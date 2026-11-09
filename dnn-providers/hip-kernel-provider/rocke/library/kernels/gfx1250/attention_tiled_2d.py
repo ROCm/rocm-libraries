@@ -418,7 +418,7 @@ def build_unified_attention_2d_tiled(
         else:
             m_inits.append(neg_inf)
     l_inits = [one_f for _ in range(c_frag)]
-    acc_inits = [b.zero_vec_f32(c_frag) for _ in range(HD // _WMMA_N)]
+    acc_inits = [b.zero_vec_f32(op.srcs[2].frag_len) for _ in range(HD // _WMMA_N)]
 
     iter_args = []
     for r in range(c_frag):
@@ -489,7 +489,7 @@ def build_unified_attention_2d_tiled(
             kv_dtype=FP8E4M3,
             k_scale=k_scale,
             dtype=dtype,
-            c_frag=c_frag,
+            src2_frag=op.srcs[2].frag_len,
             phys_block=phys_block,
         )
 

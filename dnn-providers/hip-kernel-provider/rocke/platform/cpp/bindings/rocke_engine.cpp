@@ -168,7 +168,8 @@ namespace
 struct SpecHolder
 {
     rocke_gemm_universal_spec_t spec;
-    std::vector<std::string> storage; /* keeps pointed-to strings alive */
+    /* keeps pointed-to strings alive; a deque, so no element ever moves */
+    std::deque<std::string> storage;
 
     const char* keep(const std::string& s)
     {
@@ -203,19 +204,18 @@ bool dict_str(const py::dict& d, const char* key, std::string& out)
     return false;
 }
 
-/* Build a rocke_gemm_universal_spec_t from a Python spec dict.
+/* Fill a rocke_gemm_universal_spec_t (already default-initialised) from a spec
+ * dict; the one reader of the GEMM spec dict. `store` keeps any string fields
+ * alive for the spec's lifetime. build_spec (universal GEMM), the batched,
+ * grouped and flatmm readers, and gemm_multi_d and gemm_multi_abd (their nested
+ * `base`) all call it.
  *
  * The dict mirrors UniversalGemmSpec. Recognised layouts (both accepted):
  *   (a) flat:   {name, tile_m, tile_n, ..., pipeline, epilogue, dtype_a, ...}
  *   (b) nested: {name, tile:{...}, trait:{...}, data:{...}, wave_size, ...}
  * Nested sub-dicts take precedence; any flat key is also honoured. Every field
- * defaults to the C engine default (rocke_gemm_universal_spec_default), so a
- * minimal dict {name, tile_m, tile_n, tile_k, warp_m, warp_n} works. */
-/* Fill a rocke_gemm_universal_spec_t (already default-initialised) from a spec
- * dict. `store` keeps any string fields alive for the spec's lifetime. The
- * GEMM-variant families that wrap a UniversalGemmSpec (gemm_multi_d /
- * gemm_multi_abd) reuse this to populate their nested `base` field. The dict
- * accepts both a flat key view and nested tile/trait/data sub-dicts. */
+ * keeps its default when absent, so a minimal dict
+ * {name, tile_m, tile_n, tile_k, warp_m, warp_n} works. */
 void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
                          std::deque<std::string>& store,
                          const py::dict& root)
@@ -234,12 +234,15 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
     py::dict trait = sub("trait");
     py::dict data = sub("data");
 
-    auto pick = [&](const py::dict& nested, const char* key) -> py::dict {
+    /* One view per section: the flat root keys, overridden by the nested
+     * sub-dict's. Each field is then read once below, by name, so a new field
+     * is added in one place. */
+    auto merged = [&](const py::dict& nested) -> py::dict {
         py::dict r;
-        if(nested.contains(key))
-            r[key] = nested[key];
-        else if(root.contains(key))
-            r[key] = root[key];
+        for(auto kv : root)
+            r[kv.first] = kv.second;
+        for(auto kv : nested)
+            r[kv.first] = kv.second;
         return r;
     };
 
@@ -251,22 +254,7 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
 
     /* ---- tile geometry ---- */
     {
-        py::dict t;
-        const char* keys[] = {"tile_m",
-                              "tile_n",
-                              "tile_k",
-                              "warp_m",
-                              "warp_n",
-                              "warp_k",
-                              "warp_tile_m",
-                              "warp_tile_n",
-                              "warp_tile_k"};
-        for(const char* k : keys)
-        {
-            py::dict got = pick(tile, k);
-            if(got.contains(k))
-                t[k] = got[k];
-        }
+        py::dict t = merged(tile);
         spec->tile.tile_m = dict_int(t, "tile_m", spec->tile.tile_m);
         spec->tile.tile_n = dict_int(t, "tile_n", spec->tile.tile_n);
         spec->tile.tile_k = dict_int(t, "tile_k", spec->tile.tile_k);
@@ -280,33 +268,7 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
 
     /* ---- trait ---- */
     {
-        py::dict tr;
-        const char* keys[] = {"pipeline",
-                              "scheduler",
-                              "epilogue",
-                              "pad_m",
-                              "pad_n",
-                              "pad_k",
-                              "persistent",
-                              "chiplet_swizzle",
-                              "chiplet_wgm",
-                              "chiplet_num_xcds",
-                              "chiplet_chunk_size",
-                              "waves_per_eu",
-                              "preshuffle_b",
-                              "direct_to_lds",
-                              "dtl_cache_a",
-                              "dtl_cache_b",
-                              "dtl_prefetch",
-                              "active_tile_skip",
-                              "lds_k_pad",
-                              "lds_swizzle"};
-        for(const char* k : keys)
-        {
-            py::dict got = pick(trait, k);
-            if(got.contains(k))
-                tr[k] = got[k];
-        }
+        py::dict tr = merged(trait);
         std::string s;
         if(dict_str(tr, "pipeline", s))
             spec->trait.pipeline = keep(s);
@@ -338,18 +300,33 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
             = dict_bool(tr, "active_tile_skip", spec->trait.active_tile_skip);
         spec->trait.lds_k_pad = dict_int(tr, "lds_k_pad", spec->trait.lds_k_pad);
         spec->trait.lds_swizzle = dict_bool(tr, "lds_swizzle", spec->trait.lds_swizzle);
+        /* Optional[int]: absent or None leaves the width dtype-resolved. */
+        if(tr.contains("ab_load_elem_bytes") && !tr["ab_load_elem_bytes"].is_none())
+        {
+            spec->trait.ab_load_elem_bytes_set = true;
+            spec->trait.ab_load_elem_bytes = tr["ab_load_elem_bytes"].cast<int>();
+        }
+        spec->trait.tdm = dict_bool(tr, "tdm", spec->trait.tdm);
+        spec->trait.tdm_depth = dict_int(tr, "tdm_depth", spec->trait.tdm_depth);
+        spec->trait.split_barrier = dict_bool(tr, "split_barrier", spec->trait.split_barrier);
+        spec->trait.tdm_alternate_issuers
+            = dict_bool(tr, "tdm_alternate_issuers", spec->trait.tdm_alternate_issuers);
+        spec->trait.tdm_early_refill
+            = dict_bool(tr, "tdm_early_refill", spec->trait.tdm_early_refill);
+        spec->trait.split_k = dict_int(tr, "split_k", spec->trait.split_k);
+        /* Optional[bool]: absent or None leaves the hints arch-resolved. */
+        if(tr.contains("emit_sched_hints") && !tr["emit_sched_hints"].is_none())
+        {
+            spec->trait.emit_sched_hints_set = true;
+            spec->trait.emit_sched_hints = tr["emit_sched_hints"].cast<bool>();
+        }
+        spec->trait.cshuffle_no_alias
+            = dict_bool(tr, "cshuffle_no_alias", spec->trait.cshuffle_no_alias);
     }
 
     /* ---- data ---- */
     {
-        py::dict da;
-        const char* keys[] = {"dtype_a", "dtype_b", "dtype_c", "dtype_acc", "layout"};
-        for(const char* k : keys)
-        {
-            py::dict got = pick(data, k);
-            if(got.contains(k))
-                da[k] = got[k];
-        }
+        py::dict da = merged(data);
         std::string s;
         if(dict_str(da, "dtype_a", s))
             spec->data.dtype_a = keep(s);
@@ -373,155 +350,7 @@ SpecHolder build_spec(const py::dict& root)
 {
     SpecHolder h;
     h.spec = rocke_gemm_universal_spec_default();
-    h.storage.reserve(16);
-
-    /* Merge nested sub-dicts down into a flat view for convenience. */
-    auto sub = [&](const char* key) -> py::dict {
-        if(root.contains(key) && py::isinstance<py::dict>(root[key]))
-            return root[key].cast<py::dict>();
-        return py::dict();
-    };
-    py::dict tile = sub("tile");
-    py::dict trait = sub("trait");
-    py::dict data = sub("data");
-
-    /* A getter that checks the nested sub-dict first, then the flat root. */
-    auto pick = [&](const py::dict& nested, const char* key) -> py::dict {
-        py::dict r;
-        if(nested.contains(key))
-            r[key] = nested[key];
-        else if(root.contains(key))
-            r[key] = root[key];
-        return r;
-    };
-
-    /* name */
-    {
-        std::string s;
-        if(dict_str(root, "name", s))
-            h.spec.name = h.keep(s);
-    }
-
-    /* ---- tile geometry ---- */
-    {
-        py::dict t;
-        const char* keys[] = {"tile_m",
-                              "tile_n",
-                              "tile_k",
-                              "warp_m",
-                              "warp_n",
-                              "warp_k",
-                              "warp_tile_m",
-                              "warp_tile_n",
-                              "warp_tile_k"};
-        for(const char* k : keys)
-        {
-            py::dict got = pick(tile, k);
-            if(got.contains(k))
-                t[k] = got[k];
-        }
-        h.spec.tile.tile_m = dict_int(t, "tile_m", h.spec.tile.tile_m);
-        h.spec.tile.tile_n = dict_int(t, "tile_n", h.spec.tile.tile_n);
-        h.spec.tile.tile_k = dict_int(t, "tile_k", h.spec.tile.tile_k);
-        h.spec.tile.warp_m = dict_int(t, "warp_m", h.spec.tile.warp_m);
-        h.spec.tile.warp_n = dict_int(t, "warp_n", h.spec.tile.warp_n);
-        h.spec.tile.warp_k = dict_int(t, "warp_k", h.spec.tile.warp_k);
-        h.spec.tile.warp_tile_m = dict_int(t, "warp_tile_m", h.spec.tile.warp_tile_m);
-        h.spec.tile.warp_tile_n = dict_int(t, "warp_tile_n", h.spec.tile.warp_tile_n);
-        h.spec.tile.warp_tile_k = dict_int(t, "warp_tile_k", h.spec.tile.warp_tile_k);
-    }
-
-    /* ---- trait ---- */
-    {
-        py::dict tr;
-        const char* keys[] = {"pipeline",
-                              "scheduler",
-                              "epilogue",
-                              "pad_m",
-                              "pad_n",
-                              "pad_k",
-                              "persistent",
-                              "chiplet_swizzle",
-                              "chiplet_wgm",
-                              "chiplet_num_xcds",
-                              "chiplet_chunk_size",
-                              "waves_per_eu",
-                              "preshuffle_b",
-                              "direct_to_lds",
-                              "dtl_cache_a",
-                              "dtl_cache_b",
-                              "dtl_prefetch",
-                              "active_tile_skip",
-                              "lds_k_pad",
-                              "lds_swizzle"};
-        for(const char* k : keys)
-        {
-            py::dict got = pick(trait, k);
-            if(got.contains(k))
-                tr[k] = got[k];
-        }
-        std::string s;
-        if(dict_str(tr, "pipeline", s))
-            h.spec.trait.pipeline = h.keep(s);
-        if(dict_str(tr, "scheduler", s))
-            h.spec.trait.scheduler = h.keep(s);
-        if(dict_str(tr, "epilogue", s))
-            h.spec.trait.epilogue = h.keep(s);
-        h.spec.trait.pad_m = dict_bool(tr, "pad_m", h.spec.trait.pad_m);
-        h.spec.trait.pad_n = dict_bool(tr, "pad_n", h.spec.trait.pad_n);
-        h.spec.trait.pad_k = dict_bool(tr, "pad_k", h.spec.trait.pad_k);
-        h.spec.trait.persistent = dict_bool(tr, "persistent", h.spec.trait.persistent);
-        h.spec.trait.chiplet_swizzle
-            = dict_bool(tr, "chiplet_swizzle", h.spec.trait.chiplet_swizzle);
-        h.spec.trait.chiplet_wgm = dict_int(tr, "chiplet_wgm", h.spec.trait.chiplet_wgm);
-        h.spec.trait.chiplet_num_xcds
-            = dict_int(tr, "chiplet_num_xcds", h.spec.trait.chiplet_num_xcds);
-        h.spec.trait.chiplet_chunk_size
-            = dict_int(tr, "chiplet_chunk_size", h.spec.trait.chiplet_chunk_size);
-        if(tr.contains("waves_per_eu") && !tr["waves_per_eu"].is_none())
-        {
-            h.spec.trait.waves_per_eu_set = true;
-            h.spec.trait.waves_per_eu = tr["waves_per_eu"].cast<int>();
-        }
-        h.spec.trait.preshuffle_b = dict_bool(tr, "preshuffle_b", h.spec.trait.preshuffle_b);
-        h.spec.trait.direct_to_lds = dict_bool(tr, "direct_to_lds", h.spec.trait.direct_to_lds);
-        h.spec.trait.dtl_cache_a = dict_int(tr, "dtl_cache_a", h.spec.trait.dtl_cache_a);
-        h.spec.trait.dtl_cache_b = dict_int(tr, "dtl_cache_b", h.spec.trait.dtl_cache_b);
-        h.spec.trait.dtl_prefetch = dict_bool(tr, "dtl_prefetch", h.spec.trait.dtl_prefetch);
-        h.spec.trait.active_tile_skip
-            = dict_bool(tr, "active_tile_skip", h.spec.trait.active_tile_skip);
-        h.spec.trait.lds_k_pad = dict_int(tr, "lds_k_pad", h.spec.trait.lds_k_pad);
-        h.spec.trait.lds_swizzle = dict_bool(tr, "lds_swizzle", h.spec.trait.lds_swizzle);
-    }
-
-    /* ---- data ---- */
-    {
-        py::dict da;
-        const char* keys[] = {"dtype_a", "dtype_b", "dtype_c", "dtype_acc", "layout"};
-        for(const char* k : keys)
-        {
-            py::dict got = pick(data, k);
-            if(got.contains(k))
-                da[k] = got[k];
-        }
-        std::string s;
-        if(dict_str(da, "dtype_a", s))
-            h.spec.data.dtype_a = h.keep(s);
-        if(dict_str(da, "dtype_b", s))
-            h.spec.data.dtype_b = h.keep(s);
-        if(dict_str(da, "dtype_c", s))
-            h.spec.data.dtype_c = h.keep(s);
-        if(dict_str(da, "dtype_acc", s))
-            h.spec.data.dtype_acc = h.keep(s);
-        if(dict_str(da, "layout", s))
-            h.spec.data.layout = h.keep(s);
-    }
-
-    /* ---- top-level scalars ---- */
-    h.spec.wave_size = dict_int(root, "wave_size", h.spec.wave_size);
-    h.spec.block_size = dict_int(root, "block_size", h.spec.block_size);
-    h.spec.batched = dict_bool(root, "batched", h.spec.batched);
-
+    fill_universal_spec(&h.spec, h.storage, root);
     rocke_gemm_universal_spec_finalize(&h.spec);
     return h;
 }
@@ -3387,6 +3216,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     s.two_stage = dict_bool(d, "two_stage", s.two_stage);
     s.ws_replicas = dict_int(d, "ws_replicas", s.ws_replicas);
     s.prefetch_addr = dict_bool(d, "prefetch_addr", s.prefetch_addr);
+    s.register_prefetch = dict_bool(d, "register_prefetch", s.register_prefetch);
     s.streamk_ctas = dict_int(d, "streamk_ctas", s.streamk_ctas);
     s.group_merge = dict_int(d, "group_merge", s.group_merge);
     s.async_dma = dict_bool(d, "async_dma", s.async_dma);
