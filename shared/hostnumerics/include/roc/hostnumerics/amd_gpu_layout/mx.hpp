@@ -84,6 +84,9 @@ class MxScaleStoragePlan {
 // returns physicalByteCount() bytes, with zero bytes in any padding. Throws
 // std::runtime_error if the source byte count differs from the plan's
 // naturalByteCount() or if the source is null with a nonzero byte count.
+// A std::vector<uint8_t> can supply a byte view without copying:
+//   const auto bytes = std::as_bytes(std::span(scales));
+//   auto physical = copyMxScaleStorageToPhysicalLayout(bytes.data(), bytes.size(), plan);
 std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(const std::byte* naturalScaleStorage,
                                                           size_t naturalScaleByteCount,
                                                           const MxScaleStoragePlan& plan);
