@@ -289,7 +289,7 @@ class TestCshuffleWmma(unittest.TestCase):
             b, spec_, _op, lane, accs, m_off, n_off, c_per_lane, dtype, per_cell
         ):
             # Same arguments minus ``op``, which the MFMA scatter derives from
-            # the tile instead of the atom's c_layout().
+            # the tile instead of the atom's dst_layout().
             return _emit_mfma_acc_scatter(
                 b,
                 spec_,
