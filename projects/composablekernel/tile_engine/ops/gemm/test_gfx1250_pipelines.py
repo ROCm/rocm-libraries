@@ -778,6 +778,14 @@ class TestCompTdmV3(unittest.TestCase):
             "fp8/bf8 or fp16/bf16",
             vu.gfx1250_tdm_v3_reject_reason("comp_tdm_v3", "fp32", "fp32", 4, 4, 1),
         )
+        # tile_k / warp_tile_k must be a power of two (no 192 with a 32 K step).
+        self.assertFalse(_v3_tile_ok("comp_tdm_v3", dict(tile16, tile_k=192), dtype="bf16"))
+        self.assertIn(
+            "power of two",
+            vu.gfx1250_tdm_v3_reject_reason(
+                "comp_tdm_v3", "bf16", "bf16", 4, 4, 1, tile_k=192, warp_tile_k=32
+            ),
+        )
         # Shared-table wave maps outside 2x2x1 / 4x4x1 are not v3 maps.
         self.assertFalse(_v3_tile_ok("comp_tdm_v3", dict(warp_m=4, warp_n=2)))
         self.assertFalse(_v3_tile_ok("comp_tdm_v3", prefix="batched_gemm"))

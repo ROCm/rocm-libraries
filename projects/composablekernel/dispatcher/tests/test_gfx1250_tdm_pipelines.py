@@ -895,6 +895,14 @@ class TestCompTdmV3(unittest.TestCase):
             self.assertIn("fp8/bf8 or fp16/bf16", self._gate(dtype=dtype))
         for waves in ((4, 2, 1), (2, 4, 1), (4, 1, 1), (1, 2, 2)):
             self.assertIn("wave maps", self._gate(waves=waves))
+        # K sub-tiles are whole warp-tile K steps: tile_k / warp_tile_k is a power of two.
+        for tile_k, ok in ((64, True), (128, True), (256, True), (192, False), (96, False)):
+            reason = cc.comp_tdm_v3_reject_reason("bf16", "bf16", tile_k=tile_k, warp_tile_k=32)
+            self.assertEqual(reason == "", ok, (tile_k, reason))
+        self.assertIn(
+            "power of two",
+            cc.comp_tdm_v3_reject_reason("fp8", "fp8", tile_k=384, warp_tile_k=128),
+        )
         self.assertIn("requires epilogue=cshuffle", self._gate(epi="tdm"))
         self.assertIn("persistent", self._gate(persist=True))
         self.assertEqual(self._gate(variant="batched"), COMP_TDM_V3_BATCHED_REJECT_REASON)

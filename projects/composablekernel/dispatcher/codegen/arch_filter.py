@@ -928,6 +928,7 @@ class ArchFilter:
             warp_k=config.warp_k,
             streamk=is_streamk,
             waves=(config.warp_m, config.warp_n, config.warp_k),
+            tile_k=config.tile_k,
         )
         if reason:
             result.add_error(reason)

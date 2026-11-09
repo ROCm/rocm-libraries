@@ -1505,9 +1505,11 @@ def comp_tdm_v3_reject_reason(
     dtype_b: str,
     waves: Optional[Sequence[int]] = None,
     layout: str = "",
+    tile_k: Optional[int] = None,
+    warp_tile_k: Optional[int] = None,
 ) -> str:
     """Why a comp_tdm_v3 config is rejected ("" when accepted). Empty dtypes,
-    None waves and an empty layout skip their rule."""
+    None waves / tile_k / warp_tile_k and an empty layout skip their rule."""
     pair = {dtype_a, dtype_b} - {""}
     is_8bit = bool(pair) and pair <= set(COMP_TDM_V3_8BIT_DTYPES)
     if pair and not (is_8bit or pair <= set(COMP_TDM_V3_16BIT_DTYPES)):
@@ -1518,6 +1520,15 @@ def comp_tdm_v3_reject_reason(
         return "comp_tdm_v3 supports the 2x2x1 and 4x4x1 wave maps only, got " + "x".join(
             map(str, waves)
         )
+    # The pipeline splits a K tile into 1, 2 or 4 sub-tiles of whole warp-tile K
+    # steps, so tile_k / warp_tile_k must be a power of two (e.g. no 192 with 32).
+    if tile_k and warp_tile_k:
+        k_steps = tile_k // warp_tile_k
+        if tile_k % warp_tile_k or k_steps & (k_steps - 1):
+            return (
+                f"comp_tdm_v3 needs tile_k / warp_tile_k to be a power of two, got "
+                f"{tile_k} / {warp_tile_k}"
+            )
     if is_8bit and layout and layout != COMP_TDM_V3_8BIT_LAYOUT:
         return (
             f"comp_tdm_v3 with 8-bit A/B supports layout {COMP_TDM_V3_8BIT_LAYOUT!r} "
@@ -1701,6 +1712,7 @@ def gfx1250_pipeline_reject_reason(
     warp_k: Optional[int] = None,
     streamk: bool = False,
     waves: Optional[Sequence[int]] = None,
+    tile_k: Optional[int] = None,
 ) -> str:
     """Why a comp_async / comp_tdm* / tdm-epilogue (or gfx1250 compv5) GEMM config is rejected.
 
@@ -1717,7 +1729,8 @@ def gfx1250_pipeline_reject_reason(
     pad rules. ``batched`` marks the batched GEMM variant and ``tile_mn``
     (tile_m, tile_n) enables the comp_tdm_pc accumulator rule (None skips it).
     ``warp_k`` enables the comp_tdm_pc warp_k=1 rule (None skips it); ``waves``
-    (warp_m, warp_n, warp_k) the comp_tdm_v3 wave-map rule (None skips it).
+    (warp_m, warp_n, warp_k) the comp_tdm_v3 wave-map rule and ``tile_k`` its K-tile
+    rule (None skips them).
     ``streamk`` marks the Stream-K variant: only STREAMK_GFX1250_PIPELINES are
     accepted, with a row-major C and warp_k=1, and the epilogue rules are
     streamk_trait_reject_reason's (they depend on the reduction strategy); Stream-K
@@ -1760,7 +1773,9 @@ def gfx1250_pipeline_reject_reason(
         if pipeline == COMP_TDM_V3:
             if batched:
                 return COMP_TDM_V3_BATCHED_REJECT_REASON
-            reason = comp_tdm_v3_reject_reason(dtype_a, dtype_b, waves, layout)
+            reason = comp_tdm_v3_reject_reason(
+                dtype_a, dtype_b, waves, layout, tile_k, warp_tile_k
+            )
             if reason:
                 return reason
         if pipeline == "comp_tdm_pc":

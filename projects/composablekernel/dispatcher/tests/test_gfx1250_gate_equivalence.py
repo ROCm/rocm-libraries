@@ -144,6 +144,7 @@ def _gemm_utils_accepts(
         warp_tile_m=t["warp_tile_m"],
         warp_tile_n=t["warp_tile_n"],
         tile_mn=(t["tile_m"], t["tile_n"]),
+        tile_k=t["tile_k"],
     )
 
 
@@ -364,7 +365,7 @@ class TestGfx1250GateEquivalence(unittest.TestCase):
         for tm, tn, tk, (wm, wn), (wtmn, wtk), dtype, layout in itertools.product(
             (64, 128, 256),
             (64, 128, 256),
-            (64, 128, 256),
+            (64, 128, 192, 256),
             ((2, 2), (4, 4), (4, 2)),
             ((16, 32), (16, 128), (32, 128)),
             DTYPES,

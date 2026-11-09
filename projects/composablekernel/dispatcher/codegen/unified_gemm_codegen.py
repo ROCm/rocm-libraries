@@ -2150,6 +2150,7 @@ class UnifiedGemmCodegen:
             warp_k=tile.warp_k,
             streamk=variant == GemmVariant.STREAM_K,
             waves=(tile.warp_m, tile.warp_n, tile.warp_k),
+            tile_k=tile.tile_k,
         )
 
     def _is_tile_arch_valid(
