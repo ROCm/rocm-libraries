@@ -232,6 +232,11 @@ namespace rocalution
     template <typename ValueType>
     void HIPSpIC0(rocsparse_handle handle, rocsparse_spmat_descr mat);
 
+    // In-place sort of the column indices within each row, values are reordered with them.
+    // COO matrices are sorted by row and then by column. rocsparse supports COO, CSR and CSC
+    // matrices.
+    void HIPSpSort(rocsparse_handle handle, rocsparse_spmat_descr mat);
+
     // rocsparse bsrsv buffer size
     template <typename ValueType>
     rocsparse_status rocsparseTbsrsv_buffer_size(rocsparse_handle          handle,
@@ -282,15 +287,6 @@ namespace rocalution
                                      ValueType*                y,
                                      rocsparse_solve_policy    policy,
                                      void*                     temp_buffer);
-
-    // rocsparse gthr
-    template <typename ValueType>
-    rocsparse_status rocsparseTgthr(rocsparse_handle     handle,
-                                    int                  nnz,
-                                    ValueType*           y,
-                                    ValueType*           x_val,
-                                    int*                 x_ind,
-                                    rocsparse_index_base idx_base);
 
     // rocsparse csritilu0 compute
     template <typename ValueType>

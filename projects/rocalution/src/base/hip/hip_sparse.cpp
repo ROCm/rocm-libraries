@@ -886,6 +886,58 @@ namespace rocalution
                                                  rocsparse_spmat_descr mat);
 #endif
 
+    void HIPSpSort(rocsparse_handle handle, rocsparse_spmat_descr mat)
+    {
+        assert(mat != NULL);
+
+        const rocsparse_spsort_alg alg = rocsparse_spsort_alg_default;
+        const rocsparse_direction  dir = rocsparse_direction_row;
+
+        rocsparse_spsort_descr descr;
+
+        rocsparse_status status = rocsparse_spsort_descr_create(handle, &descr, NULL);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        status = rocsparse_spsort_set_input(
+            handle, descr, rocsparse_spsort_input_alg, &alg, sizeof(alg), NULL);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        // The direction is only used for COO matrices
+        status = rocsparse_spsort_set_input(
+            handle, descr, rocsparse_spsort_input_direction, &dir, sizeof(dir), NULL);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        size_t buffer_size = 0;
+        char*  buffer      = NULL;
+
+        status = rocsparse_spsort_buffer_size(
+            handle, descr, mat, mat, rocsparse_spsort_stage_analysis, &buffer_size, NULL);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        allocate_hip(buffer_size, &buffer);
+
+        status = rocsparse_spsort(
+            handle, descr, mat, mat, rocsparse_spsort_stage_analysis, buffer_size, buffer, NULL);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        free_hip(&buffer);
+
+        status = rocsparse_spsort_buffer_size(
+            handle, descr, mat, mat, rocsparse_spsort_stage_compute, &buffer_size, NULL);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        allocate_hip(buffer_size, &buffer);
+
+        status = rocsparse_spsort(
+            handle, descr, mat, mat, rocsparse_spsort_stage_compute, buffer_size, buffer, NULL);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        free_hip(&buffer);
+
+        status = rocsparse_spsort_descr_destroy(handle, descr, NULL);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+    }
+
     // rocsparse bsrsv buffer size
     template <>
     rocsparse_status rocsparseTbsrsv_buffer_size(rocsparse_handle          handle,
@@ -1271,60 +1323,6 @@ namespace rocalution
                                       (rocsparse_double_complex*)y,
                                       policy,
                                       temp_buffer);
-    }
-
-    template <>
-    rocsparse_status rocsparseTgthr(rocsparse_handle     handle,
-                                    int                  nnz,
-                                    float*               y,
-                                    float*               x_val,
-                                    int*                 x_ind,
-                                    rocsparse_index_base idx_base)
-    {
-        return rocsparse_sgthr(handle, nnz, y, x_val, x_ind, idx_base);
-    }
-
-    template <>
-    rocsparse_status rocsparseTgthr(rocsparse_handle     handle,
-                                    int                  nnz,
-                                    double*              y,
-                                    double*              x_val,
-                                    int*                 x_ind,
-                                    rocsparse_index_base idx_base)
-    {
-        return rocsparse_dgthr(handle, nnz, y, x_val, x_ind, idx_base);
-    }
-
-    template <>
-    rocsparse_status rocsparseTgthr(rocsparse_handle     handle,
-                                    int                  nnz,
-                                    std::complex<float>* y,
-                                    std::complex<float>* x_val,
-                                    int*                 x_ind,
-                                    rocsparse_index_base idx_base)
-    {
-        return rocsparse_cgthr(handle,
-                               nnz,
-                               (rocsparse_float_complex*)y,
-                               (rocsparse_float_complex*)x_val,
-                               x_ind,
-                               idx_base);
-    }
-
-    template <>
-    rocsparse_status rocsparseTgthr(rocsparse_handle      handle,
-                                    int                   nnz,
-                                    std::complex<double>* y,
-                                    std::complex<double>* x_val,
-                                    int*                  x_ind,
-                                    rocsparse_index_base  idx_base)
-    {
-        return rocsparse_zgthr(handle,
-                               nnz,
-                               (rocsparse_double_complex*)y,
-                               (rocsparse_double_complex*)x_val,
-                               x_ind,
-                               idx_base);
     }
 
     template <>

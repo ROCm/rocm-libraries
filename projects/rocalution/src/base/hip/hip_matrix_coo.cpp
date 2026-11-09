@@ -867,61 +867,9 @@ namespace rocalution
     {
         if(this->nnz_ > 0)
         {
-            rocsparse_status status;
+            HIPSpSort(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle), this->spmat_descr_);
 
-            size_t buffer_size = 0;
-            status             = rocsparse_coosort_buffer_size(
-                ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                this->nrow_,
-                this->ncol_,
-                this->nnz_,
-                this->mat_.row,
-                this->mat_.col,
-                &buffer_size);
-            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-
-            char* buffer = nullptr;
-            allocate_hip(buffer_size, &buffer);
-
-            int* perm = nullptr;
-            allocate_hip(this->nnz_, &perm);
-            status = rocsparse_set_identity_permutation(
-                ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                this->nnz_,
-                perm,
-                rocalution_indextype_traits<int>::value);
-            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-
-            status
-                = rocsparse_coosort_by_row(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                                           this->nrow_,
-                                           this->ncol_,
-                                           this->nnz_,
-                                           this->mat_.row,
-                                           this->mat_.col,
-                                           perm,
-                                           buffer);
-            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-
-            // Gather sorted coo_val array
-            ValueType* coo_val_sorted = nullptr;
-            allocate_hip(this->nnz_, &coo_val_sorted);
-            status = rocsparseTgthr(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                                    this->nnz_,
-                                    this->mat_.val,
-                                    coo_val_sorted,
-                                    perm,
-                                    rocsparse_index_base_zero);
-            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-
-            free_hip(&perm);
-            free_hip(&this->mat_.val);
-
-            this->mat_.val = coo_val_sorted;
-
-            free_hip(&buffer);
-
-            this->CreateSpMatDescr_();
+            this->ApplyAnalyseClear_();
         }
 
         return true;
