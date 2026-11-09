@@ -44,8 +44,10 @@
 #include <miopen/mt_queue.hpp>
 #include <miopen/filesystem.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <regex>
+#include <iterator>
 #include <exception>
 #include <fstream>
 #include <map>
@@ -174,8 +176,17 @@ miopenDataType_t GetDataTypeFromString(const std::string& data_type)
 void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_desc)
 {
     std::string key = key_;
-    const auto opt  = SplitDelim(key, '_');
-    int group_cnt   = 1;
+    auto opt        = SplitDelim(key, '_');
+    // Serialize adds "_det" after the other optional parts when the deterministic attribute is set.
+    bool deterministic = false;
+    if(opt.size() >= 2)
+    {
+        const auto det = std::remove(std::next(opt.begin()), opt.end(), std::string{"det"});
+        deterministic  = det != opt.end();
+        opt.erase(det, opt.end());
+        key = opt[0];
+    }
+    int group_cnt = 1;
     conv::Direction dir;
     miopenTensorLayout_t in_layout, wei_layout, out_layout;
     size_t out_h, out_w, in_channels, out_channels, in_h, in_w, batchsize, fil_h, fil_w;
@@ -311,6 +322,8 @@ void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_des
         const auto math_type_ = use_tf32 ? miopenMathDefault : miopenMathPedantic;
         conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, static_cast<int>(math_type_));
     }
+    if(deterministic)
+        conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
     prob_desc = conv::ProblemDescription{in, wei, out, conv, dir};
 }
 
