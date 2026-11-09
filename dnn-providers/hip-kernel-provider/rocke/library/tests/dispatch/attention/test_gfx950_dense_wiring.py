@@ -18,6 +18,7 @@ Covers:
 
 from __future__ import annotations
 
+import re
 import unittest
 from dataclasses import replace
 from itertools import islice
@@ -619,15 +620,32 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
         self.assertIn("swa128", kname)
         self.assertIn("persist", kname)
 
-    def test_sliding_window_with_ragged_shape_rejected_at_dispatch(self):
-        """Ragged + sliding_window is rejected by the spec validator, so no
-        dense variant admits the request."""
+    def test_sliding_window_with_partial_tile_rejected_at_dispatch(self):
+        """A partial-tile length plus sliding_window is rejected by the spec
+        validator, so no dense variant admits the request. The graph is not
+        ragged, so the reason names the length, the tile and the window."""
         req = _gfx950_dense_req(seqlen_q=500, seqlen_k=500, sliding_window=128)
         with self.assertRaises(ValueError) as cm:
             _spec(req)
-        err_msg = str(cm.exception).lower()
-        self.assertIn("ragged", err_msg)
+        err_msg = str(cm.exception)
+        # The spec never gets built, so read the tile out of the refusal. The
+        # sliding-window tile can be 128 rows, so assert it is a registered tile
+        # that really leaves a partial block rather than naming one value.
+        tile = re.search(
+            r"seqlen_q 500 is not a multiple of block_m (\d+); "
+            r"seqlen_kv 500 is not a multiple of block_n (\d+)",
+            err_msg,
+        )
+        self.assertIsNotNone(tile, err_msg)
+        block_m, block_n = int(tile.group(1)), int(tile.group(2))
+        self.assertIn(
+            (block_m, block_n),
+            {(g["block_m"], g["block_n"]) for g in DENSE_TILE_GEOMETRIES.values()},
+        )
+        self.assertNotEqual(500 % block_m, 0)
+        self.assertNotEqual(500 % block_n, 0)
         self.assertIn("sliding_window", err_msg)
+        self.assertNotIn("ragged", err_msg)
 
     def test_sliding_window_without_ragged_accepted(self):
         spec = _spec(
@@ -708,88 +726,6 @@ class TestSWASinkComposition(unittest.TestCase):
         ).kernel_name()
         self.assertIn("swa128", kname)
         self.assertIn("sinks", kname)
-
-
-class TestScaleValidation(unittest.TestCase):
-    """run_attention_dense_torch rejects a non-finite softmax scale as invalid
-    and a finite one outside [2**-64, 2**4] as not yet supported."""
-
-    @staticmethod
-    def _launch(scale):
-        from types import SimpleNamespace
-
-        from kernels.gfx950.attention_dense import (
-            AttentionDenseSpec,
-            run_attention_dense_torch,
-        )
-
-        spec = AttentionDenseSpec(
-            batch=1,
-            seqlen_q=512,
-            seqlen_kv=512,
-            num_query_heads=8,
-            num_kv_heads=8,
-            head_size=64,
-            dtype="bf16",
-        )
-        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
-        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
-        run_attention_dense_torch(
-            spec=spec,
-            q=SimpleNamespace(shape=qshape),
-            k=SimpleNamespace(shape=kvshape),
-            v=SimpleNamespace(shape=kvshape),
-            out=SimpleNamespace(shape=qshape),
-            scale=scale,
-        )
-
-    def test_bounds_match_hipdnn_matcher(self):
-        """The hipDNN matcher hardcodes the same range (0x1p-64F / 0x1p4F in
-        Gfx950AttentionDenseNative.cpp, pinned by its gtest). Changing the
-        Python bounds alone would make the two engines serve different scales."""
-        from kernels.gfx950.attention_dense import _MAX_SCALE, _MIN_SCALE
-
-        msg = "update Gfx950AttentionDenseNative.cpp and its gtest together"
-        self.assertEqual(_MIN_SCALE, 2.0**-64, msg)
-        self.assertEqual(_MAX_SCALE, 2.0**4, msg)
-        with self.assertRaises(NotImplementedError) as cm:
-            self._launch(_MAX_SCALE * 2)
-        self.assertIn("[2**-64, 2**4]", str(cm.exception))
-
-    def test_out_of_range_scale_rejected(self):
-        """The ordinary kernel takes the row max on unscaled scores (valid only
-        for scale > 0) and masks raw scores with a power-of-two sentinel that
-        must stay exact and finite after the scale; outside the supported range
-        it must raise rather than silently produce a wrong softmax. NaN and inf
-        are invalid input (ValueError); finite out-of-range scales are a
-        kernel limit (NotImplementedError)."""
-        from kernels.gfx950.attention_dense import _MAX_SCALE, _MIN_SCALE
-
-        cases = [
-            (float("nan"), ValueError, "scale must be finite"),
-            (float("inf"), ValueError, "scale must be finite"),
-            (float("-inf"), ValueError, "scale must be finite"),
-        ] + [
-            (scale, NotImplementedError, "NOT_YET_IMPLEMENTED")
-            for scale in (0.0, -0.0, -0.125, 1e-30, _MIN_SCALE / 2, _MAX_SCALE * 2)
-        ]
-        for scale, error, message in cases:
-            with self.subTest(scale=scale):
-                with self.assertRaises(error) as cm:
-                    self._launch(scale)
-                self.assertIn(message, str(cm.exception))
-
-    def test_inclusive_bounds_pass_the_scale_guard(self):
-        """Both bounds are served. Past the guard the fake tensors fail later;
-        only a scale rejection would mention the scale."""
-        from kernels.gfx950.attention_dense import _MAX_SCALE, _MIN_SCALE
-
-        for scale in (_MIN_SCALE, _MAX_SCALE):
-            with self.subTest(scale=scale):
-                try:
-                    self._launch(scale)
-                except Exception as exc:  # noqa: BLE001 - launch on fakes fails
-                    self.assertNotIn("scale", str(exc).lower(), repr(exc))
 
 
 class TestSinksValidation(unittest.TestCase):

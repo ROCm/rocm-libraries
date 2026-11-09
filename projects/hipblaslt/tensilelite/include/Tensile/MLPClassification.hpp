@@ -80,6 +80,9 @@ namespace TensileLite
 
             bool valid(bool verbose = false) const;
 
+            /// The weights in the layout the constructor takes.
+            std::vector<float> weights() const;
+
             std::size_t size_in;
             std::size_t size_out;
 

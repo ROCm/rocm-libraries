@@ -32,7 +32,7 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     args.ptr_q = uidToPtrMap.at(params.qUid);
     args.ptr_k = uidToPtrMap.at(params.kUid);
     args.ptr_v = uidToPtrMap.at(params.vUid);
-    args.ptr_lse = (params.lseUid >= 0) ? uidToPtrMap.at(params.lseUid) : nullptr;
+    args.ptr_lse = params.lseUid ? uidToPtrMap.at(params.lseUid.value()) : nullptr;
 
     // Attention scale (args.scalar) is a runtime pass-by-value operand resolved by
     // the caller at execute via resolveScalarOperand(), so it is not set here — this
@@ -42,7 +42,10 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     const unsigned int inBpe = params.inBytesPerElement;
     constexpr unsigned int K_BF16_SIZE = 2;
 
-    // Q dimensions and strides (element strides converted to byte strides)
+    // Q dimensions and strides (element strides converted to byte strides).
+    // Group mode passes hipDNN's S_q (the maximum per-batch Q length), not AITER's packed
+    // total_q; the kernel only needs an upper bound on each batch's length. Precondition,
+    // not checked: S_q >= every per-batch Q length (see computeFwdLaunchParams).
     args.s_seq_len = params.seqLenQ;
     args.s_Seqs = params.qStrideSeq * inBpe;
     args.s_Ts = params.tileSizeQo * params.qStrideRow * inBpe;
@@ -60,9 +63,11 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     // Options and grid dimensions
     const auto launchParams = computeFwdLaunchParams(params);
     args.s_opt = launchParams.tuneOpt;
-    args.s_lse = (params.lseUid >= 0) ? 1 : 0;
+    args.s_lse = params.lseUid ? 1 : 0;
 
-    // KV dimensions
+    // KV dimensions. Group mode passes hipDNN's S_kv (the maximum per-batch KV length),
+    // not a packed total. Precondition, not checked: S_kv >= every per-batch KV length,
+    // i.e. max_b(kvOffset[b+1] - kvOffset[b]).
     args.s_kv_seq_len = params.seqLenKv;
     args.s_qk_head_dim = params.headDimQk;
     args.s_v_head_dim = params.headDimV;
@@ -84,7 +89,7 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
 
     // LSE stride (head dimension, in bytes)
     constexpr unsigned int K_FP32_SIZE = 4;
-    args.s_lse_Hs = (params.lseUid >= 0) ? params.lseStrideHead * K_FP32_SIZE : 0;
+    args.s_lse_Hs = params.lseUid ? params.lseStrideHead * K_FP32_SIZE : 0;
 
     // Padding pointers (nullptr for batch mode)
     args.ptr_qseq_padding = nullptr;
@@ -110,6 +115,22 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     args.s_descale_k_Hs = 0;
     args.s_descale_v_Bs = 0;
     args.s_descale_v_Hs = 0;
+
+    if(const auto& group = params.group)
+    {
+        // Group mode locates each batch via the ragged (seqstart) offsets, not a
+        // batch stride; a non-zero s_*_Bs would double-advance the base pointer.
+        // Mirrors AITER's varlen path (batch_stride_{q,k,v,o} = 0).
+        args.s_Bs = 0;
+        args.s_k_Bs = 0;
+        args.s_v_Bs = 0;
+        args.s_o_Bs = 0;
+
+        args.ptr_qseq_padding = uidToPtrMap.at(group->qoRaggedOffsetUid);
+        args.ptr_qseq = args.ptr_qseq_padding;
+        args.ptr_kseq_padding = uidToPtrMap.at(group->kvRaggedOffsetUid);
+        args.ptr_kseq = args.ptr_kseq_padding;
+    }
 
     return args;
 }

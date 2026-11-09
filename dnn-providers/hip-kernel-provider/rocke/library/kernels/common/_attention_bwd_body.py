@@ -180,7 +180,7 @@ from ._attention_bwd_sched import (
 from ._attention_bwd_sinks import DqSink, DqSlot, PendingDq
 from ._attention_bwd_valu import (
     batched_stats_rows,
-    cast_c_frag,
+    cast_dst_frag,
     check_stats_vec_layout,
     softmax_p,
     stats_rows_neg,
@@ -589,7 +589,7 @@ class BwdTileGeometry:
     def counted_atomics(self) -> int:
         """dQ atomics one wave issues per q step (one per G4 accumulator slot)."""
         g4 = self.g4
-        return g4.frags_m * g4.frags_n * g4.op.c_frag_len
+        return g4.frags_m * g4.frags_n * g4.op.dst.frag_len
 
     def _check_counted(self) -> None:
         """Couplings of ``loop_sync = "counted"`` (see ``_attention_bwd_counted``)."""
@@ -1420,7 +1420,7 @@ class BwdTileStep:
     def counted_n_stats(self) -> int:
         """Staged stats values per lane: (lse2, Dsum) per stats key."""
         g0 = self.geom.g0
-        return 2 * g0.frags_m * g0.op.c_frag_len
+        return 2 * g0.frags_m * g0.op.dst.frag_len
 
     def counted_zero(self, b: IRBuilder) -> list[Value]:
         """Zeros of the :meth:`counted_loads` values (a guard loop's inits)."""
@@ -1992,7 +1992,7 @@ class BwdTileStep:
         def hand_off(frags) -> None:
             """``[(fm, fn, frag), ...]`` to the sink in one call, or recorded."""
             if record is not None:
-                n = g4.op.c_frag_len
+                n = g4.op.dst.frag_len
                 record.extend(
                     b.vec_extract(f, s) for _, _, f in frags for s in range(n)
                 )
@@ -2018,7 +2018,7 @@ class BwdTileStep:
             for fm in range(g4.frags_m):
                 for fn in range(g4.frags_n):
                     frag = g4.mma_frag(
-                        b, b.zero_vec_f32(g4.op.c_frag_len), a_ds, kt_b, fm, fn,
+                        b, b.zero_vec_f32(g4.op.srcs[2].frag_len), a_ds, kt_b, fm, fn,
                         lane=lane, origin=self.o4,
                     )  # fmt: skip
                     hand_off([(fm, fn, frag)])
@@ -2275,7 +2275,7 @@ class BwdTileStep:
         g0 = self.geom.g0
         for fm in range(g0.frags_m):
             for fn in range(g0.frags_n):
-                half = cast_c_frag(b, frags[fm][fn], self.elem, self.geom.bf16_cast)
+                half = cast_dst_frag(b, frags[fm][fn], self.elem, self.geom.bf16_cast)
                 for s, (r, c) in enumerate(
                     g0.acc_coords(b, self.lane, self.o0, fm, fn)
                 ):
@@ -2308,7 +2308,7 @@ class BwdTileStep:
         above the AGPR estimate (dK / dV plus S / dP), so dK / dV fit below."""
         g = self.geom
         g0 = g.g0
-        r = g0.frags_m * g0.frags_n * g0.op.c_frag_len
+        r = g0.frags_m * g0.frags_n * g0.op.dst.frag_len
         n = int(g.agpr_alloc[0])
         return n - (2 - which) * r
 
@@ -2364,7 +2364,7 @@ class BwdTileStep:
                 else:
                     frags.append((acc.dk if which == "dk" else acc.dv)[fm][fn])
                 coords.append(self._acc_lds_coords(b, fm, fn))
-            for s in range(g1.op.c_frag_len):
+            for s in range(g1.op.dst.frag_len):
                 row = coords[0][s][0]
                 items = [
                     (coords[fn][s][1], b.vec_extract(frags[fn], s))
@@ -2376,7 +2376,7 @@ class BwdTileStep:
     def _rounded_frag(self, b: IRBuilder, frag: Value, mult: Value | None) -> Value:
         """An accumulator fragment times ``mult``, rounded once to the I/O dtype."""
         if mult is not None:
-            n = self.geom.g1.op.c_frag_len
+            n = self.geom.g1.op.dst.frag_len
             frag = b.vec_pack(
                 [b.fmul(mult, b.vec_extract(frag, i)) for i in range(n)], F32
             )
@@ -2529,7 +2529,7 @@ class BwdTileStep:
                 if static and (fn * g1.op.n) // hw != half:
                     continue
                 frag = frags[fm][fn]
-                vals = [b.vec_extract(frag, i) for i in range(g1.op.c_frag_len)]
+                vals = [b.vec_extract(frag, i) for i in range(g1.op.dst.frag_len)]
                 if mult is not None:
                     vals = [b.fmul(mult, v) for v in vals]
                 coords = self._acc_lds_coords(b, fm, fn)
@@ -2571,7 +2571,7 @@ class BwdTileStep:
             for fn in range(g1.frags_n):
                 halves.append(self._rounded_frag(b, frags[fm][fn], mult))
                 coords.append(self._acc_lds_coords(b, fm, fn))
-            for s in range(g1.op.c_frag_len):
+            for s in range(g1.op.dst.frag_len):
                 items = [
                     (coords[fn][s][1], b.vec_extract(halves[fn], s))
                     for fn in range(g1.frags_n)

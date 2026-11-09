@@ -14,6 +14,7 @@
 // both FMA-vs-separate-multiply/add noise and host-libm-vs-device-math differences.
 
 #include "GpuRefSdpaArgs.h"
+#include "GpuRefSdpaCommon.hpp"
 #include "GpuRefTypes.h"
 
 using namespace gpu_ref;
@@ -57,6 +58,34 @@ __device__ inline COMPUTE_TYPE storeSoftmaxProbability(COMPUTE_TYPE probability)
 #endif
 }
 
+// cuDNN Max / Sum_exp outputs (CpuFpReferenceSdpa rowMax / rowSumExp), written by the dv == 0
+// thread of each row like the LSE.
+__device__ inline void writeRowStats(const SdpaFwdArgs& args,
+                                     long long b,
+                                     long long h,
+                                     long long sq,
+                                     long long dv,
+                                     COMPUTE_TYPE maxVal,
+                                     COMPUTE_TYPE sumExp)
+{
+    if(dv != 0)
+    {
+        return;
+    }
+    if(args.rowMax != nullptr)
+    {
+        static_cast<float*>(args.rowMax)[b * args.rowMaxStr.s[0] + h * args.rowMaxStr.s[1]
+                                         + sq * args.rowMaxStr.s[2]]
+            = static_cast<float>(maxVal);
+    }
+    if(args.rowSumExp != nullptr)
+    {
+        static_cast<float*>(args.rowSumExp)[b * args.rowSumExpStr.s[0] + h * args.rowSumExpStr.s[1]
+                                            + sq * args.rowSumExpStr.s[2]]
+            = static_cast<float>(sumExp);
+    }
+}
+
 } // namespace
 
 extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
@@ -65,7 +94,6 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     auto* k = static_cast<const K_TYPE*>(args.k);
     auto* v = static_cast<const V_TYPE*>(args.v);
     auto* o = static_cast<O_TYPE*>(args.o);
-    auto* mask = static_cast<const MASK_TYPE*>(args.mask);
     // LSE is always float [B, H, Sq]; nullptr disables it. Written once per
     // (b, h, sq) by the dv == 0 thread (see below).
     auto* lse = static_cast<float*>(args.lse);
@@ -90,8 +118,26 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     long long kvHeadK = h / (args.numHeads / args.numHeadsK);
     long long kvHeadV = h / (args.numHeads / args.numHeadsV);
 
-    // Sliding-window offset (matches CpuFpReferenceSdpa Step 3).
-    long long windowOffset = args.topLeftAlignment ? 0 : (args.seqKv - args.seqQ);
+    // Padding (cuDNN): this batch's valid lengths.
+    const long long liveQ = sdpa_common::liveLength(args.seqLenQ, args.seqLenQStride, b, args.seqQ);
+    const long long liveKv
+        = sdpa_common::liveLength(args.seqLenKv, args.seqLenKvStride, b, args.seqKv);
+
+    // Element offset of logical key `skv` (row base, without head and dim terms) in a dense or
+    // paged K / V. Only called for skv < liveKv, so unused table entries are never read.
+    auto rowOffset = [&](const int* table,
+                         long long strB,
+                         long long strT,
+                         long long blockSize,
+                         const SdpaStrides& str,
+                         long long skv) -> long long {
+        if(table == nullptr)
+        {
+            return b * str.s[0] + skv * str.s[2];
+        }
+        long long block = static_cast<long long>(table[b * strB + (skv / blockSize) * strT]);
+        return block * str.s[0] + (skv % blockSize) * str.s[2];
+    };
 
     // Negative infinity sentinel for masked scores. INFINITY (a <math.h> macro)
     // is unavailable under HipRTC's self-contained preinclude, so use the clang
@@ -100,60 +146,40 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
 
     // Lambda computing the masked, scaled score for a single kv position.
     // Recomputed in both softmax passes (correctness over speed for a reference).
+    // A masked key's score is -inf whatever its dot product, so the band and block mask are
+    // tested first and the dot is skipped. The Q and K row bases are computed once per key, not
+    // once per dim: the page-table lookup in rowOffset is not hoisted by the compiler. Both keep
+    // the arithmetic of every unmasked score unchanged.
+    const long long qRowBase = b * args.qStr.s[0] + h * args.qStr.s[1] + sq * args.qStr.s[2];
     auto score = [&](long long skv) -> COMPUTE_TYPE {
+        if(sdpa_common::bandMasked(args.score, sq, skv, liveQ, liveKv)
+           || sdpa_common::blockMasked(args.score, b, h, sq, skv))
+        {
+            return negInf;
+        }
+        const long long kRowBase = rowOffset(args.pageTableK,
+                                             args.pageTableKStrB,
+                                             args.pageTableKStrT,
+                                             args.blockSizeK,
+                                             args.kStr,
+                                             skv)
+                                   + kvHeadK * args.kStr.s[1];
         COMPUTE_TYPE dot = static_cast<COMPUTE_TYPE>(0);
         for(long long d = 0; d < args.headDim; ++d)
         {
-            long long qIdx = b * args.qStr.s[0] + h * args.qStr.s[1] + sq * args.qStr.s[2]
-                             + d * args.qStr.s[3];
-            long long kIdx = b * args.kStr.s[0] + kvHeadK * args.kStr.s[1] + skv * args.kStr.s[2]
-                             + d * args.kStr.s[3];
-            dot += toAccum(q[qIdx]) * toAccum(k[kIdx]);
+            dot += toAccum(q[qRowBase + d * args.qStr.s[3]])
+                   * toAccum(k[kRowBase + d * args.kStr.s[3]]);
         }
-        COMPUTE_TYPE s = dot * static_cast<COMPUTE_TYPE>(args.scale);
-
-        // (a) Additive attention mask (right-aligned, broadcast on size-1 dims).
-        if(mask != nullptr)
-        {
-            long long ctxIdxs[4] = {b, h, sq, skv};
-            long long maskOffset = 0;
-            for(int i = 0; i < args.maskRank; ++i)
-            {
-                long long ctxIdx = ctxIdxs[4 - args.maskRank + i];
-                long long idxI = (args.maskDims[i] == 1) ? 0 : ctxIdx;
-                maskOffset += idxI * args.maskStr.s[i];
-            }
-            s += toAccum(mask[maskOffset]);
-        }
-
-        // (b) Sliding-window mask (applied after the additive mask), cuDNN semantics:
-        // keeps skv in [sq + windowOffset - leftBound + 1, sq + windowOffset + rightBound],
-        // so leftBound = L keeps the L keys ending at the diagonal.
-        if(args.rightBound >= 0)
-        {
-            long long startKv = sq + 1 + windowOffset + args.rightBound;
-            if(startKv < 0)
-            {
-                startKv = 0;
-            }
-            if(skv >= startKv)
-            {
-                s = negInf;
-            }
-        }
-        if(args.leftBound >= 0)
-        {
-            if(skv <= sq + windowOffset - args.leftBound)
-            {
-                s = negInf;
-            }
-        }
-        return s;
+        // The shared score pipeline (scale, softcap, bias, ALiBi).
+        return sdpa_common::scoreFromDot(args.score, dot, b, h, sq, skv, args.numHeads);
     };
 
-    // PASS 1: numerically stable softmax maximum.
-    COMPUTE_TYPE maxVal = negInf;
-    for(long long skv = 0; skv < args.seqKv; ++skv)
+    // PASS 1: numerically stable softmax maximum. Keys past liveKv are padding: never read.
+    // An attention sink joins the max and the denominator but has no value row.
+    const COMPUTE_TYPE sink
+        = args.sink != nullptr ? static_cast<COMPUTE_TYPE>(args.sink[h * args.sinkStride]) : negInf;
+    COMPUTE_TYPE maxVal = sink;
+    for(long long skv = 0; skv < liveKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
         if(s > maxVal)
@@ -170,9 +196,9 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     // row has exactly one writer and there is no contention.
     long long lseIdx = b * args.lseStr.s[0] + h * args.lseStr.s[1] + sq * args.lseStr.s[2];
 
-    // Fully-masked row: probabilities are all zero, so the output is zero.
-    // Matches CpuFpReferenceSdpa (avoids a 0/0 NaN from a sumExp==0 guard).
-    if(maxVal == negInf)
+    // Fully-masked row, or a padded query row past liveQ: probabilities are all zero, so the
+    // output is zero and LSE is -inf. Matches CpuFpReferenceSdpa (avoids a 0/0 NaN).
+    if(sq >= liveQ || maxVal == negInf)
     {
         o[oIdx] = fromAccum(static_cast<COMPUTE_TYPE>(0), tag);
         // CPU writes maxVal + log(sumExp) = -inf + log(0) = -inf for masked rows.
@@ -180,12 +206,13 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         {
             lse[lseIdx] = negInf;
         }
+        writeRowStats(args, b, h, sq, dv, negInf, static_cast<COMPUTE_TYPE>(0));
         return;
     }
 
     // PASS 2: softmax denominator.
-    COMPUTE_TYPE sumExp = static_cast<COMPUTE_TYPE>(0);
-    for(long long skv = 0; skv < args.seqKv; ++skv)
+    COMPUTE_TYPE sumExp = sink == negInf ? static_cast<COMPUTE_TYPE>(0) : expf(sink - maxVal);
+    for(long long skv = 0; skv < liveKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
         // COMPUTE_TYPE is float (enforced by the static_assert above), so expf is the
@@ -196,20 +223,45 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
 
     // PASS 3: weighted sum over V. Provider-attuned modes round the normalized
     // softmax probability before P@V, matching matrix-core SDPA kernels that
-    // materialize P in bf16 before the second matmul.
+    // materialize P in bf16 before the second matmul. cuDNN sdpa_fp8 instead stores
+    // exp(s - Max) * scaleS in fp8 and rescales by descaleS (CpuFpReferenceSdpa::forward).
     COMPUTE_TYPE weighted = static_cast<COMPUTE_TYPE>(0);
-    for(long long skv = 0; skv < args.seqKv; ++skv)
+    COMPUTE_TYPE rowAmax = static_cast<COMPUTE_TYPE>(0);
+    for(long long skv = 0; skv < liveKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
-        COMPUTE_TYPE probability = expf(s - maxVal) / sumExp;
+        COMPUTE_TYPE e = expf(s - maxVal);
+        rowAmax = e > rowAmax ? e : rowAmax;
+        if(args.pFp8Format != 0)
+        {
+            e = roundToFp8(e * args.scaleS, args.pFp8Format) * args.descaleS;
+        }
+        COMPUTE_TYPE probability = e / sumExp;
         probability = storeSoftmaxProbability(probability);
+        if(args.dropoutMask != nullptr)
+        {
+            probability
+                *= static_cast<COMPUTE_TYPE>(args.dropoutScale)
+                   * sdpa_common::dropoutAt(args.dropoutMask, args.dropoutMaskStr, b, h, sq, skv);
+        }
 
-        long long vIdx = b * args.vStr.s[0] + kvHeadV * args.vStr.s[1] + skv * args.vStr.s[2]
-                         + dv * args.vStr.s[3];
+        long long vIdx = rowOffset(args.pageTableV,
+                                   args.pageTableVStrB,
+                                   args.pageTableVStrT,
+                                   args.blockSizeV,
+                                   args.vStr,
+                                   skv)
+                         + kvHeadV * args.vStr.s[1] + dv * args.vStr.s[3];
         weighted += probability * toAccum(v[vIdx]);
     }
 
     o[oIdx] = fromAccum(weighted, tag);
+    // amaxS: e >= 0, so its float bits order like unsigned integers.
+    if(args.amaxS != nullptr && dv == 0)
+    {
+        atomicMax(reinterpret_cast<unsigned int*>(args.amaxS),
+                  __builtin_bit_cast(unsigned int, static_cast<float>(rowAmax)));
+    }
 
     // LSE = maxVal + log(sumExp), matching CpuFpReferenceSdpa. sumExp is the
     // pre-normalization softmax denominator (>= 1, since exp(maxVal-maxVal)=1).
@@ -217,4 +269,5 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     {
         lse[lseIdx] = static_cast<float>(maxVal) + logf(sumExp);
     }
+    writeRowStats(args, b, h, sq, dv, maxVal, sumExp);
 }

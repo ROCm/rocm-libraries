@@ -29,9 +29,10 @@ namespace hipdnn_integration_tests
 //
 // NOTE: the GPU reference executor (our code) throws this directly at its
 // capability-miss sites. The CPU reference executor (test_sdk) throws
-// CpuReferenceNotApplicableError for capability misses; the
-// CpuReferenceGraphExecutorAdapter translates that into a ReferenceCapabilityError.
-// Other test_sdk exceptions propagate as genuine runtime failures (case C).
+// CpuReferenceNotApplicableError for capability misses; CpuReferenceGraphExecutorAdapter
+// (CpuReferenceGraphExecutorAdapter.cpp) catches that and rethrows a
+// ReferenceCapabilityError, so code behind IReferenceGraphExecutor only ever sees this
+// type. Other test_sdk exceptions propagate as genuine runtime failures (case C).
 class ReferenceCapabilityError : public std::runtime_error
 {
 public:

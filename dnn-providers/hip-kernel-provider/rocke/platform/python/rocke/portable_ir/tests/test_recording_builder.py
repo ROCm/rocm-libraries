@@ -491,19 +491,20 @@ class TestIfElseReplay(unittest.TestCase):
         try:
             online.load()
             for name in ("if_else", "if_else_nested", "if_else_in_for"):
-                rb = RecordingIRBuilder(name)
-                KERNELS[name](rb)
-                py = lower_kernel_to_llvm(
-                    rb.kernel, llvm_flavor="llvm20", arch="gfx950"
-                )
-                with self.subTest(kernel=name, path="recipe"):
-                    cbor = recipe_bundle.cbor_encode(rb.recipe())
-                    vm, _ = online.recipe_cbor_to_llvm(cbor, arch="gfx950")
-                    self.assertEqual(vm, py)
-                with self.subTest(kernel=name, path="ir_json"):
-                    text = ir_export.export_kernel_ir_json(rb.kernel)
-                    eng, _ = online.ir_json_to_llvm(text, arch="gfx950")
-                    self.assertEqual(eng, py)
+                for arch in ("gfx942", "gfx950"):
+                    rb = RecordingIRBuilder(name)
+                    KERNELS[name](rb)
+                    py = lower_kernel_to_llvm(
+                        rb.kernel, llvm_flavor="llvm20", arch=arch
+                    )
+                    with self.subTest(kernel=name, arch=arch, path="recipe"):
+                        cbor = recipe_bundle.cbor_encode(rb.recipe())
+                        vm, _ = online.recipe_cbor_to_llvm(cbor, arch=arch)
+                        self.assertEqual(vm, py)
+                    with self.subTest(kernel=name, arch=arch, path="ir_json"):
+                        text = ir_export.export_kernel_ir_json(rb.kernel)
+                        eng, _ = online.ir_json_to_llvm(text, arch=arch)
+                        self.assertEqual(eng, py)
         finally:
             for k, v in saved.items():
                 if v is None:
@@ -526,21 +527,24 @@ class TestIfElseReplay(unittest.TestCase):
             online.load()
             plain = IRBuilder("if_else_results")
             build_if_else_results(plain)
-            with self.subTest(path="ir_json"):
-                text = ir_export.export_kernel_ir_json(plain.kernel)
-                with self.assertRaises(RuntimeError) as imported:
-                    online.ir_json_to_llvm(text, arch="gfx950")
-                self.assertIn(IF_ELSE_RESULTS_MESSAGE, str(imported.exception))
-            with self.subTest(path="recipe"):
-                rb = RecordingIRBuilder("if_else_carry")
-                build_if_else(rb)
-                recipe = rb.recipe()
-                (instr,) = [i for i in recipe["program"] if i["op"] == "scf_if_else"]
-                instr["results"] = ["if0"]
-                cbor = recipe_bundle.cbor_encode(recipe)
-                with self.assertRaises(RuntimeError) as replayed:
-                    online.recipe_cbor_to_llvm(cbor, arch="gfx950")
-                self.assertIn(IF_ELSE_RESULTS_MESSAGE, str(replayed.exception))
+            for arch in ("gfx942", "gfx950"):
+                with self.subTest(path="ir_json", arch=arch):
+                    text = ir_export.export_kernel_ir_json(plain.kernel)
+                    with self.assertRaises(RuntimeError) as imported:
+                        online.ir_json_to_llvm(text, arch=arch)
+                    self.assertIn(IF_ELSE_RESULTS_MESSAGE, str(imported.exception))
+                with self.subTest(path="recipe", arch=arch):
+                    rb = RecordingIRBuilder("if_else_carry")
+                    build_if_else(rb)
+                    recipe = rb.recipe()
+                    (instr,) = [
+                        i for i in recipe["program"] if i["op"] == "scf_if_else"
+                    ]
+                    instr["results"] = ["if0"]
+                    cbor = recipe_bundle.cbor_encode(recipe)
+                    with self.assertRaises(RuntimeError) as replayed:
+                        online.recipe_cbor_to_llvm(cbor, arch=arch)
+                    self.assertIn(IF_ELSE_RESULTS_MESSAGE, str(replayed.exception))
         finally:
             if saved is None:
                 os.environ.pop("ROCKE_ONLINE_LIB", None)

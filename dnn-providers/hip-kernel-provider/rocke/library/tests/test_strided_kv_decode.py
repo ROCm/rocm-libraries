@@ -16,8 +16,10 @@ from types import SimpleNamespace
 import pytest
 
 from kernels.common.attention_kv_cache import KvTensorLayout, StridedKvCacheLayout
-from kernels.common.attention_unified import _3d_signature
+from kernels.common.attention_unified import _tiled_3d_signatures
 from rocke.core.verify import verify
+
+from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
 
 @pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
@@ -105,7 +107,7 @@ def test_strided_segment_signature_and_identity(arch, dtype):
     assert strided.kernel_name() == paged.kernel_name() + "_stridedkv"
     kernel = module.build_unified_attention_3d_tiled(strided, arch=arch)
     assert not verify(kernel)
-    signature = _3d_signature(dtype, strided_kv=True)
+    signature, _ = _tiled_3d_signatures(arch, dtype, strided_kv=True)
     assert [p.name for p in kernel.params] == [p["name"] for p in signature]
     assert [p.type.name.replace(" ", "") for p in kernel.params] == [
         p["type"].replace(" ", "") for p in signature
@@ -201,7 +203,6 @@ def test_native_strided_builder_matches_python(arch, flavor, waves_per_eu, monke
     from dataclasses import asdict
 
     engine = pytest.importorskip("rocke_engine")
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
     module = import_module(f"kernels.{arch}.attention_tiled_3d")
@@ -219,20 +220,7 @@ def test_native_strided_builder_matches_python(arch, flavor, waves_per_eu, monke
         kv_layout="strided",
         waves_per_eu=waves_per_eu,
     )
-    kernel = module.build_unified_attention_3d_tiled(spec, arch=arch)
-    expected = _lower_kernel_to_llvm_python(kernel, arch=arch)
-    if arch == "gfx950":
-        reduce = module.UnifiedAttentionReduceTiledSpec(
-            head_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="fp16",
-            num_segments=4,
-            waves_per_eu=waves_per_eu,
-        )
-        expected += _lower_kernel_to_llvm_python(
-            module.build_unified_attention_reduce_tiled(reduce, arch=arch), arch=arch
-        )
+    expected = lower_like_tiled_3d_binding(spec, arch)
     actual = getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")(
         asdict(spec), arch
     )
@@ -440,7 +428,7 @@ def test_dense_decode_route_keeps_strided_limits(arch):
 
 
 def _dense_decode_tensors(order, *, batch=3, heads_q=8, heads_k=2, seqlen=65, dim=128):
-    import torch
+    torch = pytest.importorskip("torch")
 
     def make(heads, rows):
         shape = (
@@ -458,7 +446,7 @@ def _dense_decode_tensors(order, *, batch=3, heads_q=8, heads_k=2, seqlen=65, di
 
 @pytest.mark.parametrize("order", ["bshd", "bhsd"])
 def test_dense_decode_binding_passes_strided_views(order, monkeypatch):
-    import torch
+    torch = pytest.importorskip("torch")
 
     from dispatch.attention import dispatch_attention
     from kernels.common import attention_unified as au
@@ -642,6 +630,13 @@ def test_strided_runtime_rejects_incoherent_specs(
     spec = replace(
         result.spec, **{component: replace(getattr(result.spec, component), **changes)}
     )
+
+    class DeviceAccessMustComeLater:
+        @property
+        def device(self):
+            raise AssertionError("q.device inspected before strided spec validation")
+
+    tensors["q"] = DeviceAccessMustComeLater()
     # Validate before inspecting device tensors or compiling/launching a kernel.
     with pytest.raises(ValueError, match="disagrees"):
         au.run_unified_attention_torch(
@@ -651,6 +646,52 @@ def test_strided_runtime_rejects_incoherent_specs(
             softcap=0,
             tuning_spec=spec,
             kv_layout="strided",
+        )
+
+
+def test_strided_lse_refusal_precedes_q_device_access(
+    strided_binding_case, monkeypatch
+):
+    from kernels.common import attention_unified as au
+
+    _, _, tensors = strided_binding_case
+    tensors["problem"] = replace(tensors["problem"], emit_lse=True)
+
+    class DeviceAccessMustComeLater:
+        @property
+        def device(self):
+            raise AssertionError("q.device inspected before strided LSE refusal")
+
+    tensors["q"] = DeviceAccessMustComeLater()
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
+    with pytest.raises(NotImplementedError, match="LSE output"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            lse=object(),
+            kv_layout="strided",
+        )
+
+
+def test_additive_bias_does_not_normalize_q_without_device(
+    strided_binding_case, monkeypatch
+):
+    from kernels.common import attention_unified as au
+
+    _, _, tensors = strided_binding_case
+    tensors["problem"] = replace(tensors["problem"], use_additive_bias=True)
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
+    with pytest.raises(AttributeError, match="device"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            additive_bias=object(),
+            additive_bias_sq_stride=0,
+            kv_layout="paged",
         )
 
 

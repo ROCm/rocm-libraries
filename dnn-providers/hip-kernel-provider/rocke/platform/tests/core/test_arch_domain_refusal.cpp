@@ -264,10 +264,10 @@ void test_every_lane_has_a_column()
     }
 }
 
-/* A borrowing lane refuses as its source and names that source in the message. */
+/* Any borrowing lane refuses as its source and names that source in the message.
+ * The set can be empty once every qualified lane has a measured column. */
 void test_a_borrowing_lane_refuses_as_its_source()
 {
-    bool tested = false;
     for(int i = 0; i < rocke_llvm_flavor_count(); ++i)
     {
         const char* lane = rocke_llvm_flavor_at(i);
@@ -287,10 +287,8 @@ void test_a_borrowing_lane_refuses_as_its_source()
         Lowered refused = lower_dpp8(lane);
         EXPECT(refused.status == ROCKE_ERR_ARCH_DOMAIN && refused.text == want,
                std::string(lane) + " refuses as " + source + ": " + refused.text);
-        tested = true;
         set_mode(nullptr);
     }
-    EXPECT(tested, "no borrowing lane had the negative test cell");
 }
 
 } // namespace

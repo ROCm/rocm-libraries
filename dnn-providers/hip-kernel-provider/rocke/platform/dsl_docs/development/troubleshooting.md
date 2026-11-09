@@ -93,7 +93,7 @@ If you intentionally changed what a kernel emits, re-bless the golden **from a
 green state**, for every LLVM flavor, in the same commit, and let your reviewer
 read the diff (`tests/instances/differential/golden/README.md`):
 ```bash
-run_diff.py --mode ll --python-only --record-golden --flavor llvm20,llvm22,llvm23
+run_diff.py --mode ll --python-only --record-golden --flavor llvm20,llvm22,llvm23,llvm24
 run_diff.py --mode ir --canonical --python-only --record-golden
 ```
 `--only <family>` re-blesses just that family and keeps every other one.

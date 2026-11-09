@@ -27,6 +27,7 @@ import dataclasses
 import importlib.util
 import unittest
 
+from kernels.common import conv_direct_grouped as G
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
     DirectConvProblem,
@@ -35,12 +36,19 @@ from kernels.common.conv_direct_grouped import (
     is_valid_spec_4c,
     make_dgrad_4c_spec,
 )
+from kernels.common.conv_direct_grouped_wgrad_mfma import (
+    GroupedWgradMfmaSpec,
+    is_valid_grouped_wgrad_mfma_spec,
+)
 from rocke.core.backend import (
     conv_direct_grouped_spec_to_dict,
     lower_conv_direct_grouped,
 )
 
 _HAS_ENGINE = importlib.util.find_spec("rocke_engine") is not None
+
+#: The refusal of groups * cpg = groups * kpg = 2^31 (channel_totals_reason).
+_TOTALS_2_31 = "groups * cpg = 2147483648 and groups * kpg = 2147483648 must fit in i32"
 _SKIP = "" if _HAS_ENGINE else "rocke_engine extension not importable"
 
 
@@ -167,6 +175,44 @@ def _generic_cases():
         )
     )
     return out
+
+
+class TestChannelTotals(unittest.TestCase):
+    """Every validator whose C++ builder keeps a channel total in an ``int``
+    refuses ``groups * cpg`` or ``groups * kpg`` past i32 first, with
+    ``channel_totals_reason``'s text; the host ctest
+    ``conv_direct_dw_dgrad_host`` pins the C++ validators to the same
+    literal, and ``TestBackendBoth`` compares the bound engines."""
+
+    def test_validators_refuse_2_31_channels(self):
+        def p(groups, ch):
+            return _pg("fp16", N=1, H=8, W=8, groups=groups, cpg=ch, kpg=ch)
+
+        cases = [
+            (G.DirectConv16cSpec, G.is_valid_spec_16c, 1 << 27, 16),
+            (G.DirectConv4cSpec, G.is_valid_spec_4c, 1 << 29, 4),
+            (G.DirectConv8cSpec, G.is_valid_spec_8c, 1 << 28, 8),
+            (G.DirectConv32cSpec, G.is_valid_spec_32c, 1 << 26, 32),
+            (G.DirectConvSpec, G.is_valid_spec, 1 << 27, 16),
+            (G.DirectConvWgradSpec, G.is_valid_wgrad_spec, 1 << 27, 16),
+            (G.DirectConvDgradSpec, G.is_valid_dgrad_spec, 1 << 27, 16),
+            (G.DirectDepthwiseSpec, G.is_valid_depthwise_spec, 1 << 30, 2),
+            (G.DirectDepthwiseColSpec, G.is_valid_depthwise_col_spec, 1 << 30, 2),
+            (
+                G.DirectDepthwiseSpatialSpec,
+                G.is_valid_depthwise_spatial_spec,
+                1 << 30,
+                2,
+            ),
+            (GroupedWgradMfmaSpec, is_valid_grouped_wgrad_mfma_spec, 1 << 28, 8),
+        ]
+        for cls, valid, groups, ch in cases:
+            with self.subTest(spec=cls.__name__):
+                spec = cls(problem=p(groups, ch))
+                self.assertEqual(valid(spec, "gfx950"), (False, _TOTALS_2_31))
+                # One channel fewer per group fits.
+                ok, why = valid(cls(problem=p(groups, ch - 1)), "gfx950")
+                self.assertNotEqual(why, _TOTALS_2_31)
 
 
 class TestSpecToDict(unittest.TestCase):
@@ -324,6 +370,24 @@ class TestBackendBoth(unittest.TestCase):
                 msgs.append(str(cm.exception))
             with self.subTest(needle=needle):
                 self.assertIn(needle, msgs[0])
+                self.assertTrue(msgs[1].endswith(msgs[0]), msgs)
+
+    def test_channel_totals_rejects_match(self):
+        # groups * cpg past i32: both engines refuse with the same reason
+        # (the C++ engine prefixes its lowering context).
+        for spec, kind in (
+            (DirectConvSpec(problem=_pg("bf16", groups=1 << 27)), "generic"),
+            (DirectConv4cSpec(problem=_p4("fp16", groups=1 << 29)), "4c"),
+        ):
+            msgs = []
+            for backend in ("python", "cpp"):
+                with self.assertRaises(Exception) as cm:
+                    lower_conv_direct_grouped(
+                        spec, kind=kind, arch="gfx950", backend=backend
+                    )
+                msgs.append(str(cm.exception))
+            with self.subTest(kind=kind):
+                self.assertTrue(msgs[0].endswith(_TOTALS_2_31), msgs)
                 self.assertTrue(msgs[1].endswith(msgs[0]), msgs)
 
     def test_4c_rejects_match(self):

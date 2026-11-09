@@ -12,6 +12,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * The `cg-rsamg_mpi`, `cg-saamg_mpi` and `cg-uaamg_mpi` samples now print the total runtime, as the non-MPI samples do.
 * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
 * GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
+* CMake 3.19 or later is now required to build rocALUTION (previously 3.5).
 
 ### Removed
 * Removed the GoogleTest superbuild in `deps` and its `BUILD_GTEST` option, which `install.sh -d` invoked without enabling it.
@@ -28,6 +29,18 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `init_rocalution()` reporting an accelerator after `stop_rocalution()` when the accelerator was disabled with `disable_accelerator_rocalution()`.
 * Fixed a HIP stream leak in `init_rocalution()` in multi-node builds when creating the HIP streams fails.
 * Fixed the format warning of `GlobalMatrix::AMGUnsmoothedAggregation()` naming `AMGSmoothedAggregation()`.
+* Fixed `LocalVector::Sync()` and `LocalMatrix::Sync()` deleting both the host and the accelerator copy of an object after `MoveToHostAsync()`, which lost its data and crashed on the next access.
+* Fixed `LocalMatrix::MoveToAcceleratorAsync()` and `LocalMatrix::MoveToHostAsync()` leaking a full copy of the matrix for each additional call before `Sync()`. Additional calls before `Sync()` now do nothing, so changes made to the matrix between the first call and `Sync()` are not transferred.
+* Fixed `LocalVector::Amax()` on the accelerator returning the index and value of the entry after the largest one, and reading past the end of the vector when the largest entry is the last one. This also affected the Linf residual norm and `GetAmaxResidualIndex()` of the iterative solvers on the accelerator.
+* Fixed wrong results of the iterative triangular solves on the accelerator when both `LocalMatrix::ItLAnalyse()` and `LocalMatrix::ItUAnalyse()` are called on the same matrix, as the SGS preconditioner does with `TriSolverAlg_Iterative`.
+* Fixed `ItILU0::GetConvergenceHistory()` on the accelerator returning an unwritten history and an undefined iteration count when rocSPARSE rejects the history query. The history is now empty in this case. Also fixed a memory leak when building ItILU0 with a convergence history in single precision.
+* Fixed `ItILU0Algorithm::SyncSplit` on the accelerator stopping after the first sweep and returning zero factors, so the preconditioner is the identity, when `ItILU0Option::StoppingCriteria` or `ItILU0Option::ConvergenceHistory` is set without a norm option. `ItILU0Algorithm::AsyncSplit` failed with an illegal memory access in that case. The residual norm is now computed whenever the stopping criteria or the convergence history is requested, or when a history buffer is passed to `LocalMatrix::ItILU0Factorize()`. With only `ItILU0Option::ComputeNrmCorrection` set, the SyncSplit stopping test now also takes the residual into account.
+* Fixed `init_rocalution()` making every host OpenMP parallel region, including those of the application, run on a single thread when rocALUTION is built with OpenMP 5.0 or newer, which is the default with `amdclang++`.
+* Fixed `stop_rocalution()` aborting when nested parallelism was enabled before `init_rocalution()`, for example with `OMP_MAX_ACTIVE_LEVELS`, `OMP_NESTED` or a nested `OMP_NUM_THREADS` list, in builds with OpenMP 5.0 or newer. In builds with older OpenMP versions, such as with GCC, it restored a different maximum number of active parallel levels.
+* Fixed a data race in the host `LocalVector::Amax()` with more than one OpenMP thread, which could return the index of a later entry when the largest magnitude occurs more than once. It now returns the first one, as the sequential code and the HIP backend do.
+* Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
+* Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
+* Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 
 ## (Unreleased) rocALUTION 4.1.1
 
@@ -55,6 +68,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed the Smoothed-Aggregation AMG preconditioner not falling back to the host when the prolongation fill failed on the accelerator or in a non-CSR format.
 * Fixed the FCG and QMRCGStab solvers returning NaN when the initial residual is already below the absolute tolerance, for example a zero right-hand side on the coarsest AMG level.
 * Fixed `init_rocalution()` reporting the HIP backend as available when creating the rocBLAS or rocSPARSE handle failed on a device selected with `set_device_rocalution()`, which caused `info_rocalution()` to crash. rocALUTION now falls back to the host backend in this case.
+* Fixed a crash or out-of-bounds access in the SA-AMG, UA-AMG and Ruge-Stueben AMG setup with MPI when a process sets only the local part of a `GlobalMatrix` with `SetLocalDataPtrCSR()` or `SetLocalDataPtrCOO()` and its neighbors reference its columns. Such a matrix now has an empty ghost part with one row per local row.
 
 ## rocALUTION 4.1.0 for ROCm 7.2.0
 
