@@ -1677,8 +1677,9 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // behind the next WMMA and its barrier.
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty() || fillQuotaMet())) {
-        DAGNode* gr = globalReadQueue.top();
-        consider(gr, kGlobalRead, 0);
+        // The RANK is the scoreboard's -- `getHazardWait` went with the s_wait_alu filler
+        // placement -- so a load competes at 0 like any other free candidate.
+        consider(globalReadQueue.top(), kGlobalRead, 0);
         memWorkFitsWindow_ = true;
     }
     // SALU/other allows hidden stalls (see pickFreeBest); VALU stays
@@ -1769,6 +1770,11 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
         if (!valuQueue.empty()) consider(valuQueue.top(), kValu);
         if (!prefetchQueue.empty()) consider(prefetchQueue.top(), kPrefetch);
     }
+
+    // The RAW-window premise normally leaves enough independent work to reach the floor. If all
+    // such work is exhausted, release the oldest held load rather than inventing unencoded idle
+    // cycles or deadlocking the topological schedule; end-to-end cycle checks diagnose a shortfall.
+    if (best == nullptr && !globalReadQueue.empty()) consider(globalReadQueue.top(), kGlobalRead);
 
     if (best == nullptr) return false;
     *outNode = best;
@@ -2141,6 +2147,32 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         int dsLoadCount;
         int depThreshold;
         int maxParentWmmaIdx;
+        // A schedulable tensor_load issues behind this group. The overlap step below separates
+        // ds_load windows, which that load is not part of, so it may not carry the load along.
+        bool gatesTensorLoad;
+    };
+    // The region's own tensor_loads: one that is a scheduling boundary is not inside the region,
+    // so anything found here is a load the scheduler places, and the barrier it waits behind
+    // decides where it can go.
+    auto gatesTensorLoad = [&](const BarrierTokenGroup& group) {
+        std::unordered_set<StinkyInstruction*> groupBarriers(group.barriers.begin(),
+                                                             group.barriers.end());
+        bool passedGroup = false;
+        for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst == nullptr) continue;
+            if (groupBarriers.count(inst) != 0) {
+                passedGroup = true;
+                continue;
+            }
+            if (!passedGroup) continue;
+            if (isBarrier(*inst)) break;
+            if (!isTensorLoad(*inst)) continue;
+            for (const auto* regs : {&inst->getSrcRegs(), &inst->getDestRegs()})
+                for (const StinkyRegister& reg : *regs)
+                    if (isPseudoReg(reg) && group.tokens.count(reg.reg.idx) != 0) return true;
+        }
+        return false;
     };
 
     // Step 1a: collect all movable barriers with their PSEUDO src token sets,
@@ -2303,7 +2335,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         }
         overlapChecks.push_back({groupBarrier, group.barriers, afterThreshold, lastOverlap,
                                  wmmaWindowsNeeded, latencyWmmaBudget, matchingDsLoadCount,
-                                 depThreshold, maxParentWmmaIdx});
+                                 depThreshold, maxParentWmmaIdx, gatesTensorLoad(group)});
         PASS_DEBUG(std::cerr << "[CDNA5 computeBarrierAfterThresholds] barrier=" << groupBarrier
                              << " barrierGroupSize=" << group.barriers.size() << " afterThreshold="
                              << afterThreshold << " matchingDsLoadCount=" << matchingDsLoadCount
@@ -2362,9 +2394,14 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
 
     for (size_t i = 0; i < n; ++i) {
         const BarrierAfterSummary& summary = overlapChecks[i];
+        // The separation above is between two groups' ds_load windows. A tensor_load waits
+        // behind its barrier, so pushing the barrier for a window it is not in moves the load
+        // too -- a cost this step does not weigh. Such a group keeps its own threshold; it can
+        // still push the groups it overlaps.
+        const int pushed = pushedStart[i] + summary.wmmaWindowsNeeded + frontOverlapBudget[i];
         const int adjustedAfterThreshold =
             std::min((int)wmmaIssueConfig.issuedCount,
-                     pushedStart[i] + summary.wmmaWindowsNeeded + frontOverlapBudget[i]);
+                     summary.gatesTensorLoad ? summary.afterThreshold : pushed);
 
         for (StinkyInstruction* barrier : summary.barriers) {
             barrierWmmaThresholds_[barrier] = adjustedAfterThreshold;
@@ -3463,7 +3500,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                             : std::max(1, config_.wmmaLatencyFallbackCycles);
                 const int tensorLoadDsLoadGapWmma =
                     (tensorLoadDsLoadGapCycles + wmmaLatency - 1) / wmmaLatency;
-                const int baseAfterEnd = afterGroup.baseThreshold;
+                // The after group ends where it promotes, so its own front-overlap push counts:
+                // the estimator end alone hides a push that carries it past the before group.
+                const int baseAfterEnd = std::max(afterGroup.baseThreshold, afterGroup.threshold);
                 const int baseBeforeBegin = beforeGroup.baseThreshold;
                 const int baseAfterBegin = std::max(0, baseAfterEnd - afterGroup.claimWindow);
                 const int baseBeforeEnd = baseBeforeBegin + beforeGroup.claimWindow;
@@ -3709,6 +3748,81 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         };
         for (const auto& group : exclusiveAfterGroups) clampPairHalf(group, /*waitHalf=*/true);
         for (const auto& group : exclusiveBeforeGroups) clampPairHalf(group, /*waitHalf=*/false);
+
+        // A before-only all-wave pair is a loop-carried RAW fence when its LDS token is consumed
+        // by a later ds_load and that token reaches another later all-wave pair. This is the
+        // A -> ds_load -> B token chain: A publishes a stage, the load consumes it, and B fences
+        // the next use of the same slot. It identifies the pipeline head from token lifetime,
+        // rather than assuming a CFG header or the first barrier in the region is the head.
+        if (wmmaQueueDepth() > 1) {
+            const int headThreshold = wmmaQueueDepth();
+            const auto barrierGroups =
+                groupBarrierTokens(collectBarrierTokens(regionStart, regionEnd, /*useSrc=*/true));
+            std::unordered_map<StinkyInstruction*, unsigned> instOrder;
+            unsigned order = 0;
+            for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
+                if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr()))
+                    instOrder.emplace(inst, order);
+                ++order;
+            }
+
+            for (size_t groupIdx = 0; groupIdx < barrierGroups.size(); ++groupIdx) {
+                const BarrierTokenGroup& group = barrierGroups[groupIdx];
+                bool beforeOnlyPair = group.barriers.size() == 2;
+                int shared = std::numeric_limits<int>::max();
+                for (StinkyInstruction* barrier : group.barriers) {
+                    if (!(isBarrierSignal(*barrier) || isBarrierWait(*barrier)) ||
+                        !isSplitBarrierAllWave(*barrier)) {
+                        beforeOnlyPair = false;
+                        break;
+                    }
+                    auto it = barrierWmmaThresholds_.find(barrier);
+                    if (it == barrierWmmaThresholds_.end() || !beforeThresholds.contains(barrier) ||
+                        afterThresholds.contains(barrier)) {
+                        beforeOnlyPair = false;
+                        break;
+                    }
+                    shared = std::min(shared, it->second);
+                }
+                if (!beforeOnlyPair || shared <= headThreshold) continue;
+
+                bool hasLoopCarriedTokenChain = false;
+                const unsigned groupEnd = instOrder.at(group.barriers.back());
+                for (IRList::iterator dsIt = std::next(group.lastIt); dsIt != regionEnd; ++dsIt) {
+                    auto* ds = dyn_cast<StinkyInstruction>(dsIt.getNodePtr());
+                    if (ds == nullptr || !isDSRead(*ds)) continue;
+
+                    std::unordered_set<uint32_t> consumedTokens;
+                    for (const StinkyRegister& src : ds->getSrcRegs())
+                        if (isPseudoReg(src) && group.tokens.contains(src.reg.idx))
+                            consumedTokens.insert(src.reg.idx);
+                    if (consumedTokens.empty()) continue;
+
+                    const unsigned dsOrder = instOrder.at(ds);
+                    for (size_t laterIdx = groupIdx + 1;
+                         laterIdx < barrierGroups.size() && !hasLoopCarriedTokenChain; ++laterIdx) {
+                        const BarrierTokenGroup& later = barrierGroups[laterIdx];
+                        if (instOrder.at(later.barriers.front()) <= dsOrder) continue;
+                        bool laterAllWavePair = later.barriers.size() == 2;
+                        for (StinkyInstruction* barrier : later.barriers)
+                            laterAllWavePair &=
+                                (isBarrierSignal(*barrier) || isBarrierWait(*barrier)) &&
+                                isSplitBarrierAllWave(*barrier);
+                        if (!laterAllWavePair) continue;
+                        for (uint32_t token : consumedTokens)
+                            hasLoopCarriedTokenChain |= later.tokens.contains(token);
+                    }
+                }
+                if (!hasLoopCarriedTokenChain) continue;
+
+                for (StinkyInstruction* barrier : group.barriers)
+                    barrierWmmaThresholds_[barrier] = headThreshold;
+                PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion loop-carried barrier] threshold="
+                                     << headThreshold << " was=" << shared
+                                     << " groupSize=" << group.barriers.size()
+                                     << " regionOrder=" << groupEnd << "\n");
+            }
+        }
     }
 
     // Install the single DS priority plan after the queue-fill gate. The requested constraints
@@ -3796,18 +3910,38 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             }
             if (isGlobalPrefetch(*inst) && loadWindow >= 0) byLoad[loadWindow].push_back(inst);
         }
+        // The windows every tensor_load of this region is planned at, newest first. A lead walks
+        // its group back from its OWN load, which with one load per movement can carry it onto
+        // another movement's -- two memory issues one window apart, down the same path. The
+        // group is pushed clear of those, never later: the pin is a floor, so moving it earlier
+        // only widens the window the load may issue in.
+        std::vector<int> otherLoadWindows;
+        for (const auto& [load, planned] : loadPlannedWindow) {
+            (void)load;
+            otherLoadWindows.push_back(planned);
+        }
+        std::sort(otherLoadWindows.begin(), otherLoadWindows.end(), std::greater<int>());
+        const int wmmaLatency = wmmaIssueConfig.latency > 0
+                                    ? static_cast<int>(wmmaIssueConfig.latency)
+                                    : std::max(1, config_.wmmaLatencyFallbackCycles);
+        // Same spacing the exclusive rule keeps between a tensor_load and the ds_loads behind it.
+        const int loadGap = (tensorLoadDsLoadGapCycles() + wmmaLatency - 1) / wmmaLatency;
         for (auto& [window, prefetches] : byLoad) {
             std::reverse(prefetches.begin(), prefetches.end());  // back to original order
             const int n = static_cast<int>(prefetches.size());
             for (int k = 0; k < n; ++k) {
                 // A single-stage loop, or a stage too short for a lead, puts the whole group in the
                 // load's window.
-                prefetchEarliestWmma_[prefetches[k]] =
-                    singleStageLoop() || lead <= 0 ? std::max(0, window)
-                                                   : std::max(0, window - lead + k * lead / n);
+                int earliest = singleStageLoop() || lead <= 0
+                                   ? std::max(0, window)
+                                   : std::max(0, window - lead + k * lead / n);
+                for (int planned : otherLoadWindows)
+                    if (planned != window && earliest > planned - loadGap &&
+                        earliest < planned + loadGap)
+                        earliest = std::max(0, planned - loadGap);
+                prefetchEarliestWmma_[prefetches[k]] = earliest;
                 PASS_DEBUG(std::cerr << "[CDNA5 prefetchLead] load window=" << window << " #" << k
-                                     << " earliest=" << prefetchEarliestWmma_[prefetches[k]]
-                                     << "\n");
+                                     << " earliest=" << earliest << " loadGap=" << loadGap << "\n");
             }
         }
     }
@@ -4077,6 +4211,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             !loads.empty() && static_cast<long long>(loads.size()) *
                                       dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
                                   static_cast<long long>(wmmaTotalThisRegion_) * windowCycles;
+        PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] stages:\n" << dsSpread_.planSummary());
         for (const auto& r : dsSpread_.rateLimited())
             PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] WARNING: "
                                  << DsSpreadPacer::rateLimitedMessage(

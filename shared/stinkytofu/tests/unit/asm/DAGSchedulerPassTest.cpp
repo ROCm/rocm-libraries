@@ -28,6 +28,7 @@
 #include <iostream>
 #include <sstream>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "TestHelpers.hpp"
@@ -183,6 +184,78 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pfc.dagFeatures.dsSpread = dsSpread;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
+    }
+
+    // Queue model on: wmmaQueueDepth() is `depth` only when the cover is positive.
+    void runPassWithWmmaQueue(int depth, int coverCycles) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.wmmaQueueDepth = depth;
+        pfc.dagFeatures.wmmaQueueCoverCycles = coverCycles;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+    }
+
+    struct LoopHeadBarriers {
+        StinkyInstruction* headSignal = nullptr;
+        StinkyInstruction* headWait = nullptr;
+        StinkyInstruction* laterSignal = nullptr;
+        StinkyInstruction* laterWait = nullptr;
+    };
+
+    // Independent WMMAs, a before-only all-wave pair, ds_loads consuming its LDS token, then
+    // a later pair carrying that same token. This is the A -> ds_load -> B token chain.
+    LoopHeadBarriers buildLoopHeadBarrierCase() {
+        LoopHeadBarriers out;
+        for (int i = 0; i < 12; ++i)
+            createWmmaScaleF8(/*destStart=*/1000 + i * 16, /*src0Start=*/3000 + i * 16);
+        std::tie(out.headSignal, out.headWait) = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        for (int i = 0; i < 4; ++i)
+            createMovableDsLoad(/*destReg=*/100 + i * 8, /*addrReg=*/800 + i, /*ldsToken=*/0);
+        for (int i = 0; i < 4; ++i)
+            createWmmaScaleF8(/*destStart=*/500 + i * 16, /*src0Start=*/100 + i * 8);
+        std::tie(out.laterSignal, out.laterWait) =
+            createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        createMovableDsLoad(/*destReg=*/180, /*addrReg=*/820, /*ldsToken=*/1);
+        createWmmaScaleF8(/*destStart=*/700, /*src0Start=*/180);
+        return out;
+    }
+
+    // The first pair is after-only because its matching ds_load precedes it. The second pair is
+    // before-only, but is in the middle of the loop region and must not use the loop-head rule.
+    LoopHeadBarriers buildMidLoopBarrierCase() {
+        LoopHeadBarriers out;
+        for (int i = 0; i < 12; ++i)
+            createWmmaScaleF8(/*destStart=*/1000 + i * 16, /*src0Start=*/3000 + i * 16);
+        createMovableDsLoad(/*destReg=*/100, /*addrReg=*/800, /*ldsToken=*/9);
+        createMovableWorkgroupBarrier(bb, /*ldsToken=*/9);
+        for (int i = 0; i < 8; ++i)
+            createWmmaScaleF8(/*destStart=*/500 + i * 16, /*src0Start=*/3400 + i * 16);
+        std::tie(out.headSignal, out.headWait) = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        for (int i = 0; i < 4; ++i)
+            createMovableDsLoad(/*destReg=*/200 + i * 8, /*addrReg=*/820 + i, /*ldsToken=*/0);
+        for (int i = 0; i < 4; ++i)
+            createWmmaScaleF8(/*destStart=*/700 + i * 16, /*src0Start=*/200 + i * 8);
+        return out;
+    }
+
+    // Make bb the header of a reachable single-BB loop. This is the shape the scheduler's
+    // LoopAnalysis uses to attach a Loop* to the ready queue.
+    void makeCurrentBlockLoopHeader() {
+        bb->addSuccessor(bb);
+    }
+
+    static int wmmaCountBefore(const BasicBlock& block, const StinkyInstruction* target) {
+        int count = 0;
+        for (const IRBase& ir : block) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == target) return count;
+            if (isMatrixInstruction(*inst)) ++count;
+        }
+        return -1;
     }
 
     // Run with the tensor_load_to_lds credit-pool throttle enabled.
@@ -811,6 +884,49 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
     EXPECT_EQ(waits, 2);
 }
 
+// A loop-carried A -> ds_load -> B token chain promotes A at wmmaQueueDepth.
+TEST_F(DAGSchedulerPassTest, LoopCarriedWorkgroupBarrierUsesWmmaQueueDepth) {
+    constexpr int kDepth = 4;
+    makeCurrentBlockLoopHeader();
+    const LoopHeadBarriers ir = buildLoopHeadBarrierCase();
+
+    runPassWithWmmaQueue(kDepth, /*coverCycles=*/32);
+
+    EXPECT_EQ(wmmaCountBefore(*bb, ir.headSignal), kDepth) << scheduleOrder(*bb);
+    EXPECT_EQ(positionOf(*bb, ir.headWait), positionOf(*bb, ir.headSignal) + 1)
+        << scheduleOrder(*bb);
+    EXPECT_GT(wmmaCountBefore(*bb, ir.laterSignal), kDepth) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, ir.headSignal), positionOf(*bb, ir.laterSignal))
+        << scheduleOrder(*bb);
+}
+
+// Same token chain with the queue model off (cover 0 => depth 1) keeps its later estimator
+// placement rather than using the queue-depth rule.
+TEST_F(DAGSchedulerPassTest, LoopCarriedWorkgroupBarrierStaysWithEstimatorWithoutWmmaQueue) {
+    makeCurrentBlockLoopHeader();
+    const LoopHeadBarriers ir = buildLoopHeadBarrierCase();
+
+    runPassWithUnrollGemm();
+
+    EXPECT_GT(wmmaCountBefore(*bb, ir.headSignal), 4) << scheduleOrder(*bb);
+    EXPECT_EQ(positionOf(*bb, ir.headWait), positionOf(*bb, ir.headSignal) + 1)
+        << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, ir.headSignal), positionOf(*bb, ir.laterSignal))
+        << scheduleOrder(*bb);
+}
+
+TEST_F(DAGSchedulerPassTest, BeforeOnlyBarrierWithoutLaterTokenPairDoesNotUseHeadThreshold) {
+    constexpr int kDepth = 4;
+    makeCurrentBlockLoopHeader();
+    const LoopHeadBarriers ir = buildMidLoopBarrierCase();
+
+    runPassWithWmmaQueue(kDepth, /*coverCycles=*/32);
+
+    EXPECT_GT(wmmaCountBefore(*bb, ir.headSignal), kDepth) << scheduleOrder(*bb);
+    EXPECT_EQ(positionOf(*bb, ir.headWait), positionOf(*bb, ir.headSignal) + 1)
+        << scheduleOrder(*bb);
+}
+
 // Non-overlapping after/before groups still keep the after token's next
 // tensor_load between them when the after threshold is earlier. The load
 // defines that token, so it is not a register user of the barrier. The before
@@ -1090,6 +1206,163 @@ TEST_F(DAGSchedulerPassTest, OverlapGapStopsAfterAtParentWmmaAndPushesBefore) {
     EXPECT_LT(wmmasBefore(afterSignal), 24) << scheduleOrder(*bb);
     EXPECT_GE(wmmasBefore(beforeSignal), 26) << scheduleOrder(*bb);
     EXPECT_LT(wmmasBefore(beforeSignal), 33) << scheduleOrder(*bb);
+}
+
+// Two after groups share a window, so the front-overlap push carries the later one (token 2)
+// past the before group's threshold (token 1). The windows that are claimed then overlap, and
+// the pair has to reconcile: reading the estimator end instead of the threshold that places the
+// group hides the push, leaves the pair unresolved, and the before barrier is scheduled behind
+// the pushed after barrier with its own ds_loads crushed into what is left of the region.
+TEST_F(DAGSchedulerPassTest, PushedAfterThresholdStillOverlapsBeforeGroup) {
+    bb->addSuccessor(bb);
+
+    for (int i = 0; i < 12; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/1000 + i * 16, /*src0Start=*/3000 + i * 16);
+    for (int i = 0; i < 4; ++i)
+        createMovableDsLoad(/*destReg=*/100 + i * 8, /*addrReg=*/800 + i, /*ldsToken=*/0);
+    auto [afterSignalA, afterWaitA] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    (void)afterWaitA;
+    for (int i = 0; i < 10; ++i)
+        createMovableDsLoad(/*destReg=*/200 + i * 8, /*addrReg=*/840 + i, /*ldsToken=*/2);
+    auto [afterSignalB, afterWaitB] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/2);
+    (void)afterWaitB;
+    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    (void)beforeWait;
+    for (int i = 0; i < 6; ++i)
+        createMovableDsLoad(/*destReg=*/300 + i * 8, /*addrReg=*/880 + i, /*ldsToken=*/1);
+    for (int i = 0; i < 12; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/5000 + i * 16, /*src0Start=*/6000 + i * 16);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/700, /*src0Start=*/300);
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+
+    runPassWithUnrollGemm(/*dsSpread=*/false);
+
+    auto wmmasBefore = [&](const StinkyInstruction* target) {
+        int count = 0;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == target) break;
+            if (isMatrixInstruction(*inst)) ++count;
+        }
+        return count;
+    };
+
+    // Both pairs reconcile, so both after groups are gap-placed in front of the before group.
+    // On the estimator end the first pair reads overlap=0 and keeps its pushed threshold, which
+    // is the before group's own: 17 for both, and the ds_loads behind the before barrier lose
+    // the windows the threshold reserved for them.
+    const auto* overlaps = am.getCachedResult<Layer2BarrierOverlapAnalysis>();
+    ASSERT_NE(overlaps, nullptr);
+    EXPECT_TRUE(overlaps->contains(afterSignalA, beforeSignal));
+    EXPECT_LT(wmmasBefore(afterSignalA), wmmasBefore(beforeSignal)) << scheduleOrder(*bb);
+    EXPECT_LT(wmmasBefore(afterSignalB), wmmasBefore(beforeSignal)) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBefore(beforeSignal), 17) << scheduleOrder(*bb);
+}
+
+// The overlap step separates two after groups' ds_load windows. A tensor_load is not in those
+// windows but waits behind its barrier, so pushing that barrier carries the load with it. The
+// group that gates one keeps its own threshold; the group that does not is still pushed.
+TEST_F(DAGSchedulerPassTest, OverlapPushSkipsAnAfterGroupGatingATensorLoad) {
+    bb->addSuccessor(bb);
+
+    for (int i = 0; i < 30; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/1000 + i * 16, /*src0Start=*/3000 + i * 16);
+    for (int i = 0; i < 4; ++i)
+        createMovableDsLoad(/*destReg=*/100 + i * 8, /*addrReg=*/800 + i, /*ldsToken=*/0);
+    auto [afterSignalA, afterWaitA] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    (void)afterWaitA;
+    StinkyInstruction* tensorLoad =
+        createMovableTensorLoad(bb, /*src0Reg=*/40, /*src1Reg=*/44, /*ldsToken=*/0);
+    for (int i = 0; i < 10; ++i)
+        createMovableDsLoad(/*destReg=*/200 + i * 8, /*addrReg=*/840 + i, /*ldsToken=*/2);
+    auto [afterSignalB, afterWaitB] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/2);
+    (void)afterWaitB;
+    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    (void)beforeSignal;
+    (void)beforeWait;
+    for (int i = 0; i < 6; ++i)
+        createMovableDsLoad(/*destReg=*/300 + i * 8, /*addrReg=*/880 + i, /*ldsToken=*/1);
+    for (int i = 0; i < 30; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/5000 + i * 16, /*src0Start=*/6000 + i * 16);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/700, /*src0Start=*/300);
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+
+    runPassWithUnrollGemm(/*dsSpread=*/false);
+
+    auto wmmasBefore = [&](const StinkyInstruction* target) {
+        int count = 0;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == target) break;
+            if (isMatrixInstruction(*inst)) ++count;
+        }
+        return count;
+    };
+    // Group A claims [8, 21) and group B [9, 40), so the step pushes A to 8 + 13 + 12 = 33.
+    // A gates the tensor_load, so it keeps 21 and the load issues behind it there; B gates none
+    // and is still pushed past A's end.
+    EXPECT_EQ(wmmasBefore(afterSignalA), 21) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBefore(tensorLoad), 22) << scheduleOrder(*bb);
+    EXPECT_GT(wmmasBefore(afterSignalB), wmmasBefore(afterSignalA)) << scheduleOrder(*bb);
+}
+
+// A lead walks a prefetch back from its OWN tensor_load. With one load per movement the loads sit
+// at different windows, so a long enough lead carries the group onto another movement's load --
+// two memory issues a window apart. The pin is pushed clear of the loads it does not belong to.
+TEST_F(DAGSchedulerPassTest, PrefetchLeadKeepsClearOfAnotherMovementsTensorLoad) {
+    bb->addSuccessor(bb);
+
+    for (int i = 0; i < 30; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/1000 + i * 16, /*src0Start=*/3000 + i * 16);
+    for (int i = 0; i < 4; ++i)
+        createMovableDsLoad(/*destReg=*/100 + i * 8, /*addrReg=*/800 + i, /*ldsToken=*/0);
+    auto [signalA, waitA] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    (void)signalA;
+    (void)waitA;
+    StinkyInstruction* loadA =
+        createMovableTensorLoad(bb, /*src0Reg=*/40, /*src1Reg=*/44, /*ldsToken=*/0);
+    // After loadA, so the group it joins is loadB's and the lead walks it back across loadA.
+    StinkyInstruction* prefetch = createGlobalPrefetchB8(bb, /*vaddrReg=*/300, /*saddrReg=*/60);
+    for (int i = 0; i < 10; ++i)
+        createMovableDsLoad(/*destReg=*/200 + i * 8, /*addrReg=*/840 + i, /*ldsToken=*/2);
+    auto [signalB, waitB] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/2);
+    (void)signalB;
+    (void)waitB;
+    StinkyInstruction* loadB =
+        createMovableTensorLoad(bb, /*src0Reg=*/48, /*src1Reg=*/52, /*ldsToken=*/2);
+    for (int i = 0; i < 30; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/5000 + i * 16, /*src0Start=*/6000 + i * 16);
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.distributeGlobalRead = true;
+    pfc.dagFeatures.prefetchLeadWmmas = 20;
+    pfc.dagFeatures.prefetchLeadMinStageWmmas = 0;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    auto wmmasBefore = [&](const StinkyInstruction* target) {
+        int count = 0;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == target) break;
+            if (isMatrixInstruction(*inst)) ++count;
+        }
+        return count;
+    };
+    const int pf = wmmasBefore(prefetch);
+    const int a = wmmasBefore(loadA);
+    const int b = wmmasBefore(loadB);
+    // Its own load is loadB; loadA belongs to the other movement and the lead must not land on it.
+    EXPECT_LT(pf, b) << scheduleOrder(*bb);
+    EXPECT_LE(pf, a - 2) << "prefetch " << pf << " sits on tensor_load " << a << "\n"
+                         << scheduleOrder(*bb);
 }
 
 // Same overlap as above, with DsSpread on. The after barrier lands on the parent WMMA, so the

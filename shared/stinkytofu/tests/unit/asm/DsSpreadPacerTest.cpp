@@ -557,3 +557,22 @@ TEST(DsSpreadPacer, TheRateLimitedWarningNamesTheStageTheRateAndTheShortfall) {
               "the pace is too sparse for the stage, its last ds_load will land late (lower "
               "DsReadCyclesPerLoad)");
 }
+
+TEST(DsSpreadPacer, ThePlanSummaryNamesEveryStageAndFlagsACollapsedOne) {
+    // One stage spread over two batches, one whose window is shorter than a batch so every load
+    // of it is released at once -- the case the summary exists to make visible.
+    Loads v;
+    add(v, 6, 0, /*start=*/3, /*end=*/11);
+    add(v, 4, 6, /*start=*/12, /*end=*/13);
+    DsSpreadPacer p;
+    p.plan(v, /*wmmaTotal=*/16, /*batch=*/4, /*catchUp=*/0);
+    EXPECT_EQ(p.planSummary(),
+              "  stage [3, 11) loads=6 batches=2 lastDs=0 perBatch=3\n"
+              "  stage [12, 13) loads=4 batches=1 lastDs=0 perBatch=4"
+              "  <<< COLLAPSED (all at once)\n");
+}
+
+TEST(DsSpreadPacer, AnUnplannedPacerSummarisesNothing) {
+    DsSpreadPacer p;
+    EXPECT_EQ(p.planSummary(), "");
+}
