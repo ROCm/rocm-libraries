@@ -264,10 +264,19 @@ using FmhaBatchPrefillPageTileOptionsFor = std::conditional_t<
                            FmhaTdmSchedTuningOptions<false, false, true, 2, true>,
                            FmhaTdmSchedTuningOptions<false, false, false, 0, true>>>>;
 
+// Scheduled-TDM tuning of a page-tile problem: the default tuning of its geometry, with the
+// page-tile code-generation options (read through FmhaTdmSchedTuningOptionsOf).
+template <typename BaseTuning, typename Options_>
+struct FmhaBatchPrefillPageTileTuning : BaseTuning
+{
+    using Options = Options_;
+};
+
 template <typename Problem>
 using FmhaBatchPrefillPageTilePolicyFor = BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy<
     FmhaBatchPrefillPageTileGeometryFor<Problem>,
-    FmhaTdmSchedDefaultTuning<FmhaBatchPrefillPageTileGeometryFor<Problem>,
-                              FmhaBatchPrefillPageTileOptionsFor<Problem>>>;
+    FmhaBatchPrefillPageTileTuning<
+        FmhaTdmSchedDefaultTuning<FmhaBatchPrefillPageTileGeometryFor<Problem>>,
+        FmhaBatchPrefillPageTileOptionsFor<Problem>>>;
 
 } // namespace ck_tile

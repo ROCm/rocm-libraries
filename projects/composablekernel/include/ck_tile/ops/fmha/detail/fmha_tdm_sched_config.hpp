@@ -315,19 +315,30 @@ struct FmhaTdmSchedTuningOptions
     static constexpr bool kWmmaOperandGuard  = WmmaOperandGuard;
 };
 
+// Code-generation options of a tuning: its Options when it names them (a tuning derived for one
+// kernel family, such as the batch-prefill page tile), else the defaults.
+template <typename Tuning, typename = void>
+struct FmhaTdmSchedTuningOptionsOf
+{
+    using type = FmhaTdmSchedTuningOptions<>;
+};
+template <typename Tuning>
+struct FmhaTdmSchedTuningOptionsOf<Tuning, std::void_t<typename Tuning::Options>>
+{
+    using type = typename Tuning::Options;
+};
+
 template <index_t KWait,
           index_t VWait,
           typename QkTails,
           typename PvTails,
           bool TailDrain,
           index_t BlockPerCu,
-          typename Geometry = FmhaTdmSchedBf16D192N128Geometry,
-          typename Options_ = FmhaTdmSchedTuningOptions<>>
+          typename Geometry = FmhaTdmSchedBf16D192N128Geometry>
 struct FmhaTdmSchedTuning
 {
     using QkTailDsCounts = QkTails;
     using PvTailDsCounts = PvTails;
-    using Options        = Options_;
 
     static constexpr index_t kKWait      = KWait;
     static constexpr index_t kVWait      = VWait;
@@ -335,12 +346,6 @@ struct FmhaTdmSchedTuning
     static constexpr index_t kBlockPerCu = BlockPerCu;
     static constexpr index_t kQkStages   = QkTails::size();
     static constexpr index_t kPvStages   = PvTails::size();
-
-    static constexpr bool kQkKOuter          = Options::kQkKOuter;
-    static constexpr bool kKReadKMajor       = Options::kKReadKMajor;
-    static constexpr bool kRowMaxMaximum     = Options::kRowMaxMaximum;
-    static constexpr index_t kScalarRowClamp = Options::kScalarRowClamp;
-    static constexpr bool kWmmaOperandGuard  = Options::kWmmaOperandGuard;
 
     static_assert(kKWait == 0 || kKWait == 1, "K wait count must be zero or one");
     static_assert(kVWait == 0 || kVWait == 1, "V wait count must be zero or one");
@@ -392,7 +397,7 @@ struct FmhaTdmSchedPvTailValue
     }
 };
 
-template <typename Geometry, index_t BlockPerCu = 1, typename Options = FmhaTdmSchedTuningOptions<>>
+template <typename Geometry, index_t BlockPerCu = 1>
 using FmhaTdmSchedDerivedTuning = FmhaTdmSchedTuning<
     1,
     1,
@@ -400,7 +405,6 @@ using FmhaTdmSchedDerivedTuning = FmhaTdmSchedTuning<
     typename sequence_gen<Geometry::kPvStages, FmhaTdmSchedPvTailValue<Geometry>>::type,
     true,
     BlockPerCu,
-    Geometry,
-    Options>;
+    Geometry>;
 
 } // namespace ck_tile
