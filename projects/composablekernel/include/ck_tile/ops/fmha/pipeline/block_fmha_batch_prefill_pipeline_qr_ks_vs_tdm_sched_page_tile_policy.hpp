@@ -9,7 +9,8 @@
 namespace ck_tile {
 
 namespace detail {
-// KV-split partial outputs: FP32 output planes that a merge kernel combines.
+// KV-split partial outputs: FP32 output planes that a merge kernel combines. The page-tile kernel
+// has an FP32 output exactly when it is a KV split (FmhaBatchPrefillQrTdmPageTileKernel).
 template <typename Problem>
 inline constexpr bool fmha_tdm_is_split_partial_v =
     std::is_same_v<remove_cvref_t<typename Problem::ODataType>, float>;
