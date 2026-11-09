@@ -97,20 +97,15 @@ def _k3i_spec(cfg, dtype: str, vab: int, vc: int, arch: str):
 
 
 def k3_configs(arch: str) -> Tuple[tuple, ...]:
-    """The implicit-GEMM K3 configs of the grid: the gfx1250 list, plus the
-    32x32 warp tile and the compv3 / compv4 pipelines on the MFMA targets of
-    ``K3_MFMA_ARCHS``."""
+    """The implicit-GEMM K3 configs of the grid.
+
+    Delegates to :func:`benchmarks.common.benchmark_winograd_conv.k3_configs`,
+    which lives beside the K3 config tables it selects from."""
     from benchmarks.common.benchmark_winograd_conv import (
-        K3_CONFIGS_MFMA,
-        K3_CONFIGS_SHORT,
-        K3_MFMA_ARCHS,
+        k3_configs as _k3_configs,
     )
 
-    if arch not in K3_MFMA_ARCHS:
-        return K3_CONFIGS_SHORT
-    return K3_CONFIGS_SHORT + tuple(
-        c for c in K3_CONFIGS_MFMA if c not in K3_CONFIGS_SHORT
-    )
+    return _k3_configs(arch)
 
 
 def _job_list(arch: str) -> list:

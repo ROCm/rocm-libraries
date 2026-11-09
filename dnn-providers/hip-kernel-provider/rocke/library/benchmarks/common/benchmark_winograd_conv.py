@@ -99,6 +99,17 @@ K3_CONFIGS_TINY: Tuple[tuple, ...] = (
 )
 
 
+def k3_configs(arch: str) -> Tuple[tuple, ...]:
+    """The implicit-GEMM K3 configs of the AOT grid: :data:`K3_CONFIGS_SHORT`
+    for every arch outside :data:`K3_MFMA_ARCHS`, plus the 32x32 warp tile and
+    the ``compv3`` / ``compv4`` pipelines on the MFMA targets."""
+    if arch not in K3_MFMA_ARCHS:
+        return K3_CONFIGS_SHORT
+    return K3_CONFIGS_SHORT + tuple(
+        c for c in K3_CONFIGS_MFMA if c not in K3_CONFIGS_SHORT
+    )
+
+
 def _u8(t):
     return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
@@ -830,9 +841,9 @@ def run_case(problem, io_dtype: str, m, args, arch: str, ref_cache: dict):
     built = {}
     if "implicit" in impls:
         configs = {
-            "short": K3_CONFIGS_SHORT,
+            "short": k3_configs(arch),
             "tiny": K3_CONFIGS_TINY,
-            "first": K3_CONFIGS_SHORT[:1],
+            "first": k3_configs(arch)[:1],
         }[args.k3_sweep]
         cands = build_k3_candidates(
             configs, pipe.gemm_problem, operand, arch, jobs=args.jobs
