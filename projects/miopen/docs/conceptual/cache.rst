@@ -45,8 +45,10 @@ In non-development builds, a recognized network-backed *default* kernel cache is
 is similarly redirected to ``temp_directory_path()/.config/miopen``. These redirects emit warnings
 because the temporary caches and tuning results may not persist. Development builds warn without
 redirecting; their kernel cache is disabled by default unless enabled at configuration time.
-Warnings follow the normal ``MIOPEN_LOG_LEVEL`` setting and are emitted when the cached paths are
-initialized, not on every database access.
+Warnings follow the normal ``MIOPEN_LOG_LEVEL`` setting, but are not suppressed by quiet
+warmup. Cache-path initialization is thread-safe, so concurrent first access emits the
+network-cache warning once. Warnings are emitted when the cached paths are initialized,
+not on every database access.
 
 Detection recognizes NFS, SMB/SMB2/CIFS, Coda, OCFS2, AFS, Lustre, Ceph, GPFS, BeeGFS, PanFS,
 and 9p. Other filesystems, including network-backed FUSE mounts, might not be recognized.

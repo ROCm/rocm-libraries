@@ -165,7 +165,7 @@ fs::path PrepareUserDbPath()
         if(p.empty())
         {
             const auto fallback = fs::temp_directory_path() / ".config" / "miopen";
-            MIOPEN_LOG_W(
+            MIOPEN_LOG_NQ_(miopen::LoggingLevel::Warning,
                 "User find/performance database path '"
                 << result << "' is on a network filesystem. Redirecting to '" << fallback
                 << "'; tuning results may not persist. "
@@ -175,7 +175,7 @@ fs::path PrepareUserDbPath()
         else
 #endif
         {
-            MIOPEN_LOG_W(
+            MIOPEN_LOG_NQ_(miopen::LoggingLevel::Warning,
                 "User find/performance database path '"
                 << result << "' is on a network filesystem. "
                 << "This can cause slow tuning and database access, and database corruption. "

@@ -12,6 +12,49 @@
 
 namespace fs = miopen::fs;
 
+namespace {
+struct FilesystemTypeCase
+{
+    unsigned long type;
+    bool network;
+    const char* name;
+};
+} // namespace
+
+class CPU_FilesystemTypes_NONE : public testing::TestWithParam<FilesystemTypeCase>
+{
+};
+
+TEST_P(CPU_FilesystemTypes_NONE, ClassifiesNetworkAndLocalStorage)
+{
+    EXPECT_EQ(miopen::IsNetworkedFilesystemType(GetParam().type), GetParam().network);
+}
+
+INSTANTIATE_TEST_SUITE_P(Unit,
+                         CPU_FilesystemTypes_NONE,
+                         testing::Values(FilesystemTypeCase{0x6969, true, "NFS"},
+                                         FilesystemTypeCase{0x517b, true, "SMB"},
+                                         FilesystemTypeCase{0xfe534d42, true, "SMB2"},
+                                         FilesystemTypeCase{0xff534d42, true, "CIFS"},
+                                         FilesystemTypeCase{0x73757245, true, "Coda"},
+                                         FilesystemTypeCase{0x7461636f, true, "OCFS2"},
+                                         FilesystemTypeCase{0x5346414f, true, "AFS"},
+                                         FilesystemTypeCase{0x0bd00bd0, true, "Lustre"},
+                                         FilesystemTypeCase{0x00c36400, true, "Ceph"},
+                                         FilesystemTypeCase{0x47504653, true, "GPFS"},
+                                         FilesystemTypeCase{0x19830326, true, "BeeGFS"},
+                                         FilesystemTypeCase{0xaad7aaea, true, "PanFS"},
+                                         FilesystemTypeCase{0x01021997, true, "NineP"},
+                                         FilesystemTypeCase{0xef51, false, "Ext2Old"},
+                                         FilesystemTypeCase{0xef53, false, "Ext"},
+                                         FilesystemTypeCase{0x01021994, false, "Tmpfs"},
+                                         FilesystemTypeCase{0x794c7630, false, "Overlay"},
+                                         FilesystemTypeCase{PROC_SUPER_MAGIC, false, "Proc"},
+                                         FilesystemTypeCase{0, false, "Unknown"}),
+                         [](const testing::TestParamInfo<FilesystemTypeCase>& info) {
+                             return info.param.name;
+                         });
+
 TEST(CPU_FilesystemChecker_NONE, LocalFilesystemAndMissingAbsoluteAncestor)
 {
     // procfs provides a local, read-only filesystem without requiring CI to mount one.

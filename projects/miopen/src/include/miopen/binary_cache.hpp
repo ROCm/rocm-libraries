@@ -68,8 +68,8 @@ MIOPEN_INTERNALS_EXPORT void SaveBinary(const std::vector<char>& hsaco,
 
 #ifdef MIOPEN_BUILD_TESTING
 namespace testing {
-/// Reset cached paths for testing purposes
-/// This allows tests to reinitialize paths with different mocks/env vars
+/// Reset cached paths for testing purposes, invalidating references to the previous paths.
+/// Call only after all cache-path consumers have finished, before changing mocks/env vars.
 MIOPEN_INTERNALS_EXPORT void ResetCachedPaths();
 } // namespace testing
 #endif

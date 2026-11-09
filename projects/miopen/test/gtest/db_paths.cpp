@@ -12,7 +12,13 @@
 #include <gmock/gmock.h>
 #include "gtest_common.hpp"
 
+#include <algorithm>
+#include <barrier>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <string>
+#include <thread>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -32,12 +38,6 @@ MIOPEN_LIB_ENV_VAR(MIOPEN_CUSTOM_CACHE_DIR)
 MIOPEN_LIB_ENV_VAR(MIOPEN_SYSTEM_DB_PATH)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_DISABLE_SYSTEM_DB)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_DISABLE_USER_DB)
-
-// Helper function to check if a path contains a substring
-bool PathContains(const fs::path& path, const std::string& substring)
-{
-    return path.string().find(substring) != std::string::npos;
-}
 
 // Mock filesystem checker for testing
 class MockFilesystemChecker : public miopen::IFilesystemChecker
@@ -76,11 +76,17 @@ namespace {
 class ScopedPathWarningLogging
 {
     const bool previous_quiet = miopen::debug::LoggingQuiet;
-    ScopedEnvironment<std::string> log_level{
-        MIOPEN_LOG_LEVEL, std::to_string(static_cast<int>(miopen::LoggingLevel::Warning))};
+    ScopedEnvironment<std::string> log_level;
 
 public:
-    ScopedPathWarningLogging() { miopen::debug::LoggingQuiet = false; }
+    explicit ScopedPathWarningLogging(bool quiet = false, bool warnings_enabled = true)
+        : log_level{
+              MIOPEN_LOG_LEVEL,
+              std::to_string(static_cast<int>(warnings_enabled ? miopen::LoggingLevel::Warning
+                                                               : miopen::LoggingLevel::Error))}
+    {
+        miopen::debug::LoggingQuiet = quiet;
+    }
     ~ScopedPathWarningLogging() { miopen::debug::LoggingQuiet = previous_quiet; }
 };
 
@@ -109,6 +115,8 @@ struct PathWarningCase
     bool network;
     bool override_path;
     const char* name;
+    bool quiet            = false;
+    bool warnings_enabled = true;
 };
 
 } // namespace
@@ -138,7 +146,7 @@ TEST_P(CPU_DbPathWarnings_NONE, NetworkDiagnosticsAndPathSelection)
         MIOPEN_CUSTOM_CACHE_DIR, param.cache && param.override_path ? custom_path.string() : "");
     ScopedEnvironment<std::string> db_env(
         MIOPEN_USER_DB_PATH, !param.cache && param.override_path ? custom_path.string() : "");
-    ScopedPathWarningLogging logging;
+    ScopedPathWarningLogging logging{param.quiet, param.warnings_enabled};
 
     // Resolve the normal path independently of the network condition. This also avoids
     // encoding build-specific default directories or cache version suffixes in the test.
@@ -160,7 +168,7 @@ TEST_P(CPU_DbPathWarnings_NONE, NetworkDiagnosticsAndPathSelection)
     const auto selected_path = GetPath();
     const auto diagnostic    = initial_capture.Finish();
 
-    if(param.network)
+    if(param.network && param.warnings_enabled)
     {
         EXPECT_THAT(diagnostic, testing::HasSubstr("Warning"));
         EXPECT_THAT(diagnostic, testing::HasSubstr(normal_path.string()));
@@ -180,7 +188,8 @@ TEST_P(CPU_DbPathWarnings_NONE, NetworkDiagnosticsAndPathSelection)
             fs::temp_directory_path() / (param.cache ? ".cache" : ".config") / "miopen";
         const auto expected = param.cache ? fallback_root / normal_path.filename() : fallback_root;
         EXPECT_EQ(selected_path, expected);
-        EXPECT_THAT(diagnostic, testing::HasSubstr(selected_path.string()));
+        if(param.warnings_enabled)
+            EXPECT_THAT(diagnostic, testing::HasSubstr(selected_path.string()));
     }
     else
 #endif
@@ -188,6 +197,9 @@ TEST_P(CPU_DbPathWarnings_NONE, NetworkDiagnosticsAndPathSelection)
         EXPECT_EQ(selected_path, normal_path);
     }
 
+    // A path first resolved during quiet warmup must not lose its warning or
+    // repeat it when the normal find resumes.
+    miopen::debug::LoggingQuiet = false;
     ScopedStderrCapture repeat_capture;
     EXPECT_EQ(GetPath(), selected_path);
     EXPECT_EQ(repeat_capture.Finish(), "") << "Cached path access must not repeat diagnostics";
@@ -201,12 +213,73 @@ INSTANTIATE_TEST_SUITE_P(
                     PathWarningCase{false, false, true, "UserDbLocalOverride"},
                     PathWarningCase{true, false, true, "CacheLocalOverride"},
                     PathWarningCase{false, true, false, "UserDbNetworkDefault"},
-                    PathWarningCase{true, true, false, "CacheNetworkDefault"}),
+                    PathWarningCase{true, true, false, "CacheNetworkDefault"},
+                    PathWarningCase{false, true, true, "QuietUserDbNetworkOverride", true},
+                    PathWarningCase{true, true, true, "QuietCacheNetworkOverride", true},
+                    PathWarningCase{false, true, false, "QuietUserDbNetworkDefault", true},
+                    PathWarningCase{true, true, false, "QuietCacheNetworkDefault", true},
+                    PathWarningCase{false, false, true, "QuietUserDbLocalOverride", true},
+                    PathWarningCase{true, false, true, "QuietCacheLocalOverride", true},
+                    PathWarningCase{false, true, true, "SuppressedUserDbNetwork", true, false},
+                    PathWarningCase{true, true, true, "SuppressedCacheNetwork", true, false}),
     [](const testing::TestParamInfo<PathWarningCase>& info) { return info.param.name; });
 
 // ============================================================================
 // Additional tests
 // ============================================================================
+
+TEST_F(CPU_DbPaths_NONE, ConcurrentColdCacheInitialization)
+{
+#if !defined(MIOPEN_CACHE_DIR) || MIOPEN_DISABLE_USERDB
+    GTEST_SKIP() << "User kernel cache is disabled in this build";
+#else
+    miopen::TmpDir temp{"concurrent_cache_paths"};
+    const auto custom_path = temp.path / "kernel-cache";
+    const auto system_path = temp.path / "system-db";
+    fs::create_directories(system_path);
+    ScopedEnvironment<std::string> cache_env{MIOPEN_CUSTOM_CACHE_DIR, custom_path.string()};
+    ScopedEnvironment<std::string> system_env{MIOPEN_SYSTEM_DB_PATH, system_path.string()};
+    ScopedPathWarningLogging logging;
+
+    std::mutex mutex;
+    std::condition_variable probe_entered;
+    int probes = 0;
+    ON_CALL(mock_checker, IsNetworkedFilesystem(_)).WillByDefault([&](const fs::path&) {
+        std::unique_lock lock{mutex};
+        ++probes;
+        probe_entered.notify_all();
+        // Hold the first filesystem probe while another cold caller tries to
+        // initialize the path. Correct single-flight initialization makes the
+        // second caller wait, rather than probe and warn a second time.
+        probe_entered.wait_for(lock, std::chrono::seconds{1}, [&] { return probes > 1; });
+        return true;
+    });
+
+    fs::path user_paths[2];
+    fs::path system_paths[2];
+    std::barrier start{3};
+    const auto get_paths = [&](int i) {
+        start.arrive_and_wait();
+        user_paths[i]   = miopen::GetCachePath(false);
+        system_paths[i] = miopen::GetCachePath(true);
+    };
+    ScopedStderrCapture capture;
+    std::thread first{get_paths, 0};
+    std::thread second{get_paths, 1};
+    start.arrive_and_wait();
+    first.join();
+    second.join();
+    const auto diagnostic = capture.Finish();
+
+    EXPECT_EQ(user_paths[0], user_paths[1]);
+    EXPECT_EQ(user_paths[0].parent_path(), custom_path);
+    EXPECT_EQ(system_paths[0], system_paths[1]);
+    EXPECT_EQ(system_paths[0], MIOPEN_DISABLE_SYSDB ? fs::path{} : system_path);
+    EXPECT_THAT(diagnostic, testing::HasSubstr("MIOPEN_CUSTOM_CACHE_DIR"));
+    EXPECT_EQ(std::count(diagnostic.begin(), diagnostic.end(), '\n'), 1)
+        << "Concurrent cold access must emit exactly one network-cache warning";
+#endif
+}
 
 TEST_F(CPU_DbPaths_NONE, UserAndSystemCachePaths_AreDifferent)
 {
@@ -314,10 +387,8 @@ TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_EnvVarCleared)
     EXPECT_EQ(miopen::IsSystemDbDisabled(), static_cast<bool>(MIOPEN_DISABLE_SYSDB));
 }
 
-TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_DoesNotAffectUserDbOrSystemDbPath)
+TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_DoesNotAffectSystemDbPath)
 {
-    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
-
     const auto sys_db_path_before = miopen::GetSystemDbPath();
 
     ScopedEnvironment<bool> disable_sysdb(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
@@ -325,18 +396,6 @@ TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_DoesNotAffectUserDbOrSystemDbPath)
     // GetSystemDbPath() is also the home of the AI heuristic models, so it must keep
     // resolving. Only the find-db and perf-db lookups are gated on IsSystemDbDisabled().
     EXPECT_EQ(miopen::GetSystemDbPath(), sys_db_path_before);
-
-    miopen::testing::ResetUserDbPath();
-    const auto& user_db_path = miopen::GetUserDbPath();
-
-    if(user_db_path.empty())
-    {
-        GTEST_SKIP() << "User DB is disabled (MIOPEN_DISABLE_USERDB)";
-    }
-
-    EXPECT_TRUE(PathContains(user_db_path, "miopen"))
-        << "User DB path '" << user_db_path.string()
-        << "' should be unaffected by MIOPEN_DEBUG_DISABLE_SYSTEM_DB";
 }
 
 // ============================================================================

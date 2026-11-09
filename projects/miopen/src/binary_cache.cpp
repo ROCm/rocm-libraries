@@ -45,6 +45,8 @@
 #include <miopen/filesystem.hpp>
 #include <fstream>
 #include <iostream>
+#include <mutex>
+#include <optional>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DISABLE_CACHE)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_CUSTOM_CACHE_DIR)
@@ -79,21 +81,23 @@ static fs::path ComputeUserCachePath()
         if(custom.empty())
         {
             const auto fallback = fs::temp_directory_path() / ".cache" / "miopen" / version;
-            MIOPEN_LOG_W(
+            MIOPEN_LOG_NQ_(
+                miopen::LoggingLevel::Warning,
                 "Kernel cache path '"
-                << p << "' is on a network filesystem. " << "Redirecting to '" << fallback
-                << "'; cached kernels may not persist. "
-                << "Set MIOPEN_CUSTOM_CACHE_DIR to node-local storage for safe, fast caching.");
+                    << p << "' is on a network filesystem. " << "Redirecting to '" << fallback
+                    << "'; cached kernels may not persist. "
+                    << "Set MIOPEN_CUSTOM_CACHE_DIR to node-local storage for safe, fast caching.");
             p = fallback;
         }
         else
 #endif
         {
-            MIOPEN_LOG_W(
-                "Kernel cache path '"
-                << p << "' is on a network filesystem. "
-                << "This can cause very slow algorithm finds, timeouts, and database corruption. "
-                << "Set MIOPEN_CUSTOM_CACHE_DIR to node-local storage.");
+            MIOPEN_LOG_NQ_(miopen::LoggingLevel::Warning,
+                           "Kernel cache path '"
+                               << p << "' is on a network filesystem. "
+                               << "This can cause very slow algorithm finds, timeouts, and "
+                                  "database corruption. "
+                               << "Set MIOPEN_CUSTOM_CACHE_DIR to node-local storage.");
         }
     }
 
@@ -106,33 +110,37 @@ static fs::path ComputeUserCachePath()
 }
 
 namespace {
-// Use static local variables to avoid non-const globals while allowing reset for testing
-const fs::path*& UserCachePathPtrRef()
+struct CachedPath
 {
-    static const fs::path* ptr = nullptr;
-    return ptr;
+    std::once_flag initialized;
+    fs::path value;
+};
+
+// The optional owns the once flag so quiescent tests can reset initialization in place.
+std::optional<CachedPath>& UserCachePathRef()
+{
+    static std::optional<CachedPath> path{std::in_place};
+    return path;
 }
 
-const fs::path*& SysCachePathPtrRef()
+std::optional<CachedPath>& SysCachePathRef()
 {
-    static const fs::path* ptr = nullptr;
-    return ptr;
+    static std::optional<CachedPath> path{std::in_place};
+    return path;
 }
 
 const fs::path& GetUserCachePathInternal()
 {
-    auto& ptr = UserCachePathPtrRef();
-    if(ptr == nullptr)
-        ptr = new fs::path(ComputeUserCachePath());
-    return *ptr;
+    auto& path = *UserCachePathRef();
+    std::call_once(path.initialized, [&path] { path.value = ComputeUserCachePath(); });
+    return path.value;
 }
 
 const fs::path& GetSysCachePathInternal()
 {
-    auto& ptr = SysCachePathPtrRef();
-    if(ptr == nullptr)
-        ptr = new fs::path(ComputeSysCachePath());
-    return *ptr;
+    auto& path = *SysCachePathRef();
+    std::call_once(path.initialized, [&path] { path.value = ComputeSysCachePath(); });
+    return path.value;
 }
 } // namespace
 
@@ -158,10 +166,8 @@ fs::path GetCachePath(bool is_system)
 namespace testing {
 void ResetCachedPaths()
 {
-    delete UserCachePathPtrRef();
-    delete SysCachePathPtrRef();
-    UserCachePathPtrRef() = nullptr;
-    SysCachePathPtrRef()  = nullptr;
+    UserCachePathRef().emplace();
+    SysCachePathRef().emplace();
 }
 } // namespace testing
 #endif

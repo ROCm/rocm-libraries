@@ -103,8 +103,9 @@ const char* Stringize(unsigned long ft)
     default: return "<Unknown magic>";
     }
 }
+} // namespace
 
-bool IsNetworked(unsigned long ft)
+bool IsNetworkedFilesystemType(unsigned long ft)
 {
     switch(ft)
     {
@@ -124,7 +125,6 @@ bool IsNetworked(unsigned long ft)
     default: return false;
     }
 }
-} // namespace
 
 #undef CASE_RET_STRING
 
@@ -170,7 +170,7 @@ bool FilesystemChecker::IsNetworkedFilesystem(const fs::path& path_) const
     }
     MIOPEN_LOG_NQI("Filesystem type at '" << path << "' is: 0x" << std::hex << stat.f_type << " '"
                                           << Stringize(stat.f_type) << '\'');
-    return IsNetworked(stat.f_type);
+    return IsNetworkedFilesystemType(stat.f_type);
 }
 
 #else
