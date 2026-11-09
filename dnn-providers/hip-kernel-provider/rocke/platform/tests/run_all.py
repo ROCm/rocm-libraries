@@ -410,8 +410,7 @@ def differential_pytest_pass(env: dict[str, str], targets: list[str]) -> int:
     ``both`` never substitutes the Python result for a kernel the C++ engine
     could not lower, so this pass cannot go green vacuously: a kernel is either
     compared, or it fails, or -- for an arch named in
-    ``backend.CPP_UNPORTED_ARCHES``, or a spec its family's C++ builder cannot
-    build (``backend.CPP_PARTIAL_FAMILIES``) -- it is reported as a skip by the
+    ``backend.CPP_UNPORTED_ARCHES`` -- it is reported as a skip by the
     ``BackendCoverageGap`` hook in conftest. The skip count is the size of the
     known gap, and it is printed below so it stays visible.
 

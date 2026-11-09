@@ -13,14 +13,12 @@ returns a different kernel than the Python engine. The byte-identity gate covers
 pair, not this binding path, so this test lowers those specs through both
 backends and compares the ``.ll``.
 
-The fp32 / tf32 problems are the exception: the C++ builders have no
-fp32-storage path (and the C++ implicit-GEMM spec no ``mma_dtype``), so no
-cross-engine *builder* comparison exists for them (named debt:
-``platform/dsl_docs/development/known_gaps.md`` §9). ``TestCppBuilderGap``
-pins how the backend routes those specs in every mode, for every spec kind
-it lowers; ``TestCppLowererOnF32Ir`` holds the family-agnostic C++ *lowerer*
-to byte-identity on the Python-built fp32 / tf32 kernels. Python IR drift of
-those kernels is the representative-IR goldens' job, not this file's.
+The fp32 / tf32 problems (fp32 storage, and TF32 compute in the implicit
+GEMM) are built by both engines too. ``TestF32BuilderParity`` compares the two
+builders through every public conv entry point the backend has, with an
+explicit ``backend`` on every call, and holds their refusals to the same text;
+``TestCppLowererOnF32Ir`` holds the family-agnostic C++ *lowerer* to
+byte-identity on the Python-built fp32 / tf32 kernels.
 
 CPU only (no kernel launch). The binding and lowerer halves skip when the
 ``rocke_engine`` extension is not importable.
@@ -34,10 +32,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib.util
-import os
-import re
 import unittest
-from unittest import mock
 
 from kernels.common import conv_direct_grouped as G
 from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
@@ -417,8 +412,8 @@ class TestBackendBoth(unittest.TestCase):
 
     def test_4c_rejects_match(self):
         # The dtype reject reason is identical in both engines (the C++ engine
-        # prefixes its lowering context). fp64 is unsupported in both: fp32 and
-        # tf32 are Python-only kinds the backend keeps off the C++ builder.
+        # prefixes its lowering context). fp64 is unsupported in both; the
+        # fp32 / tf32 refusal is TestF32BuilderParity.test_4c_refusals_match.
         spec = DirectConv4cSpec(problem=_p4("fp64"))
         msgs = []
         for backend in ("python", "cpp"):
@@ -484,11 +479,12 @@ class TestBackendBoth(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# fp32 / tf32: no C++ builder path (known_gaps.md §9)
+# fp32 storage / TF32 compute: both engines build them
 # ---------------------------------------------------------------------------
 
 #: (arch, TF32 warp tile m=n, k) of the implicit-GEMM TF32 atoms.
 _TF32_ATOMS = (("gfx950", 16, 32), ("gfx942", 16, 8))
+_F32_DTYPES = ("fp32", "tf32")
 
 
 def _igemm_tf32(m, k, mma_dtype="tf32"):
@@ -519,13 +515,14 @@ def _nongrouped(dtype):
         ck=16,
         waves_m=2,
         waves_n=2,
-        lds_pad=4 if dtype in ("fp32", "tf32") else 8,
+        lds_pad=4 if dtype in _F32_DTYPES else 8,
     )
 
 
 def _lower(family, spec, arch, backend):
-    """The public backend entry point of ``family`` (a CPP_PARTIAL_FAMILIES
-    key, or a ``conv_direct_grouped`` kind)."""
+    """Lower ``spec`` through the public backend entry point of ``family``
+    (``conv_implicit_gemm``, ``conv_direct_nongrouped`` or a
+    ``conv_direct_grouped`` kind), with an explicit ``backend``."""
     if family == "conv_implicit_gemm":
         return bk.lower_conv_implicit_gemm(spec, arch=arch, backend=backend)
     if family == "conv_direct_nongrouped":
@@ -533,146 +530,140 @@ def _lower(family, spec, arch, backend):
     return bk.lower_conv_direct_grouped(spec, kind=family, arch=arch, backend=backend)
 
 
-def _gap_cases():
-    """(label, family, spec, arch, needle) of every spec kind the backend
-    lowers, in the dtypes its C++ builder has no path for; ``needle`` is in
-    the gap reason."""
+def _f32_cases():
+    """(label, family, spec, arch) of every spec kind the backend lowers, in
+    fp32 storage and with TF32 compute, on both TF32 arches."""
+    S = DirectConvSpec
     out = []
     for arch, m, k in _TF32_ATOMS:
         out.append(
-            (f"igemm_tf32_{arch}", "conv_implicit_gemm", _igemm_tf32(m, k), arch,
-             "mma_dtype='tf32'")
-        )  # fmt: skip
-        for dt in ("fp32", "tf32"):
-            needle = f"{dt} (fp32-storage)"
+            (f"igemm_tf32_{arch}", "conv_implicit_gemm", _igemm_tf32(m, k), arch)
+        )
+        for dt in _F32_DTYPES:
             out += [
-                (f"16c_{dt}_{arch}", "16c", DirectConv16cSpec(problem=_pg(dt)), arch, needle),
-                (f"generic_{dt}_{arch}", "generic", DirectConvSpec(problem=_pg(dt), block_groups=2), arch, needle),
-                (f"4c_{dt}_{arch}", "4c", DirectConv4cSpec(problem=_p4(dt)), arch, needle),
+                (f"16c_{dt}_{arch}", "16c", DirectConv16cSpec(problem=_pg(dt)), arch),
+                (f"16c_nofold_{dt}_{arch}", "16c", DirectConv16cSpec(problem=_pg(dt), fold_k32=False), arch),
+                (f"generic_{dt}_{arch}", "generic", S(problem=_pg(dt), block_groups=2), arch),
+                (f"generic_k32_{dt}_{arch}", "generic", S(problem=_pg(dt, groups=4, cpg=32, kpg=32), block_groups=2, fold_k32=True), arch),
+                (f"generic_rtc_{dt}_{arch}", "generic", S(problem=_pg(dt, groups=4, cpg=24, kpg=24), block_groups=1, runtime_channels=True, k_atoms=2, m_tiles=2), arch),
+                # The waves_k == 1 preload, waves_m and stage_out at fp32
+                # storage width.
+                (f"generic_pw_wm2_so_{dt}_{arch}", "generic",
+                 S(problem=_pg(dt, groups=4, kpg=32), block_groups=1, block_h=4,
+                   preload_weights=True, waves_m=2, stage_out=True, lds_pad=8,
+                   prefetch_rows=2, lds_only_sync=True), arch),
+                (f"nongrouped_{dt}_{arch}", "conv_direct_nongrouped", _nongrouped(dt), arch),
             ]  # fmt: skip
-    for dt in ("fp32", "tf32"):
-        out.append(
-            (f"nongrouped_{dt}", "conv_direct_nongrouped", _nongrouped(dt),
-             "gfx950", f"{dt} (fp32-storage)")
-        )  # fmt: skip
     return out
 
 
-def _no_engine():
-    raise bk.BackendError("rocke_engine is not importable")
+def _refusals(family, spec, arch):
+    """The python and cpp refusals of ``spec`` (each must refuse)."""
+    msgs = []
+    for backend in ("python", "cpp"):
+        try:
+            _lower(family, spec, arch, backend)
+        except Exception as e:  # noqa: BLE001 -- the reason is what is compared
+            msgs.append(str(e))
+        else:
+            raise AssertionError(f"the {backend} backend built {spec.kernel_name()}")
+    return msgs
 
 
-def _gap_fallbacks():
-    """The recorded cpp fallbacks that are builder-gap routings. The Python
-    builder's own lowering resolves the default backend, so with no engine it
-    records lowerer fallbacks too; those are not what is under test."""
-    return [why for _, why in bk.cpp_fallbacks() if "CPP_PARTIAL_FAMILIES" in why]
+@unittest.skipIf(bool(_SKIP), _SKIP)
+class TestF32BuilderParity(unittest.TestCase):
+    """The C++ conv builders build every fp32 / tf32 spec their Python twins
+    do: the same ``.ll`` through the public entry points, and the same
+    refusals. Each call names its backend, so the result does not depend on
+    the lane (``ROCKE_BACKEND``) the suite runs in."""
 
-
-class TestCppBuilderGap(unittest.TestCase):
-    """How the backend routes a spec its family's C++ builder cannot build.
-
-    There is no C++ twin to compare against, so this pins the routing rather
-    than parity: ``python`` lowers it without importing the engine, ``cpp``
-    lowers it through Python and records the fallback (``ROCKE_CPP_STRICT=1``
-    raises), and ``both`` raises ``BackendCoverageGap`` instead of comparing
-    two different kernels. The 16-bit twins of the same specs still go to the
-    engine. CPU only; the engine is replaced by one that cannot be imported, so
-    a spec that reaches it fails loudly."""
-
-    def test_specs_report_the_gap(self):
-        for label, family, spec, _arch, needle in _gap_cases():
+    def test_python_and_cpp_builders_agree(self):
+        for label, family, spec, arch in _f32_cases():
             with self.subTest(case=label):
-                self.assertIn(needle, spec.cpp_builder_gap())
-        # 16-bit (and unknown) dtypes are not in the gap: the engine serves
-        # them, or refuses them with the same reason as Python.
-        for dt in ("fp16", "bf16", "fp64"):
-            with self.subTest(dtype=dt):
-                self.assertIsNone(DirectConv16cSpec(problem=_pg(dt)).cpp_builder_gap())
-                self.assertIsNone(DirectConvSpec(problem=_pg(dt)).cpp_builder_gap())
-                self.assertIsNone(DirectConv4cSpec(problem=_p4(dt)).cpp_builder_gap())
-                self.assertIsNone(_nongrouped(dt).cpp_builder_gap())
-        self.assertIsNone(_igemm_tf32(16, 32, mma_dtype=None).cpp_builder_gap())
+                py = _lower(family, spec, arch, "python")
+                self.assertEqual(py.backend, bk.BACKEND_PYTHON)
+                self.assertIn(spec.kernel_name(), py.llvm_text)
+                self.assertNotIn("half", py.llvm_text)
+                cpp = _lower(family, spec, arch, "cpp")
+                self.assertEqual(cpp.backend, bk.BACKEND_CPP)
+                self.assertEqual(cpp.llvm_text, py.llvm_text)
 
-    def test_routing_in_every_mode(self):
-        # The Python builder's own lowering resolves the default backend; pin
-        # it to python so an inherited ROCKE_BACKEND=both/cpp does not send it
-        # to the missing engine.
-        env = {"ROCKE_CPP_QUIET_FALLBACK": "1", "ROCKE_BACKEND": "python"}
-        with mock.patch.object(bk, "_import_engine", _no_engine):
-            for label, family, spec, arch, needle in _gap_cases():
-                with self.subTest(case=label, backend="python/cpp"):
-                    bk.reset_cpp_fallbacks()
-                    with mock.patch.dict(os.environ, env):
-                        if family == "4c":
-                            # Python refuses fp32 / tf32 4c (no 4x4 atom); cpp
-                            # reaches that refusal only through the fallback.
-                            for backend in ("python", "cpp"):
-                                with self.assertRaisesRegex(ValueError, "4x4"):
-                                    _lower(family, spec, arch, backend)
-                        else:
-                            py = _lower(family, spec, arch, "python")
-                            self.assertEqual(py.backend, bk.BACKEND_PYTHON)
-                            self.assertEqual(_gap_fallbacks(), [])
-                            cpp = _lower(family, spec, arch, "cpp")
-                            self.assertEqual(cpp.backend, bk.BACKEND_PYTHON)
-                            self.assertEqual(cpp.llvm_text, py.llvm_text)
-                    fell_back = _gap_fallbacks()
-                    self.assertEqual(len(fell_back), 1, bk.cpp_fallbacks())
-                    self.assertIn(needle, fell_back[0])
-                strict = {"ROCKE_CPP_STRICT": "1"}
-                with (
-                    self.subTest(case=label, backend="cpp strict"),
-                    mock.patch.dict(os.environ, strict),
-                    self.assertRaisesRegex(bk.BackendError, re.escape(needle)) as cm,
-                ):
-                    _lower(family, spec, arch, "cpp")
-                self.assertNotIsInstance(cm.exception, bk.BackendCoverageGap)
-                with (
-                    self.subTest(case=label, backend="both"),
-                    self.assertRaisesRegex(bk.BackendCoverageGap, re.escape(needle)),
-                ):
-                    _lower(family, spec, arch, "both")
+    def test_both_compares_them(self):
+        # ``both`` compares the two builders' serialized IR and .ll and never
+        # substitutes the Python result. Two families are left to the .ll
+        # comparison above, for every dtype: the 16c loops differ in a no-op
+        # scf.for attribute (see TestBackendBoth), and the implicit-GEMM
+        # builders spell some loads and stores with different op aliases
+        # (buffer_load_vN / buffer_load_vN_f16, smem_store / smem_store_vN_f32)
+        # that lower to the same .ll.
+        for label, family, spec, arch in _f32_cases():
+            if family in ("16c", "conv_implicit_gemm"):
+                continue
+            with self.subTest(case=label):
+                res = _lower(family, spec, arch, "both")
+                self.assertEqual(res.backend, bk.BACKEND_BOTH)
+                self.assertIn(spec.kernel_name(), res.llvm_text)
 
-    def test_16bit_specs_reach_the_engine(self):
-        cases = [
-            ("conv_implicit_gemm", _igemm_tf32(16, 32, mma_dtype=None)),
-            ("16c", DirectConv16cSpec(problem=_pg("fp16"))),
-            ("generic", DirectConvSpec(problem=_pg("bf16"), block_groups=2)),
-            ("4c", DirectConv4cSpec(problem=_p4("fp16"))),
-            ("conv_direct_nongrouped", _nongrouped("bf16")),
-        ]
-        with mock.patch.object(bk, "_import_engine", _no_engine):
-            for family, spec in cases:
-                with (
-                    self.subTest(family=family),
-                    self.assertRaisesRegex(bk.BackendError, "not importable"),
+    def test_4c_refusals_match(self):
+        # No 4x4 TF32 or fp32 atom: both engines refuse fp32 / tf32 4c with
+        # the same reason (the C++ engine prefixes its lowering context), and
+        # ``both`` reports the refusal rather than a mismatch.
+        for arch, _m, _k in _TF32_ATOMS:
+            for dt in _F32_DTYPES:
+                for spec in (
+                    DirectConv4cSpec(problem=_p4(dt)),
+                    DirectConv4cSpec(problem=_p4(dt), dgrad_fused_weights=True),
                 ):
-                    _lower(family, spec, "gfx950", "both")
+                    with self.subTest(arch=arch, dtype=dt, name=spec.kernel_name()):
+                        msgs = _refusals("4c", spec, arch)
+                        self.assertIn("no 4x4 TF32/fp32", msgs[0])
+                        self.assertTrue(msgs[1].endswith(msgs[0]), msgs)
+                        with self.assertRaisesRegex(ValueError, "no 4x4 TF32/fp32"):
+                            _lower("4c", spec, arch, "both")
 
-    def test_unlisted_family_is_not_asked(self):
-        # Deleting a family's CPP_PARTIAL_FAMILIES entry is what "ported"
-        # means: its specs then all go to the engine.
-        spec = DirectConv16cSpec(problem=_pg("tf32"))
-        with (
-            mock.patch.object(bk, "_import_engine", _no_engine),
-            mock.patch.dict(bk.CPP_PARTIAL_FAMILIES),
-        ):
-            del bk.CPP_PARTIAL_FAMILIES["conv_direct_grouped"]
-            with self.assertRaisesRegex(bk.BackendError, "not importable"):
-                _lower("16c", spec, "gfx950", "both")
+    def test_storage_width_refusals_match(self):
+        # Refused only at fp32 storage width, by both engines alike: the
+        # preloaded weights' VGPRs and the stage_out LDS footprint.
+        cases = []
+        for dt in _F32_DTYPES:
+            preload = DirectConvSpec(
+                problem=_pg(dt, groups=4, cpg=32, kpg=32),
+                block_groups=1,
+                preload_weights=True,
+            )
+            staged = DirectConvSpec(
+                problem=_pg(dt, groups=8, cpg=64, kpg=64),
+                block_q=64,
+                block_groups=2,
+                double_buffer=False,
+                stage_out=True,
+            )
+            cases += [
+                (preload, "gfx950", "weight preload needs 144 VGPRs"),
+                (staged, "gfx942", "LDS footprint 104448 B"),
+            ]
+        for spec, arch, needle in cases:
+            with self.subTest(dtype=spec.problem.dtype, needle=needle):
+                fp16 = dataclasses.replace(
+                    spec, problem=dataclasses.replace(spec.problem, dtype="fp16")
+                )
+                self.assertTrue(is_valid_spec(fp16, arch=arch)[0])
+                msgs = _refusals("generic", spec, arch)
+                self.assertIn(needle, msgs[0])
+                self.assertTrue(msgs[1].endswith(msgs[0]), msgs)
 
 
 @unittest.skipIf(bool(_SKIP), _SKIP)
 class TestCppLowererOnF32Ir(unittest.TestCase):
-    """The cross-engine gate the fp32 / tf32 paths do have: the C++ lowerer
-    is family-agnostic, so it must lower the Python-built kernels to the same
-    ``.ll`` as the Python lowerer -- the XF32 MFMAs on gfx942, the BF16x3
-    split on gfx950 and the exact fp32 atoms. ``ROCKE_CPP_STRICT=1`` keeps a
-    C++ refusal from passing as a silent Python fallback."""
+    """The C++ lowerer is family-agnostic, so it must lower the Python-built
+    fp32 / tf32 kernels to the same ``.ll`` as the Python lowerer -- the XF32
+    MFMAs on gfx942, the BF16x3 split on gfx950 and the exact fp32 atoms.
+    Each lowerer is called directly, so a C++ refusal fails here instead of
+    passing as a Python fallback."""
 
     def test_lowerers_agree(self):
-        from rocke.helpers.compile import _lower_llvm_via_backend
+        from rocke.core.ir_serialize import serialize
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
         cases = []
         for arch, m, k in _TF32_ATOMS:
@@ -680,7 +671,7 @@ class TestCppLowererOnF32Ir(unittest.TestCase):
                 (f"igemm_tf32_{arch}", arch,
                  lambda a=arch, m=m, k=k: build_implicit_gemm_conv(_igemm_tf32(m, k), arch=a))
             )  # fmt: skip
-            for dt in ("fp32", "tf32"):
+            for dt in _F32_DTYPES:
                 cases += [
                     (f"16c_{dt}_{arch}", arch,
                      lambda a=arch, d=dt: build_direct_conv_16c(DirectConv16cSpec(problem=_pg(d)), arch=a)),
@@ -689,17 +680,12 @@ class TestCppLowererOnF32Ir(unittest.TestCase):
                     (f"nongrouped_{dt}_{arch}", arch,
                      lambda a=arch, d=dt: build_direct_conv_nongrouped(_nongrouped(d), arch=a)),
                 ]  # fmt: skip
-        with mock.patch.dict(os.environ, {"ROCKE_CPP_STRICT": "1"}):
-            for label, arch, build in cases:
-                with self.subTest(case=label):
-                    kernel = build()
-                    py = _lower_llvm_via_backend(
-                        kernel, arch=arch, backend="python", spec=None
-                    )
-                    cpp = _lower_llvm_via_backend(
-                        kernel, arch=arch, backend="cpp", spec=None
-                    )
-                    self.assertEqual(cpp, py)
+        for label, arch, build in cases:
+            with self.subTest(case=label):
+                kernel = build()
+                py = _lower_kernel_to_llvm_python(kernel, arch=arch)
+                cpp = bk._lower_via_cpp_engine(serialize(kernel), arch)
+                self.assertEqual(cpp, py)
 
 
 if __name__ == "__main__":

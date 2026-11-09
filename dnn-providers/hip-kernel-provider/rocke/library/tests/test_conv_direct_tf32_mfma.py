@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import ctypes
 import importlib.util
-import os
 import re
 import subprocess
 import tempfile
@@ -956,73 +955,50 @@ class TestDirectTf32Gpu(unittest.TestCase):
                     self.assertLess(err, _tolerance(dt, _GPU_ARCH))
 
 
-class TestDirectF32Backend(unittest.TestCase):
-    """The C++ direct builders take no fp32 / tf32 problem (16c would build an
-    fp16 kernel under the spec's name), so the backend never hands them one:
-    ``python`` and ``cpp`` lower through Python without importing the engine
-    (``cpp`` recording the fallback), ``both`` reports the gap, and 16-bit
-    specs still reach the engine."""
+#: The public backend entry point's kind for each builder it lowers.
+_BACKEND_KIND = {build_direct_conv_16c: "16c", build_direct_conv: "generic"}
 
-    _KINDS = (("16c", "16c"), ("gen", "generic"))
 
-    def _lower(self, spec, kind, arch, backend):
-        from rocke.core.backend import lower_conv_direct_grouped
+@unittest.skipIf(
+    importlib.util.find_spec("rocke_engine") is None,
+    "rocke_engine extension not importable",
+)
+class TestDirectF32CrossEngine(unittest.TestCase):
+    """The C++ direct builders build the fp32 / tf32 kernels too: every 16c
+    and generic variant above lowers to the same ``.ll`` through
+    ``lower_conv_direct_grouped`` with ``backend="python"`` and
+    ``backend="cpp"`` (named on each call, so the lane the suite runs in
+    does not matter). The 8c and 32c kernels have no backend entry point;
+    the ``conv_direct_grouped`` byte-identity family compares them."""
 
-        return lower_conv_direct_grouped(spec, kind=kind, arch=arch, backend=backend)
+    def test_python_and_cpp_builders_agree(self):
+        from rocke.core.backend import (
+            BACKEND_CPP,
+            BACKEND_PYTHON,
+            lower_conv_direct_grouped,
+        )
 
-    def test_f32_never_reaches_the_engine(self):
-        from unittest import mock
-
-        from rocke.core import backend as bk
-
-        def no_engine():
-            raise bk.BackendError("rocke_engine is not importable")
-
-        # ROCKE_BACKEND pins the Python builder's own lowering, which resolves
-        # the default backend, away from the missing engine.
-        with mock.patch.object(bk, "_import_engine", no_engine), mock.patch.dict(
-            os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1", "ROCKE_BACKEND": "python"}
-        ):
-            for name, kind in self._KINDS:
-                _, _, make, m = _FWD[name]
-                for arch in _ARCHES:
-                    for dt in _F32_DTYPES:
+        for name, (build, _valid, make, m) in _FWD.items():
+            kind = _BACKEND_KIND.get(build)
+            if kind is None:
+                continue
+            for arch in _ARCHES:
+                for dt in _F32_DTYPES:
+                    with self.subTest(variant=name, arch=arch, dtype=dt):
                         spec = make(dt)
-                        for backend in ("python", "cpp"):
-                            with self.subTest(
-                                kind=kind, arch=arch, dtype=dt, backend=backend
-                            ):
-                                bk.reset_cpp_fallbacks()
-                                res = self._lower(spec, kind, arch, backend)
-                                self.assertEqual(res.backend, bk.BACKEND_PYTHON)
-                                self.assertEqual(
-                                    set(_mfma_calls(res.llvm_text)),
-                                    {_PHYS[(arch, dt, m)]},
-                                )
-                                fell_back = any(
-                                    "fp32-storage" in why
-                                    for _, why in bk.cpp_fallbacks()
-                                )
-                                self.assertEqual(fell_back, backend == "cpp")
-                        with self.subTest(
-                            kind=kind, arch=arch, dtype=dt, backend="both"
-                        ):
-                            with self.assertRaises(bk.BackendCoverageGap):
-                                self._lower(spec, kind, arch, "both")
-                # A 16-bit spec is not gated: it still goes to the engine.
-                with self.subTest(kind=kind, dtype="fp16"):
-                    with self.assertRaisesRegex(bk.BackendError, "not importable"):
-                        self._lower(make("fp16"), kind, "gfx950", "cpp")
-
-    def test_strict_cpp_refuses_f32(self):
-        from unittest import mock
-
-        from rocke.core import backend as bk
-
-        _, _, make, _ = _FWD["16c"]
-        with mock.patch.dict(os.environ, {"ROCKE_CPP_STRICT": "1"}):
-            with self.assertRaisesRegex(bk.BackendError, "fp32-storage"):
-                self._lower(make("tf32"), "16c", "gfx950", "cpp")
+                        py = lower_conv_direct_grouped(
+                            spec, kind=kind, arch=arch, backend="python"
+                        )
+                        cpp = lower_conv_direct_grouped(
+                            spec, kind=kind, arch=arch, backend="cpp"
+                        )
+                        self.assertEqual(
+                            (py.backend, cpp.backend), (BACKEND_PYTHON, BACKEND_CPP)
+                        )
+                        self.assertEqual(
+                            set(_mfma_calls(cpp.llvm_text)), {_PHYS[(arch, dt, m)]}
+                        )
+                        self.assertEqual(cpp.llvm_text, py.llvm_text)
 
 
 if __name__ == "__main__":

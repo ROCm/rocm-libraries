@@ -50,9 +50,9 @@ the low mantissa bits in hardware, gfx950's BF16x3 split uses the full
 payload). TF32 is a precision *floor*, not a target: gfx950's emulation is
 close to fp32. Kernel names gain a trailing `fp32` / `tf32` flag (16-bit names
 are unchanged), plus `p<pad>` when an fp32-storage spec uses a non-default
-`lds_pad`. The C++ engine twin is 16-bit only; fp32 / tf32 specs lower through
-the Python engine (named debt:
-[`known_gaps.md` §9](../../../platform/dsl_docs/development/known_gaps.md)).
+`lds_pad`. The C++ engine twin builds fp32 / tf32 specs too, byte-identical to
+Python (the fp32-storage configs of `conv_direct_grouped_emit.{py,c}`, indices
+201..217).
 
 fp32 / tf32 storage runs the plain kernel only: `split_c > 1` and
 `grouped=True` stage and reduce 16-bit data, so `validate()` rejects them for
@@ -379,14 +379,13 @@ heuristic, not a validity rule: the per-shape
 | Emitters | the two sides of that gate; shared with the grouped direct-conv family, non-grouped configs are indices 42+ (dilated: 63+) | `tests/parity/conv_direct_grouped_emit.{py,c}` |
 | IR golden | Python lowering is byte-stable (7 cases, all llvm flavors) | `conv_direct_nongrouped/*` in `platform/tests/instances/rocke_ir_parity_harness.py` |
 | On-silicon numerics | output vs `torch.nn.functional.conv2d` (fp32 reference), rel. tol 5e-2 fp16 / 1e-1 bf16; includes one binary launched on four unrelated shapes | `pytest tests/test_direct_conv_correctness.py -k Nongrouped` |
-| fp32 / tf32 | validation and rejections, names, LDS sizing, knobs, register estimate; build + lower on gfx950 / gfx942 across atoms, dilation, padding, stride, DB; MFMA counts per logical atom in IR and ISA (gfx950 tf32 3x `v_mfma_*_bf16` + `v_cvt_pk_bf16_f32`, gfx942 tf32 `v_mfma_*_xf32`, fp32 `v_mfma_*_f32`), no scratch; 16-bit Python vs C++ byte-identity; on silicon the 16-bit suite's shapes, a sweep sample and one AOT binary on three shapes vs IEEE fp32 `conv2d` (rel. to peak: fp32 1e-5, tf32 1e-4 on gfx950) | `python tests/test_conv_direct_nongrouped_tf32.py` |
+| fp32 / tf32 | validation and rejections, names, LDS sizing, knobs, register estimate; build + lower on gfx950 / gfx942 across atoms, dilation, padding, stride, DB; MFMA counts per logical atom in IR and ISA (gfx950 tf32 3x `v_mfma_*_bf16` + `v_cvt_pk_bf16_f32`, gfx942 tf32 `v_mfma_*_xf32`, fp32 `v_mfma_*_f32`), no scratch; Python vs C++ byte-identity in every dtype; on silicon the 16-bit suite's shapes, a sweep sample and one AOT binary on three shapes vs IEEE fp32 `conv2d` (rel. to peak: fp32 1e-5, tf32 1e-4 on gfx950) | `python tests/test_conv_direct_nongrouped_tf32.py` |
 | AOT ABI / shape invariance | kernarg order matches `conv_direct_arg_names("fwd")`; emitted IR independent of `N`/`H`/`W`/`C`/`K` | `pytest tests/test_conv_abi.py -k nongrouped` |
 | AOT cache | runtime channels, width filtering, `groups == 1` only, plans pack against the signature | `pytest tests/test_direct_kernel_cache.py` |
 
 `rocke.core.backend.lower_conv_direct_nongrouped(spec, backend="python"|"cpp"|"both")`
 reaches the C++ builder directly through the `rocke_engine.conv_direct_nongrouped_*`
-binding. An fp32 / tf32 spec never does: `cpp` lowers it through Python with a
-recorded fallback and `both` raises `BackendCoverageGap`.
+binding.
 
 When changing the builder, change `conv_direct_nongrouped.cpp` in the same change and
 keep one IR op per C++ statement in Python order: C++ leaves argument evaluation

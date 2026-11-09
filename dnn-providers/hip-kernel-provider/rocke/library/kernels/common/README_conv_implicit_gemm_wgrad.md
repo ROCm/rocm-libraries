@@ -531,8 +531,8 @@ spec emits byte-identical IR and keeps its name:
 - The kernel name gets a trailing `_tf32`. On gfx950, TF32 and BF16 share the
   `a32x32x16` shape tag, so without the flag they would collide in the compile
   cache.
-- The C++ wgrad instance has no TF32 mirror yet (named debt:
-  [`known_gaps.md` §9](../../../platform/dsl_docs/development/known_gaps.md)).
+- The C++ wgrad instance builds TF32 specs too, byte-identical to Python
+  (TF32 configs in the `conv_implicit_gemm_wgrad` parity family).
 
 **M-outer only.** A TF32 spec rejects `lds_k_outer`. That layout feeds its
 operands through `ds_read_b64_tr_b16`, a 16-bit transpose read with no 32-bit

@@ -11,8 +11,8 @@ elements and issues each logical ``tile x tile`` atom through
 Host-side (no GPU): spec validation and rejections, kernel names, LDS sizing,
 the sweep knobs, the register estimate, built + lowered IR across atoms,
 dilation, padding and stride on gfx950 and gfx942, the AOT shape invariance,
-and -- for fp16 / bf16 -- that the Python IR still matches the C++ engine
-byte for byte. One comgr compile per (arch, dtype, atom) checks the ISA.
+and -- for fp16 / bf16 and fp32 / tf32 alike -- that the Python IR matches the
+C++ engine byte for byte. One comgr compile per (arch, dtype, atom) checks the ISA.
 
 On silicon (gfx942 / gfx950 + torch): output against an IEEE fp32
 ``conv2d`` reference computed on the CPU, relative to the output peak. On
@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import ctypes
 import importlib.util
-import os
 import re
 import subprocess
 import tempfile
@@ -261,22 +260,28 @@ _GEOMETRY = (
 )
 
 
+def _fitted_f32_spec(dt, atom, pkw, skw, arch):
+    """``(spec, ok, why)``: the ``_GEOMETRY`` row's fp32-storage spec, its
+    channel tile and then its row tile narrowed until it fits the arch's LDS
+    (the wide halos -- 5x5, dilation, stride 2 -- on gfx942's 64 KiB)."""
+    spec = _spec(dt, atom, problem=_problem(dt, **pkw), **skw)
+    ok, why = is_valid_nongrouped_spec(spec, arch)
+    while not ok and "LDS" in why and spec.m_tiles_total > 1:
+        spec = replace(spec, tile_k=spec.tile_k // 2, waves_m=1)
+        ok, why = is_valid_nongrouped_spec(spec, arch)
+    while not ok and "LDS" in why and spec.tile_h > 2:
+        spec = replace(spec, tile_h=spec.tile_h // 2)
+        ok, why = is_valid_nongrouped_spec(spec, arch)
+    return spec, ok, why
+
+
 class TestNongroupedF32Build(unittest.TestCase):
     def test_build_and_lower_matrix(self):
         for arch in _ARCHES:
             for dt in _F32_DTYPES:
                 for atom in _ATOMS:
                     for gname, pkw, skw in _GEOMETRY:
-                        spec = _spec(dt, atom, problem=_problem(dt, **pkw), **skw)
-                        ok, why = is_valid_nongrouped_spec(spec, arch)
-                        # Wide halos (5x5, dilation, stride 2) on gfx942's
-                        # 64 KiB: narrow the channel tile until fp32 fits.
-                        while not ok and "LDS" in why and spec.m_tiles_total > 1:
-                            spec = replace(spec, tile_k=spec.tile_k // 2, waves_m=1)
-                            ok, why = is_valid_nongrouped_spec(spec, arch)
-                        while not ok and "LDS" in why and spec.tile_h > 2:
-                            spec = replace(spec, tile_h=spec.tile_h // 2)
-                            ok, why = is_valid_nongrouped_spec(spec, arch)
+                        spec, ok, why = _fitted_f32_spec(dt, atom, pkw, skw, arch)
                         with self.subTest(arch=arch, dtype=dt, atom=atom, g=gname):
                             if not ok and arch == "gfx942" and gname == "5x5_partial":
                                 # 25 fp32 taps of a 32-channel tile at ck=16
@@ -333,17 +338,15 @@ class TestNongroupedF32Build(unittest.TestCase):
                 for n, align in lds:
                     self.assertEqual((int(n), int(align)), (4, 16))
 
-    def test_16bit_python_matches_cpp_engine(self):
-        """fp16 / bf16 emission is unchanged: the C++ port (not touched by the
-        fp32 work) still produces the same LLVM IR bytes."""
+    def test_python_matches_cpp_engine(self):
+        """The C++ non-grouped builder emits the same LLVM IR bytes as Python,
+        for fp16 / bf16 and for the fp32 / tf32 storage path. Every call names
+        ``backend="both"``, which compares the two builders' serialized IR and
+        ``.ll`` and raises on any difference, whatever lane the suite runs in."""
         from rocke.core import backend
 
-        # Only the engine's own "not importable" error skips: anything else
-        # (the probe renamed or moved) fails instead of skipping silently.
-        try:
-            backend._import_engine()
-        except backend.BackendError as exc:
-            self.skipTest(f"rocke_engine unavailable: {exc}")
+        if importlib.util.find_spec("rocke_engine") is None:
+            self.skipTest("rocke_engine extension not importable")
         for arch, atoms in (
             ("gfx950", ("32x32x16", "16x16x32")),
             ("gfx942", ("32x32x8", "16x16x16")),
@@ -372,6 +375,22 @@ class TestNongroupedF32Build(unittest.TestCase):
                             backend.lower_conv_direct_nongrouped(
                                 spec, arch=arch, backend="both"
                             )
+        for arch in _ARCHES:
+            for dt in _F32_DTYPES:
+                compared = 0
+                for atom in _ATOMS:
+                    for gname, pkw, skw in _GEOMETRY:
+                        spec, ok, _ = _fitted_f32_spec(dt, atom, pkw, skw, arch)
+                        if not ok:
+                            continue
+                        with self.subTest(arch=arch, dtype=dt, atom=atom, g=gname):
+                            res = backend.lower_conv_direct_nongrouped(
+                                spec, arch=arch, backend="both"
+                            )
+                            self.assertEqual(res.backend, backend.BACKEND_BOTH)
+                            self.assertNotIn("half", res.llvm_text)
+                            compared += 1
+                self.assertGreater(compared, 0, (arch, dt))
 
 
 # ---------------------------------------------------------------------------
@@ -728,40 +747,6 @@ class TestF32PlainKernelOnly(unittest.TestCase):
             # 16-bit keeps both grids.
             self.assertTrue(list(nongrouped_split_knobs(arch, "fp16")))
             self.assertTrue(list(grouped_knobs(arch, "fp16")))
-
-
-class TestNongroupedF32Backend(unittest.TestCase):
-    """The C++ non-grouped builder takes no fp32 / tf32 problem: the backend
-    lowers those through Python (``cpp`` records the fallback) and ``both``
-    reports the gap, without importing the engine."""
-
-    def test_f32_never_reaches_the_engine(self):
-        from unittest import mock
-
-        from rocke.core import backend as bk
-
-        def no_engine():
-            raise bk.BackendError("rocke_engine is not importable")
-
-        # ROCKE_BACKEND pins the Python builder's own lowering, which resolves
-        # the default backend, away from the missing engine.
-        with mock.patch.object(bk, "_import_engine", no_engine), mock.patch.dict(
-            os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1", "ROCKE_BACKEND": "python"}
-        ):
-            for dt in ("fp32", "tf32"):
-                spec = _spec(dt)
-                for backend in ("python", "cpp"):
-                    with self.subTest(dtype=dt, backend=backend):
-                        res = bk.lower_conv_direct_nongrouped(
-                            spec, arch="gfx950", backend=backend
-                        )
-                        self.assertEqual(res.backend, bk.BACKEND_PYTHON)
-                        self.assertTrue(_n_mfma_calls(res.llvm_text))
-                with self.subTest(dtype=dt, backend="both"):
-                    with self.assertRaises(bk.BackendCoverageGap):
-                        bk.lower_conv_direct_nongrouped(
-                            spec, arch="gfx950", backend="both"
-                        )
 
 
 if __name__ == "__main__":

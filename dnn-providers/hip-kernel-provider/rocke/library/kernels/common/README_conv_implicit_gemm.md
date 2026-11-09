@@ -236,10 +236,11 @@ The AMDGPU LLVM backend may replace a `load <8 x half>, ptr addrspace(3)` that f
   own refusals.
 - The compv3/compv4 hint counts are scaled for TF32 only.
 - Specs without TF32 emit byte-identical IR.
-- **C++ engine.** The C++ conv instances have no TF32 path, so TF32 specs are
-  built by Python only: `backend.lower_conv_implicit_gemm` falls back to Python
-  under `cpp` and raises `BackendCoverageGap` under `both`. Named debt:
-  [`known_gaps.md` §9](../../../platform/dsl_docs/development/known_gaps.md).
+- **C++ engine.** The C++ conv instance builds TF32 specs too
+  (`mma_dtype="tf32"` in its spec), byte-identical to Python: the
+  `conv_implicit_gemm` parity family carries TF32 configs, and
+  `backend.lower_conv_implicit_gemm` hands TF32 specs to the engine like any
+  other.
 - See [Data types](#data-types).
 
 ### Python-level K-loop unroll (`unroll_k`)

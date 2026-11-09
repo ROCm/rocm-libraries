@@ -3248,8 +3248,9 @@ def cases():
     # TF32 compute (fp32 storage, mma_dtype="tf32") on the implicit-GEMM fwd,
     # dgrad and wgrad: gfx942 issues the native XF32 MFMA, gfx950 the BF16x3
     # split (three bf16 MFMAs per logical atom). Between them the cases cover
-    # all four TF32 atoms. The C++ engine has no TF32 port, so this flag-on IR
-    # is pinned here only (no byte-identity twin).
+    # all four TF32 atoms. check_byte_identity.py holds the C++ builders to
+    # the same IR (the TF32 configs of the conv_implicit_gemm* parity families);
+    # this pins it against drift in both engines.
     for _arch, _fwd_atom, _bwd_atom in (
         ("gfx942", (32, 4), (16, 8)),
         ("gfx950", (16, 32), (32, 16)),
@@ -5330,8 +5331,9 @@ def cases():
     # fp32 storage on the direct conv: dtype "fp32" runs the exact fp32 atoms,
     # "tf32" the TF32 atoms (gfx942 native XF32, gfx950 BF16x3). Covers the
     # fixed-cpg 16c forward, the generic DirectConvSpec forward and the
-    # non-grouped kernel. Python only: the C++ twins
-    # have no fp32-storage port, so check_byte_identity.py has no twin for these.
+    # non-grouped kernel. check_byte_identity.py holds the C++ twins to the same
+    # IR (the fp32-storage configs of conv_direct_grouped_emit); this pins it
+    # against drift in both engines.
     for _arch in ("gfx942", "gfx950"):
         _a = _arch[3:]
         for _dt in ("fp32", "tf32"):

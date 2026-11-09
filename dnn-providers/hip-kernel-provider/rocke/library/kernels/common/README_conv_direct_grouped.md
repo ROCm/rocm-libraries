@@ -475,9 +475,9 @@ weight-copy kernels).
 arch. Use the generic `DirectConvSpec` for `cpg = 4`: it runs the group as a
 partial 16x16 K-atom.
 
-**Python only.** The C++ builders have no fp32-storage path, here or in the
-scalar-FMA kernels below; see [Dual-Engine Parity](#dual-engine-parity) and
-[`known_gaps.md` §9](../../../platform/dsl_docs/development/known_gaps.md).
+**Both engines.** The C++ builders have the same fp32-storage path, here and
+in the scalar-FMA kernels below, byte-identical to Python; see
+[Dual-Engine Parity](#dual-engine-parity).
 
 ### How it works
 
@@ -869,16 +869,11 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 
 ## Dual-Engine Parity
 
-Every 16-bit (`fp16` / `bf16`) kernel in this file exists in both the Python
-engine (this module) and the C++ engine
-(`cpp/instances/common/conv_direct_grouped_*.cpp`), and the two **must emit
-the same LLVM-IR bytes** for every such spec. The fp32 / tf32 problems are the
-exception: the C++ builders have no fp32-storage path, so those specs are built
-by Python only and the backend never hands them to the engine (`cpp` falls back
-to Python, `both` raises `BackendCoverageGap`). That is named debt, in
-[`known_gaps.md` §9](../../../platform/dsl_docs/development/known_gaps.md). A
-change to any builder here has to be mirrored into its C++ peer in the same
-change, and proven with:
+Every kernel in this file exists in both the Python engine (this module) and
+the C++ engine (`cpp/instances/common/conv_direct_grouped_*.cpp`), for every
+dtype (`fp16`, `bf16`, `fp32` and `tf32`), and the two **must emit the same
+LLVM-IR bytes**. A change to any builder here has to be mirrored into its C++
+peer in the same change, and proven with:
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
@@ -890,12 +885,14 @@ The gate drives the sampled spec configs in
 `tests/instances/parity/conv_direct_grouped_emit.{py,c}` — configs 0-24 are the
 existing direct-conv variants, 25-31 the wgrad variant (25 `mfma_k=32`, 26
 `mfma_k=16`, 27 multi-wave K/C/Q, 28-29 the two gfx942 rejection paths, 30-31
-bf16 at `mfma_k=32` / `16`), 148-150 the bf16 4c kernel.  The dgrad kernels
-added on top run under the separate `conv_direct_dgrad_ext` family
+bf16 at `mfma_k=32` / `16`), 148-150 the bf16 4c kernel, 201-217 the fp32 /
+tf32 non-grouped kernel and 218 on the fp32 / tf32 grouped kernels.  The dgrad
+kernels added on top run under the separate `conv_direct_dgrad_ext` family
 (`tests/parity/conv_direct_dgrad_ext_emit.{py,c}`): 0-19 the windowed
 depthwise dgrad (VALU, `dot2` and MFMA forms), 20-29 the 4c dgrad, 30-44 the
-generic `DirectConvSpec` with the fused-weight and row-stream knobs.  Add a
-config to **both** emitters when you add a variant.
+generic `DirectConvSpec` with the fused-weight and row-stream knobs, 73 on the
+fp32 / tf32 generic and 4c forms.  Add a config to **both** emitters when you
+add a variant.
 
 | Python | C++ |
 |--------|-----|

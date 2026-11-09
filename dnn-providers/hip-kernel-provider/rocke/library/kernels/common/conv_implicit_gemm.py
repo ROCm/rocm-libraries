@@ -463,16 +463,6 @@ class ImplicitGemmConvSpec:
             },
         )
 
-    def cpp_builder_gap(self) -> Optional[str]:
-        """Why the C++ builder cannot build this spec, or None (the backend's
-        ``cpp_builder_gap`` hook). The C++ spec has no ``mma_dtype``, so the
-        engine would build a non-TF32 kernel; the backend lowers these through
-        Python only (named debt: ``dsl_docs/development/known_gaps.md`` §9).
-        """
-        if self.data.mma_dtype is not None:
-            return f"no mma_dtype={self.data.mma_dtype!r} path"
-        return None
-
     def validate(self) -> None:
         # ``ImplicitGemmConvSpec.groups`` (the legacy P86 field) must not
         # contradict the authoritative ``problem.groups``. The kernel body reads

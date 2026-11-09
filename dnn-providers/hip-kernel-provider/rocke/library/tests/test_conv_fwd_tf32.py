@@ -14,13 +14,12 @@ counterpart is the ``fp32`` / ``tf32`` axis of ``test_conv_fwd_correctness.py``.
 
 from __future__ import annotations
 
-import os
+import importlib.util
 from pathlib import Path
 import re
 import subprocess
 import tempfile
 import unittest
-from unittest import mock
 from dataclasses import replace
 
 from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
@@ -394,64 +393,53 @@ class TestConvFwdTf32Isa(unittest.TestCase):
                     self.assertEqual(int(scratch.group(1)), 0, "TF32 kernel spills")
 
 
-class TestConvFwdTf32Backend(unittest.TestCase):
-    """The C++ conv builder has no TF32 path, so the backend never hands it a
-    TF32 spec: ``cpp`` lowers through Python (recorded as a fallback), ``both``
-    reports the known gap, and neither returns a non-TF32 kernel."""
+@unittest.skipIf(
+    importlib.util.find_spec("rocke_engine") is None,
+    "rocke_engine extension not importable",
+)
+class TestConvFwdTf32CrossEngine(unittest.TestCase):
+    """The C++ conv builder builds TF32 specs too: every TF32 atom, pipeline,
+    epilogue and problem of the build matrix lowers to the same ``.ll``
+    through ``lower_conv_implicit_gemm`` with ``backend="python"`` and
+    ``backend="cpp"`` (named on each call, so the lane the suite runs in does
+    not matter), and the C++ kernel issues the TF32 atom, not a 16-bit one."""
 
-    _CASES = (("gfx950", 16, 32, "16x16x32.bf16"), ("gfx942", 16, 8, "16x16x8.xf32"))
-
-    def test_cpp_lowers_tf32_through_python(self):
+    def test_python_and_cpp_builders_agree(self):
         from rocke.core import backend as bk
 
-        for arch, m, k, mfma in self._CASES:
-            with self.subTest(arch=arch):
-                bk.reset_cpp_fallbacks()
-                with mock.patch.dict(os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1"}):
-                    res = bk.lower_conv_implicit_gemm(
-                        _spec(m, k), arch=arch, backend="cpp"
-                    )
-                self.assertEqual(res.backend, bk.BACKEND_PYTHON)
-                self.assertIn(f"llvm.amdgcn.mfma.f32.{mfma}", res.llvm_text)
-                self.assertTrue(
-                    any("mma_dtype" in why for _, why in bk.cpp_fallbacks()),
-                    bk.cpp_fallbacks(),
-                )
-
-    def test_strict_cpp_refuses_tf32(self):
-        from rocke.core import backend as bk
-
-        with mock.patch.dict(os.environ, {"ROCKE_CPP_STRICT": "1"}):
-            with self.assertRaisesRegex(bk.BackendError, "mma_dtype"):
-                bk.lower_conv_implicit_gemm(_spec(16, 32), arch="gfx950", backend="cpp")
-
-    def test_both_reports_the_gap(self):
-        from rocke.core import backend as bk
-
-        with self.assertRaises(bk.BackendCoverageGap):
-            bk.lower_conv_implicit_gemm(_spec(16, 32), arch="gfx950", backend="both")
-
-    def test_python_needs_no_engine(self):
-        """``python`` (and the ``cpp`` fallback) lower a TF32 spec in a
-        Python-only install: the C++ extension is never imported."""
-        from rocke.core import backend as bk
-
-        def no_engine():
-            raise bk.BackendError("rocke_engine is not importable")
-
-        # ROCKE_BACKEND pins the Python builder's own lowering, which resolves
-        # the default backend, away from the missing engine.
-        with mock.patch.object(bk, "_import_engine", no_engine), mock.patch.dict(
-            os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1", "ROCKE_BACKEND": "python"}
-        ):
-            for arch, m, k, mfma in self._CASES:
-                for backend in ("python", "cpp"):
-                    with self.subTest(arch=arch, backend=backend):
-                        res = bk.lower_conv_implicit_gemm(
-                            _spec(m, k), arch=arch, backend=backend
+        n = 0
+        for arch, m, k, intrinsic, _emulated in _ATOMS:
+            for problem in _PROBLEMS:
+                for pipe, extra in _PIPELINES:
+                    for epi in _EPILOGUES:
+                        spec = _spec(
+                            m, k, problem=problem, pipeline=pipe, epilogue=epi, **extra
                         )
-                        self.assertEqual(res.backend, bk.BACKEND_PYTHON)
-                        self.assertIn(f"llvm.amdgcn.mfma.f32.{mfma}", res.llvm_text)
+                        if not is_valid_spec(spec, arch)[0]:
+                            continue
+                        with self.subTest(
+                            arch=arch, m=m, problem=problem, pipe=pipe, epi=epi, **extra
+                        ):
+                            py = bk.lower_conv_implicit_gemm(
+                                spec, arch=arch, backend="python"
+                            )
+                            cpp = bk.lower_conv_implicit_gemm(
+                                spec, arch=arch, backend="cpp"
+                            )
+                            self.assertEqual(
+                                (py.backend, cpp.backend),
+                                (bk.BACKEND_PYTHON, bk.BACKEND_CPP),
+                            )
+                            calls = set(
+                                re.findall(
+                                    r"call [^@\n]*@(llvm\.amdgcn\.mfma[\w.]*)\(",
+                                    cpp.llvm_text,
+                                )
+                            )
+                            self.assertEqual(calls, {intrinsic})
+                            self.assertEqual(cpp.llvm_text, py.llvm_text)
+                            n += 1
+        self.assertGreater(n, 0)
 
 
 if __name__ == "__main__":

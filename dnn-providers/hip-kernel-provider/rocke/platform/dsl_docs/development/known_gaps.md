@@ -18,10 +18,9 @@ versus the Python engine across every kernel family (see
   0 mismatch**.
 
 None of the gaps below are on the *valid-config emission path*, which is why the
-gate is fully green, with two exceptions: §5 (additive bias) and §9 (conv TF32 /
-fp32 storage) cover Python-engine-only features that *are* reachable from a
-valid config — see those sections for why the gate stays green anyway. They
-fall into three kinds:
+gate is fully green, with one exception: §5 (additive bias) covers a
+Python-engine-only feature that *is* reachable from a valid config — see that
+section for why the gate stays green anyway. They fall into three kinds:
 
 1. **Faithful rejection mirrors** — a `ROCKE_ERR_NOTIMPL` (or a reject-message)
    that translates a Python `raise NotImplementedError` / `ValueError` /
@@ -327,71 +326,6 @@ retiring the C engine. Until then, keep dense emission changes gated by the
 cross-engine parity test and the representative golden above.
 
 **Sign-off:** rocKE attention maintainer, 2026-10-30.
-
----
-
-## 9. Conv TF32 compute and fp32 storage — Python-only builder paths
-
-**Subsystem:** `library/kernels/common/conv_implicit_gemm{,_dgrad,_wgrad}.py`,
-`conv_direct_grouped.py`, `conv_direct_nongrouped.py` ⇄
-`cpp/instances/common/conv_implicit_gemm*.cpp`, `conv_direct_grouped_*.cpp`,
-`conv_direct_nongrouped.cpp`
-
-These conv families have C++ builder twins, but the twins are 16-bit only. TF32
-compute (native XF32 on gfx942, BF16x3 on gfx950) and fp32 storage are built in
-Python only. The C++ implicit-GEMM spec structs have no `mma_dtype`. The C++
-direct builders take no fp32 / tf32 problem: 16c builds an fp16 kernel under
-the spec's name, and the others refuse it with their own reason. Every 16-bit
-spec is unchanged and stays in the byte-identity gate.
-
-| What is Python-only | Specs |
-|---|---|
-| Implicit-GEMM TF32 compute (`ConvDataSpec.mma_dtype="tf32"`): the TF32 gate (`_fwd_tf32_reason`, `_tf32_conv_spec_reason`), the fp32 LDS fragment read and its `vec<tf32xN>` bitcast (`_load_mma_operand`), the TF32 atom and the `_tf32` name flag | `ImplicitGemmConvSpec` (fwd), `DgradConvSpec`, `WgradConvSpec` |
-| Direct MFMA kernels with `dtype="fp32"` / `"tf32"`: the exact fp32 or TF32 atoms, fp32 loads, stores and LDS strides, the `f32` / `tf32` name flags | `DirectConv16cSpec`, `DirectConv8cSpec`, `DirectConv32cSpec`, the generic `DirectConvSpec`, the MFMA dgrad pipeline (`make_dgrad_fprop_spec` and its weight kernels), `DirectNongroupedConvSpec` (plain kernel), `DirectConvWgradSpec` |
-| Direct scalar-FMA kernels with `dtype="fp32"` / `"tf32"` (one exact fp32 binary for both) | `DirectConvDgradSpec`, the depthwise family |
-| The fp32 / tf32 refusal of `DirectConv4cSpec` (no 4x4 TF32 or fp32 atom), whose text the C++ validator does not share | `DirectConv4cSpec` |
-
-**How the backend handles it:** `core/backend.py::CPP_PARTIAL_FAMILIES` names
-the three families with a `backend.lower_conv_*` entry point:
-`conv_implicit_gemm`, `conv_direct_grouped` (16c, 4c, generic) and
-`conv_direct_nongrouped`. Each of their specs answers `cpp_builder_gap()`, which
-returns the reason or `None`, so the backend reads no conv spec field. A spec in
-the gap never reaches the engine. `python` lowers it before the engine is
-imported. `cpp` lowers it through Python and records a fallback, and
-`ROCKE_CPP_STRICT=1` raises `BackendError` instead. `both` raises
-`BackendCoverageGap` rather than compare two different kernels. The other
-families above have no backend entry point: they are built in Python, and their
-C++ builders are reached only through the byte-identity parity emitters, whose
-configs are 16-bit.
-
-**What is gated:**
-
-- The C++ *lowerer* is family-agnostic. Python-built fp32 and tf32 kernels
-  (16c, generic, non-grouped, implicit-GEMM fwd, on gfx942 and gfx950) lower to
-  the same `.ll` through both lowerers with `ROCKE_CPP_STRICT=1`:
-  `library/tests/test_conv_direct_grouped_backend_parity.py::TestCppLowererOnF32Ir`.
-- The routing above, in all three modes, for every spec kind the backend
-  lowers: `TestCppBuilderGap` in the same file, plus the backend classes of
-  `test_conv_fwd_tf32.py`, `test_conv_direct_tf32_mfma.py` and
-  `test_conv_direct_nongrouped_tf32.py`.
-- The Python IR itself is pinned by the TF32 / fp32 cases of the
-  representative-IR goldens
-  (`platform/tests/golden/rocke_representative_ir_sha256/conv*.json`).
-
-**What closes it:** for each family, `mma_dtype` on the C++ implicit-GEMM
-specs, or the fp32 / tf32 `dtype` on the C++ direct problem; the C++ validators'
-TF32 / fp32 rules and reason texts; the fp32 loads, stores and LDS strides; the
-TF32 fragment bitcast and the BF16x3 / XF32 atoms (the C++ lowerer already
-lowers them); the name flags; fp32 / tf32 configs in the conv parity emitters
-(`library/tests/parity/conv_implicit_gemm{,_dgrad,_wgrad}_emit.{py,c}`,
-`conv_direct_grouped_emit.{py,c}`), plus a new emitter for the nongrouped
-family, which has none today; and the spec-to-dict forwarding
-in `backend.py`. Then delete the family's `CPP_PARTIAL_FAMILIES` entry, so
-`both` holds its fp32 / tf32 specs to byte-identity.
-
-**Why deferred:** the TF32 change (PR #14114) scoped the C++ port out. The
-backend gate keeps the engines from comparing or returning different kernels in
-the meantime.
 
 ---
 

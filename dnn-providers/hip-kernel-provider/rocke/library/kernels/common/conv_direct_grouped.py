@@ -455,22 +455,6 @@ def _is_f32_storage(dtype: str) -> bool:
     return _storage_dtype(dtype) == "fp32"
 
 
-def direct_cpp_builder_gap(dtype: str) -> Optional[str]:
-    """Why the C++ direct-conv builders cannot build a problem of ``dtype``, or
-    None: the ``cpp_builder_gap`` hook of the direct specs the backend lowers.
-
-    The C++ builders have no fp32-storage path (fp32 / tf32): handed one, 16c
-    builds an fp16 kernel under the spec's name and the others refuse it with
-    a different reason than Python's. The backend therefore lowers these
-    through Python only (named debt: ``dsl_docs/development/known_gaps.md``
-    §9, "Conv TF32 / fp32-storage"). An unknown dtype is no gap here: the
-    validators refuse it, with the same reason in both engines.
-    """
-    if dtype in _DIRECT_STORAGE and _is_f32_storage(dtype):
-        return f"no {dtype} (fp32-storage) path"
-    return None
-
-
 #: The channel-packed (``cpl > 1``) depthwise kernels move 16-bit channel
 #: pairs; fp32 / tf32 storage runs one channel per lane.
 _CPL_16BIT_ONLY = "cpl > 1 packs 16-bit channel pairs; fp32 and tf32 need cpl=1"
@@ -855,10 +839,6 @@ class DirectConv16cSpec:
                 **_mfma_dtype_flags(p.dtype),
             },
         )
-
-    def cpp_builder_gap(self) -> Optional[str]:
-        """See :func:`direct_cpp_builder_gap`."""
-        return direct_cpp_builder_gap(self.problem.dtype)
 
     def validate(self) -> None:
         p = self.problem
@@ -1721,10 +1701,6 @@ class DirectConv4cSpec:
                 f"sr{self.waves_q}": self.stage_rows,
             },
         )
-
-    def cpp_builder_gap(self) -> Optional[str]:
-        """See :func:`direct_cpp_builder_gap`."""
-        return direct_cpp_builder_gap(self.problem.dtype)
 
     def validate(self) -> None:
         p = self.problem
@@ -3836,10 +3812,6 @@ class DirectConvSpec:
             "rx" if self.row_exit else "",
             flags=_mfma_dtype_flags(p.dtype),
         )
-
-    def cpp_builder_gap(self) -> Optional[str]:
-        """See :func:`direct_cpp_builder_gap`."""
-        return direct_cpp_builder_gap(self.problem.dtype)
 
     def validate(self) -> None:
         p = self.problem
