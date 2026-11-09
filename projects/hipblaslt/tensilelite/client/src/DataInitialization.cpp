@@ -1778,7 +1778,7 @@ namespace TensileLite
             MxScaleStorageLayout layoutA = MxScaleStorageLayout::Natural;
             MxScaleStorageLayout layoutB = MxScaleStorageLayout::Natural;
 
-            if(m_mxScaleFormat > 0 && m_mxScaleLayout == MxScaleStorageLayout::Gfx950
+            if(m_mxScaleFormat > 0 && m_mxScaleLayout == MxScaleStorageLayout::Tile32x8
                && m_currentSolution != nullptr)
             {
                 auto const&      mi            = m_currentSolution->sizeMapping.matrixInstruction;
@@ -1801,7 +1801,7 @@ namespace TensileLite
                         auto const [kBlocksA, mnA]
                             = scaleDimsFor(problem.mxsa(), problem.boundIndices()[0].a);
                         if(kBlocksA % tileK == 0 && mnA % swizzleTileMN == 0)
-                            layoutA = MxScaleStorageLayout::Gfx950;
+                            layoutA = MxScaleStorageLayout::Tile32x8;
                     }
 
                     if(problem.mxBlockB() > 0 && MiK % problem.mxBlockB() == 0)
@@ -1809,16 +1809,16 @@ namespace TensileLite
                         auto const [kBlocksB, mnB]
                             = scaleDimsFor(problem.mxsb(), problem.boundIndices()[0].b);
                         if(kBlocksB % tileK == 0 && mnB % swizzleTileMN == 0)
-                            layoutB = MxScaleStorageLayout::Gfx950;
+                            layoutB = MxScaleStorageLayout::Tile32x8;
                     }
                 }
             }
-            else if(m_mxScaleFormat > 0 && m_mxScaleLayout == MxScaleStorageLayout::Gfx1250)
+            else if(m_mxScaleFormat > 0 && m_mxScaleLayout == MxScaleStorageLayout::FastDimensionTiles)
             {
                 if(problem.mxBlockA() > 0)
-                    layoutA = MxScaleStorageLayout::Gfx1250;
+                    layoutA = MxScaleStorageLayout::FastDimensionTiles;
                 if(problem.mxBlockB() > 0)
-                    layoutB = MxScaleStorageLayout::Gfx1250;
+                    layoutB = MxScaleStorageLayout::FastDimensionTiles;
             }
 
             // We pass cpuInput.valid (host) pointers because the CPU reference
@@ -1859,7 +1859,7 @@ namespace TensileLite
                 // unchanged descriptor means both the canonical scale and the cached
                 // swizzled bytes are still valid. gfx950 is excluded because its
                 // preswizzle choice also depends on the current solution's MI shape.
-                if(m_mxScaleLayout == MxScaleStorageLayout::Gfx1250 && descriptorsUnchanged)
+                if(m_mxScaleLayout == MxScaleStorageLayout::FastDimensionTiles && descriptorsUnchanged)
                 {
                     return;
                 }
@@ -1880,7 +1880,7 @@ namespace TensileLite
                 // and any required preswizzled copy is already known to match this
                 // scale descriptor. When that cache hit happens, remember that
                 // gpuInput.valid already contains the solution-ready layout.
-                if(m_mxScaleLayout == MxScaleStorageLayout::Gfx950 && descriptorsUnchanged
+                if(m_mxScaleLayout == MxScaleStorageLayout::Tile32x8 && descriptorsUnchanged
                    && (swizzleLayout == MxScaleStorageLayout::Natural || hasMatchingSwizzledScale))
                 {
                     if(hasMatchingSwizzledScale)
@@ -1953,7 +1953,7 @@ namespace TensileLite
                 // gfx950 has no in-device 2D scale layout; gfx1250 permutes the tiled scales
                 // like 1D scales.
                 if(mxBlockFree > 1 && swizzleLayout != MxScaleStorageLayout::Natural
-                   && swizzleLayout != MxScaleStorageLayout::Gfx1250)
+                   && swizzleLayout != MxScaleStorageLayout::FastDimensionTiles)
                     throw std::runtime_error("MXScaleFormat pre-swizzle is not supported with "
                                              "MXBlockFree > 1 except GFX1250 InMemorySwizzle.");
                 bool const varyScaleTiles = mxBlockFree > 1
@@ -2035,7 +2035,7 @@ namespace TensileLite
                         // The gfx950 ABI always packs [MN, K blocks]; the CPU
                         // reference keeps the operand's canonical scale orientation.
                         const auto scalesForDevice
-                            = swizzleLayout == MxScaleStorageLayout::Gfx950 && !kFast
+                            = swizzleLayout == MxScaleStorageLayout::Tile32x8 && !kFast
                                   ? canonicalScales.copyWithPermutedDimensions(roc::hostnumerics::Permutation{1, 0})
                                   : canonicalScales;
                         const auto scalePlan
@@ -2762,8 +2762,8 @@ namespace TensileLite
                         ptr = p.gpuInput.valid.get();
                     }
                     else if(auto mxIt = m_mxSwizzledDescriptor.find(i);
-                            (m_mxScaleLayout == MxScaleStorageLayout::Gfx1250
-                             || m_mxScaleLayout == MxScaleStorageLayout::Gfx950)
+                            (m_mxScaleLayout == MxScaleStorageLayout::FastDimensionTiles
+                             || m_mxScaleLayout == MxScaleStorageLayout::Tile32x8)
                             && mxIt != m_mxSwizzledDescriptor.end() && mxIt->second == desc)
                     {
                         // Already swizzled, and initOneMXSide kept the source bytes

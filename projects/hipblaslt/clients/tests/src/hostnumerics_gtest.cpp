@@ -318,12 +318,24 @@ TEST(HostNumericsMxGenerationBridge, MapsScaleLayoutsAndGeneratesTypedData)
     using namespace roc::hostnumerics;
     using amd_gpu_layout::MxScaleStorageLayout;
 
-    EXPECT_EQ(mxScaleStorageLayoutForArchName("gfx950"), MxScaleStorageLayout::Gfx950);
-    EXPECT_EQ(mxScaleStorageLayoutForArchName("gfx1250"), MxScaleStorageLayout::Gfx1250);
+    EXPECT_EQ(mxScaleStorageLayoutForArchName("gfx950"), MxScaleStorageLayout::Tile32x8);
+    EXPECT_EQ(mxScaleStorageLayoutForArchName("gfx1250"), MxScaleStorageLayout::FastDimensionTiles);
     EXPECT_EQ(mxScaleStorageLayoutForArchName("gfx942"), MxScaleStorageLayout::Natural);
+    EXPECT_EQ(mxScaleStorageLayoutForArchName("gfx950:sramecc+:xnack-"),
+              MxScaleStorageLayout::Tile32x8);
+    EXPECT_EQ(mxScaleStorageLayoutForArchName("gfx1250-strict:xnack-"),
+              MxScaleStorageLayout::FastDimensionTiles);
+    for(const std::string_view name : {"notgfx950",
+                                       "gfx9500",
+                                       "gfx950-sramecc+",
+                                       "gfx12500",
+                                       "gfx1250suffix",
+                                       "gfx1250-strictsuffix"})
+        EXPECT_EQ(mxScaleStorageLayoutForArchName(name), MxScaleStorageLayout::Natural);
+
     EXPECT_EQ(
         mxScaleStorageLayoutForFormat(hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT, "gfx950"),
-        MxScaleStorageLayout::Gfx950);
+        MxScaleStorageLayout::Tile32x8);
 
     const MxTensor generated = generateMxData((hipDataType)HIP_R_4F_E2M1,
                                               HIP_R_8F_UE8M0,
@@ -1898,7 +1910,8 @@ TEST(HostNumericsInitialization_pre_checkin, integer_exact_mx_swizzled_reference
     for(hipDataType type : {HIP_R_8F_E4M3, HIP_R_8F_E5M2})
         for(bool isA : {true, false})
             for(bool transpose : {true, false})
-                for(auto layout : {MxScaleStorageLayout::Gfx950, MxScaleStorageLayout::Gfx1250})
+                for(auto layout :
+                    {MxScaleStorageLayout::Tile32x8, MxScaleStorageLayout::FastDimensionTiles})
                     for(const auto& shape : {std::pair<size_t, size_t>{64, 256}, {80, 160}})
                     {
                         const auto [mn, K]  = shape;
@@ -1916,8 +1929,9 @@ TEST(HostNumericsInitialization_pre_checkin, integer_exact_mx_swizzled_reference
                                              17,
                                              isA ? MatrixRole::A : MatrixRole::B);
                         const auto scalesForDevice
-                            = layout == MxScaleStorageLayout::Gfx950 && !kMajor
-                                  ? generated.scales.copyWithPermutedDimensions(roc::hostnumerics::Permutation{1, 0})
+                            = layout == MxScaleStorageLayout::Tile32x8 && !kMajor
+                                  ? generated.scales.copyWithPermutedDimensions(
+                                      roc::hostnumerics::Permutation{1, 0})
                                   : generated.scales;
                         const amd_gpu_layout::MxScaleStoragePlan plan(
                             {scalesForDevice.shape()[0], scalesForDevice.shape()[1]}, 32, layout);
@@ -1934,7 +1948,7 @@ TEST(HostNumericsInitialization_pre_checkin, integer_exact_mx_swizzled_reference
                             const size_t m     = kMajor ? idx / rows : idx % rows;
                             const size_t block = k / 32;
                             size_t       si;
-                            if(layout == MxScaleStorageLayout::Gfx1250)
+                            if(layout == MxScaleStorageLayout::FastDimensionTiles)
                             {
                                 const size_t fast    = kMajor ? blocks : mn;
                                 const size_t slow    = kMajor ? mn : blocks;

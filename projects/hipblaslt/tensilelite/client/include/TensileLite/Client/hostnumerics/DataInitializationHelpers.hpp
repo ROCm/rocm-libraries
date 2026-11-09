@@ -46,8 +46,13 @@ namespace TensileLite
             inline roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout
                 mxScaleStorageLayoutForArchName(std::string_view archName)
             {
-                return roc::hostnumerics::amd_gpu_layout::mxScaleStorageLayoutForArchitectureName(
-                    archName);
+                using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
+                const auto processor = archName.substr(0, archName.find(':'));
+                if(processor == "gfx950")
+                    return MxScaleStorageLayout::Tile32x8;
+                if(processor == "gfx1250" || processor == "gfx1250-strict")
+                    return MxScaleStorageLayout::FastDimensionTiles;
+                return MxScaleStorageLayout::Natural;
             }
 
             inline roc::hostnumerics::MxScaleGenerationMode mxScaleGenerationMode(InitMode mode)

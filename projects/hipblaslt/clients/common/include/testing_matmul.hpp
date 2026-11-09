@@ -1930,12 +1930,13 @@ void testing_matmul_with_bias(const Arguments&                                  
                 dataOutput.copyLogicalElementsFrom(generated.data);
 
                 // gfx950 consumes [MN, K blocks] for either operand orientation.
-                const auto scalesForDevice
-                    = scalePlan.layout()
-                                  == roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950
-                              && blockColumns > 1
-                          ? generated.scales.copyWithPermutedDimensions(roc::hostnumerics::Permutation{1, 0})
-                          : generated.scales;
+                const auto                   scalesForDevice = scalePlan.layout()
+                                                         == roc::hostnumerics::amd_gpu_layout::
+                                                             MxScaleStorageLayout::Tile32x8
+                                                     && blockColumns > 1
+                                                                   ? generated.scales.copyWithPermutedDimensions(
+                                                     roc::hostnumerics::Permutation{1, 0})
+                                                                   : generated.scales;
                 const std::vector<std::byte> scaleStorage
                     = roc::hostnumerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
                         scalesForDevice.rawEncodedBackingStorage().data(),

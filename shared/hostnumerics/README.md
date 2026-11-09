@@ -54,3 +54,9 @@ The C++ and Python walkthroughs are [tutorial.cpp](examples/tutorial.cpp) and
 [tutorial.py](examples/tutorial.py). Scalar metadata and dispatch are documented
 in [scalar_type.hpp](include/roc/hostnumerics/scalar_type.hpp); the
 [core tests](tests/core_test.cpp) include a compiled dispatch example.
+
+[ReshapePermutation](include/roc/hostnumerics/reshape_permutation.hpp) describes
+padding, factoring dimensions, and reordering factors in contiguous storage.
+Its [tutorial test](tests/reshape_permutation_test.cpp) shows how to materialize
+the result. The [MX scale presets](include/roc/hostnumerics/amd_gpu_layout/mx.hpp)
+describe the layouts selected by product adapters for their kernels.

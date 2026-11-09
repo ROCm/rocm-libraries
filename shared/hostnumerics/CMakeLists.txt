@@ -69,6 +69,7 @@ endfunction()
 # Scalar types and conversions, plus the tensor model (shape, layout, and
 # storage), are available independently of numerical operations.
 add_library(hostnumerics-core STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/reshape_permutation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/tensor.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/tensor_transformations.cpp"
 )
@@ -130,6 +131,7 @@ target_sources(hostnumerics-core
             "${CMAKE_CURRENT_BINARY_DIR}/include"
         FILES
             "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/reshape_permutation.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/layout.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/expected.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/integer_conversion.hpp"
@@ -163,7 +165,9 @@ target_include_directories(hostnumerics-amd-gpu-layout
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
-target_link_libraries(hostnumerics-amd-gpu-layout PRIVATE OpenMP::OpenMP_CXX)
+target_link_libraries(hostnumerics-amd-gpu-layout
+    PUBLIC roc::hostnumerics-core
+    PRIVATE OpenMP::OpenMP_CXX)
 target_sources(hostnumerics-amd-gpu-layout
     PUBLIC
         FILE_SET HEADERS

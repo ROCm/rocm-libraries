@@ -697,7 +697,7 @@ namespace TensileLite
             {
                 return isMXProblem(problem) && m_mxScaleFormat > 0
                        && m_mxScaleLayout
-                              == roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950
+                              == roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Tile32x8
                        && solution != nullptr && solution->problemType.mxScaleFormat == 1;
             }
 

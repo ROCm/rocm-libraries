@@ -404,8 +404,8 @@ TEST(MatmulPreparation, UsesPhysicalMxScaleStoragePlansForEveryTranspose)
             const auto preparation = prepare(arguments,
                                              false,
                                              false,
-                                             MxScaleStorageLayout::Gfx950,
-                                             MxScaleStorageLayout::Gfx950);
+                                             MxScaleStorageLayout::Tile32x8,
+                                             MxScaleStorageLayout::Tile32x8);
             ASSERT_EQ(preparation.problems.size(), 1);
             const auto& prepared = preparation.problems.front();
             ASSERT_TRUE(prepared.a.mxScaleStorage);

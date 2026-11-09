@@ -299,7 +299,7 @@ _run_component(
     "${_full_install_dir}"
     full-amd-gpu-layout
     AMDGPULayout
-    AMDGPULayout
+    "Core,AMDGPULayout"
 )
 
 file(

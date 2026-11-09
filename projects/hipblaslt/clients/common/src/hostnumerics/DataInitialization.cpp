@@ -670,7 +670,13 @@ namespace hipblaslt::hostnumerics
 
     amd_gpu_layout::MxScaleStorageLayout mxScaleStorageLayoutForArchName(std::string_view archName)
     {
-        return amd_gpu_layout::mxScaleStorageLayoutForArchitectureName(archName);
+        using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
+        const auto processor = archName.substr(0, archName.find(':'));
+        if(processor == "gfx950")
+            return MxScaleStorageLayout::Tile32x8;
+        if(processor == "gfx1250" || processor == "gfx1250-strict")
+            return MxScaleStorageLayout::FastDimensionTiles;
+        return MxScaleStorageLayout::Natural;
     }
 
     amd_gpu_layout::MxScaleStorageLayout
@@ -678,10 +684,10 @@ namespace hipblaslt::hostnumerics
                                       std::string_view         archName)
     {
         if(scalingFormat == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
-            return amd_gpu_layout::MxScaleStorageLayout::Gfx950;
+            return amd_gpu_layout::MxScaleStorageLayout::Tile32x8;
         if(mxScaleStorageLayoutForArchName(archName)
-           == amd_gpu_layout::MxScaleStorageLayout::Gfx1250)
-            return amd_gpu_layout::MxScaleStorageLayout::Gfx1250;
+           == amd_gpu_layout::MxScaleStorageLayout::FastDimensionTiles)
+            return amd_gpu_layout::MxScaleStorageLayout::FastDimensionTiles;
         return amd_gpu_layout::MxScaleStorageLayout::Natural;
     }
 

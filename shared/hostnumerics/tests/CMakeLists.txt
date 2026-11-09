@@ -128,6 +128,7 @@ set_tests_properties(
 
 add_executable(
     hostnumerics-core-tests
+    reshape_permutation_test.cpp
     expected_test.cpp
     integer_conversion_test.cpp
     result_integration_test.cpp

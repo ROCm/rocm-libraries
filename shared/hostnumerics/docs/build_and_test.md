@@ -60,8 +60,9 @@ independently of numerical operations. `roc::hostnumerics` is a static library
 that adds generation, reference operations, and comparison, and links core
 transitively. The single Python `hostnumerics` package exposes both layers.
 `roc::hostnumerics-blas` adds the optional CBLAS GEMM backend, and
-`roc::hostnumerics-amd-gpu-layout` provides the independent CPU transforms for
-physical MX scale layouts. Consumers of every library except core also need
+`roc::hostnumerics-amd-gpu-layout` uses core's reshape/permutation descriptors
+to copy operands and MX scales into the global-memory layouts expected by
+GPU kernels. Consumers of every library except core also need
 OpenMP at link time. Build options and their defaults are documented next
 to their declarations in CMake.
 

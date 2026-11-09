@@ -35,7 +35,7 @@ set(
     _expected_AMDGPULayout_target
     roc::hostnumerics-amd-gpu-layout
 )
-set(_expected_AMDGPULayout_dependencies)
+set(_expected_AMDGPULayout_dependencies Core)
 
 if(NOT "${HostNumerics_SUPPORTED_COMPONENTS}"
    STREQUAL "Core;Operations;BLAS;AMDGPULayout")

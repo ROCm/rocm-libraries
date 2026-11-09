@@ -1188,10 +1188,11 @@ TEST(TensileMxGenerationTranslation, MapsArchitectureToPhysicalScaleLayout)
 {
     using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
 
-    EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx950"), MxScaleStorageLayout::Gfx950);
+    EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx950"), MxScaleStorageLayout::Tile32x8);
     EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx950:sramecc+:xnack-"),
-              MxScaleStorageLayout::Gfx950);
-    EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx1250"), MxScaleStorageLayout::Gfx1250);
+              MxScaleStorageLayout::Tile32x8);
+    EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx1250"),
+              MxScaleStorageLayout::FastDimensionTiles);
     EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx942"), MxScaleStorageLayout::Natural);
 }
 

@@ -9,7 +9,7 @@
 # Core           roc::hostnumerics-core               none
 # Operations     roc::hostnumerics                    Core
 # BLAS           roc::hostnumerics-blas               Operations, LP64 CBLAS
-# AMDGPULayout   roc::hostnumerics-amd-gpu-layout     none
+# AMDGPULayout   roc::hostnumerics-amd-gpu-layout     Core
 #
 # Component requirements are transitive. For example, requesting BLAS loads
 # Operations and Core. The
@@ -44,7 +44,7 @@ set(
     HostNumerics_AMDGPULayout_TARGET
     roc::hostnumerics-amd-gpu-layout
 )
-set(HostNumerics_AMDGPULayout_COMPONENT_DEPENDENCIES)
+set(HostNumerics_AMDGPULayout_COMPONENT_DEPENDENCIES Core)
 set(HostNumerics_AMDGPULayout_AVAILABLE ON)
 
 set(
