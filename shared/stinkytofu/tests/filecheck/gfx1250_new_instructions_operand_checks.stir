@@ -58,3 +58,50 @@ st.func @tensor_store_group2_must_be_4_sgprs() {
 ^entry:
   "st.tensor_store_from_lds"(s[0:3], s[4:11], s[12:13], s[16:19]) { issueCycles = 1, latencyCycles = 1 }
 }
+
+#--- global_load_async_to_lds_*: the LDS address is a VGPR, saddr is an SGPR pair, and
+#--- with saddr "off" vaddr is a 64-bit address
+# CHECK: "st.global_load_async_to_lds_b32"(s0, v1, s[2:3])
+# CHECK: operand src[0] has register type 's', expected 'v'
+st.func @async_load_lds_address_must_be_vgpr() {
+^entry:
+  "st.global_load_async_to_lds_b32"(s0, v1, s[2:3]) { issueCycles = 1, latencyCycles = 1 }
+}
+
+# CHECK: "st.global_load_async_to_lds_b128"(v0, v2, s4)
+# CHECK: operand src[2] has register width 1, expected 2
+st.func @async_load_saddr_must_be_sgpr_pair() {
+^entry:
+  "st.global_load_async_to_lds_b128"(v0, v2, s4) { issueCycles = 1, latencyCycles = 1 }
+}
+
+# CHECK: "st.global_load_async_to_lds_b32"(v0, v2, off)
+# CHECK: operand src[1] has register width 1, expected 2
+st.func @async_load_saddr_off_needs_64bit_vaddr() {
+^entry:
+  "st.global_load_async_to_lds_b32"(v0, v2, off) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- global_prefetch_b8: with saddr "off", vaddr is a 64-bit address
+# CHECK: "st.global_prefetch_b8"(v0, off)
+# CHECK: operand src[0] has register width 1, expected 2
+st.func @prefetch_saddr_off_needs_64bit_vaddr() {
+^entry:
+  "st.global_prefetch_b8"(v0, off) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- global_store_b8: the data is a VGPR
+# CHECK: "st.global_store_b8"(v0, s1, s[2:3])
+# CHECK: operand src[1] has register type 's', expected 'v'
+st.func @store_b8_data_must_be_vgpr() {
+^entry:
+  "st.global_store_b8"(v0, s1, s[2:3]) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- v_min_u64: the sources are 64-bit
+# CHECK: "st.v_min_u64"(v2, v[4:5])
+# CHECK: operand src[0] has register width 1, expected 2
+st.func @min_u64_sources_are_64bit() {
+^entry:
+  v[0:1] = "st.v_min_u64"(v2, v[4:5]) { issueCycles = 1, latencyCycles = 1 }
+}

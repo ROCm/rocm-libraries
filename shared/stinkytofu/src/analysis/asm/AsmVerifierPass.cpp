@@ -156,6 +156,7 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
     if (hwDesc->operandFields.empty()) return "";
 
     std::stringstream errors;
+    const bool vglobalSaddrOff = hasVGlobalSaddrOff(*hwDesc, inst->getSrcRegs());
 
     unsigned destIdx = 0;
     unsigned srcIdx = 0;
@@ -167,6 +168,8 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
         if (field.fieldSizeBits == 0) continue;
 
         unsigned expectedWidth = field.fieldSizeBits / 32;
+        if (vglobalSaddrOff && !isDest && field.encodeField == EncodeField::vaddr)
+            expectedWidth = 2;
 
         if (operandIndex >= regs.size() && !canUseLessOperand(inst)) {
             errors << "Instruction '" << hwDesc->mnemonic << "' missing operand "

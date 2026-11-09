@@ -104,7 +104,7 @@ st.func @cross_asynccnt() {
 
 st.func @async_store_cross_storecnt() {
 ^entry:
-  "st.global_store_async_from_lds_b64"(v[0:1], v2, s[30:31]) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_store_async_from_lds_b64"(v0, v2, s[30:31]) { issueCycles = 1, latencyCycles = 1 }
   "st.s_wait_storecnt"() { issueCycles = 1, latencyCycles = 1, mod.waitcnt = { vscnt = 0 } }
   v20 = "st.v_add_f32"(v21, v22) { issueCycles = 1, latencyCycles = 5 }
 }
@@ -117,7 +117,7 @@ st.func @async_store_cross_storecnt() {
 
 st.func @async_store_cross_loadcnt() {
 ^entry:
-  "st.global_store_async_from_lds_b64"(v[0:1], v2, s[30:31]) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_store_async_from_lds_b64"(v0, v2, s[30:31]) { issueCycles = 1, latencyCycles = 1 }
   "st.s_wait_loadcnt"() { issueCycles = 1, latencyCycles = 1, mod.waitcnt = { vlcnt = 0 } }
   v20 = "st.v_add_f32"(v21, v22) { issueCycles = 1, latencyCycles = 5 }
 }

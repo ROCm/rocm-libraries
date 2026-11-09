@@ -446,6 +446,27 @@ inline bool isGlobalStoreAsyncFromLds(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALStoreAsyncFromLds);
 }
 
+// global_load_async_to_lds_*: writes LDS, has no register dest.
+inline bool isGlobalLoadAsyncToLds(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_GLOBALLoadAsyncToLds);
+}
+
+// VGLOBAL descriptors declare the saddr form (32-bit vaddr); with saddr "off" vaddr is
+// a 64-bit address instead.
+inline bool hasVGlobalSaddrOff(const HwInstDesc& desc, const std::vector<StinkyRegister>& srcs) {
+    if (desc.microcode != MicrocodeFormat::MC_VGLOBAL) return false;
+    size_t srcIndex = 0;
+    for (const auto& field : desc.operandFields) {
+        if (field.isDest) continue;
+        if (field.encodeField == EncodeField::saddr)
+            return srcIndex < srcs.size() &&
+                   srcs[srcIndex].dataType == StinkyRegister::Type::LiteralString &&
+                   srcs[srcIndex].literalValue == "off";
+        ++srcIndex;
+    }
+    return false;
+}
+
 inline bool isGLOBALAtomic(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALAtomic);
 }
@@ -576,7 +597,7 @@ inline bool isTensorLoad(const StinkyInstruction& inst) {
 // across the whole async family; extend this predicate as async loads /
 // cluster-async / ds_atomic_async_barrier_arrive are added.
 inline bool isAsyncMemOp(const StinkyInstruction& inst) {
-    return isGlobalStoreAsyncFromLds(inst);
+    return isGlobalStoreAsyncFromLds(inst) || isGlobalLoadAsyncToLds(inst);
 }
 
 // Vector memory outside the DS and FLAT classes.
@@ -848,7 +869,7 @@ inline bool hasSideEffect(const StinkyInstruction& inst) {
         isCall(inst) || isWaitCnt(inst) || isHasSideEffect(inst))
         return true;
     if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst) ||
-         isGlobalStoreAsyncFromLds(inst)) &&
+         isGlobalStoreAsyncFromLds(inst) || isGlobalLoadAsyncToLds(inst)) &&
         !hasLdsPseudoRegs(inst))
         return true;
     if (isExecMaskGroup(inst)) {
