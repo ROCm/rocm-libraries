@@ -226,7 +226,10 @@ namespace TensileLite
                 if((*row.second->hardwarePredicate)(hardware))
                 {
                     useSolution = true;
-                    if(searchType == SolutionLibrarySearchType::DEFAULT)
+                    // Clustered StreamK throws while sizing workspace for grouped GEMM.
+                    if(row.second->usesStreamKSpatialCluster())
+                        useSolution = false;
+                    else if(searchType == SolutionLibrarySearchType::DEFAULT)
                     {
                         size_t ws = (*row.second).requiredWorkspaceSizeGroupedGemm(problems, hardware);
 
