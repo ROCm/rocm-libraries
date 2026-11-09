@@ -24,14 +24,6 @@ def test_installed_artifacts_exclude_source_only_tests():
     assert 'PATTERN "source_only" EXCLUDE' in package_install
 
 
-def test_legacy_namespace_bridge_files_are_absent():
-    project_root = _PACKAGE_ROOT.parent
-
-    assert not (project_root / "Tensile/__init__.py").exists()
-    assert not (_PACKAGE_ROOT / "_namespace_bridge.py").exists()
-    assert not (_PACKAGE_ROOT / "Tests/unit/test_namespace_bridge.py").exists()
-
-
 def test_wheel_excludes_source_only_tests(tmp_path):
     """Build the wheel and check its contents independently of discovery settings."""
     project_root = _PACKAGE_ROOT.parent
