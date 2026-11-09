@@ -2047,6 +2047,17 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
         rocke_strbuf_append(out, "\n");
     }
 
+    /* The GPU-check word, when a gpu_checked_value failure path stores to it:
+     * zero at load, read and cleared by the host after the launch. */
+    if(L->gpu_check_word)
+    {
+        rocke_strbuf_appendf(out,
+                             "@%s = protected addrspace(1) externally_initialized global i32 0, "
+                             "align 4\n",
+                             L->gpu_check_word);
+        rocke_strbuf_append(out, "\n");
+    }
+
     /* Needed intrinsic declarations, in the flavor's resolved table order
      * (then dynamic decls). This mirrors finalize iterating self._decls in
      * insertion order: _decls_for_flavor only replaces the text of base keys,
@@ -2375,6 +2386,7 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     L.lds_aa_used = false;
     L.smem_pool_size = 0;
     L.smem_pool_name = NULL;
+    L.gpu_check_word = NULL;
     rocke_vec_init(&L.yield_stack);
     rocke_vec_init(&L.dbg_marks);
 
