@@ -27,6 +27,33 @@ def _config(tmp_path, **overrides):
     return path
 
 
+def _assert_carried_plr_reentry_handoff(lines, first_read):
+    close = next(i for i, line in enumerate(lines) if line == 'label_PersistentLoopClose:')
+    end = next(i for i in range(close, len(lines)) if lines[i].startswith('s_endpgm'))
+    assert first_read < close
+    assert not any('s_wait_dscnt' in line for line in lines[first_read:close])
+    assert not any('s_wait_tensorcnt' in line for line in lines[close:end])
+
+    # Develop's closing LDS fence follows the stores and only runs when there
+    # is another tile. It completes carried PLR without draining tensor group1.
+    def unique(prefix):
+        matches = [i for i in range(close, end) if lines[i].startswith(prefix)]
+        assert len(matches) == 1, (prefix, matches)
+        return matches[0]
+
+    compare = unique('s_cmp_ge_u32 ')
+    exhausted = unique('s_cbranch_scc1 label_StaticGrid_CloseDone')
+    drain = unique('s_wait_dscnt ')
+    assert lines[drain].split('//', 1)[0].split() == ['s_wait_dscnt', '0']
+    signal = unique('s_barrier_signal -1')
+    wait = unique('s_barrier_wait -1')
+    backedge = unique('s_setpc_b64 ')
+    assert 'branch to label_PersistentLoopStart' in lines[backedge]
+    done = unique('label_StaticGrid_CloseDone:')
+    assert compare < exhausted < drain < signal < wait < backedge < done
+    return close, drain, signal, wait
+
+
 @pytest.mark.parametrize("strategy", ["DataParallel", "StreamK"])
 def test_carried_plr_completion_does_not_drain_second_tensor_group(tmp_path, strategy):
     results = emit_kernels_from_config(
@@ -58,12 +85,21 @@ def test_carried_plr_completion_does_not_drain_second_tensor_group(tmp_path, str
         issues1 = [i for i in range(advance1, publish1) if 'tensor_load_to_lds' in lines[i]]
         assert len(issues1) == 2 and all(i > release1 for i in issues1)
         assert not any('s_wait_tensorcnt' in line for line in lines[advance1:publish1])
-        # The first next-tile PLR reads survive store/setup until next entry's
-        # consumer. An unconditional DS drain here loses that overlap.
+        # Retained reads overlap the stores; the required closing LDS fence
+        # completes them immediately before reentry without draining group1.
         ready0 = next(i for i, line in enumerate(lines) if 'PAP PLR waits group0' in line)
         first_read = next(i for i in range(ready0, len(lines)) if 'ds_load_' in lines[i])
-        kernel_end = next(i for i in range(first_read, len(lines)) if 's_endpgm' in lines[i])
-        assert not any('s_wait_dscnt' in line for line in lines[first_read:kernel_end])
+        close, drain, signal, wait = _assert_carried_plr_reentry_handoff(lines, first_read)
+        # Corrupt real emitted instructions to prove each side of that boundary.
+        corruptions = [
+            lines[:first_read+1] + ['s_wait_dscnt 0'] + lines[first_read+1:],
+            lines[:close+1] + ['s_wait_tensorcnt 0'] + lines[close+1:],
+            lines[:drain] + lines[drain+1:],
+            [line for i, line in enumerate(lines) if i not in (signal, wait)],
+        ]
+        for corrupted in corruptions:
+            with pytest.raises(AssertionError):
+                _assert_carried_plr_reentry_handoff(corrupted, first_read)
         persistent_entry = next(i for i, line in enumerate(lines) if line.startswith('label_PersistentLoopStart:'))
         assert not any('s_wait_dscnt' in line for line in lines[persistent_entry:begin])
 
