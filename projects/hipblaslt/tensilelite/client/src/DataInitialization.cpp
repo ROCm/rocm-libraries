@@ -40,91 +40,20 @@
 #include <cstring>
 #include <hip/hip_runtime.h>
 #include <iostream>
-#include <list>
 #include <map>
 #include <span>
-#include <tuple>
 
 namespace TensileLite
 {
     namespace Client
     {
-        template <typename K, typename T, std::size_t MaxNumEntries = 128>
-        class LRUCache
-        {
-            using Entries    = std::list<K>;
-            using EntryTrack = std::pair<T, typename Entries::iterator>;
-            using EntryMap   = std::map<K, EntryTrack>;
-
-        public:
-            template <typename... Args>
-            std::pair<typename EntryMap::iterator, bool> emplace(const K& key, Args&&... args)
-            {
-                if(!entryMap.count(key))
-                {
-                    entries.push_back(key);
-                    auto&& ret = entryMap.emplace(
-                        key, std::make_pair(T(std::forward<Args>(args)...), --entries.end()));
-                    while(entries.size() > MaxNumEntries)
-                    {
-                        auto& front = entries.front();
-                        entryMap.erase(front);
-                        entries.pop_front();
-                    }
-                    return ret;
-                }
-                else
-                {
-                    auto& track = entryMap.at(key);
-                    track.first = T(std::forward<Args>(args)...);
-                    entries.splice(entries.end(), entries, track.second);
-                }
-                return {entryMap.find(key), true};
-            }
-
-            size_t count(const K& key) const
-            {
-                return entryMap.count(key);
-            }
-
-            const T& at(const K& key) const
-            {
-                auto& track = entryMap.at(key);
-                entries.splice(entries.end(), entries, track.second);
-                return track.first;
-            }
-
-            T& at(const K& key)
-            {
-                auto& track = entryMap.at(key);
-                entries.splice(entries.end(), entries, track.second);
-                return track.first;
-            }
-
-            const K& back() const
-            {
-                return entries.back();
-            }
-
-        private:
-            EntryMap entryMap;
-            Entries  entries;
-        };
-
-        using BitWidth        = uint8_t;
-        using Size            = uint64_t;
-        using SwizzleCacheKey = std::tuple<BitWidth, Size, Size>;
-        using SwizzleCacheVal = roc::hostnumerics::Tensor;
-        using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
-        static thread_local SwizzleCache g_swizzleCache;
-
         // Each rotating copy starts on a 256-byte boundary.
         static size_t rotatingBytes(size_t bytes)
         {
             return RoundUpToMultiple<size_t>(bytes, 256);
         }
 
-        const roc::hostnumerics::Permutation dataSwizzlePermutation{0, 2, 3, 1, 4};
+        const roc::hostnumerics::Permutation dataSwizzlePermutation{0, 1, 3, 4, 2, 5};
         const roc::hostnumerics::Permutation unrollMajorMXSwizzlePermutation{0, 2, 1, 3};
         const roc::hostnumerics::Permutation tiledMajorMXSwizzlePermutation{0, 1, 3, 2};
 
@@ -154,13 +83,6 @@ namespace TensileLite
                 return kind == SwizzleTensorKind::MXScale ? toHostNumericsMxScaleType(dataType)
                                                           : toHostNumericsScalarType(dataType);
             }
-        }
-
-        BitWidth toBitWidth(rocisa::DataType dataType)
-        {
-            return static_cast<BitWidth>(roc::hostnumerics::scalarTypeInfo(
-                                             swizzleScalarType(dataType, SwizzleTensorKind::Data))
-                                             .storageBits);
         }
 
         roc::hostnumerics::Tensor makeSwizzleTensor(rocisa::DataType         dataType,
@@ -1813,7 +1735,8 @@ namespace TensileLite
                     }
                 }
             }
-            else if(m_mxScaleFormat > 0 && m_mxScaleLayout == MxScaleStorageLayout::FastDimensionTiles)
+            else if(m_mxScaleFormat > 0
+                    && m_mxScaleLayout == MxScaleStorageLayout::FastDimensionTiles)
             {
                 if(problem.mxBlockA() > 0)
                     layoutA = MxScaleStorageLayout::FastDimensionTiles;
@@ -1859,7 +1782,8 @@ namespace TensileLite
                 // unchanged descriptor means both the canonical scale and the cached
                 // swizzled bytes are still valid. gfx950 is excluded because its
                 // preswizzle choice also depends on the current solution's MI shape.
-                if(m_mxScaleLayout == MxScaleStorageLayout::FastDimensionTiles && descriptorsUnchanged)
+                if(m_mxScaleLayout == MxScaleStorageLayout::FastDimensionTiles
+                   && descriptorsUnchanged)
                 {
                     return;
                 }
@@ -2036,7 +1960,8 @@ namespace TensileLite
                         // reference keeps the operand's canonical scale orientation.
                         const auto scalesForDevice
                             = swizzleLayout == MxScaleStorageLayout::Tile32x8 && !kFast
-                                  ? canonicalScales.copyWithPermutedDimensions(roc::hostnumerics::Permutation{1, 0})
+                                  ? canonicalScales.copyWithPermutedDimensions(
+                                      roc::hostnumerics::Permutation{1, 0})
                                   : canonicalScales;
                         const auto scalePlan
                             = roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan(
@@ -2680,47 +2605,38 @@ namespace TensileLite
                     // currently, if A then it means MiM = 16, if B then it means MiN = 16
                     size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
                     calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
-                    auto  unrolledSize = desc.sizes()[0];
-                    auto  tiledSize    = desc.sizes()[1];
-                    Shape paddedShape{
+                    const size_t unrolledSize = desc.sizes()[0];
+                    const size_t tiledSize    = desc.sizes()[1];
+                    const size_t batchCount   = desc.dimensions() > 2 ? desc.sizes()[2] : 1;
+                    const Shape  paddedShape{
+                        batchCount,
                         ((tiledSize / MiM_N) + !!(tiledSize % MiM_N)) * MiM_N,
                         (unrolledSize / (MiK * PackK) + !!(unrolledSize % (MiK * PackK))) * MiK
                             * PackK};
-                    auto swizzleKey
-                        = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize);
-
-                    if(g_swizzleCache.count(swizzleKey))
-                    {
-                        if(swizzleKey != g_swizzleCache.back())
-                        {
-                            Tensor& permuted = g_swizzleCache.at(swizzleKey);
-                            ptr              = copySwizzleTensor(
-                                desc, p.gpuInput.valid.get(), permuted, hipMemcpyHostToDevice);
-                        }
-                        else
-                        {
-                            ptr = p.gpuInput.valid.get();
-                        }
-                    }
-                    else
-                    {
-                        Tensor tmpTensor    = makeSwizzleTensor(desc.dataType(),
-                                                             SwizzleTensorKind::Data,
-                                                             Shape{tiledSize, unrolledSize},
-                                                             p.cpuInput.valid.get());
-                        Tensor paddedTensor = tmpTensor.copyWithZeroPadding(paddedShape);
-                        Tensor reshaped     = paddedTensor.reshapeSharingStorage(
-                            Shape{paddedShape[0] / MiM_N,
-                                  MiM_N,
-                                  paddedShape[1] / (MiK * PackK),
-                                  MiK / MiKv,
-                                  MiKv * PackK});
-                        Tensor permuted
-                            = reshaped.copyWithPermutedDimensions(dataSwizzlePermutation);
-                        ptr = copySwizzleTensor(
-                            desc, p.gpuInput.valid.get(), permuted, hipMemcpyHostToDevice);
-                        g_swizzleCache.emplace(swizzleKey, std::move(permuted));
-                    }
+                    const auto type = swizzleScalarType(desc.dataType(), SwizzleTensorKind::Data);
+                    const auto natural = Tensor::copyEncodedBackingStorage(
+                        type,
+                        roc::hostnumerics::Layout(
+                            Shape{batchCount, tiledSize, unrolledSize},
+                            {desc.dimensions() > 2 ? static_cast<ptrdiff_t>(desc.strides()[2]) : 0,
+                             static_cast<ptrdiff_t>(desc.strides()[1]),
+                             static_cast<ptrdiff_t>(desc.strides()[0])},
+                            0),
+                        std::span<const std::byte>(
+                            static_cast<const std::byte*>(p.cpuInput.valid.get()),
+                            desc.totalAllocatedBytes()));
+                    const auto padded = natural.copyWithZeroPadding(paddedShape);
+                    const auto reshaped
+                        = padded.reshapeSharingStorage(Shape{batchCount,
+                                                             paddedShape[1] / MiM_N,
+                                                             MiM_N,
+                                                             paddedShape[2] / (MiK * PackK),
+                                                             MiK / MiKv,
+                                                             MiKv * PackK});
+                    const auto permuted
+                        = reshaped.copyWithPermutedDimensions(dataSwizzlePermutation);
+                    ptr = copySwizzleTensor(
+                        desc, p.gpuInput.valid.get(), permuted, hipMemcpyHostToDevice);
                 }
                 else if(needMXSwizzle)
                 {
