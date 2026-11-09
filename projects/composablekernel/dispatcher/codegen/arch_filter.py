@@ -987,9 +987,11 @@ class ArchFilter:
                 f"Matrix B: {config.tile_n}x{config.tile_k}x{elem_size_b}={matrix_b_size}B"
             )
 
-        if is_gfx1250_tdm:
+        if is_gfx1250 and config.epilogue == "tdm":
             # TdmEpilogue stages the full output tile in the shared LDS
             # allocation, so it must fit the whole LDS (the "default" budget).
+            # A TDM pipeline with the CShuffle epilogue (comp_tdm_v3, Stream-K)
+            # does not.
             c_dtype = CommonTypeMappings.get_output_dtype(config.datatype_a)
             c_tile_bytes = (
                 config.tile_m * config.tile_n * ELEMENT_SIZE_MAP.get(c_dtype, 2)

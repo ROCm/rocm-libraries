@@ -25,6 +25,11 @@ Examples:
     # Explicit config on 4 GPUs with correctness checking:
     python streamk_gemm_full_benchmark.py gemm_streamk/configs/default_config.json \
         --devices 4 --verify --csv streamk_gemm_results.csv
+
+    # gfx1250 TDM pipelines (comp_tdm, comp_tdm_v2, comp_tdm_v3), persistent and
+    # not, at the default Stream-K workgroup budget and at half of it:
+    python streamk_gemm_full_benchmark.py gemm_streamk/configs/gfx1250_tdm_config.json \
+        --arch gfx1250 --dtype bf16 --verify --budget-pct 100,50
 """
 
 import argparse
