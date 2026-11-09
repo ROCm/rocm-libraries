@@ -4,6 +4,8 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <unordered_map>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
@@ -32,8 +34,46 @@
         }                                                                         \
     } while(0)
 
+/**
+ * @brief Applicability-check convention.
+ *
+ * A check returns hip_kernel_provider::core::utils::Rejection: std::nullopt when the
+ * graph passes, otherwise the reason the engine declines it. Checks compose with
+ * HIP_KERNEL_RETURN_IF_REJECTED and the top-level isApplicable() logs the reason once,
+ * so no check expands a logging macro of its own.
+ *
+ * HIP_KERNEL_REJECT_IF returns `message` from a Rejection-returning function when
+ * `condition` holds. `message` follows HIP_KERNEL_RETURN_FALSE_IF's rule: it is
+ * substituted unparenthesised after `std::string{} +` so `+`-chained pieces fold into
+ * a std::string left to right.
+ */
+#define HIP_KERNEL_REJECT_IF(condition, message)                                           \
+    do                                                                                     \
+    {                                                                                      \
+        if(condition)                                                                      \
+        {                                                                                  \
+            /* NOLINTNEXTLINE(bugprone-macro-parentheses) */                               \
+            return ::hip_kernel_provider::core::utils::Rejection{std::string{} + message}; \
+        }                                                                                  \
+    } while(0)
+
+/**
+ * @brief Forwards a sub-check's Rejection to the caller (which must return Rejection).
+ */
+#define HIP_KERNEL_RETURN_IF_REJECTED(check)  \
+    do                                        \
+    {                                         \
+        if(auto hipKernelRejection = (check)) \
+        {                                     \
+            return hipKernelRejection;        \
+        }                                     \
+    } while(0)
+
 namespace hip_kernel_provider::core::utils
 {
+
+// Why an engine declines a graph: std::nullopt when applicable, otherwise the reason.
+using Rejection = std::optional<std::string>;
 
 enum class ActivationMode : int
 {
