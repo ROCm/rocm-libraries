@@ -63,6 +63,13 @@ Replays read and write the device pointers that were in the variant pack at capt
 change the input of a replay, write new data to the same buffers. Do not expect a new pointer in
 the variant pack to take effect.
 
+A replay also keeps the workspace pointer and the engine's internal state from capture time. For
+example, with ``HIPBLASLT_ENGINE`` a replay keeps the synchronization flags of the capture stream,
+which the hipBLASLt handle of the hipDNN handle owns. Graphs captured from the same handle, or that
+share a workspace, must not run at the same time as each other or as other work on that handle.
+Order them on one stream, or give each graph that you replay concurrently its own handle and
+workspace.
+
 The capture works in ``hipStreamCaptureModeGlobal`` (the PyTorch default),
 ``hipStreamCaptureModeThreadLocal``, and ``hipStreamCaptureModeRelaxed``.
 
