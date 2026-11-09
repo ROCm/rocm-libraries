@@ -13,6 +13,14 @@
     {{- ')' -}}
 {%- endmacro -%}
 
+{#- Generates: '(rocprim::is_floating_point<T>) && ' if the tuning data needs it, otherwise nothing -#}
+{%- macro mk_fp_guard(type) -%}
+    {%- if type.check_fp -%}
+        {{ mk_is_fp_type_check(type) }}
+        {{- ' && ' -}}
+    {%- endif -%}
+{%- endmacro -%}
+
 {#- Generates: '(sizeof(t) <= X) && (sizeof(t) > Y)' -#}
 {%- macro mk_type_sz_check(t) -%}
     {%- if t.size_min > 0 -%}
@@ -32,15 +40,15 @@
 {#- Generates compound type-level guard -#}
 {%- macro mk_kv_type_check(config) -%}
     {#- rocprim::is_floating_point<... -#}
-    {{ mk_is_fp_type_check(config.key_type) }}
-    {{- ' && '-}}
+    {{ mk_fp_guard(config.key_type) }}
     {#- sizeof(key_type) < ... -#}
     {{ mk_type_sz_check(config.key_type) }}
     {{- ' && ' -}}
-    {%- if config.value_type.type == 'empty_type' -%}
+    {%- if config.value_type.type == 'empty_type' or config.value_type.type == 'rocprim::empty_type' -%}
         {#- std::is_same_v<..., rocprim::empty_type> -#}
         ({{ mk_is_empty_type_check(config.value_type) }})
     {%- else -%}
+        {{- mk_fp_guard(config.value_type) -}}
         {#- sizeof(value_type) < ... -#}
         {{ mk_type_sz_check(config.value_type) }}
         {%- if config.value_type.size_min == 0 -%}
@@ -55,7 +63,7 @@
 {%- block tparams -%}class key_type, class value_type{%- endblock -%}
 {%- endmacro -%}
 
-{#- Generates the symbol name of the function that return the config 
+{#- Generates the symbol name of the function that return the config
     for a target. -#}
 {%- macro mk_target_symbol() -%}
 {{ alg_short_name }}_config_picker
@@ -144,6 +152,7 @@ namespace detail
 {# Provide an alias to the default target.
    Generates: constexpr auto ..._config_picker() -> std::enable_if_t<...> { ... } -#}
 {% call mk_target_function(unknown_target, True) %}
+    {%- if default_target %}
     {%- set parts = tparams_list().split(',') -%}
     {%- set value_names = [] -%}
     {%- for part in parts -%}
@@ -155,9 +164,12 @@ namespace detail
         {{- ', ' -}}
         {{- value_names | join(', ') -}}
         {{- '>();' -}}
+    {%- else %}
+    return {{ self.config_base_type() }}();
+    {%- endif -%}
 {% endcall %}
 
-{# We need to declare what the default target is if the current target is unknown. 
+{# We need to declare what the default target is if the current target is unknown.
    Generates: using ..._targets = comp_targets<comp_target<...>, ...>; -#}
 // All the existing configs should be auto generated
 using {{ alg_short_name }}_targets = comp_targets
