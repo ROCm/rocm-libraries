@@ -1107,7 +1107,6 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_gfx942_cfvst_i64_kv_addr_numeric.py"
         "tests/library/tests/test_gfx942_4wgqa_bounds_numeric.py"
         "tests/library/tests/test_attention_gfx942_kv_pages.py"
-        "tests/library/tests/test_gfx942_4wgqa_tail_numeric.py"
         "tests/library/tests/test_attention_kv_tail_numeric.py"
         "tests/library/tests/test_attention_tiled_runtime_shape_numeric.py"
         "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"

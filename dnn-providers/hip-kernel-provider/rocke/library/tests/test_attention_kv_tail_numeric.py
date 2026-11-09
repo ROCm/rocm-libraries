@@ -12,10 +12,9 @@ import math
 
 import pytest
 from _gpu_gate import gpu_arch, requires_gpu
-from _paged_kv_tail import own_blocks, poison, result, spawn_results
+from _paged_kv_tail import TOL, own_blocks, poison, result, spawn_selected
 from test_gfx942_gqa_head_fold_numeric import _load_windowed_harness
 
-TOL = 4e-2  # repo-wide bf16 attention gate
 ARCH = gpu_arch()
 # Claimed cache size that switches the default spec to 64-bit K/V addressing (the tensors stay
 # small: the kernel only addresses the sequences' own blocks).
@@ -303,12 +302,7 @@ def results(request):
     if _load_windowed_harness() is None:
         yield None
         return
-    selected = [
-        item.callspec.params["case"]
-        for item in request.session.items
-        if item.module is request.module and hasattr(item, "callspec")
-    ]
-    yield from spawn_results({c["id"]: (_run, c) for c in selected})
+    yield from spawn_selected(request, _run)
 
 
 @requires_gpu("gfx942", "gfx950")

@@ -22,7 +22,8 @@ import traceback
 
 import pytest
 
-FAR_BLOCK = 100_000  # outside any cache here, but within i32 element addressing
+TOL = 4e-2  # repo-wide bf16 attention gate
+FAR_BLOCK = 100_000  # outside any cache here
 CASE_TIMEOUT_S = 300  # a case takes seconds
 MAX_WORKERS = 8
 
@@ -61,7 +62,9 @@ def poison(k, v, table, kv_lens, bs, mode):
                 blk = int(table[i, (kl - 1) // bs])
                 k[blk, kl % bs :] = float("nan")
                 v[blk, kl % bs :] = float("nan")
-    pad = spare if mode == "nan" else FAR_BLOCK
+    # Large pages: keep the far block's byte offset below 2**31, where i32 offsets would wrap.
+    far = min(FAR_BLOCK, ((1 << 31) - 1) // (k[0].numel() * k.element_size()))
+    pad = spare if mode == "nan" else far
     table = table.clone()
     for i, kl in enumerate(kv_lens):
         table[i, (kl + bs - 1) // bs :] = pad
@@ -142,6 +145,18 @@ def spawn_results(jobs, env=None):
             conn.close()
         for future in futures.values():
             future.cancel()
+
+
+def spawn_selected(request, fn, env=None):
+    """``spawn_results`` of ``fn`` over the ``case`` parameters of the requesting module's selected
+    tests, keyed by the case's ``id``. Use from a module-scoped fixture."""
+    cases = [
+        item.callspec.params["case"]
+        for item in request.session.items
+        if item.module is request.module
+        and "case" in getattr(getattr(item, "callspec", None), "params", {})
+    ]
+    yield from spawn_results({c["id"]: (fn, c) for c in cases}, env)
 
 
 def result(results, key):
