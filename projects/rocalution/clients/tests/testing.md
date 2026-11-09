@@ -21,7 +21,7 @@ stack.
 
 **Where it sits in the ROCm stack:** it is an Expansion-SDK-level solver library. When GPU support is
 enabled it links against **rocSPARSE**, **rocBLAS**, **rocPRIM**, and **rocRAND**
-(package minimums: `rocsparse >= 1.12.10`, `rocblas >= 2.22.0`, `rocrand >= 2.1.0`,
+(package minimums: `rocsparse >= 5.2.0`, `rocblas >= 2.22.0`, `rocrand >= 2.1.0`,
 `hip-runtime-amd >= 4.5.0`).
 
 **Backends (selectable at configuration time):**
