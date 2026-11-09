@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -100,11 +100,11 @@ TESTS_DEFINE(UnaryTests, UnaryTestsParams);
     ASSERT_EQ(reference, result);                                                                               \
   }
 
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Plus, +, thrust::plus, BinaryArithmeticTests);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Minus, -, thrust::minus, BinaryArithmeticTests);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Multiplies, *, thrust::multiplies, BinaryArithmeticTests);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Divides, /, thrust::divides, BinaryArithmeticTests);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Modulus, %, thrust::modulus, ModulusTests);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Plus, +, _THRUST_STD::plus, BinaryArithmeticTests);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Minus, -, _THRUST_STD::minus, BinaryArithmeticTests);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Multiplies, *, _THRUST_STD::multiplies, BinaryArithmeticTests);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Divides, /, _THRUST_STD::divides, BinaryArithmeticTests);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Modulus, %, _THRUST_STD::modulus, ModulusTests);
 
 #define UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(name, reference_operator, functor)                \
   TYPED_TEST(UnaryTests, TestFunctionalPlaceholders##name)                                   \
@@ -137,6 +137,6 @@ struct unary_plus_reference
 };
 
 UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(UnaryPlus, +, unary_plus_reference);
-UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(Negate, -, thrust::negate);
+UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(Negate, -, _THRUST_STD::negate);
 
 THRUST_DIAG_POP

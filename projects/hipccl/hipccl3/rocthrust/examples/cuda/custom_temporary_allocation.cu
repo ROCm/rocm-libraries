@@ -30,7 +30,6 @@
 #include <iostream>
 #include <map>
 #include <sstream>
-#include <stdexcept>
 
 // This example demonstrates how to control how Thrust allocates temporary
 // storage during algorithms such as thrust::sort. The idea will be to create a

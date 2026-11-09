@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,7 @@
 #include <thrust/system/hip/detail/general/various.h>
 #include <thrust/tuple.h>
 
-#include <cstddef>
+#include _THRUST_STD_INCLUDE(cstddef)
 
 THRUST_NAMESPACE_BEGIN
 namespace system

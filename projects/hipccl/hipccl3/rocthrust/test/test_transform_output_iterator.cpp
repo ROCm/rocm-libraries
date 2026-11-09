@@ -59,7 +59,7 @@ TEST(TransformOutputIteratorVectorTests, TestTransformOutputIteratorTraits)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using func    = thrust::negate<int>;
+  using func    = _THRUST_STD::negate<int>;
   using base_it = thrust::host_vector<int>::iterator;
 
   using it        = thrust::transform_output_iterator<func, base_it>;
@@ -74,7 +74,7 @@ TEST(TransformOutputIteratorVectorTests, TestTransformOutputIteratorTraits)
 
   static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
 
-  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+  static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(!_THRUST_STD::output_iterator<it, int>);
@@ -151,12 +151,12 @@ TYPED_TEST(TransformOutputIteratorSignedIntegralTests, TestTransformOutputIterat
     thrust::device_vector<T> d_result(size);
 
     // run on host
-    thrust::inclusive_scan(thrust::make_transform_iterator(h_data.begin(), thrust::negate<T>()),
-                           thrust::make_transform_iterator(h_data.end(), thrust::negate<T>()),
+    thrust::inclusive_scan(thrust::make_transform_iterator(h_data.begin(), _THRUST_STD::negate<T>()),
+                           thrust::make_transform_iterator(h_data.end(), _THRUST_STD::negate<T>()),
                            h_result.begin());
     // run on device
     thrust::inclusive_scan(
-      d_data.begin(), d_data.end(), thrust::make_transform_output_iterator(d_result.begin(), thrust::negate<T>()));
+      d_data.begin(), d_data.end(), thrust::make_transform_output_iterator(d_result.begin(), _THRUST_STD::negate<T>()));
 
     ASSERT_EQ(h_result, d_result);
   }
