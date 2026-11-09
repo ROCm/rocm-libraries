@@ -197,29 +197,8 @@ packs:
     - {head_size: 128, num_query_heads: 64, dtype: fp16, use_q_direct_global: false, use_conflict_free_v_store: false, knobs: knobs3, resolved: {num_queries_per_kv: 8, mask_type: 2}}
     - {head_size: 128, num_query_heads: 128, dtype: bf16, use_q_direct_global: false, use_conflict_free_v_store: false, knobs: knobs2, resolved: {num_queries_per_kv: 16, mask_type: 2}}
     - {head_size: 128, num_query_heads: 128, dtype: fp16, use_q_direct_global: false, use_conflict_free_v_store: false, knobs: knobs3, resolved: {num_queries_per_kv: 16, mask_type: 2}}
-    - {head_size: 64, num_query_heads: 8, dtype: bf16, use_q_direct_global: true, use_conflict_free_v_store: true, knobs: knobs4, resolved: {num_queries_per_kv: 1, mask_type: 2}}
-    - {head_size: 64, num_query_heads: 8, dtype: fp16, use_q_direct_global: true, use_conflict_free_v_store: true, knobs: knobs5, resolved: {num_queries_per_kv: 1, mask_type: 2}}
-    - {head_size: 64, num_query_heads: 16, dtype: bf16, use_q_direct_global: true, use_conflict_free_v_store: true, knobs: knobs4, resolved: {num_queries_per_kv: 2, mask_type: 2}}
-    - {head_size: 64, num_query_heads: 16, dtype: fp16, use_q_direct_global: true, use_conflict_free_v_store: true, knobs: knobs5, resolved: {num_queries_per_kv: 2, mask_type: 2}}
-    - {head_size: 64, num_query_heads: 32, dtype: bf16, use_q_direct_global: true, use_conflict_free_v_store: true, knobs: knobs4, resolved: {num_queries_per_kv: 4, mask_type: 2}}
-    - {head_size: 64, num_query_heads: 32, dtype: fp16, use_q_direct_global: true, use_conflict_free_v_store: true, knobs: knobs5, resolved: {num_queries_per_kv: 4, mask_type: 2}}
     - {head_size: 64, num_query_heads: 64, dtype: bf16, use_q_direct_global: true, use_conflict_free_v_store: true, knobs: knobs4, resolved: {num_queries_per_kv: 8, mask_type: 2}}
     - {head_size: 64, num_query_heads: 64, dtype: fp16, use_q_direct_global: true, use_conflict_free_v_store: true, knobs: knobs5, resolved: {num_queries_per_kv: 8, mask_type: 2}}
-    - {head_size: 64, num_query_heads: 128, dtype: bf16, use_q_direct_global: true, use_conflict_free_v_store: true, knobs: knobs4, resolved: {num_queries_per_kv: 16, mask_type: 2}}
-    - {head_size: 64, num_query_heads: 128, dtype: fp16, use_q_direct_global: true, use_conflict_free_v_store: true, knobs: knobs5, resolved: {num_queries_per_kv: 16, mask_type: 2}}
-  - name: attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw4_mw16_x00.gfx942
-    metadata: [dtype, head_size, num_queries_per_kv, block_size, mask_type, sliding_window, tile_size, num_warps, block_m_per_warp, use_mfma_32x32x8, use_transposed_qk_32x32]
-    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, use_mfma_32x32x8, use_transposed_qk_32x32, use_q_direct_global, use_conflict_free_v_store, use_i64_kv_addr]
-    vocabulary:
-      dtype:
-        bf16: BF16
-        fp16: FP16
-    spec_defaults: {head_size: 64, block_size: 16, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 4, use_q_direct_global: false, use_conflict_free_v_store: false, use_i64_kv_addr: false}
-    knob_sets:
-      knobs0:
-      - {tile_size: 64, num_warps: 4, block_m_per_warp: 16, use_mfma_32x32x8: false, use_transposed_qk_32x32: false}
-    shapes:
-    - {knobs: knobs0, resolved: {num_queries_per_kv: 1, mask_type: 2}}
   - name: attention_unified_{tag}_d64_g{md_num_queries_per_kv}_m2_bs16_t64_nw{num_warps}_mw{block_m_per_warp}_x00.gfx942
     metadata: [dtype, head_size, num_queries_per_kv, block_size, mask_type, sliding_window, tile_size, num_warps, block_m_per_warp, use_mfma_32x32x8, use_transposed_qk_32x32]
     spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, use_mfma_32x32x8, use_transposed_qk_32x32, use_q_direct_global, use_conflict_free_v_store, use_i64_kv_addr]
@@ -232,45 +211,20 @@ packs:
       knobs0:
       - {tile_size: 64, num_warps: 4, block_m_per_warp: 16, use_mfma_32x32x8: false, use_transposed_qk_32x32: false, tag: 2d.fp16}
       knobs1:
-      - {tile_size: 64, num_warps: 4, block_m_per_warp: 16, use_mfma_32x32x8: false, use_transposed_qk_32x32: false, tag: 2d.bf16}
-      knobs2:
       - {tile_size: 64, num_warps: 4, block_m_per_warp: 32, use_mfma_32x32x8: false, use_transposed_qk_32x32: false, tag: 2d.bf16}
-      knobs3:
-      - {tile_size: 64, num_warps: 4, block_m_per_warp: 32, use_mfma_32x32x8: false, use_transposed_qk_32x32: false, tag: 2d.fp16}
-      knobs4:
       - {tile_size: 64, num_warps: 2, block_m_per_warp: 16, use_mfma_32x32x8: false, use_transposed_qk_32x32: false, tag: 2d.bf16}
-      knobs5:
+      knobs2:
       - {tile_size: 64, num_warps: 2, block_m_per_warp: 16, use_mfma_32x32x8: false, use_transposed_qk_32x32: false, tag: 2d.fp16}
+      knobs3:
+      - {tile_size: 64, num_warps: 2, block_m_per_warp: 16, use_mfma_32x32x8: false, use_transposed_qk_32x32: false, tag: 2d.bf16}
     shapes:
     - {num_query_heads: 8, dtype: fp16, knobs: knobs0, resolved: {num_queries_per_kv: 1, mask_type: 2}}
-    - {num_query_heads: 16, dtype: bf16, knobs: knobs1, resolved: {num_queries_per_kv: 2, mask_type: 2}}
-    - {num_query_heads: 16, dtype: fp16, knobs: knobs0, resolved: {num_queries_per_kv: 2, mask_type: 2}}
-    - {num_query_heads: 32, dtype: bf16, knobs: knobs1, resolved: {num_queries_per_kv: 4, mask_type: 2}}
-    - {num_query_heads: 32, dtype: fp16, knobs: knobs0, resolved: {num_queries_per_kv: 4, mask_type: 2}}
-    - {num_query_heads: 64, dtype: bf16, knobs: knobs1, resolved: {num_queries_per_kv: 8, mask_type: 2}}
-    - {num_query_heads: 64, dtype: fp16, knobs: knobs0, resolved: {num_queries_per_kv: 8, mask_type: 2}}
-    - {num_query_heads: 128, dtype: bf16, knobs: knobs1, resolved: {num_queries_per_kv: 16, mask_type: 2}}
-    - {num_query_heads: 128, dtype: fp16, knobs: knobs0, resolved: {num_queries_per_kv: 16, mask_type: 2}}
-    - {num_query_heads: 8, dtype: bf16, knobs: knobs2, resolved: {num_queries_per_kv: 1, mask_type: 2}}
-    - {num_query_heads: 8, dtype: fp16, knobs: knobs3, resolved: {num_queries_per_kv: 1, mask_type: 2}}
-    - {num_query_heads: 16, dtype: bf16, knobs: knobs2, resolved: {num_queries_per_kv: 2, mask_type: 2}}
-    - {num_query_heads: 16, dtype: fp16, knobs: knobs3, resolved: {num_queries_per_kv: 2, mask_type: 2}}
-    - {num_query_heads: 32, dtype: bf16, knobs: knobs2, resolved: {num_queries_per_kv: 4, mask_type: 2}}
-    - {num_query_heads: 32, dtype: fp16, knobs: knobs3, resolved: {num_queries_per_kv: 4, mask_type: 2}}
-    - {num_query_heads: 64, dtype: bf16, knobs: knobs2, resolved: {num_queries_per_kv: 8, mask_type: 2}}
-    - {num_query_heads: 64, dtype: fp16, knobs: knobs3, resolved: {num_queries_per_kv: 8, mask_type: 2}}
-    - {num_query_heads: 128, dtype: bf16, knobs: knobs2, resolved: {num_queries_per_kv: 16, mask_type: 2}}
-    - {num_query_heads: 128, dtype: fp16, knobs: knobs3, resolved: {num_queries_per_kv: 16, mask_type: 2}}
-    - {num_query_heads: 8, dtype: bf16, knobs: knobs4, resolved: {num_queries_per_kv: 1, mask_type: 2}}
-    - {num_query_heads: 8, dtype: fp16, knobs: knobs5, resolved: {num_queries_per_kv: 1, mask_type: 2}}
-    - {num_query_heads: 16, dtype: bf16, knobs: knobs4, resolved: {num_queries_per_kv: 2, mask_type: 2}}
-    - {num_query_heads: 16, dtype: fp16, knobs: knobs5, resolved: {num_queries_per_kv: 2, mask_type: 2}}
-    - {num_query_heads: 32, dtype: bf16, knobs: knobs4, resolved: {num_queries_per_kv: 4, mask_type: 2}}
-    - {num_query_heads: 32, dtype: fp16, knobs: knobs5, resolved: {num_queries_per_kv: 4, mask_type: 2}}
-    - {num_query_heads: 64, dtype: bf16, knobs: knobs4, resolved: {num_queries_per_kv: 8, mask_type: 2}}
-    - {num_query_heads: 64, dtype: fp16, knobs: knobs5, resolved: {num_queries_per_kv: 8, mask_type: 2}}
-    - {num_query_heads: 128, dtype: bf16, knobs: knobs4, resolved: {num_queries_per_kv: 16, mask_type: 2}}
-    - {num_query_heads: 128, dtype: fp16, knobs: knobs5, resolved: {num_queries_per_kv: 16, mask_type: 2}}
+    - {num_query_heads: 8, dtype: bf16, knobs: knobs1, resolved: {num_queries_per_kv: 1, mask_type: 2}}
+    - {num_query_heads: 8, dtype: fp16, knobs: knobs2, resolved: {num_queries_per_kv: 1, mask_type: 2}}
+    - {num_query_heads: 16, dtype: bf16, knobs: knobs3, resolved: {num_queries_per_kv: 2, mask_type: 2}}
+    - {num_query_heads: 16, dtype: fp16, knobs: knobs2, resolved: {num_queries_per_kv: 2, mask_type: 2}}
+    - {num_query_heads: 64, dtype: bf16, knobs: knobs3, resolved: {num_queries_per_kv: 8, mask_type: 2}}
+    - {num_query_heads: 64, dtype: fp16, knobs: knobs2, resolved: {num_queries_per_kv: 8, mask_type: 2}}
   - name: attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw4_mw32_x11.gfx942
     metadata: [dtype, head_size, num_queries_per_kv, block_size, mask_type, sliding_window, tile_size, num_warps, block_m_per_warp, use_mfma_32x32x8, use_transposed_qk_32x32]
     spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, use_mfma_32x32x8, use_transposed_qk_32x32, use_q_direct_global, use_conflict_free_v_store, use_i64_kv_addr]
@@ -307,19 +261,6 @@ packs:
     - {num_query_heads: 64, dtype: fp16, knobs: knobs0, resolved: {num_queries_per_kv: 8, mask_type: 2}}
     - {num_query_heads: 128, dtype: bf16, knobs: knobs1, resolved: {num_queries_per_kv: 16, mask_type: 2}}
     - {num_query_heads: 128, dtype: fp16, knobs: knobs0, resolved: {num_queries_per_kv: 16, mask_type: 2}}
-  - name: attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw4_mw16_x00.gfx942
-    metadata: [dtype, head_size, num_queries_per_kv, block_size, mask_type, sliding_window, tile_size, num_warps, block_m_per_warp, use_mfma_32x32x8, use_transposed_qk_32x32]
-    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, use_mfma_32x32x8, use_transposed_qk_32x32, use_q_direct_global, use_conflict_free_v_store, use_i64_kv_addr]
-    vocabulary:
-      dtype:
-        bf16: BF16
-        fp16: FP16
-    spec_defaults: {head_size: 128, block_size: 16, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 4, use_q_direct_global: false, use_conflict_free_v_store: false, use_i64_kv_addr: false}
-    knob_sets:
-      knobs0:
-      - {tile_size: 32, num_warps: 4, block_m_per_warp: 16, use_mfma_32x32x8: false, use_transposed_qk_32x32: false}
-    shapes:
-    - {knobs: knobs0, resolved: {num_queries_per_kv: 1, mask_type: 2}}
   - name: attention_unified_{tag}_d128_g{md_num_queries_per_kv}_m2_bs16_t{tile_size}_nw{num_warps}_mw{block_m_per_warp}_x00.gfx942
     metadata: [dtype, head_size, num_queries_per_kv, block_size, mask_type, sliding_window, tile_size, num_warps, block_m_per_warp, use_mfma_32x32x8, use_transposed_qk_32x32]
     spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, use_mfma_32x32x8, use_transposed_qk_32x32, use_q_direct_global, use_conflict_free_v_store, use_i64_kv_addr]
@@ -330,9 +271,9 @@ packs:
     spec_defaults: {head_size: 128, block_size: 16, num_kv_heads: 8, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 4, use_q_direct_global: false, use_conflict_free_v_store: false, use_i64_kv_addr: false}
     knob_sets:
       knobs0:
-      - {tile_size: 32, num_warps: 4, block_m_per_warp: 16, use_mfma_32x32x8: false, use_transposed_qk_32x32: false, tag: 2d.fp16}
-      knobs1:
       - {tile_size: 32, num_warps: 4, block_m_per_warp: 16, use_mfma_32x32x8: false, use_transposed_qk_32x32: false, tag: 2d.bf16}
+      knobs1:
+      - {tile_size: 32, num_warps: 4, block_m_per_warp: 16, use_mfma_32x32x8: false, use_transposed_qk_32x32: false, tag: 2d.fp16}
       knobs2:
       - {tile_size: 32, num_warps: 2, block_m_per_warp: 32, use_mfma_32x32x8: false, use_transposed_qk_32x32: false, tag: 2d.bf16}
       knobs3:
@@ -342,32 +283,16 @@ packs:
       knobs5:
       - {tile_size: 16, num_warps: 2, block_m_per_warp: 16, use_mfma_32x32x8: false, use_transposed_qk_32x32: false, tag: 2d.fp16}
     shapes:
-    - {num_query_heads: 8, dtype: fp16, knobs: knobs0, resolved: {num_queries_per_kv: 1, mask_type: 2}}
-    - {num_query_heads: 16, dtype: bf16, knobs: knobs1, resolved: {num_queries_per_kv: 2, mask_type: 2}}
-    - {num_query_heads: 16, dtype: fp16, knobs: knobs0, resolved: {num_queries_per_kv: 2, mask_type: 2}}
-    - {num_query_heads: 32, dtype: bf16, knobs: knobs1, resolved: {num_queries_per_kv: 4, mask_type: 2}}
-    - {num_query_heads: 32, dtype: fp16, knobs: knobs0, resolved: {num_queries_per_kv: 4, mask_type: 2}}
-    - {num_query_heads: 64, dtype: bf16, knobs: knobs1, resolved: {num_queries_per_kv: 8, mask_type: 2}}
-    - {num_query_heads: 64, dtype: fp16, knobs: knobs0, resolved: {num_queries_per_kv: 8, mask_type: 2}}
-    - {num_query_heads: 128, dtype: bf16, knobs: knobs1, resolved: {num_queries_per_kv: 16, mask_type: 2}}
-    - {num_query_heads: 128, dtype: fp16, knobs: knobs0, resolved: {num_queries_per_kv: 16, mask_type: 2}}
+    - {num_query_heads: 8, dtype: bf16, knobs: knobs0, resolved: {num_queries_per_kv: 1, mask_type: 2}}
+    - {num_query_heads: 16, dtype: bf16, knobs: knobs0, resolved: {num_queries_per_kv: 2, mask_type: 2}}
+    - {num_query_heads: 16, dtype: fp16, knobs: knobs1, resolved: {num_queries_per_kv: 2, mask_type: 2}}
+    - {num_query_heads: 64, dtype: bf16, knobs: knobs0, resolved: {num_queries_per_kv: 8, mask_type: 2}}
     - {num_query_heads: 8, dtype: bf16, knobs: knobs2, resolved: {num_queries_per_kv: 1, mask_type: 2}}
     - {num_query_heads: 8, dtype: fp16, knobs: knobs3, resolved: {num_queries_per_kv: 1, mask_type: 2}}
-    - {num_query_heads: 16, dtype: bf16, knobs: knobs2, resolved: {num_queries_per_kv: 2, mask_type: 2}}
-    - {num_query_heads: 16, dtype: fp16, knobs: knobs3, resolved: {num_queries_per_kv: 2, mask_type: 2}}
     - {num_query_heads: 32, dtype: bf16, knobs: knobs2, resolved: {num_queries_per_kv: 4, mask_type: 2}}
-    - {num_query_heads: 32, dtype: fp16, knobs: knobs3, resolved: {num_queries_per_kv: 4, mask_type: 2}}
-    - {num_query_heads: 64, dtype: bf16, knobs: knobs2, resolved: {num_queries_per_kv: 8, mask_type: 2}}
-    - {num_query_heads: 64, dtype: fp16, knobs: knobs3, resolved: {num_queries_per_kv: 8, mask_type: 2}}
-    - {num_query_heads: 128, dtype: bf16, knobs: knobs2, resolved: {num_queries_per_kv: 16, mask_type: 2}}
-    - {num_query_heads: 128, dtype: fp16, knobs: knobs3, resolved: {num_queries_per_kv: 16, mask_type: 2}}
     - {num_query_heads: 8, dtype: bf16, knobs: knobs4, resolved: {num_queries_per_kv: 1, mask_type: 2}}
     - {num_query_heads: 8, dtype: fp16, knobs: knobs5, resolved: {num_queries_per_kv: 1, mask_type: 2}}
-    - {num_query_heads: 16, dtype: bf16, knobs: knobs4, resolved: {num_queries_per_kv: 2, mask_type: 2}}
-    - {num_query_heads: 16, dtype: fp16, knobs: knobs5, resolved: {num_queries_per_kv: 2, mask_type: 2}}
     - {num_query_heads: 32, dtype: bf16, knobs: knobs4, resolved: {num_queries_per_kv: 4, mask_type: 2}}
     - {num_query_heads: 32, dtype: fp16, knobs: knobs5, resolved: {num_queries_per_kv: 4, mask_type: 2}}
     - {num_query_heads: 64, dtype: bf16, knobs: knobs4, resolved: {num_queries_per_kv: 8, mask_type: 2}}
     - {num_query_heads: 64, dtype: fp16, knobs: knobs5, resolved: {num_queries_per_kv: 8, mask_type: 2}}
-    - {num_query_heads: 128, dtype: bf16, knobs: knobs4, resolved: {num_queries_per_kv: 16, mask_type: 2}}
-    - {num_query_heads: 128, dtype: fp16, knobs: knobs5, resolved: {num_queries_per_kv: 16, mask_type: 2}}

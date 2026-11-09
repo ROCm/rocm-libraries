@@ -164,16 +164,13 @@ constexpr std::array<Geometry, 5> D128_GEOMETRIES{{
     {"Narrow2x16T16", 16, 2, 16, 0, 0},
 }};
 
-/// Head pairs the forced cases cycle through: every GQA ratio the catalog ships, several of
-/// them pairs no manifest cell lists, since one kernel serves every pair of its ratio.
+/// A (query heads, KV heads) pair. Several forced cases use pairs no manifest cell lists,
+/// since one kernel serves every pair of its GQA ratio.
 struct Heads
 {
     int64_t queryHeads;
     int64_t kvHeads;
 };
-
-constexpr std::array<Heads, 7> HEADS{
-    {{8, 8}, {24, 6}, {16, 4}, {48, 3}, {64, 8}, {20, 10}, {8, 2}}};
 
 Knobs knobsOf(const Geometry& g)
 {
@@ -189,30 +186,56 @@ std::string dtypeName(DataType dataType)
     return dataType == DataType::HALF ? "Fp16" : "Bf16";
 }
 
-/// Every kernel class (head size x geometry x dtype, all bottom-right causal) forced once, on
-/// a prefill shape with B > 1 and Sq != Skv, cycling through the head pairs; then cold cases
-/// the engine's own ranking serves with each head size's default geometry, one at B 512.
+/// One forced kernel class (head size x geometry x dtype) and the head pair it runs on. The
+/// pair's GQA ratio is one the reduced catalog ships for that class.
+struct ForcedClass
+{
+    int64_t headSize;
+    const Geometry* geometry;
+    DataType dataType;
+    Heads heads;
+};
+
+/// Every kernel class the catalog ships, forced once on a prefill shape with B > 1 and
+/// Sq != Skv; then cold cases the engine's own ranking serves with each head size's default
+/// geometry, one at B 512. Variant reduction dropped D64 Narrow4x16T64 bf16 and D64
+/// Narrow4x32T64 fp16 at every ratio, so they have no case.
 std::vector<KnobCase> knobCases()
 {
+    constexpr auto BF16 = DataType::BFLOAT16;
+    constexpr auto FP16 = DataType::HALF;
+    const std::array<ForcedClass, 18> forced{{
+        {64, &D64_GEOMETRIES[0], BF16, {8, 8}},
+        {64, &D64_GEOMETRIES[0], FP16, {24, 6}},
+        {64, &D64_GEOMETRIES[1], BF16, {64, 8}},
+        {64, &D64_GEOMETRIES[1], FP16, {64, 8}},
+        {64, &D64_GEOMETRIES[2], FP16, {8, 8}},
+        {64, &D64_GEOMETRIES[3], BF16, {8, 8}},
+        {64, &D64_GEOMETRIES[4], BF16, {20, 10}},
+        {64, &D64_GEOMETRIES[4], FP16, {64, 8}},
+        {128, &D128_GEOMETRIES[0], BF16, {48, 3}},
+        {128, &D128_GEOMETRIES[0], FP16, {64, 8}},
+        {128, &D128_GEOMETRIES[1], BF16, {20, 10}},
+        {128, &D128_GEOMETRIES[1], FP16, {8, 2}},
+        {128, &D128_GEOMETRIES[2], BF16, {8, 8}},
+        {128, &D128_GEOMETRIES[2], FP16, {20, 10}},
+        {128, &D128_GEOMETRIES[3], BF16, {16, 4}},
+        {128, &D128_GEOMETRIES[3], FP16, {8, 8}},
+        {128, &D128_GEOMETRIES[4], BF16, {64, 8}},
+        {128, &D128_GEOMETRIES[4], FP16, {64, 8}},
+    }};
     std::vector<KnobCase> cases;
-    std::size_t at = 0;
-    const auto addAll = [&](int64_t headSize, const auto& geometries) {
-        for(const auto& g : geometries)
-        {
-            for(const auto dataType : {DataType::BFLOAT16, DataType::HALF})
-            {
-                const auto& h = HEADS[at++ % HEADS.size()];
-                cases.push_back(
-                    {"D" + std::to_string(headSize) + "_" + g.name + "_" + dtypeName(dataType)
-                         + "_Hq" + std::to_string(h.queryHeads) + "Hkv" + std::to_string(h.kvHeads),
-                     {dataType, headSize, h.queryHeads, h.kvHeads, Mask::BOTTOM_RIGHT, 2, 96, 256},
-                     knobsOf(g),
-                     knobsOf(g)});
-            }
-        }
-    };
-    addAll(64, D64_GEOMETRIES);
-    addAll(128, D128_GEOMETRIES);
+    for(const auto& f : forced)
+    {
+        const auto& g = *f.geometry;
+        const auto& h = f.heads;
+        cases.push_back(
+            {"D" + std::to_string(f.headSize) + "_" + g.name + "_" + dtypeName(f.dataType) + "_Hq"
+                 + std::to_string(h.queryHeads) + "Hkv" + std::to_string(h.kvHeads),
+             {f.dataType, f.headSize, h.queryHeads, h.kvHeads, Mask::BOTTOM_RIGHT, 2, 96, 256},
+             knobsOf(g),
+             knobsOf(g)});
+    }
 
     cases.push_back({"D64_Cold_SelectsTheDefaultGeometry",
                      {DataType::BFLOAT16, 64, 32, 8, Mask::BOTTOM_RIGHT, 3, 512, 512},
