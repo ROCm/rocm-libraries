@@ -104,7 +104,8 @@ typedef struct rocke_direct_conv_problem
     int KW; /* default 3 */
     int PAD; /* default 1 */
     int stride; /* default 1 */
-    const char* dtype; /* "fp16" or "bf16"; NULL is treated as "fp16" by all
+    const char* dtype; /* "fp16" or "bf16" (the non-grouped family also takes
+                        * "fp32" / "tf32"); NULL is treated as "fp16" by all
                         * build functions.  Always set this field explicitly or
                         * use rocke_direct_conv_problem_default() which sets it
                         * to "fp16".  Zero-initialising the struct leaves dtype

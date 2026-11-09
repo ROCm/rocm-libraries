@@ -1329,7 +1329,10 @@ def conv_direct_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
 
 def conv_direct_nongrouped_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`DirectNongroupedConvSpec` -> flat dict (problem nested, dtype included).
-    ``iglp`` / ``waves_per_eu`` are forwarded as-is; ``None`` means "knob off"."""
+    ``iglp`` / ``waves_per_eu`` are forwarded as-is; ``None`` means "knob off".
+    ``dtype`` is the problem's own name ("fp16", "bf16", "fp32" or "tf32"): the C
+    builder derives the storage type and the MMA atoms from it, as Python does,
+    so ``lds_pad`` (in elements) is forwarded as the spec holds it."""
     p = spec.problem
     return dict(
         problem=dict(
