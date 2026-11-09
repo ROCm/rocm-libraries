@@ -372,8 +372,9 @@ default), and they run on a two-GPU gfx950 node in Math CI's `precheckin` on pul
 built from this file ([TheRock#5230](https://github.com/ROCm/TheRock/pull/5230)), so the tiers above
 are what CI actually runs. A pull request to this repository gets the `standard` tier in Multi-Arch
 CI, because TheRock treats any rocm-libraries change as a submodule change; scheduled nightly runs
-get `comprehensive`. The hipBLASLt ASAN lane is the exception: it still drives `hipblaslt-test`
-directly through `test/therock/test_hipblaslt.py` at the `quick` tier.
+get `comprehensive`. The hipBLASLt ASAN lane drives `hipblaslt-test` directly through
+`test/therock/test_hipblaslt.py`: `quick` selects `*smoke*` on pull requests, and `standard` selects
+`*smoke*:*quick*:*pre_checkin*-*known_bug*` nightly.
 
 **Test size and shape expectations.** The suite leans heavily on many small problem sizes rather
 than few large ones, which is the right default: most correctness bugs are in tiling, edge handling,
@@ -649,10 +650,11 @@ the C++ build and test.
 | --- | --- | --- | --- |
 | Build (Linux and Windows) | Yes | CI / DevOps + TheRock | Maintain jobs, runners, and pipeline health |
 | Library logic validation (`TensileLogic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any kernel-generating build. No check name, no test report |
+| Logic corpus checks (`TensileLogic --check-all --strict-known-bugs`, `@needs_logic_corpus` tests) | Yes, when the logic or its validators are touched | Component team / CI | Enforced by the `Component CI: hipBLASLt Logic Corpus` lane, which rolls up to the required `Component CI Summary`. Unlike the build-wired call, it checks every architecture the change touches, and the whole corpus when a validator changes |
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Asserted by the gating `preliminary` job and by the TensileLite coverage lane. Review every golden diff; never bulk-regenerate |
-| AddressSanitizer build and quick test | **No** | Component team | The hipBLASLt ASAN lane runs on every hipBLASLt PR, but its summary check is not required. Keep it green anyway |
+| AddressSanitizer build and tests | **No** | Component team | The hipBLASLt ASAN lane runs quick tests for relevant PRs, standard tests nightly, and the selected test type manually, but its summary check is not required. Keep it green anyway |
 | Code coverage floor and ratchet (TensileLite) | Yes, when `tensilelite/` is touched | Component team / CI | Enforced by the `Component CI: TensileLite coverage` lane, which rolls up to the required `Component CI Summary`. Floors move up only, on the honor system |
 | Formatting and lint (`pre-commit`) | Yes | CI / DevOps | Maintain hooks |
 | Sensitive-word scan (the Math CI job named `static-analysis`) | Yes | CI / DevOps | Gating, but it is a disclosure gate rather than code analysis |
@@ -686,14 +688,16 @@ tracked as a gap.
 - TensileLite Python unit and characterization suites: on GPU across four architectures via
   `preliminary`, against installed artifacts via TheRock, and on CPU in the coverage lane
 - The TensileLite coverage floor and per-file ratchet, through `Component CI Summary`
+- The logic corpus checks on logic-only changes, through `Component CI Summary`
 - The rocjitsu GEMM workload runner unit tests, through `Component CI Summary`, when
   `clients/scripts/rocjitsu` changes
 - `pre-commit`
 
 **Informational.** Worth reading, cannot block a merge.
 
-- The hipBLASLt ASAN lane (host-only ASAN on gfx90a) and Multi-Arch CI ASAN (host-only ASAN on gfx94X
-  and gfx950). Both run on every pull request, and neither is a required check
+- The hipBLASLt ASAN lane runs host-only ASAN quick tests on relevant pull requests, standard
+  tests nightly, and the selected test type manually. Multi-Arch CI ASAN (host-only ASAN on
+  gfx94X and gfx950) runs on every pull request. Neither is a required check
 - The characterization-versus-unit coverage summary card
 - The `tensilelite-unit-codecov` and `codecov` checks and the codecov reports
 
@@ -732,19 +736,18 @@ about "what do we currently know is broken" has to check all nine.
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string, by convention | **Yes**, unless the marker overrides the strict default with `strict=False` |
 | Characterization goldens that pin known-wrong behavior | Nothing. The wrong behavior is recorded rather than hidden | ADR under `adr/` with a defect link, required by the reviewer checklist | Not applicable: a fix shows up as a golden diff needing review |
 | Coverage-pass filters in [`cmake/run_coverage_tests.sh`](cmake/run_coverage_tests.sh) | Tests that crash only in the coverage build, dropped from the coverage pass that would otherwise run them: `StreamKNullStream`, and pointer-array matmuls under `HIPBLASLT_CHECK_NUMERICS` | Ticket in a comment beside each filter (AIHPBLAS-5137, AIHPBLAS-5136) | **No.** The excluded combination stops running, so the coverage job cannot see either fix and a person has to delete the filter. The blind spot is narrow, though: both tests still run in the unfiltered `precheckin` job, so what goes unobserved is the coverage build and the enabled-`CHECK_NUMERICS` combination, not the tests themselves |
-| `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/tensilelite/Tests/unit/test_PlaceholderMerge.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
+| `@needs_logic_corpus` tests, resolved through [`logic_corpus.py`](tensilelite/tensilelite/Tests/unit/logic_corpus.py) | The few unit tests that still read the logic corpus (see [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests)), whenever `library/.../Logic` is not on disk | Issue URL in the skip reason; `HIPBLASLT_REQUIRE_LOGIC_CORPUS=1` turns the skip into a failure | **Not applicable.** It gates on a precondition rather than a bug, and the cross-file checks it once hid now run in `TensileLogic --check-all` regardless |
 
 This last mechanism is a different shape from the other eight: it is not quarantining a *known* bug
-at all, but gating on a precondition, and it lands in the same **Blind** tier as the client
-quarantine list for a more permanent reason. In TheRock CI's installed-artifact layout, the corpus
-this precondition checks for never exists by design (see
-[CI visibility and gating](tensilelite/TESTING.md#ci-visibility-and-gating)), so the 2 tests behind
-it in `test_PlaceholderMerge.py` cannot execute for real in that lane, ever, independent of whether
-the underlying data is correct. (A third, in `test_GpuRevisionTarget.py`, was deleted along with
-the module it tested in [PR #11777](https://github.com/ROCm/rocm-libraries/pull/11777).) [PR #7716](https://github.com/ROCm/rocm-libraries/pull/7716)
-narrowed the marker from a module-wide xfail (which was false-XPASSing 3 unrelated tests) to just
-the 2 tests that need the corpus; it fixed the XPASS problem it was solving but left this shape
-intact.
+at all, but gating on a precondition. In TheRock CI's installed-artifact layout the corpus never
+exists by design (see [CI visibility and gating](tensilelite/TESTING.md#ci-visibility-and-gating)),
+so these tests skip there every time. That used to hide real corpus checks, which made it a **Blind**
+entry. Those checks now live where the corpus is: `TensileLogic --check-all` for cross-file facts.
+The `@needs_logic_corpus` tests themselves also run, with the corpus required, in the
+`Component CI: hipBLASLt Logic Corpus` lane on any change under `Tensile/Logic/`. Every run prints
+a `needs_logic_corpus: N ran, M skipped` line so a lane that lacks the corpus says so
+([#14887](https://github.com/ROCm/rocm-libraries/issues/14887),
+[ROCM-33834](https://amd-hub.atlassian.net/browse/ROCM-33834)).
 
 **The distinction that matters is the last column.** Format is cosmetic; what separates a healthy
 suppression from rot is whether the mechanism can tell you the underlying bug got fixed. That sorts
@@ -887,7 +890,8 @@ the set of architectures the library supports or builds for.
 | Linux, gfx90a / gfx942 / gfx950 / gfx12 | TensileLite's whole unit and characterization tree, then the `common` GEMM-selection suite | PR, via Math CI `preliminary` | Skipped unless `tensilelite/` changed, and the second stage needs the first to pass. See [tensilelite/TESTING.md#pre-submit--ci-gates](tensilelite/TESTING.md#pre-submit--ci-gates) |
 | Linux, gfx94X-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | Primary GitHub Actions test target. 6 shards |
 | Linux, gfx950-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | On the pull-request path since the TheRock pin of 2026-10-02. Also covered per PR by Math CI |
-| Linux, gfx90a | Partial | PR (host-only ASAN, quick tier, not a required check), TheRock nightly | The hipBLASLt ASAN lane's only architecture |
+| Linux, gfx90a | Partial | TheRock nightly | Per-PR client testing remains in Math CI |
+| Linux, gfx942 / gfx950 | Partial | PR (host-only ASAN, quick tier); nightly (standard tier); manual (selected tier); not a required check | Separate hipBLASLt and hipSPARSELt GPU jobs share one build per architecture |
 | Windows, gfx110X | Partial | PR, via TheRock Multi-Arch CI | 1 shard |
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
 | Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
@@ -940,16 +944,21 @@ red sanitizer run does not block a merge.
 
 **What runs.** The `hipBLASLt ASAN CI` workflow
 ([`.github/workflows/hipblaslt-asan-ci.yml`](../../.github/workflows/hipblaslt-asan-ci.yml)) triggers
-on any pull request touching `projects/hipblaslt/**` or the hipBLASLt test driver. It builds
-hipBLASLt through TheRock with host-only ASAN (`-DTHEROCK_SANITIZER=HOST_ASAN`, mirroring TheRock's
-`linux-release-host-asan` preset) for gfx90a, and then runs the quick tier of `hipblaslt-test` under
-the sanitizer runtime on real hardware. Separately, `TheRock Multi-Arch CI ASAN` runs on every pull
+on pull requests touching either library, either test driver, the suppression file, or the workflow,
+nightly at 07:00 UTC, and on manual dispatch.
+It builds through TheRock with host-only ASAN (`-DTHEROCK_SANITIZER=HOST_ASAN`, mirroring TheRock's
+`linux-release-host-asan` preset), runs quick tests for relevant PRs, and runs standard tests
+nightly on gfx942 and gfx950. Both architectures test hipBLASLt and hipSPARSELt.
+Manual dispatch accepts the test type as a workflow input.
+The selected type is passed to the test runners for every architecture.
+Each architecture has one build and each library has a separate
+GPU job. Separately, `TheRock Multi-Arch CI ASAN` runs on every pull
 request to this repository with host-only ASAN, and builds full ASAN for its nightly and
 manually dispatched runs.
 
 | Sanitizer | What it catches | Where it runs | Gating |
 | --- | --- | --- | --- |
-| **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | Every PR touching hipBLASLt, gfx90a, quick tier, via `hipBLASLt ASAN CI` | No. `hipBLASLt ASAN CI Summary` is not a required check |
+| **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | `hipBLASLt ASAN CI` on gfx942/gfx950: quick tests on relevant PRs; standard tests nightly; manually selected test type | No. `hipBLASLt ASAN CI Summary` is not a required check |
 | **HOST_ASAN** | Same as the first row | Every PR, via Multi-Arch CI ASAN, gfx94X and gfx950 | No. `Multi-Arch CI ASAN Summary` is not a required check |
 | **Full ASAN** (host plus device instrumentation) | Adds device-side memory errors in kernels | Nightly Multi-Arch ASAN and manual dispatch, gfx94X and gfx950 | No |
 | **rocjitsu race detector** (CPU emulation) | GPU kernel races within one workgroup: register or LDS reads before the required `s_waitcnt` or `s_barrier`. Not races between workgroups through global memory | Nightly Multi-Arch sidecar, 100 fixed-seed GEMMs per emulated target (currently gfx950); see [Nightly Validation](#nightly-validation) | No |
@@ -971,15 +980,18 @@ sanitizer options intentionally stand down when the superbuild is driving.
 XNACK-capable configurations and is substantially slower, which is why it runs only nightly and on
 manual dispatch.
 
-There is currently no gfx90a device-ASAN runtime test lane. Before enabling one, runner capacity
-and stability with full ASAN and `HSA_XNACK=1` must be reviewed with DevOps. A dedicated pool,
+The ASAN workflows described here do not run gfx90a tests. Its per-PR client testing
+remains in Math CI. Before adding sanitizer coverage, runner capacity and stability must be
+reviewed with DevOps; full device ASAN also requires `HSA_XNACK=1`. A dedicated pool,
 potentially for nightly testing, is a separate follow-up; the hang investigation remains tracked
 in [rocm-libraries #12727](https://github.com/ROCm/rocm-libraries/issues/12727) and
 [TheRock-Infra #978](https://github.com/ROCm/TheRock-Infra/issues/978).
 
 **Explicitly not covered:** thread safety (no TSAN lane yet, despite the build option existing);
 undefined behavior (no UBSAN); device-side memory errors on any per-PR lane; and, in the
-hipBLASLt ASAN lane, any test outside the quick tier. None of these lanes can block a merge today.
+hipBLASLt ASAN lane, tests outside the quick tier on PRs or the standard tier on
+nightly runs. Manual coverage depends on the selected test type.
+None of these lanes can block a merge today.
 
 ## Static Analysis
 
@@ -1166,7 +1178,7 @@ real unit tests, which is the migration described in
 [tensilelite/TESTING.md#unit-testing-strategy](tensilelite/TESTING.md#unit-testing-strategy).
 
 **4. Memory safety.** Wrong-sized workspaces, out-of-bounds host buffers, and leaks in long-running
-inference processes. Checked by the per-PR ASAN lanes (host-only ASAN on gfx90a, gfx94X and gfx950)
+inference processes. Checked by the per-PR ASAN lanes (host-only ASAN on gfx94X and gfx950)
 and by nightly full ASAN, none of which blocks a merge today.
 Device-side memory errors are covered only nightly.
 
@@ -1742,11 +1754,6 @@ cadence, and pull requests get a performance number.
   and a drift produces confusing test-selection behavior rather than an obvious failure.
 - **Run derived-parameter assignment in the library logic gate** (AIHPBLAS-3575), so a logic entry
   that would fail in code generation fails at the gate instead.
-- **Give the chip-ID-arch-lock check coverage everywhere**
-  ([#7481](https://github.com/ROCm/rocm-libraries/issues/7481)). Its pytest copies never run in
-  TheRock, because the installed tree does not ship the logic corpus, and gfx1250 gets no TheRock test
-  stage at all.
-
 #### Keep it honest
 
 **Goal.** The rules that stop the test system from decaying again once it has been regularized.

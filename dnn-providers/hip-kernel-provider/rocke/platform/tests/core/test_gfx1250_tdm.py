@@ -14,7 +14,18 @@ from __future__ import annotations
 import re
 import unittest
 
-from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType, VectorType, is_pure_op_name
+from rocke.core.ir import (
+    F32,
+    I32,
+    I64,
+    TDM_PAD_AMOUNT_MAX,
+    TDM_PAD_INTERVAL_MAX,
+    IRBuilder,
+    PtrType,
+    VectorType,
+    encode_tdm_padding,
+    is_pure_op_name,
+)
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -149,6 +160,31 @@ class TestGfx1250Tdm(unittest.TestCase):
         self.assertNotIn("trunc i64 %lds", llvm)
         self.assertEqual(_readfirstlane_args(llvm)[1], "%lds")
 
+    def test_i64_global_address_used_directly(self):
+        # An i64 address (from global_addr_of) is packed as is: no ptrtoint.
+        b = IRBuilder("i64_gaddr")
+        gaddr = b.param("gaddr", I64)
+        lds = b.param("lds", I32)
+        n = b.const_i32(64)
+        groups = b.tdm_descriptor_2d(
+            gaddr,
+            lds,
+            elem_bytes=4,
+            tensor_dim0=n,
+            tensor_dim1=n,
+            row_stride=n,
+            tile_dim0=64,
+            tile_dim1=1,
+        )
+        b.tensor_load_to_lds(*groups)
+        b.ret()
+        llvm = _lower(b.kernel)
+        self.assertNotIn("ptrtoint", llvm)
+        lo = re.search(r"(%\w+) = trunc i64 %gaddr to i32", llvm)
+        self.assertIsNotNone(lo)
+        self.assertRegex(llvm, r"= lshr i64 %gaddr, 32")
+        self.assertEqual(_readfirstlane_args(llvm)[2], lo.group(1))
+
     def test_group_types(self):
         b = IRBuilder("types")
         src = b.param("src", PtrType(I32, "global"))
@@ -257,6 +293,40 @@ class TestGfx1250Tdm(unittest.TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
                     build(**overrides)
+
+
+class TestTdmPaddingEncode(unittest.TestCase):
+    """encode_tdm_padding: a row pad as the descriptor's two raw fields. A wrong
+    encode shifts every LDS row, which reads as wrong results rather than an
+    error. future_intrinsic_lowering.cpp mirrors these cases."""
+
+    def test_interval_is_a_biased_log2_of_dwords(self):
+        # pad_interval = log2(interval_bytes / 4) - 1
+        for interval_bytes, expected in ((8, 0), (16, 1), (32, 2), (64, 3), (1024, 7)):
+            with self.subTest(interval_bytes=interval_bytes):
+                self.assertEqual(encode_tdm_padding(interval_bytes, 4)[0], expected)
+
+    def test_amount_is_dwords_minus_one(self):
+        for pad_bytes, expected in ((4, 0), (16, 3), (32, 7), (512, 127)):
+            with self.subTest(pad_bytes=pad_bytes):
+                self.assertEqual(encode_tdm_padding(64, pad_bytes)[1], expected)
+
+    def test_field_widths_are_the_documented_maxima(self):
+        self.assertEqual(
+            encode_tdm_padding(1024, 512), (TDM_PAD_INTERVAL_MAX, TDM_PAD_AMOUNT_MAX)
+        )
+
+    def test_rejects_inexpressible_padding(self):
+        for args, message in (
+            ((64, 0), "needs a positive pad"),
+            ((64, 2), "dword-granular"),
+            ((12, 16), "power-of-two dword count"),
+            ((2048, 16), "pad_interval 8 exceeds 7"),
+            ((64, 1024), "pad_amount 255 exceeds 127"),
+        ):
+            with self.subTest(args=args):
+                with self.assertRaisesRegex(ValueError, message):
+                    encode_tdm_padding(*args)
 
 
 if __name__ == "__main__":

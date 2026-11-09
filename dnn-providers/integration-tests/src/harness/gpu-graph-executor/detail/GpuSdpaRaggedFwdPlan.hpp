@@ -79,6 +79,23 @@ public:
                                           _params.raggedOffsetLseTensor->strides);
         }
 
+        // seq_len_q bounds Q, O and the LSE; seq_len_kv bounds K and V. Both or neither are bound
+        // (the gate's padding rule).
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<int32_t>> seqLenQTensor;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<int32_t>> seqLenKvTensor;
+        if(_params.seqLenQTensor.has_value())
+        {
+            seqLenQTensor.emplace(variantPack.at(_params.seqLenQTensor->uid),
+                                  _params.seqLenQTensor->dims,
+                                  _params.seqLenQTensor->strides);
+        }
+        if(_params.seqLenKvTensor.has_value())
+        {
+            seqLenKvTensor.emplace(variantPack.at(_params.seqLenKvTensor->uid),
+                                   _params.seqLenKvTensor->dims,
+                                   _params.seqLenKvTensor->strides);
+        }
+
         // A pass-by-value descale (baked or runtime) is staged in a one-element tensor.
         // A device descale is viewed in place. fpropRagged checks the shape.
         const auto bindDescale
@@ -147,7 +164,9 @@ public:
                 descaleQ,
                 descaleK,
                 descaleV,
-                multipliers);
+                multipliers,
+                seqLenQTensor.has_value() ? &seqLenQTensor.value() : nullptr,
+                seqLenKvTensor.has_value() ? &seqLenKvTensor.value() : nullptr);
     }
 
 private:
@@ -189,7 +208,7 @@ public:
         return true;
     }
 
-    // fpropRagged checks that O (and a packed LSE) has Q's per-batch lengths and V has K's.
+    // fpropRagged checks that O (and a ragged LSE) has Q's per-batch lengths and V has K's.
     std::unique_ptr<IGpuGraphNodePlanExecutor>
         buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                       const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override

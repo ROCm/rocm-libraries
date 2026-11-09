@@ -85,7 +85,7 @@
 // FORCE a collision at the unit level and assert collision-safety for EVERY cache
 // CachingLibrary owns:
 //   * findBestSolution (m_cache)                         -- #7754 made it size_t-keyed; this
-//   * findTopSolutions (m_caches / m_cachesAllSolutions) -- test FAILS on #7754, PASSES on the fix.
+//   * findTopSolutions (m_caches) -- one entry holds the solutions and the already-returned-all bit.
 //   * findTopSolutionsGroupedGemm (m_cachesGroupedGemm)  -- this cache was NOT changed by #7754
 //        (it stayed keyed on the full std::vector<MyProblem>); the test below is therefore a
 //        PREVENTIVE guard that PASSES on both, ensuring this last cache is never regressed into
