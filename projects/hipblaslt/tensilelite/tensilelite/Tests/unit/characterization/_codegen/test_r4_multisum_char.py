@@ -129,6 +129,7 @@ _MULTISUM_KERNEL = {
         "UseInitialStridesAB": False,
         "IndexAssignmentsA": [0, 2, 3],
         "IndexAssignmentsB": [3, 1, 2],
+        "UseScaleAlphaVec": 0,
     },
     "DepthU": 16,
     "GlobalSplitU": 1,
