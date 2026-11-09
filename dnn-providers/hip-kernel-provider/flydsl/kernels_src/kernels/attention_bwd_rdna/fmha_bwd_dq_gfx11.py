@@ -17,7 +17,7 @@
     dS = P * (dP - delta)                 delta = rowsum(dO * O) from prep
     dQ = sm_scale * sum_j dS . K          dB = dS (bias builds; unscaled, rounded to the 16-bit I/O type like the GEMM3 operand)
 
-ABI = the gfx950 dQ launcher (`tools/test_abi_parity.py` enforces it): Q, K, V, Bias, DO, DQ, DB, LSE, Delta, ..., rt_flags, stream. The launcher
+ABI = the gfx950 dQ launcher's (argument names, order and annotations): Q, K, V, Bias, DO, DQ, DB, LSE, Delta, ..., rt_flags, stream. The launcher
 keeps its gfx950 name. A `dump=1` object has one extra `dump: fx.Pointer` immediately before `stream` and is a separate nested launcher.
 
 Orientation (`rdna_layout_gfx11.KV_ROWS`, S^T form): every accumulator tile has rows = kv, columns = q, so LSE' and Delta are per lane (column

@@ -2,9 +2,10 @@
 # Copyright (c) 2025 FlyDSL Project Contributors
 # Not vendored: written for this provider from the FlyDSL SDPA backward sweep (see README.md); it has no upstream.
 
-"""gfx11 / gfx12 helpers that `fmha_common_gfx1201` (frozen) spells with `kernels_common._if_then`, which the vendored `kernels.common`
-(FlyDSL 0.3.4) does not define. Same names and semantics as the copies in `fmha_bwd_dq_gfx11.py`: the guarded cooperative-load staging, the
-padded-head store, and the context manager under both. Imports no module of this repository.
+"""gfx11 / gfx12 helpers over `_if_then`, the `scf.if` context manager that the vendored `kernels.common` (FlyDSL 0.3.4) does not define
+(`fmha_common_gfx1201` reaches the same helper as `common_utils._if_then` of this package's `flyc_polyfill`): the guarded cooperative-load
+staging, the padded-head store, and the context manager under both. Used by `fmha_bwd_dq_gfx11.py`, `fmha_bwd_dq_f32_gfx11.py` and
+`fmha_bwd_dkdv_gfx11.py`. Imports no module of this repository.
 """
 
 import contextlib

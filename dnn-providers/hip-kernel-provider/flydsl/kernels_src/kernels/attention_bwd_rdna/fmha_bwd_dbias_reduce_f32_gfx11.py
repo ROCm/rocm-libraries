@@ -14,7 +14,7 @@ sum over the broadcast dims is this kernel's job.
 order, batch-major then head (term t = ib * (reduced head count) + ih). One thread owns one output group (4 consecutive columns) and
 sums its terms itself. No atomics, no cross-thread combine, no dependence on the launch geometry: bitwise identical run to run.
 
-**ABI** (identical to `fmha_bwd_dbias_reduce_f32_gfx950`; one object; every size and stride is a launch value; strides in 4-byte elements):
+**ABI** (identical to `fmha_bwd_dbias_reduce_f32_gfx950`, the launcher keeping its gfx950 name; one object; every size and stride is a launch value; strides in 4-byte elements):
     DB            full-shape fp32 workspace, (B, Hq, Sq, Sk) with strides stride_ws_{batch,head,seq}, unit column stride
     DBias         the user's fp32 dBias, (B or 1, Hq or 1, Sq, Sk) with strides stride_out_{batch,head,seq}, unit column stride
     num_batch, num_head, seqlen_q, seqlen_k   the problem's B, Hq, Sq, Sk
@@ -153,7 +153,6 @@ def build_fmha_bwd_dbias_reduce_f32_gfx11_module_primary(dtype_str):
         if use_vec:
             vt = Vec.make_type(VEC, elem)
             init_args = [Vec.filled(VEC, 0.0, fx.Float32).ir_value()]
-            loop_results = init_args
             for ib, b_args in range(
                 fx.Index(0), n_batch_i, fx.Index(1), init=init_args
             ):
@@ -169,7 +168,7 @@ def build_fmha_bwd_dbias_reduce_f32_gfx11_module_primary(dtype_str):
             if valid:
                 fx.ptr_store(res, out_p + fx.Int64(out_row))
         else:
-            # element-wise: 8 independent fp32 accumulators, columns masked at Sk
+            # element-wise: VEC (4) independent fp32 accumulators, columns masked at Sk
             sk = fx.Index(seqlen_k)
             init_args = [fx.Float32(0.0) for _ in range_constexpr(VEC)]
             for ib, b_args in range(

@@ -21,7 +21,7 @@ pairing as on wave64. Rows per block = 256 / TPR; the 256-thread block is 8 wave
 their own origin (`fmha.tensor_origin`: `off[z] * mul` when ragged, `z * stride_batch` when dense; LSE with its three element strides);
 Delta and LSE' go to the compact `[B, H, max_seqlen_q]` workspace (`fmha.ws_row_base`).
 
-ABI = the gfx950 plain prep launcher (`tools/test_abi_parity.py` enforces it); the launcher keeps its gfx950 name:
+ABI = the gfx950 plain prep launcher's (argument names, order and annotations); the launcher keeps its gfx950 name:
     O, DO, LSE (in), LSE_ws (out), Delta (out), batch_size, seqinfo_q0, seqinfo_q1,
     off_O, mul_O, off_DO, mul_DO, off_Stats, mul_Stats, stride_stats_{batch,head,token},
     varlen_bits, num_seqlens, max_seqlen_q, num_head_q, hdim_vo,

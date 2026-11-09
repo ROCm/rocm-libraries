@@ -25,7 +25,7 @@ row group. A row owns `TPR = gcd(tile / 4, 16)` lanes (a power of two <= 16, so 
 **Exact vs padded.** An exact build requires hdim_vo == tile and uses 4-element vector loads. A padded build reads `hdim_vo <= tile`
 columns element by element with the tail masked to zero, for any hdim_vo.
 
-ABI (identical to `fmha_bwd_prep_f32_gfx950`; `tools/test_abi_parity.py` enforces it; the launcher keeps its gfx950 name):
+ABI (the argument names, order and annotations of `fmha_bwd_prep_f32_gfx950`; the launcher keeps its gfx950 name):
     O, DO, LSE (in), LSE_ws (out), Delta (out), batch_size, seqinfo_q0, seqinfo_q1,
     off_O, mul_O, off_DO, mul_DO, off_Stats, mul_Stats, stride_stats_{batch,head,token},
     varlen_bits, num_seqlens, max_seqlen_q, num_head_q, hdim_vo, stride_o_{batch,head,seq}, stride_do_{batch,head,seq}
