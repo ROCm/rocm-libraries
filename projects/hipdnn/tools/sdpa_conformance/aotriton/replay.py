@@ -18,12 +18,15 @@ Exit status:
   repro saved and against the FP32 reference attention (backward through autograd), and those
   errors are the verdict. A wrong-result fault reproduces with exit 0 (e.g. ``nan`` errors for a
   NaN output).
-* 1: the child died with a signal (``reproduced: died with signal N``) or exited nonzero after the
-  graph began executing (``reproduced: exited with status N``).
-* 70: setup error, the replay failed before the graph executed. That covers a ``from_json``,
-  engine or candidate selection error (the child's traceback is printed above) and, with
-  ``--device cuda``, no HIP device or a device or handle initialisation failure. A child that
-  exits nonzero before it reached the graph's execute call is a setup error too.
+* 1: reproduced. The child died with a signal at any point, including during ``Handle()`` or
+  setup (``reproduced: died with signal N``), or failed (an exception or a nonzero exit) after
+  the graph began executing: a bad execute status, a HIP error at synchronise, the CPU copy
+  (``reproduced: exited with status N``; the child's traceback is printed above).
+* 70: setup error. An exception or nonzero exit before the graph began executing: ``from_json``,
+  engine or candidate selection, no HIP device, or a device or handle initialisation exception.
+  The child creates a ``.executing`` file next to its output just before each direction's execute
+  and removes it when the next direction's setup starts; the parent classifies a nonzero exit by
+  that marker, so a setup failure of a later direction is exit 70 too. A signal death is exit 1 whatever the marker.
 
 The repro layout is documented in ``hipdnn_sdpa/_repro.py``.
 """
@@ -110,6 +113,7 @@ def replay_child(directory, out_path, device):
     results = {}
     for direction in meta["directions"]:
         call = meta["calls"][direction]
+        Path(out_path + EXECUTING_SUFFIX).unlink(missing_ok=True)
         graph = hipdnn.Graph()
         graph_json = (
             Path(directory) / contract.repro_graph_name(direction)
@@ -258,7 +262,9 @@ def main(argv=None):
             replay_child(args.directory, args.child, args.device)
         except Exception:
             traceback.print_exc()
-            return SETUP_ERROR_EXIT
+            # Past the marker the graph began executing: the failure is the reproduction.
+            began = os.path.exists(args.child + EXECUTING_SUFFIX)
+            return REPRODUCED_EXIT if began else SETUP_ERROR_EXIT
         return 0
     if args.device == "cuda" and not _cuda_available():
         print("replay failed before the graph executed: no ROCm-capable device")
@@ -279,9 +285,7 @@ def main(argv=None):
         if status < 0:
             print(f"reproduced: died with signal {-status}")
             return REPRODUCED_EXIT
-        if status == SETUP_ERROR_EXIT or (
-            status != 0 and not os.path.exists(out_path + EXECUTING_SUFFIX)
-        ):
+        if status != 0 and not os.path.exists(out_path + EXECUTING_SUFFIX):
             print("replay failed before the graph executed; see the output above")
             return SETUP_ERROR_EXIT
         if status != 0:

@@ -146,6 +146,14 @@ FAKE_FRONTEND = textwrap.dedent(
             return False
 
 
+    class _Bad:
+        def is_bad(self):
+            return True
+
+        def get_message(self):
+            return "fake execute failure"
+
+
     class HeuristicMode:
         FALLBACK = "fallback"
 
@@ -157,6 +165,10 @@ FAKE_FRONTEND = textwrap.dedent(
 
     class Handle:
         def __init__(self, stream=0):
+            if os.environ.get("FAKE_HANDLE_SEGV"):
+                os.kill(os.getpid(), signal.SIGSEGV)
+            if os.environ.get("FAKE_HANDLE_RAISE"):
+                raise RuntimeError("fake handle failure")
             if os.environ.get("FAKE_INIT_FAIL"):
                 print("Hip error: 'no ROCm-capable device is detected'(100) at hipblaslt.cpp:414", flush=True)
                 os._exit(1)
@@ -173,6 +185,8 @@ FAKE_FRONTEND = textwrap.dedent(
     class Graph:
         def from_json(self, handle, text):
             self.direction = json.loads(text)["direction"]
+            if os.environ.get("FAKE_FROM_JSON_FAIL") == self.direction:
+                raise RuntimeError("fake from_json failure")
             return _Ok()
 
         def get_engine_configs(self, modes, handle):
@@ -204,6 +218,12 @@ FAKE_FRONTEND = textwrap.dedent(
         def execute(self, handle, variant_pack, workspace):
             if os.environ.get("FAKE_CRASH"):
                 os.kill(os.getpid(), signal.SIGSEGV)
+            if os.environ.get("FAKE_EXEC_BAD"):
+                return _Bad()
+            if os.environ.get("FAKE_EXEC_RAISE_DIRECTION") == self.direction:
+                raise RuntimeError("fake HIP error at execute")
+            if os.environ.get("FAKE_EXEC_RAISE"):
+                raise RuntimeError("fake HIP error at execute")
             if os.environ.get("FAKE_EXEC_EXIT"):
                 os._exit(int(os.environ["FAKE_EXEC_EXIT"]))
             results = torch.load(os.environ["FAKE_RESULTS"])[self.direction]
@@ -235,7 +255,16 @@ def fake_frontend(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_KNOBS", str(tmp_path / "knobs.log"))
     monkeypatch.delenv("FAKE_CRASH", raising=False)
     monkeypatch.delenv("FAKE_INIT_FAIL", raising=False)
-    monkeypatch.delenv("FAKE_EXEC_EXIT", raising=False)
+    for name in (
+        "FAKE_EXEC_EXIT",
+        "FAKE_EXEC_BAD",
+        "FAKE_EXEC_RAISE",
+        "FAKE_EXEC_RAISE_DIRECTION",
+        "FAKE_FROM_JSON_FAIL",
+        "FAKE_HANDLE_SEGV",
+        "FAKE_HANDLE_RAISE",
+    ):
+        monkeypatch.delenv(name, raising=False)
     return tmp_path
 
 
@@ -356,6 +385,70 @@ def test_a_child_that_exits_nonzero_after_executing_is_reproduced(
     status = replay.main([str(fake_frontend / "repro"), "--device", "cpu"])
     assert status == 1
     assert "reproduced: exited with status 3" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("fault", ["FAKE_EXEC_RAISE", "FAKE_EXEC_BAD"])
+def test_a_child_that_fails_after_the_marker_is_reproduced_not_a_setup_error(
+    fake_frontend, monkeypatch, capsys, replay, fault
+):
+    repro_of_attention(fake_frontend / "repro", {"fwd": 0, "bwd": 0})
+    monkeypatch.setenv(fault, "1")
+    status = replay.main([str(fake_frontend / "repro"), "--device", "cpu"])
+    shown = capsys.readouterr().out
+    assert status == 1, shown
+    assert "reproduced: exited with status" in shown
+    assert "failed before the graph executed" not in shown
+
+
+def test_a_setup_failure_of_a_later_direction_is_a_setup_error(
+    fake_frontend, monkeypatch, capsys, replay
+):
+    results = repro_of_attention(fake_frontend / "repro", {"fwd": 0, "bwd": 0})
+    torch.save(results, fake_frontend / "results.pt")
+    monkeypatch.setenv("FAKE_RESULTS", str(fake_frontend / "results.pt"))
+    monkeypatch.setenv("FAKE_FROM_JSON_FAIL", "bwd")
+    status = replay.main([str(fake_frontend / "repro"), "--device", "cpu"])
+    shown = capsys.readouterr().out
+    assert (
+        "bwd" not in (fake_frontend / "pins.log").read_text()
+    )  # bwd never got selected
+    assert status == 70, shown
+    assert "reproduced" not in shown
+
+
+def test_a_failure_of_a_later_direction_after_its_own_marker_is_reproduced(
+    fake_frontend, monkeypatch, capsys, replay
+):
+    results = repro_of_attention(fake_frontend / "repro", {"fwd": 0, "bwd": 0})
+    torch.save(results, fake_frontend / "results.pt")
+    monkeypatch.setenv("FAKE_RESULTS", str(fake_frontend / "results.pt"))
+    monkeypatch.setenv("FAKE_EXEC_RAISE_DIRECTION", "bwd")
+    status = replay.main([str(fake_frontend / "repro"), "--device", "cpu"])
+    shown = capsys.readouterr().out
+    assert status == 1, shown
+    assert "reproduced: exited with status" in shown
+
+
+def test_a_child_that_dies_by_signal_before_the_marker_is_still_reproduced(
+    fake_frontend, monkeypatch, capsys, replay
+):
+    repro_of_attention(fake_frontend / "repro", {"fwd": 0, "bwd": 0})
+    monkeypatch.setenv("FAKE_HANDLE_SEGV", "1")
+    status = replay.main([str(fake_frontend / "repro"), "--device", "cpu"])
+    shown = capsys.readouterr().out
+    assert status == 1, shown
+    assert f"reproduced: died with signal {int(signal.SIGSEGV)}" in shown
+
+
+def test_a_child_that_raises_before_the_marker_is_a_setup_error(
+    fake_frontend, monkeypatch, capsys, replay
+):
+    repro_of_attention(fake_frontend / "repro", {"fwd": 0, "bwd": 0})
+    monkeypatch.setenv("FAKE_HANDLE_RAISE", "1")
+    status = replay.main([str(fake_frontend / "repro"), "--device", "cpu"])
+    shown = capsys.readouterr().out
+    assert status == 70, shown
+    assert "reproduced" not in shown
 
 
 def test_a_capture_directory_replays_without_a_saved_output(

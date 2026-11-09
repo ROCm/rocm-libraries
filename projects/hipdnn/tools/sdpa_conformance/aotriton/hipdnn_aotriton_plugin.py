@@ -730,7 +730,7 @@ def unpack_names(func):
     """Names of the tuple-unpacking assignment of ``args`` in ``func``'s source that holds
     ``storage_flip`` (the vendored function takes ``(request, args, device_str)`` and unpacks
     ``args`` by name). Raises ``RuntimeError`` naming ``func`` when it has no ``args`` parameter
-    or does not unpack ``storage_flip`` from it, so a vendored refresh that moves or renames
+    does not unpack ``storage_flip`` from it, or unpacks with a starred target, so a vendored refresh that moves or renames
     the argument fails loudly instead of rewriting the wrong one."""
     name = getattr(func, "__qualname__", repr(func))
     if "args" not in inspect.signature(func).parameters:
@@ -749,6 +749,11 @@ def unpack_names(func):
             and len(node.targets) == 1
             and isinstance(node.targets[0], ast.Tuple)
         ):
+            if any(isinstance(e, ast.Starred) for e in node.targets[0].elts):
+                raise RuntimeError(
+                    f"{name} unpacks its `args` tuple with a starred target; the position of "
+                    f"{_FLIP_NAME!r} cannot be found by name"
+                )
             names = [
                 e.id if isinstance(e, ast.Name) else None for e in node.targets[0].elts
             ]

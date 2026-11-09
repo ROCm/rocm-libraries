@@ -347,6 +347,16 @@ def test_a_wrapped_function_without_storage_flip_fails_loudly(vendored):
         plugin.make_do_test_op_bwd(no_args, "pytorch")
 
 
+def test_a_starred_unpack_of_args_fails_loudly(vendored):
+    def starred(request, args, device_str="cuda"):
+        BATCH, *mid, storage_flip, bias_type = args
+
+    with pytest.raises(RuntimeError, match=r"starred.*starred target"):
+        plugin.unpack_names(starred)
+    with pytest.raises(RuntimeError, match=r"starred.*starred target"):
+        plugin.make_do_test_op_bwd(starred, "pytorch")
+
+
 def test_a_wrapped_function_without_the_extents_fails_loudly(vendored):
     def no_extents(request, args, device_str="cuda"):
         BATCH, N_HEADS, D_HEAD, sq, sk, storage_flip = args

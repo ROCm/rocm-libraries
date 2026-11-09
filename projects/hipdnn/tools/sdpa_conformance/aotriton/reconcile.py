@@ -24,7 +24,7 @@ candidate columns) still reads, with the missing fields empty.
 ``<suite> <k> <N>`` per line, so a shard that left no directory shows as missing), outcome totals (with
 the ``native-skip`` rows by class: ``kernel-limit``, ``api-rule``, ``resource``, ``other``), per-
 pass and per-(direction, engine) counts over every shard (each engine credited from the ``fwd`` and
-``bwd`` columns of every passing row, then split by mode and by test file), the engines no case passed
+``bwd`` columns of every passing row (pass 1; every other pass credits the engine it pins), then split by mode and by test file), the engines no case passed
 with their first decline reasons, every ``fail`` / ``crash`` row with engine (the failing side's, else
 the other side's), side, stage and repro path, and with ``--baseline FILE`` (one failing node id per
 line) the failing node ids new to this run and the baseline ids that no longer fail here (outcome
@@ -553,17 +553,7 @@ def engine_counts(rows, counts=None):
     is a ``_tally`` already filled, for a run whose rows come shard by shard."""
     if counts is None:
         counts = _tally(rows, collections.defaultdict(collections.Counter))
-    lines = []
-    for label, c in sorted(counts.items()):
-        extra = [
-            f"{o}={n}"
-            for o, n in sorted(c.items())
-            if o not in ("pass", "fail", "declined")
-        ]
-        lines.append(
-            f"{label}: pass={c['pass']} fail={c['fail']} declined={c['declined']}"
-            + "".join(f" {e}" for e in extra)
-        )
+    lines = [f"{label}: {_outcome_text(c)}" for label, c in sorted(counts.items())]
     return "\n".join(lines)
 
 

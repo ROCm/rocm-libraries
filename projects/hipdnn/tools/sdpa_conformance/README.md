@@ -71,12 +71,12 @@ like their inputs), `efficient` stores O, dO, dQ, dK and dV BSHD (dB like the bi
 the vendored suite's own layouts (O and dO BHSD). q/k/v/b keep the vendored cases' own layouts in every
 mode. The mode reaches the pytest workers as `HIPDNN_SDPA_CONFORMANCE_LAYOUT_MODE`, appears in the pytest
 header, and `--all-engines` pass 2 inherits it. Varlen cases are unaffected.
-Layout coverage differs by mode: the default `pytorch` never runs AOTriton's own mix (BSHD Q/K/V with BHSD
+Layout coverage differs by mode (apart from `test_memory_layouts`, which sets every layout itself in every mode): the default `pytorch` never runs AOTriton's own mix (BSHD Q/K/V with BHSD
 O/dO), because O and dO follow Q; `aotriton` runs that mix but never BSHD O/dO; `efficient` always runs BSHD
 O/dO and never BHSD O/dO. A full sweep runs both `pytorch` and `aotriton`.
 A requested layout is replaced by its equivalent at the case's shape (`canonical_perm`): an axis of extent 1 (one
 head, unit seqlen, batch 1) has no place in memory, so AOTriton's own layout check would read the allocation back as
-another permutation; `efficient` still never runs BHSD O/dO in memory order, and `aotriton` mode is unchanged.
+another permutation; for extents above 1 `efficient` still never runs BHSD O/dO in memory order (at extent 1 the two are one allocation), and `aotriton` mode is unchanged.
 The layout wrappers find the `storage_flip` argument of the vendored `_do_test_op_bwd` by name (`flip_index`); a
 vendored refresh that drops or renames it fails with a `RuntimeError` naming the function instead of changing a
 wrong argument.
@@ -99,8 +99,8 @@ the runner exits 2 with a usage error): by default every pass pins one direction
 failure names the engine of that direction. The reference-forward passes always run.
 
 A `ref-fwd` case, and every `refwd/` pass, never tests the hand-off from hipDNN's forward to its backward: the
-backward consumes the O and Stats of a reference forward. Only `--pairs` runs a hipDNN forward engine into a
-hipDNN backward engine. The recommended run is `--all-engines --pairs`.
+backward consumes the O and Stats of a reference forward. Only `--pairs` runs a forward engine other than the heuristic's pick into a
+backward engine. The recommended run is `--all-engines --pairs`.
 
 Kernel ids are opt-in too. `--kernel-ids` exports `HIPDNN_SDPA_KERNEL_LOG=1` to every pass; the plugin then
 installs `hipdnn_sdpa`'s backend log callback and fills `fwd_kernel` / `bwd_kernel`. The callback raises the
@@ -174,12 +174,7 @@ otherwise (1: tests failed; a crashed worker is a `crash` row, not a runner fail
 collection, `--fwd-no-stats` meeting non-forward cases, a usage error or a `--resume` refusal; 1 for the other refusals (no hipDNN prefix, no GPU, a
 non-empty `--out` without `--resume`, pre-set pins, `--exhaustive` without `hipdnn_bench`).
 `completion.py`: 0 once it has listed the shards (an empty list means nothing left to resume), 2 for a missing results
-directory. `replay.py`: 0 the child completed without crashing, and the per-role maximum errors it prints (against the
-saved hipDNN output and against the FP32 reference) are the verdict, so a wrong-result fault such as a NaN output
-reproduces with exit 0; 1 the child died with a signal, or exited nonzero after the graph began executing; 70 a setup
-error, failed before the graph executed:
-a `from_json`, engine or candidate selection error, no HIP device (checked before any child starts with `--device cuda`),
-a device or handle initialisation failure, or a child that exits nonzero before graph execute (traceback printed).
+directory. `replay.py`: 0 the child completed; the errors it prints (against the saved hipDNN output and against the FP32 reference) are the verdict (a wrong-result fault such as a NaN output reproduces with exit 0). 1 reproduced: the child died with a signal at any point, including during `Handle()` or setup, or failed (an exception or a nonzero exit) after the failing direction's graph began executing (bad execute status, HIP error at synchronise, the CPU copy); the parent prints `reproduced: exited with status N` or `reproduced: died with signal N`, and a signal death is exit 1 whatever the marker. 70 a setup error: an exception or nonzero exit before the failing direction's graph began executing (`from_json`, engine or candidate selection, no HIP device (checked before any child starts with `--device cuda`), a device or handle initialisation exception), including a setup failure (`from_json`, engine or candidate selection) of the second direction of a fwd+bwd repro after the first executed fine.
 `reconcile.py`: 0, or 2 for a missing run directory. `sync.py --check`: 1 when it reports a problem.
 
 AOTriton's calibration and backend knobs (`USE_ADIFFS_TXT`, `RECORD_ADIFFS_TO`, `SKIP_BWD`,
@@ -208,7 +203,7 @@ accounting (`FILE`: `<suite> <k> <N>` per line, so a shard without a directory s
 (with `native-skip by class:` `kernel-limit` (AOTriton kernel limits such as hdim or register pressure, a missing
 AITER ASM kernel), `api-rule` (an explicit attn_mask with is_causal), `resource` (low-VRAM and OOM guards) and
 `other`, from each skip's reason), passes and per-(direction, engine) counts over every shard (a passing row credits
-the engines of its `fwd` and `bwd` columns, a failing or crashed row only the failing side; `== engines by mode and
+the engines of its `fwd` and `bwd` columns (pass 1; every other pass credits the engine it pins), a failing or crashed row only the failing side; `== engines by mode and
 test file` splits them by `mode`, `hipdnn` against `ref-fwd`, and by test file, and `--engines` prints it too), the
 engines no case passed with their first decline reasons, every `fail` / `crash` row of every pass with its engine
 (the one served on `fail_side`, else the other side's, else `-`), side, stage and repro path, and the failing node
@@ -228,7 +223,7 @@ backward). A `ref-fwd` pass proves the backward only.
 A case that fails with an out-of-memory error (`torch.OutOfMemoryError`, or a `RuntimeError` whose text contains
 `out of memory` or `hipErrorOutOfMemory`) before any hipDNN call ran is recorded as `not-run` with reason
 `out of memory: <message>`, not `fail`; pytest still reports the failure. An out-of-memory error after a hipDNN call
-ran stays `fail`. `--resume` does not rerun a `not-run` row.
+ran stays what the case would have been otherwise (a declined case stays declined; a hipDNN call that ran and failed stays `fail`). `--resume` does not rerun a `not-run` row.
 
 Two ways the shim differs from AOTriton's own `aotriton_flash.py`: with dropout, `encoded_softmax` comes from this
 tool's own Philox mask (`hipdnn_sdpa.philox_mask`), not from an AOTriton kernel; and the stubbed
