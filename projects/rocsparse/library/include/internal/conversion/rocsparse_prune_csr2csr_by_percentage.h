@@ -299,7 +299,7 @@ rocsparse_status rocsparse_dprune_csr2csr_nnz_by_percentage(rocsparse_handle    
  *  info          prune info structure.
  *  @param[in]
  *  temp_buffer   buffer allocated by the user. Its size is determined by calling
- *                \ref rocsparse_sprune_csr2csr_buffer_size "rocsparse_Xprune_csr2csr_buffer_size()".
+ *                \ref rocsparse_sprune_csr2csr_by_percentage_buffer_size "rocsparse_Xprune_csr2csr_by_percentage_buffer_size()".
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
