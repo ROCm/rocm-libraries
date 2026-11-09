@@ -375,6 +375,14 @@ CACHE_FWD_SPLIT_K_MFMA_TILE_N: Tuple[int, ...] = (32, 64, 128)
 CACHE_FWD_SPLIT_K_MFMA_PIPELINES: Tuple[str, ...] = ("mem", "compv3")
 # 16-byte vectors only: the layers it serves have deep, 8-aligned channels.
 CACHE_FWD_SPLIT_K_MFMA_VECS: Tuple[int, ...] = (8,)
+# (tile_m, tile_n, tile_k, warp_m, warp_n) left out of the MFMA split-K
+# subset: one wave holding the whole 128x128 tile carries 256 fp32
+# accumulators (the full AGPR file) and, with the 64-deep K tile, the split
+# binary runs out of VGPRs and spills to scratch where its unsplit twin does
+# not.
+CACHE_FWD_SPLIT_K_MFMA_EXCLUDED: Tuple[Tuple[int, int, int, int, int], ...] = (
+    (128, 128, 64, 1, 1),
+)
 # Single-launch cluster split-K forward (ImplicitGemmConvSpec.split_k_cluster):
 # the S slices of one output tile form a (1, 1, S) workgroup cluster and fold
 # their slabs after a cluster barrier, so there is no Stage 2 launch. The
@@ -864,7 +872,7 @@ def _fwd_split_cluster_target(target, flavor: str) -> bool:
 def _fwd_split_geometry(geometry: tuple) -> bool:
     """Whether split-K forward kernels are built for ``geometry``: the WMMA
     small tiles, or on MFMA the ``CACHE_FWD_SPLIT_K_MFMA_*`` subset."""
-    tile_m, tile_n, tile_k, _wm, _wn, _wt, pipeline, epilogue, atom = geometry
+    tile_m, tile_n, tile_k, warp_m, warp_n, _wt, pipeline, epilogue, atom = geometry
     if atom.family != "wmma":
         return (
             epilogue == "cshuffle"
@@ -872,6 +880,8 @@ def _fwd_split_geometry(geometry: tuple) -> bool:
             and tile_m in CACHE_FWD_SPLIT_K_MFMA_TILE_M
             and tile_n in CACHE_FWD_SPLIT_K_MFMA_TILE_N
             and tile_k in CACHE_FWD_SPLIT_K_TILE_K
+            and (tile_m, tile_n, tile_k, warp_m, warp_n)
+            not in CACHE_FWD_SPLIT_K_MFMA_EXCLUDED
         )
     return (
         epilogue == "cshuffle"

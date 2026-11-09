@@ -12,6 +12,7 @@ partial last K tile and degrees past the K-tile count (empty slices).
 
 from __future__ import annotations
 
+import collections
 import ctypes
 import importlib.util
 import os
@@ -714,16 +715,47 @@ class TestSplitKAotScope(unittest.TestCase):
         )
         self.assertEqual(len(jobs), counted)
         split = [j.identity for j in jobs if j.identity.split_k > 1]
-        self.assertGreater(len(split), 0)
+        # The shipped set, pinned literally rather than read back from the
+        # tables that generate it: jobs per (tile_m, tile_n, tile_k).
+        # 128x128x64 is short of the other 128-row tiles' 50 by the four
+        # 1x1-warp kernels (two warp tiles x mem / compv3) left out because
+        # they spill (CACHE_FWD_SPLIT_K_MFMA_EXCLUDED).
+        shipped = {
+            (32, 32, 32): 10,
+            (32, 32, 64): 10,
+            (32, 64, 32): 16,
+            (32, 64, 64): 16,
+            (32, 128, 32): 22,
+            (32, 128, 64): 22,
+            (64, 32, 32): 16,
+            (64, 32, 64): 16,
+            (64, 64, 32): 26,
+            (64, 64, 64): 26,
+            (64, 128, 32): 36,
+            (64, 128, 64): 36,
+            (128, 32, 32): 22,
+            (128, 32, 64): 22,
+            (128, 64, 32): 36,
+            (128, 64, 64): 36,
+            (128, 128, 32): 50,
+            (128, 128, 64): 46,
+        }
+        self.assertEqual(
+            dict(collections.Counter((i.tile_m, i.tile_n, i.tile_k) for i in split)),
+            shipped,
+        )
+        self.assertEqual(len(split), 464)
         for ident in split:
             self.assertEqual(ident.split_k_cluster, 0)
             self.assertTrue(ident.two_stage)
             self.assertEqual(ident.epilogue, "cshuffle")
-            self.assertIn(ident.pipeline, aj.CACHE_FWD_SPLIT_K_MFMA_PIPELINES)
-            self.assertIn(ident.tile_m, aj.CACHE_FWD_SPLIT_K_MFMA_TILE_M)
-            self.assertIn(ident.tile_n, aj.CACHE_FWD_SPLIT_K_MFMA_TILE_N)
+            self.assertIn(ident.pipeline, ("mem", "compv3"))
             vecs = (ident.vector_size_a, ident.vector_size_b, ident.vector_size_c)
             self.assertEqual(vecs, (8, 8, 8))
+            self.assertNotEqual(
+                (ident.tile_m, ident.tile_n, ident.tile_k, ident.warp_m, ident.warp_n),
+                (128, 128, 64, 1, 1),
+            )
 
     def test_gfx942_has_no_split_jobs(self):
         from rocke.core.arch import ArchTarget
