@@ -71,7 +71,7 @@ from rocke.helpers import (
     make_gemm_manifest,
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
-from rocke.tests.arch_marks import arch_specific
+from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -114,10 +114,15 @@ except Exception:  # pragma: no cover - depends on the environment
 
 _requires_torch = unittest.skipUnless(_HAVE_TORCH, "requires torch")
 
-_CDNA_ARCHES = ("gfx942", "gfx950")
+# A gfx950-only atom lowered for gfx942 raises `ArchDomainWarning`. Make it an
+# error so a covered-arch case cannot pass with an atom the arch lacks.
+pytestmark = pytest.mark.filterwarnings(
+    "error::rocke.core.lower_llvm.ArchDomainWarning"
+)
+
 _SAME_IR = (
     "the IR is identical on gfx942 apart from the arch name; "
-    "the smoke tests that use _each_cdna_arch cover the lowerer on every CDNA arch"
+    "the smoke tests that use _each_covered_arch cover the lowerer on every covered arch"
 )
 _LABEL_ONLY = "the arch is only a label here; the test does not lower for the target"
 _ATOM_32X32X16 = (
@@ -130,18 +135,18 @@ _COMMON_ATOM = (
 )
 _MIXED = (
     "the test names one CDNA arch and one RDNA arch; "
-    "the CDNA path is the same on the other CDNA arch"
+    "the CDNA path is the same on the other covered arch"
 )
 _PERMLANE32 = "permlane32.swap exists on gfx950 only"
 _RDNA_ONLY = "the intrinsic or atom exists on RDNA and gfx12 targets only"
 
 
-def _each_cdna_arch(test):
-    """Run a test method once per CDNA arch, with the arch in `self.arch`."""
+def _each_covered_arch(test):
+    """Run a test method once per covered arch, with the arch in `self.arch`."""
 
     @functools.wraps(test)
     def run(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 self.arch = arch
                 test(self)
@@ -166,7 +171,7 @@ class TestCoreIR(unittest.TestCase):
         # KernelDef has a single body Region with a flat ops list.
         self.assertGreater(len(b.kernel.body.ops), 0)
 
-    @_each_cdna_arch
+    @_each_covered_arch
     def test_lower_llvm_emits_amdgpu_target_triple(self):
         b = IRBuilder("smoke")
         b.param("A", PtrType(F16, "global"))
@@ -271,7 +276,7 @@ class TestCoreIR(unittest.TestCase):
             ll,
         )
 
-    @_each_cdna_arch
+    @_each_covered_arch
     def test_s_waitcnt_encodes_extended_vmcnt_without_wrapping(self):
         b = IRBuilder("waitcnt_extended")
         # gfx950 uses the gfx9/gfx10 s_waitcnt layout: vmcnt is six bits
@@ -986,7 +991,7 @@ class TestHelpers(unittest.TestCase):
         self.assertGreaterEqual(attn_cfg.NUM_SEGMENTS_PER_SEQ, 8)
         self.assertIn(reduce_cfg.num_warps, (1, 2))
 
-    @_each_cdna_arch
+    @_each_covered_arch
     def test_fp8_cvt_intrinsic_lowering(self):
         """fp8e4m3->f32 conversion lowers to llvm.amdgcn.cvt.f32.fp8."""
         from rocke.core.ir import (
@@ -1878,7 +1883,7 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
         self.assertIn("to <2 x i32>", ll)
         self.assertNotIn("@llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8(i64", ll)
 
-    @_each_cdna_arch
+    @_each_covered_arch
     def test_mfma_fp8_llvm22_uses_i64_operands(self):
         from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM22
 
@@ -3225,7 +3230,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         # (the prologue setprio is a separate hook).
         self.assertNotIn("@llvm.amdgcn.s.setprio", ll)
 
-    @_each_cdna_arch
+    @_each_covered_arch
     def test_schedule_policy_emits_mfma_valu_pair_hints(self):
         from rocke.helpers.schedule import SchedulePolicy
         from rocke.core.ir import IRBuilder, PtrType, F16
@@ -3848,7 +3853,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
     about which intrinsic broke.
     """
 
-    arch = "gfx950"  # default; `_each_cdna_arch` sets it per run
+    arch = "gfx950"  # default; `_each_covered_arch` sets it per run
 
     def _builder(self, name):
         from rocke.core.ir import IRBuilder
@@ -4093,7 +4098,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         # The raw immediate reaches the call verbatim (0x041F == 1055).
         self.assertIn("call i32 @llvm.amdgcn.ds.swizzle(i32 1, i32 1055)", ll)
 
-    @_each_cdna_arch
+    @_each_covered_arch
     def test_ds_swizzle_xor_encodes_swap_mode_offset(self):
         # offset = (xor_mask << 10) | 0x1F -> (2 << 10) | 31 == 2079 (0x081F).
         ll = self._lower("dsswx", lambda b: b.ds_swizzle_xor(b.const_i32(1), 2))
@@ -4197,7 +4202,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         row_mirror 15), one kernel per (arch, mask), with exactly one DPP call
         so a swapped table entry fails here."""
         want = {1: 177, 2: 78, 3: 27, 7: 321, 8: 296, 15: 320}
-        for arch in ("gfx942", "gfx950"):
+        for arch in COVERED_ARCHES:
             for mask, ctrl in want.items():
                 with self.subTest(arch=arch, mask=mask):
                     ll = self._lower(
@@ -4593,7 +4598,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             b.mov_dpp8(b.const_i64(1), 0x11)
 
     # ---- wave_reduce ----
-    @_each_cdna_arch
+    @_each_covered_arch
     def test_wave_reduce_emits_typed_reduction_per_op(self):
         for reduce_op, ty in (
             ("fmax", "float"),
@@ -5076,7 +5081,7 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
     ported -- so the tests that need a gap install a stand-in arch.
     """
 
-    arch = "gfx950"  # default; `_each_cdna_arch` sets it per run
+    arch = "gfx950"  # default; `_each_covered_arch` sets it per run
 
     def setUp(self):
         from rocke.core import backend
@@ -5661,7 +5666,7 @@ class TestAutotuner(unittest.TestCase):
 class TestExpandedEpilogueOps(unittest.TestCase):
     """Each new EpilogueOp must build legal IR and ``tag()`` cleanly."""
 
-    arch = "gfx950"  # default; `_each_cdna_arch` sets it per run
+    arch = "gfx950"  # default; `_each_covered_arch` sets it per run
 
     def _build_epilogue_kernel(self, op):
         """Helper: emit a tiny IR kernel that exercises ``op.apply_element``.
@@ -8939,7 +8944,7 @@ class TestCShuffleEpilogueSmoke(unittest.TestCase):
     full GEMM pipeline.
     """
 
-    arch = "gfx950"  # default; `_each_cdna_arch` sets it per run
+    arch = "gfx950"  # default; `_each_covered_arch` sets it per run
 
     _TILE = dict(
         tile_m=128,
@@ -8975,7 +8980,7 @@ class TestCShuffleEpilogueSmoke(unittest.TestCase):
         epi.store(b, accs=accs, addr_fn=addr_fn, d_rsrc=d_rsrc)
         return lower_kernel_to_llvm(b.kernel, arch=self.arch)
 
-    @_each_cdna_arch
+    @_each_covered_arch
     def test_cshuffle_fp16_emits_lds_staging_and_half_store(self):
         ll = self._build_ll("fp16")
         self.assertIn("store half", ll)
