@@ -43,6 +43,10 @@ __all__ = [
 # AMD; x is capped the same way for symmetry with is_valid_spec_for_problem).
 _MAX_GRID_DIM = 65535
 
+# The convolution directions an identity names (``KernelIdentity.direction``,
+# the first token of its label).
+DIRECTIONS = ("fwd", "dgrad", "wgrad")
+
 
 def current_llvm_flavor() -> str:
     """LLVM IR flavor this process lowers to (the one ``compile_kernel`` uses).
@@ -577,7 +581,8 @@ def identity_supports_problem(
         ("dilation_h", ("dilation", "dH", "dil_h")),
         ("dilation_w", ("dilation", "dW", "dil_w")),
         ("pad_h", ("PAD", "pH")),
-        ("pad_w", ("PAD", "pW")),
+        # A direct problem's column padding is PAD_W (PAD unless it differs).
+        ("pad_w", ("PAD_W", "PAD", "pW")),
     ):
         baked = getattr(identity, name)
         if not baked and not identity.is_direct:
@@ -766,6 +771,7 @@ DIRECT_PROBLEM_CAPABILITY_ATTRS = (
     "dil_h",
     "dil_w",
     "PAD",
+    "pad_w",
     "pH",
     "pW",
 )

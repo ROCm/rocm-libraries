@@ -43,12 +43,6 @@ int wgw_ceil_div(int a, int b)
     return (a + b - 1) / b;
 }
 
-void wgw_set_reason(char* reason, size_t reason_cap, const char* msg)
-{
-    if(reason && reason_cap > 0)
-        snprintf(reason, reason_cap, "%s", msg);
-}
-
 const char* wgw_str(const char* s, const char* dflt)
 {
     return s ? s : dflt;
@@ -249,7 +243,7 @@ bool rocke_winograd_gemm_wmma_is_valid_spec(const rocke_winograd_gemm_wmma_spec_
 
     if(spec == NULL)
     {
-        wgw_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -262,20 +256,20 @@ bool rocke_winograd_gemm_wmma_is_valid_spec(const rocke_winograd_gemm_wmma_spec_
     }
     if(target->wave_size != 32 || spec->wave_size != 32)
     {
-        wgw_set_reason(reason, reason_cap, "wino_gemm_wmma is a wave32 kernel");
+        rocke_spec_set_reason(reason, reason_cap, "wino_gemm_wmma is a wave32 kernel");
         return false;
     }
     if(!target->memory.has_tdm)
     {
         snprintf(msg, sizeof msg, "no TDM on %s", arch);
-        wgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     dtype = wgw_str(spec->dtype, "fp16");
     if(strcmp(dtype, "fp16") != 0 && strcmp(dtype, "bf16") != 0)
     {
         snprintf(msg, sizeof msg, "unsupported dtype '%s'", dtype);
-        wgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     ab = wgw_is_bf16(dtype) ? "bf16" : "f16";
@@ -283,54 +277,55 @@ bool rocke_winograd_gemm_wmma_is_valid_spec(const rocke_winograd_gemm_wmma_spec_
            rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, WGW_WMMA_K))
     {
         snprintf(msg, sizeof msg, "missing wmma_f32_16x16x32_%s on %s", ab, arch);
-        wgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->waves_m < 1 || spec->waves_n < 1 || spec->frags_m < 1 || spec->frags_n < 1)
     {
-        wgw_set_reason(reason, reason_cap, "waves and fragments must be >= 1");
+        rocke_spec_set_reason(reason, reason_cap, "waves and fragments must be >= 1");
         return false;
     }
     tk = spec->tile_k;
     if(tk <= 0 || tk % WGW_WMMA_K != 0)
     {
         snprintf(msg, sizeof msg, "tile_k %d must be a positive multiple of %d", tk, WGW_WMMA_K);
-        wgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->stages < 2)
     {
-        wgw_set_reason(reason, reason_cap, "stages must be >= 2");
+        rocke_spec_set_reason(reason, reason_cap, "stages must be >= 2");
         return false;
     }
     if(spec->taps < 1)
     {
-        wgw_set_reason(reason, reason_cap, "taps must be >= 1");
+        rocke_spec_set_reason(reason, reason_cap, "taps must be >= 1");
         return false;
     }
     epi = wgw_str(spec->epilogue, "");
     if(strcmp(epi, "tdm") != 0 && strcmp(epi, "direct") != 0)
     {
         snprintf(msg, sizeof msg, "epilogue '%s' not in ('tdm', 'direct')", epi);
-        wgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     pad = wgw_str(spec->lds_pad, "");
     if(strcmp(pad, "tdm") != 0 && strcmp(pad, "clip") != 0)
     {
         snprintf(msg, sizeof msg, "lds_pad '%s' not in ('tdm', 'clip')", pad);
-        wgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(strcmp(pad, "tdm") == 0 && ((tk & (tk - 1)) != 0 || !(32 <= tk && tk <= 512)))
     {
-        wgw_set_reason(reason, reason_cap, "lds_pad tdm needs a power-of-two tile_k in 32..512");
+        rocke_spec_set_reason(
+            reason, reason_cap, "lds_pad tdm needs a power-of-two tile_k in 32..512");
         return false;
     }
     if(spec->num_xcds < 1)
     {
         snprintf(msg, sizeof msg, "num_xcds %d < 1", spec->num_xcds);
-        wgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(rocke_winograd_gemm_wmma_threads_per_block(spec)
@@ -340,14 +335,14 @@ bool rocke_winograd_gemm_wmma_is_valid_spec(const rocke_winograd_gemm_wmma_spec_
                  sizeof msg,
                  "%d threads per block",
                  rocke_winograd_gemm_wmma_threads_per_block(spec));
-        wgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(rocke_winograd_gemm_wmma_tile_m(spec) > 0xFFFF
        || rocke_winograd_gemm_wmma_tile_n(spec) > 0xFFFF || wgw_pitch(spec) > 0xFFFF
        || wgw_out_pitch(spec) > 0xFFFF)
     {
-        wgw_set_reason(reason, reason_cap, "tile too large for a TDM descriptor");
+        rocke_spec_set_reason(reason, reason_cap, "tile too large for a TDM descriptor");
         return false;
     }
     if(!rocke_archtarget_fits_lds(target, rocke_winograd_gemm_wmma_lds_bytes(spec)))
@@ -357,23 +352,19 @@ bool rocke_winograd_gemm_wmma_is_valid_spec(const rocke_winograd_gemm_wmma_spec_
                  "LDS %ld B > %d",
                  rocke_winograd_gemm_wmma_lds_bytes(spec),
                  target->lds_capacity_bytes);
-        wgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(wgw_vgpr_estimate(spec) > WGW_VGPR_BUDGET * (wgw_waves(spec) <= 4 ? 2 : 1))
     {
         snprintf(
             msg, sizeof msg, "~%d VGPRs of accumulators and fragments", wgw_vgpr_estimate(spec));
-        wgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(spec->sched != NULL && !rocke_scheduler_strategy_is_valid(spec->sched))
-    {
-        snprintf(msg, sizeof msg, "unsupported scheduler_strategy '%s'", spec->sched);
-        wgw_set_reason(reason, reason_cap, msg);
+    if(rocke_scheduler_strategy_reason(spec->sched, reason, reason_cap))
         return false;
-    }
-    wgw_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -1012,16 +1003,15 @@ rocke_kernel_def_t* rocke_build_winograd_gemm_wmma(rocke_ir_builder_t* b,
     c.pad_amount = 0;
     if(strcmp(wgw_str(spec->lds_pad, "tdm"), "tdm") == 0)
     {
-        /* pad_interval = (CK // 2).bit_length() - 2 */
-        int v = c.CK / 2;
-        int bits = 0;
-        while(v)
+        /* The TDM pads CH_PAD elements after every tile_k-element row (both
+         * 16-bit). */
+        char why[256] = {0};
+        if(!rocke_encode_tdm_padding(
+               c.CK * 2, WGW_CH_PAD * 2, &c.pad_interval, &c.pad_amount, why, sizeof(why)))
         {
-            ++bits;
-            v >>= 1;
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, why);
+            return NULL;
         }
-        c.pad_interval = bits - 2;
-        c.pad_amount = 3;
         c.tile0 = c.CK;
     }
 
@@ -1142,7 +1132,7 @@ rocke_status_t wgw_lower(BuildFn build,
         *out_ll = NULL;
     if(out_ll == NULL)
     {
-        wgw_set_reason(err, err_cap, "lower_to_llvm: null out");
+        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null out");
         return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
@@ -1152,7 +1142,7 @@ rocke_status_t wgw_lower(BuildFn build,
     {
         const char* m = rocke_ir_builder_error(&b);
         st = rocke_ir_builder_status(&b);
-        wgw_set_reason(err, err_cap, (m != NULL && m[0] != '\0') ? m : what);
+        rocke_spec_set_reason(err, err_cap, (m != NULL && m[0] != '\0') ? m : what);
         rocke_ir_builder_free(&b);
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
@@ -1174,7 +1164,7 @@ rocke_status_t rocke_winograd_gemm_wmma_lower_to_llvm(const rocke_winograd_gemm_
     {
         if(out_ll != NULL)
             *out_ll = NULL;
-        wgw_set_reason(err, err_cap, "lower_to_llvm: null spec");
+        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null spec");
         return ROCKE_ERR_VALUE;
     }
     return wgw_lower([&](rocke_ir_builder_t* b,
@@ -1343,7 +1333,7 @@ rocke_status_t
     {
         if(out_ll != NULL)
             *out_ll = NULL;
-        wgw_set_reason(err, err_cap, "lower_to_llvm: null spec");
+        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null spec");
         return ROCKE_ERR_VALUE;
     }
     return wgw_lower(

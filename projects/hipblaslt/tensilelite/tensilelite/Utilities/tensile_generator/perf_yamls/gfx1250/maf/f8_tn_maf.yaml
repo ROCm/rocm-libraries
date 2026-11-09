@@ -94,9 +94,9 @@ BenchmarkProblems:
         - PreloadKernArgs: [True]
 
         - ClusterDim: [[4,4]]
+        - InitCIterWmma: [1]
+        - SwInstructionPrefetch: [1]
         - PrefetchGL2: [2]
-        - InitCIterWmma: [0]
-        - SwInstructionPrefetch: [0]
         - ClusterAIDMapping: [-2]
         - LDSSegmentBRotate: [1]
       BenchmarkForkParameters:

@@ -69,25 +69,28 @@ class TestGenerateSdpaFwdGoldenScale(unittest.TestCase):
         attributes = graph["nodes"][0]["attributes"]
         self.assertEqual(attributes["left_bound"], 3)
         self.assertEqual(attributes["right_bound"], 0)
-        self.assertEqual(meta["config"]["window_left"], 2)
+        self.assertEqual(meta["config"]["left_bound"], 3)
 
     def test_left_bound_is_written_unchanged(self):
         # --left-bound is the graph's (cuDNN) left_bound: the same window as --window-left 2.
         graph, meta = self.generate("--causal", "top_left", "--left-bound", "3")
         self.assertEqual(graph["nodes"][0]["attributes"]["left_bound"], 3)
-        self.assertEqual(meta["config"]["window_left"], 2)
+        self.assertEqual(meta["config"]["left_bound"], 3)
         window_graph, _ = self.generate("--causal", "top_left", "--window-left", "2")
         self.assertEqual(graph["nodes"], window_graph["nodes"])
 
     def test_left_bound_one_is_diagonal_only(self):
         graph, meta = self.generate("--left-bound", "1", "--window-right", "0")
         self.assertEqual(graph["nodes"][0]["attributes"]["left_bound"], 1)
-        self.assertEqual(meta["config"]["window_left"], 0)
+        self.assertEqual(meta["config"]["left_bound"], 1)
+        window_graph, _ = self.generate("--window-left", "0", "--window-right", "0")
+        self.assertEqual(graph["nodes"], window_graph["nodes"])
 
     def test_invalid_left_bound_flags_are_rejected(self):
         for extra in (
             ("--left-bound", "0"),
             ("--left-bound", "-2"),
+            ("--window-left", "-2"),
             ("--left-bound", "3", "--window-left", "2"),
         ):
             with self.subTest(extra=extra), self.assertRaises(
@@ -118,27 +121,25 @@ class TestGenerateSdpaFwdGoldenWindowMatchesCudnn(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.gen = load_generator_module()
+        # Loading the generator puts utilities/ on sys.path.
+        cls.common = importlib.import_module("sdpa_common")
 
-    def assert_matches_cudnn(self, s_q, s_kv, causal, window_left, window_right):
+    def assert_matches_cudnn(self, s_q, s_kv, causal, left_bound, window_right):
         torch = self.gen.torch
-        keep = self.gen.build_mask(s_q, s_kv, causal, window_left, window_right)
+        keep = self.gen.build_mask(s_q, s_kv, causal, left_bound, window_right)
         diag_offset = s_kv - s_q if causal == "bottom_right" else 0
-        if causal != "none":
-            right_bound = 0
+        if window_right >= 0:
+            right_bound = window_right
         else:
-            right_bound = window_right if window_right >= 0 else None
+            right_bound = 0 if causal != "none" else None
         expected = cudnn_keep_mask(
-            torch,
-            s_q,
-            s_kv,
-            diag_offset,
-            self.gen.left_bound_from_window_left(window_left),
-            right_bound,
+            torch, s_q, s_kv, diag_offset, left_bound, right_bound
         )
         self.assertTrue(
             torch.equal(keep, expected),
-            f"S_q={s_q} S_kv={s_kv} causal={causal} window=({window_left},"
-            f"{window_right})\nbuild_mask:\n{keep.int()}\ncuDNN:\n{expected.int()}",
+            f"S_q={s_q} S_kv={s_kv} causal={causal} left_bound={left_bound} "
+            f"window_right={window_right}\nbuild_mask:\n{keep.int()}\n"
+            f"cuDNN:\n{expected.int()}",
         )
 
     def test_left_bound_two_keeps_two_keys_including_the_diagonal(self):
@@ -146,23 +147,63 @@ class TestGenerateSdpaFwdGoldenWindowMatchesCudnn(unittest.TestCase):
         torch = self.gen.torch
         keep = cudnn_keep_mask(torch, 6, 6, 0, 2, 0)
         self.assertEqual(keep[5].nonzero().flatten().tolist(), [4, 5])
-        self.assertEqual(self.gen.left_bound_from_window_left(1), 2)
-        self.assertEqual(self.gen.window_left_from_left_bound(2), 1)
-        self.assertEqual(self.gen.window_left_from_left_bound(-1), -1)
+        self.assertEqual(self.common.left_bound_from_window_left(1), 2)
+        self.assertEqual(self.common.left_bound_from_window_left(-1), -1)
+        self.assertEqual(self.common.window_left_from_left_bound(2), 1)
+        self.assertEqual(self.common.window_left_from_left_bound(-1), -1)
 
     def test_causal_windows_match_cudnn(self):
         for s_q, s_kv in ((6, 6), (4, 7), (7, 4)):
             for causal in ("top_left", "bottom_right"):
-                for window_left in (0, 1, 2, 5):
-                    self.assert_matches_cudnn(s_q, s_kv, causal, window_left, -1)
+                for left_bound in (1, 2, 3, 6):
+                    self.assert_matches_cudnn(s_q, s_kv, causal, left_bound, -1)
 
     def test_non_causal_windows_match_cudnn(self):
         for s_q, s_kv in ((6, 6), (4, 7)):
-            for window_left in (0, 1, 2, 5):
+            for left_bound in (1, 2, 3, 6):
                 for window_right in (-1, 0, 2):
                     self.assert_matches_cudnn(
-                        s_q, s_kv, "none", window_left, window_right
+                        s_q, s_kv, "none", left_bound, window_right
                     )
+
+
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestGenerateSdpaFwdGoldenMask(unittest.TestCase):
+    """The golden keep-mask must follow the bounds the graph serializes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.gen = load_generator_module()
+
+    def keep(self, mask):
+        return [[bool(x) for x in row] for row in mask.tolist()]
+
+    def test_causal_alone_keeps_up_to_diagonal(self):
+        mask = self.gen.build_mask(3, 3, "top_left", -1, -1)
+        self.assertEqual(
+            self.keep(mask),
+            [[True, False, False], [True, True, False], [True, True, True]],
+        )
+
+    def test_explicit_right_bound_replaces_causal_right_bound(self):
+        # The graph serializes causal + window_right=1 as right_bound=1, so one key past the
+        # diagonal is visible; ANDing with causal would wrongly keep right_bound at 0.
+        mask = self.gen.build_mask(3, 4, "top_left", -1, 1)
+        self.assertEqual(
+            self.keep(mask),
+            [
+                [True, True, False, False],
+                [True, True, True, False],
+                [True, True, True, True],
+            ],
+        )
+
+    def test_bottom_right_causal_shifts_diagonal(self):
+        mask = self.gen.build_mask(2, 4, "bottom_right", -1, -1)
+        self.assertEqual(
+            self.keep(mask),
+            [[True, True, True, False], [True, True, True, True]],
+        )
 
 
 @unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
@@ -203,6 +244,21 @@ class TestGenerateSdpaFwdGoldenRaggedHelpers(unittest.TestCase):
             [1 + pad, 16, 16, 16],
         )
 
+    def test_varied_seqlens_are_unequal_bounded_and_causal_safe(self):
+        for batch, s_q, s_kv in [(2, 16, 16), (3, 256, 256), (5, 256, 256), (3, 8, 8)]:
+            with self.subTest(batch=batch, s_q=s_q, s_kv=s_kv):
+                q, kv = self.gen.varied_seqlens(batch, s_q, s_kv)
+                self.assertEqual((len(q), len(kv)), (batch, batch))
+                self.assertEqual((max(q), max(kv)), (s_q, s_kv))
+                self.assertTrue(all(1 <= v <= s_q for v in q))
+                self.assertTrue(all(1 <= v <= s_kv for v in kv))
+                self.assertTrue(all(k >= v for k, v in zip(kv, q)))
+                self.assertGreater(len(set(q)), 1)
+                self.assertNotEqual(
+                    self.gen.ragged_offsets(q).flatten().tolist(),
+                    self.gen.ragged_offsets(kv).flatten().tolist(),
+                )
+
 
 @unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
 class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
@@ -223,16 +279,19 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
         self.root = Path(tmp.name)
         self.base = self.root / self.BUNDLE_DIR / "Small"
 
-    def run_generator(self, *extra_args: str) -> subprocess.CompletedProcess:
+    def run_generator(
+        self, *extra_args: str, batch: int | None = None
+    ) -> subprocess.CompletedProcess:
+        b = batch if batch is not None else self.B
         command = [
             sys.executable,
             str(SCRIPT_PATH),
             "--base-filename",
             str(self.base),
             "--q-dims",
-            *map(str, [self.B, self.H_Q, self.S, self.D_QK]),
+            *map(str, [b, self.H_Q, self.S, self.D_QK]),
             "--v-dims",
-            *map(str, [self.B, self.H_KV, self.S, self.D_V]),
+            *map(str, [b, self.H_KV, self.S, self.D_V]),
             *extra_args,
         ]
         return subprocess.run(command, capture_output=True, text=True, check=False)
@@ -263,9 +322,15 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
     def tensors_by_name(self, graph: dict) -> dict:
         return {tensor["name"]: tensor for tensor in graph["tensors"]}
 
-    def test_uniform_ragged_bundle_layout(self):
+    def test_ragged_bundle_layout(self):
         graph = self.generate_ragged()
         tensors = self.tensors_by_name(graph)
+
+        self.assertEqual(
+            set(tensors),
+            {"Q", "K", "V", "O", "RaggedOffsetQ", "RaggedOffsetK"},
+        )
+        self.assertIsNone(graph["nodes"][0]["inputs"]["seq_len_q_tensor_uid"])
 
         expected_dims = {
             "Q": [self.B, self.H_Q, self.S, self.D_QK],
@@ -274,7 +339,11 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
             "O": [self.B, self.H_Q, self.S, self.D_V],
         }
         expected_offset_uid = {"Q": 10, "O": 10, "K": 11, "V": 11}
-        uniform_offsets = [b * self.S for b in range(self.B + 1)]
+        lens_q, lens_kv = self.gen.varied_seqlens(self.B, self.S, self.S)
+        expected_offsets = {
+            10: self.gen.ragged_offsets(lens_q).flatten().tolist(),
+            11: self.gen.ragged_offsets(lens_kv).flatten().tolist(),
+        }
         for name, dims in expected_dims.items():
             with self.subTest(tensor=name):
                 tensor = tensors[name]
@@ -293,13 +362,65 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
                 offset_uid = expected_offset_uid[name]
                 self.assertEqual(len(self.read_bin(offset_uid)), (self.B + 1) * 4)
                 offsets = self.read_offsets(offset_uid)
-                self.assertEqual(offsets, uniform_offsets)
+                self.assertEqual(offsets, expected_offsets[offset_uid])
                 self.assertEqual(
                     len(self.read_bin(tensor["uid"])),
                     offsets[-1] * tensor["ragged_offset_multiplier"] * self.BF16_BYTES,
                 )
 
         self.assertEqual(graph["nodes"][0]["attributes"]["mma_core_mode"], "unset")
+
+    def test_ragged_bundle_matches_independent_per_batch_reference(self):
+        graph = self.generate_ragged("--causal", "bottom_right")
+        torch = self.torch
+        lens_q, lens_kv = self.gen.varied_seqlens(self.B, self.S, self.S)
+        scale = graph["nodes"][0]["attributes"]["attn_scale_value"]
+
+        def load(uid, tokens, heads, dim):
+            raw = bytearray(self.read_bin(uid))
+            return (
+                torch.frombuffer(raw, dtype=torch.bfloat16)
+                .reshape(tokens, heads, dim)
+                .float()
+            )
+
+        packed_q = load(self.gen.UID_Q, sum(lens_q), self.H_Q, self.D_QK)
+        packed_k = load(self.gen.UID_K, sum(lens_kv), self.H_KV, self.D_QK)
+        packed_v = load(self.gen.UID_V, sum(lens_kv), self.H_KV, self.D_V)
+        packed_o = load(self.gen.UID_O, sum(lens_q), self.H_Q, self.D_V)
+
+        q_start = kv_start = 0
+        for b, (lq, lkv) in enumerate(zip(lens_q, lens_kv)):
+            with self.subTest(batch=b):
+                q_b = packed_q[q_start : q_start + lq]
+                group = self.H_Q // self.H_KV
+                k_b = packed_k[kv_start : kv_start + lkv].repeat_interleave(
+                    group, dim=1
+                )
+                v_b = packed_v[kv_start : kv_start + lkv].repeat_interleave(
+                    group, dim=1
+                )
+                scores = torch.einsum("qhd,khd->hqk", q_b, k_b) * scale
+                keep = torch.arange(lkv)[None, :] <= torch.arange(lq)[:, None] + (
+                    lkv - lq
+                )
+                scores = scores.masked_fill(~keep, float("-inf"))
+                expected = torch.einsum(
+                    "hqk,khd->qhd", torch.softmax(scores, dim=-1), v_b
+                )
+                torch.testing.assert_close(
+                    packed_o[q_start : q_start + lq], expected, atol=2e-2, rtol=2e-2
+                )
+            q_start += lq
+            kv_start += lkv
+
+        verified = subprocess.run(
+            [sys.executable, str(VERIFIER_PATH), "--require-data", str(self.root)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(verified.returncode, 0, verified.stderr)
 
     def test_ragged_with_seq_lens_packs_padding_with_nan_sentinel(self):
         graph = self.generate_ragged(
@@ -323,7 +444,15 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
 
         packed_o = self.torch.frombuffer(
             bytearray(self.read_bin(tensors["O"]["uid"])), dtype=self.torch.bfloat16
-        ).reshape(sum(physical_q), self.H_Q, self.D_V)
+        ).reshape(-1, self.H_Q, self.D_V)
+        # A file holds the rows up to the last valid row (elementSpace): interior pad
+        # rows stay, a trailing pad is not written. Q's last batch is full; K's is not.
+        self.assertEqual(packed_o.shape[0], sum(physical_q))
+        packed_k = self.torch.frombuffer(
+            bytearray(self.read_bin(tensors["K"]["uid"])), dtype=self.torch.bfloat16
+        ).reshape(-1, self.H_KV, self.D_QK)
+        self.assertEqual(packed_k.shape[0], physical_kv[0] + self.SEQ_LENS_KV[1])
+        self.assertLess(packed_k.shape[0], sum(physical_kv))
         block_start = 0
         for valid, physical in zip(self.SEQ_LENS_Q, physical_q):
             block = packed_o[block_start : block_start + physical]
@@ -340,26 +469,10 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
         )
         self.assertEqual(verified.returncode, 0, verified.stderr)
 
-    def test_ragged_with_seq_lens_and_stats_keeps_lse_dense(self):
-        graph = self.generate_ragged(
-            "--stats", *self.seq_lens_args(self.SEQ_LENS_Q, self.SEQ_LENS_KV)
-        )
-        lse_entry = self.tensors_by_name(graph)["LSE"]
-
-        self.assertEqual(lse_entry["dims"], [self.B, self.H_Q, self.S, 1])
-        self.assertNotIn("ragged_offset_tensor_uid", lse_entry)
-        lse = self.torch.frombuffer(
-            bytearray(self.read_bin(lse_entry["uid"])), dtype=self.torch.float32
-        ).reshape(self.B, self.H_Q, self.S)
-        for b, valid in enumerate(self.SEQ_LENS_Q):
-            self.assertTrue(self.torch.isfinite(lse[b, :, :valid]).all())
-            self.assertTrue(
-                (lse[b, :, valid:] == float("-inf")).all(),
-                f"batch {b} rows past seq_len_q must be -inf",
-            )
-
-    def assert_generator_rejects(self, expected_message: str, *args: str):
-        completed = self.run_generator(*args)
+    def assert_generator_rejects(
+        self, expected_message: str, *args: str, batch: int | None = None
+    ):
+        completed = self.run_generator(*args, batch=batch)
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn(expected_message, completed.stderr)
 
@@ -387,6 +500,182 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
             *self.seq_lens_args([self.S] * self.B, [self.S] * self.B),
         )
 
+    def test_ragged_without_seq_lens_rejects_degenerate_equal_lengths(self):
+        self.assert_generator_rejects(
+            "gives equal Q and KV lengths",
+            "--ragged-offsets",
+            "--layout",
+            "bshd",
+            batch=1,
+        )
+
+    def test_ragged_with_stats_rejected(self):
+        for extra in ([], self.seq_lens_args(self.SEQ_LENS_Q, self.SEQ_LENS_KV)):
+            with self.subTest(seq_lens=bool(extra)):
+                self.assert_generator_rejects(
+                    "does not support --stats",
+                    "--ragged-offsets",
+                    "--layout",
+                    "bshd",
+                    "--stats",
+                    *extra,
+                )
+
+
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestGenerateSdpaFwdGoldenGraphOnly(unittest.TestCase):
+    """--graph-only writes the golden run's graph, no tensors, and input recipes that
+    give every graph input a valid value (RFC 0011 bundle size budget)."""
+
+    def run_generator(self, base: Path, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(SCRIPT_PATH), "--base-filename", str(base), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def generate_both(self, *args: str) -> tuple[Path, dict, dict, dict]:
+        """Golden and graph-only runs of the same arguments, into the same directory."""
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bundle_dir = Path(tmp.name) / "quick/SdpaFwd/bhsd/x/case/Small"
+        bundle_dir.mkdir(parents=True)
+        base = bundle_dir / "Small"
+        golden = self.run_generator(base, *args)
+        self.assertEqual(golden.returncode, 0, golden.stderr)
+        golden_graph = json.loads(base.with_suffix(".json").read_text())
+        (bundle_dir / "Small.tensors.dvc").write_text("outs: []\n")
+        graph_only = self.run_generator(base, *args, "--graph-only")
+        self.assertEqual(graph_only.returncode, 0, graph_only.stderr)
+        graph = json.loads(base.with_suffix(".json").read_text())
+        meta = json.loads(Path(f"{base}.meta.json").read_text())
+        return bundle_dir, golden_graph, graph, meta
+
+    def assert_graph_only(self, bundle_dir, golden_graph, graph, meta):
+        self.assertEqual(graph, golden_graph)
+        self.assertEqual(
+            sorted(p.name for p in bundle_dir.iterdir()),
+            ["Small.json", "Small.meta.json"],
+        )
+        self.assertEqual(meta["format_version"], 1)
+        self.assertEqual(meta["generator"], "generate_sdpa_fwd_golden.py")
+        self.assertTrue(meta["reference_source"].strip())
+        self.assertNotIn("input_range", meta)
+        verified = subprocess.run(
+            [sys.executable, str(VERIFIER_PATH), "--require-data", str(bundle_dir)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+        # Every non-output tensor of the graph has a recipe.
+        node = graph["nodes"][0]
+        input_uids = {v for v in node["inputs"].values() if v is not None}
+        self.assertEqual({int(uid) for uid in meta["inputs"]}, input_uids)
+
+    def test_fp8_codes_span_the_format_with_positive_fixed_descales(self):
+        args = (
+            "--dtype",
+            "fp8",
+            "--q-dims",
+            "1",
+            "2",
+            "8",
+            "16",
+            "--v-dims",
+            "1",
+            "2",
+            "8",
+            "16",
+            "--causal",
+            "bottom_right",
+            "--stats",
+            "--seed",
+            "3",
+        )
+        bundle_dir, golden_graph, graph, meta = self.generate_both(*args)
+        self.assert_graph_only(bundle_dir, golden_graph, graph, meta)
+        for uid in ("0", "1", "2"):
+            self.assertEqual(
+                meta["inputs"][uid], {"kind": "free", "lo": -448.0, "hi": 448.0}
+            )
+        for uid in ("7", "8", "9"):
+            self.assertEqual(
+                meta["inputs"][uid], {"kind": "fixed", "value": 1.0 / 448.0}
+            )
+        self.assertEqual(meta["seed"], 3)
+
+    def test_block_mask_bytes_keep_bit_seven(self):
+        args = (
+            "--block-mask",
+            "--q-dims",
+            "1",
+            "2",
+            "128",
+            "16",
+            "--v-dims",
+            "1",
+            "1",
+            "1024",
+            "16",
+            "--stats",
+            "--seed",
+            "5",
+        )
+        bundle_dir, golden_graph, graph, meta = self.generate_both(*args)
+        self.assert_graph_only(bundle_dir, golden_graph, graph, meta)
+        self.assertEqual(
+            meta["inputs"]["17"], {"kind": "free", "lo": 128.0, "hi": 255.0}
+        )
+        for uid in ("0", "1", "2"):
+            self.assertEqual(
+                meta["inputs"][uid], {"kind": "free", "lo": -1.0, "hi": 1.0}
+            )
+
+    def test_alibi_has_no_extra_inputs(self):
+        args = (
+            "--alibi",
+            "--causal",
+            "top_left",
+            "--q-dims",
+            "1",
+            "2",
+            "8",
+            "16",
+            "--v-dims",
+            "1",
+            "1",
+            "8",
+            "16",
+            "--stats",
+        )
+        bundle_dir, golden_graph, graph, meta = self.generate_both(*args)
+        self.assert_graph_only(bundle_dir, golden_graph, graph, meta)
+        self.assertEqual(sorted(meta["inputs"]), ["0", "1", "2"])
+
+    def test_rejects_inputs_a_recipe_cannot_express(self):
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp) / "Small"
+            dims = ("--q-dims", "2", "1", "8", "16", "--v-dims", "2", "1", "8", "16")
+            for extra in (
+                ("--seq-lens-q", "8", "4", "--seq-lens-kv", "8", "4"),
+                ("--dtype", "fp8", "--fp8-scaling"),
+                ("--block-mask",),  # fewer than 8 key tiles
+            ):
+                with self.subTest(extra=extra):
+                    completed = self.run_generator(base, *dims, *extra, "--graph-only")
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertIn("--graph-only", completed.stderr)
+
+
+# ctest reports exit code 77 as Skipped (SKIP_RETURN_CODE), so a run in which every
+# test skipped, e.g. without PyTorch, does not look like a pass.
+SKIP_EXIT = 77
 
 if __name__ == "__main__":
-    unittest.main()
+    result = unittest.main(exit=False).result
+    if not result.wasSuccessful():
+        sys.exit(1)
+    if result.testsRun > 0 and len(result.skipped) == result.testsRun:
+        sys.exit(SKIP_EXIT)
