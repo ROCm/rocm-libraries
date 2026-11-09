@@ -789,6 +789,29 @@ def _f32_spec(idx: int):
     if sel is not None:
         spec, arch = sel()
         return ("generic", spec, arch)
+    # 38..41: the MFMA dgrad weight transpose, (arch, dtype).
+    if idx < 42:
+        arch, dt = _f32_axes(idx - 38)
+        spec = DirectTransposeWeightsDgradSpec(problem=_f32p(2, 24, 40, dt))
+        return ("transpose", spec, arch)
+    # 42..49: the W_coa reorganize, (arch, dtype) x fold_k32 on / off.
+    if idx < 50:
+        arch, dt = _f32_axes((idx - 42) // 2)
+        spec = DirectReorganizeWeightsSpec(
+            problem=_f32p(2, 24, 64, dt), fold_k32=idx % 2 == 0
+        )
+        return ("reorganize", spec, arch)
+    # 50: runtime-channel transpose; 51: runtime-channel fold_k32 reorganize.
+    if idx == 50:
+        spec = DirectTransposeWeightsDgradSpec(
+            problem=_f32p(1, 48, 40, "tf32"), runtime_channels=True
+        )
+        return ("transpose", spec, "gfx950")
+    if idx == 51:
+        spec = DirectReorganizeWeightsSpec(
+            problem=_f32p(1, 24, 64, "fp32"), fold_k32=True, runtime_channels=True
+        )
+        return ("reorganize", spec, "gfx942")
     return None
 
 

@@ -2537,6 +2537,42 @@ static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** 
         }
         return 0;
     }
+    if(idx < 42)
+    {
+        *arch = F32_ARCHES[(idx - 38) / 2];
+        *kind = KIND_TRANSPOSE;
+        memset(sp->stp, 0, sizeof(*sp->stp));
+        sp->stp->problem = mk_f32p(2, 24, 40, F32_DTYPES[(idx - 38) % 2]);
+        return 0;
+    }
+    if(idx < 50)
+    {
+        *arch = F32_ARCHES[(idx - 42) / 4];
+        *kind = KIND_REORG;
+        memset(sp->sreorg, 0, sizeof(*sp->sreorg));
+        sp->sreorg->problem = mk_f32p(2, 24, 64, F32_DTYPES[((idx - 42) / 2) % 2]);
+        sp->sreorg->fold_k32 = idx % 2 == 0;
+        return 0;
+    }
+    if(idx == 50)
+    {
+        *arch = "gfx950";
+        *kind = KIND_TRANSPOSE;
+        memset(sp->stp, 0, sizeof(*sp->stp));
+        sp->stp->problem = mk_f32p(1, 48, 40, "tf32");
+        sp->stp->runtime_channels = true;
+        return 0;
+    }
+    if(idx == 51)
+    {
+        *arch = "gfx942";
+        *kind = KIND_REORG;
+        memset(sp->sreorg, 0, sizeof(*sp->sreorg));
+        sp->sreorg->problem = mk_f32p(1, 24, 64, "fp32");
+        sp->sreorg->fold_k32 = true;
+        sp->sreorg->runtime_channels = true;
+        return 0;
+    }
     return -1;
 }
 
