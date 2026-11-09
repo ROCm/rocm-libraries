@@ -2694,6 +2694,21 @@ TEST_P(local_matrix_formats, amg_setup_runs_on_a_csr_copy)
             EXPECT_EQ(values_of(cf_other), values_of(cf_ref));
             EXPECT_EQ(values_of(S_other), values_of(S_ref));
         }
+        {
+            SCOPED_TRACE("AMGPMISAggregate(connections, aggregates)");
+            LocalVector<int> conn, agg_ref, agg_other;
+            like(*C, conn);
+            like(*C, agg_ref);
+            like(*A, agg_other);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+            C->AMGConnect(T(0.08), &conn);
+            C->AMGPMISAggregate(conn, &agg_ref);
+            std::string log = logged([&] { A->AMGPMISAggregate(conn, &agg_other); });
+#pragma GCC diagnostic pop
+            expect_warning(log, "AMGPMISAggregate");
+            EXPECT_EQ(values_of(agg_other), values_of(agg_ref));
+        }
 
         using Interpolation = std::function<void(const LocalMatrix<T>&, LocalMatrix<T>*)>;
         const std::vector<std::pair<std::string, Interpolation>> interpolations
