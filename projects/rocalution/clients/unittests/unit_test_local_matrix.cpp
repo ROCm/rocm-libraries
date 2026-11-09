@@ -706,8 +706,9 @@ TEST_P(local_matrix_data_ptr, leave_and_set_data_ptr_hand_over_the_arrays)
             break;
         case BCSR:
         {
-            // For a BCSR matrix the block dimension is only an output
-            int blockdim = 0;
+            // For a BCSR matrix the block dimension is only an output, so another valid
+            // one must not convert it
+            int blockdim = format().blockdim + 1;
             A->LeaveDataPtrBCSR(&row, &col, &val, blockdim);
             EXPECT_EQ(blockdim, format().blockdim);
             B->SetDataPtrBCSR(&row,
