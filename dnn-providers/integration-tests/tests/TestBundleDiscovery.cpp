@@ -595,6 +595,20 @@ TEST(TestSanitizeForGtest, ReplacesInvalidChars)
     EXPECT_EQ(sanitizeForGtest("already_ok"), "already_ok");
 }
 
+// Ops without an "outputs" sub-object name their output with a flat key. The flat
+// inputs beside it, such as resample backward's dy and index, are not outputs.
+TEST(TestExtractOutputUidsFromJson, ReadsFlatOutputKeys)
+{
+    const auto graphJson = nlohmann::json::parse(R"({"nodes": [
+        {"type": "ReductionAttributes", "in_tensor_uid": 0, "out_tensor_uid": 1},
+        {"type": "ResampleFwdAttributes", "x_tensor_uid": 2, "y_tensor_uid": 3},
+        {"type": "ResampleBwdAttributes", "dy_tensor_uid": 4, "index_tensor_uid": 5,
+         "dx_tensor_uid": 6}
+    ]})");
+
+    EXPECT_EQ(detail::extractOutputUidsFromJson(graphJson), (std::vector<int64_t>{1, 3, 6}));
+}
+
 TEST_F(TestBundleDiscoveryFixture, UnparseableJsonIsDiscoveredButLoadThrows)
 {
     auto badDir = _tempDir / "BadOp" / "Malformed";

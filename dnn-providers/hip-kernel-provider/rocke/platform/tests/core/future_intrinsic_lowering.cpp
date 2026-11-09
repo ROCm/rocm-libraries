@@ -2623,6 +2623,80 @@ void case_gfx1250_tdm_i32_lds_address()
     expect_arg(tdm_readfirstlane_args(ir), 1, "%lds", __LINE__);
 }
 
+/* Mirrors test_i64_global_address_used_directly: an i64 address (from
+ * rocke_b_global_addr_of) is packed as is, with no ptrtoint. */
+void case_gfx1250_tdm_i64_global_address()
+{
+    const std::string ir = lower_one(
+        "i64_gaddr",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* gaddr = rocke_b_param(b, "gaddr", rocke_i64(), nullptr);
+            rocke_value_t* lds = i32_param(b, "lds");
+            rocke_value_t* n = rocke_b_const_i32(b, 64);
+            rocke_value_t* g[5];
+            rocke_b_tdm_descriptor_2d(b, gaddr, lds, 4, n, n, n, 64, 1, 0, -1, 0, g);
+            rocke_b_tensor_load_to_lds(b, g[0], g[1], g[2], g[3], g[4], 0);
+        },
+        "gfx1250",
+        ROCKE_LLVM_FLAVOR_LLVM23);
+    EXPECT_NO_IR(ir, "ptrtoint");
+    EXPECT_IR(ir, "lshr i64 %gaddr, 32");
+    const std::string trunc = " = trunc i64 %gaddr to i32";
+    const size_t at = ir.find(trunc);
+    if(at == std::string::npos)
+    {
+        fail("no trunc of %gaddr", __LINE__);
+        return;
+    }
+    const size_t name = ir.rfind('%', at);
+    expect_arg(tdm_readfirstlane_args(ir), 2, ir.substr(name, at - name).c_str(), __LINE__);
+}
+
+/* Mirrors TestTdmPaddingEncode in test_gfx1250_tdm.py. */
+void case_gfx1250_tdm_encode_padding()
+{
+    struct Good
+    {
+        int interval_bytes, pad_bytes, interval, amount;
+    };
+    static const Good good[] = {
+        {8, 4, 0, 0},
+        {64, 4, 3, 0},
+        {1024, 4, 7, 0},
+        {64, 32, 3, 7},
+        {1024, 512, ROCKE_TDM_PAD_INTERVAL_MAX, ROCKE_TDM_PAD_AMOUNT_MAX},
+    };
+    for(const Good& g : good)
+    {
+        int interval = -1, amount = -1;
+        if(!rocke_encode_tdm_padding(g.interval_bytes, g.pad_bytes, &interval, &amount, nullptr, 0)
+           || interval != g.interval || amount != g.amount)
+            fail("encode_tdm_padding fields", __LINE__);
+    }
+    struct Bad
+    {
+        int interval_bytes, pad_bytes;
+        const char* message;
+    };
+    static const Bad bad[] = {
+        {64, 0, "needs a positive pad"},
+        {64, 2, "dword-granular"},
+        {12, 16, "power-of-two dword count"},
+        {2048, 16, "pad_interval 8 exceeds 7"},
+        {64, 1024, "pad_amount 255 exceeds 127"},
+    };
+    for(const Bad& c : bad)
+    {
+        char why[256] = {0};
+        int interval = 0, amount = 0;
+        if(rocke_encode_tdm_padding(
+               c.interval_bytes, c.pad_bytes, &interval, &amount, why, sizeof(why)))
+            fail("encode_tdm_padding accepted an inexpressible pad", __LINE__);
+        else if(strstr(why, c.message) == nullptr)
+            fail(why, __LINE__);
+    }
+}
+
 void case_gfx1250_tdm_group_types()
 {
     rocke_ir_builder_t b;
@@ -4198,13 +4272,18 @@ void case_wmma_result_count()
             }
             else
             {
-                /* The integer WMMA is a matrix call, which names its op_id. */
+                /* Integer WMMA uses the named matrix-call diagnostic; the
+                 * float emitter retains its fixed-ABI preflight diagnostic. */
                 char expected[80];
-                snprintf(expected,
-                         sizeof(expected),
-                         "%s: expected exactly one result, got %d",
-                         integer ? "tile.wmma_i32_16x16x16_iu8" : "tile.mma",
-                         count);
+                if(integer)
+                    snprintf(expected,
+                             sizeof(expected),
+                             "tile.wmma_i32_16x16x16_iu8: expected exactly one result, got %d",
+                             count);
+                else
+                    snprintf(expected,
+                             sizeof(expected),
+                             "unscaled WMMA expects 3 operands and 1 result");
                 if(status != ROCKE_ERR_VALUE || out || strcmp(err, expected) != 0)
                     fail("malformed WMMA did not return its result-count error", __LINE__);
             }
@@ -4346,6 +4425,8 @@ const TestCase k_cases[] = {
     {"gfx1250_tdm_round_trip", case_gfx1250_tdm_round_trip},
     {"gfx1250_tdm_flag_words", case_gfx1250_tdm_flag_words},
     {"gfx1250_tdm_i32_lds_address", case_gfx1250_tdm_i32_lds_address},
+    {"gfx1250_tdm_i64_global_address", case_gfx1250_tdm_i64_global_address},
+    {"gfx1250_tdm_encode_padding", case_gfx1250_tdm_encode_padding},
     {"gfx1250_tdm_group_types", case_gfx1250_tdm_group_types},
     {"global_ptr_to_i64", case_global_ptr_to_i64},
     {"global_ptr_offset", case_global_ptr_offset},

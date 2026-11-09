@@ -473,10 +473,11 @@ the shape into the kernel and reshapes the schedule around a 256-row query tile.
 - **Compile-time-sized ABI.** `batch / seqlen / heads / head_size / causal /
   dtype` are constants baked at build time (dense, statically-sized). The only
   runtime args are the `q/k/v/o` pointers and the `f32` softmax scale $\tau$.
-  The scale is supported in $[2^{-64}, 2^4]$: `run_attention_dense_torch` raises
-  `ValueError` for a NaN or infinite scale and `NotImplementedError` for a
-  finite one outside the range (including $\tau \le 0$), and the hipDNN matcher
-  declines such graphs. The range is a chosen safety margin for the default
+  The supported scale range is `DENSE_MIN_SCALE`..`DENSE_MAX_SCALE` in
+  `kernels/common/attention_dense_spec.py`: `check_dense_scale` there makes
+  `run_attention_dense_torch` raise `ValueError` for a NaN or infinite scale and
+  `NotImplementedError` for a finite one outside the range (including
+  $\tau \le 0$), and the hipDNN matcher declines such graphs. The range is a chosen safety margin for the default
   grid's exp2 argument (§8.1), not a hardware limit. `block_n`
   (KV tile), `waves_per_eu`, and the persistent knobs are the tuning parameters;
   every algorithmic lever below is always-on.
@@ -495,7 +496,7 @@ the shape into the kernel and reshapes the schedule around a 256-row query tile.
 | **CK-1 transposed PV** | $P$ feeds the PV MFMA in its native QK-output layout via a half-local V load (`pv32_v_load_paired`); the cross-half P-relayout shuffle is gone (~96 `ds_bpermute` removed). | +35% |
 | **LDS bank-conflict pad on K** (`[NBUF, BN, D+8]`) | kills the 8-way conflict on the QK K-reads. | +80% (base win) |
 | **LDS V pad** (`+32`) | the transposed PV read (`ds_read_b64_tr_b16`) has a stricter bank pattern than K; a `+32` V-row pad fully clears its conflicts. | +~5% |
-| **native `exp2_fast`** (`v_exp_f32`, no overflow guard — softmax arg bounded: at most the lazy threshold, plus, in the default grid, the rounding residue of $m_2 = \mathrm{fl}(\max \tilde s \cdot \kappa)$ that the single-rounding fma exposes: at most half an ulp of $\max \tilde s \cdot \kappa$, which is ≤ 1 for scale ≤ $2^4$ and \|raw score\| ≤ $10^6$. Nothing bounds the raw score, so beyond that the residue keeps growing, and at pre-softmax logits of about $2\times10^8$ (fp16 $P$) to $1.5\times10^9$ (any dtype) the default grid's output becomes inf/NaN — a known, accepted limitation; see the note at `_MAX_SCALE` in the kernel) | one instruction per exp. | faster |
+| **native `exp2_fast`** (`v_exp_f32`, no overflow guard — softmax arg bounded: at most the lazy threshold, plus, in the default grid, the rounding residue of $m_2 = \mathrm{fl}(\max \tilde s \cdot \kappa)$ that the single-rounding fma exposes: at most half an ulp of $\max \tilde s \cdot \kappa$, which is ≤ 1 for scale ≤ $2^4$ and \|raw score\| ≤ $10^6$. Nothing bounds the raw score, so beyond that the residue keeps growing, and at pre-softmax logits of about $2\times10^8$ (fp16 $P$) to $1.5\times10^9$ (any dtype) the default grid's output becomes inf/NaN — a known, accepted limitation; see the scale-range note above `_EMPTY_ROW_MAX_GRID` in the kernel) | one instruction per exp. | faster |
 | **depth-1 cluster** | fuses the exp2 into the PV-MFMA loop so the softmax VALU/TRANS co-executes in the MFMA shadow (`sched_group_barrier` names the DS_READ/MFMA/VALU/TRANS population per step; the VALU count is an upper bound when the compiler packs the exp-argument FMAs). The default grid computes the argument as one $\mathrm{fma}(\tilde s, \kappa, -m_2)$ on raw scores; the persistent grid as $s_2 - m_2$ on scores scaled after the MFMA. | — |
 | **partial-vmcnt software prefetch** | per-tile K/V DMA drains to a *partial* `vmcnt` (keeps the freshest V prefetch in flight across the barrier) instead of a full `vmcnt(0)` serialize. | raises MfmaUtil |
 | **PV-only `s_setprio`** | the PV MFMA cluster is bracketed at raised priority so it wins issue slots; paired with the prefetch. | +3.5% |

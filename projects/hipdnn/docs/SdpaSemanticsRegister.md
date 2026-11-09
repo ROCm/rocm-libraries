@@ -36,16 +36,19 @@ batch when `seq_len_q/kv` are set).
   - References: `CpuFpReferenceSdpa.hpp` / `CpuFpReferenceSdpaRagged.hpp` `isMasked`, `GpuRefSdpa{Fwd,RaggedFwd,Bwd}.cpp`,
     golden generators' `build_bound_mask` (`utilities/sdpa_common.py`; `--left-bound` is the graph's `left_bound`,
     `--window-left` is FlashAttention's `window_size_left` and is written as `left_bound = W + 1`).
-  - Kernels count the keys left of the diagonal (FlashAttention `window_size_left`), so providers convert once at the
-    boundary: `asm_sdpa_engine/plans/SdpaPlanUtils.hpp` `resolveDiagonalBand` stores `left_bound - 1` (asm forward
+  - Most kernels count the keys left of the diagonal (FlashAttention `window_size_left`), so providers convert once at
+    the boundary: `asm_sdpa_engine/plans/SdpaPlanUtils.hpp` `resolveDiagonalBand` stores `left_bound - 1` (asm forward
     and backward, hip_flash2), and `Gfx1151WmmaAttentionNative.cpp` `maskFor` passes `left_bound - 1` as
-    `window_left`. The gfx950 dense pack declines windows.
+    `window_left`. The gfx942 dense pack's kernel counts the diagonal too (it keeps
+    `(q - W, q]`), so `AttentionDenseNative.cpp` `maskFor`, which both dense packs share, passes
+    `left_bound` itself as `sliding_window` for gfx942. The gfx950 dense pack declines windows.
   - `TestCpuFpReferenceSdpaFp64.LeftBoundKeepsLKeysIncludingDiagonalLikeCudnn` pins the count.
 - **Other use cases:**
   - FlashAttention, AITER, AOTriton, TransformerEngine and FlashInfer: `window_left = L - 1`.
   - vLLM `sliding_window = W` keeps W keys including self, so it maps to `L = W`.
-  - rocKE's own oracle and kernels use the FlashAttention convention; a rocKE kernel served through hipDNN gets
-    `L - 1` from the provider.
+  - rocKE's own oracle and its `window_left` kernels use the FlashAttention convention; a rocKE kernel of that kind
+    served through hipDNN gets `L - 1` from the provider. The rocKE gfx942 dense kernel's `sliding_window` counts W keys
+    including self, vLLM's convention, so it gets `L` itself.
 - **Contract:** cuDNN's meaning.
 
 ### SEM-002: Deprecated `causal_mask` / `causal_mask_bottom_right` combined with explicit bounds
@@ -95,7 +98,7 @@ batch when `seq_len_q/kv` are set).
   (frontend nodes, `PlanUtils.hpp` `extractDiagonalBandParams`, hip-kernel-provider `resolveDiagonalBand`).
 - **Contract:** hipDNN's domain. Forward `left_bound = 0` is rejected so that forward and backward accept the same
   bands (cuDNN's backward rejects it), and because providers convert to the kernels' `window_left = L - 1`, where
-  `-1` means unbounded. A graph that needs this mask can use an explicit bias.
+  `-1` means unbounded (the gfx942 dense pack, whose kernel takes the key count `L`, is the exception). A graph that needs this mask can use an explicit bias.
 
 ### SEM-006: Bias combined with a band or bottom-right causal
 
