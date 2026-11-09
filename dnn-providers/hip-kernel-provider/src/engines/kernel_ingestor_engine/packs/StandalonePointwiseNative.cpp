@@ -81,13 +81,13 @@ int32_t storage(data::DataType type)
     switch(type)
     {
     case data::DataType::FLOAT:
-        return contract::Float;
+        return contract::FLOAT;
     case data::DataType::HALF:
-        return contract::Half;
+        return contract::HALF;
     case data::DataType::BFLOAT16:
-        return contract::Bfloat16;
+        return contract::BFLOAT16;
     case data::DataType::BOOLEAN:
-        return contract::Boolean;
+        return contract::BOOLEAN;
     default:
         return -1;
     }
@@ -95,32 +95,32 @@ int32_t storage(data::DataType type)
 
 bool dtypeCombination(const Launch& launch)
 {
-    const auto* types = launch.metadata.types;
+    const auto& types = launch.metadata.types;
     const auto a = types[0];
     const auto b = types[1];
     const auto out = types[2];
-    if(a < contract::Float || a > contract::Bfloat16)
+    if(a < contract::FLOAT || a > contract::BFLOAT16)
     {
         return false;
     }
     if(launch.metadata.operation == static_cast<int32_t>(data::PointwiseMode::CMP_GT))
     {
-        return a == b && out == contract::Boolean;
+        return a == b && out == contract::BOOLEAN;
     }
-    if(out < contract::Float || out > contract::Bfloat16)
+    if(out < contract::FLOAT || out > contract::BFLOAT16)
     {
         return false;
     }
     if(launch.arity == 1)
     {
-        return a == out || a == contract::Float;
+        return a == out || a == contract::FLOAT;
     }
-    if(b < contract::Float || b > contract::Bfloat16)
+    if(b < contract::FLOAT || b > contract::BFLOAT16)
     {
         return false;
     }
-    return (a == b && (out == a || out == contract::Float))
-           || (out == contract::Float && (a == contract::Float || b == contract::Float));
+    return (a == b && (out == a || out == contract::FLOAT))
+           || (out == contract::FLOAT && (a == contract::FLOAT || b == contract::FLOAT));
 }
 
 std::optional<Launch> binding(const MatchContext& context)
@@ -357,11 +357,11 @@ Launch readSaved(const SavedLaunchInputs& inputs)
         const auto root = std::to_string(operand);
         launch.uids[operand] = requireLaunchInt(inputs, "uid." + root);
         meta.types[operand] = static_cast<int32_t>(
-            requireLaunchInt(inputs, "type." + root, contract::Float, contract::Boolean));
+            requireLaunchInt(inputs, "type." + root, contract::FLOAT, contract::BOOLEAN));
         const bool unused = operand == 1 && launch.arity == 1;
         if(unused)
         {
-            valid = valid && launch.uids[operand] == 0 && meta.types[operand] == contract::Float;
+            valid = valid && launch.uids[operand] == 0 && meta.types[operand] == contract::FLOAT;
         }
         int64_t span = 0;
         std::vector<std::pair<int64_t, int64_t>> axes;
