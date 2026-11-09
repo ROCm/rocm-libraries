@@ -32,7 +32,9 @@ split matters when you build a spec by hand:
 The gfx950 golden is untouched either way: this is a separate kernel module emitting
 its own symbol against its own fixture, not an arch branch in the gfx950 file.
 
-Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged.
+Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged,
+and a sliding window that leaves query rows no key (the last query block's window past
+`seqlen_kv` without sinks, or `seqlen_q - seqlen_kv >= W` without sinks or LSE).
 Sliding-window and attention sinks are supported, alone or combined. Sinks seed the
 online-softmax state once per work item (`m = sink * log2(e)`, `l = 1`) before the KV
 loop and add a trailing `sink_ptr` ([Hq], q dtype) kernel argument. The
@@ -48,7 +50,7 @@ reference; one run on a 304-CU gfx942 part. Every cell is a **ratio**, so per
 `AGENTS.md` the absolute throughputs stay in the protected results page.
 
 Both arms run the config that actually **ships**: dense builds its spec through the
-production dispatch factory (`dispatch/attention/gfx942_dense.py::_base_spec`, so the
+production dispatch factory (`dispatch/attention/gfx942_dense.py::tuned_base_spec`, so the
 measured binary carries the shipped `waves_per_eu` / `d64_kpad` / persistent
 decision), and the baseline takes `wide4`, `narrow` or `narrow_d64` as
 `attention_tiled_2d` selects for that shape.

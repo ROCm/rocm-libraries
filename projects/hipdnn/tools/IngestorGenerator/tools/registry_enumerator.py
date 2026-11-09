@@ -10,21 +10,25 @@
 The manifest's ``enumerate`` block names the family's candidate list and request
 class; ``pin`` selects exactly one candidate, and each cell of the ``cells`` cross
 product (first group outermost) is a request whose ``select_spec``/``sweep_space``
-specs become kernels. ``space: slice`` keeps the specs differing from the cell's
-default only in ``free_fields``. ``space: full`` keeps those matching the default
-in ``reduction.fields.feature``, projects varying ``performance`` knobs into the
-spec, KMD, metadata, bindings and name, and holds any other varying field at the
-registry default (with a WARN unless ``ignored``). The default spec carries
-``default: true``. A ``feature_fields`` entry names a boolean spec field a cell
-can turn on. It is unrelated to ``reduction.fields.feature`` (the cell-defining
-fields of variant reduction), where it should also be listed, or reduction treats
-the feature's on and off kernels as one cell. A kernel holding it at a value other than
-its dataclass default (turned on) inserts the entry's ``name_token`` after the
-name template's last slot, e.g. ``..._bn64_addb.gfx950``; given ``free_fields``
-it sweeps only those, and given ``select`` only the specs with those values;
-the cell's default is then the kept spec equal to the registry default outside
-the selected fields. The selects of two features a cell turns on must agree. The name check refuses any two kernels
-with one name, in both spaces.
+specs become kernels. ``pin`` may also be a list of such selectors: the first
+candidate gives every cell its default spec and must admit every cell, and each
+later one adds its ``sweep_space`` specs to the cells it admits. A kernel's
+``provenance`` names the first pin that supplied its spec. ``space: slice`` keeps
+the specs differing from the cell's default only in ``free_fields``.
+``space: full`` keeps those matching the default in ``reduction.fields.feature``,
+projects varying ``performance`` knobs into the spec, KMD, metadata, bindings and
+name, and holds any other varying field at the registry default (with a WARN
+unless ``ignored``). The default spec carries ``default: true``. A
+``feature_fields`` entry names a boolean spec field a cell can turn on. It is
+unrelated to ``reduction.fields.feature`` (the cell-defining fields of variant
+reduction), where it should also be listed, or reduction treats the feature's on
+and off kernels as one cell. A kernel holding it at a value other than its
+dataclass default (turned on) inserts the entry's ``name_token`` after the name
+template's last slot, e.g. ``..._bn64_addb.gfx950``; given ``free_fields`` it
+sweeps only those, and given ``select`` only the specs with those values; the
+cell's default is then the kept spec equal to the registry default outside the
+selected fields. The selects of two features a cell turns on must agree. The name
+check refuses any two kernels with one name, in both spaces.
 
 Two opt-in ``enumerate`` keys let a rule-driven candidate (one spec per request,
 picked from request fields) yield one cell per kernel family rather than one per
@@ -502,6 +506,15 @@ class Registry:
         "selector_fields",
         "cell_keyed_by",
     )
+    #: The ``enumerate`` keys under which `cell_spaces` rewrites or merges the
+    #: registry's specs, so a request combo's ``select_spec`` is no longer a cell's
+    #: default kernel.
+    _RESHAPING = (
+        "spec_overrides",
+        "neutral_fields",
+        "selector_fields",
+        "cell_keyed_by",
+    )
 
     def __init__(self, manifest: dict, decl: dict | None = None):
         primary = decl is None
@@ -511,9 +524,10 @@ class Registry:
             if key not in decl:
                 raise EnumerationError(f"the manifest's {where} lacks '{key}'.")
         self.decl = decl
-        #: ``(cell_key, kernel spec)`` -> the registry's ``tuning_id`` for it, filled
-        #: by `space`. Absent for a spec the registry hands back unwrapped.
-        self.tuning_ids: dict = {}
+        #: ``(cell_key, kernel spec)`` -> ``(pin, tuning_id)`` of the pin that supplied
+        #: it, filled by `space`. ``tuning_id`` is None for a spec the registry hands
+        #: back unwrapped.
+        self.origins: dict = {}
         self.space_kind = decl.get("space", "slice")
         if self.space_kind not in ("slice", "full"):
             raise EnumerationError(
@@ -533,7 +547,16 @@ class Registry:
                 f"cannot resolve the type hints of {decl['request']!r}: {exc}"
             ) from exc
 
-        self.pin = _mapping(decl, "pin")
+        raw_pins = decl["pin"]
+        if isinstance(raw_pins, list):
+            if not raw_pins or not all(isinstance(p, dict) for p in raw_pins):
+                raise EnumerationError(
+                    f"enumerate.pin must be a mapping or a non-empty list of mappings, "
+                    f"got {raw_pins!r}."
+                )
+            pins = [dict(p) for p in raw_pins]
+        else:
+            pins = [_mapping(decl, "pin")]
         self.fixed = _mapping(decl, "fixed")
         self.features = _mapping(decl, "feature_fields")
         arch = manifest.get("arch")
@@ -542,7 +565,7 @@ class Registry:
                 f"enumerate.fixed.arch {self.fixed['arch']!r} disagrees with the "
                 f"manifest's arch {arch!r}."
             )
-        clash = sorted(set(self.pin) & set(self.fixed))
+        clash = sorted(set().union(*pins) & set(self.fixed))
         if clash:
             raise EnumerationError(
                 f"enumerate.pin and enumerate.fixed both set {clash}."
@@ -575,13 +598,13 @@ class Registry:
         self.neutral_fields = list(decl.get("neutral_fields") or [])
         self.spec_overrides = _mapping(decl, "spec_overrides")
         self.cell_keyed_by = list(decl.get("cell_keyed_by") or [])
-        for name in itertools.chain(self.pin, self.fixed, self.cell_fields):
+        for name in itertools.chain(*pins, self.fixed, self.cell_fields):
             if name not in self.request_fields:
                 raise EnumerationError(
                     f"enumerate names request field '{name}', which "
                     f"{self.request_cls.__name__} does not define."
                 )
-        self.pin = {k: self.coerce(k, v, strict=True) for k, v in self.pin.items()}
+        pins = [{k: self.coerce(k, v, strict=True) for k, v in p.items()} for p in pins]
         self.fixed = {k: self.coerce(k, v, strict=True) for k, v in self.fixed.items()}
 
         try:
@@ -591,22 +614,11 @@ class Registry:
                 f"the registry's candidate list could not be built "
                 f"({type(exc).__name__}): {exc}"
             ) from exc
-        matched = [
-            c
-            for c in candidates
-            if all(getattr(c, k, _Missing) == v for k, v in self.pin.items())
-        ]
-        if len(matched) != 1:
-            shown = (
-                [getattr(c, "name", repr(c)) for c in matched]
-                if matched
-                else sorted({getattr(c, "name", repr(c)) for c in candidates})
-            )
-            raise EnumerationError(
-                f"enumerate.pin {self.pin} matches {len(matched)} registry candidates, "
-                f"not one. {'Matched' if matched else 'Available'}: {shown}."
-            )
-        self.candidate = matched[0]
+        pinned = [_pinned_candidate(candidates, pin) for pin in pins]
+        # The first pin: every cell's default spec, and the request shapes_report
+        # judges. Each later pin only adds specs (`space`).
+        self.pin, self.candidate = pins[0], pinned[0]
+        self.extra_pins = list(zip(pins[1:], pinned[1:]))
 
         try:
             from rocke.dispatch.tuning import walk
@@ -710,9 +722,9 @@ class Registry:
             out.append(cell)
         return out
 
-    def request(self, cell: dict):
+    def request(self, cell: dict, pin: dict | None = None):
         try:
-            return self.request_cls(**self.fixed, **self.pin, **cell)
+            return self.request_cls(**self.fixed, **(pin or self.pin), **cell)
         except (TypeError, ValueError) as exc:
             raise EnumerationError(
                 f"cannot build a {self.request_cls.__name__} for cell "
@@ -720,10 +732,59 @@ class Registry:
             ) from exc
 
     def space(self, cell: dict) -> tuple:
-        """``(select_spec spec, sweep specs)`` for one cell, both unwrapped."""
-        request = self.request(cell)
+        """``(select_spec spec, sweep specs)`` for one cell, both unwrapped: the first
+        pinned candidate's, then the sweep specs of every later pinned candidate that
+        admits the cell, each spec once. Each spec is traced to the first pin that
+        supplied it."""
+        key = self.cell_key(cell)
+        base, specs, ids = self._candidate_space(cell, self.pin, self.candidate)
+        for spec in (base, *specs):
+            self.origins.setdefault((key, spec), (self.pin, ids.get(spec)))
+        for pin, candidate in self.extra_pins:
+            request = self.request(cell, pin)
+            try:
+                ok, _why = candidate.admits(request)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise EnumerationError(
+                    f"the registry cannot judge cell {_show(cell)} for pin {pin} "
+                    f"({type(exc).__name__}): {exc}"
+                ) from exc
+            if ok:
+                _, more, ids = self._candidate_space(cell, pin, candidate)
+                added = [s for s in more if s not in specs]
+                for spec in added:
+                    self.origins.setdefault((key, spec), (pin, ids.get(spec)))
+                specs += added
+        return base, specs
+
+    def reshaped_by(self) -> list:
+        """The `_RESHAPING` keys this section sets."""
+        return [key for key in self._RESHAPING if getattr(self, key)]
+
+    def base_spec(self, cell: dict, pin: dict | None = None):
+        """The unwrapped ``select_spec`` spec for one request combo under one of the
+        manifest's pins (default the first, whose base spec is the cell's default
+        kernel). Raises for a section that sets any `_RESHAPING` key: `cell_spaces`
+        rewrites or merges its specs, so a raw combo's pick is no cell's default."""
+        reshaped = self.reshaped_by()
+        if reshaped:
+            raise EnumerationError(
+                f"base_spec answers a raw request combo's select_spec, which is not a "
+                f"cell's default kernel when enumerate sets {reshaped}."
+            )
+        pin = self.pin if pin is None else pin
+        pairs = [(self.pin, self.candidate), *self.extra_pins]
+        candidate = next((c for p, c in pairs if p == pin), None)
+        if candidate is None:
+            raise EnumerationError(f"{pin} is not one of the manifest's enumerate.pin.")
+        base, _, _ = self._candidate_space(cell, pin, candidate)
+        return base
+
+    def _candidate_space(self, cell: dict, pin: dict, candidate) -> tuple:
+        """``(base, specs, {spec: tuning_id})`` for one pinned candidate."""
+        request = self.request(cell, pin)
         try:
-            ok, why = self.candidate.admits(request)
+            ok, why = candidate.admits(request)
         except (ValueError, TypeError, AttributeError) as exc:
             raise EnumerationError(
                 f"the registry cannot judge cell {_show(cell)} "
@@ -735,10 +796,10 @@ class Registry:
                 f"cells promise: {why}"
             )
         try:
-            base_wrapped = self.candidate.select_spec(request)
+            base_wrapped = candidate.select_spec(request)
             base = _unwrap(base_wrapped)
             with self._sweep_level(self.decl["sweep_level"]):
-                wrapped = list(self.candidate.sweep_space(request))
+                wrapped = list(candidate.sweep_space(request))
             specs = [_unwrap(s) for s in wrapped]
         except (ValueError, TypeError, AttributeError) as exc:
             raise EnumerationError(
@@ -750,26 +811,26 @@ class Registry:
                 f"the registry routes cell {_show(cell)} without a kernel_spec; the "
                 f"pinned candidate must resolve to a kernel."
             )
-        key = self.cell_key(cell)
         if any(
             getattr(item, "reduce_spec", None) is not None
             for item in (base_wrapped, *wrapped)
         ):
             self.pairs_reduce = True
+        ids: dict = {}
         for item in (base_wrapped, *wrapped):
             tuning_id = getattr(item, "tuning_id", None)
             if tuning_id:
-                self.tuning_ids.setdefault((key, _unwrap(item)), str(tuning_id))
-        return base, specs
+                ids.setdefault(_unwrap(item), str(tuning_id))
+        return base, specs, ids
 
     def provenance(self, cell: dict, spec) -> dict:
-        """The pin's ``spec_id`` and, when the registry names the kernel, its
-        ``tuning_id``: what lets a shipped descriptor be traced back to the
-        registry entry that produced it. Informational; never compared."""
+        """The supplying pin's ``spec_id`` and, when the registry names the kernel,
+        that pin's ``tuning_id`` for it: what lets a shipped descriptor be traced back
+        to the registry entry that produced it. Informational; never compared."""
+        pin, tuning_id = self.origins.get((self.cell_key(cell), spec), (self.pin, None))
         out = {}
-        if self.pin.get("spec_id"):
-            out["rocke_spec_id"] = str(self.pin["spec_id"])
-        tuning_id = self.tuning_ids.get((self.cell_key(cell), spec))
+        if pin.get("spec_id"):
+            out["rocke_spec_id"] = str(pin["spec_id"])
         if tuning_id and tuning_id != "auto":
             out["rocke_tuning_id"] = tuning_id
         return out
@@ -874,6 +935,26 @@ class Registry:
 
 class _Missing:
     """No such candidate attribute; equal to nothing a pin can name."""
+
+
+def _pinned_candidate(candidates: list, pin: dict):
+    """The one registry candidate whose attributes equal every value of ``pin``."""
+    matched = [
+        c
+        for c in candidates
+        if all(getattr(c, k, _Missing) == v for k, v in pin.items())
+    ]
+    if len(matched) != 1:
+        shown = (
+            [getattr(c, "name", repr(c)) for c in matched]
+            if matched
+            else sorted({getattr(c, "name", repr(c)) for c in candidates})
+        )
+        raise EnumerationError(
+            f"enumerate.pin {pin} matches {len(matched)} registry candidates, "
+            f"not one. {'Matched' if matched else 'Available'}: {shown}."
+        )
+    return matched[0]
 
 
 def _show(cell: dict) -> str:
@@ -1124,7 +1205,7 @@ def cell_spaces(registry: Registry, classification: Classification) -> CellSpace
     raw = [registry.space(cell) for cell in combos]
     selectors, neutral = registry.selector_fields, registry.neutral_fields
     overrides, keyed = registry.spec_overrides, registry.cell_keyed_by
-    if not combos or (not selectors and not neutral and not overrides and not keyed):
+    if not combos or not registry.reshaped_by():
         return CellSpaces(combos, raw, [], len(combos))
     absent = [a for a in keyed if not hasattr(raw[0][0], a)]
     if absent:

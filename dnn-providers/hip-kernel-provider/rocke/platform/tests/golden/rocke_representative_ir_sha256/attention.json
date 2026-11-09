@@ -45,10 +45,10 @@
         },
         "attention/gfx942/2d_lse_transposed32_bf16_d128": {
           "arch": "gfx942",
-          "bytes": 489899,
+          "bytes": 492068,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_g2_bf16_mw32_mfma32x8_stqk_lse",
-          "sha256": "4911beddd44ceb1625e2d9496477b1523869506a14b54b64d16b51a13bd54be0",
+          "sha256": "27c4214a59e53bcfcc30a9f02c1a20727c449ab2ece75c3f32b8a931f6518551",
           "status": "ok"
         },
         "attention/gfx942/3d_bf16_d128_b64": {
@@ -426,10 +426,10 @@
         },
         "attention/gfx942/2d_lse_transposed32_bf16_d128": {
           "arch": "gfx942",
-          "bytes": 489999,
+          "bytes": 492168,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_g2_bf16_mw32_mfma32x8_stqk_lse",
-          "sha256": "706b2c69142c6a22c21d0ffba51cab6367622f14692d2676e4edf4ebbc975ca8",
+          "sha256": "a9dbaec67c78fcb6c6c76534dc8b04ac846f42b208ab11c310fd3ec4bb058151",
           "status": "ok"
         },
         "attention/gfx942/3d_bf16_d128_b64": {
@@ -807,10 +807,10 @@
         },
         "attention/gfx942/2d_lse_transposed32_bf16_d128": {
           "arch": "gfx942",
-          "bytes": 490063,
+          "bytes": 492232,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_g2_bf16_mw32_mfma32x8_stqk_lse",
-          "sha256": "0bcf6c2957fd7053ab70ae5522e207a76a4c0db0596a84ec7fcfee29e478685d",
+          "sha256": "3ac893853f42bfd8d5e49b6a101a80e0ac5b180dfff3684dace64cd2b3bd04f7",
           "status": "ok"
         },
         "attention/gfx942/3d_bf16_d128_b64": {
@@ -1188,10 +1188,10 @@
         },
         "attention/gfx942/2d_lse_transposed32_bf16_d128": {
           "arch": "gfx942",
-          "bytes": 490063,
+          "bytes": 492232,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_g2_bf16_mw32_mfma32x8_stqk_lse",
-          "sha256": "0bcf6c2957fd7053ab70ae5522e207a76a4c0db0596a84ec7fcfee29e478685d",
+          "sha256": "3ac893853f42bfd8d5e49b6a101a80e0ac5b180dfff3684dace64cd2b3bd04f7",
           "status": "ok"
         },
         "attention/gfx942/3d_bf16_d128_b64": {

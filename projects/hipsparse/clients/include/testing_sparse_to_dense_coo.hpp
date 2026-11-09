@@ -31,6 +31,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -78,16 +79,11 @@ void testing_sparse_to_dense_coo_bad_arg(const Arguments& argus)
     float*   dcoo_val     = (float*)dcoo_val_managed.get();
     void*    dbuf         = (void*)dbuf_managed.get();
 
-    // Matrix structures
-    hipsparseSpMatDescr_t matA;
-
     size_t bsize;
 
     // Create matrix structures
-    verify_hipsparse_status_success(
-        hipsparseCreateCoo(
-            &matA, m, n, nnz, dcoo_row_ind, dcoo_col_ind, dcoo_val, iType, idxBase, dataType),
-        "success");
+    hipsparseLocalCoo matA(
+        m, n, nnz, dcoo_row_ind, dcoo_col_ind, dcoo_val, iType, idxBase, dataType);
     hipsparseLocalDnMat matB(m, n, ld, ddense_val, dataType, order);
 
     // SparseToDense buffer size
@@ -114,9 +110,6 @@ void testing_sparse_to_dense_coo_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_pointer(
         hipsparseSparseToDense(handle, matA, matB, alg, nullptr), "Error: dbuf is nullptr");
 #endif
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(matA), "success");
 #endif
 }
 
@@ -192,9 +185,7 @@ void testing_sparse_to_dense_coo(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dval, hcoo_val.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
 
     // Create matrices
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCoo(&matA, m, n, nnz, drow, dcol, dval, typeI, idx_base, typeT));
+    hipsparseLocalCoo matA(m, n, nnz, drow, dcol, dval, typeI, idx_base, typeT);
 
     // Create dense matrix
     hipsparseLocalDnMat matB(m, n, ld, ddense, typeT, order);
@@ -295,8 +286,6 @@ void testing_sparse_to_dense_coo(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
 #endif
 }
 
