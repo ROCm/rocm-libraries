@@ -43,6 +43,16 @@ Tolerance-class levers (P11 / DESIGN 12.4 gates; off by default):
   split      (reserved for a Q5-side split-KV form; 64)
   sigm       Q7's output-gate sigmoid (default-off, e2e fast-math (b)): ``acc`` (accurate exp + correctly rounded
              divide) | ``hw`` (``v_exp_f32`` of ``-x log2 e``, then ``v_rcp_f32``; ~1 ulp: the gate's last bit)
+  q5_mm      Q5's scores: ``none`` (the mono's 256-long f32 FMA chain per score) | ``mfma`` (waves 0 / 1 each one
+             16-position half of the tile: ``S^T = K Q^T`` on ``mfma_f32_16x16x32_bf16``, 8 k-steps, the 12 heads in
+             16 columns; same scale / mask / ``ss`` pairs; needs ``fuse=none``)
+  q7_mm      Q7's PV: ``none`` | ``mfma`` (``O^T += V^T P^T`` on ``mfma_f32_16x16x16_bf16`` per wave and round: V
+             through wave-private LDS read back transposed (``ds_read_b64_tr_b16``), P = the bf16 ``pp``
+             probabilities, f32 accumulation; the 8 waves' partials summed as today; needs ``fuse=none``)
+  q7_vskip   (with ``q7_mm=mfma`` only; QsaVpath's knob of the same name covers the scalar path on its branch) a wave
+             skips round i's slot lookup + V load, its V ring write, transposed reads and MFMAs when none of its 16
+             positions is live (``16 wave + 128 i >= ak``, wave-uniform): those products are exact zeros, so the
+             accumulators are bit for bit q7_mm=mfma's
 Codegen (exact): fma ``fma`` | ``fmuladd`` (f32), fmax ``maximum`` | ``maxnum`` (f32: differs only on
   NaN / signed zero), inline ``always`` | ``default`` | ``never``.
 Test-only mutants (``mutate``): see ``MUTANTS``.
@@ -67,6 +77,9 @@ MUTANTS = (
     "fuse_den",  # N4b single: the denominator without wave 7's partial
     "splitkv_norescale",  # N4b: the merge without the exp(m_s - M) rescale
     "splitkv_drop",  # N4b: split 0 dropped from the merge
+    "q5_mm_drop",  # q5_mm: the last k-step (dims 224-255) dropped
+    "q7_mm_drop",  # q7_mm: wave 0's round-0 MFMAs dropped (positions 0-15)
+    "q7_vdrop",  # q7_vskip: round 0's guard forced off (a live round's V work skipped)
 )
 
 
@@ -100,6 +113,9 @@ class QsaKnobs:
     split: int = 64
     n4b_e: str = "f32"
     sigm: str = "acc"
+    q5_mm: str = "none"
+    q7_mm: str = "none"
+    q7_vskip: bool = False
     fma: str = "fma"
     fmax: str = "maximum"
     inline: str = "always"
@@ -127,6 +143,8 @@ class QsaKnobs:
             "split": (32, 64, 128),
             "fma": ("fma", "fmuladd"),
             "sigm": ("acc", "hw"),
+            "q5_mm": ("none", "mfma"),
+            "q7_mm": ("none", "mfma"),
             "fmax": ("maximum", "maxnum"),
             "inline": ("always", "default", "never"),
         }
@@ -135,6 +153,12 @@ class QsaKnobs:
                 raise ValueError(f"QsaKnobs.{name} must be one of {vals}, got {getattr(self, name)!r}")
         if self.mutate and self.mutate not in MUTANTS:
             raise ValueError(f"unknown mutant {self.mutate!r}")
+        if (self.q5_mm != "none" or self.q7_mm != "none") and self.fuse != "none":
+            raise ValueError("q5_mm / q7_mm need fuse=none")
+        if self.q7_vskip and self.q7_mm != "mfma":
+            raise ValueError("q7_vskip needs q7_mm=mfma in this tree")
+        if self.mutate == "q7_vdrop" and not self.q7_vskip:
+            raise ValueError("the q7_vdrop mutant needs q7_vskip")
 
     @property
     def prepoll_skip(self) -> tuple:
@@ -143,7 +167,7 @@ class QsaKnobs:
     @property
     def tolerance(self) -> bool:
         """A tolerance-class build (not bitwise the mono by design)."""
-        return self.qdense != 0 or self.fuse != "none" or self.sigm != "acc"
+        return self.qdense != 0 or self.fuse != "none" or self.sigm != "acc" or self.q5_mm != "none" or self.q7_mm != "none"
 
     def diff(self) -> dict:
         d = QsaKnobs()
@@ -153,9 +177,9 @@ class QsaKnobs:
         return "_".join(f"{k}{v}" for k, v in sorted(self.diff().items()))
 
     def as_dict(self) -> dict:
-        """The sidecar's ``stage_knobs``; ``sigm`` only when on (off: the fields of the tree before it)."""
+        """The sidecar's ``stage_knobs``; ``sigm`` / ``q5_mm`` / ``q7_mm`` / ``q7_vskip`` only when on (off: the fields of the tree before them)."""
         d = asdict(self)
-        for k in ("sigm",):
+        for k in ("sigm", "q5_mm", "q7_mm", "q7_vskip"):
             if d[k] == getattr(QsaKnobs, k):
                 del d[k]
         return d

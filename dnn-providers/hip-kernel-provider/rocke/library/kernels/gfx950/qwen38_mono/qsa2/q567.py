@@ -17,7 +17,7 @@ the code above unchanged.
 
 from __future__ import annotations
 
-from rocke.core.ir import F32, I32
+from rocke.core.ir import BF16, F32, I32, VectorType
 
 from . import lower as X
 from .ctx import NEG_MAX, SCALE_BITS, QCtx
@@ -176,30 +176,74 @@ def _q5(x: QCtx, t, turn: int):
                 x.stv(x.add(x.add(x.mul(row, lay.k_stride), x.mul(quad, 4)), ks), w4)
             x.barrier()
 
-            with b.scf_if(x.lt(tid, G * ST)):
-                h = x.div(tid, ST)
-                i = x.mod(tid, ST)
-                acc = x.f(0.0)
-                for d in range(HW // 4):
-                    qf = x.bf16x8(x.ld4(x.add(x.mul(h, HW), qs + 4 * d)))
-                    kf = x.bf16x8(x.ld4(x.add(x.mul(i, lay.k_stride), ks + 4 * d)))
-                    for e in range(8):
-                        acc = x.fma(qf[e], kf[e], acc)
-                j = x.add(x.mul(tile, ST), i)
-                scale = SCALE_BITS ^ (1 if x.k.mutate == "q5_scale" else 0)
-                score = b.select(x.lt(j, ak), b.fmul(acc, x.fbits(scale)), x.f(NEG_MAX))
-                if x.k.fuse == "tile":
-                    _q5_tile_split(x, score, j, ak, h, i, kv, tile, rq)
-                else:
-                    other = x.xshfl(score, 1)
-                    with b.scf_if(x.eq(x.mod(i, 2), 0)):
-                        at = x.mb_ix(x.add(x.mul(x.add(x.mul(kv, G), h), lay.ss_row), j), rq)
-                        x.put2(x.mb("ss"), at, score, other)
+            if x.k.q5_mm == "mfma":
+                _q5_scores_mfma(x, tile, kv, ak, rq, qs, ks)
+            else:
+                _q5_scores(x, tile, kv, ak, rq, qs, ks)
             x.barrier()
             with b.scf_if(x.eq(tid, 0)):
                 ix = x.mb_ix(x.add(x.mul(tile, 2), kv), rq) if rows > 1 else t
                 x.put(x.mb("ssh"), ix, x.c(1))
 
+
+def _q5_scores(x: QCtx, tile, kv, ak, rq, qs, ks):
+    """The mono's scores: thread ``h ST + i`` (< 12 x 32) one score, a 256-long f32 FMA chain."""
+    b, lay = x.b, x.lay
+    G, HW, ST = lay.group, lay.head_words, lay.score_tile
+    tid = x.tid
+    with b.scf_if(x.lt(tid, G * ST)):
+        h = x.div(tid, ST)
+        i = x.mod(tid, ST)
+        acc = x.f(0.0)
+        for d in range(HW // 4):
+            qf = x.bf16x8(x.ld4(x.add(x.mul(h, HW), qs + 4 * d)))
+            kf = x.bf16x8(x.ld4(x.add(x.mul(i, lay.k_stride), ks + 4 * d)))
+            for e in range(8):
+                acc = x.fma(qf[e], kf[e], acc)
+        j = x.add(x.mul(tile, ST), i)
+        scale = SCALE_BITS ^ (1 if x.k.mutate == "q5_scale" else 0)
+        score = b.select(x.lt(j, ak), b.fmul(acc, x.fbits(scale)), x.f(NEG_MAX))
+        if x.k.fuse == "tile":
+            _q5_tile_split(x, score, j, ak, h, i, kv, tile, rq)
+        else:
+            other = x.xshfl(score, 1)
+            with b.scf_if(x.eq(x.mod(i, 2), 0)):
+                at = x.mb_ix(x.add(x.mul(x.add(x.mul(kv, G), h), lay.ss_row), j), rq)
+                x.put2(x.mb("ss"), at, score, other)
+
+
+def _q5_scores_mfma(x: QCtx, tile, kv, ak, rq, qs, ks):
+    """``q5_mm=mfma``: wave ``wt`` (< 2) computes ``S^T`` of positions ``16 wt + 0..15`` of the tile: A = the 16 key
+    rows (``q5_k``), B = the 12 q heads (``q5_q``; columns 12-15 read head 11 and are dropped), 8 k-steps of 32
+    dims (lane ``16 g + n``: dims ``32 c + 8 g .. + 8``). Lane (g, n) ends with the scores of positions
+    ``4 g + e`` for head ``n``: the same scale / mask, published as two ``ss`` pairs per head (the mono's pairs)."""
+    b, lay = x.b, x.lay
+    G, HW, ST = lay.group, lay.head_words, lay.score_tile
+    lane, wave = x.lane, x.wave
+    V8 = VectorType(BF16, 8)
+    with b.scf_if(x.lt(wave, 2)):
+        n = x.mod(lane, 16)
+        g = x.div(lane, 16)
+        krow = x.add(x.mul(wave, 16), n)
+        ka = x.add(x.add(x.mul(krow, lay.k_stride), x.mul(g, 4)), ks)
+        qa = x.add(x.add(x.mul(x.smin(n, G - 1), HW), x.mul(g, 4)), qs)
+        pool = x.pool()
+        acc = b.zero_vec_f32(4)
+        steps = HW // 16 - (1 if x.k.mutate == "q5_mm_drop" else 0)
+        for c in range(steps):
+            kf = b.vec_bitcast(b.smem_load_vN(pool, x.add(ka, 16 * c), dtype=I32, n=4), V8)
+            qf = b.vec_bitcast(b.smem_load_vN(pool, x.add(qa, 16 * c), dtype=I32, n=4), V8)
+            acc = b.mfma_f32_16x16x32_bf16(kf, qf, acc)
+        scale = SCALE_BITS ^ (1 if x.k.mutate == "q5_scale" else 0)
+        j0 = x.add(x.mul(tile, ST), x.add(x.mul(wave, 16), x.mul(g, 4)))
+        sc = []
+        for e in range(4):
+            j = x.add(j0, e)
+            sc.append(b.select(x.lt(j, ak), b.fmul(b.vec_extract(acc, e), x.fbits(scale)), x.f(NEG_MAX)))
+        with b.scf_if(x.lt(n, G)):
+            at = x.add(x.mul(x.add(x.mul(kv, G), n), lay.ss_row), j0)
+            x.put2(x.mb("ss"), x.mb_ix(at, rq), sc[0], sc[1])
+            x.put2(x.mb("ss"), x.mb_ix(x.add(at, 2), rq), sc[2], sc[3])
 
 def _q5_tile_split(x: QCtx, score, j, ak, h, i, kv, tile, rq):
     """N4b ``fuse=tile`` (tolerance class): this task's tile is a split of every one of its 12 heads. The 32
@@ -502,11 +546,16 @@ def _q7(x: QCtx, t):
         aux = 2 if x.k.kv_nt else 0
         vq = []
         for i in range(lay.q7_rounds):
-            j = x.add(slot, 128 * i)
-            g_ = x.ld(x.add(x.smin(x.div(j, 4), lay.sel - 1), sl))
-            vr = _cache_row(x, g_, j, n, ak, tail)
-            at = x.add(x.mul(x.add(x.mul(vr, lay.kv_heads), kv), HW), x.add(x.mul(dt, 16), x.mul(dq, 4)))
-            vw = x.load_words(rs_v, at, 4, aux)
+            if x.k.q7_vskip:
+                with X.ifr(b, _q7_live_w(x, i, ak), [I32] * 5) as (then_, else_, res):
+                    with then_:
+                        vw, vr = _q7_vload(x, i, slot, dq, sl, n, ak, tail, kv, dt, rs_v, aux)
+                        X.yield_(b, *vw, vr)
+                    with else_:
+                        X.yield_(b, *([x.c(0)] * 5))  # the words selected there are zeros anyway (dead round)
+                vw, vr = res[:4], res[4]
+            else:
+                vw, vr = _q7_vload(x, i, slot, dq, sl, n, ak, tail, kv, dt, rs_v, aux)
             vq.append((vw, vr if x.seq else x.eq(vr, now_row)))
         words = []
         if x.seq:
@@ -526,7 +575,9 @@ def _q7(x: QCtx, t):
                 live = x.lt(x.add(slot, 128 * i), ak)
                 words.append([b.select(live, b.select(now, now_v[e], w[e]), x.c(0)) for e in range(4)])
 
-        if x.k.fuse == "none":
+        if x.k.fuse == "none" and x.k.q7_mm == "mfma":
+            av = _q7_pv_mfma(x, words, slot, qh0, nt, ak, rq, own)
+        elif x.k.fuse == "none":
             av = _q7_pv_mono(x, words, slot, qh0, nt, ak, rq, own)
         elif x.k.fuse == "tile":
             av = _q7_pv_tile(x, words, slot, qh0, kv, nt, ak, rq, own)
@@ -550,12 +601,12 @@ def _q7(x: QCtx, t):
                 x.put(x.mb("de"), x.mb_ix(x.add(x.mul(qh, 8), dt), rq), ex)
 
 
-def _q7_pv_mono(x: QCtx, words, slot, qh0, nt, ak, rq, own):
-    """Q7 after the value loads (the mono): Q6's probabilities polled to LDS, PV, wave / CTA sums."""
+def _q7_poll_p(x: QCtx, qh0, nt, rq):
+    """The mono's probability poll: the 4 heads' bf16 ``pp`` pairs to ``q7_p`` as f32, then the barrier."""
     b, lay = x.b, x.lay
-    tid, lane, wave = x.tid, x.lane, x.wave
-    W, ST = lay.waves, lay.score_tile
-    pb, part = lay.lds["q7_p"], lay.lds["q7_part"]
+    tid = x.tid
+    ST = lay.score_tile
+    pb = lay.lds["q7_p"]
     mb_pph, mb_pp = x.mb("pph"), x.mb("pp")
     x.pre_poll(lambda m: (mb_pph, x.mb_ix(x.add(qh0, x.smin(m, Q7_HEADS - 1)), rq)), Q7_HEADS)
     PPR = lay.pp_row
@@ -574,6 +625,99 @@ def _q7_pv_mono(x: QCtx, words, slot, qh0, nt, ak, rq, own):
     for r in range(len(dst)):
         x.stv(x.add(dst[r], pb), x.unpack(got[r]))
     x.barrier()
+
+
+def _q7_vload(x: QCtx, i, slot, dq, sl, n, ak, tail, kv, dt, rs_v, aux):
+    """The mono's round-i V fetch: slot-table lookup, cache row, one 4-word load. (words, cache row)."""
+    lay = x.lay
+    j = x.add(slot, 128 * i)
+    g_ = x.ld(x.add(x.smin(x.div(j, 4), lay.sel - 1), lay.lds["q7_sel"]))
+    vr = _cache_row(x, g_, j, n, ak, tail)
+    at = x.add(x.mul(x.add(x.mul(vr, lay.kv_heads), kv), lay.head_words), x.add(x.mul(dt, 16), x.mul(dq, 4)))
+    return x.load_words(rs_v, at, 4, aux), vr
+
+
+def _q7_live_w(x: QCtx, i, ak):
+    """``q7_vskip``: whether round ``i`` holds a live position of this wave (wave-uniform: its first slot is < ak)."""
+    if x.k.mutate == "q7_vdrop" and i == 0:
+        return x.lt(x.c(0), x.c(0))
+    return x.lt(x.add(x.mul(x.wave, 16), 128 * i), ak)
+
+
+Q7_VB = 0  # q7_mm's V ring (words): the arena below q7_sel (8232 / 8616 at r1 / r4s) is free during Q7
+Q7_RING = 4  # V slots per wave (256 words each: 16 positions x 32 dims bf16)
+
+
+
+def _q7_pv_mfma(x: QCtx, words, slot, qh0, nt, ak, rq, own):
+    """``q7_mm=mfma``: per wave and round ``i``, the wave's 16 positions ``128 i + 16 wave + 0..15`` x the task's 32
+    dims of V go to a wave-private LDS slot (row-major), are read back transposed (``ds_read_b64_tr_b16``: lane
+    ``16 g + n`` gets dim ``16 mt + n`` of positions ``4 g + 0..3``) as the A operand of
+    ``mfma_f32_16x16x16_bf16``; B = the bf16 probabilities of those positions for head ``n % 4`` (columns 4-15
+    repeat heads 0-3 and are dropped). f32 ``O^T`` per wave, then the mono's ``part`` layout and wave-order sum."""
+    b, lay = x.b, x.lay
+    lane, wave = x.lane, x.wave
+    W, SSR = lay.waves, lay.ss_row
+    pb, part = lay.lds["q7_p"], lay.lds["q7_part"]
+    assert Q7_VB + W * Q7_RING * 256 <= min(lay.lds["q7_sel"], pb, lay.lds["q7_cur"], part)
+    _q7_poll_p(x, qh0, nt, rq)
+    pool = x.pool()
+    n = x.mod(lane, 16)
+    g = x.div(lane, 16)
+    h4 = x.mod(n, 4)
+    rd = x.add(x.mul(x.add(x.mul(g, 4), x.div(n, 4)), 16), x.mul(x.mod(n, 4), 2))
+    V4 = VectorType(BF16, 4)
+    acc = [b.zero_vec_f32(4), b.zero_vec_f32(4)]
+
+    def round_(i, acc):
+        vs = x.add(x.mul(x.add(x.mul(wave, Q7_RING), i % Q7_RING), 256), Q7_VB)
+        x.stv(x.add(vs, x.mul(lane, 4)), words[i])
+        j0 = x.add(x.add(x.mul(wave, 16), x.mul(g, 4)), 128 * i)
+        pv = x.ld4(x.add(x.smin(j0, SSR - 4), x.add(x.mul(h4, SSR), pb)))
+        p = [b.select(x.lt(x.add(j0, e), ak), b.bitcast(pv[e], F32), x.f(0.0)) for e in range(4)]
+        pf = b.vec_trunc_f32_to_bf16(b.vec_pack(p, F32))
+        assert pf.type == V4
+        out = []
+        for mt in range(2):
+            va = b.ds_read_tr16_b64(pool, x.add(vs, x.add(rd, 8 * mt)), dtype=BF16)
+            if x.k.mutate == "q7_mm_drop" and i == 0:
+                out.append(b.select(x.eq(wave, 0), acc[mt], b.mfma_f32_16x16x16_bf16(va, pf, acc[mt])))
+            else:
+                out.append(b.mfma_f32_16x16x16_bf16(va, pf, acc[mt]))
+        return out
+
+    for i in range(lay.q7_rounds):
+        if x.k.q7_vskip:
+            # a dead round's products are all exact zeros (P = 0 and V = 0 past ak): skipping its ring write, reads and
+            # MFMAs leaves the accumulators bit for bit as they were
+            flat = [b.vec_extract(acc[mt], e) for mt in range(2) for e in range(4)]
+            with X.ifr(b, _q7_live_w(x, i, ak), [F32] * 8) as (then_, else_, res):
+                with then_:
+                    nacc = round_(i, acc)
+                    X.yield_(b, *[b.vec_extract(nacc[mt], e) for mt in range(2) for e in range(4)])
+                with else_:
+                    X.yield_(b, *flat)
+            acc = [b.vec_pack(res[4 * mt: 4 * mt + 4], F32) for mt in range(2)]
+        else:
+            acc = round_(i, acc)
+    with b.scf_if(x.lt(n, Q7_HEADS)):
+        for mt in range(2):
+            at = x.add(x.mul(wave, 128), x.add(x.mul(n, 32), x.add(x.mul(g, 4), part + 16 * mt)))
+            x.stv(at, [b.vec_extract(acc[mt], e) for e in range(4)])
+    x.barrier()
+    av = x.ldf(x.add(own, part))
+    for w in range(1, W):
+        av = b.fadd(av, x.ldf(x.add(own, part + w * 128)))
+    return av
+
+
+def _q7_pv_mono(x: QCtx, words, slot, qh0, nt, ak, rq, own):
+    """Q7 after the value loads (the mono): Q6's probabilities polled to LDS, PV, wave / CTA sums."""
+    b, lay = x.b, x.lay
+    lane, wave = x.lane, x.wave
+    W = lay.waves
+    pb, part = lay.lds["q7_p"], lay.lds["q7_part"]
+    _q7_poll_p(x, qh0, nt, rq)
 
     acc = [x.f(0.0)] * (8 * Q7_HEADS)
     for i in range(lay.q7_rounds):
