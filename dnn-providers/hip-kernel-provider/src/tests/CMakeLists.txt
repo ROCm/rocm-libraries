@@ -17,6 +17,7 @@ endif()
 add_executable(
     hip_kernel_provider_tests
     main.cpp
+    core/TestApplicabilityManager.cpp
     core/TestContainer.cpp
     core/TestHandle.cpp
     core/TestContext.cpp
@@ -142,7 +143,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
-        HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
+        HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}"
+        # The packed multi-launch set, which sits beside the unit root instead of under it:
+        # the Container never loads it, and the case that reads it builds its own descriptor
+        # tree around the archive. Binary-relative for the reason the defines above are.
+        HIPKERNELPROVIDER_MULTI_LAUNCH_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}")
+
+    # The production descriptor tree, as the same binary-relative offset the integration
+    # binary uses. Only TestGfx950ConvDgradMatchers reads it, to run the shipped dgrad
+    # catalog's metadata through the real state manager; it skips when this configuration
+    # packs no production tree, so no dependency on hkp_packaging_product is added here.
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
 
     # The same descriptor defines the ordinary binary carries, minus the kpack reldir, so
     # the shared main() resolves its root identically in both. The archive cases that read
@@ -159,13 +171,29 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH below, which the parse-level cases open
     # because they need a real container rather than a matching device.
     target_sources(hip_kernel_provider_tests PRIVATE
+        compilation/TestCodeObjectLoad.cpp
+        compilation/TestKpackArchSelection.cpp
         compilation/TestKpackArchive.cpp
+        compilation/TestKpackCodeObjectRead.cpp
         compilation/TestKpackGenericArchive.cpp
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp
+        core/TestPluginSerialization.cpp
+        engines/kernel_ingestor_engine/TestIngestorPlanCapture.cpp
+        engines/kernel_ingestor_engine/TestIngestorPlanRoundTrip.cpp
         engines/kernel_ingestor_engine/packs/TestPointwiseKpackDispatch.cpp
         ingestor/TestPackedDescriptorLoad.cpp
     )
+
+    # This binary's own packed copy of the archive_fixture Pointwise set. The save cases
+    # need a packed Pointwise kernel, and the unit root packs none: its Pointwise set is
+    # embedded_source. The copy stages outside the unit root, so the engine does not
+    # discover it. Binary-relative, like the defines above.
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_SUBDIR}")
+    if(TARGET hkp_packaging_unit_archive_fixture)
+        add_dependencies(hip_kernel_provider_tests hkp_packaging_unit_archive_fixture)
+    endif()
 
     # A real archive to open, so the arch-mismatch and missing-toc_key cases meet the
     # actual reader rather than a hand-forged header. Vendored from rocm-kpack's own
@@ -204,6 +232,42 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             add_dependencies(hip_kernel_provider_census_tests ${_hkp_set})
         endif()
     endforeach()
+
+    # The multi-launch set is read by this binary alone, and by no census entry.
+    if(TARGET hkp_packaging_multi_launch)
+        add_dependencies(hip_kernel_provider_tests hkp_packaging_multi_launch)
+    endif()
+
+    # FlyDSL's kernels ship in the production shard, which the unit root main()
+    # resolves does not reach, so FlyDSL's device cases would find no descriptor for
+    # their engine. The binary therefore names the production root as an ADDITIVE one,
+    # as the integration binary does, and is built after the pack that fills it.
+    #
+    # The ordinary binary only. A census addresses exactly one shard through an explicit
+    # HIPDNN_DESCRIPTOR_DIR, and a second root reachable from that process would put
+    # kernels in its inventory that the entry running it never named.
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+        if(TARGET hkp_packaging_product)
+            add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
+        endif()
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE
+            HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+    endif()
+
+    # The packed-load test also reads the slotted fixtures' shards (RFC 0021), beside the
+    # unit tree. The fixed-arch roots pack only for their arch (_hkp_wire_fixed_arch_root);
+    # the test decides from the staged shards, so no define follows GPU_TARGETS. rocKE is
+    # the only thing it is told.
+    foreach(_hkp_slotted hkp_packaging_slotted hkp_packaging_slotted_hsaco
+                         hkp_packaging_slotted_multi_launch)
+        if(TARGET ${_hkp_slotted})
+            add_dependencies(hip_kernel_provider_tests ${_hkp_slotted})
+        endif()
+    endforeach()
+    if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE
+            HIPKERNELPROVIDER_ENABLE_ROCKE)
+    endif()
 
     # The census binary additionally reads the production shard, which is wired only
     # where a production root holds descriptors this build packs for. Absent, there is
@@ -248,8 +312,141 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             SubtractsInTheRightDirection
     )
 
-    # Census for the gfx950 dense-attention production pack. Reads only the product
-    # shard, so it is eligible for census registration.
+    # FlyDSL's kernels ship in the production shard, so their census addresses that
+    # pack, narrowed to the architectures FlyDSL ships for: the product pack may be
+    # wired for an architecture FlyDSL has no objects for, where these suites would find
+    # no set. ACTIVE rather than the option: with the option ON for an architecture no
+    # kernels are checked in for, FlyDSL stands down and there is nothing to census.
+    #
+    # The TestFlydsl*Packs suites are the FlyDSL suites that qualify, and they have files
+    # of their own in the census binary for that reason. FlyDSL's GPU suites skip, which a
+    # census entry treats as a failure; its matcher-acceptance suites are TEST_P; and its
+    # remaining host suites build graphs in-process instead of reading loadedSet(), so
+    # censusing one would stay green against an empty shard -- the exact miss the census
+    # exists to catch. Every case below opens by reading the staged set.
+    #
+    # Each op's census reads only the shards that op ships objects for
+    # (HIPKERNELPROVIDER_FLYDSL_ARCHS_<op>): ops ship for different architectures, and a
+    # suite addressing a shard its op is absent from would fail.
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_rmsnorm)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_rmsnorm}
+            SUITES TestFlydslRmsNormPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsTheGenericTierPerFormAndBakedTiersFor16Bit
+                UnderstandsRuntimeEpsilonGraphsButNotAlignedOnes
+                EveryKernelDeclaresTheNineSlotSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_rmsnorm_bwd)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_rmsnorm_bwd}
+            SUITES TestFlydslRmsNormBwdPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsTheGenericTiersPerFormAndBakedWidthsFor16Bit
+                EveryKernelDeclaresThePartialKernelsSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna}
+            SUITES TestFlydslSdpaCdnaPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsUniqueObjectsAndOneTopServeAllPerClass
+                RanksTheNarrowerBucketFirst
+                EveryKernelDeclaresItsFamilysSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_dualwave)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_dualwave}
+            SUITES TestFlydslSdpaCdnaDualwavePacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsUniqueObjectsAndOneTopServeAllPerClass
+                EveryKernelDeclaresItsFamilysSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_decode)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_decode}
+            SUITES TestFlydslSdpaCdnaDecodePacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsUniqueObjectsAndOneTopServeAllPerClass
+                EveryKernelDeclaresItsFamilysSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna)
+        # A second suite over the same shard: one EXPECTED_CASES list pins one suite.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna}
+            SUITES TestFlydslSdpaRdnaPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsEverySpecializedAndGenericVariantOnce
+                RanksTheNarrowestServingObjectFirst
+                EveryKernelDeclaresTheThirtyEightSlotSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw}
+            SUITES TestFlydslSdpaAiwPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsEveryVariantOnce
+                EveryKernelDeclaresTheFiftySlotSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna_decode)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna_decode}
+            SUITES TestFlydslSdpaRdnaDecodePacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsEveryDecodeVariantOnce
+                RanksTheNarrowestServingObjectFirst
+                EveryKernelDeclaresTheFortySlotSignature
+        )
+    endif()
+
+    # The cases every generated Test<Engine>Packs suite below registers, shared by the
+    # attention and RDNA calls.
+    set(_hkp_generated_packs_cases
+        LoadsExactlyTheEmittedPacks
+        LoadsExactlyTheEmittedKernels
+        EveryLoadedDescriptorCoversTheRequestedArch
+        EveryKernelDeclaresTheEmittedRuntimeSourceKind
+        DeclaresTheConfiguredSdkVersion
+        ExposesTheConfiguredKnobs
+        RanksThroughItsRegisteredScoreSymbol
+        CarriesNoGraphScopedMatcher
+        CarriesExactlyOneSharedKernelScopedMatcher
+    )
+
+    # Census for each HKP_PINNED_ATTENTION_ENGINES engine's production pack (the table is in
+    # ../CMakeLists.txt). Each reads only the product shard, so it is eligible for census
+    # registration.
     #
     # The predicate and ARCHES narrow independently -- whether `product` carries THIS
     # bundle at all, and which of its wired architectures the bundle emits for. Either
@@ -257,76 +454,150 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     #
     # The Pointwise call above needs neither: its fixtures are the unit root itself, and
     # they cover every architecture it is wired for.
-    hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
-    if(_hkp_gfx950_attention_dense)
-        hkp_register_census_tests(
-            TARGET hip_kernel_provider_census_tests
-            PACK_NAME product
-            ARCHES gfx950
-            SUITES TestGfx950AttentionDensePacks
-            EXPECTED_CASES
-                LoadsExactlyTheEmittedPacks
-                LoadsExactlyTheEmittedKernels
-                EveryLoadedDescriptorCoversTheRequestedArch
-                EveryKernelDeclaresTheEmittedRuntimeSourceKind
-                DeclaresTheConfiguredSdkVersion
-                ExposesTheConfiguredKnobs
-                RanksThroughItsRegisteredScoreSymbol
-                CarriesNoGraphScopedMatcher
-                CarriesExactlyOneSharedKernelScopedMatcher
-        )
+    #
+    # An engine with hand-written companion suites lists each one's cases below under
+    # _hkp_<stem>_cases_<arch>_<snake slug>, the companion's suite being
+    # Test<local><Suite> for each <Suite> <stem> pair in _hkp_companion_suites. Each gets its
+    # own call because a pin names one suite's cases. _hkp_<arch>_attention_<snake slug> is
+    # left set for the cross-engine suite below.
+    #   CatalogTiles checks every shipped kernel against the engine's own launchability rule.
+    #   ModelBinding fails the build when a shipped trained ranker would be refused at
+    #   runtime, which the engine otherwise only logs before ranking on priority. A model
+    #   whose model.bin was not pulled is packed without its UHD, with a warning and an entry
+    #   in hkp-unpulled-models.record; the suite tolerates an absent UHD only when that record
+    #   names it, and never when HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS is ON, which it
+    #   learns from the compile definition below.
+    set(_hkp_companion_suites CatalogTiles catalog_tiles ModelBinding model_binding)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
+        PROPERTIES COMPILE_DEFINITIONS
+            "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
+    set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
+    set(_hkp_catalog_tiles_cases_gfx950_unified_2d
+        EveryShippedKernelsGeometryIsOneTheEngineLaunches)
+    set(_hkp_catalog_tiles_cases_gfx950_unified_3d
+        EveryShippedKernelsGeometryIsOneTheEngineLaunches
+        EveryEntryLaunchesItsSegmentAndReduceKernels)
+    set(_hkp_catalog_tiles_cases_gfx942_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
+    set(_hkp_model_binding_cases_gfx942_unified_3d
+        TheBoundL2KernelRankerLoads
+        TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
 
-        # Hand-written companion census over the same shard: every shipped kernel's tile
-        # passes the engine's own isSupportedGfx950AttentionDenseTile() check. Its own call
-        # because a pin names one suite's cases.
+    set(_engines ${HKP_PINNED_ATTENTION_ENGINES})
+    while(_engines)
+        list(POP_FRONT _engines _arch _snake _local _filter_var _toml _categories_var)
+        hkp_product_ships_engine_for_arch(_hkp_${_arch}_attention_${_snake}
+                                          "hipkernel:${_local}" ${_arch})
+        if(_hkp_${_arch}_attention_${_snake})
+            hkp_register_census_tests(
+                TARGET hip_kernel_provider_census_tests
+                PACK_NAME product
+                ARCHES ${_arch}
+                SUITES Test${_local}Packs
+                EXPECTED_CASES ${_hkp_generated_packs_cases}
+            )
+        else()
+            message(STATUS
+                "hkp: this configuration does not ship hipkernel:${_local} for "
+                "${_arch}, so its census is not registered.")
+        endif()
+        set(_companions ${_hkp_companion_suites})
+        while(_companions)
+            list(POP_FRONT _companions _suite _stem)
+            if(_hkp_${_arch}_attention_${_snake}
+               AND DEFINED _hkp_${_stem}_cases_${_arch}_${_snake})
+                hkp_register_census_tests(
+                    TARGET hip_kernel_provider_census_tests
+                    PACK_NAME product
+                    ARCHES ${_arch}
+                    SUITES Test${_local}${_suite}
+                    EXPECTED_CASES ${_hkp_${_stem}_cases_${_arch}_${_snake}}
+                )
+            endif()
+            unset(_hkp_${_stem}_cases_${_arch}_${_snake})
+        endwhile()
+    endwhile()
+    # The loop unsets each row's entries, so one left set names no row and its census would
+    # silently never register.
+    set(_hkp_companion_stems "")
+    set(_companions ${_hkp_companion_suites})
+    while(_companions)
+        list(POP_FRONT _companions _suite _stem)
+        list(APPEND _hkp_companion_stems ${_stem})
+    endwhile()
+    list(JOIN _hkp_companion_stems "|" _hkp_companion_stems)
+    get_directory_property(_hkp_unmatched VARIABLES)
+    list(FILTER _hkp_unmatched INCLUDE REGEX "^_hkp_(${_hkp_companion_stems})_cases_")
+    if(_hkp_unmatched)
+        message(FATAL_ERROR
+            "hkp: ${_hkp_unmatched} names no HKP_PINNED_ATTENTION_ENGINES row's <arch> and "
+            "<snake slug>, so its companion census would never register.")
+    endif()
+
+    # Unified2D hands decode to Unified3D by a static rule, so with both engines shipped,
+    # every 2D cell that rule hands off must have a 3D kernel.
+    if(_hkp_gfx950_attention_unified_2d AND _hkp_gfx950_attention_unified_3d)
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
             PACK_NAME product
             ARCHES gfx950
-            SUITES TestGfx950AttentionDenseCatalogTiles
+            SUITES TestGfx950AttentionUnified2DDecodeHandoff
             EXPECTED_CASES
-                EveryShippedKernelsTileIsOneTheEngineLaunches
+                EveryDecodeCellHandedToUnified3DHasAUnified3DKernel
+        )
+    endif()
+
+    # One generic kernel set per RDNA family ships in every RDNA3/3.5 and RDNA4 shard,
+    # as two engines: the prefill objects and the split-KV decode objects (the wide-Q
+    # prefill and D256 decode geometries differ per family). The census checks each wired
+    # shard against its own inventory. Gated per arch like the attention engines above.
+    foreach(_engine_suite IN ITEMS
+            "hipkernel:Gfx1151WmmaAttention|TestGfx1151WmmaAttentionPacks"
+            "hipkernel:Gfx1151WmmaAttentionDecode|TestGfx1151WmmaAttentionDecodePacks")
+        string(REPLACE "|" ";" _engine_suite "${_engine_suite}")
+        list(GET _engine_suite 0 _hkp_engine)
+        list(GET _engine_suite 1 _hkp_suite)
+        set(_hkp_rdna_wmma_attention_arches "")
+        foreach(_arch IN ITEMS gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153
+                               gfx1200 gfx1201)
+            hkp_product_ships_engine_for_arch(_hkp_ships "${_hkp_engine}" ${_arch})
+            if(_hkp_ships)
+                list(APPEND _hkp_rdna_wmma_attention_arches ${_arch})
+            endif()
+        endforeach()
+        if(_hkp_rdna_wmma_attention_arches)
+            hkp_register_census_tests(
+                TARGET hip_kernel_provider_census_tests
+                PACK_NAME product
+                ARCHES ${_hkp_rdna_wmma_attention_arches}
+                SUITES ${_hkp_suite}
+                EXPECTED_CASES ${_hkp_generated_packs_cases}
+            )
+        else()
+            message(STATUS
+                "hkp: this configuration does not ship ${_hkp_engine} for any RDNA arch, "
+                "so its census is not registered.")
+        endif()
+    endforeach()
+
+    # Census for the shape-generic backward-data AOT-instance pack,
+    # hipkernel:Gfx950ConvDgradAot.
+    hkp_product_ships_engine_for_arch(_hkp_gfx950_conv_dgrad_aot
+                                      "hipkernel:Gfx950ConvDgradAot" gfx950)
+    if(_hkp_gfx950_conv_dgrad_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950ConvDgradAotPacks
+            EXPECTED_CASES ${_hkp_generated_packs_cases}
         )
     else()
         message(STATUS
-            "hkp: this configuration does not ship hipkernel:Gfx950AttentionDense for "
+            "hkp: this configuration does not ship hipkernel:Gfx950ConvDgradAot for "
             "gfx950, so its census is not registered.")
     endif()
 
-    # One generic kernel set ships in every RDNA3/3.5 and RDNA4 shard; the census checks
-    # each wired one against its own inventory (gfx11 shards: standard + transposed-QK
-    # kernels, gfx12 shards: standard kernels only). Gated per arch like gfx950 above.
-    set(_hkp_rdna_wmma_attention_arches "")
-    foreach(_arch IN ITEMS gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153
-                           gfx1200 gfx1201)
-        hkp_product_ships_engine_for_arch(
-            _hkp_ships "hipkernel:Gfx1151WmmaAttention" ${_arch})
-        if(_hkp_ships)
-            list(APPEND _hkp_rdna_wmma_attention_arches ${_arch})
-        endif()
-    endforeach()
-    if(_hkp_rdna_wmma_attention_arches)
-        hkp_register_census_tests(
-            TARGET hip_kernel_provider_census_tests
-            PACK_NAME product
-            ARCHES ${_hkp_rdna_wmma_attention_arches}
-            SUITES TestGfx1151WmmaAttentionPacks
-            EXPECTED_CASES
-                LoadsExactlyTheEmittedPacks
-                LoadsExactlyTheEmittedKernels
-                EveryLoadedDescriptorCoversTheRequestedArch
-                EveryKernelDeclaresTheEmittedRuntimeSourceKind
-                UnderstandsRuntimePassByValueScaleGraphs
-                ExposesTheConfiguredKnobs
-                RanksThroughItsRegisteredScoreSymbol
-                CarriesNoGraphScopedMatcher
-                CarriesExactlyOneSharedKernelScopedMatcher
-        )
-    else()
-        message(STATUS
-            "hkp: this configuration does not ship hipkernel:Gfx1151WmmaAttention for "
-            "any RDNA arch, so its census is not registered.")
-    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

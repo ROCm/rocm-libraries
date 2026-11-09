@@ -58,7 +58,7 @@
 static int sp_wo(const rocke_direct_conv_problem_t* p)
 {
     int s = p->stride > 0 ? p->stride : 1;
-    return (p->W + 2 * p->PAD - p->KW) / s + 1;
+    return (p->W + 2 * rocke_direct_conv_problem_pad_w(p) - p->KW) / s + 1;
 }
 
 /* Raw input values of row y, one per filter column (Python: load_row).
@@ -195,12 +195,12 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     THREADS = rocke_direct_depthwise_spatial_threads_per_block(spec);
     c_stride_dw = p->stride > 0 ? p->stride : 1;
     Wo = sp_wo(p);
-    total_c = rocke_direct_conv_problem_total_c(p);
+    total_c = (int)rocke_direct_conv_problem_total_c(p);
     /* AOT: the output extents and the channel count live in kernargs now;
      * these stay only for the spec-validation arithmetic above. */
     (void)Wo;
     (void)total_c;
-    total_k = rocke_direct_conv_problem_total_k(p);
+    total_k = (int)rocke_direct_conv_problem_total_k(p);
 
     is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? 1 : 0;
 

@@ -53,7 +53,11 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          # MIWaveGroup (last two) = 1, 2 and 4 waves: the inter-wave amax reduction
+          # only has a second step, and so a cross-step LDS slot reuse, at 4 waves.
           - [16, 16, 128, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 1]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
         - DepthU: [128]
         - WavefrontSize: [32]
         - LDSTrInst: [True]
@@ -113,7 +117,11 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          # MIWaveGroup (last two) = 1, 2 and 4 waves: the inter-wave amax reduction
+          # only has a second step, and so a cross-step LDS slot reuse, at 4 waves.
           - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 64, 1, 1, 1, 1, 2, 1]
+          - [16, 16, 64, 1, 1, 1, 1, 2, 2]
         - DepthU: [64]
         - WavefrontSize: [32]
         - TransposeLDS: [0]
@@ -170,7 +178,11 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          # MIWaveGroup (last two) = 1, 2 and 4 waves: the inter-wave amax reduction
+          # only has a second step, and so a cross-step LDS slot reuse, at 4 waves.
           - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 64, 1, 1, 1, 1, 2, 1]
+          - [16, 16, 64, 1, 1, 1, 1, 2, 2]
         - DepthU: [64]
         - WavefrontSize: [32]
         - TransposeLDS: [1]
@@ -227,7 +239,11 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          # MIWaveGroup (last two) = 1, 2 and 4 waves: the inter-wave amax reduction
+          # only has a second step, and so a cross-step LDS slot reuse, at 4 waves.
           - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 64, 1, 1, 1, 1, 2, 1]
+          - [16, 16, 64, 1, 1, 1, 1, 2, 2]
         - DepthU: [64]
         - WavefrontSize: [32]
         - TransposeLDS: [1]

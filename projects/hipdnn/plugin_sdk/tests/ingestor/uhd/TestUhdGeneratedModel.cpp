@@ -59,11 +59,10 @@ DescriptorId testId(uint8_t tag)
 }
 
 /// Two kernels differing only in tile, with `priority` set against the model: without a
-/// heuristic the small tile ranks first.
-Catalog catalogAgainstPriority(int64_t seqlen)
+/// heuristic the small tile ranks first. The catalog holds pointers, so the caller keeps
+/// these definitions alive for as long as it uses the catalog or its ranking.
+std::vector<KernelDefinition> definitionsAgainstPriority(const std::string& dtype = {})
 {
-    Catalog catalog;
-
     KernelDefinition smallTile;
     smallTile.kernelId = testId(0x01);
     smallTile.priority = 10;
@@ -74,7 +73,25 @@ Catalog catalogAgainstPriority(int64_t seqlen)
     largeTile.priority = 1;
     largeTile.metadata["tile_m"] = int64_t{128};
 
-    catalog.entries = {smallTile, largeTile};
+    std::vector<KernelDefinition> definitions = {smallTile, largeTile};
+    if(!dtype.empty())
+    {
+        for(auto& definition : definitions)
+        {
+            definition.metadata["dtype"] = dtype;
+        }
+    }
+    return definitions;
+}
+
+Catalog catalogOver(const std::vector<KernelDefinition>& definitions, int64_t seqlen)
+{
+    Catalog catalog;
+    catalog.entries.reserve(definitions.size());
+    for(const auto& definition : definitions)
+    {
+        catalog.entries.push_back(&definition);
+    }
     catalog.bound["q.seqlen"] = seqlen;
     return catalog;
 }
@@ -91,14 +108,9 @@ HeuristicDescriptor dtypeDescriptor()
     return descriptor;
 }
 
-Catalog catalogForDtype(const std::string& dtype)
+Catalog catalogForDtype(const std::vector<KernelDefinition>& definitions)
 {
-    Catalog catalog = catalogAgainstPriority(1024);
-    for(auto& entry : catalog.entries)
-    {
-        entry.metadata["dtype"] = dtype;
-    }
-    return catalog;
+    return catalogOver(definitions, 1024);
 }
 
 const std::vector<std::string> DTYPE_KNOBS = {"dtype", "tile_m"};
@@ -124,10 +136,11 @@ TEST(TestIngestorUhdGeneratedModel, TheModelDecidesTheOrderRatherThanPriority)
     const MatchContext context{graph, 0, properties};
 
     // The training data has the large tile winning at seqlen 4096.
-    const auto ranked = heuristic->rank(catalogAgainstPriority(4096), context);
+    const auto definitions = definitionsAgainstPriority();
+    const auto ranked = heuristic->rank(catalogOver(definitions, 4096), context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, testId(0x02))
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x02))
         << "the large tile is last by priority and must be first by score";
 }
 
@@ -142,13 +155,14 @@ TEST(TestIngestorUhdGeneratedModel, TheSameCatalogRanksDifferentlyForADifferentP
     properties.gcnArchName = "gfx942";
     const MatchContext context{graph, 0, properties};
 
-    const auto longSequence = heuristic->rank(catalogAgainstPriority(4096), context);
-    const auto shortSequence = heuristic->rank(catalogAgainstPriority(128), context);
+    const auto definitions = definitionsAgainstPriority();
+    const auto longSequence = heuristic->rank(catalogOver(definitions, 4096), context);
+    const auto shortSequence = heuristic->rank(catalogOver(definitions, 128), context);
 
     ASSERT_EQ(longSequence.size(), 2U);
     ASSERT_EQ(shortSequence.size(), 2U);
-    EXPECT_EQ(longSequence.front().kernelId, testId(0x02)) << "long sequence wants tile 128";
-    EXPECT_EQ(shortSequence.front().kernelId, testId(0x01)) << "short sequence wants tile 64";
+    EXPECT_EQ(longSequence.front()->kernelId, testId(0x02)) << "long sequence wants tile 128";
+    EXPECT_EQ(shortSequence.front()->kernelId, testId(0x01)) << "short sequence wants tile 64";
 }
 
 // ---- A signature that reads a string (RFC 0019 §6.5) ---------------------------
@@ -165,13 +179,15 @@ TEST(TestIngestorUhdGeneratedModel, TheModelRanksOnTheStringItWasTrainedOn)
     properties.gcnArchName = "gfx942";
     const MatchContext context{graph, 0, properties};
 
-    const auto wide = heuristic->rank(catalogForDtype("BF16"), context);
-    const auto narrow = heuristic->rank(catalogForDtype("FP16"), context);
+    const auto bf16Definitions = definitionsAgainstPriority("BF16");
+    const auto fp16Definitions = definitionsAgainstPriority("FP16");
+    const auto wide = heuristic->rank(catalogForDtype(bf16Definitions), context);
+    const auto narrow = heuristic->rank(catalogForDtype(fp16Definitions), context);
 
     ASSERT_EQ(wide.size(), 2U);
     ASSERT_EQ(narrow.size(), 2U);
-    EXPECT_EQ(wide.front().kernelId, testId(0x02)) << "BF16 was trained to want tile 128";
-    EXPECT_EQ(narrow.front().kernelId, testId(0x01)) << "FP16 was trained to want tile 64";
+    EXPECT_EQ(wide.front()->kernelId, testId(0x02)) << "BF16 was trained to want tile 128";
+    EXPECT_EQ(narrow.front()->kernelId, testId(0x01)) << "FP16 was trained to want tile 64";
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

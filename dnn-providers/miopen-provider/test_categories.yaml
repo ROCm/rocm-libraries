@@ -88,40 +88,6 @@ test_categories:
       - "ffm-quick"
       - "ffm-full"
 
-# GPU-arch-specific exclusions. Mirrors the TEST_TO_IGNORE map in the legacy
-# TheRock/build_tools/github_actions/test_executable_scripts/test_miopenprovider.py:
-#
-#     TEST_TO_IGNORE = {
-#         # TODO(#3709): Re-enable gfx110X tests once issues are resolved
-#         "gfx110X-all": {
-#             "windows": ["miopen_plugin_integration_tests"],
-#         },
-#     }
-#
-# The legacy carve-out is OS-scoped (Windows only). The shared parser accepts
-# an optional `_windows` / `_linux` suffix on the key and skips the entire
-# block when configuring on the wrong OS, so this entry never reaches the
-# Linux install file. The runtime label is still `ex_gpu_gfx110X` (no OS
-# suffix) so test_runner.py's GPU-arch matching needs no changes.
-#
-# `*Integration*` is the gtest filter that scopes the exclusion to the
-# integration binary only: all TEST_P classes in integration_tests/ are named
-# IntegrationGpu*, and no TEST_P class in tests/ contains "Integration". So
-# the filter is a no-op on miopen_plugin_tests (unit tests still run) and a
-# full exclusion on miopen_plugin_integration_tests, matching the legacy
-# script's ctest --exclude-regex "miopen_plugin_integration_tests" exactly.
-exclude_gpu:
-  exclude_gpu_gfx110X_windows:
-    test_patterns:
-      - "*Integration*"
-    labels:
-      - "quick"
-      - "standard"
-      - "comprehensive"
-      - "full"
-      - "ffm-quick"
-      - "ex_gpu_gfx110X"
-
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1

@@ -29,6 +29,8 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -45,7 +47,7 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
     // clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
     // 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
     // clang-format off
-#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
     // clang-format on
     int64_t              m         = 100;
     int64_t              n         = 100;
@@ -62,8 +64,7 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
     hipDataType          dataType  = HIP_R_32F;
     hipsparseSpGEAMAlg_t alg       = HIPSPARSE_SPGEAM_ALG1;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<spgeam_struct> unique_ptr_descr(new spgeam_struct);
     hipsparseSpGEAMDescr_t         descr = unique_ptr_descr->descr;
@@ -99,46 +100,38 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
     float* dcsr_val_C     = (float*)dcsr_val_C_managed.get();
     void*  dbuf           = (void*)dbuf_managed.get();
 
-    hipsparseSpMatDescr_t A, B, C;
-
     size_t bufferSize;
 
-    verify_hipsparse_status_success(hipsparseCreateCsr(&A,
-                                                       m,
-                                                       n,
-                                                       nnz_A,
-                                                       dcsr_row_ptr_A,
-                                                       dcsr_col_ind_A,
-                                                       dcsr_val_A,
-                                                       idxType,
-                                                       idxType,
-                                                       idxBase,
-                                                       dataType),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateCsr(&B,
-                                                       m,
-                                                       n,
-                                                       nnz_B,
-                                                       dcsr_row_ptr_B,
-                                                       dcsr_col_ind_B,
-                                                       dcsr_val_B,
-                                                       idxType,
-                                                       idxType,
-                                                       idxBase,
-                                                       dataType),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateCsr(&C,
-                                                       m,
-                                                       n,
-                                                       nnz_C,
-                                                       dcsr_row_ptr_C,
-                                                       dcsr_col_ind_C,
-                                                       dcsr_val_C,
-                                                       idxType,
-                                                       idxType,
-                                                       idxBase,
-                                                       dataType),
-                                    "success");
+    hipsparseLocalCsr A(m,
+                        n,
+                        nnz_A,
+                        dcsr_row_ptr_A,
+                        dcsr_col_ind_A,
+                        dcsr_val_A,
+                        idxType,
+                        idxType,
+                        idxBase,
+                        dataType);
+    hipsparseLocalCsr B(m,
+                        n,
+                        nnz_B,
+                        dcsr_row_ptr_B,
+                        dcsr_col_ind_B,
+                        dcsr_val_B,
+                        idxType,
+                        idxType,
+                        idxBase,
+                        dataType);
+    hipsparseLocalCsr C(m,
+                        n,
+                        nnz_C,
+                        dcsr_row_ptr_C,
+                        dcsr_col_ind_C,
+                        dcsr_val_C,
+                        idxType,
+                        idxType,
+                        idxBase,
+                        dataType);
 
     // SpGEAM buffer size
     verify_hipsparse_status_invalid_handle(hipsparseSpGEAM_bufferSize(
@@ -265,27 +258,74 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
                                           "Error: opB transpose is not supported");
 
     // Only the CSR format is supported.
-    hipsparseSpMatDescr_t A_coo;
-    verify_hipsparse_status_success(hipsparseCreateCoo(&A_coo,
-                                                       m,
-                                                       n,
-                                                       nnz_A,
-                                                       dcsr_row_ptr_A,
-                                                       dcsr_col_ind_A,
-                                                       dcsr_val_A,
-                                                       idxType,
-                                                       idxBase,
-                                                       dataType),
-                                    "success");
+    hipsparseLocalCoo A_coo(
+        m, n, nnz_A, dcsr_row_ptr_A, dcsr_col_ind_A, dcsr_val_A, idxType, idxBase, dataType);
     verify_hipsparse_status_not_supported(
         hipsparseSpGEAM_bufferSize(
             handle, transA, transB, &alpha, A_coo, &beta, B, C, dataType, alg, descr, &bufferSize),
         "Error: COO format is not supported");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A_coo), "success");
 
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(B), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(C), "success");
+    // Half precision is rejected while reading the scalars in hipsparseSpGEAM_nnz and
+    // hipsparseSpGEAM. bufferSize does not take that path.
+#if !defined(CUDART_VERSION)
+    hipsparseLocalCsr A_f16(m,
+                            n,
+                            nnz_A,
+                            dcsr_row_ptr_A,
+                            dcsr_col_ind_A,
+                            dcsr_val_A,
+                            idxType,
+                            idxType,
+                            idxBase,
+                            HIP_R_16F);
+    hipsparseLocalCsr B_f16(m,
+                            n,
+                            nnz_B,
+                            dcsr_row_ptr_B,
+                            dcsr_col_ind_B,
+                            dcsr_val_B,
+                            idxType,
+                            idxType,
+                            idxBase,
+                            HIP_R_16F);
+    hipsparseLocalCsr C_f16(m,
+                            n,
+                            nnz_C,
+                            dcsr_row_ptr_C,
+                            dcsr_col_ind_C,
+                            dcsr_val_C,
+                            idxType,
+                            idxType,
+                            idxBase,
+                            HIP_R_16F);
+    verify_hipsparse_status_not_supported(hipsparseSpGEAM_nnz(handle,
+                                                              transA,
+                                                              transB,
+                                                              &alpha,
+                                                              A_f16,
+                                                              &beta,
+                                                              B_f16,
+                                                              C_f16,
+                                                              HIP_R_16F,
+                                                              alg,
+                                                              descr,
+                                                              dbuf),
+                                          "Error: f16 is not supported");
+    verify_hipsparse_status_not_supported(hipsparseSpGEAM(handle,
+                                                          transA,
+                                                          transB,
+                                                          &alpha,
+                                                          A_f16,
+                                                          &beta,
+                                                          B_f16,
+                                                          C_f16,
+                                                          HIP_R_16F,
+                                                          alg,
+                                                          descr,
+                                                          dbuf),
+                                          "Error: f16 is not supported");
+#endif
+
 #endif
 }
 
@@ -293,7 +333,7 @@ template <typename T>
 void testing_spgeam_csr(Arguments argus)
 {
     // clang-format off
-#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
     // clang-format on
     int                  m        = argus.M;
     int                  n        = argus.N;
@@ -312,8 +352,7 @@ void testing_spgeam_csr(Arguments argus)
     hipsparseIndexType_t typeJ = HIPSPARSE_INDEX_32I;
     hipDataType          typeT = getDataType<T>();
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<spgeam_struct> unique_ptr_descr(new spgeam_struct);
     hipsparseSpGEAMDescr_t         descr = unique_ptr_descr->descr;
@@ -406,41 +445,17 @@ void testing_spgeam_csr(Arguments argus)
 #endif
 
     // Create matrices
-    hipsparseSpMatDescr_t A, B, C1;
+    hipsparseLocalCsr A(
+        m, n, nnz_A, dcsr_row_ptr_A, dcsr_col_ind_A, dcsr_val_A, typeI, typeJ, idxBaseA, typeT);
+    hipsparseLocalCsr B(
+        m, n, nnz_B, dcsr_row_ptr_B, dcsr_col_ind_B, dcsr_val_B, typeI, typeJ, idxBaseB, typeT);
+    hipsparseLocalCsr C1(
+        m, n, 0, dcsr_row_ptr_C_1, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT);
     // clang-format off
 #if(!defined(CUDART_VERSION))
     // clang-format on
-    hipsparseSpMatDescr_t C2;
-#endif
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(&A,
-                                             m,
-                                             n,
-                                             nnz_A,
-                                             dcsr_row_ptr_A,
-                                             dcsr_col_ind_A,
-                                             dcsr_val_A,
-                                             typeI,
-                                             typeJ,
-                                             idxBaseA,
-                                             typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(&B,
-                                             m,
-                                             n,
-                                             nnz_B,
-                                             dcsr_row_ptr_B,
-                                             dcsr_col_ind_B,
-                                             dcsr_val_B,
-                                             typeI,
-                                             typeJ,
-                                             idxBaseB,
-                                             typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(
-        &C1, m, n, 0, dcsr_row_ptr_C_1, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT));
-    // clang-format off
-#if(!defined(CUDART_VERSION))
-    // clang-format on
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(
-        &C2, m, n, 0, dcsr_row_ptr_C_2, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT));
+    hipsparseLocalCsr C2(
+        m, n, 0, dcsr_row_ptr_C_2, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT);
 #endif
 
     // Buffer size (host pointer mode)
@@ -449,8 +464,8 @@ void testing_spgeam_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_bufferSize(
         handle, transA, transB, &h_alpha, A, &h_beta, B, C1, typeT, alg, descr, &bufferSize1));
 
-    void* externalBuffer1;
-    CHECK_HIP_ERROR(hipMalloc(&externalBuffer1, bufferSize1));
+    auto  externalBuffer1_managed = hipsparse_unique_ptr{device_malloc(bufferSize1), device_free};
+    void* externalBuffer1         = externalBuffer1_managed.get();
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_nnz(
         handle, transA, transB, &h_alpha, A, &h_beta, B, C1, typeT, alg, descr, externalBuffer1));
@@ -464,8 +479,8 @@ void testing_spgeam_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_bufferSize(
         handle, transA, transB, d_alpha, A, d_beta, B, C2, typeT, alg, descr2, &bufferSize2));
 
-    void* externalBuffer2;
-    CHECK_HIP_ERROR(hipMalloc(&externalBuffer2, bufferSize2));
+    auto  externalBuffer2_managed = hipsparse_unique_ptr{device_malloc(bufferSize2), device_free};
+    void* externalBuffer2         = externalBuffer2_managed.get();
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_nnz(
         handle, transA, transB, d_alpha, A, d_beta, B, C2, typeT, alg, descr2, externalBuffer2));
@@ -626,18 +641,6 @@ void testing_spgeam_csr(Arguments argus)
 #endif
     }
 
-    CHECK_HIP_ERROR(hipFree(externalBuffer1));
-
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(B));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C1));
-
-    // clang-format off
-#if(!defined(CUDART_VERSION))
-    // clang-format on
-    CHECK_HIP_ERROR(hipFree(externalBuffer2));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C2));
-#endif
 #endif
 }
 

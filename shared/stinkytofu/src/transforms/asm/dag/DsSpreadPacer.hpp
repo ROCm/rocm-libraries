@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <climits>
 #include <map>
+#include <sstream>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -16,8 +18,9 @@ namespace stinkytofu {
 //
 // A batch is `batch` WMMAs, counted from the stage's own start. A ds_load belongs to a stage: it
 // can not start before the barrier it reads behind (`start`, a WMMA index) and must be done
-// `drainWindows` WMMAs before the barrier it feeds (`end`; INT_MAX = the region end, which needs no
-// drain because the loop returns to its start). The loads of
+// `drain` WMMAs before the barrier it feeds (`end`; INT_MAX = the region end, which needs no
+// drain because the loop returns to its start). The barrier is the source of truth: its planned
+// window less the drain it was planned with is where its last load goes. The loads of
 // a stage are spread evenly over the stage's batches: by the end of batch k, ceil(loads * k /
 // batches) are placed (63 loads over 12 batches: 5 5 5 6 ...), so the last batch ends the stage. A
 // sparse stage gets a small quota, so its loads leave room for stalls; a dense one a quota above
@@ -27,6 +30,11 @@ namespace stinkytofu {
 // its start) has one batch: all its loads are released at once, as early as the graph lets them.
 // Stages are paced independently: two stages open at the same time each take their own quota. Once
 // the region's last WMMA has issued nothing is held.
+//
+// `start` is the opening barrier's planned window. noteOpen() moves it to where that barrier
+// actually issued, when that is later and the stage has not issued a load yet, and recounts the
+// batches over the remaining span. The end stays, so the last load is still due at the barrier it
+// feeds. A stage whose loads name different opening barriers keeps its plan.
 class DsSpreadPacer {
    public:
     struct Load {
@@ -34,21 +42,50 @@ class DsSpreadPacer {
         int start;         // WMMA index of the barrier the load waits behind (0 = none)
         int end;           // WMMA index of the barrier it feeds (INT_MAX = the region end)
         int earliest = 0;  // WMMA count the graph lets it issue at the soonest
+        int drain = 0;     // WMMAs its barrier keeps for the last load to return
+        // DAG node of the barrier that sets `start` (UINT_MAX = none). Loads of one stage that
+        // name different barriers leave the stage without one, so a late barrier cannot move
+        // loads that do not wait behind it.
+        unsigned opener = UINT_MAX;
     };
 
+    // A stage the LDS rate can not finish by its end: its loads need `needed` WMMAs from its start
+    // at cyclesPerLoad, but it has end - start. Its last load lands late, whatever the pace.
+    struct RateLimited {
+        int start;
+        int end;
+        int total;
+        int needed;
+    };
+    const std::vector<RateLimited>& rateLimited() const {
+        return rateLimited_;
+    }
+    // The debug warning for a rate-limited stage, at the rate the stage was planned with.
+    static std::string rateLimitedMessage(const RateLimited& r, int cyclesPerLoad) {
+        std::ostringstream os;
+        os << "stage [" << r.start << ", " << r.end << ") has " << r.total << " ds_loads that need "
+           << r.needed << " WMMAs at " << cyclesPerLoad << " cycles per load but has "
+           << (r.end - r.start)
+           << ": the pace is too sparse for the stage, its last ds_load will land late (lower "
+              "DsReadCyclesPerLoad)";
+        return os.str();
+    }
+
     void reset() {
+        rateLimited_.clear();
         active_ = false;
         stageOf_.clear();
         stages_.clear();
         wmmaTotal_ = 0;
     }
 
-    // loads: the region's ds_loads. wmmaTotal: the region's WMMAs. drainWindows: WMMAs kept free
-    // in front of a barrier (not the region end) for the last load feeding it to return.
+    // loads: the region's ds_loads. wmmaTotal: the region's WMMAs.
     // maxPerBatch: the most loads the hardware takes in one batch (0 = not bounded), which caps
     // what a batch that is behind its line may take.
+    // cyclesPerLoad, windowCycles: the LDS return rate and the WMMA window (0 = no rate floor). A
+    // stage's loads can not all be placed before start + total * cyclesPerLoad / windowCycles.
     void plan(const std::vector<Load>& loads, int wmmaTotal, int batch, int catchUp,
-              int drainWindows, int maxPerBatch = 0) {
+              int maxPerBatch = 0, int cyclesPerLoad = 0, int windowCycles = 0) {
         reset();
         if (loads.empty() || wmmaTotal <= 0) return;
         active_ = true;
@@ -61,16 +98,18 @@ class DsSpreadPacer {
             const int start = std::clamp(l.start, 0, wmmaTotal);
             // Only a barrier needs the drain: the region end loops back to the start, so the last
             // load of the region has nothing to be done before.
-            const int drain = l.end == INT_MAX ? 0 : std::max(0, drainWindows);
+            const int drain = l.end == INT_MAX ? 0 : std::max(0, l.drain);
             const int end = std::clamp(std::min(l.end, wmmaTotal) - drain, start, wmmaTotal);
             auto [it, fresh] = index.try_emplace({start, end}, static_cast<int>(stages_.size()));
             if (fresh) {
                 Stage st;
                 st.start = start;
                 st.end = end;
+                st.opener = l.opener;
                 stages_.push_back(st);
             }
             Stage& cur = stages_[it->second];
+            if (!fresh && cur.opener != l.opener) cur.opener = UINT_MAX;
             ++cur.total;
             cur.lastDs = std::max(cur.lastDs, l.earliest);
             stageOf_[l.nodeId] = it->second;
@@ -78,7 +117,16 @@ class DsSpreadPacer {
         // The stage ends at the later of its planned end and where its last load can first issue
         // (the dependencies fix that, the pacer cannot move it), so the plan is what happens.
         for (Stage& st : stages_) {
+            // Loads can not all be returned before start + total * cyclesPerLoad / windowCycles, so
+            // a stage planned to end later than that ends there, never before its last load's slot.
+            const int atRate =
+                cyclesPerLoad > 0 && windowCycles > 0
+                    ? st.start + (st.total * cyclesPerLoad + windowCycles - 1) / windowCycles
+                    : 0;
+            if (atRate > 0) st.end = std::min(st.end, atRate);
             if (st.lastDs > st.end) st.end = std::min(st.lastDs, wmmaTotal);
+            if (atRate > st.end)
+                rateLimited_.push_back({st.start, st.end, st.total, atRate - st.start});
             st.batches = std::max(1, (st.end - st.start + batch_ - 1) / batch_);
         }
     }
@@ -107,6 +155,33 @@ class DsSpreadPacer {
         return (open ? st.inBatch : 0) < (open ? st.allow : allowFor(st, idx));
     }
 
+    // Loads the even line has placed by the current batch minus the loads the stage has issued
+    // (> 0: the load's stage is behind its line).
+    int behind(unsigned nodeId, int wmmaIssued) const {
+        auto it = stageOf_.find(nodeId);
+        if (!active_ || it == stageOf_.end() || wmmaIssued >= wmmaTotal_) return 0;
+        const Stage& st = stages_[it->second];
+        const int idx = batchOf(st, wmmaIssued);
+        if (idx >= st.batches) return 0;
+        return std::max(0, evenLine(st, idx) - st.issued);
+    }
+
+    // The barrier `openerId` issued with `wmmaIssued` WMMAs of the region issued so far. A stage
+    // it opens, and that has not issued a load yet, takes this as its start and recounts its
+    // batches up to the same end. On time, or after a load has already been paced, this is a no-op.
+    void noteOpen(unsigned openerId, int wmmaIssued) {
+        if (!active_) return;
+        for (Stage& st : stages_) {
+            if (st.opener != openerId || st.issued != 0 || wmmaIssued <= st.start) continue;
+            st.start = wmmaIssued;
+            if (st.end < st.start) st.end = st.start;
+            st.batches = std::max(1, (st.end - st.start + batch_ - 1) / batch_);
+            st.batchIdx = -1;
+            st.inBatch = 0;
+            st.allow = 0;
+        }
+    }
+
     // A ds_load issued with `wmmaIssued` WMMAs of the region issued so far.
     void noteIssue(unsigned nodeId, int wmmaIssued) {
         auto it = stageOf_.find(nodeId);
@@ -124,8 +199,9 @@ class DsSpreadPacer {
 
    private:
     struct Stage {
-        int start = 0;    // WMMA index the stage opens at
-        int end = 0;      // WMMA index the stage ends at
+        int start = 0;  // WMMA index the stage opens at
+        int end = 0;    // WMMA index the stage ends at
+        unsigned opener = UINT_MAX;
         int lastDs = 0;   // WMMA count its last load can first issue at
         int batches = 1;  // batches between its start and its end minus the drain
         int total = 0;    // its loads
@@ -165,6 +241,7 @@ class DsSpreadPacer {
     }
 
     int maxPerBatch_ = 0;
+    std::vector<RateLimited> rateLimited_;
     std::unordered_map<unsigned, int> stageOf_;
     std::vector<Stage> stages_;
     int batch_ = 1;

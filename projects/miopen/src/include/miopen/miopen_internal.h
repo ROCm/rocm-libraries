@@ -27,18 +27,32 @@
 #define GUARD_MIOPEN_INTERNAL_H_
 
 /* Put experimental APIs here. */
-/* If used, should be included after miopen.h. */
-
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wextern-c-compat"
-#endif
+/* Not part of the public C API: miopen.h does not include this header. */
 
 #include <stddef.h>
+#include <miopen/miopen.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/*! @brief Enum for specifying the alpha-beta case for convolution operations.
+ *
+ * Describes how alpha and beta scaling factors are applied in convolution operations.
+ */
+typedef enum
+{
+    /* DEFAULT       alpha = 1.0 and beta = 0.0 */
+    /* SCALE         alpha = 4.2 and beta = 0.0 */
+    /* BILINEAR      alpha = 3.2 and beta = 1.1 */
+    /* ERROR_STATE   alpha = 0.0 and beta = 3.1 */
+
+    DEFAULT     = 0, /* alpha = 1.0 and beta = 0.0.*/
+    SCALE       = 1, /* alpha with some value and beta 0.0*/
+    BILINEAR    = 2, /* both alpha and beta with some value*/
+    ERROR_STATE = 3  /* alpha 0.0 and beta with some value, this should not occur.
+                        But used to check for errors.*/
+} miopenAlphaBetaCase_t;
 
 /*! @brief Get extra workspace for backward weight kernel.
  *
@@ -56,12 +70,46 @@ miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t a
                                                    const miopenConvolutionDescriptor_t convDesc,
                                                    size_t* buffer_size);
 
+/* The three miopenConvolution*GetWorkSpaceSizeRange entry points report the
+ * smallest and largest workspace any applicable solver needs for a problem.
+ *
+ * They are exported but deliberately not part of miopen.h, so the public/private
+ * split does not rename them: with MIOPEN_ENABLE_HIPDNN_WRAPPER=ON they stay on
+ * libMIOpen_private.so under these names. They are declared once here so that
+ * the compiler checks MIOpen's definitions and callers against the same
+ * prototype. The hipDNN provider cannot include this header, so it keeps its own
+ * copy, which check_public_abi.py check-headers compares with the definitions.
+ * The parameters carry no top-level const, which does not change the type.
+ */
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                              miopenTensorDescriptor_t wDesc,
+                                              miopenTensorDescriptor_t xDesc,
+                                              miopenConvolutionDescriptor_t convDesc,
+                                              miopenTensorDescriptor_t yDesc,
+                                              size_t* minWorkspaceSize,
+                                              size_t* maxWorkspaceSize);
+
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                   miopenTensorDescriptor_t dyDesc,
+                                                   miopenTensorDescriptor_t wDesc,
+                                                   miopenConvolutionDescriptor_t convDesc,
+                                                   miopenTensorDescriptor_t dxDesc,
+                                                   size_t* minWorkspaceSize,
+                                                   size_t* maxWorkspaceSize);
+
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                      miopenTensorDescriptor_t dyDesc,
+                                                      miopenTensorDescriptor_t xDesc,
+                                                      miopenConvolutionDescriptor_t convDesc,
+                                                      miopenTensorDescriptor_t dwDesc,
+                                                      size_t* minWorkspaceSize,
+                                                      size_t* maxWorkspaceSize);
+
 #ifdef __cplusplus
 }
-#endif
-
-#ifdef __clang__
-#pragma clang diagnostic pop
 #endif
 
 #endif // GUARD_MIOPEN_INTERNAL_H_

@@ -4,7 +4,9 @@
 #include "stinkytofu/transforms/asm/PrefetchBridgeSubstitutionPass.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <iostream>
+#include <queue>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -51,7 +53,32 @@ struct Groups {
     std::unordered_map<BasicBlock*, std::vector<Ev>> evs;
     std::unordered_map<StinkyInstruction*, StinkyInstruction*> anchorOf;
     std::unordered_map<StinkyInstruction*, unsigned> ldsOf;
+    // LDS ops laid out before / through each block, and the block of each prefetch.
+    std::unordered_map<BasicBlock*, std::pair<unsigned, unsigned>> bbLds;
+    std::unordered_map<StinkyInstruction*, BasicBlock*> bbOf;
 };
+
+// Fewest LDS ops between `anchor` and a consumer laid out before it, over any CFG path (the
+// anchor reaches it around a back edge). ~0u when no path leads there.
+unsigned backEdgeGap(const Groups& g, StinkyInstruction* anchor, BasicBlock* consumerBb,
+                     unsigned consumerLds) {
+    BasicBlock* from = g.bbOf.at(anchor);
+    using Item = std::pair<unsigned, BasicBlock*>;
+    std::priority_queue<Item, std::vector<Item>, std::greater<Item>> todo;
+    std::unordered_set<BasicBlock*> done;
+    auto push = [&](BasicBlock* bb, unsigned dist) { todo.push({dist, bb}); };
+    for (BasicBlock* succ : from->getSuccessors())
+        push(succ, g.bbLds.at(from).second - g.ldsOf.at(anchor));
+    while (!todo.empty()) {
+        auto [dist, bb] = todo.top();
+        todo.pop();
+        if (!done.insert(bb).second) continue;
+        const auto [lo, hi] = g.bbLds.at(bb);
+        if (bb == consumerBb) return dist + (consumerLds - lo);
+        for (BasicBlock* succ : bb->getSuccessors()) push(succ, dist + (hi - lo));
+    }
+    return ~0u;
+}
 
 // Prefetches that can still be the last reader of reg on some path into (bb, idx).
 // A path is cut by an earlier write to the same register.
@@ -106,6 +133,7 @@ Groups buildGroups(Function& func, const std::unordered_set<unsigned>& addrRegs)
     };
 
     for (BasicBlock& bb : func) {
+        const unsigned bbStart = ldsCount;
         for (IRBase& node : bb) {
             auto* inst = dyn_cast<StinkyInstruction>(&node);
             if (inst == nullptr) continue;
@@ -116,6 +144,7 @@ Groups buildGroups(Function& func, const std::unordered_set<unsigned>& addrRegs)
                 if (regs.empty()) continue;
                 g.evs[&bb].push_back({inst, regs, ldsCount, true});
                 g.ldsOf[inst] = ldsCount;
+                g.bbOf[inst] = &bb;
                 group.push_back(inst);
                 continue;
             }
@@ -127,6 +156,7 @@ Groups buildGroups(Function& func, const std::unordered_set<unsigned>& addrRegs)
             g.evs[&bb].push_back({inst, hit, ldsCount, false});
             closeGroup();
         }
+        g.bbLds[&bb] = {bbStart, ldsCount};
     }
     closeGroup();
     return g;
@@ -151,12 +181,14 @@ std::vector<StinkyInstruction*> electAnchorsForReg(BasicBlock* bb, size_t idx, u
         StinkyInstruction* anchor = a != g.anchorOf.end() ? a->second : pf->inst;
         anchors.push_back(anchor);
         const unsigned anchorLds = g.ldsOf.at(anchor);
-        // An anchor laid out after its consumer only reaches it around a back edge,
-        // where a layout gap says nothing. Decline.
-        if (anchorLds > consumerLds)
+        // An anchor laid out after its consumer reaches it around a back edge: count the LDS
+        // ops along the CFG path instead of the layout.
+        const unsigned gap = anchorLds > consumerLds ? backEdgeGap(g, anchor, bb, consumerLds)
+                                                     : consumerLds - anchorLds;
+        if (gap == ~0u)
             ok = false;
         else
-            minGap = std::min(minGap, consumerLds - anchorLds);
+            minGap = std::min(minGap, gap);
     }
     if (!ok || minGap < static_cast<unsigned>(required)) {
         PASS_DEBUG(std::cerr << "[PrefetchBridge] declined v" << reg << " (" << anchors.size()
