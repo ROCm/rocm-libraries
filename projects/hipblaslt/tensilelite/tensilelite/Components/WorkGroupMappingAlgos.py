@@ -405,20 +405,18 @@ def DefaultWGM(writer, kernel, sgprWGM, wg0="WorkGroup0", wg1="WorkGroup1"):
 def ClusterAIDRemap(writer, kernel):
     """Permute cluster ids so each AID's GL2 serves a contiguous half of the cluster grid.
 
-    Clusters are dispatched round-robin over 8 XCCs, starting at XCC s = ClusterAIDMapping;
-    XCCs [0,4) and [4,8) form the two AIDs, each with its own GL2. For dispatch id
-    c = cx + Cx*cy over a Cx x Cy cluster grid with Nc = Cx*Cy:
-        xcc = (c + s) % 8,  aid = xcc // 4
+    Clusters are dispatched round-robin over 8 XCCs; XCCs [0,4) and [4,8) form the two AIDs,
+    each with its own GL2. With ClusterAIDMapping == -2 each cluster reads its xcc from
+    MSG_RTN_GET_SE_AID_ID. For dispatch id c = cx + Cx*cy over a Cx x Cy cluster grid with
+    Nc = Cx*Cy:
+        aid = xcc // 4
         l   = aid*(Nc/2) + (c//8)*4 + xcc%4
-    Every block of 8 consecutive ids covers all 8 XCCs, so l is a bijection of [0, Nc)
-    for any s; s only decides whether l lines up with the real AIDs. Each AID then gets
+    If the hardware dispatch is strictly round-robin over XCCs within the launch, then
+    xcc = (c + s) % 8 for a fixed starting XCC s, every block of 8 consecutive ids covers
+    all 8 XCCs, and l is a bijection of [0, Nc). Each AID then gets
     the l range of one half of the grid, split along N (both GL2s read all of A, B is read
     once) or along M, whichever duplicates the smaller operand. Peer positions inside a
     cluster are kept, so multicast masks are unaffected.
-
-    With ClusterAIDMapping == -2, xcc is read from MSG_RTN_GET_SE_AID_ID instead, which is
-    equivalent to s = (xcc - c) % 8 per cluster. l is then a bijection only if the hardware
-    dispatch is strictly round-robin over XCCs within the launch.
 
     Skipped at runtime unless the grid is a whole number of clusters and Nc % 8 == 0.
     """
@@ -463,14 +461,10 @@ def ClusterAIDRemap(writer, kernel):
         module.add(SAndB32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=hex(cs - 1), comment="peer x"))
         module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=sgpr("WorkGroup1"), src1=hex(ck - 1), comment="peer y"))
 
-        if start == -2:
-            module.add(SSendMsgRtnB32(dst=sgpr(sP), src=135, comment="MSG_RTN_GET_SE_AID_ID, [31:16] = XCC"))
-            module.add(SWaitCnt(kmcnt=0, comment="wait SE_AID_ID"))
-            module.add(SLShiftRightB32(dst=sgpr(sP), shiftHex=hex(16), src=sgpr(sP)))
-            module.add(SAndB32(dst=sgpr(sP), src0=sgpr(sP), src1=hex(numXCC - 1), comment="xcc from hardware"))
-        else:
-            module.add(SAddU32(dst=sgpr(sP), src0=sgpr(sL), src1=start))
-            module.add(SAndB32(dst=sgpr(sP), src0=sgpr(sP), src1=hex(numXCC - 1), comment="xcc = (c + start) % 8"))
+        module.add(SSendMsgRtnB32(dst=sgpr(sP), src=135, comment="MSG_RTN_GET_SE_AID_ID, [31:16] = XCC"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait SE_AID_ID"))
+        module.add(SLShiftRightB32(dst=sgpr(sP), shiftHex=hex(16), src=sgpr(sP)))
+        module.add(SAndB32(dst=sgpr(sP), src0=sgpr(sP), src1=hex(numXCC - 1), comment="xcc from hardware"))
         module.add(SLShiftRightB32(dst=sgpr(sT), shiftHex=hex(log2(xccPerAID)), src=sgpr(sP), comment="aid"))
         module.add(SMulI32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr(sHalf), comment="aid * Nc/2"))
         module.add(SLShiftRightB32(dst=sgpr(sL), shiftHex=hex(log2(numXCC)), src=sgpr(sL), comment="c // 8"))

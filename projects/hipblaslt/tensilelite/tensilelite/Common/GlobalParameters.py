@@ -703,7 +703,7 @@ defaultBenchmarkCommonParameters = [
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
     # ClusterAIDMapping — permute cluster ids so each AID (and its GL2) gets a contiguous
-    # half of the cluster grid. -1 disables; 0-7 is the XCC that receives cluster 0;
+    # half of the cluster grid. -1 disables;
     # -2 reads each cluster's XCC from the hardware.
     {"ClusterAIDMapping": [-1]},
     {"HalfPLR": [0]},
