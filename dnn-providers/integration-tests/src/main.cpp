@@ -750,11 +750,17 @@ int main(int argc, char** argv) noexcept
                 // whose passes were all of that kind would otherwise report success
                 // having captured nothing. A run where every test skipped is left
                 // alone: on another architecture an engine-pinned lane skips by design.
-                if(passed > 0 && captures.replayed == 0)
+                //
+                // An expected rejection passes for any engine that declines the graph and
+                // has nothing to capture, so it does not count: an engine that serves none
+                // of the selected cases would otherwise fail on the rejection cases alone.
+                const auto rejected = static_cast<int>(verifiers.rejected);
+                const int capturablePasses = passed > rejected ? passed - rejected : 0;
+                if(capturablePasses > 0 && captures.replayed == 0)
                 {
-                    std::cerr << "\nFATAL: --graph-capture is active and " << passed
-                              << " test(s) passed, but not one graph was captured and "
-                                 "replayed.\n";
+                    std::cerr << "\nFATAL: --graph-capture is active and " << capturablePasses
+                              << " test(s) passed other than expected rejections, but not one "
+                                 "graph was captured and replayed.\n";
                     exitCode = 1;
                 }
             }

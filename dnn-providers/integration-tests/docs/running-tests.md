@@ -239,8 +239,9 @@ build/bin/hipdnn_integration_tests \
   files. The coverage summary counts them on a `Graph capture:` line.
 - A run in which tests passed but no graph was replayed fails with
   `FATAL: --graph-capture is active ...`: every pass stopped short of the
-  capture step, so the run checked nothing it was asked to. A run in which
-  every test skipped does not fail.
+  capture step, so the run checked nothing it was asked to. Expected-rejection
+  passes do not count, because any engine passes them by declining the graph.
+  A run in which every test skipped does not fail.
 - It cannot be combined with `--benchmark`: autotune synchronizes and times
   with events, which a capturing stream forbids.
 
