@@ -395,7 +395,10 @@ def select_split_k_wgrad(
     The floor division is load-bearing: total CTAs must stay *at or under*
     capacity. Rounding up instead crosses a CTA-quantisation cliff.
     """
-    num_cus = arch_num_cus(arch)
+    # Every table below is keyed by the bare architecture, so strip a target
+    # id's feature suffix (``gfx942:sramecc+``) once, before any lookup.
+    base_arch = arch.split(":", 1)[0]
+    num_cus = arch_num_cus(base_arch)
     max_capacity = waves_per_cu * num_cus
 
     m_tiles = ceil_div(int(wg_M), int(tile_m))
@@ -406,7 +409,9 @@ def select_split_k_wgrad(
         return SplitKDecision(1, base_grid, max_capacity, "empty grid")
 
     policy = (
-        _WGRAD_SPLIT_POLICY_BY_DTYPE.get((arch, dtype_d), _WGRAD_SPLIT_POLICY.get(arch))
+        _WGRAD_SPLIT_POLICY_BY_DTYPE.get(
+            (base_arch, dtype_d), _WGRAD_SPLIT_POLICY.get(base_arch)
+        )
         if dtype_d is not None
         else None
     )
@@ -445,9 +450,8 @@ def select_split_k_wgrad(
             f"(num_cus={num_cus} waves_per_cu={waves_per_cu})",
         )
 
-    # Strip a target id's feature suffix (``gfx950:sramecc+``); an arch the
-    # catalog does not list raises KeyError.
-    wave_size = ArchTarget.from_gfx(arch.split(":", 1)[0]).wave_size
+    # An arch the catalog does not list raises KeyError.
+    wave_size = ArchTarget.from_gfx(base_arch).wave_size
     waves_per_block = max(1, int(block_size) // wave_size)
     blocks_per_cu = max(1, WGRAD_TARGET_WAVES_PER_CU // waves_per_block)
     capacity = blocks_per_cu * num_cus
@@ -463,7 +467,7 @@ def select_split_k_wgrad(
     cap = max(1, min(wg_K, MAX_GRID_DIM_Z // int(groups)))
     split_k = min(split_k, cap)
 
-    xcds = _ARCH_NUM_XCDS.get(arch, _DEFAULT_NUM_XCDS)
+    xcds = _ARCH_NUM_XCDS.get(base_arch, _DEFAULT_NUM_XCDS)
     step = xcds // math.gcd(base_grid, xcds) if xcds > 1 else 1
     if step > 1:
         # Snap down to keep the CTA count under capacity; snap up only when the

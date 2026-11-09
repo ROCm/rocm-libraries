@@ -217,18 +217,40 @@ class TestGroupedPath(unittest.TestCase):
         with self.assertRaises(KeyError):
             _pick("dw_g192_s2", (16, 16, 32), groups=192, arch="gfx999")
 
-    def test_target_id_suffix_keeps_the_wave_size(self):
-        # A feature suffix is stripped before the catalog lookup, so the
-        # occupancy target (which the wave size sets) matches the bare arch.
-        # Only the capacity is compared: the XCD lookup still keys on the
-        # unstripped arch.
-        for arch in ("gfx950", "gfx1201"):
-            with self.subTest(arch=arch):
-                bare = _pick("dw_g192_s2", (16, 16, 32), groups=192, arch=arch)
-                suffixed = _pick(
-                    "dw_g192_s2", (16, 16, 32), groups=192, arch=f"{arch}:xnack-"
-                )
-                self.assertEqual(suffixed.target_ctas, bare.target_ctas)
+    def test_target_id_suffix_picks_the_bare_arch(self):
+        # A feature suffix is stripped once, so the CU count, the XCD snap and
+        # the wave size all come from the bare arch's tables: the decision is
+        # the bare arch's, field for field.
+        for arch in ("gfx942", "gfx950", "gfx1201"):
+            for suffix in (":xnack-", ":sramecc+", ":sramecc+:xnack-"):
+                with self.subTest(arch=arch, suffix=suffix):
+                    bare = _pick("dw_g192_s2", (16, 16, 32), groups=192, arch=arch)
+                    suffixed = _pick(
+                        "dw_g192_s2", (16, 16, 32), groups=192, arch=arch + suffix
+                    )
+                    self.assertEqual(suffixed.split_k, bare.split_k)
+                    self.assertEqual(suffixed.target_ctas, bare.target_ctas)
+                    self.assertEqual(suffixed.base_grid, bare.base_grid)
+
+    def test_target_id_suffix_reaches_every_table(self):
+        # The CU table (ungrouped CK formula) and the per-arch policy are keyed
+        # by the bare arch too; a decorated id must not fall back to defaults.
+        cases = [
+            dict(arch="gfx942", groups=1),  # 304 CUs, not the 256 default
+            dict(arch="gfx1250", groups=1, dtype_d="bf16"),  # wgrad policy
+        ]
+        for kw in cases:
+            for suffix in (":sramecc+", ":xnack-"):
+                with self.subTest(suffix=suffix, **kw):
+                    args = dict(
+                        wg_M=256, wg_N=256, wg_K=4096, tile_m=64, tile_n=64, tile_k=64
+                    )
+                    bare = select_split_k_wgrad(**args, **kw)
+                    deco = select_split_k_wgrad(
+                        **args, **{**kw, "arch": kw["arch"] + suffix}
+                    )
+                    self.assertEqual(deco.split_k, bare.split_k)
+                    self.assertEqual(deco.target_ctas, bare.target_ctas)
 
 
 class TestGfx1250Policy(unittest.TestCase):
