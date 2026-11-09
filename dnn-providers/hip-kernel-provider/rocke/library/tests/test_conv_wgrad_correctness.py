@@ -324,6 +324,7 @@ def _run_one(
     prefetch_addr: bool = False,
     register_prefetch: bool = False,
     prefetch_regs: bool = False,
+    vector_size_c: "int | None" = None,
     spec_override=None,
     positive: bool = False,
 ) -> Tuple[bool, str]:
@@ -372,6 +373,7 @@ def _run_one(
         or prefetch_addr
         or register_prefetch
         or prefetch_regs
+        or vector_size_c is not None
     ):
         from dataclasses import replace as _dc_replace
 
@@ -384,6 +386,8 @@ def _run_one(
             _over["register_prefetch"] = True
         if prefetch_regs:
             _over["prefetch_regs"] = True
+        if vector_size_c is not None:
+            _over["vector_size_c"] = vector_size_c
         if tile_m:
             _over["tile_m"] = tile_m
         if tile_n:
@@ -3066,25 +3070,30 @@ class TestWgradPrefetchRegsNumerics(unittest.TestCase):
                         )
 
     def test_split_k_atomic(self):
-        # fp16 / bf16 dW: the packed 16-bit atomics.
+        # fp16 / bf16 dW: the packed 16-bit atomics, at the default dW width and
+        # at width 2 (one lane-contiguous <2 x dtype> pair per lane), the width
+        # the gfx950 AOT grid builds them at.
         for kouter in self._KOUTER_AXIS:
             for pipeline in ("mem", "compv3", "compv4"):
                 for dtype in _DTYPES:
                     for shape in (_SHAPES[0], _SHAPES[2]):
-                        with self.subTest(
-                            kouter=kouter,
-                            pipeline=pipeline,
-                            dtype=dtype,
-                            shape=shape.id,
-                        ):
-                            self._run(
-                                shape,
-                                dtype,
-                                pipeline,
-                                "cshuffle",
-                                split_k=4,
-                                lds_k_outer=kouter,
-                            )
+                        for vec_c in (None, 2):
+                            with self.subTest(
+                                kouter=kouter,
+                                pipeline=pipeline,
+                                dtype=dtype,
+                                shape=shape.id,
+                                vector_size_c=vec_c,
+                            ):
+                                self._run(
+                                    shape,
+                                    dtype,
+                                    pipeline,
+                                    "cshuffle",
+                                    split_k=4,
+                                    lds_k_outer=kouter,
+                                    vector_size_c=vec_c,
+                                )
 
     def test_two_stage(self):
         for kouter in self._KOUTER_AXIS:
