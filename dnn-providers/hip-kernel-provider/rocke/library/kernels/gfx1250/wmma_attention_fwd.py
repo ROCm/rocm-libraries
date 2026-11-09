@@ -198,9 +198,9 @@ def build_wmma_attention_fwd(
     op = target.mma.by_op_id(_WMMA_OP_ID)
     wave = op.wave_size  # 32
     a_map = op.a_layout()  # (row, k): lane l, slot j -> (l%16, (l//16)*16 + j)
-    c_map = op.c_layout()  # (row, col): lane l, slot i -> ((l//16)*8 + i, l%16)
+    c_map = op.dst_layout()  # (row, col): lane l, slot i -> ((l//16)*8 + i, l%16)
     a_frag = op.a_frag_len  # 16
-    c_frag = op.c_frag_len  # 8
+    c_frag = op.dst.frag_len  # Result slots, including softmax/output bookkeeping.
 
     H = spec.head_size
     n_dk = H // _WMMA_K  # QK^T d-tiles (op.k = 32 each)
@@ -271,7 +271,7 @@ def build_wmma_attention_fwd(
         iter_args.append((f"m{r}", neg_inf))
         iter_args.append((f"l{r}", zero_f))
     for d in range(n_pv):
-        iter_args.append((f"acc{d}", b.zero_vec_f32(c_frag)))
+        iter_args.append((f"acc{d}", b.zero_vec_f32(op.srcs[2].frag_len)))
 
     c_block_k = b.const_i32(_BLOCK_K)
     loop_stop = b.div(seqlen_k, c_block_k)
@@ -288,7 +288,7 @@ def build_wmma_attention_fwd(
         # ---- QK^T: two N-sub-tiles (k 0..15 and 16..31), each summed over d ----
         scores = []
         for nsub in range(2):
-            score = b.zero_vec_f32(c_frag)
+            score = b.zero_vec_f32(op.srcs[2].frag_len)
             # This lane's K row for sub-tile nsub: k_tile_base + nsub*16 + (l%16).
             k_row = b.add(b.add(k_tile_base, b.const_i32(nsub * _WMMA_N)), a_row)
             k_addr_row_base = b.add(

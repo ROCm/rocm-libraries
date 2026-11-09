@@ -12,6 +12,10 @@
 #   run fails the skip) without one. Pinned to the pre-commit hook's rev, because a formatter
 #   fixed-point check is only meaningful against the formatter that defines the style.
 #   tools/CMakeLists.txt hands the venv's copy to the suite as HIPDNN_CLANG_FORMAT.
+# uhd_gen's requirements -- its pytest suites and TestUhdGenArtifact. The workflow configures
+#   with HIPDNN_REQUIRE_UHD_GEN_TESTS=ON, so a module missing here fails configure, not a
+#   silent skip. Included rather than copied so the minimums stay in one file (nested -r
+#   paths resolve against this file's directory).
 #
 # Installed with --upgrade, so nothing else is pinned here.
 pytest
@@ -21,3 +25,4 @@ jsonschema
 PyYAML
 Jinja2
 clang-format==18.1.4
+-r ../projects/hipdnn/tools/uhd_gen/requirements.txt

@@ -20,6 +20,7 @@ from tests.helpers import (
     make_kmd_field,
     make_minimal_config,
     make_pack,
+    shipped_bundles,
 )
 
 
@@ -52,6 +53,28 @@ class TestEngineNameCheck:
         from codegen.config_loader import _check_engine_name_scoped
 
         config = make_minimal_config(engine=make_engine(name="hipkernel:Pointwise"))
+        _check_engine_name_scoped(config)  # does not raise
+
+    @pytest.mark.parametrize(
+        "borrowed", ["Unscoped", "hipkernel:Test", 3], ids=["unscoped", "self", "int"]
+    )
+    def test_native_symbols_from_must_name_another_scoped_engine(self, borrowed):
+        from codegen.config_loader import _check_engine_name_scoped
+
+        config = make_minimal_config(
+            engine=make_engine(name="hipkernel:Test", native_symbols_from=borrowed)
+        )
+        with pytest.raises(ConfigError, match="native_symbols_from"):
+            _check_engine_name_scoped(config)
+
+    def test_native_symbols_from_another_engine_accepted(self):
+        from codegen.config_loader import _check_engine_name_scoped
+
+        config = make_minimal_config(
+            engine=make_engine(
+                name="hipkernel:TestSeed", native_symbols_from="hipkernel:Test"
+            )
+        )
         _check_engine_name_scoped(config)  # does not raise
 
     def test_invalid_heuristic_value_rejected(self):
@@ -88,18 +111,28 @@ class TestEngineNameCheck:
             load_config(path)
 
 
-class TestKnobsIntTypedCheck:
-    """Pre-mint check #2: every knob names a declared, int-typed KMD field."""
+class TestKnobsAddressableCheck:
+    """Pre-mint check #2: every knob names a declared int- or string-typed KMD field."""
 
     def test_undeclared_knob_rejected(self):
-        from codegen.config_loader import _check_knobs_int_typed
+        from codegen.config_loader import _check_knobs_addressable
 
         config = make_minimal_config(engine=make_engine(knobs=["nonexistent"]))
         with pytest.raises(ConfigError, match="no kmd_fields entry declares"):
-            _check_knobs_int_typed(config)
+            _check_knobs_addressable(config)
 
-    def test_non_int_knob_rejected(self):
-        from codegen.config_loader import _check_knobs_int_typed
+    def test_float_knob_rejected(self):
+        from codegen.config_loader import _check_knobs_addressable
+
+        config = make_minimal_config(
+            kmd_fields=[make_kmd_field(name="scale", type="float", default_value=None)],
+            engine=make_engine(knobs=["scale"]),
+        )
+        with pytest.raises(ConfigError, match="int-typed fields"):
+            _check_knobs_addressable(config)
+
+    def test_string_knob_accepted_as_ordinal(self):
+        from codegen.config_loader import _check_knobs_addressable
 
         config = make_minimal_config(
             kmd_fields=[
@@ -107,14 +140,13 @@ class TestKnobsIntTypedCheck:
             ],
             engine=make_engine(knobs=["dtype"]),
         )
-        with pytest.raises(ConfigError, match="int-typed"):
-            _check_knobs_int_typed(config)
+        _check_knobs_addressable(config)  # does not raise
 
     def test_int_typed_knob_accepted(self):
-        from codegen.config_loader import _check_knobs_int_typed
+        from codegen.config_loader import _check_knobs_addressable
 
         config = make_minimal_config(engine=make_engine(knobs=["block_size"]))
-        _check_knobs_int_typed(config)  # does not raise
+        _check_knobs_addressable(config)  # does not raise
 
 
 class TestKernelMetadataAgainstKmdCheck:
@@ -410,6 +442,13 @@ class TestPackDiscriminatorsCheck:
         with pytest.raises(ConfigError, match="discriminator"):
             _check_pack_discriminators(config)
 
+    def test_multi_pack_with_no_discriminator_is_a_sharded_catalog(self):
+        from codegen.config_loader import _check_pack_discriminators
+
+        config = make_minimal_config(packs=[make_pack(name="a"), make_pack(name="b")])
+        _check_pack_discriminators(config)
+        assert config.is_multi_pack and not config.has_operation_matchers
+
     def test_single_pack_with_discriminator_rejected(self):
         from codegen.config_loader import _check_pack_discriminators
 
@@ -506,6 +545,79 @@ class TestEmittedIdentifierShape:
             "attnV2",
         )
         _check_emitted_identifiers(make_minimal_config(engine=engine))  # no raise
+
+    @pytest.mark.parametrize("slug", ["../evil", "a/b", "a.b", "", "-lead", " "])
+    def test_slug_override_must_be_a_single_path_stem(self, slug):
+        """The slug is the descriptor directory's name and every file's stem, so an
+        override gets the same containment the derived slug gets."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(engine=make_engine(slug_override=slug))
+        with pytest.raises(ConfigError, match="engine.slug"):
+            _check_emitted_identifiers(config)
+
+    def test_slug_override_is_accepted_when_it_is_a_stem(self):
+        from codegen.config_loader import _check_emitted_identifiers
+
+        _check_emitted_identifiers(
+            make_minimal_config(
+                engine=make_engine(
+                    name="hipkernel:Gfx950AttentionUnified2D",
+                    slug_override="gfx950_attention_unified_2d",
+                )
+            )
+        )  # no raise
+
+    def test_load_config_reads_engine_slug(self, tmp_path):
+        import yaml
+
+        path = tmp_path / "slug.yaml"
+        path.write_text(
+            yaml.dump(
+                {
+                    "dialect": "packaged",
+                    "authored_subpath": "rocKE/x",
+                    "engine": {
+                        "name": "hipkernel:Gfx950AttentionUnified2D",
+                        "slug": "gfx950_attention_unified_2d",
+                        "knobs": ["block_size"],
+                    },
+                    "kmd_fields": [
+                        {"name": "block_size", "type": "int", "default_value": 64},
+                        {"name": "dtype", "type": "string"},
+                    ],
+                    "specialization": {
+                        "metadata_fields": ["block_size", "dtype"],
+                        "bindings": {
+                            "block_size": {"field": "block_size"},
+                            "dtype": {"field": "dtype"},
+                        },
+                    },
+                    "kernel_source_kind": "rocke",
+                    "packs": [
+                        {
+                            "name": "p",
+                            "arch": ["gfx950"],
+                            "kernels": [
+                                {
+                                    "name": "k",
+                                    "kernel_source": {
+                                        "kind": "rocke",
+                                        "source": "s.py",
+                                        "builder": "b",
+                                        "spec": {"head_size": 64},
+                                    },
+                                    "metadata": {"block_size": 64, "dtype": "BF16"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+        )
+        config = load_config(path)
+        assert config.engine.slug == "gfx950_attention_unified_2d"
+        assert config.native_symbol_namespace == "hipkernel.gfx950_attention_unified_2d"
 
     def test_census_name_symbol_rejects_cpp_expressions(self):
         from codegen.config_loader import _check_emitted_identifiers
@@ -1140,10 +1252,41 @@ def _parse(text):
     return yaml.load(text, Loader=_DuplicateKeySafeLoader)  # nosec B506
 
 
+def _duplicate_key_loaders():
+    from codegen import config_loader
+
+    loaders = [pytest.param(config_loader._PyDuplicateKeySafeLoader, id="python")]
+    if getattr(yaml, "__with_libyaml__", False):
+        loaders.append(
+            pytest.param(config_loader._CDuplicateKeySafeLoader, id="libyaml")
+        )
+    return loaders
+
+
+def test_the_config_loader_parses_with_libyaml_when_pyyaml_has_it():
+    from codegen import config_loader
+
+    if getattr(yaml, "__with_libyaml__", False):
+        assert issubclass(config_loader._DuplicateKeySafeLoader, yaml.CSafeLoader)
+    else:
+        assert config_loader._DuplicateKeySafeLoader is (
+            config_loader._PyDuplicateKeySafeLoader
+        )
+
+
 class TestRepeatedYamlKeys:
     """Stock PyYAML keeps the last of two equal mapping keys and drops the other
     silently, so the value an author reads first is not the one generated. Merge keys,
-    aliases and YAML's scalar resolution stay what stock SafeLoader makes of them."""
+    aliases and YAML's scalar resolution stay what stock SafeLoader makes of them.
+
+    Every case runs over both parsers: libyaml's, which the loader takes when PyYAML
+    was built with it, and the pure-Python fallback."""
+
+    @pytest.fixture(autouse=True, params=_duplicate_key_loaders())
+    def _loader(self, request, monkeypatch):
+        from codegen import config_loader
+
+        monkeypatch.setattr(config_loader, "_DuplicateKeySafeLoader", request.param)
 
     def _load(self, tmp_path, text):
         path = tmp_path / "c.yaml"
@@ -1329,7 +1472,12 @@ class TestShippedExampleConfigsLoad:
         for path in paths:
             manifest = registry_enumerator.load_manifest(str(path))
             assert manifest["engine"]["name"], path
-            assert manifest["enumerate"]["max_kernels"] > 0, path
+            # Every manifest freezes its build cost: a slice by max_kernels, a full space
+            # (which the enumerator does not hold to max_kernels) by the AOT budget.
+            if manifest["enumerate"].get("space", "slice") == "full":
+                assert manifest["reduction"]["aot_budget_per_arch"] > 0, path
+            else:
+                assert manifest["enumerate"]["max_kernels"] > 0, path
             assert manifest["provider_root"], path
 
     def test_an_engine_manifest_is_not_a_generator_config(self, configs_dir):
@@ -2277,7 +2425,7 @@ class TestSpecializationDeclaration:
             "binary_ops.yaml",
             "axes_example.yaml",
             "variants_example.yaml",
-            "gfx950_attention_dense.yaml",
+            *(f"{bundle}.yaml" for bundle in shipped_bundles()),
         ):
             config = load_test_config(name)
             declared = {f.name for f in config.kmd_fields}
@@ -2351,6 +2499,18 @@ class TestRuntimeContractRejections:
                 ),
                 r"default_value \[1, 'two'\], which contradicts its declared type 'int_list'",
                 id="kmd-default-value-mixed-int-list",
+            ),
+            pytest.param(
+                lambda r: r["kmd_fields"].append(
+                    {"name": "dtype", "type": "string", "builder_default": True}
+                ),
+                r"entry 'dtype' declares builder_default without a default_value",
+                id="kmd-builder-default-on-mandatory-field",
+            ),
+            pytest.param(
+                lambda r: r["kmd_fields"][0].__setitem__("builder_default", "yes"),
+                r"entry 'block_size' declares builder_default 'yes'; it must be true",
+                id="kmd-builder-default-not-bool",
             ),
             # T1(b) -- requireNoDuplicates, DescriptorLoader.hpp:634-645, 750, 753.
             pytest.param(
@@ -2972,3 +3132,130 @@ class TestReductionBlockAndDefaultMarker:
     ):
         with pytest.raises(ConfigError, match=key):
             self._load(tmp_path, {**self.REDUCTION, key: value})
+
+
+class TestEngineHeuristics:
+    """``engine.heuristics``: the per-arch UHD bindings `uhd_gen promote` writes."""
+
+    MODEL = "4b750e22-2656-46ce-89e7-be9ba588d732"
+    OTHER = "73276c7b-f432-437b-9a06-8bb62920c823"
+
+    @staticmethod
+    def _load(tmp_path, configs_dir, heuristics, base="scale_add.yaml", **engine):
+        raw = yaml.safe_load((configs_dir / base).read_text())
+        raw["engine"].update(engine, heuristics=heuristics)
+        path = tmp_path / base
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        return load_config(path)
+
+    def test_bindings_load_in_config_order(self, tmp_path, configs_dir):
+        config = self._load(
+            tmp_path,
+            configs_dir,
+            {
+                "predict_engine": {"gfx950": [self.MODEL], "default": [self.OTHER]},
+                "sort_kernel_catalog": {"gfx950": [self.OTHER], "gfx942": [self.MODEL]},
+            },
+        )
+        bindings = config.engine.heuristics
+        assert list(bindings) == ["predict_engine", "sort_kernel_catalog"]
+        assert list(bindings["sort_kernel_catalog"]) == ["gfx950", "gfx942"]
+        assert bindings["predict_engine"]["default"] == [self.OTHER]
+
+    def test_absent_is_empty(self, scale_add_config):
+        assert scale_add_config.engine.heuristics == {}
+
+    @pytest.mark.parametrize(
+        "heuristics, match",
+        [
+            ({"rank_engine": {"gfx942": [MODEL]}}, "role 'rank_engine'"),
+            (
+                {"sort_kernel_catalog": {"gfx9": [MODEL]}},
+                "sort_kernel_catalog key 'gfx9'",
+            ),
+            (
+                {"sort_kernel_catalog": {"gfx950-dcgpu": [MODEL]}},
+                "key 'gfx950-dcgpu'",
+            ),
+            (
+                {"sort_kernel_catalog": {"default": [MODEL]}},
+                r"sort_kernel_catalog\.default",
+            ),
+            ({"sort_kernel_catalog": {"gfx942": []}}, r"sort_kernel_catalog\.gfx942"),
+            ({"predict_engine": {"gfx942": ["not-a-uuid"]}}, r"predict_engine\.gfx942"),
+            ({"predict_engine": {"gfx942": MODEL}}, r"predict_engine\.gfx942"),
+            (
+                {"predict_engine": {"gfx942": [MODEL, MODEL]}},
+                r"predict_engine\.gfx942 repeats",
+            ),
+            ({"predict_engine": {}}, r"heuristics\.predict_engine is empty"),
+            ({"predict_engine": [MODEL]}, "predict_engine"),
+            ([MODEL], "engine.heuristics"),
+        ],
+    )
+    def test_refusals_name_the_key(self, tmp_path, configs_dir, heuristics, match):
+        with pytest.raises(ConfigError, match=match):
+            self._load(tmp_path, configs_dir, heuristics)
+
+    def test_arch_entries_need_the_native_default(self, tmp_path, configs_dir):
+        with pytest.raises(ConfigError, match="engine.heuristic is 'none'"):
+            self._load(
+                tmp_path,
+                configs_dir,
+                {"sort_kernel_catalog": {"gfx942": [self.MODEL]}},
+                heuristic="none",
+            )
+
+    def test_refused_beside_slots(self, tmp_path):
+        fixture = Path(__file__).parent / "fixtures" / "slotted_three_slot.yaml"
+        raw = yaml.safe_load(fixture.read_text())
+        raw["engine"]["heuristics"] = {"predict_engine": {"gfx942": [self.MODEL]}}
+        path = tmp_path / fixture.name
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        with pytest.raises(ConfigError, match="engine.heuristics is set on a slotted"):
+            load_config(path)
+
+    def test_refusal_exits_2(self, tmp_path, configs_dir, monkeypatch, capsys):
+        import generate
+
+        raw = yaml.safe_load((configs_dir / "scale_add.yaml").read_text())
+        raw["engine"]["heuristics"] = {"sort_kernel_catalog": {"gfx9": [self.MODEL]}}
+        path = tmp_path / "scale_add.yaml"
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        argv = [
+            "generate.py",
+            "--config",
+            str(path),
+            "--output-dir",
+            str(tmp_path / "o"),
+        ]
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(SystemExit) as exit_info:
+            generate.main()
+        assert exit_info.value.code == 2
+        assert "engine.heuristics.sort_kernel_catalog" in capsys.readouterr().err
+
+    @pytest.mark.parametrize(
+        "token",
+        [
+            "gfx942",
+            "gfx90a",
+            "gfx1151",
+            "gfx1250-strict",
+            "gfx9",
+            "gfx11-generic",
+            "gfx950-dcgpu",
+            "gfx950-all",
+            "GFX942",
+            "default",
+            "sm90",
+        ],
+    )
+    def test_arch_check_matches_device_probe(self, token):
+        tools = str(Path(__file__).parent.parent / "tools")
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import device_probe
+        from codegen.config_loader import _is_arch_token
+
+        assert _is_arch_token(token) == device_probe.is_arch_token(token)

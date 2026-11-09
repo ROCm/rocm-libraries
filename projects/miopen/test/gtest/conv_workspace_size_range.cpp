@@ -13,49 +13,12 @@
 
 #include <gtest/gtest.h>
 #include <miopen/miopen.h>
+#include <miopen/miopen_internal.h>
 
 #include "gtest_desc_guard.hpp"
 #include "gtest_handle_guard.hpp"
 
 #include <hip/hip_runtime_api.h>
-
-// These functions are exported from the MIOpen implementation library but
-// intentionally not declared in the public miopen.h header. Declare the
-// prototypes locally.
-//
-// They keep their original names in both build configurations: because they are
-// not part of the miopen.h contract, the public/private split does not rename
-// them, and with MIOPEN_ENABLE_HIPDNN_WRAPPER=ON they stay exported un-suffixed
-// from libMIOpen_private.so (see test/public_abi/wrapper_excluded_symbols.txt).
-//
-// These have C linkage, so a divergence from the definitions in
-// src/convolution_api.cpp would link cleanly and corrupt arguments at run time.
-// script/check_public_abi.py check-headers compares the two.
-extern "C" {
-miopenStatus_t miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t,
-                                                             const miopenTensorDescriptor_t,
-                                                             const miopenTensorDescriptor_t,
-                                                             const miopenConvolutionDescriptor_t,
-                                                             const miopenTensorDescriptor_t,
-                                                             size_t*,
-                                                             size_t*);
-miopenStatus_t
-miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t,
-                                                   const miopenTensorDescriptor_t,
-                                                   const miopenTensorDescriptor_t,
-                                                   const miopenConvolutionDescriptor_t,
-                                                   const miopenTensorDescriptor_t,
-                                                   size_t*,
-                                                   size_t*);
-miopenStatus_t
-miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t,
-                                                      const miopenTensorDescriptor_t,
-                                                      const miopenTensorDescriptor_t,
-                                                      const miopenConvolutionDescriptor_t,
-                                                      const miopenTensorDescriptor_t,
-                                                      size_t*,
-                                                      size_t*);
-}
 
 namespace {
 

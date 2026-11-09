@@ -407,8 +407,8 @@ lane can have at `(1,16,1)`, so it would spill; at `WTK = 8` only bf16 state wit
 would fit. The exception covers every single-wave `fuse_conv` tile except where `conv_once`
 narrows it (below). Those tiles load these inputs where the parent order did: each row's `v`
 inputs and its conv in the step-8 row loop, each state chunk at step 7, and `out_gate` /
-`norm_weight` at the norm. Their `q`, `k` and gate inputs still load first. `late_row_inputs` in
-the emitter holds the rule.
+`norm_weight` at the norm. Their `q`, `k` and gate inputs still load first. `auto_late_row_inputs`
+in the emitter holds the rule; the `row_loads` knob (§4.10) forces either order instead.
 
 With `conv_once` (§4.10) the exception is narrower. The `v` channels then come from LDS, so only
 the state chunks and the per-lane norm inputs would stay late. Late, each state chunk's load is
@@ -425,11 +425,19 @@ Multi-wave `fuse_conv` tiles hoist every load. Their per-lane cap is `512 / ceil
 tiles with a small `WTK` (wide `q`/`k` slices with their taps and weights) or many waves can still
 spill; `CASE_STUDY.md` lists the ones that do, per compiler.
 
+No order is known to win everywhere: loading first shortens the wait before the math, but it usually
+keeps more registers live and in some configurations spills. Which order wins depends on the
+tile, the knobs and the batch, and only timing decides. So
+`row_loads` (§4.10) lets a pinned or swept configuration force `"first"` or `"late"` on any
+single-wave `fuse_conv` spec; `"auto"` (the default) keeps the rule above, and `auto` dispatch
+never sets the knob.
+
 Cost: holding the raw state, `q`, `k` and `v` (and, fused, their taps and weights) live at once
 changes the register count, up for some tiles and down for others. Where that crosses a
 register-allocation granule a tile gains or loses waves per SIMD, or starts, stops or changes a
 spill. Which tiles move, and in which direction, depends on the compiler: the same tile can gain
-waves under one comgr and lose them under another. No dispatcher candidate starts to spill; some
+waves under one comgr and lose them under another. No dispatcher tile's base configuration (no
+knobs) starts to spill; a forced `row_loads` order listed in the registry can (§4.10), and some
 multi-wave `fuse_conv` tiles do, and `test_lowers_and_compiles_without_scratch` holds at 0 B the
 fused cases that every measured compiler keeps there. `CASE_STUDY.md` has the per-tile counts for
 each measured compiler and the command that regenerates them; re-run it when the compiler or the
@@ -510,19 +518,43 @@ Each registered tile is a tuned candidate on the shared `rocke.dispatch.tuning` 
 `dispatch/gdn/axes.py`, scope and legality in `dispatch/gdn/rules.py`), so every
 (tile × knob) configuration of the listed axes is registered, listed by
 `dispatch_gdn_decode_all`, and pinnable by `spec_id` plus `tuning_id`
-(`<spec_id>_wpe<N>@<config_key>`) and/or `tuning_knobs`. The nine knob axes are listed whole;
-`waves_per_eu`, the outer knob, is listed per sweep level as attention's is: `production` (what
-`dispatch_gdn_decode_all` lists by default) sweeps `{0, 4}`, `4` being the one non-zero value the
-knob numeric suite runs on every configured tile, and `full` sweeps every legal value `0`–`8`.
+(`<spec_id>_wpe<N>@<config_key>`) and/or `tuning_knobs`. Nine knob axes are listed whole;
+`row_loads`, read only on a single-wave `fuse_conv` tile (`row_loads_applies`), lists one forced
+order per knob set and `waves_per_eu` value: the one `auto` does not choose there. A forced
+order equal to auto's is auto's kernel, so it is dropped like an out-of-scope knob and never listed
+twice. Whether it equals auto's depends on `waves_per_eu`, the outer knob, so the space names
+`row_loads` in the shared kit's `outer_dependent_knobs` and the walk applies that drop at each
+value (`rocke/dispatch/ARCHITECTURE.md` §14). `waves_per_eu`, the outer knob, is listed per sweep
+level as attention's is: `production` (what `dispatch_gdn_decode_all` lists by default) sweeps
+`{0, 4}`, `4` being the one non-zero value the knob numeric suite runs on every configured tile,
+and `full` sweeps every legal value `0`–`8` (the dispatcher's `full` level lists every legal
+configuration, tens of thousands per shape; the sweep tool's `--sweep-level full` additionally
+requires `--tuning-sample N` and times a random sample of `N` per tile).
+
+Configuration count. A *knob set* is one legal point of the product of a tile's in-scope axes
+other than `row_loads` (`waves_per_eu`, the outer knob, is not an axis). Off the single-wave
+`fuse_conv` tiles a tile lists (knob sets) × 2 at `production`. A single-wave `fuse_conv` tile
+lists (knob sets) × 2 × 2: at each `waves_per_eu` value, each knob set in `auto`'s order and in
+the other one (`"first"`, except `"late"` for the `conv_once` knob sets where
+[`auto_late_row_inputs`](#43-dataflow-and-pipeline) (§4.3) loads first, at `waves_per_eu = 0`).
+KDA fused (both flags) with an `f32` state at
+`DK = DV = 128`, for example: `(1, 8, 1)` and `(1, 16, 1)` have 384 knob sets and list 1536
+configurations each (768 before `row_loads`); `(1, 4, 1)` and `(1, 2, 1)` list 768 (384) and
+`(1, 1, 1)` 384 (192). The whole case grows from 9,888 to 12,384 configurations per shape.
+
 Every legal `waves_per_eu` is pinnable at either level, and a non-`int` one (`True`, `None`,
 `4.0`) is refused rather than read as `1`, unset or `4`. A pin resolves to exactly that
 configuration or raises `PinRefused`. A knob the request cannot read (a fused-only knob on an
-unfused request, a tile-dependent knob where its `*_applies` predicate is False) is dropped rather
-than refused, and the result's explanation names it (`dropped out-of-scope tuning_knobs [...]`); a
-value outside its knob's axis is refused. So `tuning_knobs` alone (`tuning_id`
+unfused request, a tile-dependent knob where its `*_applies` predicate is False, a `row_loads`
+that restates auto's order) is dropped rather than refused, and the result's explanation names it
+(`dropped tuning_knobs that change no code here [...]`); a value outside its knob's axis is refused. So `tuning_knobs` alone (`tuning_id`
 `auto`) carry a configuration across shapes. A stored `tuning_id` does not: it names the knob set
 that was canonical where it was recorded, and where scope drops one of those knobs the pin is
-refused, naming the dropped knobs. A bare `spec_id` pin (no `tuning_id`, no knobs) runs the
+refused, naming the dropped knobs. Adding `row_loads` changed every `config_key`, since the key
+fingerprints every knob default, and the field is part of every result's `spec_hash`,
+`compile_key` and `selection_key`, `auto`'s included (kernel name and IR are unchanged, so `auto`
+selects the same kernels, but a cached build under the old key is rebuilt once): a `tuning_id`
+recorded before it is refused as stale and must be re-swept. A bare `spec_id` pin (no `tuning_id`, no knobs) runs the
 tile's base configuration: every knob at its default (flags off, hints `default`, `waves_per_eu`
 `0`).
 
@@ -531,8 +563,12 @@ plain, bf16 state, D128: 54 tiles and 2,384 configurations at `production`). The
 device suites cover each knob alone on every configured tile, every applicable knob together on
 two fused tiles, `waves_per_eu` `0` and `4`, and sampled pinned configurations per mode. Other knob
 combinations and `waves_per_eu` `1`–`3` and `5`–`8` are pinnable but not device-verified. The
-space is meant to shrink: a follow-up measures every configuration, each checked against the fp32
-reference before it is timed, and removes the knobs and values that do not help.
+space is meant to shrink as these measurements are reviewed: `decode_table_sweep.py` measures
+every configuration at the chosen
+`--sweep-level` (default `production`: `waves_per_eu` 0 and 4 only; `full`: a random sample of
+`--tuning-sample N` per tile), each checked against the fp32 reference before it is timed. The sweep and
+`decode_defaults_report.py` re-derive the evidence for the `AUTO_DEFAULTS` table from rocKE's own
+registry, and a person edits the table; neither reproduces any external comparison.
 
 **`auto` defaults.** Production `auto` runs one static configuration per *case*: gate kind ×
 fused (either `fuse_conv` or `fuse_out_norm`) × state width. Each is a tile plus a knob stack on
@@ -553,8 +589,12 @@ stores; the table lists the rest. A knob not listed stays off (`waves_per_eu` `0
 | KDA | fused | f32 | `(4, 8, 1)` | `dpp_reduce`, `stream_rows`, `interleave_cols`, `conv_once`, `out_lds` |
 
 Provenance. The table comes from a cold-memory sweep on gfx950 (ROCm 7.13 container, Python
-lowerer; every call reads its state from HBM; ≥ 1 GiB of inputs rotate per cycle) with bf16 I/O
-and `use_qk_l2norm` on. A *shape* is one head geometry `Hk/Hv` at one batch. Each case was
+lowerer) with bf16 I/O and `use_qk_l2norm` on. That sweep used a cold-memory harness that rotated
+the inputs through at least 1 GiB per cycle; the harness is not in this tree, and that 1 GiB
+exceeds the caches was not measured. The in-tree helper (`gdn_decode.cold_copies`) gives the same
+rotation guarantee for the in-tree tools, whose rows record the toolchain they ran with (ROCm,
+LLVM, torch, lowering backend and LLVM flavor); the lowerer of the table's sweep is stated here
+only. A *shape* is one head geometry `Hk/Hv` at one batch. Each case was
 measured at `DK = DV = 128` and batch 1, 8, 16, 32, 64, 128 and 256 on three head geometries:
 KDA 8/8, 32/32, 96/96; GDN plain 16/32, 4/8, 32/32;
 GDN fused 8/8, 16/16, 32/32. Of these, 16/32 is Qwen3-Next and 32/32 is Kimi-Linear (§1.4), 4/8
@@ -569,10 +609,15 @@ measured run.
 Rule. A configuration's score is the geomean, over the shapes, of its time over the shape's
 fastest configuration. A case takes the lowest score; among the configurations near-tied with it,
 the lower worst-shape ratio, near-tied worst shapes counting as tied; then fewer non-default
-knobs; then the lower score. One override, chosen for batch 1 (the latency case): for KDA fused
-f32 the rule picks `(16, 16, 1)` with `interleave_cols`, `conv_once`, `out_lds`,
+knobs; then the lower score. Near-tied is one rule everywhere: `TIE = 0.01`, relative and
+one-sided, so `x` is near-tied with `best` when `x <= best * (1 + TIE)`. `0.01` (a 1% band) is the
+report's default, a tool default and not a measured noise floor; `decode_defaults_report.py --tie` sets it. The
+report does not prove that it reproduces the shipped `AUTO_DEFAULTS` rows. There is one
+override, chosen for batch 1 (the latency case): for KDA
+fused f32 the rule picks `(16, 16, 1)` with `interleave_cols`, `conv_once`, `out_lds`,
 `waves_per_eu=4`; the row shipped is the `(4, 8, 1)` configuration with the best score among the
-`(4, 8, 1)` arms, near-tied with the rule's pick on the score. One row serves every batch.
+`(4, 8, 1)` arms, close to the rule's pick on the score (how close, and so whether it lies within
+the tie band above, is not recorded in tree). One row serves every batch.
 
 Not measured: a fused request with one flag (it runs its row with the other flag's knobs
 dropped, below; e.g. `fuse_out_norm` alone at `Hk ≠ Hv`, where `fuse_conv` is not allowed), other
@@ -581,9 +626,13 @@ head dims where the case tile is legal (e.g. GDN at `DK = 256`, which runs its r
 row spills at a wider key dim; the row's other knobs are not timed there), an `f16` state (it
 moves the same bytes as bf16, so it runs the bf16 row), f16 I/O and `use_qk_l2norm` off (each
 runs its row), and gfx942.
-To revisit a case, sweep its tiles × knobs cold (`tune.py` times tiles at their base
-configuration only; an in-tree tiles × knobs sweep is a follow-up, §8), then change its row in
-`AUTO_DEFAULTS`, the literal table in `test_gfx950_wiring.py` and this table together.
+To revisit a case, sweep its tiles × knobs cold with
+`library/benchmarks/gfx950/gdn/decode_table_sweep.py` (stage 1 over every shape of the case in
+`decode_shapes.json`), score them with `decode_defaults_report.py` (this rule; it prints a
+shortlist), re-time the shortlist with the sweep's stage 2 and score that (the report's own
+`--stage 2` flag, `decode_defaults_report.py --stage 2`); the report
+is advisory (README, *Measure and re-tune defaults*). Then change the row in `AUTO_DEFAULTS`, the
+literal table in `test_gfx950_wiring.py` and this table together.
 
 A knob the request cannot read is dropped for it (the scope rule above): a request with only one
 fused flag drops the knobs of the other (`out_lds` and `norm_gate_once` need `fuse_out_norm`;
@@ -701,7 +750,7 @@ product. Tile selection for the fused modes is dispatch's (§4.6), not this emit
 
 ### 4.10 Performance knobs
 
-Ten spec fields change how the warp-tiled kernel computes, not what it computes (the two state
+Eleven spec fields change how the warp-tiled kernel computes, not what it computes (the two state
 hints and `waves_per_eu` also apply on the reference path). Each one's default is the code the
 kernel emitted before the knob existed, so with every knob at its default the kernel name and the
 emitted IR are byte-identical to the knob-free emitter (the golden IR test pins this). The
@@ -719,40 +768,67 @@ configuration. `auto` runs one knob stack per case (§4.6).
 | `norm_gate_once` | off, on | `fuse_out_norm` (required); `conv_once` (not yet implemented without it) | the norm's `act(out_gate) ⊙ norm_weight` (§4.9) is computed once per output row into `conv_once`'s LDS block; off, every lane loads its rows' `out_gate` and `norm_weight` |
 | `out_lds` | off, on | `fuse_out_norm` (required) | each row's pre-norm f32 output goes to LDS ahead of the norm's cross-wave barrier (a one-wave tile adds an LDS barrier); after it the first `DV / OUT_W` lanes each normalize `OUT_W` consecutive rows (`OUT_W` = 2, 4 or 8 as `DV` exceeds 2 and 4 wave widths; in more than one round when `DV / OUT_W` exceeds the workgroup size) and store them with one packed store, instead of one 2 B store per row from its k-lane-0 owner |
 | `waves_per_eu` | `0`, `1`–`8` | always, both emitters | `amdgpu-waves-per-eu` = `"N,8"`: the compiler must fit at least `N` waves per SIMD, which caps registers per lane; `0` emits no attribute. The ceiling 8 is the hardware limit: a gfx950 SIMD holds at most 8 waves |
+| `row_loads` | `auto`, `first`, `late` | single wave with `fuse_conv`, forcing the order `auto` does not choose | where each row's late inputs load (§4.3, "One exception"): each row's `v` conv inputs, each state chunk, and the per-lane `out_gate` / `norm_weight`. `auto` keeps `auto_late_row_inputs`' rule; `first` loads them with the other inputs ahead of the math, `late` where each is first used |
 
 **Inert knobs and names.** The kernel name is the compile and launcher cache key (the comment in
 `GdnDecodeSpec.kernel_name` states the rule), so a knob adds its name token only where it changes
 code. For the four tile-dependent knobs that is what `dpp_reduce_applies`, `xcd_remap_applies`,
 `stream_rows_applies` and `interleave_cols_applies` decide: on a tile where the predicate is False
-the knob is legal, emits the knob-off kernel, and keeps the knob-off name. The three fused-only
-knobs need no predicate, because the validator rejects them wherever they would be inert. The
-tokens are `lhnt` / `shnt` (streaming hints), `wpe<N>`, `dppr`, `xcd`, `sr`, `ic`, `co`, `ngo` and
-`olds`.
+the knob is legal, emits the knob-off kernel, and keeps the knob-off name. `row_loads` is legal on
+every spec too; `row_loads_applies` (one wave, `fuse_conv`) says where the order is a choice, and
+`row_loads_overrides` where a forced order is not the one `auto` already picks for that spec (its
+knobs and `waves_per_eu` included). Only there does it change code and add its token; a forced
+order equal to auto's is auto's kernel under auto's name. The three fused-only knobs need no
+predicate, because the validator rejects them wherever they would be inert. The tokens are
+`lhnt` / `shnt` (streaming hints), `wpe<N>`, `dppr`, `xcd`, `sr`, `ic`, `co`, `ngo`, `olds` and
+`rlf` / `rll` (`row_loads` `first` / `late`).
+
+**`row_loads` and spills.** The validator refuses only a value outside `auto` / `first` / `late`
+(a non-`str` included): every forced order builds and compiles. A compile sweep of every
+single-wave `fuse_conv` spec family in both orders found no build or compile failure. Where a
+forced order spills more than `auto`'s is not a legality rule: how much a spill costs against the
+order's other effects is a timing question, so these configurations stay legal and listed, and the
+sweep ranks them. The spill counts move with the compiler, so they are a snapshot kept, with the
+command that regenerates it, in
+[`CASE_STUDY.md` §8](CASE_STUDY.md#8-forced-row_loads-order-spills).
 
 **Loads first.** The knobs keep §4.3's order. `conv_once` issues its channel loads (with indices
 clamped into range, so no load sits behind a branch) ahead of the state loads, and `out_lds`
 issues its storing lanes' gate and weight loads with the other loads; the structural load-order
 test covers knob-on specs too. The single-wave `fuse_conv` tile keeps §4.3's exception except where
-`late_row_inputs` lets it load first (`conv_once` at `DK = DV = 128`, `WTK` 4 or 8, no
-`waves_per_eu` floor); elsewhere its state chunks (and, for the per-lane norm, `out_gate` /
-`norm_weight`) still load where they are first used.
+`auto_late_row_inputs` (§4.3) lets it load first or `row_loads="first"` forces it; elsewhere, or
+with `row_loads="late"`, its
+state chunks (and, for the per-lane norm, `out_gate` / `norm_weight`) still load where they are
+first used.
 
-**Numerics.** `dpp_reduce`, `xcd_remap`, `stream_rows`, `out_lds`, the hints and `waves_per_eu`
-run the same floating-point operations on the same values (for `dpp_reduce`, the xor-7 / xor-15
-partner holds the same quad or half-row sum as the xor-4 / xor-8 partner). `conv_once` computes
-each channel with the same operations as the per-lane path. Two knobs change a rounding order:
+**Numerics.** `dpp_reduce`, `xcd_remap`, `stream_rows`, `out_lds`, the hints, `waves_per_eu` and
+`row_loads` run the same floating-point operations on the same values (for `dpp_reduce`, the
+xor-7 / xor-15 partner holds the same quad or half-row sum as the xor-4 / xor-8 partner;
+`row_loads` moves loads and, without `conv_once`, the `v` conv + SiLU that consumes them (§4.3),
+not the set of operations). `conv_once` computes each channel with the same operations as
+the per-lane path. Two knobs change a rounding order:
 `interleave_cols` gives each lane different K columns, so its partial dot products sum in a
 different order, and `norm_gate_once` computes `(o ⊙ r) ⊙ (act(out_gate) ⊙ norm_weight)` instead of
 `(o ⊙ r ⊙ norm_weight) ⊙ act(out_gate)`, where `r = rsqrt(mean(o ⊙ o) + norm_eps)` (§4.9). On
 device every knob is checked against the fp32 reference, and with a bf16 or `f32` state every
 knob except these two is also compared with the knob-off kernel's output, state and conv state
-(§7 lists the tiles). With bf16 output that comparison is bit for bit. With f16 output it is bit
-for bit except `out_lds`'s output, which may differ by one f16 ulp (unit in the last place): the
+(`row_loads`: with the auto order's; §7 lists the tiles). With bf16 output that comparison is bit
+for bit. With f16 output it is bit for bit except `out_lds`'s output, which may differ by one f16 ulp (unit in the last place): the
 IR rounds the same way, but the backend folds the per-lane path's last multiply and its f16
 conversion into one `v_fma_mixlo_f16` (one rounding), while `out_lds` packs with
 `v_cvt_pk_f16_f32` after an f32 multiply (two roundings). This was observed in the code object
 with ROCm 7.13 comgr and is not pinned by a test; `kernels/common/_lse_store.py` documents the
 same fold.
+One exception for `row_loads`: with an `f16` state and the per-lane norm (`fuse_out_norm`) the
+compiler folds the final `f32` → `f16` rounding of a state element into its FMA (`v_fma_mix`) for a
+different set of elements in each order, so the written state can differ by one f16 ulp; the output
+and conv state stay bit for bit. This shows in the ISA with the ROCm 7.1.0 comgr (`llvm20`, WTK 4
+and 16, GDN and KDA, with and without `conv_once`): an `f16` state with the norm holds `v_fma_mix`
+instructions in a different number in each order. Without the norm an `f16` state holds none in
+either order, and the number of `v_pk_fma_f32` and `v_cvt_pk_f16_f32` (the state-rounding
+instructions) is the same in both orders, so no difference is expected and those pairs are compared
+bit for bit. For a `bf16` or `f32` state the `v_fma_mix` count does not depend on the order. The numeric
+test checks this on gfx950. It is not pinned by a test of the ISA.
 
 ---
 
@@ -945,23 +1021,35 @@ Both kernels are validated against **independent oracles**, not against each oth
   the in-place tap shift is checked twice: on silicon by a read-slot = write-slot case with 16 waves
   (with the barrier removed, 2-8 waves stayed correct but 16 waves corrupted the taps on every run),
   and in the IR, where a barrier must sit between the last tap read and the first tap write.
-- **Performance knobs (§4.10)** — each knob alone, against the same reference, on gfx950: at the
-  default heads (`DK = DV = 128`) on every registered tile and the reference path, and in every
-  fused mode it accepts on every `BPV = 1` tile, per gate kind and state dtype (bf16, `f32`); at
+- **Performance knobs (§4.10)** — each knob alone, against the same reference, on gfx950. Every
+  knob but `row_loads`: at the default heads (`DK = DV = 128`) on every registered tile and the
+  reference path, and in every fused mode it accepts on every `BPV = 1` tile, per gate kind and
+  state dtype (bf16, `f32`); at
   `DK = DV = 64` and `256` on one warp-tiled and one fused tile; and `out_lds` at `DV = 256` and
-  `512` and with two store rounds. Those use bf16 I/O. With f16 I/O and a bf16 or `f32` state,
+  `512` and with two store rounds. Those use bf16 I/O. `row_loads` (single-wave `fuse_conv` tiles
+  only) runs in the order auto does not choose, in both fused modes with `fuse_conv`, without
+  `conv_once`, with it, with it under `waves_per_eu = 4`, and with it and the register-heavy knobs:
+  on every single-wave `BPV = 1` tile at `DK = DV = 128` with a bf16 and an `f32` state, at
+  `DK = DV = 64` (`WTK` 1 and 8) and `256` (`WTK` 1, 16 and 32) with both, and with an f16 state
+  and f16 I/O at `DK = DV = 128` (`WTK` 4 and 16, where both orders are forced); it is compared bit
+  for bit with the auto order (with an f16 state and the per-lane norm the written state within one
+  f16 ulp, §4.10). All
+  eleven knobs also run at once on the fused `(1,16,1)` and `(4,16,1)` tiles. With f16 I/O and a bf16 or `f32` state,
   each knob runs on the default tile, the reference path and the fused `(4,16,1)` tile in every
-  fusion mode it accepts; an f16 state runs the same specs. The knobs that keep the
+  fusion mode it accepts (`row_loads` aside); an f16 state runs the same specs. The knobs that keep the
   floating-point order are also compared with the knob-off kernel: bit for bit with bf16 output,
   and with f16 output bit for bit except `out_lds`'s output, which may differ by one f16 ulp
   because the backend folds the per-lane path's last multiply and f16 conversion into
   `v_fma_mixlo_f16` (§4.10, Numerics; observed with ROCm 7.13 comgr, not pinned by a test). An
-  f16 state is checked against the reference only and not compared bit for bit: whether the
+  f16 state is checked against the reference only and not compared bit for bit (`row_loads`
+  aside, above): whether the
   knob-on and knob-off kernels round an f16 state the same way has not been established. bf16
   I/O with an f16 state and the knobs on is not separately covered. Each knob's flag-on IR is
   golden-pinned on every path where it changes code: gate kind × state dtype × reference /
   warp-tiled / fused (both fusions, and every mode a fused-only knob accepts), and at the other
-  head dims.
+  head dims; each forced `row_loads` order sits next to the auto kernel it replaces, at `WTK`
+  4 / 8 with `conv_once` (`late`) and 8 / 16 without (`first`), conv only, under
+  `waves_per_eu = 4`, and per gate kind at `DK = DV = 64` and `256` and with an f16 state.
 - **IR stability** — GDN golden IR entries are pinned and SHA-stable across the supported lowerer
   flavours, while **all pre-existing KDA golden hashes remain unchanged**, which is what makes the
   "byte-identical" claim in §2.3 testable rather than asserted. The golden lowers through the
@@ -1014,5 +1102,12 @@ Widening the range needs nested chunking or per-token rescaling.
    then (§4.8).
 9. A footprint-based `auto` fallback order (§4.6): when a case's tile is illegal, the first legal
    tile in priority order can be register-heavy (`(1, 1, 1)` for GDN at `DK = DV = 64` or `192`).
-10. An in-tree tiles × knobs sweep (§4.6) that regenerates `AUTO_DEFAULTS`: `tune.py` times tiles
-    at their base configuration only.
+10. The `row_loads` order of single-wave `fuse_conv` tiles (§4.3, §4.10): `auto` picks it by a spill
+    rule, not by timing. For example `auto` keeps `(1,16,1)` `f32`-state `conv_once` specs on the
+    spill-rule order; whether the other order is better there is for the sweep tool to rank (the
+    repo has no timing record for it). Widening the first-order set (for example to single-wave
+    `f32` `conv_once` at low batch) is a timing decision. It is taken from the sweep tool's ranking
+    of both orders, not from a spill test. The spill test only says whether a widened tile stays
+    spill-free, and widening `auto`'s set also means extending the WTK set that
+    `test_one_wave_conv_once_loads_first_without_a_new_spill` hard-codes
+    (`test_gdn_decode_fused.py`, `wtk in (4, 8)`).

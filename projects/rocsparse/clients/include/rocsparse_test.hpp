@@ -189,12 +189,15 @@ inline void rocsparse_expect_data_status(rocsparse_data_status status, rocsparse
         }                                                                  \
     } while(false)
 
+// The pending error is consumed before throwing so that the next hipGetLastError
+// call does not report it against a later test.
 #define CHECK_HIP_THROW_ERROR(ERROR)                   \
     do                                                 \
     {                                                  \
         auto CHECK_HIP_THROW_ERROR_status = (ERROR);   \
         if(CHECK_HIP_THROW_ERROR_status != hipSuccess) \
         {                                              \
+            static_cast<void>(hipGetLastError());      \
             throw CHECK_HIP_THROW_ERROR_status;        \
         }                                              \
     } while(false)

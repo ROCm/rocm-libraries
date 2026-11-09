@@ -33,6 +33,49 @@ from rocke.runtime.hip_module import get_device_arch
 _ARCH = get_device_arch(0)
 
 
+def test_dense_attention_initializers_use_accumulator_source(monkeypatch):
+    from dataclasses import replace
+
+    from rocke.core.arch import ArchTarget, MmaCatalog
+    from rocke.core.ir import F32, VectorType
+    from kernels.gfx1250.wmma_attention_fwd import (
+        WmmaAttentionFwdSpec,
+        build_wmma_attention_fwd,
+    )
+
+    target = ArchTarget.from_gfx("gfx1250")
+    atom = target.mma.by_op_id("wmma_gfx1250_f32_16x16x32_f16")
+    source_width = atom.srcs[2].frag_len + 1
+    custom = replace(
+        atom, srcs=(*atom.srcs[:2], replace(atom.srcs[2], frag_len=source_width))
+    )
+    target = replace(target, mma=MmaCatalog([custom]))
+    monkeypatch.setattr(ArchTarget, "from_gfx", staticmethod(lambda arch: target))
+    kernel = build_wmma_attention_fwd(
+        WmmaAttentionFwdSpec(head_size=64, num_query_heads=4)
+    )
+
+    def walk(region):
+        for op in region.ops:
+            yield op
+            for child in op.regions:
+                yield from walk(child)
+
+    ops = list(walk(kernel.body))
+    zeros = [
+        op
+        for op in ops
+        if op.name == "arith.constant_vec" and op.attrs["elem"] == "f32"
+    ]
+    # Four O accumulator tiles and two QK score tiles are initialized separately.
+    assert len(zeros) == 6
+    assert all(op.result.type == VectorType(F32, source_width) for op in zeros)
+    mmas = [op for op in ops if op.name == "tile.mma"]
+    assert mmas and all(
+        op.result.type == VectorType(F32, atom.dst.frag_len) for op in mmas
+    )
+
+
 class TestGfx1250DenseAttention(unittest.TestCase):
     def test_attention_fwd_lowers(self):
         # The standalone gfx1250 dense WMMA attention forward (BLOCK_K=32) must

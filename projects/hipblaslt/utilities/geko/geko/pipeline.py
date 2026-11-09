@@ -599,6 +599,8 @@ def run_optimize(
     if n_completed == 0:
         raise ValueError(f"No GEMMs completed out of {n_gemms} in {input_dir}")
 
+    optim.process_duplicates(hipblaslt_path, input_dir, devices)
+
     merged_libs = library.merge_solutions(input_dir, epilogues=True)
 
     if lib_dir.is_dir():
