@@ -326,3 +326,65 @@ def test_packed_carrier_preflight_preserves_existing_budget(monkeypatch, free_ra
     assert plan == ({"packed": True} if expected else None)
     assert [(slot.status, slot.tag) for slot in writer.sgprPool.getPool()] == before
     assert writer.sgprPool.size() == 98
+
+
+@pytest.mark.parametrize("scales", [False, True])
+@pytest.mark.parametrize("prepared", [False, True])
+def test_streamk_packed_consumer_matches_ordinary_descriptors(monkeypatch, scales, prepared):
+    kernel, tensors, writer = _writer(scales=scales)
+    kernel.update(TileProcessingStrategy="StreamK", NoTailLoop=True)
+    writer.states.papNextTileVgpr = 12
+    writer.states.papAddressCarrier = {"packed": True}
+    identity = ("WorkGroup0", "WorkGroup1", "WorkGroup2", "StreamKLocalStart", "StreamKLocalEnd")
+    current = (2, 1, 0, 1, 7)
+    following = (1, 2, 3, 3, 9)
+
+    def mapping(*args, **kwargs):
+        module = Module("observable next range")
+        for name, value in zip(identity, following):
+            module.add(SMovB32(sgpr(name), value))
+        module.add(SAddU32(sgpr("Mappings"), sgpr("Mappings"), 1))
+        return module
+
+    def issue(*args, **kwargs):
+        module = Module("capture descriptors and range at first issue")
+        module.add(SMovB64(sgpr("IssuedData", 2), sgpr("tdmAGroup0+2", 2)))
+        if scales:
+            module.add(SMovB64(sgpr("IssuedMX", 2), sgpr("tdmMXSAGroup0+2", 2)))
+        for name in identity:
+            module.add(SMovB32(sgpr("Issued" + name), sgpr(name)))
+        module.add(SAddU32(sgpr("Loads"), sgpr("Loads"), 1))
+        return module
+
+    loop = PersistentLoopOn()
+    monkeypatch.setattr(loop, "prefetchClassicLoads", issue)
+    consumer = loop.prefetchPreparedClassic(writer, kernel, tensors["A"], tensors["B"],
+        SimpleNamespace(prefetchAcrossPersistentSetupNextTile=mapping), {"packed": True})
+    pairs = [("A", "B")] + ([("MXSA", "MXSB")] if scales else [])
+    for wave in range(4):
+        machine = _machine(kernel, tensors, wave)
+        for name, value in zip(identity, current):
+            machine.set(name, value)
+        _run(machine, _full(writer, kernel, tensors))
+        reference = deepcopy(machine)
+        for name, value in zip(identity, following):
+            reference.set(name, value)
+        for a, b in pairs:
+            _run(reference, writer.papTdmUpdateDescriptor(kernel, tensors[a], tensors[b]))
+        for lane, value in enumerate(following):
+            machine.set(f"Lane12_{lane}", value)
+        for a, b in pairs:
+            lane = 5 if a == "A" else 7
+            address = reference.get(f"tdm{a}Group0+2", 2)
+            machine.set(f"Lane12_{lane}", address & 0xffffffff)
+            machine.set(f"Lane12_{lane+1}", address >> 32)
+        machine.set("PersistentPrefetchState", 4 if prepared else 0)
+        _run(machine, _lane_instructions(consumer))
+        assert machine.get("IssuedData", 2) == reference.get("tdmAGroup0+2", 2)
+        if scales:
+            assert machine.get("IssuedMX", 2) == reference.get("tdmMXSAGroup0+2", 2)
+        assert machine.descriptor(scales) == reference.descriptor(scales)
+        assert tuple(machine.get("Issued" + name) for name in identity) == following
+        assert tuple(machine.get(name) for name in identity) == current
+        assert machine.get("Loads") == 1
+        assert machine.get("Mappings") == int(not prepared)

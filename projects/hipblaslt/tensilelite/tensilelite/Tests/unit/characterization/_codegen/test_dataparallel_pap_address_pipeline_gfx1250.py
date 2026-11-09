@@ -100,3 +100,68 @@ def test_complete_ngll_preserves_pap_carrier(monkeypatch, carrier_mode):
         assert clobbers == [], "NGLL overwrites live PAP coordinates: " + repr(clobbers)
         assert any("PAP add free-tile offset" in line for line in lines[compute:consume])
         assert max(int(value) for value in re.findall(r"\.amdhsa_next_free_sgpr\s+(\d+)", src)) <= 106
+
+
+def test_streamk_packed_preparation_preserves_identity_and_masks(tmp_path):
+    """The packed path carries next addresses without losing current completion identity."""
+    import yaml
+
+    config = yaml.safe_load(_CONFIG.read_text())
+    for entry in config["BenchmarkProblems"][0][1]["ForkParameters"]:
+        if "TileProcessingStrategy" in entry:
+            entry["TileProcessingStrategy"] = ["StreamK"]
+        if "AssertSummationElementMultiple" in entry:
+            entry["AssertSummationElementMultiple"] = [256]
+    path = tmp_path / "streamk_packed.yaml"
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    results = emit_kernels_from_config(path, limit=1, arch="gfx1250")
+    assert_real_gfx1250_kernels(results)
+    for name, src, _ in results:
+        assert_assembles(src, name)
+        (tmp_path / "prepared.s").write_text(src)
+        # Ignore encoding selectors while preserving the physical payload
+        # register, then compare every identity/address lane at both ends.
+        lines = re.sub(r"v\[(\d+)-\d+\]", r"v[\1]", src).splitlines()
+
+        def lanes(op, tag):
+            result = []
+            for line in lines:
+                if tag not in line:
+                    continue
+                code, _, comment = line.partition("//")
+                assert code.startswith(op)
+                args = [item.strip() for item in code[len(op):].split(",")]
+                payload, scalar = args[:2] if op == "v_writelane_b32" else args[1::-1]
+                result.append((payload, scalar, int(args[2]), comment.split(tag, 1)[1].strip()))
+            return result
+
+        saved = lanes("v_writelane_b32", "PAP pack current ")
+        restored = lanes("v_readlane_b32", "PAP unpack current ")
+        identity = {"WorkGroup0", "WorkGroup1", "WorkGroup2", "StreamKLocalStart", "StreamKLocalEnd"}
+        assert {field for _, _, _, field in saved} == identity
+        assert sorted(saved) == sorted(restored)
+        assert len({(payload, lane) for payload, _, lane, _ in saved}) == 5
+        # Later pipeline stages also retain descriptor words after addresses
+        # are consumed; they are not part of the next-range identity.
+        following = [move for move in lanes("v_writelane_b32", "PAP retain next ")
+                     if move[3] in identity]
+        activated = lanes("v_readlane_b32", "PAP unpack next ")
+        assert set(following) == set(activated)
+        assert {field for _, _, _, field in following} == identity
+        addresses = lanes("v_writelane_b32", "PAP retain prepared StreamK address")
+        consumed = lanes("v_readlane_b32", "PAP unpack prepared address")
+        address_slots = {(payload, lane) for payload, _, lane, _ in addresses}
+        assert len(address_slots) == 4
+        assert address_slots == {(payload, lane) for payload, _, lane, _ in consumed}
+        occupied = {(payload, lane) for payload, _, lane, _ in saved + following}
+        assert address_slots.isdisjoint(occupied)
+        assert len(occupied) == 10
+        assert len({payload for payload, _, _, _ in saved + following + addresses}) == 1
+
+        # The mapper restores both incoming masks before returning to compute.
+        restore = [i for i, line in enumerate(lines) if "PAP mapper restore exact mask" in line]
+        assert len(restore) == 2
+        assert {lines[i].split()[1].rstrip(",") for i in restore} == {"exec_lo", "vcc_lo"}
+        mapping = next(i for i, line in enumerate(lines) if "PAP mapper scratch uses full EXEC" in line)
+        assert not any(line.startswith("v_wmma") for line in lines[mapping:max(restore)])
+        assert max(map(int, re.findall(r"\.amdhsa_next_free_sgpr\s+(\d+)", src))) <= 106
