@@ -584,6 +584,30 @@ bool isSdpaZeroProbabilityDropout(const hipdnn_flatbuffers_sdk::data_objects::Sd
     return true;
 }
 
+/// The backward overload: probability 0 with no explicit mask, dropout_scale or
+/// dropout_scale_inv. The seed and offset rule is the forward's.
+template <typename TensorMap>
+bool isSdpaZeroProbabilityDropout(
+    const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs,
+    const TensorMap& tensorMap)
+{
+    if(!attrs.dropout_probability().has_value() || attrs.dropout_probability().value() != 0.0F
+       || attrs.dropout_mask_tensor_uid().has_value()
+       || attrs.dropout_scale_tensor_uid().has_value()
+       || attrs.dropout_scale_inv_tensor_uid().has_value())
+    {
+        return false;
+    }
+    for(const auto uid : {attrs.seed_tensor_uid(), attrs.offset_tensor_uid()})
+    {
+        if(uid.has_value() && tensorMap.find(uid.value()) == tensorMap.end())
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 #define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \
     do                                              \
     {                                               \
@@ -883,8 +907,9 @@ bool isSupportedSdpaBwdNode(
         }
     }
 
-    // Dropout: only cuDNN's explicit-mask form; dropout_scale_inv must be one FLOAT element.
-    if(!isSupportedSdpaDropout(attrs, tensorMap))
+    // Dropout: cuDNN's explicit-mask form (dropout_scale_inv must be one FLOAT element), or
+    // probability 0, which is no dropout (isSdpaZeroProbabilityDropout).
+    if(!isSdpaZeroProbabilityDropout(attrs, tensorMap) && !isSupportedSdpaDropout(attrs, tensorMap))
     {
         return false;
     }

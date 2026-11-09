@@ -60,6 +60,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuMatmulPlan.cpp
     TestGpuSdpaFwdSignatureKey.cpp
     TestGpuSdpaBwdPlan.cpp
+    TestGpuSdpaBwdPlanZeroDropout.cpp
     TestGpuSdpaFwdPlan.cpp
     TestGpuSdpaFwdPlanZeroDropout.cpp
     TestGpuSdpaFwdPlanVllmForm.cpp

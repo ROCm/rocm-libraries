@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -1021,6 +1022,105 @@ INSTANTIATE_TEST_SUITE_P(
                                },
                                false}),
     [](const TestParamInfo<BwdDropoutFieldCase>& info) { return std::string(info.param.name); });
+
+// Dropout probability 0 with no mask, dropout_scale or dropout_scale_inv is no dropout
+// (isSdpaZeroProbabilityDropout): dQ, dK and dV are bit-identical to the graph without dropout
+// fields, whether a seed and an offset are named or absent. A named one must be in the graph.
+TEST(TestSdpaBwdPlanZeroDropout, MatchesTheGraphWithoutDropoutFields)
+{
+    constexpr int64_t SEED_UID = 23;
+    constexpr int64_t OFFSET_UID = 24;
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    const unsigned int seed = getGlobalTestSeed();
+    hipdnn_data_sdk::utilities::Tensor<int64_t> seedTensor({1, 1, 1, 1});
+    hipdnn_data_sdk::utilities::Tensor<int64_t> offsetTensor({1, 1, 1, 1});
+    seedTensor.fillWithValue(1234);
+    offsetTensor.fillWithValue(7);
+
+    const auto gradients = [&](bool zeroProbability, bool withSeed, bool withOffset) {
+        SdpaBackwardAttributesT attrs;
+        std::vector<RawBwdExtraTensor> extras;
+        if(zeroProbability)
+        {
+            attrs.dropout_probability = 0.0F;
+        }
+        if(withSeed)
+        {
+            attrs.seed_tensor_uid = SEED_UID;
+            extras.push_back({SEED_UID, DataType::INT64, {1, 1, 1, 1}});
+        }
+        if(withOffset)
+        {
+            attrs.offset_tensor_uid = OFFSET_UID;
+            extras.push_back({OFFSET_UID, DataType::INT64, {1, 1, 1, 1}});
+        }
+        auto graph = makeRawSdpaBwdGraph(
+            attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras);
+        CpuReferenceGraphExecutor executor;
+        EXPECT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+        auto bundle = std::make_unique<SdpaBwdTensorBundle<float>>(dims, dims, dims, seed);
+        std::unordered_map<int64_t, void*> pack{{1, bundle->qTensor.memory().hostData()},
+                                                {2, bundle->kTensor.memory().hostData()},
+                                                {3, bundle->vTensor.memory().hostData()},
+                                                {4, bundle->oTensor.memory().hostData()},
+                                                {5, bundle->doTensor.memory().hostData()},
+                                                {6, bundle->statsTensor.memory().hostData()},
+                                                {7, bundle->dqTensor.memory().hostData()},
+                                                {8, bundle->dkTensor.memory().hostData()},
+                                                {9, bundle->dvTensor.memory().hostData()},
+                                                {SEED_UID, seedTensor.memory().hostData()},
+                                                {OFFSET_UID, offsetTensor.memory().hostData()}};
+        EXPECT_NO_THROW(executor.execute(graph.GetBufferPointer(), graph.GetSize(), pack));
+        return bundle;
+    };
+
+    const auto plain = gradients(false, false, false);
+    const CpuFpReferenceValidation<float> exact(0.0F, 0.0F);
+    for(const auto& [withSeed, withOffset] : {std::pair{false, false},
+                                              std::pair{true, true},
+                                              std::pair{true, false},
+                                              std::pair{false, true}})
+    {
+        SCOPED_TRACE(std::string("seed ") + (withSeed ? "named" : "absent") + ", offset "
+                     + (withOffset ? "named" : "absent"));
+        const auto zero = gradients(true, withSeed, withOffset);
+        EXPECT_TRUE(exact.allClose(plain->dqTensor, zero->dqTensor));
+        EXPECT_TRUE(exact.allClose(plain->dkTensor, zero->dkTensor));
+        EXPECT_TRUE(exact.allClose(plain->dvTensor, zero->dvTensor));
+    }
+}
+
+// Probability 0 keeps the other dropout fields' rules, and a seed no tensor backs is declined.
+TEST(TestSdpaBwdPlanZeroDropout, KeepsTheOtherFieldRules)
+{
+    const auto applicable
+        = [](void (*edit)(SdpaBackwardAttributesT&, std::vector<RawBwdExtraTensor>&)) {
+              SdpaBackwardAttributesT attrs;
+              attrs.dropout_probability = 0.0F;
+              std::vector<RawBwdExtraTensor> extras;
+              edit(attrs, extras);
+              auto graph = makeRawSdpaBwdGraph(
+                  attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras);
+              CpuReferenceGraphExecutor executor;
+              return executor.isApplicable(graph.GetBufferPointer(), graph.GetSize());
+          };
+    EXPECT_TRUE(applicable([](SdpaBackwardAttributesT&, std::vector<RawBwdExtraTensor>&) {}));
+    EXPECT_FALSE(applicable([](SdpaBackwardAttributesT& a, std::vector<RawBwdExtraTensor>&) {
+        a.seed_tensor_uid = 23;
+    }));
+    EXPECT_FALSE(applicable([](SdpaBackwardAttributesT& a, std::vector<RawBwdExtraTensor>& e) {
+        a.dropout_scale_inv_tensor_uid = BWD_DROPOUT_SCALE_INV_UID;
+        e.push_back({BWD_DROPOUT_SCALE_INV_UID, DataType::FLOAT, {1, 1, 1, 1}});
+    }));
+    EXPECT_FALSE(applicable([](SdpaBackwardAttributesT& a, std::vector<RawBwdExtraTensor>& e) {
+        a.dropout_scale_tensor_uid = BWD_DROPOUT_SCALE_UID;
+        e.push_back({BWD_DROPOUT_SCALE_UID, DataType::FLOAT, {1, 1, 1, 1}});
+    }));
+    EXPECT_FALSE(applicable([](SdpaBackwardAttributesT& a, std::vector<RawBwdExtraTensor>& e) {
+        a.dropout_mask_tensor_uid = BWD_DROPOUT_MASK_UID;
+        e.push_back({BWD_DROPOUT_MASK_UID, DataType::FLOAT, {1, 2, 4, 4}});
+    }));
+}
 
 // Stats may be rank-3 [B, H, Sq] (the checked-in backward bundles use it) or rank-4
 // [B, H, Sq, 1]; both give identical gradients. Stats must be FLOAT.
