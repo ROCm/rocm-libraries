@@ -1394,7 +1394,8 @@ def main() -> int:
             "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce), "
             "also for --run-from-cache: "
             "auto = two-stage only when C/groups is odd (where the packed atomic "
-            "cannot be built); "
+            "cannot be built), except under --run-from-cache, where the cached "
+            "two-stage kernels always compete with the packed-atomic ones; "
             "always = time the two-stage kernels alongside the packed-atomic ones "
             "(nothing is dropped), so both split-K reductions compete; "
             "never = skip two-stage entirely (default: auto)"
@@ -4691,6 +4692,22 @@ def _cache_dispatch(args, arch, target, cases) -> int:
     return _run_from_cache(args, arch, target, cases, cache, directions)
 
 
+def _filter_wgrad_two_stage_candidates(candidates, two_stage_mode):
+    """Cached-candidate wgrad two-stage filter.
+
+    By default both split-K reductions compete: the cached two-stage
+    (scratch + reduce) kernels are timed next to the packed-atomic ones
+    whatever C/groups is -- the JIT sweep builds them for odd C/groups only,
+    but here they are already compiled, and deep f32-workspace splits beat
+    the atomic ones on many even shapes. Only an explicit
+    ``--two-stage never`` drops them outright; "auto" and "always" leave
+    ``candidates`` untouched regardless of C/groups parity.
+    """
+    if two_stage_mode != "never":
+        return candidates
+    return [c for c in candidates if not c[0].two_stage]
+
+
 def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
     """Benchmark every cached kernel that can run each requested case.
 
@@ -4815,26 +4832,15 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         flush=True,
                     )
                     continue
-            if direction == "wgrad" and args.two_stage != "always":
-                # Same rule as the JIT sweep's --two-stage: by default the
-                # two-stage (scratch + reduce) kernels only run when C/groups
-                # is odd -- the case the packed-atomic epilogue cannot cover;
-                # "never" drops them outright; "always" keeps them alongside
-                # the packed-atomic ones, so both reductions compete.
-                odd = (problem.C // max(1, problem.groups)) % 2 != 0
-                if args.two_stage == "never" or not odd:
-                    candidates = [c for c in candidates if not c[0].two_stage]
+            if direction == "wgrad":
+                candidates = _filter_wgrad_two_stage_candidates(
+                    candidates, args.two_stage
+                )
                 if not candidates:
                     print(
                         f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
-                        f"no compatible kernel ("
-                        + (
-                            "two-stage disabled by --two-stage never"
-                            if args.two_stage == "never"
-                            else "two-stage kernels only run for odd C/groups; "
-                            "see --two-stage"
-                        )
-                        + ")",
+                        "no compatible kernel (two-stage disabled by "
+                        "--two-stage never)",
                         flush=True,
                     )
                     continue
@@ -5552,10 +5558,13 @@ def _widest_vector_sizes(candidates):
     thread) only in narrower copies. Narrower access does not win, so only the
     kernels at the problem's widest combination are run.
 
-    "Widest" is taken per kernel kind -- direction, epilogue, split-K mode and
-    group merging -- because the kind caps some widths regardless of the
-    problem: the default epilogue stores scalar (c = 1), and a group-merged
-    kernel derives its widths in the builder (recorded as 0). Default-epilogue
+    "Widest" is taken per kernel kind -- direction, epilogue, split-K mode,
+    group merging and the K loop (synchronous or async-DMA) -- because the
+    kind caps some widths regardless of the problem: the default epilogue
+    stores scalar (c = 1), a group-merged kernel derives its widths in the
+    builder (recorded as 0), and an async-DMA kernel records the chunk widths
+    its copies use where a synchronous one records its width caps, which its
+    loader can narrow at build time, so the two do not compare. Default-epilogue
     kernels are dropped altogether where a kernel of the same kind can store
     wider than 1 for this problem.
     ``supports_problem`` has already dropped widths the problem cannot take,
@@ -5573,15 +5582,22 @@ def _widest_vector_sizes(candidates):
             ident.group_merge,
             ident.streamk,
             ident.streamk_reduction,
+            bool(getattr(ident, "async_dma", False)),
         )
 
     def rank(ident):
-        return (
-            ident.vector_size_a + ident.vector_size_b + ident.vector_size_c,
-            ident.vector_size_a,
-            ident.vector_size_b,
-            ident.vector_size_c,
-        )
+        # An async-DMA binary leaves A / B unset and records the chunk widths
+        # its copies use instead; it ranks by those against the other async
+        # binaries of its kind (kind() keeps it apart from the synchronous
+        # kernels, whose recorded caps are not their effective load widths).
+        a = ident.vector_size_a
+        b = ident.vector_size_b
+        if a is None:
+            a = getattr(ident, "async_chunk_a", 0) or 8
+        if b is None:
+            b = getattr(ident, "async_chunk_b", 0) or 8
+        c = ident.vector_size_c or 0
+        return (a + b + c, a, b, c)
 
     # The default epilogue stores scalar (c = 1) straight from the MMA
     # accumulators. Where the same kind of kernel can store wider -- a

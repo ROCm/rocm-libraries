@@ -76,6 +76,7 @@ namespace TensileLite
             bool        m_highPrecisionAccumulate;
             bool        m_deterministicMode;
             bool        m_cEqualsD;
+            bool        m_deviceScalarAlpha;
             int         m_uniformSummationOrder;
             int         m_useBias = 0;
             int         m_biasSrc = static_cast<int>(ContractionProblemGemm::TENSOR::D);

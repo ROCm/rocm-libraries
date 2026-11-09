@@ -102,6 +102,7 @@ from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
 from .Common.DataType import DataType
+from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar
 from .Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
 from .Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
@@ -183,6 +184,24 @@ def _tdmSparseMetadataKOffset(writer, kernel):
     mod.add(SAddCU32(dst=sgpr("tdmMetadataGroup0+3"), src0=sgpr("tdmMetadataGroup0+3"),
                      src1=sgpr(lo + 1), comment="Apply metadata K-offset high word and address carry"))
   return mod
+
+def _tailPacksTwoElementsPerLoad(kernel, tP):
+  """Return whether the tail global read packs two 16-bit elements per load."""
+  # Must match the numElementsPerLoad == 2 selection in globalReadDo.
+  tc = tP["tensorChar"]
+  macDataType = kernel["ProblemType"]["MacDataType%s"%tc]
+  dataType = kernel["ProblemType"]["DataType%s"%tc]
+  if not kernel["ConvertAfterDS"] and tP["glvw"] < 8 * macDataType.numRegisters():
+    dataType = macDataType
+  isLds = kernel["DirectToLds%s"%tc] and not kernel["NonDTLTailLoop%s"%tc]
+  return (dataType.isHalf() or dataType.isBFloat16()) and not kernel["enableGLTr%s"%tc] \
+    and tP["glvw"] > 1 and kernel["AssertSummationElementMultiple"] % 2 == 0 and not isLds
+
+def _fp8D16UsesHighWord(isCvtHighBits, inTailLoop, tailPacksPairs):
+  """Return the source word for an FP8 pair loaded into a d16 VGPR."""
+  # A packed tail read writes each pair to the low word of its own VGPR; other
+  # reads alternate d16/d16_hi destinations.
+  return isCvtHighBits and not (inTailLoop and tailPacksPairs)
 
 from math import ceil, floor, log, prod
 from contextlib import contextmanager
@@ -1645,8 +1664,10 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["DirectToVgprA"] and (self.states.packDTVA or self.states.convDTVA):
             # DirectToVgpr case, we need LoopIters * 2 buffers
             numBiFactor = kernel["LoopIters"] * 2
-          # RAP: one buffer set per resident k-tile, matching the grown allocation.
-          numBiFactor *= self.rapResidentKTiles(kernel)
+          # RAP: a buffer set per iteration of every resident k-tile, matching the
+          # grown allocation.
+          if kernel["ReuseAcrossPersistent"]:
+            numBiFactor = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
           if self.states.lrvwTileMXSA > 1:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
             for bi in range(0,numBiFactor): # buffer indices
@@ -1782,8 +1803,10 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["DirectToVgprA"] and (self.states.packDTVA or self.states.convDTVA):
           # DirectToVgpr case, we need LoopIters * 2 buffers
           numBiFactor = kernel["LoopIters"] * 2
-        # RAP: one buffer set per resident k-tile, matching the grown allocation.
-        numBiFactor *= self.rapResidentKTiles(kernel)
+        # RAP: a buffer set per iteration of every resident k-tile, matching the
+        # grown allocation.
+        if kernel["ReuseAcrossPersistent"]:
+          numBiFactor = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
         if self.states.lrvwTileA > 1:
           moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_BASE", "vgprBase", self.states.a.startVgprValu - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
@@ -2946,6 +2969,98 @@ class KernelWriterAssembly(KernelWriter):
 
     return kernelArgs
 
+  def loadDeviceScalarAlpha(self, kernel):
+    """Replace inline Alpha with ScaleAlphaVec[0] in device-scalar mode.
+
+    internalArg0 bit 11 is preserved in ArgType bit 9 by the common prologue.
+    A clear bit keeps the existing device-vector path. A set bit means that
+    the same ScaleAlphaVec kernarg contains a pointer to one device scalar.
+    """
+    module = Module("Load device scalar alpha")
+    if not scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"]):
+      return module
+
+    assert kernel["ProblemType"]["UseScaleAlphaVec"]
+    assert kernel["ProblemType"]["ComputeDataType"].isSingle()
+
+    scalarAlphaDone = Label(label=self.labels.getNameInc("DeviceScalarAlphaDone"), comment="")
+    module.add(SBitcmp1B32(src0=sgpr("ArgType"), src1=9, comment="device scalar alpha?"))
+    module.add(SCBranchSCC0(labelName=scalarAlphaDone.getLabelName(), comment="keep device vector alpha path"))
+
+    normalOffset = self.argLoader.getOffset()
+    if kernel["ProblemType"]["UseScaleAB"]:
+      normalOffset += self.states.userArgsInfo.scaleASize + self.states.userArgsInfo.scaleBSize
+    if kernel["ProblemType"]["UseScaleCD"]:
+      normalOffset += self.states.userArgsInfo.scaleCSize + self.states.userArgsInfo.scaleDSize
+
+    def addLoads(alphaPtrIdx, deferWait):
+      pointerOffset = hex(normalOffset)
+      if kernel["ProblemType"]["SupportUserArgs"]:
+        # DeviceUserArguments has alpha@80, beta@96 and four scale pointers@112.
+        # Select its fixed scaleAlphaVec offset after choosing the GEMM base.
+        self.cmpNamedArgTypeEq(module, 2, "ArgType == 2: fixed device-user-args layout")
+        with self.allocTmpSgpr(1, tag="deviceScalarAlpha_offset") as offset:
+          module.add(SMovB32(dst=sgpr(offset.idx), src=hex(normalOffset)))
+          module.add(SCSelectB32(dst=sgpr(offset.idx), src0=hex(144), src1=sgpr(offset.idx)))
+          module.add(SLoadB64(dst=sgpr(alphaPtrIdx, 2), base=sgpr("KernArgAddress", 2),
+                              soffset=sgpr(offset.idx), comment="load device scalar alpha pointer"))
+          module.add(SWaitCnt(kmcnt=0, comment="wait for device scalar alpha pointer"))
+      else:
+        module.add(SLoadB64(dst=sgpr(alphaPtrIdx, 2), base=sgpr("KernArgAddress", 2),
+                            soffset=pointerOffset, comment="load device scalar alpha pointer"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait for device scalar alpha pointer"))
+      module.add(SLoadB32(dst=sgpr("Alpha"), base=sgpr(alphaPtrIdx, 2), soffset=0,
+                          comment="replace inline alpha with ScaleAlphaVec[0]"))
+      if not deferWait:
+        module.add(SWaitCnt(kmcnt=0, comment="wait for device scalar alpha"))
+
+    # AddressScaleAlphaVec belongs to the deferred epilogue SGPR block and is
+    # not allocated yet at this point. gfx125x XNACK replay can reread the base
+    # SGPRs of an outstanding scalar load, so a scheduled value load keeps its
+    # pointer pair reserved until waitForDeviceScalarAlpha emits kmcnt=0.
+    deferWait = self.deferDeviceScalarAlphaWait(kernel)
+    if deferWait:
+      assert self.states.deviceScalarAlphaPtrSgpr == -1
+      alphaPtrIdx = self.sgprPool.checkOutAligned(
+          2, 2, tag="loadDeviceScalarAlpha_pointer", preventOverflow=False)
+      if alphaPtrIdx + 2 > self.states.regCaps["MaxSgpr"]:
+        self.states.overflowedResources = 2
+        if self.db["AssertOnSgprOverflow"]:
+          self.sgprPool.checkIn(alphaPtrIdx)
+          raise RuntimeError("device scalar alpha pointer SGPR overflow")
+      self.states.deviceScalarAlphaPtrSgpr = alphaPtrIdx
+      addLoads(alphaPtrIdx, True)
+    else:
+      with self.allocTmpSgpr(2, 2, tag="loadDeviceScalarAlpha_pointer") as alphaPtr:
+        addLoads(alphaPtr.idx, False)
+
+    module.add(scalarAlphaDone)
+    return module
+
+  def deferDeviceScalarAlphaWait(self, kernel):
+    """Whether gfx125x can hide the scalar-value load behind strided setup."""
+    return (scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"])
+            and kernel["ProblemType"]["StridedBatched"]
+            and self.states.version[:2] == (12, 5))
+
+  def waitForDeviceScalarAlpha(self, kernel):
+    """Drain a scheduled device-alpha value load before its first consumer."""
+    module = Module("Wait for scheduled device scalar alpha")
+    if not self.deferDeviceScalarAlphaWait(kernel):
+      return module
+
+    scalarAlphaReady = Label(label=self.labels.getNameInc("DeviceScalarAlphaReady"), comment="")
+    module.add(SBitcmp1B32(src0=sgpr("ArgType"), src1=9, comment="device scalar alpha?"))
+    module.add(SCBranchSCC0(labelName=scalarAlphaReady.getLabelName(),
+                            comment="vector alpha has no scheduled scalar load"))
+    module.add(SWaitCnt(kmcnt=0, comment="wait for scheduled device scalar alpha"))
+    module.add(scalarAlphaReady)
+
+    assert self.states.deviceScalarAlphaPtrSgpr >= 0
+    self.sgprPool.checkIn(self.states.deviceScalarAlphaPtrSgpr)
+    self.states.deviceScalarAlphaPtrSgpr = -1
+    return module
+
   def localReadAddresses(self, kernel, tPA, tPB, tPM):
     module = Module("Local Read Addresses")
 
@@ -3440,7 +3555,13 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["GlobalSplitU"] != 0 or kernel["AdaptiveGemmNTAB"] != 0:
         moduleRegInit.add(SAndB32(dst=sgpr("GSU"), src0=sgpr(sgprPackedArgs), src1=hex(0xFFFF), comment="Restore GSUConfig and GSU"))
 
-      if kernel["ProblemType"]["SupportUserArgs"]:
+      if scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"]):
+        # Preserve internalArg0 bit 11 in an otherwise unused ArgType bit.
+        # ArgType is live through the epilogue, unlike the packed-args temp.
+        moduleRegInit.add(SAndB32(dst=sgpr(sgprPackedArgs), src0=sgpr(sgprPackedArgs), src1=hex(0x0800), comment="device scalar alpha bit"))
+        moduleRegInit.add(SLShiftRightB32(dst=sgpr(sgprPackedArgs), shiftHex=2, src=sgpr(sgprPackedArgs), comment="save scalar alpha in ArgType bit 9"))
+        moduleRegInit.add(SOrB32(dst=sgpr("ArgType"), src0=sgpr(sgprArgType), src1=sgpr(sgprPackedArgs)))
+      elif kernel["ProblemType"]["SupportUserArgs"]:
         moduleRegInit.add(SMovB32(dst=sgpr("ArgType"),src=sgpr(sgprArgType)))
 
     self.sgprPool.checkIn(sgprPackedArgs)
@@ -3667,6 +3788,14 @@ class KernelWriterAssembly(KernelWriter):
       else:
         waitForArgsToLoad()
         calculateWG()
+
+      # Device-scalar mode replaces inline Alpha. Resolve it before batched
+      # address handling and every later Alpha==0/1 decision so the inline
+      # value has no semantic effect.
+      # Keep labels as direct moduleWg items: this block is cloned for the
+      # routed/non-routed prologues and the existing relabel pass only visits
+      # direct items.
+      moduleWg.addModuleAsFlatItems(self.loadDeviceScalarAlpha(kernel))
 
       if not kernel["ProblemType"]["StridedBatched"]:
         with self.allocTmpSgpr(self.states.laneSGPRCount, tag="calculateWG_tmpSgpr") as tmpSgpr:
@@ -4002,6 +4131,11 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self.remapWgSerial(kernel))
       module.addSpaceLine()
       module.add(labelMultiGemmEnd)
+
+      # Both mutually exclusive workgroup-setup clones issue the device-alpha
+      # value load, then converge here. Drain the selected path before freeing
+      # its replay-sensitive pointer pair for the remaining SGPR definitions.
+      module.addModuleAsFlatItems(self.waitForDeviceScalarAlpha(kernel))
 
       # Deferred check-in of the abs-prefetch base triple (reserved across the prolog in
       # _initKernel so the dynamic CFG-target ladder inserted after this label can use it). Free it
@@ -14664,10 +14798,12 @@ class KernelWriterAssembly(KernelWriter):
                       self.vgprPool.checkIn(vgprTmp)
                 elif newBlockWidth == 0.5:
                   vgprTmp = self.vgprPool.checkOutAligned(2, 2, tag="localWriteDo_vgprTmp9")
-                  src_sel = SelectBit.WORD_1 if isCvtHighBits else SelectBit.WORD_0
+                  useHighWord = _fp8D16UsesHighWord(
+                      isCvtHighBits, self.states.inTailLoop, _tailPacksTwoElementsPerLoad(kernel, tP))
+                  src_sel = SelectBit.WORD_1 if useHighWord else SelectBit.WORD_0
                   modNum = max(1, int(newBlockWidth / blockWidth))
                   if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
-                    sel  = [1,0,0,0] if isCvtHighBits else [0,0,0,0]
+                    sel  = [1,0,0,0] if useHighWord else [0,0,0,0]
                     localWriteCVTCode.add(VCvtScalePkFP8toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), scale=0x3f800000,\
                                                           vop3=VOP3PModifiers(op_sel=sel), comment="D convert fp8 to f16"))
                   else:
@@ -15305,7 +15441,7 @@ class KernelWriterAssembly(KernelWriter):
       return
     gsuFlatLabel = Label(label=self.labels.getNameInc("GSU_FlatAddr"), comment="")
     with self.allocTmpSgpr(1) as tmpSgprGSU:
-      module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+      module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
       module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
       module.add(SCBranchSCC1(labelName=gsuFlatLabel.getLabelName(), comment="skip GSU offset if GSU == 1"))
     numDim = kernel["ProblemType"]["NumIndicesC"]
@@ -18786,9 +18922,13 @@ class KernelWriterAssembly(KernelWriter):
           else:
             module.add(self.allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeI")))
           module.add(SMulI32(dst=sgpr("SrdScaleAlphaVec+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleAlphaVec+2"), comment="ScaleAlphaVec scaled by BPE"))# scaled by BPE
+          if scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"]):
+            # Suppress the per-element buffer load so the existing null-vector path stages 1.0.
+            module.add(SBitcmp1B32(src0=sgpr("ArgType"), src1=9, comment="device scalar alpha?"))
+            module.add(SCSelectB32(dst=sgpr("SrdScaleAlphaVec+2"), src0=0, src1=sgpr("SrdScaleAlphaVec+2"), comment="device scalar uses ScaleAlphaVec identity"))
           module.add(self.shiftSrd("ScaleAlphaVec"))
-        for d in range(len(factorDims)):
-          vectorDataTypes.scaleAlpha(d).dataType = kernel["ProblemType"]["ComputeDataType"]
+        for dim in factorDims:
+          vectorDataTypes.scaleAlpha(dim).dataType = kernel["ProblemType"]["ComputeDataType"]
 
       # Add ScaleABVec support here
       # Issue read scale A/B vector value for later use
@@ -20879,6 +21019,11 @@ class KernelWriterAssembly(KernelWriter):
       else:
         # For flat addressing, check if the base pointer is non-null
         module.add(VCmpNeU64(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Address%s"%addressStr, 2), src1=0, comment="address != 0 ?"))
+        if addressStr == "ScaleAlphaVec" and scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"]):
+          module.add(SBitcmp1B32(src0=sgpr("ArgType"), src1=9, comment="device scalar alpha?"))
+          for maskWord in range(self.states.laneSGPRCount):
+            maskSgpr = "Address%s%s" % (addressStr, "" if maskWord == 0 else "+%d" % maskWord)
+            module.add(SCSelectB32(dst=sgpr(maskSgpr), src0=0, src1=sgpr(maskSgpr), comment="device scalar uses ScaleAlphaVec identity"))
       # Set maskConst to 1.0 or 1
       if kernel["ProblemType"]["ComputeDataType"].isSingle():
         maskConst = 1.0
@@ -21044,7 +21189,17 @@ class KernelWriterAssembly(KernelWriter):
       globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "Bias", biasOffsetVgpr, biasShiftOffset, biasDataType, biasBpe, gwvw, tmpVgpr1Res, biasDstVgpr, dim))
     if scaleAlphaDataType:
       scaleAlphaShiftOffset = self.getGlobalShiftOffset(kernel, scaleAlphaDataType, gwvw)
-      globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "ScaleAlphaVec", scaleAlphaOffsetVgpr, scaleAlphaShiftOffset, scaleAlphaDataType, scaleAlphaBpe, gwvw, tmpVgpr1Res, scaleAlphaDstVgpr, dim))
+      supportDeviceScalarAlpha = scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"])
+      if supportDeviceScalarAlpha and not kernel["BufferLoad"]:
+        assert scaleAlphaDataType.isSingle() and gwvw == 1 and scaleAlphaShiftOffset == 0
+        scaleAlphaReady = Label(label=self.labels.getNameInc("ScaleAlphaVecReady"), comment="")
+        globalLoadsModule.add(SBitcmp1B32(src0=sgpr("ArgType"), src1=9, comment="device scalar alpha?"))
+        globalLoadsModule.add(SCBranchSCC1(labelName=scaleAlphaReady.getLabelName(),
+                                           comment="device scalar skips vector load"))
+        globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "ScaleAlphaVec", scaleAlphaOffsetVgpr, scaleAlphaShiftOffset, scaleAlphaDataType, scaleAlphaBpe, gwvw, tmpVgpr1Res, scaleAlphaDstVgpr, dim))
+        globalLoadsModule.add(scaleAlphaReady)
+      else:
+        globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "ScaleAlphaVec", scaleAlphaOffsetVgpr, scaleAlphaShiftOffset, scaleAlphaDataType, scaleAlphaBpe, gwvw, tmpVgpr1Res, scaleAlphaDstVgpr, dim))
     if scaleADataType:
       scaleAShiftOffset = self.getGlobalShiftOffset(kernel, scaleADataType, gwvw)
       globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "ScaleA", scaleAOffsetVgpr, scaleAShiftOffset, scaleADataType, scaleABpe, gwvw, tmpVgpr1Res, scaleADstVgpr, 0))
@@ -21058,6 +21213,11 @@ class KernelWriterAssembly(KernelWriter):
         vlcnt = vlcnt + 1
     module.add(globalLoadsModule)
     assert vlcnt > 0
+
+    # Flat addressing skips ScaleAlphaVec VMEM in device-scalar mode. Drain both
+    # runtime paths here instead of using static per-store wait accounting.
+    if scaleAlphaDataType and supportDeviceScalarAlpha and not kernel["BufferLoad"]:
+      module.add(SWaitCnt(vlcnt=0, comment="wait for runtime-selected epilogue vector loads"))
 
     # Local write
     # In local write, all vector shares the same offsetVgpr since the internal data types are all the same.
@@ -21080,7 +21240,10 @@ class KernelWriterAssembly(KernelWriter):
       subGroupOffset[0] += kernel["NumThreads"] * int(kernel["ProblemType"]["ComputeDataType"].numBytes()) * vectorDataTypes.bias(dim).turn
     if scaleAlphaDataType:
       vectorDataTypes.scaleAlpha(dim).ldsOffset = subGroupOffset[0]
-      storeModules.add(self.addVectorLocalStore(kernel, "ScaleAlphaVec", offsetVgpr, scaleAlphaShiftOffset, scaleAlphaDataType, gwvw, tmpVgpr1Res, scaleAlphaDstVgpr, subGroupOffset, dim, setToOne=True, comment="store scaleAlpha"))
+      storeModules.add(self.addVectorLocalStore(
+        kernel, "ScaleAlphaVec", offsetVgpr, scaleAlphaShiftOffset, scaleAlphaDataType,
+        gwvw, tmpVgpr1Res, scaleAlphaDstVgpr, subGroupOffset, dim, setToOne=True,
+        comment="store scaleAlpha"))
       subGroupOffset[0] += kernel["NumThreads"] * int(kernel["ProblemType"]["ComputeDataType"].numBytes()) * vectorDataTypes.scaleAlpha(dim).turn
     if scaleADataType:
       vectorDataTypes.scaleA.ldsOffset = subGroupOffset[0]
@@ -21110,8 +21273,9 @@ class KernelWriterAssembly(KernelWriter):
           if isinstance(item, DSStoreInstruction):
             item.setMemToken(MemTokenData([self.states.memTokenEpilogue]))
           if (not isAdded) and isinstance(item, (VCvtInstruction, DSStoreInstruction, VCndMaskB32, VLShiftLeftB32, VAndB32)):
-            vlcnt = vlcnt - 1
-            module.add(SWaitCnt(vlcnt=(vlcnt), comment="wait for global load"))
+            if not (scaleAlphaDataType and supportDeviceScalarAlpha and not kernel["BufferLoad"]):
+              vlcnt = vlcnt - 1
+              module.add(SWaitCnt(vlcnt=(vlcnt), comment="wait for global load"))
             module.add(item)
             isAdded = True
           else:
@@ -21515,9 +21679,10 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SCBranchVCCNZ(label_wave_lower.getLabelName()))
     mod.add(SBranch(label_wave_empty.getLabelName()))
 
+    # Wave w stores to slot w and lower wave w reads slot w + Offset. A wave is an upper wave in exactly one
+    # iteration, so every slot is written once: no iteration can overwrite a slot an earlier one still reads (WAR).
     mod.add(label_wave_upper)
-    mod.add(VSubU32(vgpr("Tmp"), vgpr("Widx"), sgpr("Offset")))
-    mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Tmp")))
+    mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Widx")))
 
     # TODO- select inst
     ds = DSModifiers(offset=amax_lds_start)
@@ -21527,7 +21692,8 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SBranch(label_wave_inter.getLabelName()))
     mod.add(label_wave_lower)
     mod.add(SBarrier())
-    mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Widx")))
+    mod.add(VAddU32(vgpr("Tmp"), sgpr("Offset"), vgpr("Widx")))
+    mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Tmp")))
 
     # TODO- select inst
     mod.add(DSLoadB32(vgpr("AmaxOutB"), vgpr("Tmp"), ds))
@@ -24349,11 +24515,16 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("TDM increment")
     tdmGroup0 = f"tdm{tc}Group0"
     incSgprName = f"GlobalReadIncs{tc}"
+    maskLastIter = self.hplrMasksLoopIncrement(kernel, prefetchIndex)
 
     if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
       with self.allocTmpSgpr(2, tag="tdmIncrementAB_tmpSgprInfo") as tmpSgprInfo:
         incTmpLo = tmpSgprInfo.idx
         incTmpHi = tmpSgprInfo.idx + 1
+        incSrc = sgpr(incSgprName)
+        if maskLastIter:
+          mod.add(self.hplrMaskedIncrement(kernel, tc, incTmpLo))
+          incSrc = sgpr(incTmpLo)
 
         if prefetchIndex:
           mod.add(SAddU32(dst=sgpr(incTmpLo), src0=self.loopCounter(kernel, self.states.unrollIdx), \
@@ -24362,7 +24533,7 @@ class KernelWriterAssembly(KernelWriter):
         else:
           mod.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
                     src1=sgpr("StaggerUIter"), comment="Is this the wrapIter?"))
-        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr(f"WrapU{tc}+0"), src1=sgpr(incSgprName), \
+        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr(f"WrapU{tc}+0"), src1=incSrc, \
                 comment="select WrapU or normal inc (lo)"))
         mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr(f"WrapU{tc}+1"), src1=0, \
                 comment="select WrapU or normal inc (hi)"))
@@ -24370,6 +24541,10 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SAddU64(dst=sgpr(f"{tdmGroup0}+2", 2), src0=sgpr(f"{tdmGroup0}+2", 2), \
                 src1=sgpr(incTmpLo, 2), comment="TDM addr += inc (with wrap, 64-bit)"))
 
+    elif maskLastIter:
+      with self.allocTmpSgpr(1, tag="tdmIncrementAB_maskedInc") as tmpSgprInfo:
+        mod.add(self.hplrMaskedIncrement(kernel, tc, tmpSgprInfo.idx))
+        mod.add(comp.incrementGlobalAddr(self, tdmGroup0, tmpSgprInfo.idx))
     else:
       mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
 
@@ -25041,27 +25216,62 @@ class KernelWriterAssembly(KernelWriter):
     valuStr = "Valu%s_G%u+%u"%(tc, vgprGroups[gIdx], newOffset)
     return valuStr
 
+  def hplrMasksLoopIncrement(self, kernel, prefetchIndex) -> bool:
+    """True when tdmIncrementAB drops the last-iteration increment itself.
+
+    Single-wave TDM advances each descriptor straight from GlobalReadIncs*. The
+    tail loop, the stagger removal and the StreamK tile offset read those
+    increments after the unrolled loop, so the last-iteration increment is
+    masked in a temporary instead of being cleared in place.
+    """
+    return bool(kernel["HalfPLR"]) and prefetchIndex == 0 and kernel["NumWaves"] == 1 \
+      and not kernel.get("UseSubtileImpl")
+
+  def hplrLastIterCompare(self, kernel, tmpSgpr: Optional[int]) -> Module:
+    """Set SCC when the unrolled loop is on its last iteration.
+
+    tmpSgpr is only used (and only required) with PrefetchAcrossPersistent.
+    """
+    mod = Module("hplrLastIterCompare")
+    if kernel["PrefetchAcrossPersistent"]:
+      # The StreamK tail repositions the TDM descriptor with (iters-1)*increment after
+      # the loop, so the increments must survive once PAP has primed the next tile.
+      # Bias the counter instead of branching, to keep the loop body one basic block.
+      biasedCounter = sgpr(tmpSgpr)
+      mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="PAP primed?"))
+      mod.add(SCSelectB32(dst=biasedCounter, src0=2, \
+        src1=self.loopCounter(kernel, self.states.unrollIdx), \
+        comment="keep increments live for the StreamK tail once primed"))
+      mod.add(SCmpLeI32(src0=biasedCounter, src1=1, \
+        comment="is this the last iters (and not primed)"))
+    else:
+      mod.add(SCmpLeI32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
+        src1=1, \
+        comment="%s"%"is this the last iters"))
+    return mod
+
+  def hplrMaskedIncrement(self, kernel, tc, dstSgpr) -> Module:
+    """dstSgpr <- 0 on the last unrolled iteration, else tc's global-read increment."""
+    mod = Module("hplrMaskedIncrement")
+    mod.add(self.hplrLastIterCompare(kernel, dstSgpr))
+    mod.add(SCSelectB32(dst=sgpr(dstSgpr), src0=0, \
+      src1=self.globalReadIncsOperand(tc, self.states.unrollIdx), \
+      comment="no increment on the last iters"))
+    return mod
+
   def graIncrementMask(self, kernel, tPA, tPB) -> Module:
     mod = Module("graIncrementMask")
     if not kernel["HalfPLR"]:
       return mod
     # Only support TDM
+    if self.hplrMasksLoopIncrement(kernel, 0):
+      # tdmIncrementAB masks each single-wave increment itself.
+      return mod
     if kernel["PrefetchAcrossPersistent"]:
-      # The StreamK tail repositions the TDM descriptor with (iters-1)*increment after
-      # the loop, so the increments must survive once PAP has primed the next tile.
-      # Bias the counter instead of branching, to keep the loop body one basic block.
       with self.allocTmpSgpr(1, tag="graIncrementMask_notPrimed") as tmpSgprRes:
-        biasedCounter = sgpr(tmpSgprRes.idx)
-        mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="PAP primed?"))
-        mod.add(SCSelectB32(dst=biasedCounter, src0=2, \
-          src1=self.loopCounter(kernel, self.states.unrollIdx), \
-          comment="keep increments live for the StreamK tail once primed"))
-        mod.add(SCmpLeI32(src0=biasedCounter, src1=1, \
-          comment="is this the last iters (and not primed)"))
+        mod.add(self.hplrLastIterCompare(kernel, tmpSgprRes.idx))
     else:
-      mod.add(SCmpLeI32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
-        src1=1, \
-        comment="%s"%"is this the last iters"))
+      mod.add(self.hplrLastIterCompare(kernel, None))
     if kernel["NumWaves"] > 1 and tdmSharedScaleSetActive(kernel):
       # Shared set zeros tdmABIncs; the separate data tensor (not tdmSharedScaleSetOwner) zeros its own GlobalReadIncs.
       sep = "B" if tdmSharedScaleSetOwner(kernel) == "A" else "A"

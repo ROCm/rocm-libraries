@@ -262,7 +262,7 @@ def test_reduce_predicate_admits_the_reduce_spec_of_every_admitted_3d_problem(
         (dict(dtype="fp32"), "fp16/bf16"),
         (dict(head_size=96), "divisible by 64"),
         (dict(num_query_heads=30, num_kv_heads=8), "divisible by num_kv_heads"),
-        (dict(num_query_heads=-8, num_kv_heads=8), "positive num_query_heads"),
+        (dict(num_query_heads=-8, num_kv_heads=8), "must be > 0"),
         (dict(num_segments=40961), "over gfx950's 163840 B LDS (at most 40960)"),
     ],
 )

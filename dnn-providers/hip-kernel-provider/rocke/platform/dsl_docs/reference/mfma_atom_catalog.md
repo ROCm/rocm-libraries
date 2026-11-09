@@ -229,7 +229,7 @@ For i in 0..3:
 ```
 
 An epilogue written for the f32 16x16 layout stores f64 results to the wrong
-rows. Take the layout from the atom's `c_layout()`.
+rows. Take the layout from the atom's `dst_layout()`.
 
 `mfma_f64_4x4x4_f64` computes four independent 4x4x4 products per wave. The
 catalog describes the blocks stacked along rows, so A, B, and C/D are each

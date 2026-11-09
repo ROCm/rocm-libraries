@@ -98,7 +98,6 @@ std::string prepareFailureFor(const KernelSpec& spec, const GraphSpec& graphSpec
 constexpr const char* MISSING_TOKEN_MARKER = "missing bound token";
 constexpr const char* OUTPUT_LAYOUT_MARKER = "not dense BSHD";
 constexpr const char* GEOMETRY_MARKER = "declares no supported geometry";
-constexpr const char* CAPACITY_MARKER = "serves at most";
 constexpr const char* BLOCK_MARKER = "does not divide seqlen_kv";
 
 } // namespace
@@ -250,19 +249,16 @@ TEST(TestGfx950AttentionUnified2DDispatch, BindsExactlyTheTokensTheDispatchReads
 
 /// The positive control the refusals below depend on: a prepare() that threw for every input
 /// would satisfy all of them and dispatch nothing. A failure is still expected -- the archive
-/// is absent -- but it must be the loader's, which means the bindings, the geometry, the
-/// capacity and the identity tables were all accepted first.
+/// is absent -- but it must be the loader's, which means the bindings, the geometry and the
+/// identity tables were all accepted first.
 TEST(TestGfx950AttentionUnified2DDispatch, ReachesTheLoaderOnceEverythingBeforeItIsGood)
 {
     const std::string failure = prepareFailureFor(KernelSpec{});
 
     ASSERT_FALSE(failure.empty()) << "the archive named by the fixture does not exist, so "
                                      "prepare() cannot have succeeded";
-    for(const char* marker : {MISSING_TOKEN_MARKER,
-                              OUTPUT_LAYOUT_MARKER,
-                              GEOMETRY_MARKER,
-                              CAPACITY_MARKER,
-                              BLOCK_MARKER})
+    for(const char* marker :
+        {MISSING_TOKEN_MARKER, OUTPUT_LAYOUT_MARKER, GEOMETRY_MARKER, BLOCK_MARKER})
     {
         EXPECT_EQ(failure.find(marker), std::string::npos) << failure;
     }
@@ -327,7 +323,7 @@ TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareWhenTheOutputTokenNam
 TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareWhenTheOutputTokenNamesANonBshdTensor)
 {
     GraphSpec spec;
-    spec.oLayout = Layout::BHSD;
+    spec.oLayout = SdpaLayout::BHSD;
     const Graph graph(spec);
     // graph_match refuses this graph, so bind the tokens from the well-formed one and point
     // O at the same tensor in the BHSD graph.
@@ -363,7 +359,6 @@ TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareACandidateWithoutASup
     with([](KernelSpec& s) { s.blockSize = 24; });
     with([](KernelSpec& s) { s.useMfma32x32 = 1; }); // needs 32 rows per warp
     with([](KernelSpec& s) { s.useTransposedQk32x32 = 1; }); // needs the 32x32 path
-    with([](KernelSpec& s) { s.numSeqs = 0; });
     with([](KernelSpec& s) { s.maskType = 3; });
     with([](KernelSpec& s) { s.headSize = 96; });
     with([](KernelSpec& s) { s.numQueryHeads = 9; });
@@ -390,6 +385,10 @@ TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareACandidateMissingAFie
         {
             continue; // read by the matcher, not by prepare()
         }
+        if(field == "num_seqs")
+        {
+            continue; // declared by the KMD, not read: the batch is a kernarg
+        }
         SCOPED_TRACE(field);
         auto kernel = makeKpackKernel(KernelSpec{}, pythonAbi());
         kernel.metadata.erase(field);
@@ -404,25 +403,21 @@ TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareACandidateMissingAFie
     EXPECT_NE(failure.find(GEOMETRY_MARKER), std::string::npos) << failure;
 }
 
-/// One past the capacity the kernel was built for. The search would leave the last blocks
-/// reading another sequence's lengths without a fault, so prepare() refuses by name.
-TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareABatchAboveTheCandidatesCapacity)
+/// The kernel derives its cu_q search trip count from the `num_seqs` kernarg, so a batch past
+/// what the old baked 9-iteration search resolved (2^9 - 1) reaches the loader like any other.
+TEST(TestGfx950AttentionUnified2DDispatch, PreparesABatchPastTheOldBakedSearch)
 {
     GraphSpec spec;
-    spec.batch = 4;
+    spec.batch = 512;
     spec.seqLenQ = 16;
     spec.seqLenKv = 16;
-    KernelSpec capacityThree;
-    capacityThree.numSeqs = 3; // 2 iterations -> 3 sequences
 
-    const std::string tooMany = prepareFailureFor(capacityThree, spec);
-    ASSERT_FALSE(tooMany.empty());
-    EXPECT_NE(tooMany.find(CAPACITY_MARKER), std::string::npos) << tooMany;
-
-    spec.batch = 3;
-    const std::string exactlyFull = prepareFailureFor(capacityThree, spec);
-    ASSERT_FALSE(exactlyFull.empty());
-    EXPECT_EQ(exactlyFull.find(CAPACITY_MARKER), std::string::npos) << exactlyFull;
+    const std::string failure = prepareFailureFor(KernelSpec{}, spec);
+    ASSERT_FALSE(failure.empty()) << "the archive named by the fixture does not exist, so "
+                                     "prepare() cannot have succeeded";
+    EXPECT_EQ(failure.find(GEOMETRY_MARKER), std::string::npos) << failure;
+    EXPECT_EQ(failure.find(BLOCK_MARKER), std::string::npos) << failure;
+    EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
 }
 
 /// A block size that does not divide the graph's Skv is not a whole-block cache.

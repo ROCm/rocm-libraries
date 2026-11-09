@@ -87,7 +87,8 @@ inline std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
 
 /// The fields the engine's KMD declares, as a completed catalog record carries them. The
 /// defaults are the shipped baseline kernel for the default graph (bf16, D128, Hq 8 / Hkv 2,
-/// top-left causal, block 16, T64, 4 warps x 16 rows, capacity 511).
+/// top-left causal, block 16, T64, 4 warps x 16 rows, num_seqs 511). The engine does not read
+/// num_seqs -- the batch is a kernarg -- but the KMD still declares it.
 struct KernelSpec
 {
     std::string dtype = "BF16";
@@ -172,7 +173,7 @@ inline double scoreOf(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
     return scorer(graph.context(), bound.value_or(BoundTokens{}), makeKernel(kernelSpec));
 }
 
-/// The 18-argument ABI the rocKE builder declares, under the names it gives them.
+/// The 21-argument ABI the rocKE builder declares, under the names it gives them.
 inline std::vector<KernelArgument> pythonAbi()
 {
     constexpr uint32_t POINTER_BYTES = 8;
@@ -198,7 +199,10 @@ inline std::vector<KernelArgument> pythonAbi()
             scalar("softcap"),
             scalar("num_seqs"),
             scalar("block_table_stride"),
-            scalar("qq_bias_stride_0")};
+            scalar("qq_bias_stride_0"),
+            scalar("num_query_heads"),
+            scalar("num_kv_heads"),
+            scalar("sliding_window")};
 }
 
 /// A KPACK descriptor for this engine naming an archive that is not there, recording

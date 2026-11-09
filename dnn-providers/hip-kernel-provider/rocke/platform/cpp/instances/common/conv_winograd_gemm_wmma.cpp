@@ -1003,16 +1003,15 @@ rocke_kernel_def_t* rocke_build_winograd_gemm_wmma(rocke_ir_builder_t* b,
     c.pad_amount = 0;
     if(strcmp(wgw_str(spec->lds_pad, "tdm"), "tdm") == 0)
     {
-        /* pad_interval = (CK // 2).bit_length() - 2 */
-        int v = c.CK / 2;
-        int bits = 0;
-        while(v)
+        /* The TDM pads CH_PAD elements after every tile_k-element row (both
+         * 16-bit). */
+        char why[256] = {0};
+        if(!rocke_encode_tdm_padding(
+               c.CK * 2, WGW_CH_PAD * 2, &c.pad_interval, &c.pad_amount, why, sizeof(why)))
         {
-            ++bits;
-            v >>= 1;
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, why);
+            return NULL;
         }
-        c.pad_interval = bits - 2;
-        c.pad_amount = 3;
         c.tile0 = c.CK;
     }
 

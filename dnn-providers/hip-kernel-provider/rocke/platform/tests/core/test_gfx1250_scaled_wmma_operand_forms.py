@@ -259,6 +259,76 @@ def test_an_operand_of_another_shape_is_refused(op_id, role, dtype, fp4_words):
     assert_both_engines_reject(kernel, "gfx1250", ValueError, message, _FLAVOR)
 
 
+@pytest.mark.parametrize(
+    "dtype,form,count",
+    [
+        ("fp8e4m3", "stack", 64.0),
+        ("fp6e2m3", "stack", 12.0),
+        ("fp4e2m1", "stack", 8.0),
+        ("fp6e2m3", "register", 16.0),
+        ("fp4e2m1", "register", 16.0),
+    ],
+)
+@pytest.mark.parametrize("role", [0, 1])
+def test_non_integer_payload_counts_are_refused_before_emission(
+    dtype, form, count, role
+):
+    from rocke.core.lower_llvm import _Lowerer
+
+    op_id = _scaled_op(dtype, dtype, 32)
+    builder = _stack_form if form == "stack" else _register_words
+    kernel = _kernel(op_id, builder, builder)
+    call = next(op for op in kernel.body.ops if op.name == "tile.mma")
+    call.operands[role].type = VectorType(call.operands[role].type.elem, count)
+    lowerer = _Lowerer(kernel, arch="gfx1250", llvm_flavor=_FLAVOR)
+    with pytest.raises(ValueError) as caught:
+        lowerer.lower_op(call)
+    assert str(caught.value) == (
+        f"MMA operand {('a', 'b')[role]} of {op_id!r} requires an integer operand "
+        f"vector count, got {count!r}"
+    )
+    assert lowerer._needs_intrin == {}
+    assert all(block.lines == [] for block in lowerer._blocks)
+
+
+@pytest.mark.parametrize("dtype", ["fp8e4m3", "fp4e2m1"])
+@pytest.mark.parametrize("role", [0, 1])
+def test_missing_matrix_types_are_refused_before_emission(dtype, role):
+    from rocke.core.lower_llvm import _Lowerer
+
+    op_id = _scaled_op(dtype, dtype, 32)
+    kernel = _kernel(op_id, _stack_form, _stack_form)
+    call = next(op for op in kernel.body.ops if op.name == "tile.mma")
+    call.operands[role].type = None
+    call.name = f"tile.{op_id}"
+    lowerer = _Lowerer(kernel, arch="gfx1250", llvm_flavor=_FLAVOR)
+    # Exercise this emitter's preflight directly: generic IR validation has a
+    # separate contract requiring every value to already carry an IR type.
+    with pytest.raises(ValueError) as caught:
+        lowerer._backend.emit_scaled_wmma(lowerer, call)
+    assert (
+        str(caught.value)
+        == f"MMA operand {('a', 'b')[role]} of {op_id!r} must define an IR type"
+    )
+    assert lowerer._needs_intrin == {}
+    assert all(block.lines == [] for block in lowerer._blocks)
+
+
+def test_both_matrix_payloads_are_checked_before_the_first_reinterpretation():
+    from rocke.core.lower_llvm import _Lowerer
+
+    op_id = _scaled_op("fp8e4m3", "fp4e2m1", 32)
+    kernel = _kernel(op_id, _stack_form, _stack_form)
+    call = next(op for op in kernel.body.ops if op.name == "tile.mma")
+    # A needs a bitcast; an incomplete B must fail before A's bitcast is emitted.
+    call.operands[1].type = VectorType(I32, 7)
+    lowerer = _Lowerer(kernel, arch="gfx1250", llvm_flavor=_FLAVOR)
+    with pytest.raises(ValueError, match="operand's 8 packed 32-bit words"):
+        lowerer.lower_op(call)
+    assert lowerer._needs_intrin == {}
+    assert all(block.lines == [] for block in lowerer._blocks)
+
+
 # The format name the disassembler prints for each matrix format.
 _ISA_FORMAT = {
     "fp8e4m3": "MATRIX_FMT_FP8",
