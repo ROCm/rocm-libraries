@@ -63,6 +63,82 @@ TEST(TestRMSnormValidator, ValidBackwardActivation)
     EXPECT_NO_THROW(validator.checkBwdActivationTensorConfigSupported(activationAttr, bwdAttr));
 }
 
+namespace
+{
+using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+
+struct ActivationCase
+{
+    bool isBwd;
+    PointwiseMode mode;
+    flatbuffers::Optional<float> slope;
+    bool supported;
+};
+
+class TestRMSnormActivationValidator : public ::testing::TestWithParam<ActivationCase>
+{
+};
+} // namespace
+
+TEST_P(TestRMSnormActivationValidator, DirectionIdentityAndLeakyRelu)
+{
+    const auto& testCase = GetParam();
+    auto original = testCase.isBwd
+                        ? hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph()
+                        : hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
+    auto nativeGraph
+        = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(original.GetBufferPointer());
+    auto* activation
+        = nativeGraph->nodes[testCase.isBwd ? 0 : 1]->attributes.AsPointwiseAttributes();
+    activation->operation = testCase.mode;
+    activation->relu_lower_clip_slope = testCase.slope;
+    if(testCase.mode == PointwiseMode::IDENTITY)
+    {
+        activation->in_1_tensor_uid = flatbuffers::nullopt;
+    }
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, nativeGraph.get()));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    RMSnormValidator validator(graph.getTensorMap());
+    const auto validate = [&]() {
+        if(testCase.isBwd)
+        {
+            validator.checkBwdActivationTensorConfigSupported(
+                *graph.getNode(0).attributes_as_PointwiseAttributes(),
+                *graph.getNode(1).attributes_as_RMSNormBackwardAttributes());
+        }
+        else
+        {
+            validator.checkFwdActivationTensorConfigSupported(
+                *graph.getNode(0).attributes_as_RMSNormAttributes(),
+                *graph.getNode(1).attributes_as_PointwiseAttributes());
+        }
+    };
+    if(testCase.supported)
+    {
+        EXPECT_NO_THROW(validate());
+    }
+    else
+    {
+        EXPECT_THROW(validate(), hipdnn_plugin_sdk::HipdnnPluginException);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ActivationContracts,
+    TestRMSnormActivationValidator,
+    ::testing::Values(ActivationCase{false, PointwiseMode::IDENTITY, flatbuffers::nullopt, true},
+                      ActivationCase{true, PointwiseMode::IDENTITY, flatbuffers::nullopt, true},
+                      ActivationCase{false, PointwiseMode::RELU_FWD, flatbuffers::nullopt, true},
+                      ActivationCase{true, PointwiseMode::RELU_BWD, flatbuffers::nullopt, true},
+                      ActivationCase{false, PointwiseMode::RELU_BWD, flatbuffers::nullopt, false},
+                      ActivationCase{true, PointwiseMode::RELU_FWD, flatbuffers::nullopt, false},
+                      ActivationCase{false, PointwiseMode::RELU_FWD, 0.1f, false},
+                      ActivationCase{true, PointwiseMode::RELU_BWD, 0.1f, false},
+                      ActivationCase{false, PointwiseMode::RELU_FWD, 0.0f, false},
+                      ActivationCase{true, PointwiseMode::RELU_BWD, 0.0f, false}));
+
 TEST(TestRMSnormValidator, UnsupportedDim)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(

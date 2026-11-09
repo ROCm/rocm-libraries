@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
 #include <gtest/gtest.h>
 
 #include "PointwiseGraphUtils.hpp"
@@ -25,6 +26,37 @@ using namespace hipdnn_sdk_test_utils;
 class TestPointwisePlan : public ::testing::Test
 {
 };
+
+TEST_F(TestPointwisePlan, ExecutePlanUnaryIdentityPreservesValues)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph({1, 3, 2, 2},
+                                   {1, 3, 2, 2},
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   hipdnn_frontend::PointwiseMode::IDENTITY);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const NodeWrapper nodeWrapper(&graphWrapper.getNode(0));
+    const auto& attributes = nodeWrapper.attributesAs<PointwiseAttributes>();
+    auto* input = static_cast<float*>(variantPack.at(attributes.in_0_tensor_uid()));
+    const auto* output = static_cast<const float*>(variantPack.at(attributes.out_0_tensor_uid()));
+    const std::array<float, 12> expected
+        = {-3.0f, -2.0f, -1.0f, -0.5f, 0.0f, 0.5f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        input[i] = expected[i];
+    }
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        EXPECT_EQ(output[i], expected[i]) << "element " << i;
+    }
+}
 
 TEST_F(TestPointwisePlan, ExecutePlanUnaryReluFwd)
 {

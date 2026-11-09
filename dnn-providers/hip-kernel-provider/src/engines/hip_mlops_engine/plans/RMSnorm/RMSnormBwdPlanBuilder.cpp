@@ -34,7 +34,9 @@ void backwardActivationCheckTensors(
         tensorMap)
 {
     const auto activationIn1Uid = activationAttr.in_1_tensor_uid();
-    if(!activationIn1Uid.has_value())
+    if(!activationIn1Uid.has_value()
+       && activationAttr.operation()
+              != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -56,9 +58,10 @@ void backwardActivationCheckTensors(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation in_0 (dy gradient) must be non-virtual");
     }
 
-    const auto& actTensorIn1 = findTensorAttributes(tensorMap, activationIn1Uid.value());
     const auto& actTensorOut = findTensorAttributes(tensorMap, activationAttr.out_0_tensor_uid());
-    if(actTensorIn1.virtual_() || !actTensorOut.virtual_())
+    if(!actTensorOut.virtual_()
+       || (activationIn1Uid.has_value()
+           && findTensorAttributes(tensorMap, activationIn1Uid.value()).virtual_()))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,

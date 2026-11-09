@@ -239,6 +239,36 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForValidInferenceActivatio
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
+TEST_F(TestRMSnormPlanBuilder, IdentityActivationIsApplicable)
+{
+    auto builder = createRMSnormActivationTestGraph(
+        false,
+        false,
+        false,
+        false,
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestRMSnormPlanBuilder, BackwardReluIsNotApplicable)
+{
+    auto builder = createRMSnormActivationTestGraph(
+        false,
+        false,
+        false,
+        false,
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(

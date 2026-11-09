@@ -135,7 +135,8 @@ TEST(TestPointwiseValidation, ImplementedTernaryModesAreSubset)
 TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
 {
     // Define which unary operations are currently implemented
-    const std::set<PointwiseMode> expectedImplementedUnary = {PointwiseMode::RELU_FWD,
+    const std::set<PointwiseMode> expectedImplementedUnary = {PointwiseMode::IDENTITY,
+                                                              PointwiseMode::RELU_FWD,
                                                               PointwiseMode::SIGMOID_FWD,
                                                               PointwiseMode::TANH_FWD,
                                                               PointwiseMode::ABS,
