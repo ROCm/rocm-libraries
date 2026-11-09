@@ -494,6 +494,12 @@ PYTHON_ONLY_OPCODES = frozenset(
         "tile.permlane16_swap",
         # Natural exp (``IRBuilder.exp``, ``llvm.exp.f32``).
         "math.exp",
+        # IEEE-754-2019 maximum / minimum (``llvm.maximum`` / ``llvm.minimum``) and a fused
+        # multiply-add (``llvm.fma``): MLIR ``arith.maximumf`` / ``minimumf`` / ``math.fma``
+        # semantics, for bit-identical ports of FlyDSL / MLIR kernels.
+        "math.fmaximum",
+        "math.fminimum",
+        "math.fma_fused",
         # Device ops as IR ops (``IRBuilder.s_getreg`` .. ``l2_touch_drain``):
         # the Python lowering emits the inline asm of the matching
         # ``helpers.device_ops`` helper (the same LLVM text), the direct
@@ -504,6 +510,8 @@ PYTHON_ONLY_OPCODES = frozenset(
         "tile.global_atomic_add_scoped",
         "tile.l2_touch_load",
         "tile.l2_touch_drain",
+        # An LDS byte load at a byte offset of an allocation (``IRBuilder.smem_load_u8``).
+        "tile.smem_load_u8",
     }
 )
 
@@ -1397,6 +1405,27 @@ class IRBuilder:
         ``expf`` / MLIR ``math.exp`` compile to). f32 only. Python engine only
         (``PYTHON_ONLY_OPCODES``): the C++ engine does not lower it."""
         return self._op("math.exp", [a], [a.type], result_name_hint="exp").result
+
+    def smem_load_u8(self, smem: Value, byte_index: Value) -> Value:
+        """The LDS byte at byte offset ``byte_index`` from the start of allocation ``smem`` (whatever its element
+        type), zero-extended to i32: one ``ds_read_u8`` whose constant part folds into the instruction's offset.
+        For byte tables packed in a word-typed pool (e.g. MX scale codes), where ``smem_load_vN`` reads whole
+        elements. Python engine only."""
+        return self._op("tile.smem_load_u8", [smem, byte_index], [I32], result_name_hint="lb").result
+
+    def fmaximum(self, a: Value, b: Value) -> Value:
+        """``llvm.maximum.f32``: NaN-propagating, with -0 < +0 (MLIR ``arith.maximumf``;
+        ``fmax`` is ``llvm.maxnum``). f32 only. Python engine only."""
+        return self._op("math.fmaximum", [a, b], [a.type], result_name_hint="fmaxi").result
+
+    def fminimum(self, a: Value, b: Value) -> Value:
+        """``llvm.minimum.f32`` (MLIR ``arith.minimumf``). f32 only. Python engine only."""
+        return self._op("math.fminimum", [a, b], [a.type], result_name_hint="fmini").result
+
+    def fma_fused(self, a: Value, b: Value, c: Value) -> Value:
+        """``llvm.fma.f32``: ``a * b + c`` with one rounding, always (MLIR ``math.fma``;
+        ``fma`` is ``llvm.fmuladd``, which may be unfused). f32 only. Python engine only."""
+        return self._op("math.fma_fused", [a, b, c], [a.type], result_name_hint="ffma").result
 
     def log2(self, a: Value) -> Value:
         return self._op("math.log2", [a], [a.type], result_name_hint="log2").result
@@ -6302,6 +6331,9 @@ PURE_OP_NAMES = {
     "math.exp2",
     "math.exp2_fast",
     "math.exp",
+    "math.fmaximum",
+    "math.fminimum",
+    "math.fma_fused",
     "math.log2",
     "math.rcp",
     "math.rcp_fast",

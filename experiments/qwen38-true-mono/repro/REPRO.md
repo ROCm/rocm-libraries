@@ -1,5 +1,176 @@
 # Qwen3.8-Flash-Next true rocKE monokernel stack: reproduction (TP1, MI355X)
 
+## Reproduce on your own MI355X
+
+You need:
+- one MI355X (gfx950) on Linux, with docker (or podman: replace `docker` below);
+- about 200 GB of free disk for the image, the venv and the runs, plus the checkpoint;
+- the checkpoint `Qwen3.8-Flash-Next-MXFP4`. ATOM's `scripts/qwen38_flash_mono/repro.sh convert` builds it from
+  `Qwen/Qwen3.8-Flash-Next` on Hugging Face (335 GiB download, about 500 GiB of disk while it converts).
+
+Everything else is in this directory:
+- `patches/` holds three plain `git apply` patches against pinned public commits;
+- `knobs/` holds the server environment of every arm;
+- `kit/` holds the few inputs that live in no repository: the picks, the schedule recipe, the N8 ranking, the
+  generator scripts and the benchmark driver. `kit/FILES.txt` says what each file is, and `kit/SHA256SUMS` lists their
+  hashes.
+
+**The patches apply only to the pinned commits.** They do NOT apply to ATOM `main`, which has no
+`atom/models/qwen4_exp_mono` (patch 01 fails on `df86c482` with the qwen4_exp_mono files missing). Use the
+`qwen38-megakernels` commit below.
+
+### 1. Trees (ATOM 352229d6 + 01 + 02, rocm-libraries 4478c174a13 + 03, the hybrid's 01 and 89209ac)
+
+```bash
+REPRO=/path/to/copy-rocm-lib/experiments/qwen38-true-mono/repro     # this directory
+T=$HOME/q38-c2; mkdir -p $T && cd $T
+# ATOM: the stack's tree (01 + 02) and, as a second worktree, the hybrid's tree (01 only)
+git clone --branch qwen38-megakernels https://github.com/proaditya/ATOM.git atom-truemono
+git -C atom-truemono checkout --detach 352229d6d4a756cf58146bc5cb37519dd5d5aefd
+git -C atom-truemono worktree add --detach ../atom-hybrid 352229d6d4a756cf58146bc5cb37519dd5d5aefd
+git -C atom-truemono apply $REPRO/patches/01-atom-hybrid-rocke-on-352229d6.patch
+git -C atom-truemono apply $REPRO/patches/02-atom-truemono-c2-on-01.patch
+git -C atom-hybrid   apply $REPRO/patches/01-atom-hybrid-rocke-on-352229d6.patch
+# rocKE: only its directory of rocm-libraries; the stack's commit + 03, and the hybrid's commit unpatched
+git clone --filter=blob:none --no-checkout --branch users/vanantha/rocke-monokernels \
+  https://github.com/ROCm/rocm-libraries.git rocm-libraries
+git -C rocm-libraries sparse-checkout set dnn-providers/hip-kernel-provider/rocke
+git -C rocm-libraries checkout --detach 4478c174a136aa5d3ff76e70b0a53da2dc64c91e
+git -C rocm-libraries apply $REPRO/patches/03-rocke-c2f-on-4478c174a13.patch
+git -C rocm-libraries worktree add --no-checkout --detach ../rocm-libraries-hyb 89209ac76656aede13abd8bb4e5e6ec371ed6a1f
+git -C rocm-libraries-hyb sparse-checkout set dnn-providers/hip-kernel-provider/rocke
+git -C rocm-libraries-hyb checkout --detach 89209ac76656aede13abd8bb4e5e6ec371ed6a1f
+(cd $REPRO/kit && sha256sum -c --quiet SHA256SUMS) && echo kit OK
+```
+
+The trees are file for file the trees the measured jobs ran. `python3 $REPRO/tools/tree_vs_manifest.py <tree>
+$REPRO/manifests/<stage>.manifest --ignore .git` checks it. The one expected difference is
+`atom/entrypoints/openai/serving_anthropic.py`, a non-qwen change that the patches leave out.
+
+### 2. Container, venv and checkpoint (once)
+
+```bash
+export WORK=$T/work GPU=0                                    # GPU = the HIP device index of the MI355X to use
+bash $T/atom-hybrid/scripts/qwen38_flash_mono/repro.sh setup
+# setup does the following:
+#   - pulls rocm/pytorch@sha256:bbdaba66029f905321be3bbc95206a2d9a56a2bc5300877d146ad24d40db9a12 (ROCm 10.0, torch 2.13);
+#   - builds $WORK/venv: aiter c53e9b3f, FlyDSL 0.3.4.1 (repro-constraints.txt), ATOM editable;
+#   - checks that the GPU is gfx950.
+MODEL=/path/to/Qwen3.8-Flash-Next-MXFP4
+(cd $MODEL && sha256sum -c --quiet $T/atom-hybrid/scripts/qwen38_flash_mxfp4/Qwen3.8-Flash-Next-MXFP4.sha256) && echo checkpoint OK
+```
+
+### 3. Generate the stage functions and run the benchmark
+
+One `docker run` lays the trees out the way the measured jobs saw them, with the stack's ATOM at `/atom`, the other
+trees under `/job/stages`, and the kit. It then runs `kit/in_container.sh`:
+- `gen` regenerates the stage functions with the recipe `gen_c2Ab` (and the hybrid's `gen_e2ecomp2`), then compares
+  them with the measured functions (`kit/expected`). The `.bc` files are left out of the compare, because they embed
+  the output path.
+- `bench` runs `gen`, then the measured benchmark driver unchanged.
+- `k0` does the same as `bench`, at K=0.
+
+```bash
+RUN=$T/runs/$(date -u +%Y%m%d-%H%M%S); mkdir -p $RUN
+RK=dnn-providers/hip-kernel-provider/rocke
+docker run --rm --init --ulimit nofile=65535:65535 --ulimit memlock=-1:-1 --ulimit stack=67108864 \
+  --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --ipc=host \
+  --device=/dev/kfd --device=/dev/dri --group-add video -e HIP_VISIBLE_DEVICES=$GPU -e PASSES=4 \
+  -v $T/atom-truemono:/atom -v $WORK:/work -v $MODEL:/model:ro -v $RUN:/job -v $REPRO/kit:/kit \
+  -v $T/atom-hybrid:/job/stages/hb-atom-sa -v $REPRO/kit/harness:/job/stages/h-qk-sa \
+  -v $T/rocm-libraries/$RK:/job/stages/rocke-qk-sa -v $T/rocm-libraries-hyb/$RK:/job/stages/rocke-tmbase \
+  rocm/pytorch@sha256:bbdaba66029f905321be3bbc95206a2d9a56a2bc5300877d146ad24d40db9a12 \
+  bash /kit/in_container.sh bench          # or: gen (functions only, ~1 min), k0 (the K=0 arms)
+```
+
+`bench` serves `hybrid`, `hybrid_b`, `c2s3b` and `c2s3b_b` at MTP K=3, CONC 1, TP1:
+- one untimed prime server, then `PASSES` (default 4) seeded passes with the arm order rotated;
+- one fresh server per arm-run, and 2 untimed warm-up requests per run;
+- 32 GSM8K prompts (the DFlash seed-42 selection), greedy, reasoning `xhigh`, a 2048-token cap;
+- the server flags of `FINAL-STACK.md` section 2.
+
+`hybrid_b` and `c2s3b_b` are A-vs-A twins: the same configuration under a second name. They show the session's
+noise. Every server log is checked: mono on, rocKE head on, every expected build line present, no tracebacks.
+
+The results land in `$RUN/out/q/`: `ratios.json` holds the ratios, `abs.json` the absolutes. `kit/verdict.py`
+prints PASS or FAIL against the bands below.
+
+Run time on one MI355X:
+- `setup`: about 20-40 min, once (image pull and aiter build);
+- `gen`: about 1 min;
+- `bench` at 4 passes: about 75 min. One arm-run of the stack takes about 4-4.5 min, because its layer builds
+  JIT-compile at every server start. One hybrid arm-run takes about 2.5-3.5 min.
+
+### 4. Expected result (same-session ratios; `kit/verdict.py` checks them)
+
+| check | band |
+|---|---|
+| K=3 `c2s3b` / `hybrid`, decode tok/s per request (median over requests, mean over passes) | 1.11-1.15 |
+| K=3 `c2s3b` / `hybrid`, ms per verify round (median) | 0.88-0.895 |
+| K=0 `c2s0b` / `hybrid`, tok/s per request (`k0` mode) | 1.12-1.15 |
+| twins `hybrid_b` / `hybrid`, `c2s3b_b` / `c2s3b` | tok/s within about ±1.5 %, round within about ±0.5 % |
+
+Decide on the medians and on 4 passes. Per-request tok/s also carries 2-4 % of run-to-run acceptance noise, because
+the served path is not token-deterministic. The twins show how much of a ratio is noise in your session. This tree
+states ratios only.
+
+### Serving one arm by hand (hybrid vs c2s3b)
+
+Use this inside the same container, after `gen` (`$FN` = `/job/fns/c2Ab-rocke-qk-sa`, `$FN_HYB` =
+`/job/fns/e2ecomp2-rocke-tmbase`, both written by `gen`). `knobs/<arm>.env` holds each arm's full environment, with
+`$FN`, `$FN_HYB`, `$H` (= `/job/stages/h-qk-sa`) and `$RK` (= `/job/stages/rocke-qk-sa`) as placeholders. Every server
+uses the same command line:
+
+```bash
+COMMON="ATOM_RUNNER_INLINE_SEND=1 ATOM_MONO_ENABLE=1 ATOM_ENABLE_REPLAYSSM=0"
+ARGS="--model /model --trust-remote-code -tp 1 --server-port 8000 --max-num-seqs 4 --max-model-len 10240 \
+  --gpu-memory-utilization 0.9 --method mtp --num-speculative-tokens 3"
+# hybrid (the bar): ATOM 352229d6 + 01, rocKE 89209ac
+cd /job/stages/hb-atom-sa && env $COMMON ATOM_Q38_SCHED=best ATOM_Q38_ROCKE_HEAD=1 ATOM_Q38_EXTERN_MISSING=mono \
+  "ATOM_Q38_EXTERN_STAGES=m3=$FN_HYB/moe/m3_{variant}.ll,m4=$FN_HYB/moe/m4_{variant}.ll,m5=$FN_HYB/moe/m5_{variant}.ll,b3=$FN_HYB/b3,b3pre=$FN_HYB/b3" \
+  PYTHONPATH=/job/stages/hb-atom-sa:/job/stages/rocke-tmbase/platform/python:/job/stages/rocke-tmbase/library \
+  python -m atom.entrypoints.openai_server $ARGS --hf-overrides '{"_multimodal_config": null}'
+# c2s3b (the stack): ATOM + 01 + 02 at /atom, rocKE 4478c174a13 + 03; every ATOM_Q38_* line of knobs/c2s3b.env
+cd /atom && env $COMMON "ATOM_Q38_SCHED=$(cat $FN/sched.c2.txt)" ATOM_Q38_ROCKE_HEAD=1 ATOM_Q38_EXTERN_MISSING=mono \
+  "ATOM_Q38_EXTERN_STAGES=$(grep '^ATOM_Q38_EXTERN_STAGES=' $REPRO_KNOBS/c2s3b.env | cut -d= -f2- | sed "s#\$FN#$FN#g")" \
+  ATOM_Q38_DRAFT_VOCAB=/job/stages/h-qk-sa/truemono-quick/n8/ranking.pt ATOM_Q38_DRAFT_VOCAB_N=98304 \
+  'ATOM_Q38_DRAFT_VOCAB_SPEC={"korder":"lane","ctas":256,"xpad":64,"waves_per_eu":1,"fsync":"counter"}' \
+  ATOM_Q38_TRUE_MONO=tail ATOM_Q38_TRUE_MONO_LAYER=kernels.gfx950.qwen38_mono.truemono_tail:layer_passthrough \
+  ATOM_Q38_TRUE_MONO_STATS=100000 ATOM_Q38_TM_TAIL_DRAFT=lean \
+  ATOM_Q38_RB_DEVMETA=1 ATOM_Q38_RB_DEVMETA_TRIM=1 ATOM_Q38_RB_DEVMETA_ADV=1 \
+  PYTHONPATH=/atom:/job/stages/rocke-qk-sa/platform/python:/job/stages/rocke-qk-sa/library \
+  python -m atom.entrypoints.openai_server $ARGS --hf-overrides '{"_multimodal_config": null}'
+```
+
+Notes on the hand-served commands:
+- `REPRO_KNOBS` is wherever `knobs/` is mounted; add `-v $REPRO/knobs:/knobs` to the `docker run` and set
+  `REPRO_KNOBS=/knobs`.
+- `$FN/sched.c2.txt` equals `ATOM_Q38_SCHED` of `knobs/c2s3b.env`.
+- Measure with ATOM's own client:
+  `python -m atom.benchmarks.qwen38_flash_mono.single_request_bench --base-url http://127.0.0.1:8000 --model /model --dataset gsm8k --num-prompts 32 --max-tokens 2048 --chat-template-kwargs '{"reasoning_effort": "xhigh"}'`.
+- `c2s0b` (K=0) uses the same env without `ATOM_Q38_DRAFT_VOCAB*`, `ATOM_Q38_TM_TAIL_DRAFT`, `ATOM_Q38_RB_DEVMETA*`
+  and `ATOM_ENABLE_REPLAYSSM`, and without `--method mtp --num-speculative-tokens 3`.
+
+### Troubleshooting
+
+- **No GPU in the container / wrong arch.** `in_container.sh` stops when torch sees no device, or sees one that is not
+  gfx950. Check `--device=/dev/kfd --device=/dev/dri`, the `video` / `render` groups and `HIP_VISIBLE_DEVICES`.
+- **`GEN FAIL`.** Every generated `.ll`, `.json` and sched file must equal the measured bytes. A failure means that a
+  tree, the kit or the container differs: re-check the commits, `git apply`, `kit/SHA256SUMS` and the image digest.
+- **Container COMGR, `waves=8`.** The image's COMGR (ROCm 10) miscompiles some 512-thread large-batch QSA kernels.
+  None of them is in this stack, and `gen` plus the server-log checks cover the served set. Any new lever that adds
+  such kernels must ship code objects built outside the container.
+- **The `hz` `s_nop` knob.** Inline-asm VMEM after a VALU write of its SGPR needs `s_nop 4`, which is the rocKE knob
+  `hz` (default on). Never turn it off. The served CONC-1 functions of this stack do not contain that pattern.
+- **Noise and the compile lottery.** One recompile can shift a layer by about 1 %, and acceptance moves per-request
+  tok/s by 2-4 %. Use 4 passes, decide on the medians, and read the twins: if a twin is outside its band, the session
+  was noisy, so re-run before you judge the stack. A busy neighbour on the same GPU node also inflates means; the
+  per-request medians resist it.
+- **Means vs best pass.** A single pass can land above the 4-pass mean. Quote the 4-pass mean of the same-session
+  ratio, never the best pass.
+
+## The package in detail (and the alola cluster modes)
+
 This package reproduces the current verified best stack of the true-mono project, "consolidated stack 2". It has
 two arms: **`c2s3b`** at MTP K=3 (with **`c2s3b_n8_64k`**, the K=3 integration base) and **`c2s0b`** at K=0. Both
 are measured against the pinned hybrid ALL stack ([Qwen3.8-Flash-Next-rocKE.md](../../../../ATOM/recipes/Qwen3.8-Flash-Next-rocKE.md)
@@ -207,6 +378,7 @@ Against the stack before it (`full3_l_rba`), `c2s3b` is 0.968 of the round (8 / 
 | `gen` | `rp-gengate-rp-a2` (n01-09); re-run alone as `rp-gen-rp-a3` (n07-17) | `gen_c2Ab`: 608 / 608 and `gen_e2ecomp2`: 66 / 66 generated files byte-identical to the measured job's (`.bc` excluded) |
 | `gate` | `rp-gengate-rp-a2` | `C2_LAYER_GATE PASS` (10 cells bitwise and deterministic, `hc_mix_avg` / `c1_put_bit` mutants differ); `RB GATE PASS` (c3la 64 / 64 OK, d3la 1,728 deep checks equal, c1a 56 / 56, d0 unaffected, ADV mutant 16 / 16 DIFF); `CS_GATE PASS` (29 CPU tests, g3l / g0, 4 must-fail mutants caught). The job's rc was 1 only because of a bug in `gen_check.sh`'s own exit status; that is fixed, and `rp-gen-rp-a3` re-checks it. |
 | `quick` (1 GPU, 2 passes, n07-17) | `rp-quick-rp-a2` | K=3 `c2s3b` / hybrid: **tok/s per request (median) 1.131 [1.122-1.141], ms per round (median) 0.889 [0.889-0.889]**. Twin `c2s3b_b`: 1.135 / 0.889. `c2s3b_n8_64k`: 1.135 / 0.886. hybrid_b: 0.996 / 1.000. K=0 `c2s0b` / hybrid: **1.142 [1.140-1.143]**; twin 1.138; hybrid_b 1.004. Every server-log check passed. |
+| "Reproduce on your own MI355X" step 1, from fresh public clones (2026-11-06, alola CPU job 68293691) | `hackathon-prep/qwen38/truemono-repro/sa-check/check_fresh.sh` | `git apply` of 01, 02 (ATOM) and 03 (rocm-libraries) all clean. The four trees equal the measured stages file for file: 1941 / 1924 / 2675 / 2400 files, 0 differences. `kit/SHA256SUMS` OK. Steps 2-3 (`docker run` + `kit/in_container.sh`) were not run on a GPU in this round. Their content is the measured jobs' harness and server env, byte for byte. |
 | `full` (both nodes, 4 passes, T4) | not run | Its pieces are the measured c2 jobs (`qk-c2-e1/e2/f1/f2/e4`, `qk-c2-t4b`). This package's own `full` and `t4` modes were not exercised (GPU budget). |
 
 ## Known pitfalls

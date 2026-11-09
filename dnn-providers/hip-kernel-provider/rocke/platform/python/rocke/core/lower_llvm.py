@@ -489,6 +489,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
     "exp.f32": "declare float @llvm.exp.f32(float)",
+    "maximum.f32": "declare float @llvm.maximum.f32(float, float)",
+    "minimum.f32": "declare float @llvm.minimum.f32(float, float)",
+    "fma.f32": "declare float @llvm.fma.f32(float, float, float)",
     "amdgcn.exp2.f32": "declare float @llvm.amdgcn.exp2.f32(float)",
     "log2.f32": "declare float @llvm.log2.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
@@ -3134,6 +3137,37 @@ class _Lowerer:
         self._current().emit(
             f"  {op.result.name} = call float @llvm.exp.f32(float {self._operand(v)})"
         )
+
+    def _op_tile_smem_load_u8(self, op: Op) -> None:
+        """``tile.smem_load_u8`` (Python engine only): a byte GEP from the allocation's base, ``load i8``, zext."""
+        smem, idx = op.operands
+        gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
+        gep, byte = self._fresh("lb.gep"), self._fresh("lb.b")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds i8, ptr addrspace(3) {base_ptr}, i32 {self._operand(idx)}"
+        )
+        self._current().emit(f"  {byte} = load i8, ptr addrspace(3) {gep}, align 1")
+        self._current().emit(f"  {op.result.name} = zext i8 {byte} to i32")
+
+    def _op_math_fmaximum(self, op: Op) -> None:
+        """``math.fmaximum`` (Python engine only): ``llvm.maximum.f32``."""
+        self._f32_intrinsic(op, "maximum")
+
+    def _op_math_fminimum(self, op: Op) -> None:
+        """``math.fminimum`` (Python engine only): ``llvm.minimum.f32``."""
+        self._f32_intrinsic(op, "minimum")
+
+    def _op_math_fma_fused(self, op: Op) -> None:
+        """``math.fma_fused`` (Python engine only): ``llvm.fma.f32``."""
+        self._f32_intrinsic(op, "fma")
+
+    def _f32_intrinsic(self, op: Op, name: str) -> None:
+        if any(v.type.name != "f32" for v in op.operands):
+            raise NotImplementedError(f"math.{name} currently supports f32")
+        self._need(f"{name}.f32")
+        args = ", ".join(f"float {self._operand(v)}" for v in op.operands)
+        self._current().emit(f"  {op.result.name} = call float @llvm.{name}.f32({args})")
 
     def _op_math_exp2_fast(self, op: Op) -> None:
         (v,) = op.operands

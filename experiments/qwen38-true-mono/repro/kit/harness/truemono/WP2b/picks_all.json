@@ -1,0 +1,206 @@
+{
+ "delta.r4s": {
+  "b1": "asm_lead=-1,asm_tail=20,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,s_cpol=2,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,ra=4,s_cpol=2,w_cpol=2"
+ },
+ "delta.r1": {
+  "b1": "asm_lead=-1,asm_tail=12,barrier=lds,hdr=vmem,mb_impl=irf,mfma=asm,oob=split,ra=3,s_cpol=2,w_cpol=3",
+  "c1": "asop=1,barrier=lds,mb_impl=ir,pause=1,ra=3,w_cpol=19"
+ },
+ "delta_ple.r1": {
+  "b1": "asm_lead=-1,asm_tail=12,barrier=lds,cprio=3,mfma=asm,oob=split,s_cpol=2,w_cpol=2",
+  "c1": "asm_lead=-1,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,ra=4,s_cpol=2,w_cpol=2",
+  "p1": ""
+ },
+ "delta_ple.r4s": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "qsa.r4s": {
+  "c1": "bsop=1,mb_impl=ir,mfma=asm,oob=split,pause=2,w_cpol=19",
+  "q1": "asm_lead=-1,asm_tail=12,asop=1,epi=reg,mb_impl=irf,mfma=asm,oob=split,pause=8,ra=3,s_cpol=18,sgb=mfma2,w_cpol=2"
+ },
+ "qsa.r1": {
+  "c1": "mb_impl=ir,mfma=asm,oob=split,pause=0,ra=4,w_cpol=19",
+  "q1": "mb_impl=irf,mfma=asm,oob=split,pause=0,s_cpol=18,w_cpol=19"
+ },
+ "delta.r4g2": {
+  "b1": "asm_lead=-1,asm_tail=12,barrier=lds,hdr=vmem,mb_impl=irf,mfma=asm,oob=split,ra=3,s_cpol=2,w_cpol=3",
+  "c1": "asop=1,barrier=lds,mb_impl=ir,pause=1,ra=3,w_cpol=19"
+ },
+ "delta.r8g4": {
+  "b1": "asm_lead=-1,barrier=lds,mb_impl=irf,mfma=asm,oob=split,pause=0,ra=3,s_cpol=18,w_cpol=2",
+  "c1": "asop=1,mb_impl=ir,pause=16,w_cpol=19"
+ },
+ "delta.r16g4": {
+  "b1": "asm_lead=-1,asm_tail=12,barrier=lds,hdr=vmem,mb_impl=irf,mfma=asm,oob=split,pause=4,s_cpol=2,w_cpol=3",
+  "c1": "asop=1,barrier=lds,mb_impl=ir,pause=1,ra=3,w_cpol=19"
+ },
+ "qsa.r4g2": {
+  "c1": "mb_impl=ir,mfma=asm,oob=split,pause=0,ra=4,w_cpol=19",
+  "q1": "mb_impl=irf,mfma=asm,oob=split,pause=0,s_cpol=18,w_cpol=19"
+ },
+ "qsa.r8g4": {
+  "c1": "mb_impl=ir,mfma=asm,oob=split,pause=0,ra=4,w_cpol=19",
+  "q1": "mb_impl=irf,mfma=asm,oob=split,pause=0,s_cpol=18,w_cpol=19"
+ },
+ "qsa.r16g4": {
+  "c1": "asm_lead=3,bsop=1,mb_impl=ir,mfma=asm,oob=split,pause=2,sgb=mfma2,w_cpol=19",
+  "q1": "asm_lead=-1,asm_tail=12,asop=1,mb_impl=irf,mfma=asm,oob=split,pause=8,ra=3,s_cpol=18,sgb=mfma2,w_cpol=2"
+ },
+ "delta_ple.r4g2": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta_ple.r8g4": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta_ple.r16g4": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,mb_impl=ir,mfma=asm,oob=split,pause=1,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta.r2": {
+  "b1": "asm_lead=-1,asm_tail=12,barrier=lds,hdr=vmem,mb_impl=irf,mfma=asm,oob=split,ra=3,s_cpol=2,w_cpol=3",
+  "c1": "asop=1,barrier=lds,mb_impl=ir,pause=1,ra=3,w_cpol=19"
+ },
+ "delta.r3": {
+  "b1": "asm_lead=-1,asm_tail=20,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,s_cpol=2,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,ra=4,s_cpol=2,w_cpol=2"
+ },
+ "delta.r4": {
+  "b1": "asm_lead=-1,asm_tail=20,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,s_cpol=2,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,ra=4,s_cpol=2,w_cpol=2"
+ },
+ "delta.r2s": {
+  "b1": "asm_lead=-1,asm_tail=12,barrier=lds,hdr=vmem,mb_impl=irf,mfma=asm,oob=split,ra=3,s_cpol=2,w_cpol=3",
+  "c1": "asop=1,barrier=lds,mb_impl=ir,pause=1,ra=3,w_cpol=19"
+ },
+ "delta.r3s": {
+  "b1": "asm_lead=-1,asm_tail=20,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,s_cpol=2,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,ra=4,s_cpol=2,w_cpol=2"
+ },
+ "qsa.r2": {
+  "c1": "mb_impl=ir,mfma=asm,oob=split,pause=0,ra=4,w_cpol=19",
+  "q1": "mb_impl=irf,mfma=asm,oob=split,pause=0,s_cpol=18,w_cpol=19"
+ },
+ "qsa.r3": {
+  "c1": "mb_impl=ir,mfma=asm,oob=split,pause=0,ra=4,w_cpol=19",
+  "q1": "mb_impl=irf,mfma=asm,oob=split,pause=0,s_cpol=18,w_cpol=19"
+ },
+ "qsa.r4": {
+  "c1": "bsop=1,mb_impl=ir,mfma=asm,oob=split,pause=2,w_cpol=19",
+  "q1": "asm_lead=-1,asm_tail=12,asop=1,epi=reg,mb_impl=irf,mfma=asm,oob=split,pause=8,ra=3,s_cpol=18,sgb=mfma2,w_cpol=2"
+ },
+ "qsa.r2s": {
+  "c1": "bsop=1,mb_impl=ir,mfma=asm,oob=split,pause=2,w_cpol=19",
+  "q1": "asm_lead=-1,asm_tail=12,asop=1,epi=reg,mb_impl=irf,mfma=asm,oob=split,pause=8,ra=3,s_cpol=18,sgb=mfma2,w_cpol=2"
+ },
+ "qsa.r3s": {
+  "c1": "bsop=1,mb_impl=ir,mfma=asm,oob=split,pause=2,w_cpol=19",
+  "q1": "asm_lead=-1,asm_tail=12,asop=1,epi=reg,mb_impl=irf,mfma=asm,oob=split,pause=8,ra=3,s_cpol=18,sgb=mfma2,w_cpol=2"
+ },
+ "delta_ple.r2": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta_ple.r3": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta_ple.r4": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta_ple.r2s": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta_ple.r3s": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta.r12g4": {
+  "b1": "asm_lead=-1,asm_tail=20,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,s_cpol=2,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,ra=4,s_cpol=2,w_cpol=2"
+ },
+ "delta.r6g2": {
+  "b1": "asm_lead=-1,asm_tail=20,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,s_cpol=2,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,ra=4,s_cpol=2,w_cpol=2"
+ },
+ "delta.r8g2": {
+  "b1": "asm_lead=-1,asm_tail=20,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,s_cpol=2,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,ra=4,s_cpol=2,w_cpol=2"
+ },
+ "delta.r6g3": {
+  "b1": "asm_lead=-1,asm_tail=20,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,s_cpol=2,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,ra=4,s_cpol=2,w_cpol=2"
+ },
+ "delta.r9g3": {
+  "b1": "asm_lead=-1,asm_tail=12,barrier=lds,hdr=vmem,mb_impl=irf,mfma=asm,oob=split,ra=3,s_cpol=2,w_cpol=3",
+  "c1": "asop=1,barrier=lds,mb_impl=ir,pause=1,ra=3,w_cpol=19"
+ },
+ "delta.r12g3": {
+  "b1": "asm_lead=-1,asm_tail=20,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,s_cpol=2,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,ra=4,s_cpol=2,w_cpol=2"
+ },
+ "qsa.r12g4": {
+  "c1": "bsop=1,mb_impl=ir,mfma=asm,oob=split,pause=2,w_cpol=19",
+  "q1": "asm_lead=-1,asm_tail=12,asop=1,epi=reg,mb_impl=irf,mfma=asm,oob=split,pause=8,ra=3,s_cpol=18,sgb=mfma2,w_cpol=2"
+ },
+ "qsa.r6g2": {
+  "c1": "mb_impl=ir,mfma=asm,oob=split,pause=0,ra=4,w_cpol=19",
+  "q1": "mb_impl=irf,mfma=asm,oob=split,pause=0,s_cpol=18,w_cpol=19"
+ },
+ "qsa.r8g2": {
+  "c1": "mb_impl=ir,mfma=asm,oob=split,pause=0,ra=4,w_cpol=19",
+  "q1": "mb_impl=irf,mfma=asm,oob=split,pause=0,s_cpol=18,w_cpol=19"
+ },
+ "qsa.r6g3": {
+  "c1": "bsop=1,mb_impl=ir,mfma=asm,oob=split,pause=2,w_cpol=19",
+  "q1": "asm_lead=-1,asm_tail=12,asop=1,epi=reg,mb_impl=irf,mfma=asm,oob=split,pause=8,ra=3,s_cpol=18,sgb=mfma2,w_cpol=2"
+ },
+ "qsa.r12g3": {
+  "c1": "mb_impl=ir,mfma=asm,oob=split,pause=0,ra=4,w_cpol=19",
+  "q1": "mb_impl=irf,mfma=asm,oob=split,pause=0,s_cpol=18,w_cpol=19"
+ },
+ "delta_ple.r12g4": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta_ple.r6g2": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta_ple.r8g2": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta_ple.r6g3": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta_ple.r9g3": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ },
+ "delta_ple.r12g3": {
+  "b1": "asm_tail=20,asop=1,barrier=lds,cprio=3,mb_impl=ir,mfma=asm,oob=split,pause=8,ra=1,s_cpol=18,w_cpol=2",
+  "c1": "asm_lead=3,asm_tail=20,barrier=lds,bsop=1,mb_impl=irf,mfma=asm,oob=split,pause=16,ra=4,s_cpol=2,w_cpol=2",
+  "p1": "oob=split,pause=4"
+ }
+}

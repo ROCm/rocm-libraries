@@ -1,0 +1,45 @@
+Repro kit: the non-repo inputs of the frozen stack (c2s3b / c2s0b), copied byte for byte from the frozen harness stage
+h-qk-c2-f (sha256 ce005780d12f7bad..., the stage every measured c2 job ran). Paths under harness/ are the stage's own,
+so kit/harness can be mounted as the harness stage and the measured scripts run unchanged. SHA256SUMS covers every
+file. Nothing here holds absolute performance numbers.
+
+in_container.sh                          entry point inside the pinned container: gen (regenerate + verify the stage
+                                         functions), bench (K=3 arms), k0 (K=0 arms); see REPRO.md
+verdict.py                               PASS / FAIL of a run's ratios.json against the expected ratio bands
+expected/manifest-c2Ab.sha256            sha256 of the 655 generated stack functions of the measured job qk-c2-e4-n01
+                                         (= hackathon-prep truemono/C2/results/final_functions_c2Ab.manifest.sha256)
+expected/manifest-e2ecomp2.sha256        sha256 of the hybrid's 66 generated functions (same job)
+
+harness/common/server.sh                 start / stop the ATOM server (the served flags of FINAL-STACK.md 2.2), q38_speed
+                                         = ATOM's single_request_bench client
+harness/common/caches.sh                 job-local compile caches (comgr, FlyDSL, Triton, inductor under /job/cache)
+harness/e2ecomp2/gen.sh                  the hybrid's rocKE stage functions (fused MoE M3-M5, B3 + prologue), and the
+                                         stack's base set (gen_tuned starts from it)
+harness/truemono-quick/quick.sh          the benchmark driver: prime server, PASSES rotated seeded passes, one fresh
+                                         server per arm-run, 2 warm-up requests, 32 gsm8k prompts (DFlash seed 42),
+                                         CONC 1, greedy, reasoning xhigh, 2048-token cap, server-log checks
+harness/truemono-quick/summarize.py      per-arm medians and ratios to the same-session hybrid (ratios.json, abs.json)
+harness/truemono-quick/arms.sh           arm definitions: hybrid (pinned hybrid ATOM + rocKE 89209ac), hyb_tm
+harness/truemono-quick/arms.d/c2.sh      the frozen arms c2s3b / c2s3b_b / c2s0b / c2s0b_b and the recipe gen_c2Ab
+harness/truemono-quick/arms.d/cs.sh      the consolidated stack's K=3 / K=0 tail env (_cs_full3 / _cs_full0),
+                                         CS_GEN_PP fix of gen_e2ecomp2's PYTHONPATH
+harness/truemono-quick/arms.d/tuned.sh   gen_tuned / gen_tunedHqd (picksH + qsa:qdense=3), TUNED_ENV, N8 head spec
+harness/truemono-quick/arms.d/n8.sh      N8_RANK (the draft-vocab ranking path)
+harness/truemono-quick/arms.d/w8c.sh     gen_w8c: the WP2c QSA functions (qsa2.gen, knobs) + schedule overrides
+harness/truemono-quick/arms.d/w8c2.sh    gen_w8c57 (Q3 / Q4 without r4s), hybrid_b twin, _w8c57_env
+harness/truemono-quick/lookback/gen_tuned.py  writes the per-kind MoE / B3 functions, sched.txt, expect_k*.txt from picks
+harness/truemono-quick/lookback/space.py      knob spaces gen_tuned.py imports
+harness/truemono-quick/lookback/picksH.json   the in-situ lookback picks per CONC-1 cell (schedule groups + MoE / B3 knobs)
+harness/truemono-quick/n8/ranking.pt     N8 draft vocab: frequency-ranked token ids (torch tensor, 1.99 MB; sha256 in
+                                         SHA256SUMS). Kept in the kit: the stack serves its top 98,304 ids
+harness/truemono/RB/arms_rb.sh           _rb_on: ATOM_Q38_RB_DEVMETA=1 (+ TRIM / ADV) and its log rejects
+harness/truemono/WP2a-fix/arms_wp2a.sh   _wp2a_gen / _wp2a_x: the HC functions and their extern entries
+harness/truemono/WP2a-fix/wp2a_gen.py    generator of the HC functions (A1 / A2 / M1 / M2) + the picks' HC schedule groups
+harness/truemono/WP2a-fix/picks_final.json  WP2a picks (12 cells)
+harness/truemono/WP2b/arms_wp2b.sh       gen_wp2bHqd / _wp2b_x: the GEMV functions and their extern entries
+harness/truemono/WP2b/wp2b_gen.py        generator of the GEMV functions (B1 / C1 / Q1 / P1)
+harness/truemono/WP2b/picks_all.json     WP2b picks (48 cells; the 2026-11-02 04:27 UTC version the jobs used)
+
+Recipe constants (in arms.d/c2.sh): WP2c qsa2 knobs numa=1,qdense=3,prepoll=q5+q6+q7,q5_kpre=True; schedule override
+qsa.r1:hold.q7=64. The served schedule string is ATOM_Q38_SCHED in ../knobs/c2s3b.env; gen writes the same string to
+/job/fns/c2Ab-rocke-qk-sa/sched.c2.txt (outside the manifest, which covers k / hc / qsa2 / qsa2_34).
