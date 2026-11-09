@@ -34,11 +34,25 @@
 #include <miopen/handle.hpp>
 #include <string>
 #include <map>
+#include <set>
+#include <numeric>
 #include <optional>
 #include <vector>
 #include <sstream>
 #include <algorithm>
 #include <cmath>
+
+// Implemented in ai_heuristics.cpp; forward-declared (like the offline generator) so the key-format
+// round-trip test can rebuild the vocabulary the same way generation and the enumeration path do.
+namespace miopen {
+namespace solver {
+namespace conv {
+void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
+                          std::vector<int>& indexes,
+                          std::vector<std::vector<std::string>>& kernels);
+} // namespace conv
+} // namespace solver
+} // namespace miopen
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 using namespace miopen::ai::tuning::candidate_selection;
@@ -393,6 +407,93 @@ TEST_P(GPU_CandidateSelection_FP32, ModelSelectBestCandidateTableMissFallsBack_T
         kDisable); // restore before asserting, so leaks can't occur
     EXPECT_TRUE(result.IsEmpty())
         << "A config-table miss must yield an empty result (non-AI fallback), not a pick";
+}
+
+// Pins the key format the whole precompute design depends on. Rebuild each shipped table's keys the
+// way the offline generator and the runtime enumeration path do -- the vocab config strings ->
+// FillHeuristicKernels -> [ExpandKernelParamsWithSplitK] -> EncodeKernelParams -- and assert every
+// resulting key is in the table and returns the stored embedding. If EncodeKernelParams or
+// FillHeuristicKernels ever drift from how a table was generated, every lookup would miss and all
+// solvers would silently fall to the non-AI heuristic; this catches that. CPU-only (no GPU
+// kernels).
+TEST_P(GPU_CandidateSelection_FP32, TableKeysRoundTripThroughEncodeKernelParams_Test)
+{
+    const auto& p = GetParam();
+    CandidateSelectionMetadata meta(p.arch, p.solver);
+    const auto& vocab = GetConfigEmbeddingVocab(p.arch, p.solver);
+    ASSERT_FALSE(vocab.empty()) << "no v3 vocab for " << p.arch << " " << p.solver;
+
+    const bool uses_split_k = p.solver.find("Fwd") == std::string::npos; // Bwd/Wrw use split_k
+
+    // Recover the config-string vocabulary (strip the "+<split_k>" suffix that follows the final
+    // '>').
+    std::map<std::string, std::vector<float>> emb_by_id;
+    std::vector<std::string> all_kernels;
+    std::set<std::string> seen_cfg;
+    for(const auto& [kid, emb] : vocab)
+    {
+        emb_by_id[kid]  = emb;
+        std::string cfg = kid;
+        const auto gt   = kid.rfind('>');
+        const auto plus = kid.find('+', gt == std::string::npos ? 0 : gt);
+        if(plus != std::string::npos)
+            cfg = kid.substr(0, plus);
+        if(seen_cfg.insert(cfg).second)
+            all_kernels.push_back(cfg);
+    }
+
+    std::vector<int> indexes;
+    std::vector<std::vector<std::string>> heuristic_kernels;
+    miopen::solver::conv::FillHeuristicKernels(all_kernels, indexes, heuristic_kernels);
+
+    std::vector<std::vector<std::string>> params;
+    std::vector<std::string> param_kernel_ids;
+    if(uses_split_k)
+    {
+        const std::vector<int>& split_ks =
+            meta.GetSplitKValues(); // the set the table was built with
+        std::vector<int> hidx(heuristic_kernels.size());
+        std::iota(hidx.begin(), hidx.end(), 0);
+        auto [expanded, mapping] = ExpandKernelParamsWithSplitK(
+            heuristic_kernels, hidx, split_ks, accept_all_combinations);
+        params = std::move(expanded);
+        param_kernel_ids.resize(params.size());
+        for(std::size_t i = 0; i < params.size() && i < mapping.size(); ++i)
+        {
+            const int kidx = mapping[i].first;
+            if(kidx >= 0 && static_cast<std::size_t>(kidx) < indexes.size())
+                param_kernel_ids[i] =
+                    all_kernels[indexes[kidx]] + "+" + std::to_string(mapping[i].second);
+        }
+    }
+    else
+    {
+        params = heuristic_kernels;
+        param_kernel_ids.resize(params.size());
+        for(std::size_t j = 0; j < params.size() && j < indexes.size(); ++j)
+            param_kernel_ids[j] = all_kernels[indexes[j]];
+    }
+
+    const auto encoded = EncodeKernelParams(params, meta, uses_split_k);
+    ASSERT_EQ(encoded.size(), param_kernel_ids.size());
+
+    std::size_t checked = 0;
+    for(std::size_t i = 0; i < encoded.size(); ++i)
+    {
+        const auto it = emb_by_id.find(param_kernel_ids[i]);
+        if(it == emb_by_id.end())
+            continue; // sentinel/unknown, deduped, or not a vocab row
+        const auto hit = TryEncodeKernelConfigsFromTable({encoded[i]}, p.arch, p.solver);
+        ASSERT_TRUE(hit.has_value()) << "EncodeKernelParams key for vocab id '"
+                                     << param_kernel_ids[i] << "' is not in the shipped table";
+        ASSERT_EQ(hit->size(), 1u);
+        EXPECT_EQ((*hit)[0], it->second)
+            << "table returned a different embedding for '" << param_kernel_ids[i] << "'";
+        ++checked;
+    }
+    EXPECT_GT(checked, 0u) << "no vocab keys were round-tripped";
+    EXPECT_GE(checked, vocab.size() / 2)
+        << "too few vocab keys matched (" << checked << "/" << vocab.size() << ")";
 }
 
 TEST_P(GPU_CandidateSelection_FP32, ExpandKernelParamsWithSplitK_Test)
