@@ -128,8 +128,9 @@ packing those inputs into the required device layout.
 ### MX block-scaled operands
 
 Each operand retains its `mxBlockA/B` block size and `mxTypeA/B` scale datatype.
-The descriptor also retains `mxScaleFormat`: 0 for ordinary scales, 1 for
-gfx950 host-preswizzled scales, and 2 for gfx1250 TDM scales. A zero block size
+The descriptor also retains the scale layout as `mx_scale_format`, an
+`MXScaleFormat`: `NO_SWIZZLE` for ordinary scales, `HOST_PRE_SWIZZLE` for gfx950
+host-preswizzled scales, and `IN_MEMORY_SWIZZLE` for gfx1250 TDM scales. A zero block size
 means the operand is unscaled. These scales are part of the multiplication,
 so they cannot be disabled like an optional epilogue.
 

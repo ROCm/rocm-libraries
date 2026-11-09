@@ -11,6 +11,7 @@ from itertools import product
 import msgpack
 import pytest
 from tensilelite.Utilities.gemm_problem_for_solution import (
+    MXScaleFormat,
     UnsupportedSolution,
     load_library_metadata,
 )
@@ -398,6 +399,7 @@ def test_gfx950_mx_streamk_preserves_scales_and_original_index(tmp_path, dtype, 
         problem.mx_type_b,
         problem.mx_scale_format,
     ) == (32, 32, "E8", "E8", 1)
+    assert problem.mx_scale_format is MXScaleFormat.HOST_PRE_SWIZZLE
     assert (problem.m, problem.n, problem.k) == (128, 96, 8 * depth)
     assert problem.solution_index == 17
 

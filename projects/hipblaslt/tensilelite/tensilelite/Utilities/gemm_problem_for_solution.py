@@ -11,6 +11,7 @@ an installed GPU. Execution and native solution support checks happen later.
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from enum import IntEnum
 from math import isfinite, lcm
 from pathlib import Path
 from types import MappingProxyType
@@ -39,6 +40,19 @@ AUTOMATIC_SPLIT_GROUPS = 2
 # Serialized bias-source codes: the bias reduction of a gradient epilogue reads
 # A, B or D. Code 2 (C) does not occur in shipped solutions.
 _BIAS_SOURCES = {0: "A", 1: "B", 3: "D"}
+
+
+class MXScaleFormat(IntEnum):
+    """Layout of MX block scales, as serialized in ``mxScaleFormat``.
+
+    The names are TensileLite's ``MXScaleFormat`` parameter values.
+    """
+
+    NO_SWIZZLE = 0
+    # Scales rearranged on the host for the gfx950 subtile pipeline.
+    HOST_PRE_SWIZZLE = 1
+    # Scales rearranged in device memory by gfx1250 tensor data movement.
+    IN_MEMORY_SWIZZLE = 2
 
 
 class UnsupportedSolution(Exception):
@@ -255,8 +269,8 @@ class GemmProblem:
     with E, meaning its derivative when ``gradient`` is set; ``amax_d`` also
     returns the absolute maximum of D.
     Native execution still checks solution support.
-    MX block sizes of zero mean unscaled operands. MX scale format is 0 for
-    ordinary scales, 1 for host-preswizzled gfx950 scales, or 2 for gfx1250 TDM.
+    MX block sizes of zero mean unscaled operands; ``mx_scale_format`` gives the
+    scales' layout.
     ``grouped_members`` is None for a single GEMM, or the ordered (M, N, K)
     shapes in a grouped dispatch. The scalar dimensions describe its first member.
     Swizzle flags request packed device layouts; adapters rearrange the logical
@@ -287,7 +301,7 @@ class GemmProblem:
     mx_block_b: int = 0
     mx_type_a: str = "E8"
     mx_type_b: str = "E8"
-    mx_scale_format: int = 0
+    mx_scale_format: MXScaleFormat = MXScaleFormat.NO_SWIZZLE
     alpha: int | float = 1
     beta: int | float = 0
     gradient: bool = False
@@ -321,7 +335,9 @@ class GemmProblem:
         return self.m * self.k, self.n * self.k, self.m * self.n, self.m * self.n
 
 
-@dataclass(frozen=True, slots=True)
+# Equality and hashing are by identity: comparing two loads record by record
+# has no use, and the records are not hashable.
+@dataclass(frozen=True, slots=True, eq=False)
 class LibraryMetadata:
     """Descriptions of the kernels in one built library.
 
@@ -377,7 +393,10 @@ class LibraryMetadata:
             finite_scalars = False
         if not finite_scalars:
             raise ValueError("alpha and beta must be finite real numbers")
-        record = self._records[solution_index]
+        try:
+            record = self._records[solution_index]
+        except KeyError:
+            raise KeyError(f"Solution index {solution_index} was not loaded") from None
         p, mapping = record["problemType"], record["sizeMapping"]
         if beta != 0 and not p.get("useBeta", True):
             raise UnsupportedSolution(solution_index, ["nonzero beta without beta support"])
@@ -438,8 +457,9 @@ class LibraryMetadata:
             )
         mx_types = tuple(p.get(f"mxType{operand}", "E8") for operand in "AB")
         mx_format = p.get("mxScaleFormat", 0)
-        if type(mx_format) is not int or mx_format not in (0, 1, 2):
+        if type(mx_format) is not int or mx_format not in MXScaleFormat.__members__.values():
             raise ValueError(f"Solution {solution_index}: invalid mxScaleFormat {mx_format!r}")
+        mx_format = MXScaleFormat(mx_format)
         types = {key: p[f"{key}Type"] for key in "abcd"}
         compute_a = p.get("computeInputTypeA", p.get("computeInputType", types["a"]))
         compute_b = p.get("computeInputTypeB", p.get("computeInputType", types["b"]))
