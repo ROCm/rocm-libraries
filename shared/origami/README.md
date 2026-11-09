@@ -369,7 +369,7 @@ cmake -S . -B build/ \
 cmake --build build/ --parallel
 ```
 
-With `ORIGAMI_ENABLE_NN=ON`, Origami can load TWREC YAML manifests/sidecars from `data/nn/tilewright/,<arch>` (typically fetched externally).
+Download tilewright weights into `shared/origami/data/nn/tilewright/gfx950/`. A hipBLASLt build with `ORIGAMI_ENABLE_NN=ON` copies that directory next to each Tensile library, and `PredictionLibrary` loads the copy from the logic-file directory. Set `ORIGAMI_NN_WEIGHTS_DIR` to that download directory to load it directly.
 
 **hipBLASLt** uses the same `ORIGAMI_ENABLE_NN` option (default **OFF**). Enable NN when configuring hipBLASLt:
 
