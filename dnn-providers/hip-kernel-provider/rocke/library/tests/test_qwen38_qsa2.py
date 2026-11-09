@@ -132,11 +132,34 @@ MUTANT_CELLS = {
     "q4_rank": ("q4", {}), "qdense_drop": ("q7", {"qdense": 3}), "splitkv_norescale": ("q7", {"fuse": "splitkv"}),
     "splitkv_drop": ("q7", {"fuse": "splitkv"}), "fuse_den": ("q7", {"fuse": "single"}),
     "tile_norescale": ("q7", {"fuse": "tile"}),
+    "q5_mm_drop": ("q5", {"q5_mm": "mfma"}), "q7_mm_drop": ("q7", {"q7_mm": "mfma"}),
+    "q7_vdrop": ("q7", {"q7_mm": "mfma", "q7_vskip": True}),
 }  # fmt: skip
 
 
 def test_every_mutant_has_a_cell():
     assert set(MUTANT_CELLS) == set(MUTANTS)
+
+
+@pytest.mark.parametrize("stage,kw", [
+    ("q7", {"sigm": "hw"}), ("q5", {"q5_mm": "mfma"}), ("q7", {"q7_mm": "mfma"}),
+    ("q7", {"q7_mm": "mfma", "q7_vskip": True}),
+])  # fmt: skip
+def test_new_knobs_change_their_stage_and_default_is_unchanged(stage, kw):
+    base = _ir(stage)
+    assert _ir(stage, knobs=QsaKnobs(**kw)) != base
+    off = {"sigm": "acc", "q5_mm": "none", "q7_mm": "none", "q7_vskip": False}
+    assert _ir(stage, knobs=QsaKnobs(**off)) == base
+    assert QsaKnobs(**kw).diff()
+    assert not set(QsaKnobs().as_dict()) & {"sigm", "q5_mm", "q7_mm", "q7_vskip"}  # off: the sidecar is unchanged
+
+
+def test_new_knob_validation():
+    for bad in ({"q7_vskip": True}, {"q5_mm": "mfma", "fuse": "tile"}, {"q7_mm": "mfma", "fuse": "single"},
+                {"mutate": "q7_vdrop"}, {"sigm": "fast"}):  # fmt: skip
+        with pytest.raises(ValueError):
+            QsaKnobs(**bad)
+    assert QsaKnobs(sigm="hw").tolerance and QsaKnobs(q5_mm="mfma").tolerance and QsaKnobs(q7_mm="mfma").tolerance
 
 
 @pytest.mark.parametrize("m", sorted(MUTANTS))

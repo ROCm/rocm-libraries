@@ -90,7 +90,8 @@ KNOB_STAGE = [
     (dict(pre="args"), "a1"), (dict(spread=10), "a1"), (dict(spread=2), "a2"), (dict(stats="halves"), "m1"),
     (dict(hbar=0), "a1"), (dict(sgb=1, ra=1), "m1"), (dict(anchor=0), "a1"), (dict(anchor=0), "m2"),
     (dict(amax="fmax"), "a2"), (dict(amax="fmax"), "a1"), (dict(shfl4="select"), "m1"), (dict(inv="regs"), "a1"),
-    (dict(inv="regs"), "m2"),
+    (dict(inv="regs"), "m2"), (dict(invmath="rsq32"), "a1"), (dict(invmath="rsq32"), "m2"), (dict(sigm="hw"), "a2"),
+    (dict(sigm="hw"), "m2"),
 ] + [(dict(mutate=m), st) for m, st in (("eps", "a1"), ("down_part", "m1"), ("pack_scale", "a1"), ("inj_lane", "a1"),
                                          ("up_kit", "a2"), ("mix_avg", "m2"))]  # fmt: skip
 
@@ -99,6 +100,18 @@ KNOB_STAGE = [
 def test_every_knob_acts(kw, stage):
     """Every knob value changes the IR of a stage it applies to (no silently ignored knob)."""
     assert _ir(_spec(stage, **kw)) != _ir(_spec(stage))
+
+
+def test_fast_math_defaults_are_spelled_out():
+    """``invmath="f64"`` / ``sigm="acc"`` are the defaults: spelling them out changes nothing."""
+    for st in ("a1", "a2", "m1", "m2"):
+        assert _ir(_spec(st, invmath="f64", sigm="acc")) == _ir(_spec(st))
+
+
+@pytest.mark.parametrize("bad", [{"invmath": "rsq64"}, {"sigm": "fast"}])
+def test_fast_math_knobs_validate(bad):
+    with pytest.raises(ValueError):
+        H.HcKnobs(**bad)
 
 
 def test_sgb_with_read_ahead_differs_from_sgb_alone():

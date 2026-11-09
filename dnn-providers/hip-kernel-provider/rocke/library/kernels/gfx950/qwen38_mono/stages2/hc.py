@@ -267,6 +267,9 @@ SCALES = ("ldsstep", "hoist", "opsel")
 A2_ORDERS = ("mono", "h_first")
 AMAXES = ("umax", "fmax")
 INVS = ("lds", "regs")
+INVMATHS = ("f64", "rsq32")  # the inverse RMS: the reference f64 sqrt + divide | fp32 v_rsq_f32 (TOLERANCE CLASS)
+SIGMS = ("acc", "hw")  # sigmoid / SiLU: accurate exp + correctly rounded divide | v_exp_f32 + v_rcp_f32 (TOLERANCE CLASS)
+L2E = 1.4426950408889634
 SHFL4S = ("rowshift", "select")
 STATS = ("streams", "halves")
 PRES = ("none", "args")
@@ -328,6 +331,13 @@ class HcKnobs:
       (every wave's norm loads ahead of any weight stream) | 0 = none.
     acc: TOLERANCE CLASS (N1 hook, never a default): K-split accumulators per down chain (1 = FlyDSL; 2 = two
       chains summed at the end: changes the summation order).
+    invmath: TOLERANCE CLASS (default-off, e2e fast-math (a)): the streams' inverse RMS ``f64`` (reference: f32 -> f64
+      sqrt -> f64 divide -> f32, ~7 ``v_rsq_f64`` / ``v_rcp_f64`` / ``v_div_fixup_f64`` + refinement per build) |
+      ``rsq32`` (one ``v_rsq_f32`` on the f32 ``ms + eps``, ~1 ulp: changes the last bit of the inverse).
+    sigm: TOLERANCE CLASS (default-off, e2e fast-math (b)): sigmoid / SiLU of the HC (A2 / M2 injection gate, the
+      down's activation): ``acc`` (accurate ``llvm.exp.f32`` + correctly rounded divide) | ``hw`` (``exp2_fast`` of
+      ``-x log2 e`` = one ``v_exp_f32``, then ``v_rcp_f32``; no range guard: the argument's overflow gives ``inf``,
+      whose reciprocal is the correct 0, an underflow gives 0 -> 1).
     src: the attention HC's streams (A1 / A2 of the delta and qsa layers): ``mem`` (FlyDSL: the layer input from
       memory) | ``xl`` (the persistent kernel's cross-layer hand-off, probe P1's ``xl``: the previous layer's M5
       publishes the output words as tagged pairs and their 16-column square sums into this layer's ``ph`` / ``phs``,
@@ -365,6 +375,8 @@ class HcKnobs:
     shfl4: str = "rowshift"
     inv: str = "lds"
     acc: int = 1
+    invmath: str = "f64"
+    sigm: str = "acc"
     src: str = "mem"
     order: str = "weights"
     xhold: str = "none"
@@ -383,7 +395,8 @@ class HcKnobs:
         if self.spread and self.spread not in SPREAD_VALUES:
             raise ValueError(f"spread must be 0 or one of {SPREAD_VALUES}")
         for name, allowed in (("pre", PRES), ("wait", WAITS), ("scale", SCALES), ("a2order", A2_ORDERS),
-                              ("stats", STATS), ("amax", AMAXES), ("shfl4", SHFL4S), ("inv", INVS)):
+                              ("stats", STATS), ("amax", AMAXES), ("shfl4", SHFL4S), ("inv", INVS),
+                              ("invmath", INVMATHS), ("sigm", SIGMS)):
             if getattr(self, name) not in allowed:
                 raise ValueError(f"{name} must be one of {allowed}, got {getattr(self, name)!r}")
         if self.ra not in (0, 1, 2):
@@ -421,7 +434,7 @@ class HcKnobs:
     @property
     def tolerance(self) -> bool:
         """True when a knob changes the numerics (tolerance class: never bitwise)."""
-        return self.acc != 1
+        return self.acc != 1 or self.invmath != "f64" or self.sigm != "acc"
 
 
 def knobs_spec(k: HcKnobs) -> str:
@@ -649,12 +662,16 @@ class _Hc:
 
     def sigmoid_acc(self, x):
         b = self.b
+        if self.k.sigm == "hw":
+            return b.rcp_fast(b.fadd(self.f(1.0), b.exp2_fast(b.fmul(x, self.f(-L2E)))))
         return b.fdiv(self.f(1.0), b.fadd(self.f(1.0), b.exp(b.fsub(self.f(0.0), x))))
 
     def silu_q(self, low):
         """``s = bf16(bf16(low) * 0.25)``, ``bf16(s / (1 + exp(0 - s)))`` (the down's activation)."""
         b = self.b
         s = self.bf16r(b.fmul(self.bf16r(low), self.f(0.25)))
+        if self.k.sigm == "hw":
+            return self.bf16r(b.fmul(s, self.sigmoid_acc(s)))
         return self.bf16r(b.fdiv(s, b.fadd(self.f(1.0), b.exp(b.fsub(self.f(0.0), s)))))
 
     def shfl(self, v, off):
@@ -1009,6 +1026,8 @@ def _inv_of(e: _Hc, bb, row):
     v = b.select(e.lt(e.lane, 16), b.fadd(v, hi), v)
     ms = b.fmul(e.natural_sum(v), e.fbits(INV_HIDDEN))
     stab = b.fadd(ms, e.fbits(EPS + ((20 << 23) if e.k.mutate == "eps" else 0)))
+    if e.k.invmath == "rsq32":
+        return b.rsqrt(stab)
     return b.cvt_f64_to_f32(b.fdiv(b.const_f64(1.0), b.sqrt(b.cvt_f32_to_f64(stab))))
 
 

@@ -215,6 +215,8 @@ def fused_moe(rows: int, seq: bool = False, *, arena_words: int | None = None, n
     knobs.append(_cat("route", ("cta", "wave")))
     if rows > 1:
         knobs.append(_cat("m3_rows", (0, rows)))
+    # router_mma (MFMA router dot of the fused MoE's M3): a tolerance knob (f32 sum order only), default off. Appended last.
+    knobs.append(_cat("router_mma", (0, 1), numerics=TOLERANCE))
 
     def normalize(cfg):
         if cfg.get("dn_issue", "with_gu") != "lds":
