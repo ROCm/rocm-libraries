@@ -5655,6 +5655,7 @@ class IRBuilder:
         soffset: Value,
         dwords: int,
         coherency: int = 0,
+        offset: int = 0,
     ) -> None:
         """Variant of `async_buffer_load_lds` that takes a raw i64 LDS
         address instead of a typed `smem<...>` value. This is the form
@@ -5669,6 +5670,8 @@ class IRBuilder:
         (AUX) argument of ``llvm.amdgcn.raw.ptr.buffer.load[.lds]``. ``CACHE_STREAM`` is the
         right hint for one-shot streaming loads in a
         ping-pong pipeline that won't reuse the data.
+        offset: the instruction offset (0..4095), added to both the
+        global and the LDS address.
         """
         if dwords not in (1, 3, 4):
             raise ValueError(
@@ -5676,10 +5679,15 @@ class IRBuilder:
             )
         if coherency not in (0, 1, 2, 3):
             raise ValueError(f"coherency must be 0..3 (got {coherency})")
+        if not 0 <= offset <= 4095:
+            raise ValueError(f"offset must be 0..4095 (got {offset})")
+        attrs = {"dwords": int(dwords), "aux": int(coherency)}
+        if offset:
+            attrs["offset"] = int(offset)
         self._op(
             "tile.async_buffer_load_lds_addr",
             [rsrc, lds_addr, voffset, soffset],
-            attrs={"dwords": int(dwords), "aux": int(coherency)},
+            attrs=attrs,
         )
 
     # ----- scheduler / synchronisation hints -----
@@ -5822,7 +5830,7 @@ class IRBuilder:
 
     def s_waitcnt(
         self, *, vmcnt: int = -1, lgkmcnt: int = -1, expcnt: int = -1
-    ) -> None:
+    ) -> Op:
         """Insert an `s_waitcnt`. Pass -1 to leave a counter alone (no
         wait); pass 0 to fully drain that counter.
 
@@ -5837,9 +5845,10 @@ class IRBuilder:
         important detail is that VMCNT is 6 bits split across bits [3:0]
         and [15:14], so values such as ``vmcnt=16`` are valid partial
         waits and must not be masked down to zero. We default the not-set
-        counters to their max value (no wait).
+        counters to their max value (no wait). Returns the op, whose counts
+        a builder may tighten once later code is known.
         """
-        self._op(
+        return self._op(
             "tile.s_waitcnt",
             attrs={"vmcnt": int(vmcnt), "lgkmcnt": int(lgkmcnt), "expcnt": int(expcnt)},
         )

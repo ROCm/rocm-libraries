@@ -1504,7 +1504,7 @@ class _Lowerer:
             f"_llvm_amdgcn_raw_ptr_buffer_load_lds("
             f"{_name(rsrc)}, "
             f"(__attribute__((address_space(3))) void*)({_name(lds_addr)}), "
-            f"{size_bytes}, {_name(voff)}, {_name(soff)}, 0, 0);"
+            f"{size_bytes}, {_name(voff)}, {_name(soff)}, {int(op.attrs.get('offset', 0))}, 0);"
         )
 
     @staticmethod

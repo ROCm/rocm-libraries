@@ -5507,6 +5507,7 @@ class _Lowerer:
         dwords = int(op.attrs["dwords"])
         size_bytes = dwords * 4
         aux = int(op.attrs.get("aux", 0))
+        imm = int(op.attrs.get("offset", 0))
         self._need("raw.ptr.buffer.load.lds")
         # Convert the i64 LDS address back to ptr addrspace(3).
         ptr_name = self._fresh("lds_ptr")
@@ -5520,7 +5521,7 @@ class _Lowerer:
             f"i32 {size_bytes}, "
             f"i32 {self._operand(voff)}, "
             f"i32 {self._operand(soff)}, "
-            f"i32 0, i32 {aux})"
+            f"i32 {imm}, i32 {aux})"
             f"{self._lds_aa_suffix(self._lds_prov.get(lds_addr.name))}"
         )
 
