@@ -422,6 +422,28 @@ static __host__ void writeDeviceBytes(void *dst, const void *src, size_t bytes) 
     copyOnDmaEngine(dst, staging, bytes);
 }
 
+// TEMPORARY (CI diagnosis): HIPTHREADS_DEBUG_NO_STREAMOPS=1 makes the host's word writes go through the DMA engine
+// instead of hipStreamWriteValue, which ROCclr runs as the __amd_rocclr_streamOpsWrite kernel.
+static __host__ bool useStreamOps() {
+    static const bool use = [](){
+        const char *env = ::std::getenv("HIPTHREADS_DEBUG_NO_STREAMOPS");
+        return env == nullptr || ::std::strcmp(env, "1") != 0;
+    }();
+    return use;
+}
+
+template <typename T>
+static __host__ void writeDeviceWord(T *dst, T value) {
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8, "hipStreamWriteValue only writes 32- or 64-bit words");
+    if (!useStreamOps()) {
+        writeDeviceBytes(dst, &value, sizeof(T));
+    } else if constexpr (sizeof(T) == 4) {
+        __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), dst, value, 0));
+    } else {
+        __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue64(getEnqueingStream(), dst, value, 0));
+    }
+}
+
 static __host__ void waitForSpaceInCPUQueue(const uint32_t myPushCount) {
     for (uint32_t curPopCount = 0; myPushCount - curPopCount >= CPU_WORK_QUEUE_SIZE; ) {
         // TODO: should we put this in a different stream so the copy from Device to Host can happen at the same time as other copies from Host to Device?
@@ -455,12 +477,13 @@ static __host__ void prepDeviceForWork() {
           if (noCuMask != nullptr) {
               const unsigned int vcores = hip::wthread::hardware_concurrency();
               ::std::cerr << "[hipthreads] debug launch: vcores=" << vcores
-                          << " cu_mask=" << (useCuMask ? "on" : "off") << ::std::endl;
+                          << " cu_mask=" << (useCuMask ? "on" : "off")
+                          << " streamops=" << (useStreamOps() ? "on" : "off") << ::std::endl;
           }
 
           void *numVcoresAddr;
           __LIBHIPTHREADS_HIP_CHECK__(hipGetSymbolAddress(&numVcoresAddr, HIP_SYMBOL(numVcores)));
-          __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), static_cast<uint32_t *>(numVcoresAddr), hip::wthread::hardware_concurrency(), 0));
+          writeDeviceWord(static_cast<uint32_t *>(numVcoresAddr), static_cast<uint32_t>(hip::wthread::hardware_concurrency()));
 
           isFirstTime = true;
           return true;
@@ -471,7 +494,7 @@ static __host__ void prepDeviceForWork() {
         // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its write in that stream, and we need to make
         // sure the change made by the last wthread's destructor doesn't get over-written.
         // cpuWorkQueue.pushCount is initialized to -1U, so we don't need to do this the first time through.
-        __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), getCPUWorkQueuePushCountAddr(), -1U, 0));
+        writeDeviceWord(getCPUWorkQueuePushCountAddr(), -1U);
         __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     }
 
@@ -499,7 +522,7 @@ static __host__ void prepDeviceForWork() {
 }
 
 static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bool blocking = false) {
-    __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), getCPUWorkQueuePushCountAddr(), cpuWorkQueuePushCount, 0));
+    writeDeviceWord(getCPUWorkQueuePushCountAddr(), static_cast<uint32_t>(cpuWorkQueuePushCount));
     // Make sure the write is actually submitted: on Windows, queued work may not reach the GPU until the stream is
     // synchronized (see the kicker thread in prepDeviceForWork), and threading_main can't exit until it sees it.
     __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
@@ -518,7 +541,7 @@ __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::se
     writeDeviceBytes(worknode_d.get(), this, this->worknodeSize);
 
     // *new_location = worknode_d.get();
-    __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue64(getEnqueingStream(), new_location, reinterpret_cast<uintptr_t>(worknode_d.get()), 0));
+    writeDeviceWord(reinterpret_cast<uint64_t *>(new_location), static_cast<uint64_t>(reinterpret_cast<uintptr_t>(worknode_d.get())));
 
     // TODO: If the GPU is able to see individual bytes as they get written, we need a way to signal when the whole
     // write is complete. It seems that on Navi4 cards, if the host uses hipMemcpyAsync to update queue[index], the
