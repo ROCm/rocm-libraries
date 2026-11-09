@@ -29,6 +29,7 @@
 
 #include "get_handle.hpp"
 #include <miopen/conv/data_invoke_params.hpp>
+#include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
 
@@ -39,6 +40,19 @@
 namespace group_conv {
 
 using Direction = miopen::conv::Direction;
+
+// Skip-gate for the perf-config search tests: true when the solver is applicable on the current
+// device. IsApplicable() is false when CK has no instance for the dtype/arch, the CK library is not
+// loaded, or the solver is env-disabled -- the same CK predicate the enumeration uses, so where the
+// solver is applicable callers still assert SetNextValue().
+template <class Solver>
+inline bool SolverApplicable(const miopen::conv::ProblemDescription& problem)
+{
+    auto&& handle = get_handle();
+    auto ctx      = miopen::ExecutionContext{};
+    ctx.SetStream(&handle);
+    return Solver{}.IsApplicable(ctx, problem);
+}
 
 template <unsigned NDIM>
 struct GroupConvTestConfig

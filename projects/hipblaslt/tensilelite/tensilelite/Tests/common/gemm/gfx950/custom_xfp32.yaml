@@ -17,6 +17,7 @@ GlobalParameters:
   Device: 0
   RotatingBufferSize: 512
   PrintSolutionRejectionReason: True
+  UniformSummationOrder: 0
 
 BenchmarkProblems:
   ########################################

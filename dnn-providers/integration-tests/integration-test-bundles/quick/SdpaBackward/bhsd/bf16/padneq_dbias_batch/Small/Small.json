@@ -1,0 +1,283 @@
+{
+    "nodes": [
+        {
+            "type": "SdpaBackwardAttributes",
+            "compute_data_type": "float",
+            "name": "SdpaBwd_0",
+            "inputs": {
+                "q_tensor_uid": 2,
+                "k_tensor_uid": 0,
+                "v_tensor_uid": 6,
+                "o_tensor_uid": 1,
+                "do_tensor_uid": 7,
+                "stats_tensor_uid": 8,
+                "scale_tensor_uid": null,
+                "attn_mask_tensor_uid": 9,
+                "seq_len_q_tensor_uid": 10,
+                "seq_len_kv_tensor_uid": 11,
+                "seed_tensor_uid": null,
+                "offset_tensor_uid": null,
+                "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null,
+                "dropout_scale_inv_tensor_uid": null
+            },
+            "outputs": {
+                "dq_tensor_uid": 4,
+                "dk_tensor_uid": 3,
+                "dv_tensor_uid": 5,
+                "dbias_tensor_uid": 15
+            },
+            "parameters": {
+                "alibi_mask": false,
+                "padding_mask": true,
+                "causal_mask": false,
+                "causal_mask_bottom_right": false,
+                "dropout_probability": null,
+                "attn_scale_value": 0.125,
+                "left_bound": null,
+                "right_bound": null,
+                "diagonal_alignment": "TOP_LEFT"
+            }
+        }
+    ],
+    "tensors": [
+        {
+            "uid": 0,
+            "name": "K",
+            "dims": [
+                3,
+                2,
+                96,
+                64
+            ],
+            "strides": [
+                12288,
+                6144,
+                64,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 1,
+            "name": "O",
+            "dims": [
+                3,
+                2,
+                64,
+                64
+            ],
+            "strides": [
+                8192,
+                4096,
+                64,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "Q",
+            "dims": [
+                3,
+                2,
+                64,
+                64
+            ],
+            "strides": [
+                8192,
+                4096,
+                64,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "SdpaBwd_0::dK",
+            "dims": [
+                3,
+                2,
+                96,
+                64
+            ],
+            "strides": [
+                12288,
+                6144,
+                64,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "SdpaBwd_0::dQ",
+            "dims": [
+                3,
+                2,
+                64,
+                64
+            ],
+            "strides": [
+                8192,
+                4096,
+                64,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 5,
+            "name": "SdpaBwd_0::dV",
+            "dims": [
+                3,
+                2,
+                96,
+                64
+            ],
+            "strides": [
+                12288,
+                6144,
+                64,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 6,
+            "name": "V",
+            "dims": [
+                3,
+                2,
+                96,
+                64
+            ],
+            "strides": [
+                12288,
+                6144,
+                64,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 7,
+            "name": "dO",
+            "dims": [
+                3,
+                2,
+                64,
+                64
+            ],
+            "strides": [
+                8192,
+                4096,
+                64,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 8,
+            "name": "stats",
+            "dims": [
+                3,
+                2,
+                64,
+                1
+            ],
+            "strides": [
+                128,
+                64,
+                1,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 9,
+            "name": "attn_mask",
+            "dims": [
+                3,
+                1,
+                64,
+                96
+            ],
+            "strides": [
+                6144,
+                6144,
+                96,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 10,
+            "name": "seq_len_q",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 11,
+            "name": "seq_len_kv",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 15,
+            "name": "SdpaBwd_0::dBias",
+            "dims": [
+                3,
+                1,
+                64,
+                96
+            ],
+            "strides": [
+                6144,
+                6144,
+                96,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        }
+    ],
+    "io_data_type": "bfloat16",
+    "compute_data_type": "float",
+    "intermediate_data_type": "float",
+    "name": ""
+}

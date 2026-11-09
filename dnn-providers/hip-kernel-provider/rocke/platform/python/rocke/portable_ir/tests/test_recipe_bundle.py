@@ -137,20 +137,23 @@ class TestConcreteRecordBundle(unittest.TestCase):
         from rocke.portable_ir.examples import mini_attn
         from rocke.portable_ir.src.recipe_bundle import record_concrete_bundle
 
-        entries = record_concrete_bundle(
-            [
-                (lambda: mini_attn.build_mini_attn(0, "f32"), "gfx950"),
-                (lambda: mini_attn.build_mini_attn(1, "f32"), "gfx950"),
-            ]
-        )
-        self.assertEqual(
-            [e["key"] for e in entries],
-            ["rocke_mini_attn_norm0_f32", "rocke_mini_attn_norm1_f32"],
-        )
-        bundle = cbor_decode(cbor_encode(build_bundle(entries)))
-        r = bundle_lookup(bundle, "rocke_mini_attn_norm1_f32", "gfx950")
-        self.assertEqual(r["schema"], "rocke.recipe/v1")
-        self.assertEqual(r, entries[1]["recipe"])  # CBOR preserved the recipe exactly
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                entries = record_concrete_bundle(
+                    [
+                        (lambda: mini_attn.build_mini_attn(0, "f32"), arch),
+                        (lambda: mini_attn.build_mini_attn(1, "f32"), arch),
+                    ]
+                )
+                self.assertEqual(
+                    [e["key"] for e in entries],
+                    ["rocke_mini_attn_norm0_f32", "rocke_mini_attn_norm1_f32"],
+                )
+                bundle = cbor_decode(cbor_encode(build_bundle(entries)))
+                r = bundle_lookup(bundle, "rocke_mini_attn_norm1_f32", arch)
+                self.assertEqual(r["schema"], "rocke.recipe/v1")
+                # CBOR preserved the recipe exactly
+                self.assertEqual(r, entries[1]["recipe"])
 
 
 if __name__ == "__main__":

@@ -128,7 +128,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
-        if problem.select_path() != "2d":
+        if problem.select_path(req.arch) != "2d":
             return False, "problem routes to 3D, not 2D"
         if not problem.default_mask:
             return False, "gfx942 tiled 2D implements only bottom-right causal"

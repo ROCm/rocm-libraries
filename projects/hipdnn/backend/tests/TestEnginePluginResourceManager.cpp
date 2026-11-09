@@ -2003,6 +2003,220 @@ TEST(TestEnginePluginResourceManager, ConstructorContinuesAfterBadPluginWithGood
     }
 }
 
+// A plugin that loads fine but throws when asked which engines apply to a graph must not
+// take the other plugins' engines down with it. ROCm/rocm-libraries#14266.
+TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsSkipsPluginThatThrows)
+{
+    const std::shared_ptr<MockEnginePlugin> badPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> goodPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{badPlugin, goodPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+
+    auto badHandle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0xbad);
+    EXPECT_CALL(*badPlugin, name()).WillRepeatedly(::testing::Return("BadPlugin"));
+    EXPECT_CALL(*badPlugin, createHandle()).WillOnce(::testing::Return(badHandle));
+    EXPECT_CALL(*badPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*badPlugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*badPlugin, destroyHandle(badHandle));
+    EXPECT_CALL(*badPlugin, getApplicableEngineIds(badHandle, testing::_))
+        .Times(1)
+        .WillRepeatedly(
+            ::testing::Throw(HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "no applicable solver")));
+
+    auto goodHandle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0xcafe);
+    EXPECT_CALL(*goodPlugin, createHandle()).WillOnce(::testing::Return(goodHandle));
+    EXPECT_CALL(*goodPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{200}));
+    EXPECT_CALL(*goodPlugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*goodPlugin, destroyHandle(goodHandle));
+    EXPECT_CALL(*goodPlugin, getApplicableEngineIds(goodHandle, testing::_))
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{200}));
+
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillRepeatedly(::testing::Return(fakeSerializedData));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        std::vector<int64_t> engineIds;
+        EXPECT_NO_THROW(engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc));
+        EXPECT_EQ(engineIds, std::vector<int64_t>{200});
+    }
+}
+
+// A plugin that throws something that is not a std::exception must be skipped just the same.
+TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsSkipsPluginThatThrowsNonStandardType)
+{
+    const std::shared_ptr<MockEnginePlugin> badPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> goodPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{badPlugin, goodPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+
+    auto badHandle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0xbad);
+    EXPECT_CALL(*badPlugin, name()).WillRepeatedly(::testing::Return("BadPlugin"));
+    EXPECT_CALL(*badPlugin, createHandle()).WillOnce(::testing::Return(badHandle));
+    EXPECT_CALL(*badPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*badPlugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*badPlugin, destroyHandle(badHandle));
+    EXPECT_CALL(*badPlugin, getApplicableEngineIds(badHandle, testing::_))
+        .Times(1)
+        .WillRepeatedly(::testing::Throw(42));
+
+    auto goodHandle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0xcafe);
+    EXPECT_CALL(*goodPlugin, createHandle()).WillOnce(::testing::Return(goodHandle));
+    EXPECT_CALL(*goodPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{200}));
+    EXPECT_CALL(*goodPlugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*goodPlugin, destroyHandle(goodHandle));
+    EXPECT_CALL(*goodPlugin, getApplicableEngineIds(goodHandle, testing::_))
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{200}));
+
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillRepeatedly(::testing::Return(fakeSerializedData));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        std::vector<int64_t> engineIds;
+        EXPECT_NO_THROW(engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc));
+        EXPECT_EQ(engineIds, std::vector<int64_t>{200});
+    }
+}
+
+// An explicitly chosen engine is answered by the plugin that owns it alone: that plugin's own
+// failure is the answer, and no other plugin's failure can fail the choice.
+class TestEnginePluginResourceManagerPinnedEngine : public ::testing::Test
+{
+protected:
+    static constexpr int64_t OWNER_ENGINE_ID = 100;
+    static constexpr int64_t OWNER_SIBLING_ENGINE_ID = 101;
+    static constexpr int64_t OTHER_ENGINE_ID = 200;
+
+    void SetUp() override
+    {
+        _ownerPlugin = std::make_shared<NiceMock<MockEnginePlugin>>();
+        _otherPlugin = std::make_shared<NiceMock<MockEnginePlugin>>();
+        _plugins = {_ownerPlugin, _otherPlugin};
+        _manager = std::make_shared<NiceMock<MockEnginePluginManager>>();
+        ON_CALL(*_manager, getPlugins()).WillByDefault(ReturnRef(_plugins));
+
+        setUpPlugin(
+            *_ownerPlugin, "OwnerPlugin", _ownerHandle, {OWNER_ENGINE_ID, OWNER_SIBLING_ENGINE_ID});
+        setUpPlugin(*_otherPlugin, "OtherPlugin", _otherHandle, {OTHER_ENGINE_ID});
+
+        ON_CALL(_graph, getSerializedGraph()).WillByDefault(Return(_serializedGraph));
+        _resources = std::make_unique<EnginePluginResourceManager>(_manager);
+    }
+
+    static void setUpPlugin(MockEnginePlugin& plugin,
+                            std::string_view pluginName,
+                            hipdnnEnginePluginHandle_t handle,
+                            const std::vector<int64_t>& engineIds)
+    {
+        ON_CALL(plugin, name()).WillByDefault(Return(pluginName));
+        ON_CALL(plugin, createHandle()).WillByDefault(Return(handle));
+        ON_CALL(plugin, getAllEngineIds()).WillByDefault(Return(engineIds));
+        ON_CALL(plugin, apiVersion())
+            .WillByDefault(Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    }
+
+    std::shared_ptr<NiceMock<MockEnginePlugin>> _ownerPlugin;
+    std::shared_ptr<NiceMock<MockEnginePlugin>> _otherPlugin;
+    std::vector<std::shared_ptr<EnginePlugin>> _plugins;
+    std::shared_ptr<NiceMock<MockEnginePluginManager>> _manager;
+    std::unique_ptr<EnginePluginResourceManager> _resources;
+    MockGraphDescriptor _graph;
+    hipdnnEnginePluginHandle_t _ownerHandle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0xcafe);
+    hipdnnEnginePluginHandle_t _otherHandle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0xbeef);
+    hipdnnPluginConstData_t _serializedGraph{reinterpret_cast<const void*>("fake_graph_data"), 15};
+};
+
+TEST_F(TestEnginePluginResourceManagerPinnedEngine, OwnerPluginFailurePropagatesUnchanged)
+{
+    const std::string message = "Failed to get applicable engine IDs. Status: 7, Error: no solver";
+    EXPECT_CALL(*_ownerPlugin, getApplicableEngineIds(_ownerHandle, _))
+        .Times(1)
+        .WillOnce(Throw(HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, message)));
+    EXPECT_CALL(*_otherPlugin, getApplicableEngineIds(_, _)).Times(0);
+
+    try
+    {
+        (void)_resources->isEngineApplicable(OWNER_ENGINE_ID, &_graph);
+        FAIL() << "Expected the owning plugin's error to propagate";
+    }
+    catch(const HipdnnException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_STATUS_PLUGIN_ERROR);
+        EXPECT_EQ(e.getMessage(), message);
+    }
+}
+
+TEST_F(TestEnginePluginResourceManagerPinnedEngine, OwnerPluginNonStandardFailurePropagates)
+{
+    EXPECT_CALL(*_ownerPlugin, getApplicableEngineIds(_ownerHandle, _))
+        .Times(1)
+        .WillOnce(Throw(42));
+
+    EXPECT_THROW((void)_resources->isEngineApplicable(OWNER_ENGINE_ID, &_graph), int);
+}
+
+TEST_F(TestEnginePluginResourceManagerPinnedEngine, NonOwnerPluginFailureDoesNotFailTheChoice)
+{
+    EXPECT_CALL(*_otherPlugin, getApplicableEngineIds(_otherHandle, _))
+        .WillRepeatedly(Throw(HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "other plugin broke")));
+    EXPECT_CALL(*_ownerPlugin, getApplicableEngineIds(_ownerHandle, _))
+        .Times(1)
+        .WillOnce(Return(std::vector<int64_t>{OWNER_ENGINE_ID}));
+
+    bool applicable = false;
+    EXPECT_NO_THROW(applicable = _resources->isEngineApplicable(OWNER_ENGINE_ID, &_graph));
+    EXPECT_TRUE(applicable);
+}
+
+TEST_F(TestEnginePluginResourceManagerPinnedEngine, InapplicablePinnedEngineIsNotApplicable)
+{
+    EXPECT_CALL(*_ownerPlugin, getApplicableEngineIds(_ownerHandle, _))
+        .WillRepeatedly(Return(std::vector<int64_t>{OWNER_SIBLING_ENGINE_ID}));
+    EXPECT_CALL(*_otherPlugin, getApplicableEngineIds(_, _)).Times(0);
+
+    EXPECT_FALSE(_resources->isEngineApplicable(OWNER_ENGINE_ID, &_graph));
+    EXPECT_TRUE(_resources->isEngineApplicable(OWNER_SIBLING_ENGINE_ID, &_graph));
+}
+
+TEST_F(TestEnginePluginResourceManagerPinnedEngine, UnknownEngineIsNotApplicable)
+{
+    EXPECT_CALL(*_ownerPlugin, getApplicableEngineIds(_, _)).Times(0);
+    EXPECT_CALL(*_otherPlugin, getApplicableEngineIds(_, _)).Times(0);
+
+    EXPECT_FALSE(_resources->isEngineApplicable(999, &_graph));
+}
+
+TEST_F(TestEnginePluginResourceManagerPinnedEngine, NullGraphIsRejected)
+{
+    ASSERT_THROW_HIPDNN_STATUS((void)_resources->isEngineApplicable(OWNER_ENGINE_ID, nullptr),
+                               HIPDNN_STATUS_INTERNAL_ERROR);
+}
+
 TEST(TestEnginePluginResourceManager, GetEngineInfosSinglePlugin)
 {
     const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();

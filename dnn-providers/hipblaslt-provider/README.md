@@ -44,3 +44,7 @@ policies are maintained in hipDNN:
 - [hipDNN Overview](../../projects/hipdnn/README.md)
 - [Contributing Guidelines](../../projects/hipdnn/CONTRIBUTING.md)
 - [Security Policy](../../projects/hipdnn/SECURITY.md)
+
+## License
+
+This project is licensed under the terms described in [LICENSE](./LICENSE).

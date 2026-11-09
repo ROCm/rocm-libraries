@@ -59,6 +59,15 @@ def gfx1151_wmma_attention_config(load_test_config):
 
 
 @pytest.fixture
+def multi_launch_config():
+    """A small packaged config whose pack declares ``launches``, for the multi-launch arms
+    of the templates."""
+    return load_config(
+        Path(__file__).parent / "fixtures" / "verify_multi_launch" / "config.yaml"
+    )
+
+
+@pytest.fixture
 def gfx1151_wmma_attention_decode_config(load_test_config):
     return load_test_config("gfx1151_wmma_attention_decode.yaml")
 
@@ -79,14 +88,3 @@ def template_dir():
 @pytest.fixture
 def generator(template_dir):
     return IngestorGenerator(template_dir)
-
-
-@pytest.fixture
-def all_config_names():
-    return [
-        "scale_add.yaml",
-        "binary_ops.yaml",
-        "gfx950_attention_dense.yaml",
-        "gfx1151_wmma_attention.yaml",
-        "gfx1151_wmma_attention_decode.yaml",
-    ]

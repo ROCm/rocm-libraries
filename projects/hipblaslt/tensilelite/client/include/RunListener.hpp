@@ -40,6 +40,10 @@ namespace TensileLite
 {
     namespace Client
     {
+        struct DeviceContext;
+
+        inline const std::vector<std::shared_ptr<DeviceContext>> noDevices;
+
         class RunListener
         {
         public:
@@ -48,6 +52,11 @@ namespace TensileLite
             virtual void setReporter(std::shared_ptr<ResultReporter> reporter)
             {
                 m_reporter = reporter;
+            }
+
+            virtual void setDevices(std::vector<std::shared_ptr<DeviceContext>> const* devices)
+            {
+                m_devices = devices;
             }
 
             /**********************************
@@ -141,7 +150,8 @@ namespace TensileLite
             virtual int error() const = 0;
 
         protected:
-            std::shared_ptr<ResultReporter> m_reporter;
+            std::shared_ptr<ResultReporter>                    m_reporter;
+            std::vector<std::shared_ptr<DeviceContext>> const* m_devices = &noDevices;
         };
 
     } // namespace Client

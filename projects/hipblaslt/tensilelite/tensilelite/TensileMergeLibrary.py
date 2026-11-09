@@ -34,7 +34,7 @@ from . import __version__
 from . import LibraryIO
 from .SolutionStructs.Naming import getSolutionNameMin
 from .SolutionStructs.Naming import getKernelNameMin
-from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
+from .SolutionStructs.Problem import ProblemType, isFusedA2A, problemTypeToEnum, splitFusedA2ARow
 from .Common import ParallelMap2
 from .Common.GlobalParameters import defaultSolution
 from .Common import assignParameterWithDefault
@@ -93,11 +93,16 @@ def allFiles(startDir):
     return files
 
 
-def fixSizeInconsistencies(sizes, fileType):
+def fixSizeInconsistencies(sizes, fileType, problemType=None):
     origNumSizes = len(sizes)
+    fusedA2A = isFusedA2A(problemType)
     sizesDict = dict()
     for size, index in sizes:
-        size = size[:-4] if len(size) >= 8 else size
+        if fusedA2A:
+            sizes, _, keys = splitFusedA2ARow(size, problemType)
+            size = sizes + keys
+        elif len(size) >= 8:
+            size = size[:-4]
         sizesDict[tuple(value for value in size)] = [size, index]
     newSizes = list()
     for value in sizesDict.values():
@@ -399,8 +404,9 @@ def mergeLogic(oriData: dict[str, Any], incData: dict[str, Any], forceMerge, noE
     verbose(origNumSizes, "sizes and", origNumSolutions, "solutions in base logic file")
     verbose(incNumSizes, "sizes and", incNumSolutions, "solutions in incremental logic file")
 
-    oriExactLogic, origNumSizes = fixSizeInconsistencies(oriExactLogic, "base")
-    incExactLogic, incNumSizes = fixSizeInconsistencies(incExactLogic, "incremental")
+    problemType = oriData.get("ProblemType")
+    oriExactLogic, origNumSizes = fixSizeInconsistencies(oriExactLogic, "base", problemType)
+    incExactLogic, incNumSizes = fixSizeInconsistencies(incExactLogic, "incremental", problemType)
     oriData["ExactLogic"] = oriExactLogic
     incData["ExactLogic"] = incExactLogic
 
@@ -523,13 +529,6 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
 
         if mergedData.get("DefaultSolution"):
             removeDefaultInitParams(mergedData)
-        # reNameSolutions rebuilds each solution from the policy normalizer, which
-        # appends new keys. Dict-format output still needs the naming keys first
-        # and the rest alphabetical, independent of that insertion order.
-        mergedData["Solutions"] = [
-            LibraryIO.reorderSolutionDictForDictMerge(solution)
-            for solution in mergedData.get("Solutions", [])
-        ]
         normalizeDictLibraryLayout(mergedData)
         if isinstance(mergedData.get("ProblemType"), dict):
             mergedData["ProblemType"] = dict(sorted(mergedData["ProblemType"].items()))

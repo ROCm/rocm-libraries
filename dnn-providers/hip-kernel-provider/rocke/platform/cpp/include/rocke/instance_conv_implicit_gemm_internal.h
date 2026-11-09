@@ -325,7 +325,7 @@ typedef struct rocke_conv_build_ctx
     /* ---- per-lane MMA fragment widths (off op) ---- */
     int a_per_lane; /* op.a_frag_len */
     int b_per_lane; /* op.b_frag_len */
-    int c_per_lane; /* op.c_frag_len */
+    int c_per_lane; /* op.dst.frag_len (output partials and epilogues) */
 
     /* ---- block tile dims (aliases of spec geometry) ---- */
     int block_m; /* spec.tile_m */
@@ -359,6 +359,18 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* group_idx;
     rocke_value_t* k_out_group_base;
 
+    /* ---- forward split-K state (spec.split_k > 1; all NULL / false off it) ----
+     * The trailing ws_ptr / ws_bytes / ks / ks_count kernargs, the CTA's K
+     * slice (z = group * ks_count + slice), and the slab base the epilogue adds
+     * to every D offset. Mirrors the Python builder's `split` locals. */
+    bool fwd_split;
+    rocke_value_t* fwd_p_ws;
+    rocke_value_t* fwd_p_ws_bytes;
+    rocke_value_t* fwd_p_ks;
+    rocke_value_t* fwd_p_ks_count;
+    rocke_value_t* fwd_slice_id;
+    rocke_value_t* fwd_slab_base;
+
     /* ---- wgrad stream-K state (NULL off the stream-K path) ---- *
      * wgrad_c_kpg       = b.const_i32(kpg)  (grouped dY k_out fold, Python c_kpg)
      * wgrad_replica_sel = linear CTA index hashed into the workspace replica in
@@ -380,7 +392,7 @@ typedef struct rocke_conv_build_ctx
     int k_atoms; /* spec.k_atoms_per_tile_k */
 
     /* ---- accumulators ---- */
-    rocke_value_t* acc_init; /* zero_vec_f32(c_per_lane)    */
+    rocke_value_t* acc_init; /* zero_vec_f32(op->srcs[2].frag_len) */
     /* The `accs` list: one zero-acc iter-arg per (mi, ni) warp MFMA tile, named
      * "acc_m{mi}_n{ni}" + the shared acc_init. */
     const char* acc_names[ROCKE_CONV_MAX_ACCS];
@@ -454,6 +466,12 @@ typedef struct rocke_conv_build_ctx
      * pipeline="wavelet": a_wavelet_loader/b_wavelet_loader are
      *   CoalescedTileLoader sized to num_load_waves * wave_size threads. */
     bool async_dma; /* spec.async_dma (cached)         */
+    /* gfx1250 async K loop (wgrad only): the sync loaders' slot partition with
+     * each chunk moved by global_load_async_to_lds from a_ptr / b_ptr instead of
+     * a buffer load. Zeroed by the ctx memset, so fwd/dgrad are unaffected. */
+    bool async_global_lds;
+    rocke_value_t* a_ptr;
+    rocke_value_t* b_ptr;
     /* spec.lds_k_outer (wgrad only). Zeroed by the ctx memset, so the forward
      * and dgrad drivers keep their exact previous behaviour. */
     bool lds_k_outer;
@@ -746,6 +764,10 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
  * its run_ping_pong sequencing inline against ctx until that port lands.) */
 void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx);
 
+/* gfx1250 async branch (wgrad only, ctx->async_global_lds): one-barrier
+ * ping-pong over global_load_async_to_lds copies drained by s_wait_asynccnt. */
+void rocke_conv_emit_kloop_async_global_lds(rocke_conv_build_ctx_t* ctx);
+
 /* pipeline=="wavelet" branch (Python lines 1539-1797): dedicated load-wave /
  * math-wave split. Requires ctx->have_wavelet_loaders and the wavelet_* fields
  * to be populated by rocke_conv_build_ctx_init. Dispatches the WMMA
@@ -793,6 +815,7 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* ir_d_pitch_pw,
                                           const rocke_tensor_descriptor_t* D_desc,
                                           rocke_value_t* k_out_group_base,
+                                          rocke_value_t* slab_base,
                                           rocke_value_t* bound_m,
                                           rocke_value_t* bound_n);
 
@@ -809,6 +832,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_mmaop_t* op,
                                        const rocke_tensor_descriptor_t* D_desc,
                                        rocke_value_t* k_out_group_base,
+                                       rocke_value_t* slab_base,
+                                       const char* out_dtype,
                                        rocke_value_t* bound_m,
                                        rocke_value_t* bound_n);
 

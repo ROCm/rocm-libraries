@@ -121,6 +121,10 @@ namespace TensileLite
     struct TENSILELITEHOST_EXPORT KernelInvocation
     {
     public:
+        // Max clusters in y and z of a cluster launch (16-bit cluster ids);
+        // larger grids launch without error but wrap on the device.
+        static constexpr size_t MaxClusterGridDimYZ = 65535;
+
         std::string kernelName;
         std::string codeObjectFile; //Code object file kernel is located in
 
@@ -205,7 +209,7 @@ namespace TensileLite
                                        const std::vector<LazyLoadingInit>& preload);
 
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
+    TENSILELITEHOST_EXPORT std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
         LoadLibraryData(std::vector<uint8_t> const& data);
 } // namespace TensileLite
 

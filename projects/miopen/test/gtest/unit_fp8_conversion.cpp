@@ -24,7 +24,7 @@ constexpr std::size_t value_count = 7;
 struct ConversionData
 {
     std::array<float, value_count> input;
-    std::array<unsigned char, value_count> encoded;
+    std::array<unsigned char, value_count> encoded; // Exact expectations for non-NaN inputs.
     std::array<float, value_count> decoded;
 };
 
@@ -99,22 +99,28 @@ void TestConversions(const Fp8Format& format, bool force_software_fallback, Fp8T
                      GetKernelSource())(
         input_dev.get(), fp8_dev.get(), bfp8_dev.get(), fp8_out_dev.get(), bfp8_out_dev.get());
 
-    if(fp8_type == Fp8Type::Fp8)
-    {
-        EXPECT_EQ(handle.Read<unsigned char>(fp8_dev, value_count),
-                  std::vector<unsigned char>(data.encoded.begin(), data.encoded.end()));
-    }
-    else
-    {
-        EXPECT_EQ(handle.Read<unsigned char>(bfp8_dev, value_count),
-                  std::vector<unsigned char>(data.encoded.begin(), data.encoded.end()));
-    }
+    const auto encoded = fp8_type == Fp8Type::Fp8
+                             ? handle.Read<unsigned char>(fp8_dev, value_count)
+                             : handle.Read<unsigned char>(bfp8_dev, value_count);
 
     const auto output = fp8_type == Fp8Type::Fp8 ? handle.Read<float>(fp8_out_dev, value_count)
                                                  : handle.Read<float>(bfp8_out_dev, value_count);
     for(std::size_t i = 0; i < value_count; ++i)
     {
         SCOPED_TRACE("value index " + std::to_string(i));
+        if(std::isnan(data.input[i]))
+        {
+            // Native and software conversion may produce different NaN signs and payloads.
+            if(!format.ieee_exponent_bias)
+                EXPECT_EQ(encoded[i], 0x80);
+            else if(fp8_type == Fp8Type::Fp8)
+                EXPECT_EQ(encoded[i] & 0x7F, 0x7F);
+            else
+                EXPECT_GT(encoded[i] & 0x7F, 0x7C);
+        }
+        else
+            EXPECT_EQ(encoded[i], data.encoded[i]);
+
         if(std::isnan(data.decoded[i]))
             EXPECT_TRUE(std::isnan(output[i]));
         else

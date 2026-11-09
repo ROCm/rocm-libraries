@@ -12,7 +12,7 @@ emitted IR changed.
 
 It is intended to run directly from an installed staging prefix, co-located with
 the ``rocke`` package, the ``rocke_ir_parity_harness`` module, and the golden
-JSON under ``golden/``. It fixes up ``sys.path`` before importing anything, so
+shard directory under ``golden/``. It fixes up ``sys.path`` before importing anything, so
 RockCI can execute it from a staged test artifact:
 
   python rocke_installed_golden.py
@@ -71,10 +71,10 @@ def _add_installed_python_paths() -> None:
 
 def _find_golden() -> Path:
     script = Path(__file__).resolve()
-    name = "rocke_representative_ir_sha256.json"
-    # Co-located layouts: <dir>/golden/<name> (installed) or a sibling golden/
-    # dir one level up. Fall back to the in-source tests/golden/ when run from a
-    # checkout.
+    # The golden is a directory of per-family JSON shards. Co-located layouts:
+    # <dir>/golden/<name> (installed) or a sibling golden/ dir one level up.
+    # Fall back to the in-source tests/golden/ when run from a checkout.
+    name = "rocke_representative_ir_sha256"
     candidates = [
         script.parent / "golden" / name,
         script.parent / name,
@@ -82,7 +82,7 @@ def _find_golden() -> Path:
         script.parents[1] / "tests" / "golden" / name,
     ]
     for cand in candidates:
-        if cand.is_file():
+        if cand.is_dir():
             return cand
     raise SystemExit(
         "golden not found; looked in:\n  " + "\n  ".join(str(c) for c in candidates)

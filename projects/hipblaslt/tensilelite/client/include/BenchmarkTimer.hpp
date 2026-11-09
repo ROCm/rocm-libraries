@@ -48,10 +48,9 @@ namespace TensileLite
         public:
             using clock = std::chrono::steady_clock;
 
-            BenchmarkTimer(po::variables_map const&                    args,
-                           Hardware const&                             hardware,
-                           float                                       flushTimeUs,
-                           std::vector<std::shared_ptr<DeviceContext>> devices);
+            BenchmarkTimer(po::variables_map const& args,
+                           Hardware const&          hardware,
+                           float                    flushTimeUs);
 
             virtual bool needMoreBenchmarkRuns() const override;
             virtual void preBenchmarkRun() override;
@@ -124,7 +123,6 @@ namespace TensileLite
             clock::time_point m_startTime;
             clock::time_point m_endTime;
 
-            std::vector<std::shared_ptr<DeviceContext>> m_devices;
             std::vector<hipEvent_t>                     m_start;
             std::vector<hipEvent_t>                     m_stop;
 
