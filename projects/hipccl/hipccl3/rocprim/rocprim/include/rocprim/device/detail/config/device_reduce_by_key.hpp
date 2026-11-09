@@ -40,10 +40,12 @@ namespace detail
 {
 // TARGET: {'gen': 'rdna2', 'arch': 'gfx1030', 'gpu': 'rx6900', 'rep': 'amdgcn'}
 template<class Target, class key_type, class value_type>
-constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
-    reduce_by_key_config_params>
+constexpr auto reduce_by_key_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
+        reduce_by_key_config_params>
 {
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'double', 'block_size_x': 512, 'ipt': 8}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
@@ -81,7 +83,7 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
             block_scan_algorithm::using_warp_scan
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 8}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 8, 'tiles_per_block': 2}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -524,10 +526,12 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
 
 // TARGET: {'gen': 'rdna3', 'arch': 'gfx1100', 'gpu': 'rx7900', 'rep': 'amdgcn'}
 template<class Target, class key_type, class value_type>
-constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
-    reduce_by_key_config_params>
+constexpr auto reduce_by_key_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
+        reduce_by_key_config_params>
 {
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'double', 'block_size_x': 512, 'ipt': 12}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
@@ -541,7 +545,7 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
             block_scan_algorithm::using_warp_scan
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'float', 'block_size_x': 512, 'ipt': 8}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'float', 'block_size_x': 512, 'ipt': 8, 'tiles_per_block': 2}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
@@ -554,7 +558,7 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
             2
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::half', 'block_size_x': 512, 'ipt': 10}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::half', 'block_size_x': 512, 'ipt': 10, 'tiles_per_block': 2}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 2)))
@@ -567,7 +571,7 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
             2
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 10}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 10, 'tiles_per_block': 2}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -580,7 +584,7 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
             2
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 512, 'ipt': 8}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 512, 'ipt': 8, 'tiles_per_block': 2}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
@@ -593,7 +597,7 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
             2
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 512, 'ipt': 10}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 512, 'ipt': 10, 'tiles_per_block': 2}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
@@ -606,7 +610,7 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
             2
         };
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 384, 'ipt': 14}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 384, 'ipt': 14, 'tiles_per_block': 2}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 1)))
@@ -631,7 +635,7 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
             block_scan_algorithm::using_warp_scan
         };
     }
-    // CONFIG: {'key_type': 'int', 'value_type': 'float', 'block_size_x': 512, 'ipt': 12}
+    // CONFIG: {'key_type': 'int', 'value_type': 'float', 'block_size_x': 512, 'ipt': 12, 'tiles_per_block': 2}
     if constexpr(((sizeof(key_type) <= 4) && (sizeof(key_type) > 2)
                   && bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
@@ -656,7 +660,7 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
             block_scan_algorithm::using_warp_scan
         };
     }
-    // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 12}
+    // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 12, 'tiles_per_block': 2}
     if constexpr(((sizeof(key_type) <= 4) && (sizeof(key_type) > 2)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -741,7 +745,7 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
             block_scan_algorithm::using_warp_scan
         };
     }
-    // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 14}
+    // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 14, 'tiles_per_block': 2}
     if constexpr(((sizeof(key_type) <= 2) && (sizeof(key_type) > 1)
                   && !bool(rocprim::is_floating_point<value_type>::value)
                   && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -1016,10 +1020,12 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
 
 // TARGET: {'gen': 'rdna4', 'arch': 'gfx1200', 'gpu': 'rx9060', 'rep': 'amdgcn'}
 template<class Target, class key_type, class value_type>
-constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>>::value,
-    reduce_by_key_config_params>
+constexpr auto reduce_by_key_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>>::value,
+        reduce_by_key_config_params>
 {
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'double', 'block_size_x': 512, 'ipt': 6}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
@@ -1356,10 +1362,12 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
 
 // TARGET: {'gen': 'rdna4', 'arch': 'gfx1201', 'gpu': 'rx9070', 'rep': 'amdgcn'}
 template<class Target, class key_type, class value_type>
-constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>::value,
-    reduce_by_key_config_params>
+constexpr auto reduce_by_key_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>::value,
+        reduce_by_key_config_params>
 {
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'double', 'block_size_x': 256, 'ipt': 15}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
@@ -1839,10 +1847,11 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
 
 // TARGET: {'gen': 'gcn5', 'arch': 'gfx906', 'gpu': 'mi50', 'rep': 'amdgcn'}
 template<class Target, class key_type, class value_type>
-constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
-    reduce_by_key_config_params>
+constexpr auto reduce_by_key_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
+        reduce_by_key_config_params>
 {
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'double', 'block_size_x': 128, 'ipt': 15}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
@@ -2322,10 +2331,11 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
 
 // TARGET: {'gen': 'cdna1', 'arch': 'gfx908', 'gpu': 'mi100', 'rep': 'amdgcn'}
 template<class Target, class key_type, class value_type>
-constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
-    reduce_by_key_config_params>
+constexpr auto reduce_by_key_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
+        reduce_by_key_config_params>
 {
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'double', 'block_size_x': 256, 'ipt': 15}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
@@ -2805,10 +2815,11 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
 
 // TARGET: {'gen': 'cdna2', 'arch': 'gfx90a', 'gpu': 'mi210', 'rep': 'amdgcn'}
 template<class Target, class key_type, class value_type>
-constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
-    reduce_by_key_config_params>
+constexpr auto reduce_by_key_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
+        reduce_by_key_config_params>
 {
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'double', 'block_size_x': 192, 'ipt': 7}
     if constexpr(((sizeof(key_type) <= 8) && (sizeof(key_type) > 4)
@@ -3288,10 +3299,11 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
 
 // TARGET: {'gen': 'cdna3', 'arch': 'gfx942', 'gpu': 'mi300x', 'rep': 'amdgcn'}
 template<class Target, class key_type, class value_type>
-constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
-    reduce_by_key_config_params>
+constexpr auto reduce_by_key_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
+        reduce_by_key_config_params>
 {
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'double', 'block_size_x': 256, 'ipt': 15}
     if constexpr(((sizeof(key_type) <= 16) && (sizeof(key_type) > 8)
@@ -3771,10 +3783,12 @@ constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
 
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
 template<class Target, class key_type, class value_type>
-constexpr auto reduce_by_key_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
-    reduce_by_key_config_params>
+constexpr auto reduce_by_key_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
+        reduce_by_key_config_params>
 {
     return reduce_by_key_config_picker<
         comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
