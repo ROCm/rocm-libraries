@@ -1808,6 +1808,165 @@ TEST_P(local_matrix_formats, householder_reflects_a_column_onto_the_diagonal)
     });
 }
 
+// Analyses of the sparsity pattern. Clear, Permute and Sort drop them. A copy of
+// the same size keeps the triangular ones, for a refactorization, so a copy of
+// another pattern needs a new analysis.
+
+namespace
+{
+    // The CSR matrix with the columns of each row in reverse order
+    template <typename T>
+    std::unique_ptr<LocalMatrix<T>> unsorted_csr(const Csr<T>& ref)
+    {
+        const Csr<T> mix = unsorted(ref);
+        auto         U   = empty_local_matrix<T>(Backend::Host);
+        U->AllocateCSR("U", mix.nnz(), mix.n, mix.m);
+        U->CopyFromCSR(mix.row_offset.data(), mix.col.data(), mix.val.data());
+        return U;
+    }
+}
+
+TEST_P(local_matrix_formats, apply_follows_a_new_sparsity_pattern)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T>           a    = banded<T>();
+        const Csr<T>           c    = pentadiagonal<T>();
+        const std::vector<T>   x    = rhs<T>(a.n);
+        const std::vector<int> perm = scrambled(a.n);
+
+        auto A              = make(a);
+        auto expect_applies = [&](const Csr<T>& ref) {
+            auto y = vector_of(std::vector<T>(ref.n, 0.0));
+            A->Apply(*vector_of(x), y.get());
+            expect_close(values_of(*y), ref.apply(x), tol<T>());
+        };
+
+        A->ApplyAnalyse();
+        expect_applies(a);
+
+        // CopyFrom keeps the sizes of a matrix with entries
+        A->Clear();
+        A->CopyFrom(*make(c));
+        expect_applies(c);
+        A->ApplyAnalyse();
+        expect_applies(c);
+
+        // COO Permute leaves the entries unsorted, see permute_moves_rows_and_columns
+        if(!is(COO))
+        {
+            A->Permute(*vector_of(perm));
+            expect_applies(permuted(c, perm));
+            A->ApplyAnalyse();
+            expect_applies(permuted(c, perm));
+        }
+
+        if(is(CSR))
+        {
+            // The same number of entries in another pattern
+            A->CopyFrom(*make(c));
+            expect_applies(c);
+
+            A->ApplyAnalyse();
+            A->CopyFrom(*unsorted_csr(c));
+            A->Sort();
+            expect_applies(c);
+            A->ApplyAnalyse();
+            expect_applies(c);
+        }
+    });
+}
+
+TEST_P(local_matrix_formats, triangular_analyses_follow_a_new_sparsity_pattern)
+{
+    if(!has_analysis(backend(), format().id, "L"))
+    {
+        GTEST_SKIP() << "the triangular solves keep no analysis";
+    }
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T>           a    = banded<T>();
+        const Csr<T>           c    = pentadiagonal<T>();
+        const std::vector<T>   b    = rhs<T>(a.n);
+        const std::vector<int> perm = scrambled(a.n);
+
+        auto A                 = make(a);
+        auto analyse_and_solve = [&](const Csr<T>& ref) {
+            A->LAnalyse(false);
+            A->UAnalyse(false);
+            auto x = vector_of(std::vector<T>(ref.n, 0.0));
+            A->LSolve(*vector_of(b), x.get());
+            expect_solves(lower(ref, true), values_of(*x), b, tol<T>());
+            A->USolve(*vector_of(b), x.get());
+            expect_solves(upper(ref, true), values_of(*x), b, tol<T>());
+        };
+
+        analyse_and_solve(a);
+
+        // CopyFrom keeps the sizes of a matrix with entries
+        A->Clear();
+        A->CopyFrom(*make(c));
+        analyse_and_solve(c);
+
+        A->Permute(*vector_of(perm));
+        analyse_and_solve(permuted(c, perm));
+
+        if(is(CSR))
+        {
+            // The same number of entries in another pattern
+            A->CopyFrom(*make(c));
+            analyse_and_solve(c);
+
+            A->CopyFrom(*unsorted_csr(c));
+            A->Sort();
+            analyse_and_solve(c);
+        }
+        A->LAnalyseClear();
+        A->UAnalyseClear();
+    });
+}
+
+// The LU analyses stay valid through the iterative ILU(0), which keeps the
+// sparsity pattern and replaces the values
+TEST_P(local_matrix_formats, lu_analyses_before_itilu0_apply_to_the_factors)
+{
+    if(!native("ItILU0Factorize") || !has_analysis(backend(), format().id, "LU"))
+    {
+        GTEST_SKIP() << "the ItILU0Factorize fallback moves the matrix, which drops the analyses";
+    }
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T>         ref = banded<T>();
+        const std::vector<T> b   = rhs<T>(ref.n);
+
+        for(bool iterative : {false, true})
+        {
+            SCOPED_TRACE(iterative ? "ItLUSolve" : "LUSolve");
+            auto A = make(ref);
+            iterative ? A->ItLUAnalyse() : A->LUAnalyse();
+
+            int niter = -1;
+            A->ItILU0Factorize(rocalution::Default, 0, 200, scaled_tol<T>(1e-14), &niter, nullptr);
+
+            auto x = vector_of(std::vector<T>(ref.n, 0.0));
+            if(iterative)
+            {
+                A->ItLUSolve(24, 0, false, *vector_of(b), x.get());
+                A->ItLUAnalyseClear();
+            }
+            else
+            {
+                A->LUSolve(*vector_of(b), x.get());
+                A->LUAnalyseClear();
+            }
+            expect_close(ref.apply(values_of(*x)), b, loose_tol<T>(1e-10));
+        }
+    });
+}
+
 // Permutations and orderings
 
 TEST_P(local_matrix_formats, permute_moves_rows_and_columns)
