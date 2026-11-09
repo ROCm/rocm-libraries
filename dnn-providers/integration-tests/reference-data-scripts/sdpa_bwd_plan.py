@@ -894,8 +894,6 @@ GATES = {
     "harness: zero strides rejected": ("HG17: zero input strides (#14709 lets the data SDK Tensor hold them; "
                                        "H62 needs a GPU run to confirm)", "to file"),
     "none": ("no oracle (Philox: the backward schema has no rng_dump)", "to file"),
-    "p0": ("a SEM entry for dropout_probability = 0 without RNG state, and a reference that models it "
-           "(the references decline any dropout_probability since #14358)", "ALMIOPEN-3149 or ALMIOPEN-3150"),
     "none (decline-only probe mode)": ("a decline-only probe mode that does not allocate", "to file"),
     "unit": ("descriptor-only: a unit test, not a sweep case", "#14075"),
     "frontend": ("a frontend rule (R14): TestSdpaBwdNode.PreValidateChecksDiagonalBandBounds, not a sweep case",
