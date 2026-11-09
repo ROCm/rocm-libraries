@@ -131,11 +131,33 @@ if(WIN32)
   set(ROCALUTION_HIP_AVAILABLE ${hip_FOUND})
 else()
   # The HIP sources are compiled by CMAKE_HIP_COMPILER, so the host sources
-  # can be built with any C++ compiler. check_language() only searches the
-  # PATH and /opt/rocm, so look in ROCM_PATH first.
-  if(NOT DEFINED CMAKE_HIP_COMPILER AND NOT DEFINED ENV{HIPCXX}
-     AND ROCM_PATH AND EXISTS "${ROCM_PATH}/bin/amdclang++")
-    set(CMAKE_HIP_COMPILER "${ROCM_PATH}/bin/amdclang++" CACHE FILEPATH "HIP compiler")
+  # can be built with any C++ compiler. check_language() reports a compiler
+  # that fails as not found, which would silently build without HIP, so it
+  # only runs when no ROCm compiler is found here. CMake rejects hipcc as HIP
+  # compiler, so a hipcc HIPCXX is replaced with the amdclang++ next to it.
+  if(NOT DEFINED CMAKE_HIP_COMPILER)
+    set(_rocalution_hip_bin_dirs)
+    if(ROCM_PATH)
+      list(APPEND _rocalution_hip_bin_dirs "${ROCM_PATH}/bin")
+    endif()
+    if("$ENV{HIPCXX}" MATCHES "hipcc")
+      message(STATUS "Ignoring HIPCXX=$ENV{HIPCXX}: CMake does not support hipcc as HIP compiler")
+      get_filename_component(_rocalution_hipcc_dir "$ENV{HIPCXX}" DIRECTORY)
+      if(_rocalution_hipcc_dir)
+        list(APPEND _rocalution_hip_bin_dirs "${_rocalution_hipcc_dir}")
+      endif()
+    elseif(NOT "$ENV{HIPCXX}" STREQUAL "")
+      set(CMAKE_HIP_COMPILER "$ENV{HIPCXX}" CACHE FILEPATH "HIP compiler")
+    endif()
+    if(NOT "$ENV{ROCM_PATH}" STREQUAL "")
+      list(APPEND _rocalution_hip_bin_dirs "$ENV{ROCM_PATH}/bin")
+    endif()
+    list(APPEND _rocalution_hip_bin_dirs /opt/rocm/bin)
+    foreach(_dir IN LISTS _rocalution_hip_bin_dirs)
+      if(NOT DEFINED CMAKE_HIP_COMPILER AND EXISTS "${_dir}/amdclang++")
+        set(CMAKE_HIP_COMPILER "${_dir}/amdclang++" CACHE FILEPATH "HIP compiler")
+      endif()
+    endforeach()
   endif()
   include(CheckLanguage)
   check_language(HIP)
@@ -150,6 +172,11 @@ endif()
 # HIP related library dependencies
 if(SUPPORT_HIP)
   if(NOT WIN32)
+    # Without CMAKE_HIP_ARCHITECTURES, enabling HIP detects the architecture
+    # of the local GPU
+    if(NOT DEFINED CMAKE_HIP_ARCHITECTURES AND GPU_TARGETS)
+      set(CMAKE_HIP_ARCHITECTURES "${GPU_TARGETS}" CACHE STRING "HIP architectures")
+    endif()
     enable_language(HIP)
   endif()
   find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)

@@ -199,22 +199,24 @@ if(SUPPORT_HIP)
   else()
     set_source_files_properties(${HIP_SOURCES} PROPERTIES LANGUAGE HIP)
     add_library(rocalution_hip ${HIP_SOURCES})
-    set_target_properties(rocalution_hip PROPERTIES HIP_ARCHITECTURES "${GPU_TARGETS}")
-  endif()
+    if(GPU_TARGETS)
+      set_target_properties(rocalution_hip PROPERTIES HIP_ARCHITECTURES "${GPU_TARGETS}")
+    endif()
 
-  # If CPU optimizations for local machine is actived
-  if(BUILD_OPTCPU)
-    target_compile_options(rocalution_hip PRIVATE "-march=native")
-  endif()
-  target_compile_options(rocalution_hip PRIVATE "-O3")
+    # If CPU optimizations for local machine is actived
+    if(BUILD_OPTCPU)
+      target_compile_options(rocalution_hip PRIVATE "-march=native")
+    endif()
+    target_compile_options(rocalution_hip PRIVATE "-O3")
 
-  # Coverage instruments host code only. Device-side coverage makes the HIP
-  # runtime abort while dumping the profile at process exit (AISPARSE-778).
-  if(BUILD_CODE_COVERAGE)
-    target_compile_options(rocalution_hip PRIVATE
-      -fprofile-instr-generate -fcoverage-mapping
-      "SHELL:-Xarch_device -fno-profile-instr-generate"
-      "SHELL:-Xarch_device -fno-coverage-mapping")
+    # Coverage instruments host code only. Device-side coverage makes the HIP
+    # runtime abort while dumping the profile at process exit (AISPARSE-778).
+    if(BUILD_CODE_COVERAGE)
+      target_compile_options(rocalution_hip PRIVATE
+        -fprofile-instr-generate -fcoverage-mapping
+        "SHELL:-Xarch_device -fno-profile-instr-generate"
+        "SHELL:-Xarch_device -fno-coverage-mapping")
+    endif()
   endif()
 
   if(SUPPORT_MPI)

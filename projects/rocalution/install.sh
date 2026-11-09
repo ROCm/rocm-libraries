@@ -494,9 +494,6 @@ pushd .
     cmake_common_options="${cmake_common_options} -DSUPPORT_HIP=OFF"
   else
     cmake_common_options="${cmake_common_options} -DSUPPORT_HIP=ON"
-    if [[ -z "${HIPCXX}" ]]; then
-      cmake_common_options="${cmake_common_options} -DCMAKE_HIP_COMPILER=${rocm_path}/bin/amdclang++"
-    fi
   fi
 
   # sanitizer

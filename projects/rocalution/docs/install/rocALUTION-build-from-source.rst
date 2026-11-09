@@ -191,9 +191,9 @@ Build rocALUTION using individual make commands
 ===============================================
 
 The rocALUTION library contains both host and device code. The device code is
-compiled with CMake's HIP language support, so specify the HIP compiler with
-``CMAKE_HIP_COMPILER`` during the CMake configuration process. The host code can
-be compiled with any C++ compiler, set with ``CXX``.
+compiled with CMake's HIP language support, by ``amdclang++`` from ``ROCM_PATH``
+unless ``CMAKE_HIP_COMPILER`` or ``HIPCXX`` selects another HIP compiler. The
+host code can be compiled with any C++ compiler, set with ``CXX``.
 
 .. note::
 
@@ -218,7 +218,7 @@ You can build rocALUTION using the following commands:
    cd build/release
 
    # The install path defaults to ROCM_PATH; use -DCMAKE_INSTALL_PREFIX= to adjust it
-   CXX=$ROCM_PATH/bin/amdclang++ cmake ../.. -DCMAKE_HIP_COMPILER=$ROCM_PATH/bin/amdclang++ -DROCM_PATH=$ROCM_PATH
+   CXX=$ROCM_PATH/bin/amdclang++ cmake ../.. -DROCM_PATH=$ROCM_PATH
 
    # Compile rocALUTION library
    make -j$(nproc)
@@ -266,7 +266,7 @@ For example, to build rocALUTION with MPI support enabled:
 
 .. code-block:: shell
 
-   CXX=$ROCM_PATH/bin/amdclang++ cmake ../.. -DCMAKE_HIP_COMPILER=$ROCM_PATH/bin/amdclang++ -DSUPPORT_MPI=ON -DROCM_PATH=$ROCM_PATH
+   CXX=$ROCM_PATH/bin/amdclang++ cmake ../.. -DSUPPORT_MPI=ON -DROCM_PATH=$ROCM_PATH
 
 .. _testing-rocalution:
 
