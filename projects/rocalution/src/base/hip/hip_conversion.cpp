@@ -942,13 +942,13 @@ namespace rocalution
                           const MatrixCSR<ValueType, IndexType, PointerType>& src,
                           MatrixDENSE<ValueType>*                             dst)
     {
-        assert(nnz > 0);
+        assert(nnz >= 0);
         assert(nrow > 0);
         assert(ncol > 0);
 
         assert(src.row_offset != NULL);
-        assert(src.col != NULL);
-        assert(src.val != NULL);
+        assert(nnz == 0 || src.col != NULL);
+        assert(nnz == 0 || src.val != NULL);
 
         assert(dst != NULL);
         assert(backend != NULL);
@@ -1077,18 +1077,26 @@ namespace rocalution
         allocate_hip(target_nnz, &dst->col);
         allocate_hip(target_nnz, &dst->val);
 
-        // rocSPARSE checks the column and value arrays against nrow * ncol instead of the
-        // actual nnz, so they must not be NULL even if the dense matrix has no non-zeros
-        status = rocsparse_csr_set_pointers(target,
-                                            dst->row_offset,
-                                            target_nnz == 0 ? (IndexType*)0x4 : dst->col,
-                                            target_nnz == 0 ? (ValueType*)0x4 : dst->val);
-        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+        if(target_nnz > 0)
+        {
+            status = rocsparse_csr_set_pointers(target, dst->row_offset, dst->col, dst->val);
+            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
-        // Compute
-        status = rocsparse_dense_to_sparse(
-            handle, source, target, rocsparse_dense_to_sparse_alg_default, &buffer_size, buffer);
-        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+            // Compute
+            status = rocsparse_dense_to_sparse(handle,
+                                               source,
+                                               target,
+                                               rocsparse_dense_to_sparse_alg_default,
+                                               &buffer_size,
+                                               buffer);
+            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+        }
+        else
+        {
+            // rocSPARSE requires column and value arrays for the compute stage even without
+            // non-zeros, an empty matrix only needs zero row offsets
+            set_to_zero_hip(backend->HIP_block_size, nrow + 1, dst->row_offset);
+        }
 
         free_hip(&buffer);
 
