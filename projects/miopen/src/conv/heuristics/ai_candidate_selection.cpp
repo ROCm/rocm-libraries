@@ -599,9 +599,18 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
     {
         // Named engineered features: emit exactly what the model's metadata lists, in order. This
         // transparently covers the optional divfeat features - a model opts in by listing them.
-        // raw in_channels (un-normalized) is required for the cpg_in/is_depthwise divfeat terms.
+        // raw in_channels (un-normalized) is only consumed by the cpg_in/is_depthwise divfeat
+        // terms; fetch it only when the model lists one, so a model without those features does not
+        // require an "in_channels" entry in the feature map.
+        const bool needs_raw_in_channels =
+            std::find(derived_names.begin(), derived_names.end(), "log_cpg_in") !=
+                derived_names.end() ||
+            std::find(derived_names.begin(), derived_names.end(), "is_depthwise") !=
+                derived_names.end();
         const auto raw_in_channels =
-            static_cast<std::size_t>(FeatureAt(features_by_name, "in_channels"));
+            needs_raw_in_channels
+                ? static_cast<std::size_t>(FeatureAt(features_by_name, "in_channels"))
+                : std::size_t{0};
         derived = common::EngineeredConvFeaturesByName(N,
                                                        C_in,
                                                        C_out,
