@@ -6,6 +6,15 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Conv] Fixed deterministic convolutions that reused the find-db record and the cached invokers
+  of a non-deterministic call with the same problem. The deterministic call could return a stale
+  time and, in one handle, run a non-deterministic split-K kernel. The find-db key now contains
+  `_det` and the network config contains `det` when the deterministic attribute is set.
+  Non-deterministic keys do not change, so existing find-db and perf-db records stay valid for
+  non-deterministic calls. The shipped find-db has no `_det` records. Thus the first deterministic
+  Find for each problem measures again, and the user waits for it. Deterministic immediate mode no
+  longer reads the shipped find-db times. Those times can come from split-K > 1 kernels, so they
+  do not apply to deterministic mode.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
