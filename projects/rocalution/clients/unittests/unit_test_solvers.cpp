@@ -3490,7 +3490,7 @@ TEST(solvers_mixed_precision, rebuild_numeric_takes_the_values_of_a_reset_operat
 }
 
 // The low precision matrix keeps its structure, so ReBuildNumeric() takes only the
-// values of an operator of the same sizes and number of entries
+// values of an operator of the same sizes and sparsity pattern
 TEST(solvers_mixed_precision_DeathTest,
      rebuild_numeric_of_an_operator_with_another_number_of_entries_ends_the_program)
 {
@@ -3508,6 +3508,33 @@ TEST(solvers_mixed_precision_DeathTest,
 
     solver.ResetOperator(*B);
     EXPECT_ASSERT_DEATH(solver.ReBuildNumeric(), "GetLocalNnz");
+}
+
+// The identity and the reversal have the same row offsets but other columns
+TEST(solvers_mixed_precision_DeathTest,
+     rebuild_numeric_of_an_operator_with_another_pattern_ends_the_program)
+{
+    Csr<double> reversal(16);
+    for(int i = 0; i < 16; ++i)
+    {
+        reversal.add(15 - i, 1.0);
+        reversal.end_row();
+    }
+
+    auto A = make_local_matrix(Backend::Host, diagonal(Vec<double>(16, 1.0)));
+    auto B = make_local_matrix(Backend::Host, reversal);
+
+    rocalution::LU<LocalMatrix<float>, LocalVector<float>, float> inner;
+    inner.Verbose(0);
+
+    MixedPrecision solver;
+    solver.Verbose(0);
+    solver.SetOperator(*A);
+    solver.Set(inner);
+    quietly([&] { solver.Build(); });
+
+    solver.ResetOperator(*B);
+    EXPECT_ASSERT_DEATH(solver.ReBuildNumeric(), "col_l");
 }
 
 TEST(solvers_mixed_precision, one_iteration_is_one_defect_correction)
