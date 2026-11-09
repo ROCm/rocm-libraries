@@ -2,6 +2,10 @@
 # name: test_a2a_gemm_gfx950_golden
   list([
     dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_A2AGemm_UserArgs_MT256x256H5ylkkzVhMwn8KkGnd400W9CKcPu08i7hQw5Guxb8Fw=',
+      'err': 0,
+    }),
+    dict({
       'basename': 'Cijk_Alik_Bljk_BBS_BH_A2AGemm_UserArgs_MT256x256_0cfveHNdTRZpYTUqqbSrAv63g5lxqaLXJ8NSGberDQ=',
       'err': 0,
     }),

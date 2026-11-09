@@ -22,7 +22,7 @@ are gathered from the peers one shard at a time. Three changes in that PR reach 
 - The existing GemmA2A kernels' name suffix changes from `FusedA2A` to
   `GemmA2A`, which moves the two basenames in
   `test_fused_a2a_gfx950_char.ambr`; the new `test_a2a_gemm_loop_char.ambr`
-  pins the two A2AGemm kernels.
+  pins the three A2AGemm kernels.
 
 Eight changed `.ambr` files exceed the threshold of three in
 `check_snapshot_diff.py` (AIHPBLAS-3876).
@@ -31,7 +31,7 @@ Eight changed `.ambr` files exceed the threshold of three in
 Accept the eight files together as one reviewed update. Each diff is confined
 to the keys and basenames listed above; every `err` stays `0`, and no node
 outside those keys changes. The eight test files passed two consecutive runs
-without `--snapshot-update` (148 tests, 123 snapshots each run).
+without `--snapshot-update` (147 tests, 123 snapshots each run).
 
 ## Consequences
 The override applies only to this PR. A later fused mode that adds a

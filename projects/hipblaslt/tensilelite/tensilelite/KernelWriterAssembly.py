@@ -9446,7 +9446,9 @@ class KernelWriterAssembly(KernelWriter):
     and A2ABlockCount.
 
     A feature-tile-0 work-group of each batch must be dispatched before the
-    work-groups of the batches it places fill every free slot.
+    work-groups of the batches it places fill every free slot. With
+    WorkGroupMapping >= 0, each mapping group dispatches the feature-tile-0
+    work-groups of all its token blocks first.
 
     Everything between the election and A2ASkipEnqueue runs on an enqueuer only.
     """
