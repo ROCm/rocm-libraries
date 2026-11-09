@@ -139,17 +139,21 @@ if (BUILD_WITH_ROCBLAS AND rocblas_FOUND)
 endif()
 
 if(BUILD_CODE_COVERAGE)
-  target_compile_options(rocsparse PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  # Instrument host code only. Device-side coverage makes the HIP runtime abort
-  # while dumping the profile at process exit, after every test has already
-  # passed (AISPARSE-778). Both halves matter: the compile flags suppress the
-  # __profd_* counter globals, and the host-only link keeps the AMDGPU profile
-  # runtime, which contributes __llvm_profile_sections_*, out of the device image.
+  # Instrument host code only. A bare -fprofile-instr-generate is also applied to
+  # the device compilation of a HIP translation unit, and on clang 23
+  # -Xarch_device -fno-profile-instr-generate does not undo it: the device link
+  # fails with an undefined __llvm_profile_instrument_gpu. Passing the
+  # instrumentation through -Xarch_host keeps it off the device image. That is
+  # also what avoids the HIP runtime abort while dumping a device profile
+  # (AISPARSE-778).
   target_compile_options(rocsparse PRIVATE
-    "SHELL:-Xarch_device -fno-profile-instr-generate"
-    "SHELL:-Xarch_device -fno-coverage-mapping")
+    "SHELL:-Xarch_host -fprofile-instr-generate"
+    "SHELL:-Xarch_host -fcoverage-mapping")
   target_link_options(rocsparse PRIVATE -u__llvm_profile_runtime)
   target_link_libraries(rocsparse PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
+  # See projects/rocsparse/CMakeLists.txt: ccache drops -Xarch_* flags.
+  set_property(TARGET rocsparse PROPERTY C_COMPILER_LAUNCHER "")
+  set_property(TARGET rocsparse PROPERTY CXX_COMPILER_LAUNCHER "")
 endif()
 
 if (NOT WIN32)

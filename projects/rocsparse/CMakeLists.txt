@@ -111,6 +111,14 @@ if(BUILD_CODE_COVERAGE)
   set(ROCSPARSE_PROFILE_RUNTIME
       -Wl,--start-group ${ROCSPARSE_PROFILE_RUNTIME} -Wl,--end-group
       ${CMAKE_DL_LIBS} -lpthread -lrt)
+  # ccache 4.9 treats -Xarch_* as an argument it drops before invoking the
+  # compiler, so a coverage build launched through ccache silently loses
+  # -Xarch_host -fprofile-instr-generate. Compile these targets directly.
+  if(CMAKE_C_COMPILER_LAUNCHER OR CMAKE_CXX_COMPILER_LAUNCHER)
+    message(STATUS "BUILD_CODE_COVERAGE: not using the compiler launcher")
+    set(CMAKE_C_COMPILER_LAUNCHER "")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "")
+  endif()
 endif()
 option(BUILD_ADDRESS_SANITIZER "Build rocSPARSE with address sanitizer enabled" OFF)
 option(BUILD_MEMSTAT "Build rocSPARSE with memory statistics enabled" OFF)

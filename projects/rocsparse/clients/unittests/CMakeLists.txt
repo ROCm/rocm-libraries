@@ -508,6 +508,22 @@ add_executable(rocsparse-unit-test-device
 # built into the executable, not symbols imported from the shared library).
 target_compile_definitions(rocsparse-unit-test-device
   PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE ROCSPARSE_KEEP_INTERNAL_U16)
+
+# These routines are compiled into the library unconditionally. The unit tests
+# that exercise them were written behind macros that nothing in the build
+# defines, so the tests never ran. Define the macros on those translation units.
+set_property(SOURCE
+  unit_test_device_extra_spmat_scale.cpp
+  unit_test_device_conv_descr.cpp
+  APPEND PROPERTY COMPILE_DEFINITIONS ROCSPARSE_WITH_SPMAT_SCALE)
+set_property(SOURCE
+  unit_test_device_extra_sptrsm.cpp
+  unit_test_device_level2_dispatch.cpp
+  APPEND PROPERTY COMPILE_DEFINITIONS ROCSPARSE_WITH_DIAGONAL_SOLVE)
+set_property(SOURCE
+  unit_test_device_level2_dispatch.cpp
+  unit_test_device_level2_spsv.cpp
+  APPEND PROPERTY COMPILE_DEFINITIONS ROCSPARSE_WITH_ELL_TRSV)
 target_compile_options(rocsparse-unit-test-device PRIVATE
   -Wno-deprecated
   -Wno-unused-command-line-argument
@@ -620,14 +636,16 @@ endif()
 if(BUILD_CODE_COVERAGE)
   foreach(_cov_tgt rocsparse-unit-test rocsparse-unit-test-device)
     if(TARGET ${_cov_tgt})
-      target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-      # Host-only instrumentation, as for the library target: device-side
-      # coverage crashes the HIP runtime at profile dump (AISPARSE-778).
+      # Host-only instrumentation, as for the library target. See library/CMakeLists.txt:
+      # -Xarch_host is required so clang 23 does not instrument the device image.
       target_compile_options(${_cov_tgt} PRIVATE
-        "SHELL:-Xarch_device -fno-profile-instr-generate"
-        "SHELL:-Xarch_device -fno-coverage-mapping")
+        "SHELL:-Xarch_host -fprofile-instr-generate"
+        "SHELL:-Xarch_host -fcoverage-mapping")
       target_link_options(${_cov_tgt} PRIVATE -u__llvm_profile_runtime)
       target_link_libraries(${_cov_tgt} PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
+      # ccache drops -Xarch_* flags; keep host instrumentation on the real compiler.
+      set_property(TARGET ${_cov_tgt} PROPERTY C_COMPILER_LAUNCHER "")
+      set_property(TARGET ${_cov_tgt} PROPERTY CXX_COMPILER_LAUNCHER "")
     endif()
   endforeach()
 endif()
