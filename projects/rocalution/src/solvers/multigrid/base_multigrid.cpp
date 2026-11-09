@@ -728,6 +728,8 @@ namespace rocalution
     {
         log_debug(this, "BaseMultiGrid::Vcycle_()", " #*# begin", (const void*&)rhs, x);
 
+        assert(!continue_x || this->current_level_ < this->levels_ - 1);
+
         // Run coarse grid solver, if coarsest grid has been reached
         if(this->current_level_ == this->levels_ - 1)
         {

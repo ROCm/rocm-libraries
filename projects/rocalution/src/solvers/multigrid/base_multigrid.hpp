@@ -139,7 +139,8 @@ namespace rocalution
         /** \brief V-cycle */
         void Vcycle_(const VectorType& rhs, VectorType* x);
         /** \brief V-cycle; a coarse level, and the finest level of a preconditioner, start
-         *  from a zero initial guess unless continue_x is set */
+         *  from a zero initial guess unless continue_x is set. The coarsest level always
+         *  solves from zero, so continue_x must not be set there */
         void Vcycle_(const VectorType& rhs, VectorType* x, bool continue_x);
         /** \brief W-cycle */
         void Wcycle_(const VectorType& rhs, VectorType* x);
