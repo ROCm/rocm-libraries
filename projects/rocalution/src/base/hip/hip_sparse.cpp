@@ -307,7 +307,7 @@ namespace rocalution
                                        rocsparse_fill_mode         fill_mode,
                                        rocsparse_diag_type         diag_type)
     {
-        assert(this->descr_ == NULL);
+        this->Clear();
 
         this->fill_mode_ = fill_mode;
         this->diag_type_ = diag_type;
@@ -535,8 +535,9 @@ namespace rocalution
                                        rocsparse_fill_mode         fill_mode,
                                        rocsparse_diag_type         diag_type)
     {
-        assert(this->triangle_ == NULL);
         assert(mat != NULL);
+
+        this->Clear();
 
         rocsparse_format format;
 

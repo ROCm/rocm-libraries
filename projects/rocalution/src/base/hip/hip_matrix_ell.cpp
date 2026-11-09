@@ -73,20 +73,17 @@ namespace rocalution
     {
         this->DestroySpMatDescr_();
 
-        if(this->nnz_ >= 0)
-        {
-            rocsparse_status status
-                = rocsparse_create_ell_descr(&this->spmat_descr_,
-                                             this->nrow_,
-                                             this->ncol_,
-                                             this->mat_.col,
-                                             this->mat_.val,
-                                             this->mat_.max_row,
-                                             rocsparse_indextype_i32,
-                                             rocsparse_index_base_zero,
-                                             rocalution_datatype_traits<ValueType>::value);
-            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-        }
+        rocsparse_status status
+            = rocsparse_create_ell_descr(&this->spmat_descr_,
+                                         this->nrow_,
+                                         this->ncol_,
+                                         this->mat_.col,
+                                         this->mat_.val,
+                                         this->mat_.max_row,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
+                                         rocalution_datatype_traits<ValueType>::value);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
     }
 
     template <typename ValueType>
@@ -364,6 +361,8 @@ namespace rocalution
 
             copy_d2d(this->nnz_, this->mat_.col, hip_cast_mat->mat_.col);
             copy_d2d(this->nnz_, this->mat_.val, hip_cast_mat->mat_.val);
+
+            hip_cast_mat->ApplyAnalyseClear_();
         }
         else
         {
@@ -555,6 +554,8 @@ namespace rocalution
                      hip_cast_mat->mat_.val,
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+
+            hip_cast_mat->ApplyAnalyseClear_();
         }
         else
         {

@@ -93,22 +93,10 @@ namespace rocalution
         this->set_backend(local_backend);
 
         this->spmat_descr_ = 0;
-        this->mat_descr_   = 0;
 
         this->tmp_vec_ = NULL;
 
         CHECK_HIP_ERROR(__FILE__, __LINE__);
-
-        rocsparse_status status;
-
-        status = rocsparse_create_mat_descr(&this->mat_descr_);
-        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-
-        status = rocsparse_set_mat_index_base(this->mat_descr_, rocsparse_index_base_zero);
-        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-
-        status = rocsparse_set_mat_type(this->mat_descr_, rocsparse_matrix_type_general);
-        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
     }
 
     template <typename ValueType>
@@ -116,30 +104,48 @@ namespace rocalution
     {
         this->DestroySpMatDescr_();
 
-        if(this->nnz_ >= 0)
-        {
-            rocsparse_status status
-                = rocsparse_create_csr_descr(&this->spmat_descr_,
-                                             this->nrow_,
-                                             this->ncol_,
-                                             this->nnz_,
-                                             this->mat_.row_offset,
-                                             this->mat_.col,
-                                             this->mat_.val,
-                                             rocalution_indextype_traits<PtrType>::value,
-                                             rocalution_indextype_traits<int>::value,
-                                             rocsparse_index_base_zero,
-                                             rocalution_datatype_traits<ValueType>::value);
-            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+        rocsparse_status status
+            = rocsparse_create_csr_descr(&this->spmat_descr_,
+                                         this->nrow_,
+                                         this->ncol_,
+                                         this->nnz_,
+                                         this->mat_.row_offset,
+                                         this->mat_.col,
+                                         this->mat_.val,
+                                         rocalution_indextype_traits<PtrType>::value,
+                                         rocalution_indextype_traits<int>::value,
+                                         rocsparse_index_base_zero,
+                                         rocalution_datatype_traits<ValueType>::value);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
-            this->L_sptrsv_.Update(this->spmat_descr_);
-            this->LT_sptrsv_.Update(this->spmat_descr_);
-            this->U_sptrsv_.Update(this->spmat_descr_);
+        // The sparsity pattern may have changed, triangular analyses are no longer valid
+        this->LAnalyseClear();
+        this->UAnalyseClear();
+        this->LUAnalyseClear();
+        this->LLAnalyseClear();
 
-            this->L_spitsv_.Update(this->spmat_descr_);
-            this->LT_spitsv_.Update(this->spmat_descr_);
-            this->U_spitsv_.Update(this->spmat_descr_);
-        }
+        this->ItLAnalyseClear();
+        this->ItUAnalyseClear();
+        this->ItLUAnalyseClear();
+        this->ItLLAnalyseClear();
+    }
+
+    template <typename ValueType>
+    void HIPAcceleratorMatrixCSR<ValueType>::UpdateSpMatDescrValues_(void)
+    {
+        assert(this->spmat_descr_ != NULL);
+
+        rocsparse_status status = rocsparse_csr_set_pointers(
+            this->spmat_descr_, this->mat_.row_offset, this->mat_.col, this->mat_.val);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        this->L_sptrsv_.Update(this->spmat_descr_);
+        this->LT_sptrsv_.Update(this->spmat_descr_);
+        this->U_sptrsv_.Update(this->spmat_descr_);
+
+        this->L_spitsv_.Update(this->spmat_descr_);
+        this->LT_spitsv_.Update(this->spmat_descr_);
+        this->U_spitsv_.Update(this->spmat_descr_);
     }
 
     template <typename ValueType>
@@ -162,11 +168,6 @@ namespace rocalution
         log_debug(this, "HIPAcceleratorMatrixCSR::~HIPAcceleratorMatrixCSR()", "destructor");
 
         this->Clear();
-
-        rocsparse_status status;
-
-        status = rocsparse_destroy_mat_descr(this->mat_descr_);
-        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
     }
 
     template <typename ValueType>
@@ -601,6 +602,7 @@ namespace rocalution
             if(this->mat_.row_offset != NULL)
             {
                 copy_d2d(this->nrow_ + 1, this->mat_.row_offset, hip_cast_mat->mat_.row_offset);
+                hip_cast_mat->ApplyAnalyseClear_();
             }
 
             copy_d2d(this->nnz_, this->mat_.col, hip_cast_mat->mat_.col);
@@ -653,6 +655,7 @@ namespace rocalution
                          hip_cast_mat->mat_.row_offset,
                          true,
                          HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+                hip_cast_mat->ApplyAnalyseClear_();
             }
 
             copy_d2h(this->nnz_,
@@ -1465,7 +1468,7 @@ namespace rocalution
 
             this->mat_.val = ilu0;
 
-            this->CreateSpMatDescr_();
+            this->UpdateSpMatDescrValues_();
         }
 
         return true;
@@ -3094,6 +3097,13 @@ namespace rocalution
         int m = cast_mat_A->nrow_;
         int n = cast_mat_B->ncol_;
 
+        // A matrix without arrays has no descriptor, and the product has no entries
+        if(cast_mat_A->spmat_descr_ == NULL || cast_mat_B->spmat_descr_ == NULL)
+        {
+            this->AllocateCSR(0, m, n);
+            return true;
+        }
+
         ValueType alpha = static_cast<ValueType>(1);
 
         rocsparse_handle   handle    = ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle);
@@ -3239,6 +3249,12 @@ namespace rocalution
         assert(cast_mat->ncol_ == this->ncol_);
         assert(this->nnz_ >= 0);
         assert(cast_mat->nnz_ >= 0);
+
+        // A matrix without arrays has no descriptor, both matrices are then 0 x 0
+        if(this->spmat_descr_ == NULL || cast_mat->spmat_descr_ == NULL)
+        {
+            return true;
+        }
 
         if(structure == false)
         {

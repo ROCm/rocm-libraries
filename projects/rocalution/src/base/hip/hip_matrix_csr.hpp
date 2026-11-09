@@ -481,6 +481,7 @@ namespace rocalution
 
     private:
         void CreateSpMatDescr_(void);
+        void UpdateSpMatDescrValues_(void);
         void DestroySpMatDescr_(void);
         void ApplyAnalyse_(ValueType                   alpha,
                            rocsparse_const_dnvec_descr x,
@@ -503,8 +504,6 @@ namespace rocalution
         HIPSpITSV<ValueType> L_spitsv_;
         HIPSpITSV<ValueType> LT_spitsv_;
         HIPSpITSV<ValueType> U_spitsv_;
-
-        rocsparse_mat_descr mat_descr_;
 
         HIPAcceleratorVector<ValueType>* tmp_vec_;
 

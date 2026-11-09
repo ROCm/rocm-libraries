@@ -394,6 +394,8 @@ namespace rocalution
             copy_d2d(this->coo_nnz_, this->mat_.COO.row, hip_cast_mat->mat_.COO.row);
             copy_d2d(this->coo_nnz_, this->mat_.COO.col, hip_cast_mat->mat_.COO.col);
             copy_d2d(this->coo_nnz_, this->mat_.COO.val, hip_cast_mat->mat_.COO.val);
+
+            hip_cast_mat->ApplyAnalyseClear_();
         }
         else
         {
@@ -664,6 +666,8 @@ namespace rocalution
                      hip_cast_mat->mat_.COO.val,
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+
+            hip_cast_mat->ApplyAnalyseClear_();
         }
         else
         {

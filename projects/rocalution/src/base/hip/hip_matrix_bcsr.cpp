@@ -97,28 +97,31 @@ namespace rocalution
     {
         this->DestroySpMatDescr_();
 
-        if(this->mat_.nnzb >= 0)
-        {
-            // Determine whether we are using row or column major for the blocks
-            rocsparse_direction dir
-                = BCSR_IND_BASE ? rocsparse_direction_row : rocsparse_direction_column;
+        // Determine whether we are using row or column major for the blocks
+        rocsparse_direction dir
+            = BCSR_IND_BASE ? rocsparse_direction_row : rocsparse_direction_column;
 
-            rocsparse_status status
-                = rocsparse_create_bsr_descr(&this->spmat_descr_,
-                                             this->mat_.nrowb,
-                                             this->mat_.ncolb,
-                                             this->mat_.nnzb,
-                                             dir,
-                                             this->mat_.blockdim,
-                                             this->mat_.row_offset,
-                                             this->mat_.col,
-                                             this->mat_.val,
-                                             rocalution_indextype_traits<PtrType>::value,
-                                             rocsparse_indextype_i32,
-                                             rocsparse_index_base_zero,
-                                             rocalution_datatype_traits<ValueType>::value);
-            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-        }
+        rocsparse_status status
+            = rocsparse_create_bsr_descr(&this->spmat_descr_,
+                                         this->mat_.nrowb,
+                                         this->mat_.ncolb,
+                                         this->mat_.nnzb,
+                                         dir,
+                                         this->mat_.blockdim,
+                                         this->mat_.row_offset,
+                                         this->mat_.col,
+                                         this->mat_.val,
+                                         rocalution_indextype_traits<PtrType>::value,
+                                         rocalution_indextype_traits<int>::value,
+                                         rocsparse_index_base_zero,
+                                         rocalution_datatype_traits<ValueType>::value);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        // The sparsity pattern may have changed, triangular analyses are no longer valid
+        this->LAnalyseClear();
+        this->UAnalyseClear();
+        this->LUAnalyseClear();
+        this->LLAnalyseClear();
     }
 
     template <typename ValueType>
@@ -459,6 +462,8 @@ namespace rocalution
             copy_d2d(this->mat_.nnzb * this->mat_.blockdim * this->mat_.blockdim,
                      this->mat_.val,
                      hip_cast_mat->mat_.val);
+
+            hip_cast_mat->ApplyAnalyseClear_();
         }
         else
         {
@@ -707,6 +712,8 @@ namespace rocalution
                      hip_cast_mat->mat_.val,
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+
+            hip_cast_mat->ApplyAnalyseClear_();
         }
         else
         {
