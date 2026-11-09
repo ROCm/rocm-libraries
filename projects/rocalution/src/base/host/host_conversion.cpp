@@ -192,11 +192,9 @@ namespace rocalution
         set_to_zero_host(nnz, dst->col);
         set_to_zero_host(nnz, dst->val);
 
-        assert(nnz <= std::numeric_limits<int>::max());
-
         for(IndexType ai = 0; ai < nrow + 1; ++ai)
         {
-            dst->row_offset[ai] = static_cast<IndexType>(nrow + src.row_offset[ai] - ai);
+            dst->row_offset[ai] = static_cast<PointerType>(nrow + src.row_offset[ai] - ai);
         }
 
 #ifdef _OPENMP
@@ -427,14 +425,13 @@ namespace rocalution
         // Initialize values with zero
         set_to_zero_host(nnzb * blockdim * blockdim, dst->val);
 
-        assert(nnz <= std::numeric_limits<int>::max());
-
         // Fill BCSR structure
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
         {
-            std::vector<IndexType> blockcol(nb, -1);
+            // Block offset of each block column in the current block row
+            std::vector<PointerType> blockcol(nb, -1);
 
 #ifdef _OPENMP
 #pragma omp for
@@ -478,7 +475,7 @@ namespace rocalution
                         if(blockcol[bcsr_col] == -1)
                         {
                             // Keep block value offset for filling
-                            blockcol[bcsr_col] = static_cast<IndexType>(bcsr_idx);
+                            blockcol[bcsr_col] = bcsr_idx;
 
                             // Write BCSR column index
                             dst->col[bcsr_idx++] = bcsr_col;
