@@ -800,23 +800,21 @@ Each failure must have a known cause before it gets a skip.
 
 Do not skip a failure that has no ticket.
 
-A case can have the triggers of more than one defect. A skip applies to the
-whole test, and the first entry that matches a test is the one that the suite
-uses. So such a case is skipped under one ticket only. Use the ticket of the
-defect that the failure message shows, for example the defect that makes the
-failing tensor wrong. The case still has its other defects. Section 10.4 tells
-what to do about them when a fix lands.
+A case can have the triggers of more than one defect. Such a case is in the
+entry of each of those defects (section 10.3). A skip applies to the whole
+test, and the first entry that matches a test is the one that the suite uses.
+So the suite reports the skip under one ticket only. The case still has its
+other defects. Section 10.4 tells what to do about them when a fix lands.
 
 ### 10.3 Writing a skip entry
 
 A skip entry is a `[[test_skips]]` table
-([File Formats](../file-formats.md)). Write one entry for each defect and each
-set of GPUs. An entry has three fields:
+([File Formats](../file-formats.md)). Write one entry for each defect. An
+entry has these fields:
 
 ```toml
 # SdpaFwdPlan cases that <trigger, in a few words>.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "<tier>_SdpaFwdPlan_<Topology>.*",
     "<tier>_SdpaFwdPlan_<Topology>.<case id>",
@@ -824,10 +822,6 @@ filters = [
 reason = "ALMIOPEN-NNNN: <what the engine does wrong>"
 ```
 
-- `archs`: the GPUs on which the failure was seen. Do not add a GPU on which
-  the case passed, or on which it was not run. The suite matches each value as
-  part of the GPU's architecture name, so `gfx942` matches
-  `gfx942:sramecc+:xnack-`.
 - `filters`: GTest names (section 9.4). A name can hold `*`, which matches any
   run of characters. A name with `*` is a **glob**; a name without `*` is an
   **exact name**.
@@ -835,29 +829,79 @@ reason = "ALMIOPEN-NNNN: <what the engine does wrong>"
   the ticket key, then a colon, then the defect in one short sentence. When a
   second ticket blocks the check (for example, a reference executor cannot yet
   check the case), name that ticket in the sentence too.
+- `archs` (optional): the GPU architectures on which the entry applies. An
+  entry without `archs` applies on every GPU. Add `archs` only when the defect
+  is specific to an architecture. Then list every architecture of the affected
+  family, not only the GPUs on which the cases were run. For example, the
+  `FP8_E4M3_FNUZ` entry lists the FNUZ-native targets `gfx940`, `gfx941` and
+  `gfx942`. The suite matches each value as part of the GPU's architecture
+  name, so `gfx942` matches `gfx942:sramecc+:xnack-`.
 
-Use a glob only when it is safe. A glob is safe when, on every GPU in `archs`,
-every case that it matches either failed with this defect or was declined.
-Otherwise, list exact names. Some defects give a wrong output only with some
-input data. For those defects, always list exact names: a glob could hide a case
-that passes.
+#### Which cases an entry covers
+
+An entry covers every case that has the defect's trigger: the layout, the
+setting or the value that the ticket names. It covers those cases on every GPU,
+unless the defect is specific to an architecture. It covers them also when some
+of them pass today. Some defects give a result that depends on the memory
+contents or on the GPU. Such a case can pass by chance, so a pass does not show
+that the engine is correct for it. Examples:
+
+- ALMIOPEN-3041: every case with a Q, K, V or O head-dim stride other than 1.
+  The engine reads memory outside the layout, so the result depends on the
+  contents of that memory.
+- ALMIOPEN-3042: every case with self-overlapping Q, K or V sequence strides,
+  and every case with a Stats layout that the kernel cannot address. The
+  result depends on the input data and on the memory contents.
+- ALMIOPEN-3043: every case with an attention scale that is zero, negative or
+  subnormal.
+
+Use a list of exact names from measured failures only for a defect that has no
+known trigger. For example, the ALMIOPEN-3212 entry names the one case that
+showed the defect.
+
+#### Building an entry from the bundles
+
+Build a trigger-based entry from the bundle data, not from the results of a
+run:
+
+1. Read the graph and the metadata (section 9.4) of every `SdpaFwdPlan` case.
+2. Select each case that has the trigger. For example, select each case with a
+   tensor whose head-dim stride is not 1. For a scale, read the scale's value in
+   the graph, or its fixed fill in `metadata.inputs`.
+3. Put the GTest name of each selected case in `filters`.
+4. Replace exact names with a glob only when every case that the glob matches
+   has the trigger.
+
+Build the entry again in the same way when the bundles change. A run does not
+change the entry.
 
 A glob also skips the declined cases that it matches. The suite then records no
-result for those cases on that GPU.
+result for those cases.
 
-Check the entries before you commit them. Apply the entries to the recorded
-results of section 10.1. Every failure must be skipped. No passing case may be
-skipped. Each skipped failure must be skipped under a ticket whose trigger the
-case has.
+#### Checking the entries
+
+Check the entries before you commit them:
+
+1. Apply each trigger-based entry to the bundles. Every case with the trigger
+   must match the entry. Every case that the entry matches must have the
+   trigger.
+2. Apply all the entries to the recorded results of section 10.1. Every failure
+   must be skipped, under a ticket whose trigger the case has, or under the
+   ticket of section 10.5. A skipped case that passes is correct when it has
+   the trigger.
 
 ### 10.4 Removing a skip when a fix lands
 
 1. When a fix for a ticket lands, find every entry whose `reason` starts with
    that ticket key. Delete those entries in the change that lands the fix.
-2. Run the cases again on every GPU in the deleted entries' `archs`.
+2. Run the cases that those entries matched (section 10.1). Run them on gfx942
+   and on gfx950. For an entry with `archs`, run them on a GPU of the listed
+   architectures.
 3. A case that passes, or that the engine declines, needs nothing more.
-4. A case that still fails has another defect (section 10.2). Add it to the
-   entry for that defect's ticket, with the rules of section 10.3.
+4. A case that still fails has another defect (section 10.2). If that defect
+   has a trigger, make sure that its entry matches the case (section 10.3). If
+   that defect has no known trigger, add the case to its entry as an exact
+   name.
 
 A known defect that needs a setting that no bundle can express needs no skip:
 rows with such a setting are excluded (section 9.1).
@@ -865,11 +909,12 @@ rows with such a setting are excluded (section 9.1).
 ### 10.5 Unverifiable cases
 
 An uncheckable single (section 7) that the engine accepts is reported as
-Unverifiable, and an unverifiable case fails. Such a case has no engine defect:
-no reference can compute its expected output. It gets a skip whose ticket is
-the one that blocks the check, for example a reference executor that does not
-take the case's setting. Each such entry lists exact names. Delete it when the
-blocking ticket is fixed, then follow section 10.4.
+Unverifiable, and an unverifiable case fails. The cause is a gap in the
+references, not an engine defect: no reference can compute the expected output
+of the case. Such a case gets a skip whose ticket is the one that blocks the
+check, for example a reference executor that does not take the case's setting.
+The entry omits `archs`, because the gap is the same on every GPU. Delete the
+entry when the blocking ticket is fixed, then follow section 10.4.
 
 ## 11. Limits and what comes next
 
