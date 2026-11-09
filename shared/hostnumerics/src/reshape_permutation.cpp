@@ -3,10 +3,12 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <cstring>
 #include <roc/hostnumerics/reshape_permutation.hpp>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace roc::hostnumerics {
 
@@ -23,6 +25,14 @@ ReshapePermutation::ReshapePermutation(Shape naturalShape, Shape paddedShape, Sh
             throw std::runtime_error("Padding cannot reduce an extent.");
     if (paddedShape.elementCount() != reshapedShape.elementCount())
         throw std::runtime_error("Reshape must preserve the padded element count.");
+}
+
+ReshapePermutation& ReshapePermutation::operator=(ReshapePermutation other) noexcept {
+    m_naturalShape = std::move(other.m_naturalShape);
+    m_paddedLayout = std::move(other.m_paddedLayout);
+    m_physicalLayout = std::move(other.m_physicalLayout);
+    m_order = std::move(other.m_order);
+    return *this;
 }
 
 ReshapePermutation ReshapePermutation::identity(const Shape& shape) {

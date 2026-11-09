@@ -47,6 +47,12 @@ class ReshapePermutation {
    public:
     ReshapePermutation(Shape naturalShape, Shape paddedShape, Shape reshapedShape,
                        Permutation order);
+    ReshapePermutation(const ReshapePermutation&) = default;
+    ReshapePermutation(ReshapePermutation&&) noexcept = default;
+
+    // Copy all metadata before replacing this value so an allocation failure
+    // cannot leave shapes and order inconsistent. Self-move preserves the value.
+    ReshapePermutation& operator=(ReshapePermutation other) noexcept;
 
     // Keeps the shape and storage order exactly: no padding or rearrangement.
     // For example, shape [2, 3] has six physical elements and maps i to i.
@@ -100,6 +106,7 @@ void copyReshapePermutationBytes(const std::byte* input, std::byte* output, size
 
 // Copy natural elements to their physical offsets, preserving their object
 // representations. Input and output must not overlap; T must be trivially copyable.
+// Specify T explicitly to accept containers and fixed-extent or mutable spans.
 // Both spans must have exactly the transform's respective element counts, or
 // std::runtime_error is thrown. Padding is left untouched, so the caller can
 // initialize it to any value before copying. The output has last-dimension-fastest

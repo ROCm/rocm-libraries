@@ -63,9 +63,6 @@ add_library(hostnumerics-amd-gpu-layout STATIC
 )
 add_library(roc::hostnumerics-amd-gpu-layout ALIAS hostnumerics-amd-gpu-layout)
 target_link_libraries(hostnumerics-amd-gpu-layout PUBLIC roc::hostnumerics-core)
-target_include_directories(hostnumerics-amd-gpu-layout
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
-)
 target_sources(hostnumerics-amd-gpu-layout
     PUBLIC
         FILE_SET HEADERS
