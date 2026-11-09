@@ -1757,11 +1757,13 @@ def _gfx125_qr_tdm_pingpong_tiles(hdim_pair):
     # barrier, K/V transfers, row-max rescale): it stages 128 keys per trip, which the
     # whole-tile K buffers hold easily.
     bn0 = 128 if hdim_v < 64 else 64
+    # Up to 16 rows the 64-row tile would idle 3/4 of its M rows, so the short-query tile
+    # spends its warps on N instead: four, or two where a quarter of V's columns is no
+    # whole number of 16-column warp tiles (d96, d160).
+    sw = 4 if hdim_v % 64 == 0 else 2
     #                                         bm0, bn0, bk0,  bn1, bk1, bk0max
     tiles = (
-        # Up to 16 rows the 64-row tile would idle 3/4 of its M rows, so this one
-        # spends its four warps on N instead.
-        FmhaFwdTileSize( 16,  64,  32, hdim_v, 32,  hdim,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {rng}"), "qr_tdm_pingpong"),
+        FmhaFwdTileSize( 16,  64,  32, hdim_v, 32,  hdim,  1, sw, 1,  1, sw, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {rng}"), "qr_tdm_pingpong"),
         FmhaFwdTileSize( 64,  bn0, 32, hdim_v, 32,  hdim,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64), "qr_tdm_pingpong"),
         FmhaFwdTileSize(128,  bn0, 32, hdim_v, 32,  hdim,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(rng), "qr_tdm_pingpong"),
     )  # fmt: skip

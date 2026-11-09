@@ -113,6 +113,15 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             ? 6
             : 2;
     static_assert(kSubQKHeaddim == kQKHeaddim, "qr_tdm_pingpong stages whole K rows");
+    // the block gemms give each warp kN / warps whole warp tiles: a remainder would go
+    // uncomputed
+    static_assert(BlockFmhaShape::kN0 % (BlockFmhaShape::Gemm0BlockWarps::at(I1) *
+                                         BlockFmhaShape::Gemm0WarpTile::at(I1)) ==
+                          0 &&
+                      BlockFmhaShape::kN1 % (BlockFmhaShape::Gemm1BlockWarps::at(I1) *
+                                             BlockFmhaShape::Gemm1WarpTile::at(I1)) ==
+                          0,
+                  "qr_tdm_pingpong: the warps on N need whole warp tiles of K rows and V columns");
     // BlockDropout::Run walks P in the QK gemm's output layout
     static_assert(!Base::kHasDropout || kNWarp == 1,
                   "qr_tdm_pingpong: dropout needs the QK gemm warps on M");
