@@ -3,8 +3,10 @@
 
 #pragma once
 
-#include <math.h>
-#include <stdint.h>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
 
 #ifdef __HIPCC__
 #define HKP_POINTWISE_DEVICE __host__ __device__
@@ -17,11 +19,11 @@ namespace hkp_standalone_pointwise_v2
 
 enum Storage : int32_t
 {
-    Float = 0,
-    Half = 1,
-    Bfloat16 = 2,
-    Boolean = 3,
-    Int32 = 4
+    FLOAT = 0,
+    HALF = 1,
+    BFLOAT16 = 2,
+    BOOLEAN = 3,
+    INT32 = 4
 };
 
 // Fixed-size launch metadata, not compile-time specialization: every rank, shape,
@@ -29,16 +31,16 @@ enum Storage : int32_t
 struct Metadata
 {
     int64_t elements = 0;
-    int64_t dims[5] = {};
-    int64_t strides[4][5] = {};
-    int32_t types[4] = {};
+    std::array<int64_t, 5> dims = {};
+    std::array<std::array<int64_t, 5>, 4> strides = {};
+    std::array<int32_t, 4> types = {};
     int32_t scalarMask = 0;
     int32_t operation = 0;
     float lower = 0;
     float upper = 0;
     float slope = 0;
     float beta = 1;
-    float scalars[3] = {};
+    std::array<float, 3> scalars = {};
     int32_t reluParameterized = 0;
     float alpha = 1;
     int32_t axis = 0;
@@ -46,13 +48,15 @@ struct Metadata
 
 static_assert(sizeof(Metadata) == 272, "standalone pointwise launch ABI");
 
-HKP_POINTWISE_DEVICE inline int64_t offset(const Metadata& meta, int operand, int64_t linear)
+HKP_POINTWISE_DEVICE inline int64_t
+    offset(const Metadata& meta, std::size_t operand, int64_t linear)
 {
     int64_t result = 0;
-    for(int axis = 4; axis >= 0; --axis)
+    for(auto axis = meta.dims.size(); axis > 0; --axis)
     {
-        result += (linear % meta.dims[axis]) * meta.strides[operand][axis];
-        linear /= meta.dims[axis];
+        const auto index = axis - 1;
+        result += (linear % meta.dims[index]) * meta.strides[operand][index];
+        linear /= meta.dims[index];
     }
     return result;
 }
@@ -93,13 +97,21 @@ HKP_POINTWISE_DEVICE inline float evaluate(const Metadata& meta, float a, float 
     case 31:
         return -a;
     case 33:
-        return a
-               * (meta.reluParameterized == 0
-                      ? (b > 0.0f ? 1.0f : 0.0f)
-                      : (b <= meta.lower ? meta.slope : (b > meta.upper ? 0.0f : 1.0f)));
+        if(meta.reluParameterized == 0)
+        {
+            return a * (b > 0.0f ? 1.0f : 0.0f);
+        }
+        if(b <= meta.lower)
+        {
+            return a * meta.slope;
+        }
+        return a * (b > meta.upper ? 0.0f : 1.0f);
     case 34:
-        return a <= meta.lower ? meta.slope * (a - meta.lower) + meta.lower
-                               : (a >= meta.upper ? meta.upper : a);
+        if(a <= meta.lower)
+        {
+            return meta.slope * (a - meta.lower) + meta.lower;
+        }
+        return a >= meta.upper ? meta.upper : a;
     case 36:
     {
         const float sigmoid = 1.0f / (1.0f + expf(-b));

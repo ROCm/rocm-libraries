@@ -92,15 +92,15 @@ int32_t storage(data::DataType type)
     switch(type)
     {
     case data::DataType::FLOAT:
-        return contract::Float;
+        return contract::FLOAT;
     case data::DataType::HALF:
-        return contract::Half;
+        return contract::HALF;
     case data::DataType::BFLOAT16:
-        return contract::Bfloat16;
+        return contract::BFLOAT16;
     case data::DataType::BOOLEAN:
-        return contract::Boolean;
+        return contract::BOOLEAN;
     case data::DataType::INT32:
-        return contract::Int32;
+        return contract::INT32;
     default:
         return -1;
     }
@@ -115,25 +115,25 @@ float readHostScalar(const void* pointer, int32_t type)
     }
     switch(type)
     {
-    case contract::Float:
+    case contract::FLOAT:
     {
         float value;
         std::memcpy(&value, pointer, sizeof(value));
         return value;
     }
-    case contract::Half:
+    case contract::HALF:
     {
         hipdnn_data_sdk::types::half value;
         std::memcpy(&value, pointer, sizeof(value));
         return static_cast<float>(value);
     }
-    case contract::Bfloat16:
+    case contract::BFLOAT16:
     {
         hipdnn_data_sdk::types::bfloat16 value;
         std::memcpy(&value, pointer, sizeof(value));
         return static_cast<float>(value);
     }
-    case contract::Boolean:
+    case contract::BOOLEAN:
     {
         bool value;
         std::memcpy(&value, pointer, sizeof(value));
@@ -181,42 +181,42 @@ std::optional<float> bakedScalar(const data::TensorAttributes& tensor)
 
 bool dtypeCombination(const Launch& launch)
 {
-    const auto* types = launch.metadata.types;
+    const auto& types = launch.metadata.types;
     const auto a = types[0];
     const auto b = types[1];
     const auto out = types[3];
-    if(a < contract::Float || a > contract::Bfloat16)
+    if(a < contract::FLOAT || a > contract::BFLOAT16)
     {
         return false;
     }
     if(launch.metadata.operation == static_cast<int32_t>(data::PointwiseMode::GEN_INDEX))
     {
-        return out == contract::Float || out == contract::Int32;
+        return out == contract::FLOAT || out == contract::INT32;
     }
     if(launch.metadata.operation == static_cast<int32_t>(data::PointwiseMode::CMP_GT))
     {
-        return a == b && out == contract::Boolean;
+        return a == b && out == contract::BOOLEAN;
     }
-    if(out < contract::Float || out > contract::Bfloat16)
+    if(out < contract::FLOAT || out > contract::BFLOAT16)
     {
         return false;
     }
     if(launch.arity == 1)
     {
-        return a == out || a == contract::Float;
+        return a == out || a == contract::FLOAT;
     }
     if(launch.arity == 3)
     {
-        return a == b && out == a && types[2] == contract::Boolean;
+        return a == b && out == a && types[2] == contract::BOOLEAN;
     }
-    if(b < contract::Float || b > contract::Bfloat16)
+    if(b < contract::FLOAT || b > contract::BFLOAT16)
     {
         return false;
     }
     // CPU graph executor FLOAT-compute signatures: equal inputs may retain their
     // storage or upcast; FLOAT with either low-precision input produces FLOAT.
-    return (a == b && (out == a || out == contract::Float))
-           || (out == contract::Float && (a == contract::Float || b == contract::Float));
+    return (a == b && (out == a || out == contract::FLOAT))
+           || (out == contract::FLOAT && (a == contract::FLOAT || b == contract::FLOAT));
 }
 
 std::optional<Launch> binding(const MatchContext& context)
@@ -400,7 +400,7 @@ std::optional<Launch> binding(const MatchContext& context)
             return decline("GEN_INDEX requires an axis in [0, output rank)");
         }
         meta.axis = static_cast<int32_t>(5 - static_cast<int64_t>(rank) + *axis);
-        if(meta.dims[meta.axis] > std::numeric_limits<int32_t>::max())
+        if(meta.dims[static_cast<size_t>(meta.axis)] > std::numeric_limits<int32_t>::max())
         {
             return decline("GEN_INDEX axis extent exceeds INT32 range");
         }
@@ -544,7 +544,8 @@ Launch readSaved(const SavedLaunchInputs& inputs)
     valid = valid && count == meta.elements;
     if(meta.operation == static_cast<int32_t>(data::PointwiseMode::GEN_INDEX))
     {
-        valid = valid && meta.dims[meta.axis] <= std::numeric_limits<int32_t>::max();
+        valid = valid
+                && meta.dims[static_cast<size_t>(meta.axis)] <= std::numeric_limits<int32_t>::max();
     }
     for(size_t operand = 0; operand < 4; ++operand)
     {
@@ -562,7 +563,7 @@ Launch readSaved(const SavedLaunchInputs& inputs)
             if(operand >= static_cast<size_t>(launch.arity))
             {
                 valid = valid && launch.kinds[operand] == 0 && launch.uids[operand] == 0
-                        && meta.types[operand] == contract::Float && meta.scalars[operand] == 0.0f;
+                        && meta.types[operand] == contract::FLOAT && meta.scalars[operand] == 0.0f;
             }
         }
         int64_t span = 0;
