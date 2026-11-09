@@ -261,7 +261,10 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      # TEMPORARY (PR #15353, revert before merge): a test_filter:standard PR
+      # label forces the standard tier, which the configure job's test_type
+      # otherwise overrides.
+      test_type: ${{ contains(github.event.pull_request.labels.*.name, 'test_filter:standard') && 'standard' || needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
@@ -287,7 +290,10 @@ jobs:
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_msi_package_version: ${{ needs.setup.outputs.rocm_msi_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      # TEMPORARY (PR #15353, revert before merge): a test_filter:standard PR
+      # label forces the standard tier, which the configure job's test_type
+      # otherwise overrides.
+      test_type: ${{ contains(github.event.pull_request.labels.*.name, 'test_filter:standard') && 'standard' || needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
