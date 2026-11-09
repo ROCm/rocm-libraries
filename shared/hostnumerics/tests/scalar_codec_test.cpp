@@ -8,6 +8,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <roc/hostnumerics/scalar_storage.hpp>
 #include <roc/hostnumerics/tensor.hpp>
@@ -194,4 +195,38 @@ TEST(ScalarCodecs, NativeValuesRoundTrip) {
     check(std::array{
         std::complex<double>{0.5, -2.0},
         std::complex<double>{std::numeric_limits<double>::max(), std::nextafter(1.0, 2.0)}});
+}
+
+TEST(ScalarCodecs, KnownFloatingEncodings) {
+    using namespace roc::hostnumerics;
+    // Fixed code/value pairs check numerical meaning independently of round trips.
+    struct Example {
+        ScalarType type;
+        uint16_t code;
+        float value;
+    };
+    using enum ScalarType;
+    const Example examples[]{
+        {Float4E2M1, 0x03, 1.5f},     {Float6E2M3, 0x0c, 1.5f}, {Float6E3M2, 0x0e, 1.5f},
+        {Float8E4M3, 0x3c, 1.5f},     {Float8E5M2, 0x3e, 1.5f}, {Float8E4M3Fnuz, 0x44, 1.5f},
+        {Float8E5M2Fnuz, 0x42, 1.5f}, {E4M3, 0x3c, 1.5f},       {E5M3, 0x7c, 1.5f},
+        {E8M0, 0x80, 2.0f},           {E8M0Zero, 0x80, 2.0f},   {Float16, 0x3e00, 1.5f},
+        {BFloat16, 0x3fc0, 1.5f},
+    };
+    const ScalarConversionOptions options{
+        IntegerRounding::NearestEven,    IntegerOverflow::Saturate,
+        FloatingRounding::NearestEven,   FloatingSourcePrecision::Float32,
+        FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
+    for (const auto& example : examples) {
+        SCOPED_TRACE(scalarTypeName(example.type));
+        std::array<std::byte, 2> expected{};
+        if (scalarTypeInfo(example.type).storageBits == 16)
+            std::memcpy(expected.data(), &example.code, sizeof(example.code));
+        else
+            expected[0] = static_cast<std::byte>(example.code);
+        EXPECT_EQ(detail::decodeScalar<float>(example.type, expected, 0, options), example.value);
+        std::array<std::byte, 2> actual{};
+        detail::encodeScalar(example.type, actual, 0, example.value, options);
+        EXPECT_EQ(actual, expected);
+    }
 }

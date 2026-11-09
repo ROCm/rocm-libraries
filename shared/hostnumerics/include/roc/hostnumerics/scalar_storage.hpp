@@ -17,9 +17,7 @@
 #include <utility>
 
 namespace roc::hostnumerics::detail {
-// encodeScalar and decodeScalar support every concrete ScalarType: Boolean,
-// signed and unsigned integers, floating types, scales and complex types.
-// ScalarType::Count and unnamed enum values are invalid.
+// Every ScalarType is supported.
 //
 // Storage helpers require a concrete ScalarType, a nonnegative element offset,
 // and storage containing the whole element or bit range. Bit-offset arithmetic
@@ -27,6 +25,7 @@ namespace roc::hostnumerics::detail {
 // callers establish storage bounds from their layouts before entering this layer.
 // Packed elements use consecutive low-to-high bits and can straddle bytes;
 // byte-addressable elements use the host's byte order.
+// Concurrent writes to packed elements sharing a byte require synchronization.
 //
 // Decoding an encoded value returns the value after the selected conversions,
 // not necessarily the original input: FP4 maps 5.0 to 4.0 with the default
