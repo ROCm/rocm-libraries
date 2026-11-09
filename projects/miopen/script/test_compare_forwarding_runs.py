@@ -385,12 +385,61 @@ class ComparatorTest(unittest.TestCase):
         self.assertEqual(rc, 0, err)
 
     def test_a_malformed_arch_field_is_rejected(self):
-        for archs in ("942", "gfx942,", "all,gfx942", "GFX942"):
+        for archs in ("942", "gfx942,", "all,gfx942", "GFX942", "optional", "optional,"):
             with self.subTest(archs=archs):
                 listing = KNOWN_LINE.replace("gfx942", archs)
                 rc, _, err = self.compare(suite(SERVED), suite(DECLINED), known=listing)
                 self.assertEqual(rc, 1)
                 self.assertIn("archs field", err)
+
+    def test_an_optional_line_is_tolerated_and_announced_when_it_diverges(self):
+        listing = KNOWN_LINE.replace("gfx942", "all,optional")
+        rc, out, err = self.compare(suite(SERVED), suite(DECLINED), known=listing)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("1 known divergence tolerated", out)
+        self.assertIn("Shim.A [optional]", out)
+        self.assertNotIn("did not occur", out)
+
+    def test_an_optional_line_that_did_not_diverge_passes_and_says_so(self):
+        # Both modes agree, as on a build without the plugin. The run must pass,
+        # and the log must show the listed gap was not open.
+        listing = KNOWN_LINE.replace("gfx942", "all,optional")
+        rc, out, err = self.compare(suite(DECLINED), suite(DECLINED), known=listing)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("1 optional known divergence did not occur on gfx942", out)
+        self.assertIn("Shim.A", out)
+        self.assertIn("parity_served_case=false", out)
+        self.assertIn("1 optional known divergence did not occur", out.splitlines()[-1])
+
+    def test_an_optional_line_does_not_tolerate_a_different_divergence(self):
+        listing = KNOWN_LINE.replace("gfx942", "all,optional")
+        rc, _, err = self.compare(
+            suite(SERVED), suite(("A", "failed")), known=listing
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("update or delete that line", err)
+
+    def test_an_optional_line_for_another_arch_is_not_reported_on_this_one(self):
+        listing = KNOWN_LINE.replace("gfx942", "gfx90a,optional")
+        rc, out, err = self.compare(suite(DECLINED), suite(DECLINED), known=listing)
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("did not occur", out)
+
+    def test_a_run_with_a_tolerated_and_an_unoccurred_optional_line_reports_both(self):
+        listing = "\n".join(
+            (
+                KNOWN_LINE,
+                "Shim.B | all,optional | passed | passed | needs a plugin",
+            )
+        )
+        rc, out, err = self.compare(
+            suite(SERVED, ("B", "passed")),
+            suite(DECLINED, ("B", "passed")),
+            known=listing,
+        )
+        self.assertEqual(rc, 0, err)
+        self.assertIn("1 known divergence tolerated", out)
+        self.assertIn("1 optional known divergence did not occur", out)
 
     def test_a_listed_test_absent_from_the_run_is_not_stale(self):
         # The discrete build registers the harness against several binaries, and only

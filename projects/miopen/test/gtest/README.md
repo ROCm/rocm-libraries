@@ -164,6 +164,14 @@ Three rules make the list safe to have:
 - A run that tolerates a line says so in its output and does not print the ordinary success
   line, so a known divergence never reads as a clean pass.
 
+A divergence that depends on the build as well as the device, such as one that exists only when
+the Composable Kernel (CK) plugin is loaded, is listed with the token `optional` in the devices
+field (`all,optional`, or `gfx942,optional`). Such a line is tolerated when it diverges. When the
+two replays agree it is not an error, because the gap is not open on that build. The output
+names each optional line that did not occur, with the outcome both replays reported, and the
+final line ends with the count, so a log never hides which of the two happened. Use it only when
+the reason is a build option; a gap that depends on the device alone is listed by device.
+
 To add one, run the harness, copy the failing line's test name, the device it ran on, and both
 outcomes into the file, and write down the reason. The list's own rules are covered by
 `test_forwarding_parity_scripts`, or by hand with
