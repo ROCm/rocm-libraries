@@ -48,7 +48,7 @@ constexpr auto segmented_reduce_config_picker()
         reduce_config_params>
 {
     // CONFIG: {'key_type': 'double', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -57,7 +57,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'float', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -66,7 +66,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
     {
         return reduce_config_params{
             {256, 16},
@@ -74,7 +74,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)))
     {
         return reduce_config_params{
@@ -83,7 +83,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int64_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -92,7 +92,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -101,7 +101,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'short', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)))
     {
         return reduce_config_params{
@@ -110,7 +110,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int8_t', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
     {
         return reduce_config_params{
             {256, 8},
@@ -130,7 +130,7 @@ constexpr auto segmented_reduce_config_picker()
         reduce_config_params>
 {
     // CONFIG: {'key_type': 'double', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -139,7 +139,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'float', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -148,7 +148,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
     {
         return reduce_config_params{
             {256, 16},
@@ -156,7 +156,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)))
     {
         return reduce_config_params{
@@ -165,7 +165,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int64_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -174,7 +174,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -183,7 +183,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'short', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)))
     {
         return reduce_config_params{
@@ -192,7 +192,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int8_t', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
     {
         return reduce_config_params{
             {256, 8},
@@ -211,7 +211,7 @@ constexpr auto segmented_reduce_config_picker()
         reduce_config_params>
 {
     // CONFIG: {'key_type': 'double', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -220,7 +220,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'float', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -229,7 +229,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
     {
         return reduce_config_params{
             {256, 16},
@@ -237,7 +237,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)))
     {
         return reduce_config_params{
@@ -246,7 +246,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int64_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -255,7 +255,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -264,7 +264,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'short', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)))
     {
         return reduce_config_params{
@@ -273,7 +273,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int8_t', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
     {
         return reduce_config_params{
             {256, 8},
@@ -293,7 +293,7 @@ constexpr auto segmented_reduce_config_picker()
         reduce_config_params>
 {
     // CONFIG: {'key_type': 'double', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -302,7 +302,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'float', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -311,7 +311,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
     {
         return reduce_config_params{
             {256, 16},
@@ -319,7 +319,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)))
     {
         return reduce_config_params{
@@ -328,7 +328,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int64_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -337,7 +337,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -346,7 +346,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'short', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)))
     {
         return reduce_config_params{
@@ -355,7 +355,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int8_t', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
     {
         return reduce_config_params{
             {256, 8},
@@ -375,7 +375,7 @@ constexpr auto segmented_reduce_config_picker()
         reduce_config_params>
 {
     // CONFIG: {'key_type': 'double', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -384,7 +384,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'float', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -393,7 +393,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
     {
         return reduce_config_params{
             {256, 16},
@@ -401,7 +401,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)))
     {
         return reduce_config_params{
@@ -410,7 +410,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int64_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -419,7 +419,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -428,7 +428,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'short', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)))
     {
         return reduce_config_params{
@@ -437,7 +437,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int8_t', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
     {
         return reduce_config_params{
             {256, 8},
@@ -457,7 +457,7 @@ constexpr auto segmented_reduce_config_picker()
         reduce_config_params>
 {
     // CONFIG: {'key_type': 'double', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -466,7 +466,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'float', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -475,7 +475,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
     {
         return reduce_config_params{
             {256, 16},
@@ -483,7 +483,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)))
     {
         return reduce_config_params{
@@ -492,7 +492,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int64_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -501,7 +501,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -510,7 +510,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'short', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)))
     {
         return reduce_config_params{
@@ -519,7 +519,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int8_t', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
     {
         return reduce_config_params{
             {256, 8},
@@ -539,7 +539,7 @@ constexpr auto segmented_reduce_config_picker()
         reduce_config_params>
 {
     // CONFIG: {'key_type': 'double', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -548,7 +548,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'float', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -557,7 +557,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
     {
         return reduce_config_params{
             {256, 16},
@@ -565,7 +565,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)))
     {
         return reduce_config_params{
@@ -574,7 +574,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int64_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -583,7 +583,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -592,7 +592,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'short', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)))
     {
         return reduce_config_params{
@@ -601,7 +601,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int8_t', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
     {
         return reduce_config_params{
             {256, 8},
@@ -621,7 +621,7 @@ constexpr auto segmented_reduce_config_picker()
         reduce_config_params>
 {
     // CONFIG: {'key_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)))
     {
         return reduce_config_params{
@@ -630,7 +630,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int64_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -639,7 +639,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -648,7 +648,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'short', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)))
     {
         return reduce_config_params{
@@ -657,7 +657,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'int8_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)))
     {
         return reduce_config_params{
             {256, 16},
@@ -665,7 +665,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'double', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)))
     {
         return reduce_config_params{
@@ -674,7 +674,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'float', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)))
     {
         return reduce_config_params{
@@ -683,7 +683,7 @@ constexpr auto segmented_reduce_config_picker()
         };
     }
     // CONFIG: {'key_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)))
     {
         return reduce_config_params{
             {256, 16},

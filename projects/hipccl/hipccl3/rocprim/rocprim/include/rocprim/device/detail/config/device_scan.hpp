@@ -48,7 +48,7 @@ constexpr auto scan_config_picker()
         scan_config_params>
 {
     // CONFIG: {'value_type': 'double', 'block_size_x': 128, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -59,7 +59,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'float', 'block_size_x': 64, 'ipt': 5, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -70,7 +70,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 64, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
     {
         return scan_config_params{
             {64, 12},
@@ -80,7 +80,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 2, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8)))
     {
         return scan_config_params{
@@ -91,7 +91,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -102,7 +102,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 64, 'ipt': 5, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -113,7 +113,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 64, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1)))
     {
         return scan_config_params{
@@ -124,8 +124,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value)
-                  && (sizeof(value_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)))
     {
         return scan_config_params{
             {256, 24},
@@ -147,7 +146,7 @@ constexpr auto scan_config_picker()
         scan_config_params>
 {
     // CONFIG: {'value_type': 'double', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -158,7 +157,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'float', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -169,7 +168,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 64, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
     {
         return scan_config_params{
             {64, 22},
@@ -179,7 +178,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8)))
     {
         return scan_config_params{
@@ -190,7 +189,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -201,7 +200,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -212,7 +211,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 64, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1)))
     {
         return scan_config_params{
@@ -223,8 +222,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value)
-                  && (sizeof(value_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)))
     {
         return scan_config_params{
             {256, 24},
@@ -246,7 +244,7 @@ constexpr auto scan_config_picker()
         scan_config_params>
 {
     // CONFIG: {'value_type': 'double', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -257,7 +255,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'float', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -268,7 +266,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
     {
         return scan_config_params{
             {256, 16},
@@ -278,7 +276,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -289,7 +287,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -300,7 +298,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1)))
     {
         return scan_config_params{
@@ -311,8 +309,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value)
-                  && (sizeof(value_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)))
     {
         return scan_config_params{
             {256, 24},
@@ -334,7 +331,7 @@ constexpr auto scan_config_picker()
         scan_config_params>
 {
     // CONFIG: {'value_type': 'double', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -345,7 +342,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'float', 'block_size_x': 256, 'ipt': 6, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -356,7 +353,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
     {
         return scan_config_params{
             {256, 12},
@@ -366,7 +363,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -377,7 +374,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 6, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -388,7 +385,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 256, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1)))
     {
         return scan_config_params{
@@ -399,8 +396,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value)
-                  && (sizeof(value_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)))
     {
         return scan_config_params{
             {256, 24},
@@ -410,7 +406,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 11, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8)))
     {
         return scan_config_params{
@@ -432,7 +428,7 @@ constexpr auto scan_config_picker()
         scan_config_params>
 {
     // CONFIG: {'value_type': 'double', 'block_size_x': 128, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -443,7 +439,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'float', 'block_size_x': 256, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -454,7 +450,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
     {
         return scan_config_params{
             {256, 24},
@@ -464,7 +460,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8)))
     {
         return scan_config_params{
@@ -475,7 +471,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -486,7 +482,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -497,7 +493,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1)))
     {
         return scan_config_params{
@@ -508,8 +504,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value)
-                  && (sizeof(value_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)))
     {
         return scan_config_params{
             {256, 24},
@@ -531,7 +526,7 @@ constexpr auto scan_config_picker()
         scan_config_params>
 {
     // CONFIG: {'value_type': 'double', 'block_size_x': 256, 'ipt': 6, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -542,7 +537,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'float', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -553,7 +548,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
     {
         return scan_config_params{
             {256, 24},
@@ -563,7 +558,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8)))
     {
         return scan_config_params{
@@ -574,7 +569,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 6, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -585,7 +580,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -596,7 +591,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 128, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1)))
     {
         return scan_config_params{
@@ -607,8 +602,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value)
-                  && (sizeof(value_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)))
     {
         return scan_config_params{
             {256, 24},
@@ -630,7 +624,7 @@ constexpr auto scan_config_picker()
         scan_config_params>
 {
     // CONFIG: {'value_type': 'double', 'block_size_x': 128, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -641,7 +635,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'float', 'block_size_x': 128, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -652,7 +646,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
     {
         return scan_config_params{
             {64, 24},
@@ -662,7 +656,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8)))
     {
         return scan_config_params{
@@ -673,7 +667,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 128, 'ipt': 7, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -684,7 +678,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 128, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -695,7 +689,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1)))
     {
         return scan_config_params{
@@ -706,8 +700,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value)
-                  && (sizeof(value_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)))
     {
         return scan_config_params{
             {256, 24},
@@ -729,7 +722,7 @@ constexpr auto scan_config_picker()
         scan_config_params>
 {
     // CONFIG: {'value_type': 'double', 'block_size_x': 256, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 0}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -741,7 +734,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'float', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan', 'lookback_scan_state_alignment': 0}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -753,7 +746,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan', 'lookback_scan_state_alignment': 64}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
     {
         return scan_config_params{
             {256, 24},
@@ -764,7 +757,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan', 'lookback_scan_state_alignment': 128}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8)))
     {
         return scan_config_params{
@@ -776,7 +769,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 128}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -788,7 +781,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 64}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -800,7 +793,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 128}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1)))
     {
         return scan_config_params{
@@ -812,8 +805,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 128}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value)
-                  && (sizeof(value_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)))
     {
         return scan_config_params{
             {256, 24},
@@ -836,7 +828,7 @@ constexpr auto scan_config_picker()
         scan_config_params>
 {
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 128}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8)))
     {
         return scan_config_params{
@@ -848,7 +840,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 128}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -860,7 +852,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan', 'lookback_scan_state_alignment': 64}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -872,7 +864,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan', 'lookback_scan_state_alignment': 128}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1)))
     {
         return scan_config_params{
@@ -884,8 +876,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 128}
-    if constexpr((!bool(rocprim::is_floating_point<value_type>::value)
-                  && (sizeof(value_type) <= 1)))
+    if constexpr(((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)))
     {
         return scan_config_params{
             {256, 24},
@@ -896,7 +887,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'double', 'block_size_x': 256, 'ipt': 17, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 64}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4)))
     {
         return scan_config_params{
@@ -908,7 +899,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'float', 'block_size_x': 256, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan', 'lookback_scan_state_alignment': 128}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2)))
     {
         return scan_config_params{
@@ -920,7 +911,7 @@ constexpr auto scan_config_picker()
         };
     }
     // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan', 'lookback_scan_state_alignment': 64}
-    if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
+    if constexpr(((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)))
     {
         return scan_config_params{
             {256, 24},

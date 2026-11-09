@@ -48,39 +48,35 @@ constexpr auto find_first_of_config_picker()
         find_first_of_config_params>
 {
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 10}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+    if constexpr((sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return find_first_of_config_params{
             {256, 10}
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 12}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+    if constexpr((sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return find_first_of_config_params{
             {256, 12}
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 256, 'ipt': 12}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+    if constexpr((sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return find_first_of_config_params{
             {256, 12}
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 15}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1))
+    if constexpr((sizeof(value_type) <= 1))
     {
         return find_first_of_config_params{
             {64, 15}
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+    if constexpr((sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return find_first_of_config_params{
             {256, 4}
@@ -99,39 +95,35 @@ constexpr auto find_first_of_config_picker()
         find_first_of_config_params>
 {
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 9}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+    if constexpr((sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return find_first_of_config_params{
             {256, 9}
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 128, 'ipt': 13}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+    if constexpr((sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return find_first_of_config_params{
             {128, 13}
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 256, 'ipt': 9}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+    if constexpr((sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return find_first_of_config_params{
             {256, 9}
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 13}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1))
+    if constexpr((sizeof(value_type) <= 1))
     {
         return find_first_of_config_params{
             {64, 13}
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+    if constexpr((sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return find_first_of_config_params{
             {256, 4}
@@ -150,31 +142,28 @@ constexpr auto find_first_of_config_picker()
         find_first_of_config_params>
 {
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 128, 'ipt': 15}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+    if constexpr((sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return find_first_of_config_params{
             {128, 15}
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 12}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+    if constexpr((sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return find_first_of_config_params{
             {256, 12}
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 128, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+    if constexpr((sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return find_first_of_config_params{
             {128, 16}
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1))
+    if constexpr((sizeof(value_type) <= 1))
     {
         return find_first_of_config_params{
             {256, 16}
@@ -193,39 +182,35 @@ constexpr auto find_first_of_config_picker()
         find_first_of_config_params>
 {
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+    if constexpr((sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return find_first_of_config_params{
             {256, 6}
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 10}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+    if constexpr((sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return find_first_of_config_params{
             {256, 10}
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 64, 'ipt': 8}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+    if constexpr((sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return find_first_of_config_params{
             {64, 8}
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1))
+    if constexpr((sizeof(value_type) <= 1))
     {
         return find_first_of_config_params{
             {128, 16}
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 3}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+    if constexpr((sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return find_first_of_config_params{
             {256, 3}
@@ -243,39 +228,35 @@ constexpr auto find_first_of_config_picker()
         find_first_of_config_params>
 {
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 15}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+    if constexpr((sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return find_first_of_config_params{
             {256, 15}
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 1024, 'ipt': 14}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+    if constexpr((sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return find_first_of_config_params{
             {1024, 14}
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+    if constexpr((sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return find_first_of_config_params{
             {64, 16}
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 11}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1))
+    if constexpr((sizeof(value_type) <= 1))
     {
         return find_first_of_config_params{
             {256, 11}
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+    if constexpr((sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return find_first_of_config_params{
             {256, 4}
@@ -294,39 +275,35 @@ constexpr auto find_first_of_config_picker()
         find_first_of_config_params>
 {
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+    if constexpr((sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return find_first_of_config_params{
             {256, 8}
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 10}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+    if constexpr((sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return find_first_of_config_params{
             {256, 10}
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 256, 'ipt': 11}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+    if constexpr((sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return find_first_of_config_params{
             {256, 11}
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 10}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1))
+    if constexpr((sizeof(value_type) <= 1))
     {
         return find_first_of_config_params{
             {256, 10}
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+    if constexpr((sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return find_first_of_config_params{
             {256, 4}
@@ -345,39 +322,35 @@ constexpr auto find_first_of_config_picker()
         find_first_of_config_params>
 {
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+    if constexpr((sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return find_first_of_config_params{
             {256, 6}
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 128, 'ipt': 9}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+    if constexpr((sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return find_first_of_config_params{
             {128, 9}
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 256, 'ipt': 15}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+    if constexpr((sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return find_first_of_config_params{
             {256, 15}
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 10}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1))
+    if constexpr((sizeof(value_type) <= 1))
     {
         return find_first_of_config_params{
             {256, 10}
         };
     }
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+    if constexpr((sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return find_first_of_config_params{
             {256, 4}
@@ -396,39 +369,35 @@ constexpr auto find_first_of_config_picker()
         find_first_of_config_params>
 {
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 6}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+    if constexpr((sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return find_first_of_config_params{
             {1024, 6}
         };
     }
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 1024, 'ipt': 7}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+    if constexpr((sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return find_first_of_config_params{
             {1024, 7}
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 1024, 'ipt': 6}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+    if constexpr((sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return find_first_of_config_params{
             {1024, 6}
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 1024, 'ipt': 9}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+    if constexpr((sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return find_first_of_config_params{
             {1024, 9}
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 1024, 'ipt': 11}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1))
+    if constexpr((sizeof(value_type) <= 1))
     {
         return find_first_of_config_params{
             {1024, 11}
@@ -447,39 +416,35 @@ constexpr auto find_first_of_config_picker()
         find_first_of_config_params>
 {
     // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 6}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+    if constexpr((sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return find_first_of_config_params{
             {512, 6}
         };
     }
     // CONFIG: {'value_type': 'int64_t', 'block_size_x': 1024, 'ipt': 6}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+    if constexpr((sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return find_first_of_config_params{
             {1024, 6}
         };
     }
     // CONFIG: {'value_type': 'int', 'block_size_x': 1024, 'ipt': 6}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+    if constexpr((sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return find_first_of_config_params{
             {1024, 6}
         };
     }
     // CONFIG: {'value_type': 'short', 'block_size_x': 1024, 'ipt': 7}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+    if constexpr((sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return find_first_of_config_params{
             {1024, 7}
         };
     }
     // CONFIG: {'value_type': 'int8_t', 'block_size_x': 1024, 'ipt': 11}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1))
+    if constexpr((sizeof(value_type) <= 1))
     {
         return find_first_of_config_params{
             {1024, 11}

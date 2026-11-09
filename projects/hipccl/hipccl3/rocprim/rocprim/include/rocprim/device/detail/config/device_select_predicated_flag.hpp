@@ -48,7 +48,7 @@ constexpr auto select_predicated_flag_config_picker()
         partition_config_params>
 {
     // CONFIG: {'data_type': 'double', 'flag_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -57,7 +57,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -66,7 +66,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -75,7 +75,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -84,7 +84,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -92,7 +92,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -101,7 +101,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -110,7 +110,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -119,7 +119,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -128,7 +128,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -136,7 +136,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -144,7 +144,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -152,7 +152,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -160,7 +160,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'short', 'block_size_x': 192, 'ipt': 25}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -168,7 +168,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -176,7 +176,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -185,7 +185,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -194,7 +194,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -203,7 +203,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -212,7 +212,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -220,7 +220,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -229,7 +229,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -238,7 +238,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -247,7 +247,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -256,7 +256,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -264,7 +264,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -273,7 +273,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -282,7 +282,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -291,7 +291,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -300,7 +300,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -308,7 +308,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -317,7 +317,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -326,7 +326,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -335,7 +335,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -344,7 +344,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -352,7 +352,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -360,7 +360,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -368,7 +368,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -376,7 +376,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -384,7 +384,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -404,7 +404,7 @@ constexpr auto select_predicated_flag_config_picker()
         partition_config_params>
 {
     // CONFIG: {'data_type': 'double', 'flag_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -413,7 +413,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -422,7 +422,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -431,7 +431,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -440,7 +440,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -448,7 +448,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -457,7 +457,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -466,7 +466,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int', 'block_size_x': 192, 'ipt': 6}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -475,7 +475,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'short', 'block_size_x': 192, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -484,7 +484,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int8_t', 'block_size_x': 192, 'ipt': 12}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -492,7 +492,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -500,7 +500,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -508,7 +508,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -516,7 +516,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -524,7 +524,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int8_t', 'block_size_x': 192, 'ipt': 22}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -532,7 +532,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -541,7 +541,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -550,7 +550,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -559,7 +559,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -568,7 +568,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -576,7 +576,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -585,7 +585,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -594,7 +594,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -603,7 +603,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -612,7 +612,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -620,7 +620,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -629,7 +629,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -638,7 +638,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int', 'block_size_x': 192, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -647,7 +647,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'short', 'block_size_x': 192, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -656,7 +656,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int8_t', 'block_size_x': 192, 'ipt': 12}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -664,7 +664,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -673,7 +673,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -682,7 +682,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -691,7 +691,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'short', 'block_size_x': 384, 'ipt': 18}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -700,7 +700,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 20}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -708,7 +708,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -716,7 +716,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -724,7 +724,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -732,7 +732,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 20}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -740,7 +740,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 20}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -760,7 +760,7 @@ constexpr auto select_predicated_flag_config_picker()
         partition_config_params>
 {
     // CONFIG: {'data_type': 'double', 'flag_type': 'int64_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -769,7 +769,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -778,7 +778,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -787,7 +787,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -795,7 +795,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int64_t', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -804,7 +804,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -813,7 +813,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'short', 'block_size_x': 384, 'ipt': 6}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -822,7 +822,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int8_t', 'block_size_x': 384, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -830,7 +830,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -838,7 +838,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int', 'block_size_x': 384, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -846,7 +846,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'short', 'block_size_x': 384, 'ipt': 12}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -854,7 +854,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int8_t', 'block_size_x': 384, 'ipt': 18}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -862,7 +862,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int64_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -871,7 +871,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -880,7 +880,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -889,7 +889,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -897,7 +897,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int64_t', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -906,7 +906,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -915,7 +915,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'short', 'block_size_x': 384, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -924,7 +924,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int8_t', 'block_size_x': 384, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -932,7 +932,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -941,7 +941,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int', 'block_size_x': 384, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -950,7 +950,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'short', 'block_size_x': 384, 'ipt': 12}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -959,7 +959,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int8_t', 'block_size_x': 384, 'ipt': 18}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -967,7 +967,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -975,7 +975,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -983,7 +983,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -991,7 +991,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 24}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1010,7 +1010,7 @@ constexpr auto select_predicated_flag_config_picker()
         partition_config_params>
 {
     // CONFIG: {'data_type': 'double', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1019,7 +1019,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int64_t', 'block_size_x': 192, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1028,7 +1028,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int', 'block_size_x': 192, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1037,7 +1037,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1046,7 +1046,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1054,7 +1054,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1063,7 +1063,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1072,7 +1072,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 11}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1081,7 +1081,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 10}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1090,7 +1090,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 11}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1098,7 +1098,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -1106,7 +1106,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -1114,7 +1114,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 12}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -1122,7 +1122,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 18}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -1130,7 +1130,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 18}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1138,7 +1138,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1147,7 +1147,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int64_t', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1156,7 +1156,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1165,7 +1165,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'short', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1174,7 +1174,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 3}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1182,7 +1182,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1191,7 +1191,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int64_t', 'block_size_x': 192, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1200,7 +1200,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int', 'block_size_x': 192, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1209,7 +1209,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1218,7 +1218,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1226,7 +1226,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1235,7 +1235,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1244,7 +1244,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 11}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1253,7 +1253,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 10}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1262,7 +1262,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 11}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1270,7 +1270,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1279,7 +1279,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1288,7 +1288,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 12}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1297,7 +1297,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 18}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1306,7 +1306,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 18}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1314,7 +1314,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -1322,7 +1322,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -1330,7 +1330,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 11}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -1338,7 +1338,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 24}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -1346,7 +1346,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int8_t', 'block_size_x': 192, 'ipt': 24}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1366,7 +1366,7 @@ constexpr auto select_predicated_flag_config_picker()
         partition_config_params>
 {
     // CONFIG: {'data_type': 'double', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1375,7 +1375,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int64_t', 'block_size_x': 128, 'ipt': 6}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1384,7 +1384,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int', 'block_size_x': 128, 'ipt': 6}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1393,7 +1393,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'short', 'block_size_x': 128, 'ipt': 6}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1402,7 +1402,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int8_t', 'block_size_x': 128, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1410,7 +1410,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1419,7 +1419,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1428,7 +1428,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int', 'block_size_x': 128, 'ipt': 11}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1437,7 +1437,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 10}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1446,7 +1446,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 11}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1454,7 +1454,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -1462,7 +1462,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -1470,7 +1470,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 12}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -1478,7 +1478,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 24}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -1486,7 +1486,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 24}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1494,7 +1494,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1503,7 +1503,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int64_t', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1512,7 +1512,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1521,7 +1521,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'short', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1530,7 +1530,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int8_t', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1538,7 +1538,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1547,7 +1547,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int64_t', 'block_size_x': 128, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1556,7 +1556,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int', 'block_size_x': 128, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1565,7 +1565,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'short', 'block_size_x': 128, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1574,7 +1574,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int8_t', 'block_size_x': 128, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1582,7 +1582,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1591,7 +1591,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1600,7 +1600,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int', 'block_size_x': 128, 'ipt': 11}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1609,7 +1609,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 10}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1618,7 +1618,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 11}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1626,7 +1626,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1635,7 +1635,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1644,7 +1644,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 12}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1653,7 +1653,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 18}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1662,7 +1662,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 18}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1670,7 +1670,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -1678,7 +1678,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -1686,7 +1686,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 11}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -1694,7 +1694,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 24}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -1702,7 +1702,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 24}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1722,7 +1722,7 @@ constexpr auto select_predicated_flag_config_picker()
         partition_config_params>
 {
     // CONFIG: {'data_type': 'double', 'flag_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1731,7 +1731,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int64_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1740,7 +1740,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 5}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1749,7 +1749,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'short', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1758,7 +1758,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int8_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1766,7 +1766,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1775,7 +1775,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int64_t', 'block_size_x': 192, 'ipt': 5}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1784,7 +1784,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1793,7 +1793,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'short', 'block_size_x': 192, 'ipt': 10}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1802,7 +1802,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1810,7 +1810,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -1818,7 +1818,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -1826,7 +1826,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 10}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -1834,7 +1834,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 20}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -1842,7 +1842,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 20}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1850,7 +1850,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1859,7 +1859,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int64_t', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1868,7 +1868,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1877,7 +1877,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'short', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1886,7 +1886,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int8_t', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1894,7 +1894,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1903,7 +1903,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int64_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1912,7 +1912,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1921,7 +1921,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'short', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1930,7 +1930,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int8_t', 'block_size_x': 192, 'ipt': 5}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1938,7 +1938,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1947,7 +1947,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int64_t', 'block_size_x': 192, 'ipt': 5}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -1956,7 +1956,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -1965,7 +1965,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'short', 'block_size_x': 192, 'ipt': 10}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -1974,7 +1974,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int8_t', 'block_size_x': 192, 'ipt': 10}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -1982,7 +1982,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -1991,7 +1991,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int64_t', 'block_size_x': 256, 'ipt': 6}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2000,7 +2000,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 10}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2009,7 +2009,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'short', 'block_size_x': 256, 'ipt': 20}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2018,7 +2018,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 20}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2026,7 +2026,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 192, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -2034,7 +2034,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int64_t', 'block_size_x': 192, 'ipt': 5}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -2042,7 +2042,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 12}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -2050,7 +2050,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'short', 'block_size_x': 192, 'ipt': 20}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -2058,7 +2058,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 24}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2078,7 +2078,7 @@ constexpr auto select_predicated_flag_config_picker()
         partition_config_params>
 {
     // CONFIG: {'data_type': 'double', 'flag_type': 'rocprim::int128_t', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -2087,7 +2087,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2096,7 +2096,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2105,7 +2105,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2114,7 +2114,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2122,7 +2122,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'rocprim::int128_t', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -2131,7 +2131,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2140,7 +2140,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 15}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2149,7 +2149,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 15}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2158,7 +2158,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 15}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2166,7 +2166,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'rocprim::int128_t', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -2174,7 +2174,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -2182,7 +2182,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 14}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -2190,7 +2190,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 30}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -2198,7 +2198,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 28}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2206,7 +2206,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -2215,7 +2215,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int64_t', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2224,7 +2224,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2233,7 +2233,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'short', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2242,7 +2242,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int8_t', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2250,7 +2250,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -2259,7 +2259,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2268,7 +2268,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2277,7 +2277,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2286,7 +2286,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2294,7 +2294,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'rocprim::int128_t', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -2303,7 +2303,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2312,7 +2312,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 15}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2321,7 +2321,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 14}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2330,7 +2330,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 15}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2338,7 +2338,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'rocprim::int128_t', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -2347,7 +2347,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2356,7 +2356,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 14}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2365,7 +2365,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 30}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2374,7 +2374,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 28}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2382,7 +2382,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 384, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -2390,7 +2390,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -2398,7 +2398,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 15}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -2406,7 +2406,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 28}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -2414,7 +2414,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 24}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2434,7 +2434,7 @@ constexpr auto select_predicated_flag_config_picker()
         partition_config_params>
 {
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -2443,7 +2443,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2452,7 +2452,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2461,7 +2461,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2470,7 +2470,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::int128_t', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
                   && (sizeof(data_type) > 8) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2478,7 +2478,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 448, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -2487,7 +2487,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2496,7 +2496,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2505,7 +2505,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2514,7 +2514,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int64_t', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2522,7 +2522,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'rocprim::int128_t', 'block_size_x': 320, 'ipt': 4}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -2531,7 +2531,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int64_t', 'block_size_x': 320, 'ipt': 15}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2540,7 +2540,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int', 'block_size_x': 320, 'ipt': 15}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2549,7 +2549,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2558,7 +2558,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2566,7 +2566,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 10}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -2575,7 +2575,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int64_t', 'block_size_x': 384, 'ipt': 19}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2584,7 +2584,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 17}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2593,7 +2593,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'short', 'block_size_x': 384, 'ipt': 23}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2602,7 +2602,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'short', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 17}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(data_type) > 1) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2610,7 +2610,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 18}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -2618,7 +2618,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int64_t', 'block_size_x': 192, 'ipt': 31}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -2626,7 +2626,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int', 'block_size_x': 256, 'ipt': 29}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -2634,7 +2634,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'short', 'block_size_x': 192, 'ipt': 28}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -2642,7 +2642,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'int8_t', 'flag_type': 'int8_t', 'block_size_x': 256, 'ipt': 21}
-    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
+    if constexpr(((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2650,7 +2650,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -2659,7 +2659,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int64_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2668,7 +2668,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2677,7 +2677,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2686,7 +2686,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'double', 'flag_type': 'int8_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                   && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2694,7 +2694,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 5}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
                   && (sizeof(flag_type) > 8)))
     {
@@ -2703,7 +2703,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int64_t', 'block_size_x': 320, 'ipt': 15}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
                   && (sizeof(flag_type) > 4)))
     {
@@ -2712,7 +2712,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int', 'block_size_x': 320, 'ipt': 15}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
                   && (sizeof(flag_type) > 2)))
     {
@@ -2721,7 +2721,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'short', 'block_size_x': 320, 'ipt': 15}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
                   && (sizeof(flag_type) > 1)))
     {
@@ -2730,7 +2730,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'float', 'flag_type': 'int8_t', 'block_size_x': 320, 'ipt': 15}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                   && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
@@ -2738,7 +2738,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 29}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8)))
     {
         return partition_config_params{
@@ -2746,7 +2746,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int64_t', 'block_size_x': 128, 'ipt': 29}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4)))
     {
         return partition_config_params{
@@ -2754,7 +2754,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int', 'block_size_x': 512, 'ipt': 27}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2)))
     {
         return partition_config_params{
@@ -2762,7 +2762,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'short', 'block_size_x': 512, 'ipt': 27}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
@@ -2770,7 +2770,7 @@ constexpr auto select_predicated_flag_config_picker()
         };
     }
     // CONFIG: {'data_type': 'rocprim::half', 'flag_type': 'int8_t', 'block_size_x': 384, 'ipt': 23}
-    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+    if constexpr(((rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                   && (sizeof(flag_type) <= 1)))
     {
         return partition_config_params{
