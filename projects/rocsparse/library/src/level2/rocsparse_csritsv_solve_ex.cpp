@@ -304,6 +304,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                 }
                 host_nmaxiter[0] = 1;
             }
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
             return rocsparse_status_success;
         }
         else
@@ -313,6 +314,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                 reinterpret_cast<rocsparse_int*>(info->csritsv_info->get_position()),
                 (rocsparse_int)descr->base,
                 stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
             return rocsparse_status_success;
         }
     }
