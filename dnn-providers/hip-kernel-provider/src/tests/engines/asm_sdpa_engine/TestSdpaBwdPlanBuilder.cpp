@@ -43,6 +43,12 @@ namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
 class TestSdpaBwdPlanBuilder : public ::testing::Test
 {
 protected:
+    // The test device's architecture; call after SKIP_IF_NO_DEVICES().
+    std::string deviceString() const
+    {
+        return hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    }
+
     SdpaBwdPlanBuilder _planBuilder;
     Handle _handle;
 };
@@ -113,7 +119,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsTrueForMultipleOf16ByteAlignme
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -130,8 +136,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForNon16ByteAlignment)
 {
     SKIP_IF_NO_DEVICES();
 
-    // Without a gfx942 device the device check declines first, masking the alignment check.
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    // On other devices the device check declines first, masking the alignment check.
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -150,10 +156,12 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
 
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
+
+    const bool isGfx942 = deviceString() == "gfx942";
 
     const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
         // Valid backward graph: BF16, HD=128, FP32 stats, no masking — the one
@@ -165,10 +173,11 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
         // requests pddv=1, so no dqdkdv row matches.
         {GraphTest{createSdpaBwdGraph({4, 8, 256, 64}), "Head dimension 64"}, false},
 
-        // HD=192 BF16: registry-supported and now dispatched. The CPU reference
-        // is not yet calibrated, so buildPlan logs a one-time WARN; isApplicable
-        // accepts.
-        {GraphTest{createSdpaBwdGraph({4, 8, 256, 192}), "Head dimension 192"}, true},
+        // HD=192 BF16: registry-supported and dispatched on gfx942. The CPU
+        // reference is not yet calibrated, so buildPlan logs a one-time WARN;
+        // isApplicable accepts. AITER sends gfx950 hd192x192 to CK, so gfx950
+        // declines it.
+        {GraphTest{createSdpaBwdGraph({4, 8, 256, 192}), "Head dimension 192"}, isGfx942},
 
         // FP16 HD128: registry-supported and dispatched, with a calibrated CPU
         // reference (logs INFO, like bf16 hd128); isApplicable accepts.
@@ -380,7 +389,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsRuntimePassByValueScale)
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -396,7 +405,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsNonPassByValueScaleTensor)
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -414,7 +423,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor
     // Verify it still passes after the PBV changes.
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -441,7 +450,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsUnsupportedAttnScale)
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -479,7 +488,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsSupportedAttnScale)
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -822,13 +831,9 @@ TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd192Bf16CausalBatch)
     EXPECT_FALSE(odoKey.empty()) << "hd192 bf16 odo lookup should resolve";
 }
 
-// gfx950 BF16 rows store bf16_cvt=3 (the FP16 sentinel) regardless of the
-// rounding mode the caller asked for, because gfx950 ships only one kernel
-// per (dtype, hdim, mask, atomic, pssk, pddv, mode) tuple.  findKey must
-// skip the bf16_cvt comparison on gfx950 so a caller passing the
-// graph-derived RoundingMode (e.g. RTNE = 0) still resolves the row.
-// isApplicable rejects gfx950 day-one, so we exercise the registry helper
-// directly.
+// The gfx950 hd128 BF16 rows store bf16_cvt=3: one kernel serves every rounding
+// mode, so a caller passing the graph-derived RoundingMode (e.g. RTNE = 0)
+// still resolves the row.
 TEST(TestSdpaBwdRegistryLookup, RegistryLookupGfx950Hd128Bf16NoMaskBatch)
 {
     using namespace bwd_dispatch;
@@ -943,7 +948,7 @@ TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16CausalBrBatch)
     EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 causal_br dqdkdv lookup should resolve";
 }
 
-// SWA / window (mask=3) dispatch — only hd128 gfx942 has SWA rows in the CSV.
+// SWA / window (mask=3) dispatch on gfx942.
 TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16SwaBatch)
 {
     using namespace bwd_dispatch;
@@ -981,11 +986,188 @@ TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd128CausalBatch)
     EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 fp16 causal_tl dqdkdv lookup should resolve";
 }
 
+// gfx950 window kernels: mask 3 (top-left) and mask 4 (bottom-right), hd128,
+// both dtypes, A32 batch (AITER v0.1.29 hsa/gfx950/fmha_v3_bwd/fmha_bwd_dqdkdv.csv).
+// gfx942 has no mask-4 rows: its one window kernel takes both alignments.
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupGfx950Hd128WindowBatch)
+{
+    using namespace bwd_dispatch;
+
+    for(const char* dtype : {"bf16", "fp16"})
+    {
+        for(const int mask : {MASK_SLIDING_WINDOW, BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW})
+        {
+            SCOPED_TRACE(std::string(dtype) + " mask=" + std::to_string(mask));
+            EXPECT_FALSE(lookupKernelNameKey(PipelineStage::DQDKDV,
+                                             "gfx950",
+                                             dtype,
+                                             /*hdimQ=*/128,
+                                             /*hdimV=*/128,
+                                             mask,
+                                             ATOMIC_A32,
+                                             PSSK_ON,
+                                             PDDV_ON,
+                                             MODE_BATCH,
+                                             std::string(dtype) == "fp16" ? BF16_CVT_FP16_SENTINEL
+                                                                          : BF16_CVT_RTNE)
+                             .empty());
+        }
+    }
+
+    EXPECT_TRUE(lookupKernelNameKey(PipelineStage::DQDKDV,
+                                    "gfx942",
+                                    "bf16",
+                                    /*hdimQ=*/128,
+                                    /*hdimV=*/128,
+                                    BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW,
+                                    ATOMIC_A32,
+                                    PSSK_ON,
+                                    PDDV_ON,
+                                    MODE_BATCH,
+                                    BF16_CVT_RTNE)
+                    .empty());
+}
+
+// =============================================================================
+// bf16_cvt matching: `cfg.bf16_cvt == 3 || cfg.bf16_cvt == requested`
+// =============================================================================
+
+// The bf16_cvt of the dqdkdv row an A32 batch lookup resolves, or std::nullopt
+// when no row matches.
+std::optional<int> resolvedDqdkdvBf16Cvt(const char* arch, const char* dtype, int hdim, int bf16Cvt)
+{
+    const auto key = bwd_dispatch::lookupKernelNameKey(bwd_dispatch::PipelineStage::DQDKDV,
+                                                       arch,
+                                                       dtype,
+                                                       hdim,
+                                                       hdim,
+                                                       MASK_NONE,
+                                                       ATOMIC_A32,
+                                                       PSSK_ON,
+                                                       PDDV_ON,
+                                                       MODE_BATCH,
+                                                       bf16Cvt);
+    if(key.empty())
+    {
+        return std::nullopt;
+    }
+    return cfg_fmha_bwd_dqdkdv.at(key).bf16_cvt;
+}
+
+// gfx950 hd192 bf16 ships one row per rounding mode (0, 1, 2) for an otherwise
+// identical tuple, as gfx942 does for every bf16 row. The lookup must return the
+// requested one every time, not whichever the unordered registry yields first.
+TEST(TestSdpaBwdRegistryLookup, PerRoundingModeRowsResolveTheRequestedMode)
+{
+    for(const auto& [arch, hdim] :
+        std::vector<std::pair<const char*, int>>{{"gfx950", 192}, {"gfx942", 128}})
+    {
+        for(const int bf16Cvt : {0, 1, 2})
+        {
+            SCOPED_TRACE(std::string(arch) + " hd" + std::to_string(hdim)
+                         + " bf16_cvt=" + std::to_string(bf16Cvt));
+            EXPECT_EQ(resolvedDqdkdvBf16Cvt(arch, "bf16", hdim, bf16Cvt), bf16Cvt);
+        }
+    }
+}
+
+// A bf16 row stored with bf16_cvt=3 (gfx950 hd128) serves every requested mode.
+TEST(TestSdpaBwdRegistryLookup, AllModeRowServesEveryRoundingMode)
+{
+    for(const int bf16Cvt : {0, 1, 2})
+    {
+        SCOPED_TRACE(bf16Cvt);
+        EXPECT_EQ(resolvedDqdkdvBf16Cvt("gfx950", "bf16", 128, bf16Cvt), BF16_CVT_FP16_SENTINEL);
+    }
+}
+
+// The rule is not "ignore bf16_cvt": gfx942 has no all-mode bf16 dqdkdv rows,
+// so requesting the sentinel for bf16 there finds nothing.
+TEST(TestSdpaBwdRegistryLookup, PerRoundingModeRowsDoNotServeTheSentinel)
+{
+    EXPECT_FALSE(resolvedDqdkdvBf16Cvt("gfx942", "bf16", 128, BF16_CVT_FP16_SENTINEL).has_value());
+}
+
+// =============================================================================
+// Backward window dispatch: dqdkdv mask ordinal and kernarg coordinates
+// =============================================================================
+
+// AITER v0.1.29 mha_bwd.cu asm_mask_type(): only a gfx950 window aligned
+// bottom-right selects mask 4; masks keep their MaskType ordinal otherwise.
+TEST(TestSdpaBwdDqdkdvMaskOrdinal, Gfx950BottomRightWindowSelectsMask4)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+    using plan_utils::MaskType;
+
+    EXPECT_EQ(bwd_dispatch::dqdkdvMaskOrdinal(
+                  "gfx950", MaskType::SLIDING_WINDOW, DiagonalAlignment::BOTTOM_RIGHT),
+              BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW);
+    EXPECT_EQ(bwd_dispatch::dqdkdvMaskOrdinal(
+                  "gfx950", MaskType::SLIDING_WINDOW, DiagonalAlignment::TOP_LEFT),
+              MASK_SLIDING_WINDOW);
+    EXPECT_EQ(bwd_dispatch::dqdkdvMaskOrdinal(
+                  "gfx942", MaskType::SLIDING_WINDOW, DiagonalAlignment::BOTTOM_RIGHT),
+              MASK_SLIDING_WINDOW);
+    EXPECT_EQ(bwd_dispatch::dqdkdvMaskOrdinal(
+                  "gfx950", MaskType::BOTTOM_RIGHT_CAUSAL, DiagonalAlignment::BOTTOM_RIGHT),
+              MASK_BOTTOM_RIGHT_CAUSAL);
+    EXPECT_EQ(bwd_dispatch::dqdkdvMaskOrdinal(
+                  "gfx950", MaskType::NO_MASK, DiagonalAlignment::BOTTOM_RIGHT),
+              MASK_NONE);
+}
+
+// Params for a 256 x 512 window plan on arch with the given dqdkdv mask.
+SdpaBwdParams makeWindowParams(const char* arch, int32_t maskOrdinal, bool topLeftAlignment)
+{
+    SdpaBwdParams params{};
+    params.archString = arch;
+    params.seqLenQ = 256;
+    params.seqLenKv = 512;
+    params.maskOrdinal = maskOrdinal;
+    params.windowLeft = 63;
+    params.windowRight = -1;
+    params.topLeftAlignment = topLeftAlignment;
+    return params;
+}
+
+// The gfx950 window kernels take the FlashAttention window sizes unchanged,
+// -1 (unbounded) included, for both alignments.
+TEST(TestSdpaBwdDqdkdvMaskCoordinates, Gfx950WindowsPassRawWindowSizes)
+{
+    const std::pair<int32_t, int32_t> raw{63, -1};
+    EXPECT_EQ(dqdkdvMaskCoordinates(
+                  makeWindowParams("gfx950", BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW, false)),
+              raw);
+    EXPECT_EQ(dqdkdvMaskCoordinates(makeWindowParams("gfx950", MASK_SLIDING_WINDOW, true)), raw);
+}
+
+// The gfx942 window kernel takes compute_mask_coordinates() output:
+// bottom-right with S_q = 256, S_kv = 512, left 63 and unbounded right gives
+// mask_y = 1 + 63 + (256 - 512) and mask_x = 1 + (256 - 1) + (512 - 256).
+TEST(TestSdpaBwdDqdkdvMaskCoordinates, Gfx942WindowPassesComputedCoordinates)
+{
+    const std::pair<int32_t, int32_t> expected{-192, 512};
+    EXPECT_EQ(dqdkdvMaskCoordinates(makeWindowParams("gfx942", MASK_SLIDING_WINDOW, false)),
+              expected);
+}
+
+// Causal and unmasked kernels bake the mask in; their coordinates stay 0.
+TEST(TestSdpaBwdDqdkdvMaskCoordinates, NonWindowMasksPassZero)
+{
+    const std::pair<int32_t, int32_t> zero{0, 0};
+    for(const int32_t mask : {MASK_NONE, MASK_TOP_LEFT_CAUSAL, MASK_BOTTOM_RIGHT_CAUSAL})
+    {
+        SCOPED_TRACE(mask);
+        EXPECT_EQ(dqdkdvMaskCoordinates(makeWindowParams("gfx950", mask, false)), zero);
+        EXPECT_EQ(dqdkdvMaskCoordinates(makeWindowParams("gfx942", mask, false)), zero);
+    }
+}
+
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -1003,7 +1185,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFp8)
 
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -1015,24 +1197,43 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFp8)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsGfx950)
+// =============================================================================
+// Head dims AITER v0.1.29 routes to CK although the registry has rows for them
+// =============================================================================
+
+// AITER sends gfx950 hd64 and hd192x192 to CK; the engine serves gfx950 hd128
+// only. gfx942 head dims are left to the registry.
+TEST(TestSdpaBwdBatchShape, Gfx950ServesOnlyHd128)
 {
-    // Cannot synthesise a different device string from the test harness, so
-    // this test only meaningfully runs on a non-gfx942 device. On gfx942 it
-    // is skipped (the positive case is covered by IsApplicableSdpaBwdVariations).
+    EXPECT_TRUE(bwd_dispatch::isBatchShapeSupported("gfx950", 128, 128));
+    EXPECT_FALSE(bwd_dispatch::isBatchShapeSupported("gfx950", 64, 64));
+    EXPECT_FALSE(bwd_dispatch::isBatchShapeSupported("gfx950", 192, 192));
+    EXPECT_FALSE(bwd_dispatch::isBatchShapeSupported("gfx950", 192, 128));
+
+    EXPECT_TRUE(bwd_dispatch::isBatchShapeSupported("gfx942", 64, 64));
+    EXPECT_TRUE(bwd_dispatch::isBatchShapeSupported("gfx942", 192, 192));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesGfx950HeadDimsAiterSendsToCk)
+{
     SKIP_IF_NO_DEVICES();
 
-    auto deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(deviceString == "gfx942")
+    if(deviceString() != "gfx950")
     {
-        GTEST_SKIP() << "Test requires non-gfx942 device to assert rejection";
+        GTEST_SKIP() << "gfx950 head-dim limits";
     }
 
-    auto builder = createSdpaBwdGraph();
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
-        builder.GetBufferPointer(), builder.GetSize());
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
+        {GraphTest{createSdpaBwdGraph({4, 8, 256, 128}), "hd128"}, true},
+        {GraphTest{createSdpaBwdGraph({4, 8, 256, 64}), "hd64"}, false},
+        {GraphTest{createSdpaBwdGraph({4, 8, 256, 192}), "hd192x192"}, false},
+    };
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
@@ -1041,7 +1242,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
 
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -1077,7 +1278,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsIntegralGqaRatio)
 
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -1115,7 +1316,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -1223,7 +1424,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsAddressableLayouts)
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -1369,7 +1570,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsMisalignedOrShortRows)
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -1442,7 +1643,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsNonUnitHeadDimStride)
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -1475,7 +1676,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsNonPackedStats)
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -1543,7 +1744,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsMismatchedTensorDims)
 
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -1624,7 +1825,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsZeroStrideOutputs)
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -1668,11 +1869,11 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsZeroStrideOutputs)
 // boolean is merged with the stored bounds and alignment (see
 // plan_utils::resolveDiagonalBand); only setting both booleans throws. The policy is
 // hardware-agnostic (it runs before any device dispatch and independent of the
-// kernel registry), so the assertions are meaningful on any device — including
-// this gfx950 box. The backward isApplicable cannot be used here: it rejects
-// non-gfx942 devices at its first gate, so on gfx950 it would return false
-// before ever reaching getMaskType, making an isApplicable-based assertion
-// pass for the wrong reason.
+// kernel registry), so the assertions are meaningful on any device. The backward
+// isApplicable cannot be used here: it declines devices other than gfx942 and
+// gfx950 at its first gate, so on those it would return false before ever
+// reaching getMaskType, making an isApplicable-based assertion pass for the
+// wrong reason.
 
 // Build a backward SDPA graph that sets the deprecated causal booleans and the
 // modern bounds trio explicitly, so contradictory combinations can be
@@ -2114,7 +2315,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioLeftOnlyDerivesSlidingWindow)
 // Masked attention dispatch (causal, causal-BR, SWA) — isApplicable tests
 // =============================================================================
 // These tests use createSdpaBwdGraphWithMask (defined above) and require a
-// gfx942 device to exercise the full isApplicable() path.
+// gfx942 or gfx950 device to exercise the full isApplicable() path.
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsCausalMaskBottomRight)
 {
@@ -2122,7 +2323,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsCausalMaskBottomRight)
 
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -2146,23 +2347,28 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsWindowMask)
 
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
 
-    // Symmetric sliding window with left=64, right=64
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/false,
-        /*causalMaskBottomRight=*/false,
-        flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
-        DiagonalAlignment::TOP_LEFT);
+    // Symmetric sliding window with left=64, right=64, in both alignments
+    // (on gfx950 the bottom-right one dispatches the mask-4 kernel).
+    for(const auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
+    {
+        SCOPED_TRACE(EnumNameDiagonalAlignment(alignment));
+        auto builder = createSdpaBwdGraphWithMask(
+            /*causalMask=*/false,
+            /*causalMaskBottomRight=*/false,
+            flatbuffers::Optional<int64_t>(64),
+            flatbuffers::Optional<int64_t>(64),
+            alignment);
 
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
-        builder.GetBufferPointer(), builder.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
 
-    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+    }
 }
 
 // =============================================================================
@@ -2216,7 +2422,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsDimensionsAtTheir32BitLimits)
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -2246,7 +2452,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesDimensionsPastTheir32BitLimit
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -2289,7 +2495,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesHeadDimsThatTruncateToASuppor
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
@@ -2319,21 +2525,26 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesHeadDimsThatTruncateToASuppor
     }
 }
 
-// The `ts` of the DQDKDV row isApplicable resolves for a bf16 hd128 no-mask
-// batch graph on the default A32 accumulator path.
-std::optional<int> resolveBwdTileSizeKv()
+// The `ts` of the DQDKDV row isApplicable resolves on arch for a bf16 hd128
+// no-mask batch graph on the default A32 accumulator path (RTNE).
+std::optional<int> resolveBwdTileSizeKv(const std::string& arch)
 {
-    for(const auto& entry : cfg_fmha_bwd_dqdkdv)
+    const auto key = bwd_dispatch::lookupKernelNameKey(bwd_dispatch::PipelineStage::DQDKDV,
+                                                       arch,
+                                                       "bf16",
+                                                       128,
+                                                       128,
+                                                       MASK_NONE,
+                                                       ATOMIC_A32,
+                                                       PSSK_ON,
+                                                       PDDV_ON,
+                                                       MODE_BATCH,
+                                                       BF16_CVT_RTNE);
+    if(key.empty())
     {
-        const auto& cfg = entry.second;
-        if(cfg.arch == "gfx942" && cfg.dtype == "bf16" && cfg.hdim_q == 128 && cfg.hdim_v == 128
-           && cfg.mask == 0 && cfg.atomic32 == 1 && cfg.pssk == 1 && cfg.pddv == 1 && cfg.mode == 0
-           && cfg.bf16_cvt == 0)
-        {
-            return cfg.ts;
-        }
+        return std::nullopt;
     }
-    return std::nullopt;
+    return cfg_fmha_bwd_dqdkdv.at(key).ts;
 }
 
 // The Ts kernarg is tsKv * stride_k * sizeof(bf16). The per-field stride guard
@@ -2343,13 +2554,13 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSi
 {
     SKIP_IF_NO_DEVICES();
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }
 
-    const auto tileSizeKv = resolveBwdTileSizeKv();
-    ASSERT_TRUE(tileSizeKv.has_value()) << "no gfx942 bf16 hd128 no-mask a32 dqdkdv row";
+    const auto tileSizeKv = resolveBwdTileSizeKv(deviceString());
+    ASSERT_TRUE(tileSizeKv.has_value()) << "no bf16 hd128 no-mask a32 dqdkdv row";
 
     constexpr int64_t K_BF16_BYTES = 2;
     const int64_t limit = static_cast<int64_t>(UINT32_MAX) / (K_BF16_BYTES * *tileSizeKv);
@@ -2466,8 +2677,7 @@ TEST_F(TestSdpaBwdPlanBuilder, GetCustomKnobsReturnsAccumulatorKnob)
 
     SKIP_IF_NO_DEVICES();
 
-    // TODO(ALMIOPEN-1833): Remove gfx942 restriction once gfx950 is enabled
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
     {
         GTEST_SKIP();
     }

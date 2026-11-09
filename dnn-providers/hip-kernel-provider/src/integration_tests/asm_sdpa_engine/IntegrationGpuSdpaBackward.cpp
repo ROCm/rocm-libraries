@@ -91,7 +91,7 @@ std::vector<SdpaBwdTestCase> getSdpaBwdTestCases()
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, false),
         // SLIDING_WINDOW / SWA (mask=3): top-left alignment
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, 64, 64, true),
-        // SLIDING_WINDOW / SWA (mask=3): bottom-right alignment
+        // SLIDING_WINDOW / SWA (mask=3, mask=4 on gfx950): bottom-right alignment
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, 64, 64, false),
         // Asymmetric Sq != Skv — no mask
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}),
@@ -99,10 +99,26 @@ std::vector<SdpaBwdTestCase> getSdpaBwdTestCases()
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, -1, 0, true),
         // Asymmetric Sq != Skv — bottom-right causal
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, -1, 0, false),
+        // Asymmetric Sq != Skv — sliding windows. Unlike Sq == Skv, the alignment
+        // moves the window, and on gfx950 each alignment has its own kernel
+        // (mask 3 top-left, mask 4 bottom-right) that takes the raw window sizes.
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, 64, 64, true),
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, 64, 64, false),
+        // One-sided bottom-right window: the right bound is unbounded (-1).
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, 64, -1, false),
+        // Small S_q (1 and 16). AITER's Python layer sends these to CK for speed,
+        // so the ASM kernels see them less often; the gfx950 hd128 kernels carry
+        // a seqlen_q == 1 buffer-range fix.
+        SdpaBwdTestCase({1, 1, 1, 128}, {1, 1, 256, 128}),
+        SdpaBwdTestCase({1, 1, 1, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, false),
+        SdpaBwdTestCase({1, 1, 16, 128}, {1, 1, 256, 128}),
+        SdpaBwdTestCase({1, 1, 16, 128}, {1, 1, 16, 128}, std::nullopt, -1, 0, true),
         // B=2 and H=2, so every batch and head stride, and the packed LSE/D
         // layout that buildPlan derives from Q's dims, reach the kernels.
         SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}),
         SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}, std::nullopt, -1, 0, true),
+        // Bottom-right window with Sq != Skv (mask 4 on gfx950).
+        SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 512, 128}, std::nullopt, 64, 64, false),
         // The same with non-packed layouts that isApplicable accepts.
         SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}).withNonPackedLayouts(),
         SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}, std::nullopt, -1, 0, true)
@@ -173,9 +189,10 @@ protected:
 
     void runGraphTest(float tolerance)
     {
-        if(hip_kernel_provider_common::getDeviceString(this->stream()) != "gfx942")
+        const auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
+        if(deviceString != "gfx942" && deviceString != "gfx950")
         {
-            GTEST_SKIP() << "Skipped: ASM SDPA kernel only supports gfx942.";
+            GTEST_SKIP() << "Skipped: ASM SDPA backward supports gfx942 and gfx950 only.";
         }
 
         const SdpaBwdTestCase& testCase = this->GetParam();

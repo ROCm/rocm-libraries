@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 
@@ -21,6 +22,11 @@ enum class AccumulatorType : uint8_t
     A32, // FP32 accumulator — 3-kernel path (ODO → DQDKDV → DQ_CONVERT)
     A16 // BF16 accumulator — 2-kernel path (ODO → DQDKDV)
 };
+
+/// CSV `mask` ordinal of the gfx950 dqdkdv kernels for a sliding window with
+/// bottom-right alignment (AITER mha_bwd.cu asm_mask_type()). Ordinals 0-3 are
+/// plan_utils::MaskType; this one exists only in the gfx950 backward registry.
+inline constexpr int32_t BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW = 4;
 
 /**
  * @brief Parameters for SDPA backward kernel execution.
@@ -133,19 +139,23 @@ struct SdpaBwdParams
     // Accumulator type (a32 = 3-kernel path, a16 = 2-kernel path)
     AccumulatorType accumulatorType = AccumulatorType::A32;
 
-    // Mask type ordinal (matches CSV `mask` column and MaskType enum):
-    //   0 = NO_MASK, 1 = TOP_LEFT_CAUSAL, 2 = BOTTOM_RIGHT_CAUSAL, 3 = SLIDING_WINDOW
+    // Device architecture the kernels were resolved for (e.g. "gfx942").
+    std::string archString;
+
+    // dqdkdv CSV `mask` ordinal of the resolved kernel:
+    //   0 = NO_MASK, 1 = TOP_LEFT_CAUSAL, 2 = BOTTOM_RIGHT_CAUSAL,
+    //   3 = SLIDING_WINDOW (top-left on gfx950, either alignment on gfx942),
+    //   4 = BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW (gfx950 only)
     int32_t maskOrdinal = 0;
 
-    // Window attention bounds for SLIDING_WINDOW (mask=3).
-    // Set to -1 (unbounded) for non-window masks.
+    // FlashAttention window sizes for the sliding-window masks (3 and 4),
+    // -1 for unbounded. Left at -1 for the other masks.
     int32_t windowLeft = -1;
     int32_t windowRight = -1;
 
-    // Diagonal alignment for the mask. True = top-left (skv==sq diagonal),
-    // false = bottom-right (skv==sq+(seqKv-seqQ) diagonal).
-    // Used by computeMaskCoordinates() to compute the offset applied to
-    // mask_x/mask_y for SLIDING_WINDOW kernels.
+    // Diagonal alignment of the sliding window. True = top-left (query i sits
+    // on key i), false = bottom-right (query i sits on key i + S_kv - S_q).
+    // computeMaskCoordinates() uses it for the gfx942 window kernels.
     bool topLeftAlignment = true;
 };
 

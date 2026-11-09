@@ -4,14 +4,19 @@
 // =============================================================================
 // AITER Provenance
 //
-// Commit:  17d4a33b6f9535e820353ebc6217769efc3766d6
+// Release: AITER v0.1.29
+// Commit:  a0c4b69c146d94e393984bbe553b704e8c89a5e4
+//          (pinned in asm/asm_kernels/aiter_pins.json)
 // Sources:
-//   - aiter/csrc/include/mha_bwd.h           (lines 149-305: backward kernel args)
-//   - aiter/csrc/include/aiter_hip_common.h  (lines 48-62: p2, p3 padding structs)
+//   - aiter/csrc/include/mha_bwd.h           (lines 168-345: backward kernel args)
+//   - aiter/csrc/include/aiter_hip_common.h  (lines 144-154: p3, p2 padding structs)
 //
 // Adaptations:
 //   - Replaced AITER padding types p2/p3 with SgprPad2/SgprPad3 (see SgprPadding.hpp)
 //   - Removed all AITER #include directives
+//   - Omitted the gfx1250-only tail fields of fmha_bwd_dqdkdv_args (nsplit,
+//     split_stride) and fmha_bwd_post_kernel_args (max_seqlen_dq, nsplit,
+//     split_stride): the gfx942 and gfx950 kernels end at 0x2c0 and 0xc0
 //   - Added static_assert on sizeof to catch ABI drift
 //   - Added detailed field documentation for all three backward kernels
 //   - Organized into 3-kernel pipeline: odo → dqdkdv → dq_convert
@@ -266,18 +271,22 @@ struct __attribute__((packed)) fmha_bwd_post_kernel_args
     SgprPad2 _p1;
 
     // ---- dq_acc tensor strides (in bytes, FP32) ----------------------------
-    uint32_t Hs_dq_acc; // co:Hs_dq_acc  dq_acc head stride
-    SgprPad3 _p2;
-    uint32_t BAs_dq_acc; // co:BAs_dq_acc  dq_acc batch stride
-    SgprPad3 _p3;
+    // The head and batch strides are 64-bit: the gfx950 post kernels load them
+    // as 64-bit, and the gfx942 kernels read the low 32 bits.
+    uint64_t Hs_dq_acc; // co:Hs_dq_acc  dq_acc head stride
+    SgprPad2 _p2;
+    uint64_t BAs_dq_acc; // co:BAs_dq_acc  dq_acc batch stride
+    SgprPad2 _p3;
     uint32_t Seqs_dq_acc; // co:Seqs_dq_acc  dq_acc sequence stride
     SgprPad3 _p4;
 
     // ---- dQ tensor strides (in bytes, BF16) --------------------------------
-    uint32_t Hs_dq; // co:Hs_dq  dQ head stride
-    SgprPad3 _p5;
-    uint32_t BAs_dq; // co:BAs_dq  dQ batch stride
-    SgprPad3 _p6;
+    // 64-bit like the dq_acc ones; the gfx942 and gfx950 kernels read the low
+    // 32 bits.
+    uint64_t Hs_dq; // co:Hs_dq  dQ head stride
+    SgprPad2 _p5;
+    uint64_t BAs_dq; // co:BAs_dq  dQ batch stride
+    SgprPad2 _p6;
     uint32_t Seqs_dq; // co:Seqs_dq  dQ sequence stride
     SgprPad3 _p7;
 
@@ -305,12 +314,13 @@ static_assert(sizeof(fmha_bwd_odo_args) == 256, "fmha_bwd_odo_args size mismatch
 static_assert(sizeof(fmha_bwd_post_kernel_args) == 192,
               "fmha_bwd_post_kernel_args size mismatch with AITER ABI");
 
-// Per-field offset checks for the most load-bearing kernarg fields.  sizeof
-// pins total layout, but the kernel reads each field by SGPR index — a
+// Per-field offset checks for the fields most exposed to drift. sizeof pins
+// the total layout, but the kernel reads each field by SGPR index — a
 // toolchain change that honoured `__attribute__((packed))` differently could
 // keep the total size while shifting individual offsets and silently corrupt
-// the dispatch.  Offsets below come from AITER's mha_bwd.h hex annotations
-// (commit 9522048).
+// the dispatch. Offsets below come from AITER v0.1.29 mha_bwd.h (hex
+// annotations on fmha_bwd_dqdkdv_args; 16-byte SGPR slots on
+// fmha_bwd_post_kernel_args).
 static_assert(offsetof(fmha_bwd_dqdkdv_args, ptr_dq) == 0x00,
               "fmha_bwd_dqdkdv_args::ptr_dq offset drift vs AITER ABI");
 static_assert(offsetof(fmha_bwd_dqdkdv_args, seqlen_q) == 0xb0,
@@ -319,6 +329,8 @@ static_assert(offsetof(fmha_bwd_dqdkdv_args, Ts) == 0xc0,
               "fmha_bwd_dqdkdv_args::Ts offset drift vs AITER ABI");
 static_assert(offsetof(fmha_bwd_post_kernel_args, Hs_dq_acc) == 0x20,
               "fmha_bwd_post_kernel_args::Hs_dq_acc offset drift vs AITER ABI");
+static_assert(offsetof(fmha_bwd_post_kernel_args, Hs_dq) == 0x50,
+              "fmha_bwd_post_kernel_args::Hs_dq offset drift vs AITER ABI");
 
 // NOLINTEND(readability-identifier-naming)
 

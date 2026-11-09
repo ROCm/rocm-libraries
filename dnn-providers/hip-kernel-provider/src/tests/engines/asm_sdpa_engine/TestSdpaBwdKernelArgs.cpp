@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cstddef>
+#include <cstdint>
+#include <type_traits>
 
 #include <gtest/gtest.h>
 
@@ -188,6 +190,19 @@ TEST(TestSdpaBwdPostKernelArgs, DqStrideOffsets)
     EXPECT_EQ(offsetof(fmha_bwd_post_kernel_args, Hs_dq), 80u);
     EXPECT_EQ(offsetof(fmha_bwd_post_kernel_args, BAs_dq), 96u);
     EXPECT_EQ(offsetof(fmha_bwd_post_kernel_args, Seqs_dq), 112u);
+}
+
+// The gfx950 post kernels load the dq_acc head and batch strides as 64-bit, so
+// those fields, and the dQ ones beside them, are 64-bit (AITER v0.1.29
+// mha_bwd.h); the sequence strides stay 32-bit.
+TEST(TestSdpaBwdPostKernelArgs, HeadAndBatchStridesAre64Bit)
+{
+    EXPECT_TRUE((std::is_same_v<decltype(fmha_bwd_post_kernel_args::Hs_dq_acc), uint64_t>));
+    EXPECT_TRUE((std::is_same_v<decltype(fmha_bwd_post_kernel_args::BAs_dq_acc), uint64_t>));
+    EXPECT_TRUE((std::is_same_v<decltype(fmha_bwd_post_kernel_args::Hs_dq), uint64_t>));
+    EXPECT_TRUE((std::is_same_v<decltype(fmha_bwd_post_kernel_args::BAs_dq), uint64_t>));
+    EXPECT_TRUE((std::is_same_v<decltype(fmha_bwd_post_kernel_args::Seqs_dq_acc), uint32_t>));
+    EXPECT_TRUE((std::is_same_v<decltype(fmha_bwd_post_kernel_args::Seqs_dq), uint32_t>));
 }
 
 TEST(TestSdpaBwdPostKernelArgs, DimensionFieldOffsets)

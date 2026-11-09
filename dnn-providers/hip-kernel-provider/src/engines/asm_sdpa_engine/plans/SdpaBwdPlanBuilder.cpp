@@ -179,13 +179,11 @@ std::optional<fmha_v3_bwdConfig> findConfig(const CFG& registry,
         {
             continue;
         }
-        // gfx950 BF16/FP16 rows are emitted with `bf16_cvt = 3` (the FP16
-        // sentinel) regardless of the BF16 rounding mode the caller asked
-        // for, because gfx950 ships only one kernel per (dtype, hdim, mask,
-        // atomic, pssk, pddv, mode) tuple — there are no per-rounding-mode
-        // variants to disambiguate.  Mirrors the equivalent special case
-        // in SdpaFwdPlanBuilder.cpp::getKernelNameKey for gfx950.
-        if(archId != "gfx950" && cfg.bf16_cvt != bf16Cvt)
+        // A row stored with bf16_cvt = 3 serves every rounding mode (the fp16
+        // rows, and the bf16 rows that ship one kernel for all modes); any other
+        // row serves only the mode it names. Mirrors AITER v0.1.29 mha_bwd.cu
+        // get_heuristic_kernel(): `(cfg.bf16_cvt == 3) || (cfg.bf16_cvt == bf16_cvt)`.
+        if(cfg.bf16_cvt != BF16_CVT_FP16_SENTINEL && cfg.bf16_cvt != bf16Cvt)
         {
             continue;
         }
@@ -283,6 +281,9 @@ bool wouldBwdByteStridesFitUint32(const hipdnn_flatbuffers_sdk::data_objects::Te
     ok &= check("nhead_stride_lsed", seqLenQ, K_FP32_BYTES);
 
     // dq_acc: contiguous [B, H_q, S_q, D_qk] FP32, derived from dims (A32 only).
+    // The post kernel takes its head and batch strides as 64-bit, but the
+    // non-window DQDKDV kernels address dq_acc with 32-bit byte offsets, so
+    // every dq_acc stride must fit 32 bits.
     if(useA32)
     {
         const int64_t strideDqAcc = headDimQk;
@@ -321,7 +322,7 @@ bool wouldBwdByteStridesFitUint32(const hipdnn_flatbuffers_sdk::data_objects::Te
 // calibrated.
 BwdDispatchTuples computeDispatchTuples(const std::string& dataType,
                                         int hdimQ,
-                                        MaskType maskType,
+                                        int dqdkdvMask,
                                         int bf16CvtValue,
                                         AccumulatorMode accMode)
 {
@@ -329,8 +330,7 @@ BwdDispatchTuples computeDispatchTuples(const std::string& dataType,
 
     BwdDispatchTuples tuples{};
     tuples.odo = {0, 0, 0, 0, BF16_CVT_FP16_SENTINEL, verified};
-    tuples.dqdkdv
-        = {static_cast<int>(maskType), static_cast<int>(accMode), 1, 1, bf16CvtValue, verified};
+    tuples.dqdkdv = {dqdkdvMask, static_cast<int>(accMode), 1, 1, bf16CvtValue, verified};
     tuples.dqConvert = {0, 0, 0, 0, bf16CvtValue, verified};
     return tuples;
 }
@@ -350,15 +350,16 @@ AccumulatorMode toAccumulatorMode(AccumulatorType accType)
 // duration.
 constexpr size_t K_NUM_DTYPES = 2; // bf16, fp16
 constexpr size_t K_NUM_HDIMS = 3; // hd64, hd128, hd192
-constexpr size_t K_NUM_MASKS = 4; // plan_utils::MaskType cardinality
+constexpr size_t K_NUM_MASKS = 5; // dqdkdv CSV mask ordinals 0-4
 constexpr size_t K_LOG_FLAGS = K_NUM_DTYPES * K_NUM_HDIMS * K_NUM_MASKS;
 std::array<std::once_flag, K_LOG_FLAGS> dispatchLogFlags;
 
-// Map a (dtype, hdim, mask) triple to a flat index into dispatchLogFlags.
-// isApplicable filters to the supported axes before buildPlan reaches this, so
-// the asserts document the contract and the clamps are a defensive guard
-// against an out-of-bounds index should an unexpected combination slip through.
-size_t dispatchLogIndex(const std::string& dtype, int hdim, MaskType mask)
+// Map a (dtype, hdim, dqdkdv mask ordinal) triple to a flat index into
+// dispatchLogFlags. isApplicable filters to the supported axes before buildPlan
+// reaches this, so the asserts document the contract and the clamps are a
+// defensive guard against an out-of-bounds index should an unexpected
+// combination slip through.
+size_t dispatchLogIndex(const std::string& dtype, int hdim, int mask)
 {
     const size_t dtypeIdx = (dtype == "fp16") ? 1U : 0U; // bf16 -> 0, fp16 -> 1
 
@@ -394,6 +395,35 @@ size_t dispatchLogIndex(const std::string& dtype, int hdim, MaskType mask)
 
 namespace bwd_dispatch
 {
+
+bool isSupportedArch(const std::string& archId)
+{
+    return archId == "gfx942" || archId == "gfx950";
+}
+
+bool isBatchShapeSupported(const std::string& archId, int64_t headDimQk, int64_t headDimV)
+{
+    // AITER v0.1.29 aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950() admits
+    // `(hdim_q > 64 and hdim_q <= 128 and hdim_q == hdim_v) or (hdim_q == 192
+    // and hdim_v == 128)`. isApplicable admits only D in {64, 128, 192} with
+    // D_qk == D_v, so this leaves D = 128.
+    return archId != "gfx950" || (headDimQk == 128 && headDimV == 128);
+}
+
+int dqdkdvMaskOrdinal(const std::string& archId,
+                      MaskType maskType,
+                      hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment)
+{
+    // AITER v0.1.29 mha_bwd.cu asm_mask_type(): `else if(arch_id == "gfx950" &&
+    // a.mask_type == mask_bottom_right) return 4;` for every mask that is
+    // neither causal nor unmasked.
+    if(archId == "gfx950" && maskType == MaskType::SLIDING_WINDOW
+       && alignment == hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT)
+    {
+        return BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW;
+    }
+    return static_cast<int>(maskType);
+}
 
 std::string lookupKernelNameKey(PipelineStage stage,
                                 const std::string& archId,
@@ -483,11 +513,9 @@ bool SdpaBwdPlanBuilder::isApplicable(
     }
     const std::string& deviceString = *deviceStringOpt;
 
-    // The codegen-generated registry contains both gfx942 and gfx950 rows;
-    // only gfx942 is dispatched here.
-    HIP_KERNEL_RETURN_FALSE_IF(deviceString != "gfx942",
-                               "Device string does not match gfx942 (Actual value: " + deviceString
-                                   + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !bwd_dispatch::isSupportedArch(deviceString),
+        "Device string does not match gfx942 or gfx950 (Actual value: " + deviceString + ")");
 
     HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.size() != 1, "Graph has more than one node");
     HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.front()->attributesType()
@@ -785,6 +813,13 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                "Head dimension must be one of {64, 128, 192} (Actual value: "
                                    + std::to_string(headDimQk) + ")");
 
+    // Shapes that have registry rows but that AITER sends to CK on this arch
+    // (see bwd_dispatch::isBatchShapeSupported).
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !bwd_dispatch::isBatchShapeSupported(deviceString, headDimQk, headDimV),
+        deviceString + " backward serves only D_qk = D_v = 128 (Actual: D_qk = "
+            + std::to_string(headDimQk) + ", D_v = " + std::to_string(headDimV) + ")");
+
     // Each kernel takes B, H, S_q, S_kv and D once, from Q, K and V, and addresses
     // every tensor with them, so O, dO and dQ must have Q's dims and V, dK and dV
     // must have K's. The frontend lets V have fewer heads than K (it checks only
@@ -822,11 +857,13 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // condition the engine declines rather than dispatches.
     const int64_t seqLenKv = kTensor->dims()->Get(2);
     MaskType maskType = MaskType::NO_MASK;
+    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment{};
     try
     {
         const auto band = plan_utils::makeCoveringBoundsUnbound(
             plan_utils::resolveDiagonalBand(attrs), seqLenQ, seqLenKv);
         maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
+        alignment = band.alignment;
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
@@ -834,9 +871,11 @@ bool SdpaBwdPlanBuilder::isApplicable(
         return false;
     }
     // Mask types NO_MASK (0), TOP_LEFT_CAUSAL (1), BOTTOM_RIGHT_CAUSAL (2),
-    // and SLIDING_WINDOW (3) are all dispatched. The DQDKDV CSV registry
-    // carries rows for each mask ordinal; ODO and DQ_CONVERT are mask-agnostic
-    // (always mask=0). Applicability is gated by the registry lookup below.
+    // and SLIDING_WINDOW (3, or 4 for a bottom-right window on gfx950) are all
+    // dispatched. The DQDKDV CSV registry carries rows for each mask ordinal;
+    // ODO and DQ_CONVERT are mask-agnostic (always mask=0). Applicability is
+    // gated by the registry lookup below.
+    const int dqdkdvMask = bwd_dispatch::dqdkdvMaskOrdinal(deviceString, maskType, alignment);
 
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(attrs));
@@ -844,7 +883,7 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // default knob value and the most demanding (dq_acc + DQ_CONVERT). The user
     // may still select A16 via the knob at buildPlan time.
     auto dispatchTuples = computeDispatchTuples(
-        dataTypeId, headDimQk, maskType, bf16CvtValue, AccumulatorMode::A32);
+        dataTypeId, headDimQk, dqdkdvMask, bf16CvtValue, AccumulatorMode::A32);
 
     auto checkRegistry = [&](const char* registryName,
                              bwd_dispatch::PipelineStage stage,
@@ -1158,6 +1197,8 @@ void SdpaBwdPlanBuilder::buildPlan(
         plan_utils::resolveDiagonalBand(sdpaAttrs), qDims->Get(2), kTensor->dims()->Get(2));
     const auto maskType
         = plan_utils::getMaskType(maskBand.leftBound, maskBand.rightBound, maskBand.alignment);
+    const int dqdkdvMask
+        = bwd_dispatch::dqdkdvMaskOrdinal(deviceString, maskType, maskBand.alignment);
     auto batchMode = getBatchMode(sdpaAttrs);
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(sdpaAttrs));
@@ -1166,7 +1207,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     // the DQ_CONVERT stage is resolved and loaded below.
     auto dispatchTuples = computeDispatchTuples(dataTypeId,
                                                 static_cast<int>(headDimQk),
-                                                maskType,
+                                                dqdkdvMask,
                                                 bf16CvtValue,
                                                 toAccumulatorMode(accType));
 
@@ -1177,20 +1218,19 @@ void SdpaBwdPlanBuilder::buildPlan(
     // (a throwing call_once initializer would let the exception escape, which
     // bugprone-exception-escape forbids).
     std::call_once(
-        dispatchLogFlags[dispatchLogIndex(dataTypeId, static_cast<int>(headDimQk), maskType)],
+        dispatchLogFlags[dispatchLogIndex(dataTypeId, static_cast<int>(headDimQk), dqdkdvMask)],
         [&]() noexcept {
-            const int maskOrdinal = static_cast<int>(maskType);
             if(dispatchTuples.dqdkdv.verified)
             {
                 HIPDNN_PLUGIN_LOG_INFO("SDPA bwd dispatch: verified kernel dtype="
                                        << dataTypeId << " hd=" << headDimQk
-                                       << " mask=" << maskOrdinal);
+                                       << " mask=" << dqdkdvMask);
             }
             else
             {
                 HIPDNN_PLUGIN_LOG_WARN("SDPA bwd dispatch: UNVERIFIED kernel dtype="
                                        << dataTypeId << " hd=" << headDimQk
-                                       << " mask=" << maskOrdinal
+                                       << " mask=" << dqdkdvMask
                                        << " - results not validated against CPU reference");
             }
         });
@@ -1369,11 +1409,12 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.statsStrideBatch = statsStrideBatch;
     params.attnScale = attnScale;
     params.accumulatorType = accType;
-    params.maskOrdinal = static_cast<int32_t>(maskType);
+    params.archString = deviceString;
+    params.maskOrdinal = dqdkdvMask;
     // A surviving bound is strictly below its sequence span (the covering ones
     // became -1), and isApplicable capped both sequence lengths at INT32_MAX, so
-    // the narrowing below and the mask coordinates computed from it in
-    // SdpaBwdPlan are exact.
+    // the narrowing below and the mask coordinates SdpaBwdPlan passes from it
+    // are exact.
     if(maskType == MaskType::SLIDING_WINDOW)
     {
         params.windowLeft = static_cast<int32_t>(maskBand.leftBound);
