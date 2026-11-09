@@ -27,6 +27,7 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_envariables.hpp"
+#include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "internal/generic/rocsparse_v2_spmv.h"
@@ -35,9 +36,18 @@
 #include "csrmv_device_nnzsplit.h"
 #include "rocsparse_primitives.hpp"
 
-#define LAUNCH_CSRMV_ANALYSIS(BLOCKSIZE, NNZ_PER_THREAD) \
-    csrmv_analysis_nnzsplit<BLOCKSIZE, NNZ_PER_THREAD>(  \
-        handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, csrmv_info);
+#define LAUNCH_CSRMV_ANALYSIS(BLOCKSIZE, NNZ_PER_THREAD)            \
+    csrmv_analysis_nnzsplit<BLOCKSIZE, NNZ_PER_THREAD>(handle,      \
+                                                       trans,       \
+                                                       m,           \
+                                                       n,           \
+                                                       nnz,         \
+                                                       descr,       \
+                                                       csr_val,     \
+                                                       csr_row_ptr, \
+                                                       csr_col_ind, \
+                                                       csrmv_info,  \
+                                                       use_starting_block_ids);
 
 #define LAUNCH_CSRMV(BLOCKSIZE, NNZ_PER_THREAD)                               \
     uint32_t NNZ_PER_BLOCK  = NNZ_PER_THREAD * BLOCKSIZE;                     \
@@ -48,7 +58,7 @@
                                                                               \
     if(handle->wavefront_size == 64)                                          \
     {                                                                         \
-        if(csrmv_info->nnzsplit.use_starting_block_ids)                       \
+        if(csrmv_info->nnzsplit.get_use_starting_block_ids())                 \
         {                                                                     \
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
                 (csrmv_nnzsplit<BLOCKSIZE, NNZ_PER_THREAD, 64, true>),        \
@@ -62,12 +72,12 @@
                 n,                                                            \
                 ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
                 csr_row_ptr,                                                  \
-                (J*)csrmv_info->nnzsplit.starting_ids,                        \
+                csrmv_info->nnzsplit.get_starting_ids<J>(),                   \
                 csr_col_ind,                                                  \
                 csr_val,                                                      \
                 x,                                                            \
                 y,                                                            \
-                (J*)csrmv_info->nnzsplit.starting_block_ids,                  \
+                csrmv_info->nnzsplit.get_starting_block_ids<J>(),             \
                 descr->base,                                                  \
                 handle->pointer_mode == rocsparse_pointer_mode_host);         \
         }                                                                     \
@@ -85,19 +95,19 @@
                 n,                                                            \
                 ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
                 csr_row_ptr,                                                  \
-                (J*)csrmv_info->nnzsplit.starting_ids,                        \
+                csrmv_info->nnzsplit.get_starting_ids<J>(),                   \
                 csr_col_ind,                                                  \
                 csr_val,                                                      \
                 x,                                                            \
                 y,                                                            \
-                (J*)csrmv_info->nnzsplit.starting_block_ids,                  \
+                csrmv_info->nnzsplit.get_starting_block_ids<J>(),             \
                 descr->base,                                                  \
                 handle->pointer_mode == rocsparse_pointer_mode_host);         \
         }                                                                     \
     }                                                                         \
     else                                                                      \
     {                                                                         \
-        if(csrmv_info->nnzsplit.use_starting_block_ids)                       \
+        if(csrmv_info->nnzsplit.get_use_starting_block_ids())                 \
         {                                                                     \
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
                 (csrmv_nnzsplit<BLOCKSIZE, NNZ_PER_THREAD, 32, true>),        \
@@ -111,12 +121,12 @@
                 n,                                                            \
                 ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
                 csr_row_ptr,                                                  \
-                (J*)csrmv_info->nnzsplit.starting_ids,                        \
+                csrmv_info->nnzsplit.get_starting_ids<J>(),                   \
                 csr_col_ind,                                                  \
                 csr_val,                                                      \
                 x,                                                            \
                 y,                                                            \
-                (J*)csrmv_info->nnzsplit.starting_block_ids,                  \
+                csrmv_info->nnzsplit.get_starting_block_ids<J>(),             \
                 descr->base,                                                  \
                 handle->pointer_mode == rocsparse_pointer_mode_host);         \
         }                                                                     \
@@ -134,12 +144,12 @@
                 n,                                                            \
                 ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
                 csr_row_ptr,                                                  \
-                (J*)csrmv_info->nnzsplit.starting_ids,                        \
+                csrmv_info->nnzsplit.get_starting_ids<J>(),                   \
                 csr_col_ind,                                                  \
                 csr_val,                                                      \
                 x,                                                            \
                 y,                                                            \
-                (J*)csrmv_info->nnzsplit.starting_block_ids,                  \
+                csrmv_info->nnzsplit.get_starting_block_ids<J>(),             \
                 descr->base,                                                  \
                 handle->pointer_mode == rocsparse_pointer_mode_host);         \
         }                                                                     \
@@ -165,7 +175,7 @@
         n,                                                               \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),    \
         csr_row_ptr,                                                     \
-        (J*)csrmv_info->nnzsplit.starting_ids,                           \
+        csrmv_info->nnzsplit.get_starting_ids<J>(),                      \
         csr_col_ind,                                                     \
         csr_val,                                                         \
         x,                                                               \
@@ -360,7 +370,8 @@ rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
                                          const A*                  csr_val,
                                          const I*                  csr_row_ptr,
                                          const J*                  csr_col_ind,
-                                         rocsparse_csrmv_info      csrmv_info)
+                                         rocsparse_csrmv_info      csrmv_info,
+                                         bool                      use_starting_block_ids)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -373,11 +384,12 @@ rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
     dim3 csrmv_threads(BLOCKSIZE);
     dim3 csrmv_phase_1((rocsparse::max(m + 1, n) + BLOCKSIZE - 1) / BLOCKSIZE);
 
-    RETURN_IF_ROCSPARSE_ERROR(
-        csrmv_info->nnzsplit.allocate_starting_ids(stream, requiredBlocks, sizeof(J)));
-    J* temp_buffer_j = reinterpret_cast<J*>(csrmv_info->nnzsplit.starting_ids);
+    RETURN_IF_ROCSPARSE_ERROR(csrmv_info->nnzsplit.allocate(
+        requiredBlocks, use_starting_block_ids, rocsparse::get_indextype<J>(), stream));
+    J* starting_ids       = csrmv_info->nnzsplit.get_starting_ids<J>();
+    J* starting_block_ids = csrmv_info->nnzsplit.get_starting_block_ids<J>();
 
-    if(csrmv_info->nnzsplit.use_starting_block_ids)
+    if(use_starting_block_ids)
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrmv_determine_block_starts<BLOCKSIZE, NNZ_PER_THREAD, true, I, J>),
             csrmv_phase_1,
@@ -386,8 +398,8 @@ rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
             stream,
             m,
             csr_row_ptr,
-            temp_buffer_j,
-            (J*)csrmv_info->nnzsplit.starting_block_ids,
+            starting_ids,
+            starting_block_ids,
             descr->base);
     else
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -398,11 +410,11 @@ rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
             stream,
             m,
             csr_row_ptr,
-            temp_buffer_j,
-            (J*)csrmv_info->nnzsplit.starting_block_ids,
+            starting_ids,
+            starting_block_ids,
             descr->base);
 
-    if(csrmv_info->nnzsplit.use_starting_block_ids)
+    if(use_starting_block_ids)
     {
         size_t buffer_size;
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::exclusive_scan_buffer_size<J, J>(
@@ -419,14 +431,13 @@ rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
             RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&temp_storage_ptr, buffer_size, stream));
             temp_alloc = true;
         }
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::primitives::exclusive_scan(handle,
-                                                  (J*)csrmv_info->nnzsplit.starting_block_ids,
-                                                  (J*)csrmv_info->nnzsplit.starting_block_ids,
-                                                  static_cast<J>(0),
-                                                  requiredBlocks + 1,
-                                                  buffer_size,
-                                                  temp_storage_ptr));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::exclusive_scan(handle,
+                                                                        starting_block_ids,
+                                                                        starting_block_ids,
+                                                                        static_cast<J>(0),
+                                                                        requiredBlocks + 1,
+                                                                        buffer_size,
+                                                                        temp_storage_ptr));
         if(temp_alloc)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(temp_storage_ptr, stream));
@@ -447,7 +458,8 @@ rocsparse_status
                                                          const A*                  csr_val,
                                                          const I*                  csr_row_ptr,
                                                          const J*                  csr_col_ind,
-                                                         rocsparse_csrmv_info*     p_csrmv_info)
+                                                         rocsparse_csrmv_info*     p_csrmv_info,
+                                                         bool use_starting_block_ids)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -689,8 +701,17 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
         rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(10,
                        csrmv_info,
-                       (csrmv_info->nnzsplit.starting_ids == nullptr),
+                       (csrmv_info->nnzsplit.get_starting_ids() == nullptr),
                        rocsparse_status_invalid_value);
+
+    if(csrmv_info->nnzsplit.get_indextype() != rocsparse::get_indextype<J>())
+    {
+        // LCOV_EXCL_START
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            rocsparse_status_internal_error,
+            "the nnz-split analysis was run with a different column index type");
+        // LCOV_EXCL_STOP
+    }
 
     const J ysize = (trans == rocsparse_operation_none) ? m : n;
 
@@ -733,7 +754,8 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
         const ATYPE*              csr_val,                                          \
         const ITYPE*              csr_row_ptr,                                      \
         const JTYPE*              csr_col_ind,                                      \
-        rocsparse_csrmv_info*     p_csrmv_info);
+        rocsparse_csrmv_info*     p_csrmv_info,                                     \
+        bool                      use_starting_block_ids);
 
 // Uniform precision
 INSTANTIATE(int32_t, int32_t, _Float16);

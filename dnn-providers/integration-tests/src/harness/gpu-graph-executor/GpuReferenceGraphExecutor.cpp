@@ -98,6 +98,10 @@ detail::GpuPlanRegistrySignatureKey buildSignatureKey(
         return detail::GpuBatchnormFwdTrainSignatureKey(node, tensorMap, node.compute_data_type());
     case NodeAttrs::ConvolutionFwdAttributes:
         return detail::GpuConvolutionFwdSignatureKey(node, tensorMap, node.compute_data_type());
+    case NodeAttrs::ConvolutionBwdAttributes:
+        return detail::GpuConvolutionBwdSignatureKey(node, tensorMap, node.compute_data_type());
+    case NodeAttrs::ConvolutionWrwAttributes:
+        return detail::GpuConvolutionWrwSignatureKey(node, tensorMap, node.compute_data_type());
     case NodeAttrs::LayernormAttributes:
         return detail::GpuLayernormFwdSignatureKey(node, tensorMap, node.compute_data_type());
     case NodeAttrs::LayernormBackwardAttributes:
@@ -139,8 +143,6 @@ detail::GpuPlanRegistrySignatureKey buildSignatureKey(
 
     // Node types with no GPU plan yet - throw descriptive error
     case NodeAttrs::BatchnormBackwardAttributes:
-    case NodeAttrs::ConvolutionBwdAttributes:
-    case NodeAttrs::ConvolutionWrwAttributes:
     case NodeAttrs::BlockScaleDequantizeAttributes:
     case NodeAttrs::BlockScaleQuantizeAttributes:
     {
@@ -251,26 +253,52 @@ struct GpuReferenceGraphExecutor::Impl
         }
     }
 
-    // The CPU executor's ragged-as-dense run with device buffers: offsets and packed inputs are
-    // read back, unpacked on the host and uploaded; dense outputs are read back, packed into a
-    // host copy of the packed output (so bytes outside live tokens are kept) and uploaded.
+    // The CPU executor's ragged-as-dense run with device buffers: offsets, the graph's own
+    // seq_len tensors and packed inputs are read back, unpacked on the host and uploaded; dense
+    // outputs are read back, packed into a host copy of the packed output (so bytes outside live
+    // tokens are kept) and uploaded. Live lengths come from seq_len where the graph has it, else
+    // from the offset blocks.
     void executeRaggedAsDense(hipdnn_test_sdk::detail::DenseSdpaFromRagged& dense,
                               const std::unordered_map<int64_t, void*>& variantPack)
     {
         namespace rd = hipdnn_test_sdk::detail;
         const auto& primaries = dense.primaries;
+        // Host copy of the graph's own seq_len tensors (INT32 [B, 1, 1, 1], element b at b * stride); empty
+        // where the rewrite adds them.
+        const auto readOwnSeqLen = [&](const std::optional<int64_t>& added,
+                                       int64_t uid,
+                                       int64_t stride) {
+            std::vector<int32_t> raw;
+            if(!added.has_value())
+            {
+                raw.resize(rd::stridedAuxSpan(dense.batch, stride, "ragged SDPA densify: seq_len"));
+                copyBytes(raw.data(),
+                          variantPack.at(uid),
+                          raw.size() * sizeof(int32_t),
+                          hipMemcpyDeviceToHost);
+            }
+            return raw;
+        };
+        const auto ownSeqLenQ
+            = readOwnSeqLen(dense.addedSeqLenQUid, dense.seqLenQUid, dense.seqLenQStride);
+        const auto ownSeqLenKv
+            = readOwnSeqLen(dense.addedSeqLenKvUid, dense.seqLenKvUid, dense.seqLenKvStride);
         std::vector<std::vector<int64_t>> offsets;
         std::vector<std::vector<int64_t>> lengths;
         for(const auto& primary : primaries)
         {
-            std::vector<uint8_t> table(static_cast<size_t>(dense.batch + 1)
-                                       * primary.offsetElementSize);
+            std::vector<uint8_t> table(rd::raggedOffsetBytes(primary, dense.batch));
             copyBytes(table.data(),
                       variantPack.at(primary.offsetUid),
                       table.size(),
                       hipMemcpyDeviceToHost);
             offsets.push_back(rd::raggedElementOffsets(primary, table.data(), dense.batch));
-            lengths.push_back(rd::raggedLengths(primary, offsets.back()));
+            const auto& seqLen = primary.queryPacking ? ownSeqLenQ : ownSeqLenKv;
+            lengths.push_back(rd::raggedLengths(primary,
+                                                offsets.back(),
+                                                seqLen.empty() ? nullptr : seqLen.data(),
+                                                primary.queryPacking ? dense.seqLenQStride
+                                                                     : dense.seqLenKvStride));
         }
         const auto [qLengths, kvLengths] = rd::raggedGroupLengths(dense, lengths);
 
@@ -298,37 +326,24 @@ struct GpuReferenceGraphExecutor::Impl
                       hipMemcpyHostToDevice);
             densePack[primaries[i].uid] = deviceBuffers.back()->ptr;
         }
-        const auto bindSeqLens = [&](std::optional<int64_t> added,
-                                     int64_t uid,
-                                     const std::vector<int64_t>& packed,
-                                     const char* name) {
-            if(packed.empty())
-            {
-                return;
-            }
-            std::vector<int32_t> values(packed.size());
-            if(added.has_value())
-            {
-                values.assign(packed.begin(), packed.end());
-                deviceBuffers.push_back(
-                    std::make_unique<DeviceBuffer>(values.size() * sizeof(int32_t)));
-                copyBytes(deviceBuffers.back()->ptr,
-                          values.data(),
-                          values.size() * sizeof(int32_t),
-                          hipMemcpyHostToDevice);
-                densePack[uid] = deviceBuffers.back()->ptr;
-            }
-            else
-            {
-                copyBytes(values.data(),
-                          variantPack.at(uid),
-                          values.size() * sizeof(int32_t),
-                          hipMemcpyDeviceToHost);
-                rd::requireSeqLensWithinPacked(values.data(), packed, name);
-            }
-        };
-        bindSeqLens(dense.addedSeqLenQUid, dense.seqLenQUid, qLengths, "seq_len_q");
-        bindSeqLens(dense.addedSeqLenKvUid, dense.seqLenKvUid, kvLengths, "seq_len_kv");
+        // A seq_len tensor the rewrite added carries the offset-derived lengths.
+        const auto bindAddedSeqLens
+            = [&](const std::optional<int64_t>& added, const std::vector<int64_t>& packed) {
+                  if(!added.has_value() || packed.empty())
+                  {
+                      return;
+                  }
+                  const std::vector<int32_t> values(packed.begin(), packed.end());
+                  deviceBuffers.push_back(
+                      std::make_unique<DeviceBuffer>(values.size() * sizeof(int32_t)));
+                  copyBytes(deviceBuffers.back()->ptr,
+                            values.data(),
+                            values.size() * sizeof(int32_t),
+                            hipMemcpyHostToDevice);
+                  densePack[*added] = deviceBuffers.back()->ptr;
+              };
+        bindAddedSeqLens(dense.addedSeqLenQUid, qLengths);
+        bindAddedSeqLens(dense.addedSeqLenKvUid, kvLengths);
 
         executeAsIs(dense.graph.data(), dense.graph.size(), densePack);
 

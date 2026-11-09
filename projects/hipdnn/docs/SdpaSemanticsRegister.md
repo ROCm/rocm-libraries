@@ -36,16 +36,19 @@ batch when `seq_len_q/kv` are set).
   - References: `CpuFpReferenceSdpa.hpp` / `CpuFpReferenceSdpaRagged.hpp` `isMasked`, `GpuRefSdpa{Fwd,RaggedFwd,Bwd}.cpp`,
     golden generators' `build_bound_mask` (`utilities/sdpa_common.py`; `--left-bound` is the graph's `left_bound`,
     `--window-left` is FlashAttention's `window_size_left` and is written as `left_bound = W + 1`).
-  - Kernels count the keys left of the diagonal (FlashAttention `window_size_left`), so providers convert once at the
-    boundary: `asm_sdpa_engine/plans/SdpaPlanUtils.hpp` `resolveDiagonalBand` stores `left_bound - 1` (asm forward
+  - Most kernels count the keys left of the diagonal (FlashAttention `window_size_left`), so providers convert once at
+    the boundary: `asm_sdpa_engine/plans/SdpaPlanUtils.hpp` `resolveDiagonalBand` stores `left_bound - 1` (asm forward
     and backward, hip_flash2), and `Gfx1151WmmaAttentionNative.cpp` `maskFor` passes `left_bound - 1` as
-    `window_left`. The gfx950 dense pack declines windows.
+    `window_left`. The gfx942 dense pack's kernel counts the diagonal too (it keeps
+    `(q - W, q]`), so `AttentionDenseNative.cpp` `maskFor`, which both dense packs share, passes
+    `left_bound` itself as `sliding_window` for gfx942. The gfx950 dense pack declines windows.
   - `TestCpuFpReferenceSdpaFp64.LeftBoundKeepsLKeysIncludingDiagonalLikeCudnn` pins the count.
 - **Other use cases:**
   - FlashAttention, AITER, AOTriton, TransformerEngine and FlashInfer: `window_left = L - 1`.
   - vLLM `sliding_window = W` keeps W keys including self, so it maps to `L = W`.
-  - rocKE's own oracle and kernels use the FlashAttention convention; a rocKE kernel served through hipDNN gets
-    `L - 1` from the provider.
+  - rocKE's own oracle and its `window_left` kernels use the FlashAttention convention; a rocKE kernel of that kind
+    served through hipDNN gets `L - 1` from the provider. The rocKE gfx942 dense kernel's `sliding_window` counts W keys
+    including self, vLLM's convention, so it gets `L` itself.
 - **Contract:** cuDNN's meaning.
 
 ### SEM-002: Deprecated `causal_mask` / `causal_mask_bottom_right` combined with explicit bounds
@@ -95,7 +98,7 @@ batch when `seq_len_q/kv` are set).
   (frontend nodes, `PlanUtils.hpp` `extractDiagonalBandParams`, hip-kernel-provider `resolveDiagonalBand`).
 - **Contract:** hipDNN's domain. Forward `left_bound = 0` is rejected so that forward and backward accept the same
   bands (cuDNN's backward rejects it), and because providers convert to the kernels' `window_left = L - 1`, where
-  `-1` means unbounded. A graph that needs this mask can use an explicit bias.
+  `-1` means unbounded (the gfx942 dense pack, whose kernel takes the key count `L`, is the exception). A graph that needs this mask can use an explicit bias.
 
 ### SEM-006: Bias combined with a band or bottom-right causal
 
@@ -195,9 +198,9 @@ batch when `seq_len_q/kv` are set).
 - **Status:** Aligned.
 - **cuDNN:** natural log, fp32, `[B, H, Sq, 1]`.
 - **Other use cases:** FlashInfer uses log2. vLLM uses packed `[Hq, T]` for varlen.
-- **hipDNN today:** natural log, fp32, `[B, H, Sq, 1]` dense. The ragged GPU reference also accepts packed
-  LSE.
-- **Contract:** cuDNN. The packed layout follows the ragged-offset model.
+- **hipDNN today:** natural log, fp32, `[B, H, Sq, 1]` dense. The ragged CPU and GPU references accept a ragged
+  LSE with its own offsets and lengths.
+- **Contract:** cuDNN. A ragged LSE follows the ragged-offset model.
 
 ### SEM-012: Softmax probability precision in the reference
 
@@ -343,6 +346,27 @@ batch when `seq_len_q/kv` are set).
   SEM-010. The plans check the dtype and shape; the golden generator's `--block-mask` expansion is identical to
   cuDNN's code.
 - **Contract:** cuDNN.
+
+## Ragged layouts
+
+### SEM-026: Ragged layout validation
+
+- **Status:** Diverges (reference container; deliberately stricter).
+- **cuDNN:** a ragged tensor is addressed from its per-batch offsets and strides. The frontend checks only graph
+  attributes (ragged needs padding, backend and architecture gates, paged plus ragged from backend 9.7); it never
+  reads offset values, so it does not validate overlapping layouts and defines no behaviour for them.
+  - Source: cudnn-frontend v1.24.0 `include/cudnn_frontend/node/sdpa_support_surface.h:27-30, 90-92, 281-283`,
+    `scaled_dot_product_flash_attention.h:486-507` (ragged offsets added to the node).
+- **hipDNN:** the Data SDK `RaggedTensor` rejects, at construction, layouts whose non-empty batches share a token
+  row, dense views that break the sorted-stride rule, negative strides, origins that are not whole tokens, and
+  `seq_len` values outside `[0, S_max]`. Zero-stride broadcast axes are accepted. The frontend and the
+  `isApplicable` gates see graph attributes only, so the rule applies where offset values are on the host: bundle
+  loading and the CPU and GPU references (RFC 0014, Known limitations item 8). Pinned by `TestRaggedLayoutRows`
+  (`AliasingRowsAreRejectedByRule`, `OverlapRuleBoundaryIsOneSharedRow`, `SortedStrideRuleExemptsSizeOneAxes`) and
+  `TestRaggedLayoutRejections`.
+- **Contract:** every logical element has exactly one address, so outputs are written once and the element count
+  and footprint are well defined. A use case that needs aliased read-only inputs (for example a shared prefix)
+  would relax the rule for inputs only.
 
 ## Process
 

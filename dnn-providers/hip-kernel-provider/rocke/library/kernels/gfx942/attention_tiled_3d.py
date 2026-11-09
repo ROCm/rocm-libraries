@@ -41,6 +41,10 @@ from kernels.common._attention_strided_kv import (
     strided_kv_resource,
 )
 from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common.attention_split_kv_reduce import (
+    split_kv_reduce_spec,
+    tiled_reduce_unsupported_reason,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -253,6 +257,16 @@ class UnifiedAttention3DTiledSpec:
             if self.tile_size_override is not None
             else self.block_size
         )
+
+    def resolved_tile_size_override(self) -> int:
+        """The KV tile the kernel runs (``None`` -> one block per tile), so a
+        catalog can record the knob as a non-null value."""
+        return self.tile_size
+
+    def resolved_num_queries_per_kv(self) -> int:
+        """The GQA ratio the kernel bakes (the head counts are kernargs), so a
+        catalog can bind it as a method like ``resolved_tile_size_override``."""
+        return self.num_queries_per_kv
 
     @property
     def dtype_ir(self) -> Type:
@@ -1531,6 +1545,22 @@ def build_unified_attention_reduce_tiled(
     return b.kernel
 
 
+def supports_tiled_reduce_spec(
+    spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx942"
+) -> Tuple[bool, str]:
+    """Spec-first predicate for the split-KV reduce kernel (functional limits only).
+
+    Applies the one copy of the reduce rules in
+    ``kernels.common.attention_split_kv_reduce.tiled_reduce_unsupported_reason``
+    (wave64 arch, fp16/bf16, ``head_size`` a positive multiple of 64, segment-factor
+    cache fits LDS); the gfx950 module adds a head-grouping check on top, this one
+    has none. Typed with this module's reduce spec class, which ``hkp_pack`` matches
+    predicates by.
+    """
+    reason = tiled_reduce_unsupported_reason(spec, arch=arch)
+    return (False, reason) if reason is not None else (True, "supported")
+
+
 def supports_tiled_3d_spec(
     spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx942"
 ) -> Tuple[bool, str]:
@@ -1556,4 +1586,79 @@ def supports_tiled_3d_spec(
         q_dtype=spec.dtype,
         kv_storage_dtype=spec.kv_storage_dtype,
         arch=arch,
+    )
+
+
+def reduce_spec_for(
+    spec: UnifiedAttention3DTiledSpec, *, emit_lse: bool = False
+) -> UnifiedAttentionReduceTiledSpec:
+    """The reduce kernel that consumes ``spec``'s per-segment workspace.
+
+    Mirrors the reduce spec the runtime pairs with a segment
+    (``_strided_3d_specs_from_problem`` and ``_get_3d_pipeline`` in
+    ``kernels.common.attention_unified``): the segment's head shape, dtype,
+    ``num_segments`` and ``waves_per_eu``, derived through
+    ``kernels.common.attention_split_kv_reduce.split_kv_reduce_spec`` like the
+    gfx950 module's ``reduce_spec_for``. ``emit_lse`` comes from the request, not
+    the segment spec: it defaults off, as on the strided decode path.
+    """
+    return split_kv_reduce_spec(
+        UnifiedAttentionReduceTiledSpec, spec, emit_lse=emit_lse
+    )
+
+
+def supports_unified_attention_3d_tiled_module(
+    spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx942"
+) -> Tuple[bool, str]:
+    """Spec-first predicate for :func:`build_unified_attention_3d_tiled_module`.
+
+    Functional limits only: the segment kernel's shape gate, its KV tile, its Q/K/V
+    tiles fitting LDS (the same bound the strided runtime enforces), and the reduce
+    kernel derived by :func:`reduce_spec_for`.
+
+    The KV tile (``spec.tile_size``: ``tile_size_override``, else ``block_size``) must
+    be a positive multiple of ``MFMA_N`` that divides ``block_size``: the builder walks
+    a page in whole tiles and a tile in whole 16-wide MFMA steps. With the gate's head
+    sizes (multiples of 64) that also splits a tile into whole async K/V copies.
+    """
+    from ..common.attention_unified import _strided_3d_lds_reason
+
+    ok, reason = supports_tiled_3d_spec(spec, arch=arch)
+    if not ok:
+        return False, reason
+    tile = spec.tile_size
+    if tile <= 0 or tile % MFMA_N != 0 or spec.block_size % tile != 0:
+        return (
+            False,
+            f"tiled 3D kernel needs a KV tile that is a positive multiple of {MFMA_N} "
+            f"dividing block_size {spec.block_size} (tile_size_override "
+            f"{spec.tile_size_override})",
+        )
+    reduce = reduce_spec_for(spec)
+    ok, reason = supports_tiled_reduce_spec(reduce, arch=arch)
+    if not ok:
+        return False, reason
+    reason = _strided_3d_lds_reason(spec, reduce, arch=arch)
+    return (False, reason) if reason is not None else (True, "supported")
+
+
+def build_unified_attention_3d_tiled_module(
+    spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx942"
+):
+    """The split-KV segment kernel with its reduce kernel as one code object.
+
+    Returns ``rocke.helpers.KernelModule(primary=<segment>, companions={"reduce":
+    <reduce>})`` for :func:`rocke.helpers.compile_module` / hkp_pack. The reduce is
+    :func:`reduce_spec_for` ``(spec)``, so every packed segment variant carries the
+    reduce that matches its ``num_segments``.
+    """
+    from rocke.helpers import KernelModule
+
+    return KernelModule(
+        primary=build_unified_attention_3d_tiled(spec, arch=arch),
+        companions={
+            "reduce": build_unified_attention_reduce_tiled(
+                reduce_spec_for(spec), arch=arch
+            )
+        },
     )

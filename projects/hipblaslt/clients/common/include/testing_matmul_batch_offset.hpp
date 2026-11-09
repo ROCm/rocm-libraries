@@ -28,6 +28,7 @@
 
 #include "cblas_interface.hpp"
 #include "datatype_interface.hpp"
+#include "fast_check.hpp"
 #include "flops.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_init.hpp"
@@ -35,12 +36,13 @@
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#include "memory_estimate_check.hpp"
 #include "near.hpp"
 #include "norm.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
-#include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
+#include <hipblaslt/hipblaslt.h>
 
 /* ============================================================================================ */
 /*! \brief  Test for 64-bit batch offset support in general batched GEMM                        */
@@ -102,6 +104,18 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     size_t size_B_full = padding_b + size_B_sub + (offset_b > 0 ? size_t(offset_b) : 0);
     size_t size_C_full = padding_c + size_C_sub + (offset_c > 0 ? size_t(offset_c) : 0);
     size_t size_D_full = padding_d + size_D_sub + (offset_d > 0 ? size_t(offset_d) : 0);
+
+    // As in testing_matmul, a case that needs more memory than the runner has skips with the
+    // amounts. The host holds the four buffers below and the reference D; the device holds the
+    // four buffers and a workspace of at most prefMaxWorkspaceSize (128 MiB).
+    const size_t operandBytes
+        = ((size_A_full + size_B_full) * sizeof(Ti) + (size_C_full + size_D_full) * sizeof(To))
+          * size_t(batch_count);
+    const size_t hostBytes = operandBytes + size_D_sub * sizeof(To) * size_t(batch_count);
+    std::string  why = fast_check_memory_shortfall(operandBytes + (size_t(128) << 20), hostBytes);
+    if(!why.empty())
+        SKIP_FOR_MEMORY(why);
+    MemoryEstimateCheck memoryEstimateCheck(hostBytes);
 
     // Allocate host memory for full buffers
     host_vector<Ti> h_A_full(size_A_full * batch_count);

@@ -34,6 +34,8 @@
 #include <string>
 #include <vector>
 
+#include "malformed_param_attrs.h"
+#include "rocke/intexpr.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/recipe_vm.h"
@@ -222,7 +224,7 @@ void check_invalid_integer_values()
         const std::string expr_label = std::string("integer expression ") + spelling;
         check(run_attr_recipe(recipe, &ll, &err) != ROCKE_OK,
               (expr_label + " is rejected").c_str());
-        check(err.find("not an integer") != std::string::npos,
+        check(err.find(ROCKE_INTEXPR_NOT_EXACT_INT) != std::string::npos,
               (expr_label + " has a diagnostic (got: " + err + ")").c_str());
     }
 }
@@ -411,12 +413,85 @@ void check_scf_if_else()
           ("unresolved cond names the op (got: " + err + ")").c_str());
 }
 
+// A recipe whose one instruction is a pointer param carrying `attrs_json`.
+std::string param_recipe(const std::string& attrs_json)
+{
+    return std::string(R"json({"schema": "rocke.recipe/v1", "kernel_name_fmt": "param_probe",
+  "spec": [], "attrs": {}, "program": [
+    {"op": "param", "name": "P", "bind": "P",
+     "type": {"kind": "ptr", "pointee": "f32", "space": "global"}, "attrs": )json")
+           + attrs_json + R"json(}, {"op": "ret"}]})json";
+}
+
+// Every pointer attribute the lowerer emits reaches the replayed kernel, and a
+// param attr the VM cannot read fails the replay: dropping it would lower a
+// different kernel than the one recorded.
+void check_param_attrs()
+{
+    std::string ll, err;
+    check(
+        run_attr_recipe(
+            param_recipe(R"json({"nonnull": true, "nocapture": false, "dereferenceable": 64})json"),
+            &ll,
+            &err)
+            == ROCKE_OK,
+        ("nonnull / nocapture / dereferenceable replay (got: " + err + ")").c_str());
+    check(
+        ll.find("ptr addrspace(1) nonnull dereferenceable(64) %P") != std::string::npos,
+        "nonnull and dereferenceable reach the lowered param, and nocapture=false drops nocapture");
+
+    for(const malformed_param_attr_t& c : kMalformedParamAttrs)
+    {
+        ll.clear();
+        err.clear();
+        const std::string what = std::string("param attr with ") + c.what;
+        check(run_attr_recipe(param_recipe(c.attrs), &ll, &err) != ROCKE_OK,
+              (what + " is rejected").c_str());
+        check(err.find(c.message) != std::string::npos,
+              (what + " names the defect (got: " + err + ")").c_str());
+    }
+}
+
 } // namespace
+
+// The VM reads an integer parameter's facts -- ints, and a relation as the
+// canonical intexpr JSON string the recording builder records -- and they lower
+// to no byte; a declaration the builder refuses fails the replay with its text.
+void check_param_facts()
+{
+    const auto recipe = [](const std::string& ldc_attrs) {
+        return std::string(R"json({"schema": "rocke.recipe/v1", "kernel_name_fmt": "fact_probe",
+  "spec": [], "attrs": {}, "program": [
+    {"op": "param", "name": "M", "bind": "M", "type": "i32",
+     "attrs": {"ge": 1, "multiple_of": 8}},
+    {"op": "param", "name": "ldc", "bind": "ldc", "type": "i32", "attrs": )json")
+               + ldc_attrs + R"json(}, {"op": "ret"}]})json";
+    };
+    std::string ll, err;
+    check(run_attr_recipe(recipe(R"json({"ge": "{\"param\":\"M\"}", "le": 4096})json"), &ll, &err)
+              == ROCKE_OK,
+          ("param facts replay (got: " + err + ")").c_str());
+    check(ll.find("(i32 %M, i32 %ldc)") != std::string::npos,
+          "param facts lower to plain i32 arguments");
+    const char* const bad[][2] = {
+        {R"json({"ge": "{\"param\":\"K\"}"})json",
+         "ldc: the relation names K, which is not a parameter of this kernel"},
+    };
+    for(const auto& c : bad)
+    {
+        ll.clear();
+        err.clear();
+        check(run_attr_recipe(recipe(c[0]), &ll, &err) != ROCKE_OK, c[0]);
+        check(err.find(c[1]) != std::string::npos, (std::string(c[0]) + " got: " + err).c_str());
+    }
+}
 
 int main()
 {
     std::printf("portable_ir recipe_vm_replay:\n");
 
+    check_param_attrs();
+    check_param_facts();
     check_kernel_list_attrs();
     check_invalid_integer_values();
     check_scf_if_else();
