@@ -30,7 +30,6 @@ from timeit import default_timer as timer
 from typing import List, Union, NamedTuple
 
 from ..Common import print1, ensurePath
-from ..Common.Architectures import baseArchName, compilerTargetOf
 from ..Common.TimingInstrumentation import timing_context
 
 from .Component import Compiler, Bundler
@@ -151,8 +150,6 @@ def buildSourceCodeObjectFiles(
     with timing_context("python_kernel_build_src_co.compile"):
         compiler(str(includeDir), cmdlineArchs, str(kernelPath), objPath)
 
-    # The bundler names the compiler target; an alias writes under its own name.
-    outDirs = {compilerTargetOf(baseArchName(a), compiler.path): baseArchName(a) for a in cmdlineArchs}
     with timing_context("python_kernel_build_src_co.unbundle"):
         for target in bundler.targets(objPath):
           match = re.search("gfx.*$", target)
@@ -162,7 +159,7 @@ def buildSourceCodeObjectFiles(
             if not coPathRaw: continue
             bundler(target, objPath, str(coPathRaw))
 
-            destDir = Path(ensurePath(destRoot / outDirs.get(baseArch, baseArch)))
+            destDir = Path(ensurePath(destRoot / baseArch))
             coPath = str(destDir / coPathRaw.stem)
             coPathsRaw.append(coPathRaw)
             coPaths.append(coPath)

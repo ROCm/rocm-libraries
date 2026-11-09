@@ -338,12 +338,28 @@ namespace TensileLite
                     addError(concatenate("Unexpected msgpack type for enum: ", (int)object.type,
                                        " (expected STRING or INTEGER)"));
                 }
-                    
+
                 if(match)
                 {
                     enumFound++;
                     member = value;
                 }
+            }
+
+            template <typename T>
+            bool enumLookup(T& member, std::unordered_map<std::string, T> const& map)
+            {
+                if(object.type == msgpack::type::object_type::STR)
+                {
+                    auto it = map.find(std::string(object.via.str.ptr, object.via.str.size));
+                    if(it != map.end())
+                    {
+                        member = it->second;
+                        enumFound = 1;
+                        return true;
+                    }
+                }
+                return false;
             }
         };
 
@@ -721,6 +737,22 @@ namespace TensileLite
             }
         };
 
+        template <typename T, typename NameFn>
+        void hashmapEnumeration(MessagePackInput& io, T& value, int count, NameFn nameFor)
+        {
+            static const auto map = [count, nameFor] {
+                std::unordered_map<std::string, T> m;
+                for(int i = 0; i < count; i++)
+                    m.emplace(nameFor(i), static_cast<T>(i));
+                return m;
+            }();
+            if(!io.enumLookup(value, map))
+            {
+                for(int i = 0; i < count; i++)
+                    io.enumCase(value, nameFor(i).c_str(), static_cast<T>(i));
+            }
+        }
+
         template <>
         struct IOTraits<MessagePackOutput>
         {
@@ -789,6 +821,56 @@ namespace TensileLite
             static void enumCase(MessagePackOutput& io, T& member, const char* key, T value)
             {
                 io.enumCase(member, key, value);
+            }
+        };
+
+        template <>
+        struct EnumTraits<CustomArgSemantic, MessagePackInput>
+        {
+            static void enumeration(MessagePackInput& io, CustomArgSemantic& value)
+            {
+                hashmapEnumeration(io, value, static_cast<int>(CustomArgSemantic::COUNT),
+                    [](int i) { return TensileLite::toString(static_cast<CustomArgSemantic>(i)); });
+            }
+        };
+
+        template <>
+        struct EnumTraits<CustomArgType, MessagePackInput>
+        {
+            static void enumeration(MessagePackInput& io, CustomArgType& value)
+            {
+                hashmapEnumeration(io, value, static_cast<int>(CustomArgType::CustomArgType_Count),
+                    [](int i) { return TensileLite::toString(static_cast<CustomArgType>(i)); });
+            }
+        };
+
+        template <>
+        struct EnumTraits<rocisa::DataType, MessagePackInput>
+        {
+            static void enumeration(MessagePackInput& io, rocisa::DataType& value)
+            {
+                hashmapEnumeration(io, value, static_cast<int>(rocisa::DataType::Count),
+                    [](int i) { return DataTypeInfo::Get(i).name; });
+            }
+        };
+
+        template <>
+        struct EnumTraits<CustomGridSize, MessagePackInput>
+        {
+            static void enumeration(MessagePackInput& io, CustomGridSize& value)
+            {
+                hashmapEnumeration(io, value, static_cast<int>(CustomGridSize::CustomGridSize_Count),
+                    [](int i) { return TensileLite::toString(static_cast<CustomGridSize>(i)); });
+            }
+        };
+
+        template <>
+        struct EnumTraits<CustomWorkspaceType, MessagePackInput>
+        {
+            static void enumeration(MessagePackInput& io, CustomWorkspaceType& value)
+            {
+                hashmapEnumeration(io, value, static_cast<int>(CustomWorkspaceType::CustomWorkspaceType_Count),
+                    [](int i) { return TensileLite::toString(static_cast<CustomWorkspaceType>(i)); });
             }
         };
 

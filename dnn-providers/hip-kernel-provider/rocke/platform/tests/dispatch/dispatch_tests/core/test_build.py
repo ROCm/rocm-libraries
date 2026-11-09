@@ -21,36 +21,41 @@ from rocke.dispatch.families.norm import NormRequest, dispatch_norm
 from rocke.dispatch.gemm.bf16_rcr import dispatch_gemm_bf16
 from rocke.dispatch.gemm.common import GemmRequest
 from rocke.dispatch.gemm.fp16_rcr import dispatch_gemm_fp16
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
-def _gemm(dtype):
-    return GemmRequest(M=256, N=256, K=256, arch="gfx950", dtype=dtype)
+def _gemm(dtype, arch):
+    return GemmRequest(M=256, N=256, K=256, arch=arch, dtype=dtype)
 
 
-def _moe(dtype="fp16"):
+def _moe(dtype, arch):
     return MoeRequest(
         num_tokens=128,
         hidden=7168,
         intermediate=2048,
         num_experts=256,
         top_k=8,
-        arch="gfx950",
+        arch=arch,
         dtype=dtype,
     )
 
 
-def _norm(kind):
-    return NormRequest(rows=4096, cols=4096, kind=kind, arch="gfx950")
+def _norm(kind, arch):
+    return NormRequest(rows=4096, cols=4096, kind=kind, arch=arch)
 
 
 # One representative request per registered family, so a family that grows a
 # build cannot skip the agreement check.
-_CASES = (
-    ("gemm_fp16_rcr", dispatch_gemm_fp16, _gemm("fp16")),
-    ("gemm_bf16_rcr", dispatch_gemm_bf16, _gemm("bf16")),
-    ("moe_fused_mega_f16", dispatch_moe, _moe("fp16")),
-    ("norm2d_rmsnorm", dispatch_norm, _norm("rmsnorm")),
-    ("norm2d_layernorm", dispatch_norm, _norm("layernorm")),
+_CASES = tuple(
+    (f"{label}:{arch}", dispatch, request)
+    for arch in COVERED_ARCHES
+    for label, dispatch, request in (
+        ("gemm_fp16_rcr", dispatch_gemm_fp16, _gemm("fp16", arch)),
+        ("gemm_bf16_rcr", dispatch_gemm_bf16, _gemm("bf16", arch)),
+        ("moe_fused_mega_f16", dispatch_moe, _moe("fp16", arch)),
+        ("norm2d_rmsnorm", dispatch_norm, _norm("rmsnorm", arch)),
+        ("norm2d_layernorm", dispatch_norm, _norm("layernorm", arch)),
+    )
 )
 
 
@@ -84,7 +89,7 @@ class TestSpecBuilderAgreement(unittest.TestCase):
             )
             .build()
             .name
-            for arch in ("gfx942", "gfx950")
+            for arch in COVERED_ARCHES
         }
         self.assertEqual(len(names), 2)
 
@@ -123,8 +128,8 @@ class TestBuildRatchet(unittest.TestCase):
     def test_registration_fails_when_a_required_build_is_missing(self):
         from rocke.core.arch import known_arches
         from rocke.dispatch.core import (
-            Capability,
             CandidateRegistry,
+            Capability,
             KernelCandidate,
         )
 
