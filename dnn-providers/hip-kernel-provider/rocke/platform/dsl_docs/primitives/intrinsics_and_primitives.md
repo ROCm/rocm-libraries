@@ -469,6 +469,18 @@ host_preshuffle_layout(spec, *, n, k)
 Used together with the FP8 / BF8 MFMA atoms, these helpers compose
 into the full v2 MFMA-based block-scaled / MX GEMM body.
 
+gfx950 MX decode pieces:
+
+```text
+# Scaled MFMA with free formats and op_sel scale-byte select
+# (Python engine only: compile with backend="python").
+IRBuilder.mfma_scale_mx(a, b, c, a_scale, b_scale, *, shape="16x16x128",
+ fmt_a="fp8", fmt_b="fp4", opsel_a=0, opsel_b=0)
+# Two f32 -> two scaled fp8 / bf8 bytes in one half of ``old``
+# (Python engine only).
+IRBuilder.cvt_scalef32_pk_fp8_f32(old, src0, src1, scale, *, hi=False, bf8=False)
+```
+
 ## fused-MoE indirect-address helpers
 
 `helpers/gather_scatter.py` is the per-token indirect-address surface

@@ -574,6 +574,101 @@ def _check_cachepolicy(op: str, value: int) -> int:
     return v
 
 
+# gfx94x / gfx950 buffer and global cache-policy (``aux``) bits, as LLVM's
+# ``CPol`` encodes them for ``raw.ptr.buffer.{load,store}``: SC0 = GLC (1),
+# NT = SLC (2), SC1 = SCC (16). sc1 alone is device (agent) coherence: such a
+# load skips the per-CU vL1D, which a tagged-mailbox poll needs to make
+# progress; sc0 + sc1 is system coherence.
+CPOL_SC0 = 1
+CPOL_NT = 2
+CPOL_SC1 = 16
+
+# ``IRBuilder.tagged_poll(reload=...)``: "" = the original op (no attribute),
+# "launder" = the reload-fix variant (see its docstring).
+TAGGED_POLL_RELOADS = ("", "launder")
+
+# Opcodes the Python engine lowers and the C++ engine does not (see the
+# "persistent-kernel memory ops" section of ``IRBuilder``). A kernel using any
+# of them must compile with ``backend="python"``; ``uses_python_only_ops``
+# tells a caller which.
+PYTHON_ONLY_OPCODES = frozenset(
+    {
+        "tile.int_to_ptr",
+        "tile.buffer_load_cp",
+        "tile.buffer_store_cp",
+        "tile.global_load_atomic",
+        "tile.global_store_atomic",
+        "tile.tagged_poll",
+        # gfx950 MX compute (``mfma_scale_mx`` / ``cvt_scalef32_pk_fp8_f32``).
+        "tile.mfma_scale_mx",
+        "arith.cvt_scalef32_pk_fp8_f32",
+        "arith.cvt_scalef32_pk_bf8_f32",
+        # gfx950 MX decode GEMV (``cvt_scalef32_pk_bf16_fp4`` / ``permlane16_swap``).
+        "arith.cvt_scalef32_pk_bf16_fp4",
+        "tile.permlane16_swap",
+        # Natural exp (``IRBuilder.exp``, ``llvm.exp.f32``).
+        "math.exp",
+        # IEEE-754-2019 maximum / minimum (``llvm.maximum`` / ``llvm.minimum``) and a fused
+        # multiply-add (``llvm.fma``): MLIR ``arith.maximumf`` / ``minimumf`` / ``math.fma``
+        # semantics, for bit-identical ports of FlyDSL / MLIR kernels.
+        "math.fmaximum",
+        "math.fminimum",
+        "math.fma_fused",
+        # Device ops as IR ops (``IRBuilder.s_getreg`` .. ``l2_touch_drain``):
+        # the Python lowering emits the inline asm of the matching
+        # ``helpers.device_ops`` helper (the same LLVM text), the direct
+        # code-object compiler lowers them natively.
+        "tile.s_getreg",
+        "tile.s_sleep",
+        "tile.memrealtime",
+        "tile.global_atomic_add_scoped",
+        "tile.l2_touch_load",
+        "tile.l2_touch_drain",
+        # An LDS byte load at a byte offset of an allocation (``IRBuilder.smem_load_u8``).
+        "tile.smem_load_u8",
+    }
+)
+
+#: ``IRBuilder.s_getreg`` hardware registers.
+S_GETREG_HWREGS = ("XCC_ID", "HW_ID")
+
+
+# Kernel parameter attributes only the Python lowering emits (the C++ engine
+# does not): ``inreg`` = gfx940/gfx950 kernarg preload into user SGPRs.
+PYTHON_ONLY_PARAM_ATTRS = ("inreg",)
+
+# (opcode, operand type) pairs only the Python engine lowers although the
+# opcode itself is dual-engine (the C++ engine rejects the type): reported by
+# :func:`uses_python_only_ops` under the given name.
+PYTHON_ONLY_TYPED_OPS = {("math.sqrt", "f64"): "math.sqrt.f64"}
+
+
+def uses_python_only_ops(kernel: "KernelDef") -> "List[str]":
+    """Sorted names of the ``PYTHON_ONLY_OPCODES`` that ``kernel`` uses, plus
+    ``param.<attr>`` for each :data:`PYTHON_ONLY_PARAM_ATTRS` entry one of its
+    parameters carries, plus the :data:`PYTHON_ONLY_TYPED_OPS` names of
+    dual-engine opcodes used with a Python-engine-only operand type."""
+    found = set()
+    for p in getattr(kernel, "params", ()):
+        for a in PYTHON_ONLY_PARAM_ATTRS:
+            if p.attrs.get(a):
+                found.add(f"param.{a}")
+
+    def walk(region: "Region") -> None:
+        for op in region.ops:
+            if op.name in PYTHON_ONLY_OPCODES:
+                found.add(op.name)
+            for v in op.operands[:1]:
+                typed = PYTHON_ONLY_TYPED_OPS.get((op.name, getattr(v.type, "name", None)))
+                if typed:
+                    found.add(typed)
+            for nested in op.regions:
+                walk(nested)
+
+    walk(kernel.body)
+    return sorted(found)
+
+
 def _check_axis(op: str, axis: object) -> str:
     """Validate a grid axis name (``x``, ``y``, or ``z``)."""
     if axis not in ("x", "y", "z"):
@@ -840,6 +935,19 @@ class KernelDef:
 # are unwanted by default, so this stays off unless a caller asks for it.
 LOC_CAPTURE_ENV = "ROCKE_DEBUG_LOC"
 
+# The op attribute of the Rust direct compiler's lever scopes
+# (``IRBuilder.lever_scope``; ``rir::lever`` in ``rocke-codeobj``).
+LEVER_SCOPE_ATTR = "dlevers"
+
+
+def _lever_scope_text(levers) -> Optional[str]:
+    """A lever scope (a list or a ``,`` / ``+`` joined string) as the
+    attribute's text, or None when it names nothing."""
+    if isinstance(levers, (list, tuple)):
+        levers = ",".join(str(x).strip() for x in levers if str(x).strip())
+    names = [x.strip() for x in (levers or "").replace("+", ",").split(",") if x.strip()]
+    return ",".join(names) or None
+
 # Frames inside ``core/`` are the builder machinery itself (this file, the
 # helpers it calls, the isa backends), never the code that asked for an op.
 _CORE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1046,6 +1154,9 @@ class IRBuilder:
         # emission of every other kernel.
         self.fence_barriers: Optional[str] = None
         self._counter = 0
+        # The direct compiler's lever scope of the ops being emitted
+        # (``lever_scope``); None: the kernel's levers.
+        self._lever_scope: Optional[str] = None
         self._region_stack: List[Region] = []
         self._params: List[Param] = []
         self._param_values: Dict[str, Value] = {}
@@ -1078,7 +1189,43 @@ class IRBuilder:
         # the one place a location has to be stamped.
         if self._capture_loc and op.loc is None:
             op.loc = current_source_loc()
+        if self._lever_scope is not None and LEVER_SCOPE_ATTR not in op.attrs:
+            op.attrs = {**op.attrs, LEVER_SCOPE_ATTR: self._lever_scope}
         self._region_stack[-1].ops.append(op)
+
+    def lever_scope(self, levers):
+        """Context manager: the ops emitted inside carry the Rust direct
+        compiler lever scope ``levers`` (attribute ``dlevers``): a list or a
+        ``,`` / ``+`` joined string of ``ROCKE_DIRECT_LEVERS`` names, ``-name``
+        turning a kernel lever off. The scope overrides the kernel's levers for
+        those ops only (e.g. ``nofence`` for the MoE stage of a monokernel and
+        not for its head); COMGR builds ignore it (``helpers.compile`` strips
+        it). Scopes nest: an inner one replaces the outer one. ``None`` or an
+        empty value emits nothing (byte-identical IR)."""
+        import contextlib
+
+        text = _lever_scope_text(levers)
+
+        @contextlib.contextmanager
+        def scope():
+            saved = self._lever_scope
+            if text is not None:
+                self._lever_scope = text
+            try:
+                yield
+            finally:
+                self._lever_scope = saved
+
+        return scope()
+
+    def set_lever_scope(self, levers) -> Optional[str]:
+        """Sets the lever scope of the ops emitted from here on (as
+        :meth:`lever_scope`, without a ``with`` block: a phase marker that
+        holds until the next one); ``None`` / empty: the kernel's levers.
+        Returns the previous scope."""
+        saved = self._lever_scope
+        self._lever_scope = _lever_scope_text(levers)
+        return saved
 
     def push_region(self, region: Region) -> None:
         self._region_stack.append(region)
@@ -1468,6 +1615,33 @@ class IRBuilder:
             "math.exp2_fast", [a], [a.type], result_name_hint="exp2f"
         ).result
 
+    def exp(self, a: Value) -> Value:
+        """Natural exp: ``llvm.exp.f32`` (the backend's accurate expansion; what
+        ``expf`` / MLIR ``math.exp`` compile to). f32 only. Python engine only
+        (``PYTHON_ONLY_OPCODES``): the C++ engine does not lower it."""
+        return self._op("math.exp", [a], [a.type], result_name_hint="exp").result
+
+    def smem_load_u8(self, smem: Value, byte_index: Value) -> Value:
+        """The LDS byte at byte offset ``byte_index`` from the start of allocation ``smem`` (whatever its element
+        type), zero-extended to i32: one ``ds_read_u8`` whose constant part folds into the instruction's offset.
+        For byte tables packed in a word-typed pool (e.g. MX scale codes), where ``smem_load_vN`` reads whole
+        elements. Python engine only."""
+        return self._op("tile.smem_load_u8", [smem, byte_index], [I32], result_name_hint="lb").result
+
+    def fmaximum(self, a: Value, b: Value) -> Value:
+        """``llvm.maximum.f32``: NaN-propagating, with -0 < +0 (MLIR ``arith.maximumf``;
+        ``fmax`` is ``llvm.maxnum``). f32 only. Python engine only."""
+        return self._op("math.fmaximum", [a, b], [a.type], result_name_hint="fmaxi").result
+
+    def fminimum(self, a: Value, b: Value) -> Value:
+        """``llvm.minimum.f32`` (MLIR ``arith.minimumf``). f32 only. Python engine only."""
+        return self._op("math.fminimum", [a, b], [a.type], result_name_hint="fmini").result
+
+    def fma_fused(self, a: Value, b: Value, c: Value) -> Value:
+        """``llvm.fma.f32``: ``a * b + c`` with one rounding, always (MLIR ``math.fma``;
+        ``fma`` is ``llvm.fmuladd``, which may be unfused). f32 only. Python engine only."""
+        return self._op("math.fma_fused", [a, b, c], [a.type], result_name_hint="ffma").result
+
     def log2(self, a: Value) -> Value:
         return self._op("math.log2", [a], [a.type], result_name_hint="log2").result
 
@@ -1765,6 +1939,46 @@ class IRBuilder:
             [v],
             [VectorType(F32, 4)],
             result_name_hint="dqb8x4",
+        ).result
+
+    def cvt_scalef32_pk_fp8_f32(
+        self,
+        old: Value,
+        src0: Value,
+        src1: Value,
+        scale: Value,
+        *,
+        hi: bool = False,
+        bf8: bool = False,
+    ) -> Value:
+        """Two f32 -> two scaled fp8 (bf8) bytes in one 16-bit half of ``old``.
+
+        gfx950 ``v_cvt_scalef32_pk_fp8_f32`` (``_bf8_`` with ``bf8=True``):
+        writes ``cvt(src0 / scale), cvt(src1 / scale)`` into bytes 0, 1
+        (``hi=False``) or 2, 3 (``hi=True``) of ``old`` (i32) and keeps the
+        other half. Only the exponent of ``scale`` is used (E8M0). Lowers to
+        ``llvm.amdgcn.cvt.scalef32.pk.{fp8,bf8}.f32``.
+
+        **Python engine only** (the C++ engine has no lowering for it). The
+        dual-engine route is ``tile.inline_asm``
+        (``helpers/mx_quant.py`` ``cvt="asm"``).
+        """
+        for name, v, want in (
+            ("old", old, "i32"),
+            ("src0", src0, "f32"),
+            ("src1", src1, "f32"),
+            ("scale", scale, "f32"),
+        ):
+            if v.type.name != want:
+                raise ValueError(
+                    f"cvt_scalef32_pk_fp8_f32 {name} must be {want}, got {v.type.name}"
+                )
+        return self._op(
+            "arith.cvt_scalef32_pk_bf8_f32" if bf8 else "arith.cvt_scalef32_pk_fp8_f32",
+            [old, src0, src1, scale],
+            [I32],
+            attrs={"hi": bool(hi)},
+            result_name_hint="q8",
         ).result
 
     def cvt_scalef32_pk_f32_fp8x4(self, v: Value, scale_f32: Value) -> Value:
@@ -3252,6 +3466,52 @@ class IRBuilder:
         """
         return self.mma("mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale)
 
+    def mfma_scale_mx(
+        self,
+        a: Value,
+        b: Value,
+        c: Value,
+        a_scale: Value,
+        b_scale: Value,
+        *,
+        shape: str = "16x16x128",
+        fmt_a="fp8",
+        fmt_b="fp4",
+        opsel_a: int = 0,
+        opsel_b: int = 0,
+    ) -> Value:
+        """gfx950 scaled MFMA with free formats and scale byte select.
+
+        ``shape`` is ``"16x16x128"`` (``<4 x f32>`` accumulator) or
+        ``"32x32x64"`` (``<16 x f32>``). ``a`` / ``b`` are ``<8|6|4 x i32>``
+        matching ``fmt_a`` / ``fmt_b`` (fp8/bf8, fp6/bf6, fp4; names or codes
+        0..4). ``a_scale`` / ``b_scale`` are i32 dwords; ``opsel_a`` /
+        ``opsel_b`` (0..3) pick the byte holding the E8M0 scale. Lane maps and
+        the engine policy are in :mod:`rocke.core.arch.mfma_scale_mx`.
+
+        **Python engine only**: compile with ``backend="python"``.
+        """
+        from .arch import mfma_scale_mx as _mx
+
+        attrs = {
+            "shape": str(shape),
+            "fmt_a": _mx.format_code(fmt_a),
+            "fmt_b": _mx.format_code(fmt_b),
+            "opsel_a": opsel_a,
+            "opsel_b": opsel_b,
+        }
+        types = [v.type.name for v in (a, b, c, a_scale, b_scale)]
+        error = _mx.check_operands(attrs, types)
+        if error:
+            raise ValueError(error)
+        return self._op(
+            _mx.OP_NAME,
+            [a, b, c, a_scale, b_scale],
+            [c.type],
+            attrs=attrs,
+            result_name_hint="mxacc",
+        ).result
+
     def mfma_f32_16x16x128_fp4(self, a: Value, b: Value, c: Value) -> Value:
         """fp4 MX MFMA (gfx950+, P52).
 
@@ -4030,6 +4290,55 @@ class IRBuilder:
             result_name_hint="qperm",
         ).result
 
+    def dpp_row_mirror(self, data: Value, half: bool) -> Value:
+        """In-row ``v_mov_b32_dpp`` mirror on the VALU.
+
+        ``half=False`` is ``row_mirror`` (DPP control ``0x140``): lane ``i``
+        of every 16-lane row reads lane ``15 - i`` of the same row.
+        ``half=True`` is ``row_half_mirror`` (``0x141``): lane ``i`` of every
+        8-lane half-row reads lane ``7 - i`` of the same half-row.
+
+        A mirror is not an XOR permutation, but for a commutative reduction
+        it is an equivalent butterfly stage once the narrower stages are
+        done: after the two :meth:`quad_perm` stages every lane of a quad
+        holds the quad's value, the half mirror pairs quad 0 with quad 1 of
+        each half-row, and the row mirror pairs the two half-rows. So
+        ``xor 1, xor 2, half mirror, mirror`` leaves the full 16-lane sum in
+        every lane, with no ``ds_swizzle`` (lane model:
+        ``TestNewTargetIntrinsics`` in ``tests/test_rocke.py``).
+
+        That recipe is only valid under two conditions. (1) The combine must
+        be commutative: different lanes see their operands in different
+        orders (lane 0 combines its half-row with the upper one, lane 15 the
+        upper with the lower), so a non-commutative combine gives different
+        values in different lanes. Floating-point add is commutative, so
+        every lane still gets the same bits. (2) The lowerers emit
+        ``bound_ctrl = 1``, so a source lane disabled in EXEC reads ``0``
+        instead of keeping the old value. Run it with every lane of the row
+        active; if lanes can be inactive, only a reduction whose identity is
+        ``0`` (a sum) stays correct, and ``max``/``min``/product do not.
+
+        Like :meth:`quad_perm` the mapping is wave-size-independent (16
+        divides 32 and 64), the op needs base DPP (available on CDNA), and
+        the row and bank masks are fixed at ``15, 15`` by the lowerers.
+
+        ``half`` must be a ``bool``: it selects the lane mapping, so a
+        truthy or falsy stand-in (``"false"``, ``None``, ``1``) is rejected
+        instead of silently picking one.
+        """
+        if type(half) is not bool:
+            raise TypeError(f"dpp_row_mirror: half must be a bool, got {half!r}")
+        if data.type.name != "i32":
+            raise ValueError("dpp_row_mirror requires i32 data")
+        ctrl = 0x141 if half else 0x140
+        return self._op(
+            "tile.dpp_row_mirror",
+            [data],
+            [I32],
+            attrs={"ctrl": ctrl},
+            result_name_hint="rmirror",
+        ).result
+
     def warp_shuffle_xor_quad(self, v: Value, xor_mask: int) -> Value:
         """XOR shuffle within a four-lane quad.
 
@@ -4104,6 +4413,50 @@ class IRBuilder:
         )
         return op.results[0], op.results[1]
 
+    def permlane16_swap(self, lo: Value, hi: Value):
+        """gfx950 ``v_permlane16_swap_b32`` (``llvm.amdgcn.permlane16.swap``).
+
+        Swaps the odd 16-lane rows of ``lo`` with the even rows of ``hi``:
+        with rows ``(a0, a1, a2, a3)`` of ``lo`` and ``(b0, b1, b2, b3)`` of
+        ``hi`` it returns ``(a0, b0, a2, b2)`` and ``(a1, b1, a3, b3)``. With
+        :meth:`permlane32_swap` (rows ``(a0, a1, b0, b1)`` and ``(a2, a3, b2,
+        b3)``) four registers transpose 4 x 4 across the row groups in four
+        VALU ops. Both operands ``i32``. **Python engine only.**
+        """
+        if lo.type.name != "i32" or hi.type.name != "i32":
+            raise ValueError("permlane16_swap requires i32 operands")
+        op = self._op(
+            "tile.permlane16_swap",
+            [lo, hi],
+            [I32, I32],
+            result_name_hint="p16s",
+        )
+        return op.results[0], op.results[1]
+
+    def cvt_scalef32_pk_bf16_fp4(self, src: Value, scale: Value, byte: int) -> Value:
+        """Two E2M1 (fp4) codes -> ``<2 x bf16>`` scaled by an E8M0 exponent.
+
+        gfx950 ``v_cvt_scalef32_pk_bf16_fp4``: byte ``byte`` (0..3) of ``src``
+        (i32) holds two codes, the low nibble element 0; each value is
+        multiplied by ``2^(exponent field of scale - 127)`` (only the f32
+        exponent field of ``scale`` is used: an E8M0 byte shifted left by 23).
+        Exact for every product a bf16 holds. Lowers to
+        ``llvm.amdgcn.cvt.scalef32.pk.bf16.fp4``. **Python engine only.**
+        """
+        if src.type.name != "i32" or scale.type.name != "f32":
+            raise ValueError(
+                "cvt_scalef32_pk_bf16_fp4 expects (i32 src, f32 scale), got "
+                f"({src.type.name}, {scale.type.name})"
+            )
+        if isinstance(byte, bool) or not isinstance(byte, int) or not 0 <= byte <= 3:
+            raise ValueError(f"cvt_scalef32_pk_bf16_fp4 byte must be 0..3, got {byte!r}")
+        return self._op(
+            "arith.cvt_scalef32_pk_bf16_fp4",
+            [src, scale],
+            [VectorType(BF16, 2)],
+            attrs={"byte": int(byte)},
+            result_name_hint="dq4",
+        ).result
     def perm_b32(self, src0: Value, src1: Value, sel: Value) -> Value:
         """`__builtin_amdgcn_perm(src0, src1, sel)` = ``v_perm_b32`` — an
         in-lane byte-select across two source VGPRs (NO cross-lane, NO
@@ -5157,6 +5510,315 @@ class IRBuilder:
             raise ValueError("s_setprio level must be in 0..3")
         self._op("tile.s_setprio", attrs={"level": int(level)})
 
+    # ----- persistent-kernel memory ops (Python engine only) -----
+    #
+    # Opcodes in ``PYTHON_ONLY_OPCODES`` are lowered by the Python engine
+    # alone; the C++ engine does not know them. A kernel that uses one must
+    # be compiled with ``compile_kernel(..., backend="python")`` (or
+    # ``ROCKE_BACKEND=python``) and is excluded from cpp parity; with the
+    # default ``cpp`` backend the build falls back loudly (an error under
+    # ``ROCKE_CPP_STRICT=1``). ``helpers/device_ops.py`` and
+    # ``helpers/mailbox.py`` offer inline-asm equivalents that both engines
+    # lower, so a kernel can pick either path per build.
+
+    def int_to_ptr(self, addr: Value, ptr_type: "PtrType") -> Value:
+        """``inttoptr i64 addr to ptr addrspace(1)``: a global pointer from a
+        runtime 64-bit address (e.g. one loaded from a device pointer table).
+
+        Python engine only (see ``PYTHON_ONLY_OPCODES``). The pointer carries
+        no provenance; never index it past the object the address names.
+
+        ``PtrType(..., "constant")`` gives ``ptr addrspace(4)`` instead: loads
+        through it at a wave-uniform index select scalar ``s_load`` (memory
+        that no wave writes during the launch only). Both the kernel lowering
+        and the device-function lowering
+        (``kernels/gfx950/qwen38_mono/device_function.py``) lower ``load``s
+        through such a pointer as invariant ``addrspace(4)`` loads.
+        """
+        if addr.type != I64:
+            raise TypeError(f"int_to_ptr expects an i64 address, got {addr.type}")
+        if not isinstance(ptr_type, PtrType) or ptr_type.space not in (
+            "global",
+            "constant",
+        ):
+            raise TypeError(
+                f"int_to_ptr expects a global or constant PtrType, got {ptr_type}"
+            )
+        return self._op(
+            "tile.int_to_ptr", [addr], [ptr_type], result_name_hint="iptr"
+        ).result
+
+    def buffer_load_cp(
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        *,
+        dwords: int,
+        aux: int = 0,
+    ) -> Value:
+        """``raw.ptr.buffer.load`` of 1, 2 or 4 dwords with explicit cache-policy
+        bits ``aux`` (gfx94x/gfx950: ``CPOL_SC0`` 1, ``CPOL_NT`` 2,
+        ``CPOL_SC1`` 16). Returns ``i32`` for one dword, else ``<dwords x i32>``.
+
+        A 2- or 4-dword load of an aligned slot written by one store of the
+        same width observes that store whole, which is what a tagged
+        ``(payload, tag)`` mailbox pair relies on. Python engine only.
+        """
+        if dwords not in (1, 2, 4):
+            raise ValueError(f"buffer_load_cp dwords must be 1, 2 or 4, got {dwords}")
+        rt = I32 if dwords == 1 else VectorType(I32, dwords)
+        return self._op(
+            "tile.buffer_load_cp",
+            [rsrc, voffset, soffset],
+            [rt],
+            attrs={
+                "dwords": int(dwords),
+                "aux": _check_cachepolicy("buffer_load_cp", aux),
+            },
+            result_name_hint=f"blcp{dwords}",
+        ).result
+
+    def buffer_store_cp(
+        self,
+        data: Value,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        *,
+        aux: int = 0,
+    ) -> None:
+        """``raw.ptr.buffer.store`` of an ``i32`` / ``<2 x i32>`` / ``<4 x i32>``
+        with explicit cache-policy bits ``aux`` (see :meth:`buffer_load_cp`).
+        Python engine only."""
+        t = data.type
+        if t == I32:
+            dwords = 1
+        elif isinstance(t, VectorType) and t.elem == I32 and t.count in (2, 4):
+            dwords = t.count
+        else:
+            raise TypeError(
+                f"buffer_store_cp stores i32, <2 x i32> or <4 x i32>, got {t}"
+            )
+        self._op(
+            "tile.buffer_store_cp",
+            [data, rsrc, voffset, soffset],
+            attrs={
+                "dwords": dwords,
+                "aux": _check_cachepolicy("buffer_store_cp", aux),
+            },
+        )
+
+    def global_load_atomic(
+        self,
+        ptr: Value,
+        idx: Value,
+        *,
+        dtype: "Type" = I64,
+        ordering: str = "monotonic",
+        scope: str = "agent",
+    ) -> Value:
+        """``load atomic <dtype> ptr[idx] syncscope(scope) ordering``.
+
+        A ``monotonic`` agent-scope 8-byte load is how LLVM spells a
+        ``global_load_dwordx2 ... sc1`` that is never hoisted out of a loop
+        (one ``(payload, tag)`` pair). ``dtype`` is ``I32`` or ``I64``;
+        ``idx`` counts elements. Python engine only."""
+        if dtype not in (I32, I64):
+            raise TypeError(f"global_load_atomic dtype must be i32 or i64, got {dtype}")
+        if ordering not in ("monotonic", "acquire", "seq_cst"):
+            raise ValueError(f"global_load_atomic ordering {ordering!r}")
+        if scope not in _FENCE_SCOPES:
+            raise ValueError(f"unknown atomic scope {scope!r}")
+        return self._op(
+            "tile.global_load_atomic",
+            [ptr, idx],
+            [dtype],
+            attrs={"ordering": ordering, "scope": scope},
+            result_name_hint="ald",
+        ).result
+
+    def global_store_atomic(
+        self,
+        ptr: Value,
+        idx: Value,
+        value: Value,
+        *,
+        ordering: str = "monotonic",
+        scope: str = "agent",
+    ) -> None:
+        """``store atomic <i32|i64> value, ptr[idx] syncscope(scope) ordering``
+        (the 8-byte form publishes one ``(payload, tag)`` pair with sc1 at
+        agent scope). Python engine only."""
+        if value.type not in (I32, I64):
+            raise TypeError(
+                f"global_store_atomic value must be i32 or i64, got {value.type}"
+            )
+        if ordering not in _FLAG_STORE_ORDERINGS:
+            raise ValueError(f"global_store_atomic ordering {ordering!r}")
+        if scope not in _FENCE_SCOPES:
+            raise ValueError(f"unknown atomic scope {scope!r}")
+        self._op(
+            "tile.global_store_atomic",
+            [ptr, idx, value],
+            attrs={"ordering": ordering, "scope": scope},
+        )
+
+    def tagged_poll(
+        self,
+        tag: Value,
+        specs: "Sequence[Tuple[Value, Value, int]]",
+        *,
+        aux: int = 16,
+        pause: str = "s_nop 0",
+        reload: str = "",
+    ) -> "List[Value]":
+        """Spin until every ``(payload, tag)`` pair named by ``specs`` carries
+        ``tag``; return the loaded words.
+
+        ``specs`` is ``[(rsrc, byte_voffset, dwords)]`` with ``dwords`` in
+        ``{2, 4}`` (one or two pairs per load). Each retry re-issues every
+        load (``raw.ptr.buffer.load`` with cache bits ``aux``; default sc1,
+        which bypasses the per-CU vL1D on gfx94x/gfx950), ORs the per-pair tag
+        mismatches and loops; ``pause`` is a side-effecting asm statement
+        executed between retries (it keeps the loads inside the loop and can
+        throttle, e.g. ``"s_sleep 1"``). Each lane spins until its own pairs
+        match. A leaf op: the loop lives entirely inside its lowering, so the
+        structured IR stays ``scf.for`` / ``scf.if`` only. Returns one
+        ``<dwords x i32>`` per spec (payload words at even indices).
+        Python engine only.
+
+        ``reload`` (the reload-fix op variant; empty = the original op, whose
+        IR is unchanged): LLVM may hoist the original op's loads out of the
+        loop and leave a spin that never reloads (seen on gfx950: Qwen3.8
+        true-mono probe P2, finding 1). The polled buffer is usually a
+        ``noalias`` kernel parameter, so no asm in the loop (memory clobber or
+        not) may write it as far as alias analysis can tell, and the loads'
+        volatile ``aux`` bit is invisible to the IR passes: neither keeps the
+        loads in the loop (checked on gfx950 code objects). ``"launder"``
+        passes every load's ``voffset`` through a side-effecting asm copy at
+        the top of each retry (the address is loop-variant, so the load cannot
+        be hoisted or forwarded) and gives the pause asm a ``~{memory}``
+        clobber.
+        """
+        if reload not in TAGGED_POLL_RELOADS:
+            raise ValueError(
+                f"tagged_poll reload must be one of {TAGGED_POLL_RELOADS}, got {reload!r}"
+            )
+        if tag.type != I32:
+            raise TypeError(f"tagged_poll tag must be i32, got {tag.type}")
+        if not specs:
+            raise ValueError("tagged_poll needs at least one spec")
+        operands: List[Value] = [tag]
+        widths: List[int] = []
+        for rsrc, voff, dwords in specs:
+            if dwords not in (2, 4):
+                raise ValueError(f"tagged_poll dwords must be 2 or 4, got {dwords}")
+            operands += [rsrc, voff]
+            widths.append(int(dwords))
+        attrs = {
+            "dwords": widths,
+            "aux": _check_cachepolicy("tagged_poll", aux),
+            "pause": str(pause),
+        }
+        if reload:
+            # only the variant carries the attribute: the original op's IR
+            # (and every existing build's) stays byte-identical
+            attrs["reload"] = reload
+        op = self._op(
+            "tile.tagged_poll",
+            operands,
+            [VectorType(I32, w) for w in widths],
+            attrs=attrs,
+            result_name_hint="poll",
+        )
+        return list(op.results)
+
+    # ----- device ops as IR ops (Python engine only) -----
+    # Each is the IR form of a ``helpers.device_ops`` inline-asm helper: the
+    # Python lowering emits that helper's asm (the same LLVM text, so a COMGR
+    # build is the asm build's), and a compiler that reads rocKE IR (the
+    # direct code-object compiler) lowers the op itself instead of refusing
+    # an asm template.
+
+    def s_getreg(self, hwreg: str) -> Value:
+        """``s_getreg_b32 hwreg(HW_REG_<hwreg>)``, ``hwreg`` in
+        :data:`S_GETREG_HWREGS`: a uniform i32 (``device_ops.xcc_id``'s raw
+        read, ``device_ops.hw_id``). Side-effecting: never merged or hoisted.
+        Python engine only."""
+        if hwreg not in S_GETREG_HWREGS:
+            raise ValueError(f"s_getreg hwreg must be one of {S_GETREG_HWREGS}, got {hwreg!r}")
+        hint = {"XCC_ID": "xcc", "HW_ID": "hwid"}[hwreg]
+        return self._op(
+            "tile.s_getreg", [], [I32], attrs={"hwreg": hwreg}, result_name_hint=hint
+        ).result
+
+    def s_sleep(self, units: int) -> None:
+        """Sleep ``units`` x 64 clocks (``device_ops.s_sleep``: ``s_sleep``
+        chained in steps of at most 127). ``units`` >= 1. Python engine only."""
+        if isinstance(units, bool) or not isinstance(units, int) or units < 1:
+            raise ValueError(f"s_sleep units must be an int >= 1, got {units!r}")
+        self._op("tile.s_sleep", [], [], attrs={"units": int(units)})
+
+    def memrealtime(self) -> Value:
+        """``s_memrealtime`` and its ``lgkmcnt(0)`` (``device_ops.memrealtime``):
+        the device-wide 100 MHz clock as a uniform i64. Python engine only."""
+        return self._op("tile.memrealtime", [], [I64], result_name_hint="rtc").result
+
+    def global_atomic_add_scoped(
+        self,
+        base: Value,
+        voff: Value,
+        value: Value,
+        *,
+        scope: str = "agent",
+        returns: bool = False,
+        result_name_hint: str = "aold",
+    ) -> Optional[Value]:
+        """``global_atomic_add`` (i32 ``value``) or ``global_atomic_add_x2``
+        (i64) at ``base`` (uniform i64 address) + ``voff`` (i32 bytes), at a
+        memory scope, monotonic: ``device_ops.atomic_add_scoped``'s cache bits
+        (``system``: ``sc1``; ``returns``: ``sc0`` and the pre-add value,
+        waited for). Python engine only."""
+        if scope not in ("workgroup", "agent", "system"):
+            raise ValueError(f"global_atomic_add_scoped scope {scope!r}")
+        if base.type != I64 or voff.type != I32 or value.type not in (I32, I64):
+            raise TypeError(
+                "global_atomic_add_scoped expects (i64 base, i32 voff, i32 or i64 value)"
+            )
+        op = self._op(
+            "tile.global_atomic_add_scoped",
+            [voff, value, base],
+            [value.type] if returns else [],
+            attrs={"scope": scope, "returns": bool(returns)},
+            result_name_hint=result_name_hint,
+        )
+        return op.result if returns else None
+
+    def l2_touch_load(self, base: Value, voff: Value) -> Value:
+        """``global_load_dwordx4`` at ``base`` (uniform i64 address) +
+        ``voff`` (i32 bytes) that only warms the caches: a ``<4 x i32>`` the
+        kernel never reads, which no pass may delete. Its destination stays
+        allocated until :meth:`l2_touch_drain` takes it (the toy chain's
+        ``prefetch="l2_touch"``). Python engine only."""
+        if base.type != I64 or voff.type != I32:
+            raise TypeError("l2_touch_load expects (i64 base, i32 voff)")
+        return self._op(
+            "tile.l2_touch_load",
+            [voff, base],
+            [VectorType(I32, 4)],
+            attrs={"dwords": 4},
+            result_name_hint="asm",
+        ).result
+
+    def l2_touch_drain(self, values: "Sequence[Value]") -> None:
+        """``s_waitcnt vmcnt(0)`` that keeps the :meth:`l2_touch_load`
+        destinations ``values`` allocated until it retires. Python engine only."""
+        values = list(values)
+        if not values or any(v.type != VectorType(I32, 4) for v in values):
+            raise TypeError("l2_touch_drain takes l2_touch_load results")
+        self._op("tile.l2_touch_drain", values, [])
+
     # ----- buffer resources + async DRAM->LDS -----
 
     def global_ptr_add(self, ptr: Value, byte_off: Value) -> Value:
@@ -5923,6 +6585,10 @@ PURE_OP_NAMES = {
     "arith.cvt_f32_to_u8_sat",
     "math.exp2",
     "math.exp2_fast",
+    "math.exp",
+    "math.fmaximum",
+    "math.fminimum",
+    "math.fma_fused",
     "math.log2",
     "math.rcp",
     "math.rcp_fast",
@@ -5989,11 +6655,14 @@ PURE_OP_NAMES = {
     "arith.cvt_scalef32_pk_f32_bf8",
     "arith.cvt_scalef32_pk_fp8_f32",
     "arith.cvt_scalef32_pk_bf8_f32",
+    "arith.cvt_scalef32_pk_bf16_fp4",
+    "tile.permlane16_swap",
     "tile.ds_read_tr_b8",
     "tile.ds_swizzle_xor",
     "tile.ds_swizzle",
     "tile.mov_dpp8",
     "tile.quad_perm",
+    "tile.dpp_row_mirror",
     "tile.wave_reduce",
     "tile.readlane",
     "tile.writelane",

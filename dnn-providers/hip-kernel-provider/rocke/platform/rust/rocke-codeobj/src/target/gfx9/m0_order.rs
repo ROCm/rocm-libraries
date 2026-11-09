@@ -72,7 +72,9 @@ impl M0Order {
     pub fn new(insts: &[MInst]) -> Option<M0Order> {
         let dma = insts.iter().any(|i| is_dma(i.op));
         let other = insts.iter().any(|i| i.op.flags() & F_VMEM_LOAD != 0 && !is_dma(i.op));
-        (dma && other && !crate::rir::debug_flag("nom0order")).then(M0Order::default)
+        // rustgemm lever `dmafree`: every block with a DMA load gets these orders (DMA loads and their M0 moves are
+        // no fences even without another VMEM load), so the scheduler may issue a DMA ahead of LDS reads / MFMAs.
+        (dma && (other || crate::rir::kernel_lever("dmafree")) && !crate::rir::debug_flag("nom0order")).then(M0Order::default)
     }
 
     /// Records `insts[i]` and calls `edge(from, i, latency)` for each earlier

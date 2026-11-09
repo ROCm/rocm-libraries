@@ -606,11 +606,16 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
                 raise Unprintable("an operand on a SOPP without one")
             return mn
         return f"{mn} {v.imm & 0xFFFF:#x}"
+    if fmt == "Smem" and i.form == "nobase":
+        if u or v.imm:
+            raise Unprintable("an address or offset on s_memrealtime / s_dcache_inv")
+        return f"{mn} {reg9(d[0])}" if d else mn
     if fmt == "Smem":
         off = v.imm
+        glc = " glc" if v.mods & 0x1000 else ""
         return f"{mn} {reg9(d[0])}, {reg9(u[0])}, " + (
             f"{off:#x}" if off >= 0 else f"-{-off:#x}"
-        )
+        ) + glc
     if fmt == "Vop1":
         if not d:
             return mn
@@ -632,6 +637,10 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
             raise Unprintable("modifier bits beyond neg")
         e64 = words is not None and is_vop3_word9(words[0])
         return f"{mn}{'_e64' if e64 else '_e32'} {reg9(d[0])}, {src_text9(u[0], neg(0), float_source(mn, 0))}"
+    if fmt == "Vop2" and i.form == "dpp16":
+        if m:
+            raise Unprintable("modifiers on a DPP VOP2")
+        return f"{mn}_dpp {reg9(d[0])}, {reg9(u[0])}, {reg9(u[1])} {dpp_text9(v.imm)}"
     if fmt == "Vop2":
         if m & ~0x7:
             raise Unprintable("modifier bits beyond neg")
@@ -642,7 +651,7 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
         enc_uses = [x for x, sig in zip(u, i.uses) if sig[0] != "old"]
         sfx = "_e64" if v.name == "VCmp" or mn in GFX9_E64_ALWAYS else ""
         opsel = ""
-        if v.name == "VPackB32F16":
+        if v.name in ("VPackB32F16", "VCvtScalef32PkBf16Fp4"):
             if m & ~0x30:
                 raise Unprintable("modifier bits beyond op_sel")
             opsel = f" op_sel:[{m >> 4 & 1},{m >> 5 & 1},0]" if m & 0x30 else ""
@@ -656,6 +665,9 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
         srcs = [
             src_text9(x, neg(k), float_source(mn, k)) for k, x in enumerate(enc_uses)
         ]
+        if v.name == "VBitop3B32":
+            # The truth table (imm), encoded in the neg / abs / omod fields.
+            opsel = f" bitop3:{v.imm:#x}" if v.imm else ""
         return f"{mn}{sfx} " + ", ".join([reg9(x) for x in d] + srcs) + opsel
     if fmt == "Vop3p":
         enc_uses = [x for x, sig in zip(u, i.uses) if sig[0] != "old"]
@@ -684,10 +696,11 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
             )
             ops = [reg9(d[0]), reg9(u[0]), reg9(u[1]), c]
             if i.form == "mai_scale":
-                pair = re.fullmatch(r"v(\d+)x2", u[3])
-                if not pair:
-                    raise Unprintable(f"a scale pair {u[3]}")
-                ops += [f"v{pair.group(1)}", f"v{int(pair.group(1)) + 1}"]
+                # The A and B scales: one VGPR each.
+                for x in u[3:5]:
+                    if not re.fullmatch(r"v\d+x1", x):
+                        raise Unprintable(f"a scale {x}")
+                ops += [reg9(u[3]), reg9(u[4])]
             return f"{mn} " + ", ".join(ops) + tail
         if i.form == "pk32":
             # Lane selects: op_sel in imm bits 2:0, op_sel_hi cleared in 6:4;
@@ -787,9 +800,14 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
         )
     if fmt == "Mubuf":
         vdata, rest = (reg9(d[0]), u) if d else (reg9(u[0]), u[1:])
+        if m & ~((1 << 12) | (1 << 13) | (1 << 14)):
+            raise Unprintable("modifier bits beyond sc0, sc1 and nt")
+        # MInst bits: sc0 (M_GLC) 12, sc1 13, nt 14 (target/gfx9/cpol.rs).
+        policy = [("sc0", 12), ("sc1", 13), ("nt", 14)]
         return (
             f"{mn} {vdata}, {reg9(rest[0])}, {reg9(rest[1])}, {reg9(rest[2])} offen"
             + mem_offset("offset", v.imm)
+            + "".join(f" {name}" for name, bit in policy if m >> bit & 1)
         )
     raise Unprintable(f"format {fmt}")
 

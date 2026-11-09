@@ -109,7 +109,15 @@ fn settle(e: Evaluations, dead: &mut [bool], renamed: &mut [Option<VRef>]) -> us
 /// the earlier one's, for compares evaluated `MIN_EVALUATIONS` times or more,
 /// in a kernel without MFMAs. Returns the pairs dropped.
 pub fn reuse(f: &mut MFunc) -> usize {
-    if crate::rir::debug_flag("nomasks64") || f.blocks.iter().flat_map(|b| &b.insts).any(|i| is_mfma(i.op)) {
+    if crate::rir::debug_flag("nomasks64") {
+        return 0;
+    }
+    // Lever `masksall`: the evaluations under it are shared in every block (straight-line ones too) and in
+    // kernels with MFMAs as well, as LLVM evaluates a uniform compare's lane mask once (`v_cmp` / `s_cselect`
+    // into one SGPR pair that every reader takes).
+    let all = f.lever_anywhere("masksall");
+    let has_mfma = f.blocks.iter().flat_map(|b| &b.insts).any(|i| is_mfma(i.op));
+    if has_mfma && !all {
         return 0;
     }
     let n = f.vregs.len();
@@ -124,12 +132,22 @@ pub fn reuse(f: &mut MFunc) -> usize {
     let mut renamed: Vec<Option<VRef>> = vec![None; n];
     let mut dropped = 0;
     let vregs = &f.vregs;
-    for block in f.blocks.iter_mut().filter(|b| b.loop_depth > 0) {
+    let scopes = f.scopes.clone();
+    // Whether the evaluation at `inst` may be shared in a block at loop depth `depth` (the default rule:
+    // loop blocks of kernels without MFMAs; `masksall`: every block).
+    let eligible = |inst: &MInst, depth: u32| -> bool {
+        if all && crate::rir::lever_at(&scopes, inst.scope, "masksall") {
+            return true;
+        }
+        depth > 0 && !has_mfma
+    };
+    for block in f.blocks.iter_mut().filter(|b| b.loop_depth > 0 || all) {
+        let depth = block.loop_depth;
         let insts = &mut block.insts;
         let mut dead = vec![false; insts.len()];
         let mut open: Vec<Evaluations> = Vec::new();
         for i in 0..insts.len() {
-            if i + 1 < insts.len() {
+            if i + 1 < insts.len() && eligible(&insts[i], depth) {
                 if let Some((key, m)) = evaluation(&insts[i], &insts[i + 1], vregs, &defs) {
                     match open.iter_mut().find(|e| e.key == key) {
                         Some(e) => {

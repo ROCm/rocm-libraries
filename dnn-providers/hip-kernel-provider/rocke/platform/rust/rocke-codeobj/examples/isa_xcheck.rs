@@ -357,6 +357,8 @@ mod gfx950 {
             Imm::Off12cpol => vec![0, 4095, 1 << 12, 2 << 12, 4 << 12, 7 << 12 | 16],
             // quad_perm with bound_ctrl, row_mirror, row_half_mirror, row_ror:8, row_shr:1,
             // row_bcast:15/31, wave_shr:1, and row_xmask:1 (gfx10+, refused).
+            // v_bitop3 truth tables: none, each field's low bit (neg, abs, omod), a router key's, all.
+            Imm::Bitop3 => vec![0, 1, 8, 0x40, 0xde, 0xff],
             Imm::Dpp16 => vec![0x00ff_08b1, 0x00ff_0140, 0x00ff_0141, 0x00ff_0128, 0x00ff_0111, 0x00ff_0142, 0x00ff_0143, 0x00ff_0138, 0x00ff_0161],
         }
     }

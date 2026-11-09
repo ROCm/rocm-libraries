@@ -360,7 +360,20 @@ pub fn fact(inst: &MInst) -> Fact {
     let soffset = || t::signature(op).and_then(|s| s.uses.iter().position(|o| o.role == Role::Soffset));
     let sgpr_soffset = fmt == Fmt::Mubuf && soffset().and_then(|k| inst.uses.get(k)).and_then(regs).is_some_and(|r| r.is_sgpr());
     let uses: RegList = inst.uses.iter().filter_map(regs).collect();
-    let mfma = mfma_kind(op);
+    let mfma = match mfma_kind(op) {
+        // rustgemm lever `fp6pass`: a block-scaled f8f6f4 MFMA whose A and B are both fp6 / bf6 / fp4 (format codes
+        // 2..4 in its control bits, `mfma::select_mx`) runs half the passes of the fp8 form (4 for 16x16x128, 8 for
+        // 32x32x64; the roofline study measured 16 and 32 cycles per MFMA), so its result waits shrink to match.
+        Some((MfmaClass::Xdl, p))
+            if matches!(op, Opc::Gfx9(super::gen_isa::Gfx9Op::VMfmaScale16x16x128F8f6f4 | super::gen_isa::Gfx9Op::VMfmaScale32x32x64F8f6f4))
+                && (2..=4).contains(&(inst.imm & 0x7f))
+                && (2..=4).contains(&(inst.imm >> 7 & 0x7))
+                && crate::rir::kernel_lever("fp6pass") =>
+        {
+            Some((MfmaClass::Xdl, p / 2))
+        }
+        kind => kind,
+    };
     let dot = match op {
         Opc::VDot2F32F16 => 1,
         Opc::VDot2F32Bf16 => 2,
@@ -1063,8 +1076,16 @@ mod tests {
             let name = t::mnemonic(op).unwrap_or("");
             assert_eq!(name.starts_with("v_mfma"), mfma_kind(op).is_some(), "{name}: an MFMA row has its class");
         }
+        // H13 orders an s_getreg after an s_setreg of the same register: with
+        // no s_setreg row (and no inline asm to write one) it never applies,
+        // so s_getreg_b32 (`tile.s_getreg`) needs no rule while that holds.
+        let setreg = t::ALL.iter().any(|&op| t::mnemonic(op).is_some_and(|n| n.starts_with("s_setreg")));
+        assert!(!setreg, "an s_setreg row needs H13 in this recognizer");
         for op in t::ALL {
             let Some(name) = t::mnemonic(op) else { continue };
+            if name.starts_with("s_getreg") {
+                continue;
+            }
             let emitted = !matches!(op, Opc::SSendmsg);
             // The LDS DMA loads are emitted, with H12 as their rule.
             let dma = t::info(op).is_some_and(|i| i.form == Form::Lds);

@@ -16,6 +16,13 @@ pub fn permlane32_swap() -> Opc {
     Opc::Gfx9(Gfx9Op::VPermlane32SwapB32)
 }
 
+/// `tile.permlane16_swap` (`v_permlane16_swap_b32`: the odd 16-lane rows of
+/// the first operand trade places with the even rows of the second, as
+/// `llvm.amdgcn.permlane16.swap` with `fi` and `bound_ctrl` off).
+pub fn permlane16_swap() -> Opc {
+    Opc::Gfx9(Gfx9Op::VPermlane16SwapB32)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::rir;

@@ -523,7 +523,7 @@ fn loads_wait_on_carried(op: &Op, pins_wait: bool) -> bool {
             break;
         }
     }
-    let pin = |o: &Op| o.kind == OpKind::InlineAsmIdentity && o.str_attr("template").is_some_and(str::is_empty);
+    let pin = |o: &Op| o.asm_pin().is_some();
     all.iter().any(|o| {
         o.kind.is_removable() && !o.kind.is_pure() && (pins_wait || !pin(o)) && o.operands.iter().any(|v| tainted.contains(v))
     })

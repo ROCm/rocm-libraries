@@ -394,7 +394,7 @@ impl Webs {
                 near.clear();
                 near.extend(placed.iter().filter(|&&(h, _, _)| gmem[h].iter().any(|&j| gadj[g].get(j as usize))).map(|&(_, hb, hs)| (hb, hs)));
                 let fits = |at: u32| near.iter().all(|&(hb, hs)| at + size <= hb || hb + hs <= at);
-                match (0..=AGPRS.saturating_sub(size)).step_by(align as usize).find(|&at| fits(at)) {
+                match (0..=AGPRS.min(crate::rir::agpr_cap()).saturating_sub(size)).step_by(align as usize).find(|&at| fits(at)) {
                     Some(at) => placed.push((g, at, size)),
                     None => {
                         placed.truncate(mark);
@@ -1136,7 +1136,7 @@ mod tests {
                 let size = f.vregs[members[g] as usize].size as u32;
                 let align = if size >= 4 { 4 } else { size.max(1) };
                 let fits = |at: u32| placed.iter().all(|&(h, hb, hs)| !gadj[g].intersects(&gmem[h]) || at + size <= hb || hb + hs <= at);
-                match (0..=AGPRS.saturating_sub(size)).step_by(align as usize).find(|&at| fits(at)) {
+                match (0..=AGPRS.min(crate::rir::agpr_cap()).saturating_sub(size)).step_by(align as usize).find(|&at| fits(at)) {
                     Some(at) => placed.push((g, at, size)),
                     None => {
                         placed.truncate(mark);

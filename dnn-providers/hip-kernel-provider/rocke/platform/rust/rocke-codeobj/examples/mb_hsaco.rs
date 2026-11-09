@@ -97,6 +97,7 @@ fn package(line: &str) -> Result<(String, usize), String> {
         rsrc3: num("rsrc3", derived.2)?,
         private_segment_size: 0,
         vgpr_spill_count: 0,
+        kernarg_preload: 0,
     };
     let hsaco = write_kernel_object(&spec)?;
     rocke_codeobj_ffi::validate_hsaco(&hsaco, &[spec.symbol.to_string()])?;

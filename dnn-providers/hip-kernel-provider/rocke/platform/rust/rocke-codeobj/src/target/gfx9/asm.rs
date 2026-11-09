@@ -343,7 +343,8 @@ fn vop3(
         Some(sdst) => t::EncVop3b { op, vdst: dst, sdst, src0, src1, src2, neg, ..Default::default() }.pack(),
         None => {
             let op_sel = (mods / M_OPSEL_SRC0) & 0xf;
-            t::EncVop3 { op, vdst: dst, op_sel, src0, src1, src2, neg, ..Default::default() }.pack()
+            let abs = (mods / super::q38::M_ABS0) & 0x7;
+            t::EncVop3 { op, vdst: dst, abs, op_sel, src0, src1, src2, neg, ..Default::default() }.pack()
         }
     });
     Ok(())
@@ -426,20 +427,50 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             out.push(t::EncSopk { op: code, sdst, simm16: inst.imm as u32 & 0xffff }.pack());
         }
         Fmt::Sopp => out.push(t::EncSopp { op: code, simm16: inst.imm as u32 & 0xffff }.pack()),
+        Fmt::Smem if form == Form::Nobase && defs.is_empty() => {
+            // s_dcache_inv: no operands, the imm bit clear (as llvm-mc writes it).
+            if !uses.is_empty() || inst.imm != 0 {
+                return Err(bad(format!("{}: no operands", name())));
+            }
+            let word = t::EncSmem { op: code, ..Default::default() }.pack()[0] & !(1 << 17);
+            push2(out, [word, 0]);
+        }
+        Fmt::Smem if form == Form::Nobase => {
+            // s_memrealtime: only sdata, the imm bit clear (as llvm-mc writes it).
+            if !uses.is_empty() || inst.imm != 0 {
+                return Err(bad(format!("{}: no address and no offset", name())));
+            }
+            let Opnd::P(Phys::S(r), 2) = *nth(defs, 0)? else {
+                return Err(bad(format!("{}: the destination is an SGPR pair", name())));
+            };
+            if r % 2 != 0 {
+                return Err(bad(format!("{}: an SGPR pair at an even register", name())));
+            }
+            let sdata = sgpr(r, 2)?;
+            let word = t::EncSmem { op: code, sdata, ..Default::default() }.pack()[0] & !(1 << 17);
+            push2(out, [word, 0]);
+        }
         Fmt::Smem => {
             if matches!(nth(defs, 0)?, Opnd::P(Phys::M0 | Phys::ExecLo, _)) {
                 return Err(bad(format!("{}: M0 and EXEC are not SMEM destinations", name())));
             }
             let sdata = sdst(nth(defs, 0)?)?;
-            let Opnd::P(Phys::S(base), 2) = *nth(uses, 0)? else {
-                return Err(bad("SMEM base is not an SGPR pair"));
+            // An SGPR pair (s_load) or a buffer descriptor quad (s_buffer_load), at an even register.
+            let (base, n) = match *nth(uses, 0)? {
+                Opnd::P(Phys::S(base), n @ (2 | 4)) => (base, n),
+                _ => return Err(bad("SMEM base is not an SGPR pair or quad")),
             };
             let offset = inst.imm;
             if !(-(1 << 20)..1 << 20).contains(&offset) {
                 return Err(bad(format!("SMEM offset {offset} out of range")));
             }
-            let sbase = sgpr(base, 2)? >> 1;
-            push2(out, t::EncSmem { op: code, sdata, sbase, offset: offset as u32 & 0x1f_ffff, ..Default::default() }.pack());
+            // s_buffer_load takes an unsigned 20-bit offset (llvm-mc refuses a negative one).
+            if n == 4 && offset < 0 {
+                return Err(bad(format!("{}: a negative offset {offset}", name())));
+            }
+            let sbase = sgpr(base, n)? >> 1;
+            let glc = u32::from(inst.mods & M_GLC != 0);
+            push2(out, t::EncSmem { op: code, sdata, sbase, glc, offset: offset as u32 & 0x1f_ffff, ..Default::default() }.pack());
         }
         Fmt::Vop1 if defs.is_empty() => out.push(t::EncVop1 { op: code, ..Default::default() }.pack()),
         Fmt::Vop1 if form == Form::Swap => {
@@ -493,6 +524,16 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
                 vop3(out, vop3_code, dst, None, &uses[..1], mods, reads, name())?;
             }
         }
+        Fmt::Vop2 if form == Form::Dpp16 => {
+            let vdst = vgpr(nth(defs, 0)?)?;
+            let (src0, vsrc1) = (vgpr(nth(uses, 0)?)?, vgpr(nth(uses, 1)?)?);
+            let control = inst.imm as u32 & 0xff_ffff;
+            if !dpp_control_on_gfx9(control & 0x1ff) || control & 1 << 10 != 0 || mods != 0 {
+                return Err(bad(format!("{}: DPP control {control:#x} or modifiers {mods:#x}", name())));
+            }
+            out.push(t::EncVop2 { op: code, vdst, vsrc1, src0: t::SRC_DPP }.pack());
+            out.push(t::EncDpp { src0, ctrl: control }.pack());
+        }
         Fmt::Vop2 => {
             let vdst = vgpr(nth(defs, 0)?)?;
             let (s0, s1) = (nth(uses, 0)?, nth(uses, 1)?);
@@ -514,7 +555,18 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
         Fmt::Vop3 => {
             // The destination's old value (a fourth use, or the third of v_cvt_pk_fp8_f32) is not encoded.
             let vdst = vgpr(nth(defs, 0)?)?;
+            // v_bitop3_b32: its truth table in the neg (bits 2:0), abs (5:3) and omod (7:6) fields.
+            let (mods, omod) = if inst.op == Opc::Gfx9(t::Gfx9Op::VBitop3B32) {
+                let k = inst.imm as u32 & 0xff;
+                ((k & 7) | ((k >> 3) & 7) * super::q38::M_ABS0, (k >> 6) & 3)
+            } else {
+                (mods, 0)
+            };
             vop3(out, vop3_code, vdst, None, &uses[..super::fp8::encoded_sources(sig, uses)], mods, valu_lits(form, flags), name())?;
+            if omod != 0 {
+                let n = out.len();
+                out[n - 1] |= omod << 27;
+            }
         }
         Fmt::Vop3b => {
             let vdst = vgpr(nth(defs, 0)?)?;
@@ -552,16 +604,20 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
         }
         Fmt::Vop3p if matches!(form, Form::Mai | Form::MaiScale) => {
             // The block-scaled form (VOP3PX2) starts with v_mfma_ld_scale_b32
-            // reading the A and B scales (the VGPR pair after C, byte 0 of
+            // reading the A and B scales (the two VGPRs after C, byte 0 of
             // each: op_sel and op_sel_hi clear); its MFMA half sets bit 11.
             let scaled = form == Form::MaiScale;
             if scaled {
-                let pair = nth(uses, 3)?;
-                if pair.dwords() != 2 {
-                    return Err(bad(format!("{}: the A and B scales are one VGPR pair, not {pair:?}", name())));
+                // The A and B scales: two VGPRs (any two, not a pair).
+                let (sa, sb) = (nth(uses, 3)?, nth(uses, 4)?);
+                if sa.dwords() != 1 || sb.dwords() != 1 {
+                    return Err(bad(format!("{}: the A and B scales are one VGPR each, not {sa:?}, {sb:?}", name())));
                 }
-                let s = vgpr(pair)?;
-                push2(out, t::EncVop3p { op: LD_SCALE, src0: t::SRC_VGPR + s, src1: t::SRC_VGPR + s + 1, ..Default::default() }.pack());
+                let (s, s1) = (vgpr(sa)?, vgpr(sb)?);
+                // The scale byte selects (imm bits 13:10, A's low): op_sel holds bit 0 of each, op_sel_hi bit 1.
+                let sel = (inst.imm >> 10) as u32 & 15;
+                let (op_sel, op_sel_hi) = (sel & 1 | (sel >> 2 & 1) << 1, (sel >> 1 & 1) | (sel >> 3 & 1) << 1);
+                push2(out, t::EncVop3p { op: LD_SCALE, src0: t::SRC_VGPR + s, src1: t::SRC_VGPR + s1, op_sel, op_sel_hi, ..Default::default() }.pack());
             }
             // D and C share one bank (acc_cd); A and B each name theirs (acc).
             let (vdst, acc_cd) = vgpr_or_agpr(nth(defs, 0)?)?;
@@ -583,7 +639,8 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
                     t::SRC_VGPR + k
                 }
             };
-            let ctl = inst.imm;
+            // The scaled form's scale byte selects (imm bits 13:10) went to the ld_scale word.
+            let ctl = if scaled { inst.imm & !(15 << 10) } else { inst.imm };
             if !(0..1 << 10).contains(&ctl) {
                 return Err(bad(format!("{}: controls {ctl:#x} past cbsz, abid and blgp", name())));
             }
@@ -769,7 +826,10 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             if offset >= 4096 {
                 return Err(bad(format!("buffer offset {offset} out of range")));
             }
-            push2(out, t::EncMubuf { op: code, offset, offen: 1, soffset, srsrc, vdata, vaddr, ..Default::default() }.pack());
+            // Cache policy (rows with `m=glc,sc1,nt`): sc0 is the GLC bit.
+            let sc0 = u32::from(mods & M_GLC != 0);
+            let (sc1, nt) = (u32::from(mods & super::cpol::M_SC1 != 0), u32::from(mods & super::cpol::M_NT != 0));
+            push2(out, t::EncMubuf { op: code, offset, offen: 1, sc0, sc1, nt, soffset, srsrc, vdata, vaddr, ..Default::default() }.pack());
         }
         Fmt::Vopd | Fmt::Pseudo => return Err(bad(format!("{} has no gfx950 encoding", op.name()))),
     }
@@ -998,6 +1058,10 @@ mod tests {
             (MInst::new(g(VPkMulF32), [v(0, 2)], [v(2, 2), v(4, 2)]).with_imm(0x20), vec![0xd3b1_4000, 0x0802_0902]),
             (MInst::new(g(VPkMulF32), [v(0, 2)], [s(2, 2), v(4, 2)]).with_imm(0x10), vec![0xd3b1_4000, 0x1002_0802]),
             (MInst::new(g(VPkMulF32), [v(0, 2)], [v(2, 2), v(4, 2)]).with_mods(M_NEG0), vec![0xd3b1_4100, 0x3802_0902]),
+            // llvm-mc -mcpu=gfx950: v_bitop3_b32 v3, v9, v11, v3 bitop3:0xde / 0x1 / 0x80 (the table in neg, abs, omod)
+            (MInst::new(g(VBitop3B32), [v(3, 1)], [v(9, 1), v(11, 1), v(3, 1)]).with_imm(0xde), vec![0xd234_0303, 0xdc0e_1709]),
+            (MInst::new(g(VBitop3B32), [v(3, 1)], [v(9, 1), v(11, 1), v(3, 1)]).with_imm(0x1), vec![0xd234_0003, 0x240e_1709]),
+            (MInst::new(g(VBitop3B32), [v(3, 1)], [v(9, 1), v(11, 1), v(3, 1)]).with_imm(0x80), vec![0xd234_0003, 0x140e_1709]),
             // A one-dword broadcast source: the low half of its pair at an even
             // register; at an odd one the high half of the pair below it, read
             // by both lanes (op_sel:[1,0] / [0,1,0] with op_sel_hi set).
@@ -1060,15 +1124,15 @@ mod tests {
             // v[0:15], v[16:23], v[24:31], v[0:15], v32, v33 / a[0:15], v[16:19], v[24:27], 0,
             // v32, v33 cbsz:4 blgp:4 / v[0:15], v[16:21], a[24:31], v[0:15], v254, v255 cbsz:3.
             (
-                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 2)]),
+                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1), v(33, 1)]),
                 vec![0xd3ac_0000, 0x0002_4320, 0xd3ae_0800, 0x0402_3110],
             ),
             (
-                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(AGPR0, 16)], [v(16, 4), v(24, 4), Opnd::Imm(0), v(32, 2)]).with_imm(4 | 4 << 7),
+                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(AGPR0, 16)], [v(16, 4), v(24, 4), Opnd::Imm(0), v(32, 1), v(33, 1)]).with_imm(4 | 4 << 7),
                 vec![0xd3ac_0000, 0x0002_4320, 0xd3ae_8c00, 0x8202_3110],
             ),
             (
-                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 6), v(AGPR0 + 24, 8), v(0, 16), v(254, 2)]).with_imm(3),
+                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 6), v(AGPR0 + 24, 8), v(0, 16), v(254, 1), v(255, 1)]).with_imm(3),
                 vec![0xd3ac_0000, 0x0003_fffe, 0xd3ae_0b00, 0x1402_3110],
             ),
         ];
@@ -1119,8 +1183,8 @@ mod tests {
             // refuses SGPR scales), abid, an A format whose size is not A's.
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1)]),
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), s(4, 2)]),
-            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 2)]).with_imm(1 << 3),
-            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 2)]).with_imm(4),
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1), v(33, 1)]).with_imm(1 << 3),
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1), v(33, 1)]).with_imm(4),
         ];
         for inst in refused {
             assert!(words(inst.clone()).is_err(), "{inst:?}");

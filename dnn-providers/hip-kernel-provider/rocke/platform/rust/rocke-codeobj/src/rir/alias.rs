@@ -47,6 +47,11 @@ fn writes_through_operand0(kind: OpKind) -> bool {
     )
 }
 
+/// Ops that write global memory through the resource of their operand 1.
+fn writes_through_operand1(kind: OpKind) -> bool {
+    kind == OpKind::BufferStoreCp
+}
+
 /// Per value, the tag of what a pointer or buffer resource addresses:
 /// `1 + p` when it is based on argument `p` alone and `p` is `noalias`, else
 /// `ANY`. A pointer is based on an argument through `tile.global_ptr_add` of
@@ -86,6 +91,10 @@ pub fn value_tags(kernel: &Kernel) -> Vec<u16> {
             let p = operand0(&base);
             contradicted |= p != UNTRACED && kernel.params[p as usize].readonly;
         }
+        if writes_through_operand1(op.kind) {
+            let p = op.operands.get(1).and_then(|v| base.get(v.0 as usize)).copied().unwrap_or(UNTRACED);
+            contradicted |= p != UNTRACED && kernel.params[p as usize].readonly;
+        }
     });
     let tag = |p: u32| match kernel.params.get(p as usize) {
         Some(param) if param.noalias && !contradicted && p < u16::MAX as u32 => p as u16 + 1,
@@ -100,10 +109,16 @@ pub fn value_tags(kernel: &Kernel) -> Vec<u16> {
 pub fn op_tag(tags: &[u16], op: &Op) -> u16 {
     let access = matches!(
         op.kind,
-        OpKind::GLoad | OpKind::GlobalLoad | OpKind::GlobalLoadVec | OpKind::BufferLoadVec | OpKind::BufferLoadScalar
+        OpKind::GLoad
+            | OpKind::GlobalLoad
+            | OpKind::GlobalLoadVec
+            | OpKind::BufferLoadVec
+            | OpKind::BufferLoadScalar
+            | OpKind::BufferLoadCp
     ) || writes_through_operand0(op.kind);
-    match op.operands.first() {
-        Some(v) if access => tags.get(v.0 as usize).copied().unwrap_or(ANY),
+    let at = if writes_through_operand1(op.kind) { 1 } else { 0 };
+    match op.operands.get(at) {
+        Some(v) if access || at == 1 => tags.get(v.0 as usize).copied().unwrap_or(ANY),
         _ => ANY,
     }
 }

@@ -40,6 +40,39 @@ pub(super) fn err(message: impl Into<String>) -> CompileError {
     CompileError::new("ROCKE_DIRECT_PARSE", message)
 }
 
+/// Well-formed rocKE IR this compiler does not lower: `ROCKE_DIRECT_UNSUPPORTED`,
+/// on which `rocke.helpers.compile_kernel` compiles the kernel with COMGR.
+/// Text that is not rocKE IR stays `ROCKE_DIRECT_PARSE`.
+pub(super) fn unsupported(message: impl Into<String>) -> CompileError {
+    CompileError::new("ROCKE_DIRECT_UNSUPPORTED", message)
+}
+
+/// The dialects of rocKE IR op names (`rocke.core.ir.IRBuilder`).
+const DIALECTS: [&str; 8] = ["arith.", "math.", "vector.", "memref.", "tile.", "gpu.", "scf.", "cf."];
+
+fn is_ident(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// The error for an op name `OpKind::from_name` does not know: a name in a
+/// rocKE IR dialect is an op rocKE defines (its serializer emits no other)
+/// that this compiler does not lower, so it is refused as unsupported; any
+/// other name is a parse error.
+pub(super) fn unknown_op(opname: &str) -> CompileError {
+    if DIALECTS.iter().any(|d| opname.strip_prefix(d).is_some_and(is_ident)) {
+        unsupported(format!("op {opname:?} is not lowered by the direct backend"))
+    } else {
+        err(format!("op {opname:?} is not supported by the direct backend"))
+    }
+}
+
+/// The pointee of a `ptr<T,constant>` spelling (a scalar `T`), `None` for
+/// any other type text.
+fn constant_pointer(text: &str) -> Option<Result<Scalar, CompileError>> {
+    let inner = text.trim().strip_prefix("ptr<")?.strip_suffix(",constant>")?;
+    Some(parse_scalar(inner.trim()))
+}
+
 pub fn parse_type(text: &str) -> Result<Type, CompileError> {
     let text = text.trim();
     if let Some(inner) = text.strip_prefix("vec<").and_then(|rest| rest.strip_suffix('>')) {
@@ -57,10 +90,18 @@ pub fn parse_type(text: &str) -> Result<Type, CompileError> {
         let comma = inner
             .rfind(',')
             .ok_or_else(|| err(format!("malformed pointer type {text:?}")))?;
-        if inner[comma + 1..].trim() != "global" {
-            return Err(err(format!("only global pointers are supported, got {text:?}")));
+        let space = inner[comma + 1..].trim();
+        if space != "global" {
+            let message = format!("only global pointers are supported, got {text:?}");
+            return Err(if is_ident(space) { unsupported(message) } else { err(message) });
         }
-        return Ok(Type::Ptr(parse_scalar(&inner[..comma])?));
+        let pointee = inner[..comma].trim();
+        if pointee.starts_with("vec<") || pointee.starts_with("ptr<") {
+            // rocKE IR has pointers to vectors (`PtrType(VectorType)`); this compiler's pointers are to scalars.
+            parse_type(pointee)?;
+            return Err(unsupported(format!("a pointer to {pointee} ({text:?})")));
+        }
+        return Ok(Type::Ptr(parse_scalar(pointee)?));
     }
     if let Some(inner) = text.strip_prefix("smem<").and_then(|rest| rest.strip_suffix('>')) {
         let open = inner.rfind('[').ok_or_else(|| err(format!("malformed smem type {text:?}")))?;
@@ -94,7 +135,8 @@ fn parse_scalar(text: &str) -> Result<Scalar, CompileError> {
         "bf8e5m2" => Ok(Scalar::BF8E5M2),
         "f64" => Ok(Scalar::F64),
         "tf32" => Ok(Scalar::TF32),
-        other => Err(err(format!("unsupported element type {other:?}"))),
+        other if is_ident(other) => Err(unsupported(format!("unsupported element type {other:?}"))),
+        other => Err(err(format!("malformed element type {other:?}"))),
     }
 }
 
@@ -732,7 +774,7 @@ pub(super) fn scan_op<'a>(
     if let Some(parts) = canonical_with(line, masks) {
         let opname = parts.opname;
         let kind = OpKind::from_name(opname)
-            .ok_or_else(|| err(format!("op {opname:?} is not supported by the direct backend")))?;
+            .ok_or_else(|| unknown_op(opname))?;
         // Names hold no commas, and `canonical` checked each is followed by `, `.
         let names = parts.operands;
         let mut start = 0;
@@ -754,7 +796,7 @@ pub(super) fn scan_op<'a>(
         None => ("", trim(&line[..paren])),
     };
     let kind = OpKind::from_name(opname)
-        .ok_or_else(|| err(format!("op {opname:?} is not supported by the direct backend")))?;
+        .ok_or_else(|| unknown_op(opname))?;
 
     let after = &line[paren + 3..];
     let close = after
@@ -775,13 +817,24 @@ pub(super) fn scan_op<'a>(
         start = end + 1;
     }
 
-    let attrs = scan_tail(&after[close + 1..], depth)?;
+    let mut attrs = scan_tail(&after[close + 1..], depth)?;
 
     if !results_text.is_empty() {
         for entry in split_top(results_text) {
             let entry = trim(entry);
             let colon = find_spaced(entry, ':').ok_or_else(|| err(format!("bad result entry {entry:?}")))?;
-            let ty = parse_type(&entry[colon + 3..])?;
+            let text = &entry[colon + 3..];
+            let ty = match constant_pointer(text) {
+                // `ptr<T,constant>` (`ptr addrspace(4)`): only `tile.int_to_ptr`
+                // makes one; the value is a plain pointer whose loads are
+                // invariant (`space = "constant"`, `opt` marks them).
+                Some(scalar) if kind == OpKind::IntToPtr => {
+                    attrs.push(("space".into(), Attr::Str("constant".into())));
+                    Type::Ptr(scalar?)
+                }
+                Some(_) => return Err(unsupported(format!("a constant pointer made by {opname} ({text:?})"))),
+                None => parse_type(text)?,
+            };
             results.push((trim(&entry[..colon]), ty));
         }
     }
@@ -840,22 +893,22 @@ pub(super) struct Prologue<'a> {
     pub agpr_limit: Option<u32>,
     /// Parameter names without the `%`, their types, and whether they are
     /// `noalias` and `readonly`.
-    pub params: Vec<(&'a str, Type, bool, bool)>,
+    pub params: Vec<(&'a str, Type, bool, bool, bool)>,
 }
 
-/// `noalias` and `readonly` of a parameter's attribute map: a key holds when
-/// every occurrence is `b:true`. A map that does not parse states neither;
-/// the other attributes are ignored.
-fn param_facts(attrs: &str) -> (bool, bool) {
+/// `noalias`, `readonly` and `inreg` of a parameter's attribute map: a key
+/// holds when every occurrence is `b:true`. A map that does not parse states
+/// none; the other attributes are ignored.
+fn param_facts(attrs: &str) -> (bool, bool, bool) {
     let mut scanner = Scanner::new(attrs);
     let Ok(map) = parse_attr_map(&mut scanner, MAX_ATTR_NESTING) else {
-        return (false, false);
+        return (false, false, false);
     };
     let holds = |key: &str| {
         let mut values = map.iter().filter(|(k, _)| k == key).map(|(_, v)| v).peekable();
         values.peek().is_some() && values.all(|v| *v == Attr::Bool(true))
     };
-    (holds("noalias"), holds("readonly"))
+    (holds("noalias"), holds("readonly"), holds("inreg"))
 }
 
 /// Parses the header, the kernel line, its attributes and the parameters.
@@ -872,10 +925,22 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
         .ok_or_else(|| err(format!("bad kernel line {kernel_line:?}")))?
         .trim()
         .to_string();
+    // rocKE names kernels freely (LLVM quotes the symbol, e.g. a `-1` knob
+    // value); the ELF writer emits `[A-Za-z0-9_.$-]` symbols of at most 1024
+    // bytes only (`hsaco_writer::write_kernel_object`). Refuse the others here,
+    // before any work, instead of failing in the writer.
+    if name.is_empty() {
+        return Err(err(format!("bad kernel line {kernel_line:?}")));
+    }
+    if name.len() > 1024 || !name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'$' | b'-')) {
+        return Err(unsupported(format!("kernel symbol {name:?} (the ELF writer emits [A-Za-z0-9_.$-] symbols)")));
+    }
 
     let mut max_workgroup_size = 1024u32;
     let mut waves_per_eu = (0u32, 0u32);
     let mut agpr_limit = None;
+    crate::rir::set_agpr_acc_request(0);
+    crate::rir::set_agpr_cap(256);
     if let Some(attrs_line) = lines.peek().filter(|line| line.starts_with("attrs ")) {
         lines.next()?;
         let mut scanner = Scanner::new(&attrs_line["attrs ".len()..]);
@@ -884,9 +949,16 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
                 ("max_workgroup_size", Attr::Int(size)) => max_workgroup_size = u32::try_from(size).unwrap_or(0),
                 // Selects LLVM's machine scheduler only; it carries no semantics.
                 ("scheduler_strategy", Attr::Str(_)) => {}
+                // COMGR compile policy (`rocke.helpers.compile.COMGR_FRESH_PROCESS_ATTR`): LLVM's
+                // `iglp_opt(1)` code depends on earlier compiles in the process. This compiler's
+                // output depends on the IR text only, so it carries nothing here.
+                ("comgr_fresh_process", Attr::Bool(_)) => {}
                 // Tells the LLVM lowering to scope LDS accesses per allocation, so that a read waits only
                 // for the LDS DMA into its own allocation; the gfx950 waitcnt pass's LDS tags always do.
                 ("lds_alias_scopes", Attr::Bool(_)) => {}
+                // rustgemm: rocKE's LLVM-only `-amdgpu-mfma-vgpr-form=0` switch; MFMA forms here follow the
+                // allocation (AGPR accumulators -> the AGPR form).
+                ("mfma_agpr_form", Attr::Bool(_)) => {}
                 // An occupancy hint, `n` or `[min, max]` waves per SIMD.
                 ("waves_per_eu", Attr::Int(n)) if (0..=16).contains(&n) => waves_per_eu = (n as u32, n as u32),
                 ("waves_per_eu", Attr::List(range)) => match range[..] {
@@ -898,10 +970,28 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
                 // `[min, max]` AGPRs (LLVM's `amdgpu-agpr-alloc`); `[0, 0]`: none.
                 ("agpr_alloc", Attr::List(range)) => match range[..] {
                     [Attr::Int(0), Attr::Int(0)] => agpr_limit = Some(0),
-                    _ => return Err(err(format!("kernel attribute agpr_alloc {range:?} is not supported by the direct backend"))),
+                    // rustgemm: `[lo, 256]` with lo > 0, rocKE's "accumulators in AGPRs" request (the whole
+                    // AGPR file allowed). The allocator places MFMA accumulator webs in AGPRs under VGPR
+                    // pressure on its own; caps below 256 stay unsupported (the allocator has none).
+                    [Attr::Int(lo), Attr::Int(256)] if 0 < lo && lo <= 256 => {
+                        crate::rir::set_agpr_acc_request(lo as u32);
+                    }
+                    // rust-compiler-v2: `[lo, hi]` with 0 <= lo <= hi < 256 (e.g. `[128, 128]`, rocKE's request for a
+                    // tile_n = 128 GEMM's 128 accumulators): at most `hi` AGPRs. Accumulator webs are placed in
+                    // a0..a(hi-1) and AGPR spill slots stay below `hi` (a function that needs more keeps the rest in
+                    // VGPRs or spills elsewhere); the compile fails if an allocation would still use more.
+                    [Attr::Int(lo), Attr::Int(hi)] if 0 <= lo && lo <= hi && 0 < hi && hi < 256 => {
+                        crate::rir::set_agpr_acc_request(lo as u32);
+                        crate::rir::set_agpr_cap(hi as u32);
+                    }
+                    _ => {
+                        return Err(unsupported(format!(
+                            "kernel attribute agpr_alloc {range:?} is not supported by the direct backend"
+                        )))
+                    }
                 },
                 (other, _) => {
-                    return Err(err(format!(
+                    return Err(unsupported(format!(
                         "kernel attribute {other:?} is not supported by the direct backend"
                     )))
                 }
@@ -918,17 +1008,20 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
         if line == "}" {
             break;
         }
-        let (head, (noalias, readonly)) = match line.find('{') {
+        let (head, (noalias, readonly, inreg)) = match line.find('{') {
             Some(brace) => (&line[..brace], param_facts(&line[brace..])),
-            None => (line, (false, false)),
+            None => (line, (false, false, false)),
         };
         let colon = find_spaced(head, ':').ok_or_else(|| err(format!("bad param line {line:?}")))?;
         let pname = head[..colon].trim().trim_start_matches('%');
         let ty = parse_type(&head[colon + 3..])?;
         if !matches!(ty, Type::Scalar(Scalar::I32 | Scalar::I64 | Scalar::F32) | Type::Ptr(_)) {
-            return Err(err(format!("unsupported kernel argument type for %{pname}")));
+            return Err(unsupported(format!("unsupported kernel argument type for %{pname}")));
         }
-        params.push((pname, ty, noalias, readonly));
+        // Kernarg preload into user SGPRs (LLVM's `inreg` on gfx950):
+        // `isel` preloads the leading `inreg` arguments that fit
+        // (`opt::kernarg_preload`); gfx1151 refuses it there.
+        params.push((pname, ty, noalias, readonly, inreg));
     }
     Ok(Prologue { name, max_workgroup_size, waves_per_eu, agpr_limit, params })
 }
@@ -1277,9 +1370,9 @@ fn parse_sequential(text: &str, hashcons: bool) -> Result<Kernel, CompileError> 
     };
     parser.names.enter();
     let mut params = Vec::with_capacity(prologue.params.len());
-    for (pname, ty, noalias, readonly) in prologue.params {
+    for (pname, ty, noalias, readonly, inreg) in prologue.params {
         let value = parser.names.define(&format!("%{pname}"), ty.clone());
-        params.push(Param { value, name: pname.to_string(), ty, noalias, readonly });
+        params.push(Param { value, name: pname.to_string(), ty, noalias, readonly, inreg });
     }
     let body = parser.body(&mut lines)?;
     if lines.next()? != "}" {
@@ -1733,9 +1826,9 @@ mod tests {
         };
         parser.names.enter();
         let mut params = Vec::with_capacity(prologue.params.len());
-        for (pname, ty, noalias, readonly) in prologue.params {
+        for (pname, ty, noalias, readonly, inreg) in prologue.params {
             let value = parser.names.define(&format!("%{pname}"), ty.clone());
-            params.push(Param { value, name: pname.to_string(), ty, noalias, readonly });
+            params.push(Param { value, name: pname.to_string(), ty, noalias, readonly, inreg });
         }
         let body = parser.body(&mut lines)?;
         if lines.next()? != "}" {

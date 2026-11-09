@@ -127,6 +127,8 @@ unpack_i4_byte_to_pair_f32, unpack_i4_byte_to_pair_i32, unpack_i4_byte_to_pair_i
 dequant_i4_byte_to_fp8_pair, dequant_i4_byte_to_bf8_pair
 # OCP MX E8M0 shared-exponent (helpers/mx_scale.py)
 decode_mx_scale_e8m0, apply_mx_scale, load_and_decode_mx_scale_byte
+# IRBuilder methods, Python engine only (rocke.core.ir.PYTHON_ONLY_OPCODES)
+IRBuilder.mfma_scale_mx, IRBuilder.cvt_scalef32_pk_fp8_f32
 # Preshuffled-B layout (helpers/preshuffle.py)
 PreshuffleBSpec, emit_preshuffleb_offset, host_preshuffle_layout
 # FP8 / BF8 MFMA catalog (helpers/atoms.py)

@@ -19,7 +19,7 @@
 //! pressure (`regalloc::pressure`, before scheduling) reaches a higher
 //! granule of eight registers.
 //!
-//! It runs only with `ROCKE_DIRECT_DEBUG=litshare`, as a measured variant:
+//! It runs only with `ROCKE_DIRECT_DEBUG=litshare` (or the lever `litshare`), as a measured variant:
 //! with fewer instructions the schedule taken still ran one wave less in
 //! eleven census objects (sparse attention, depthwise windows, grouped
 //! dgrad), a trade measured only for the single-wave attention tunings.
@@ -48,17 +48,18 @@ fn literal_move(f: &MFunc, inst: &MInst) -> Option<(VRef, u32)> {
 
 /// With `ROCKE_DIRECT_DEBUG=litshare`, `share_with` of `f`.
 pub fn share(f: &mut MFunc) -> usize {
-    if !crate::rir::debug_flag("litshare") {
+    if !crate::rir::debug_flag("litshare") && !f.lever_anywhere("litshare") {
         return 0;
     }
-    share_with(f)
+    f.fill_scopes();
+    share_with(f, crate::rir::debug_flag("litshare"))
 }
 
 /// Shares the literal moves of `f`'s blocks when that keeps its pressure's
 /// granules; returns how many went.
-fn share_with(f: &mut MFunc) -> usize {
+fn share_with(f: &mut MFunc, all: bool) -> usize {
     let mut g = f.clone();
-    let dropped = share_all(&mut g);
+    let dropped = share_all(&mut g, all);
     if dropped == 0 {
         return 0;
     }
@@ -73,7 +74,8 @@ fn share_with(f: &mut MFunc) -> usize {
 }
 
 /// Shares the literal moves of `f`'s blocks; returns how many went.
-fn share_all(f: &mut MFunc) -> usize {
+/// `all`: every block's moves, else those whose scope has lever `litshare`.
+fn share_all(f: &mut MFunc, all: bool) -> usize {
     let mut writes = vec![0u32; f.vregs.len()];
     for inst in f.blocks.iter().flat_map(|b| b.insts.iter()) {
         for d in inst.defs.iter() {
@@ -89,7 +91,8 @@ fn share_all(f: &mut MFunc) -> usize {
         let mut kept: HashMap<(Class, u32), (VRef, usize)> = HashMap::new();
         let mut keep = Vec::with_capacity(f.blocks[b].insts.len());
         for (i, inst) in std::mem::take(&mut f.blocks[b].insts).into_iter().enumerate() {
-            if let Some((d, v)) = literal_move(f, &inst).filter(|(d, _)| writes[d.reg as usize] == 1) {
+            let shares = all || f.lever(&inst, "litshare");
+            if let Some((d, v)) = literal_move(f, &inst).filter(|(d, _)| shares && writes[d.reg as usize] == 1) {
                 let key = (f.vregs[d.reg as usize].class, v);
                 match kept.get(&key) {
                     Some(&(r, at)) if i - at <= SPAN => {
@@ -155,7 +158,7 @@ mod tests {
     #[test]
     fn a_block_writes_each_literal_once() {
         let mut f = block(8);
-        assert_eq!(share_with(&mut f), 7);
+        assert_eq!(share_with(&mut f, true), 7);
         assert_eq!(moves(&f), 1);
         // Every maximum reads the one move's register.
         let kept = f.blocks[0].insts[1].defs[0];
@@ -165,14 +168,14 @@ mod tests {
     #[test]
     fn a_long_block_writes_a_literal_again_past_the_span() {
         let mut f = block(64);
-        share_with(&mut f);
+        share_with(&mut f, true);
         let n = moves(&f);
         assert!(n > 1 && 4 * n <= 64, "{n} moves");
     }
 
     #[test]
     fn it_runs_only_when_asked() {
-        if !crate::rir::debug_flag("litshare") {
+        if !crate::rir::debug_flag("litshare") && !crate::rir::lever("litshare") {
             let mut f = block(8);
             assert_eq!((share(&mut f), moves(&f)), (0, 8));
         }

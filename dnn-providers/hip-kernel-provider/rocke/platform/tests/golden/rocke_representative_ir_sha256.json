@@ -1642,6 +1642,14 @@
           "sha256": "4d288e2719ecced978c860ae52a2f0426d6b4a6342bf24f48e8587682df3b8c8",
           "status": "ok"
         },
+        "crosslane/gfx942/dpp_row_mirror_reduce_i32": {
+          "arch": "gfx942",
+          "bytes": 1579,
+          "family": "crosslane",
+          "kernel_name": "irhash_dpp_row_mirror_reduce_gfx942",
+          "sha256": "fd9b25fd4ef14c1fea5100f9fd81897aec185be1002b5cec379a3c5e268f7176",
+          "status": "ok"
+        },
         "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
           "arch": "gfx942",
           "bytes": 2311,
@@ -1656,6 +1664,14 @@
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx942",
           "sha256": "bead4c0c6804d720d9c5cdade1c9db9c585a958a102c32b380391656e872c931",
+          "status": "ok"
+        },
+        "crosslane/gfx950/dpp_row_mirror_reduce_i32": {
+          "arch": "gfx950",
+          "bytes": 1579,
+          "family": "crosslane",
+          "kernel_name": "irhash_dpp_row_mirror_reduce_gfx950",
+          "sha256": "02279009c5354d67aecaaafc4502135c3203a8bd80784cf8f729de5cb243885f",
           "status": "ok"
         },
         "crosslane/gfx950/warp_shuffle_xor_dpp_masks_f32": {
@@ -2173,8 +2189,8 @@
           "gfx1201": 8,
           "gfx1250": 12,
           "gfx90a": 5,
-          "gfx942": 52,
-          "gfx950": 178
+          "gfx942": 53,
+          "gfx950": 179
         },
         "expected_failures": 6,
         "families": {
@@ -2192,7 +2208,7 @@
           "conv_wgrad": 21,
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
-          "crosslane": 5,
+          "crosslane": 7,
           "deep_fused_conv": 10,
           "gemm": 13,
           "grouped_gemm": 1,
@@ -2201,7 +2217,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 267
+        "ok_cases": 269
       }
     },
     "llvm22": {
@@ -3846,6 +3862,14 @@
           "sha256": "c537f808c7b016859e77bc2a89ceb19f97bb54a8b55502c05ba3e5ffdfe8aa9f",
           "status": "ok"
         },
+        "crosslane/gfx942/dpp_row_mirror_reduce_i32": {
+          "arch": "gfx942",
+          "bytes": 1586,
+          "family": "crosslane",
+          "kernel_name": "irhash_dpp_row_mirror_reduce_gfx942",
+          "sha256": "dcdd8ed324eeaaaba520bf90691d94585468456a2cbad18d382afe70c659be30",
+          "status": "ok"
+        },
         "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
           "arch": "gfx942",
           "bytes": 2318,
@@ -3860,6 +3884,14 @@
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx942",
           "sha256": "bba9fe84d9c58bef9c199c3af8c572d22ade94fa45cdccda7c5d13ba944fa032",
+          "status": "ok"
+        },
+        "crosslane/gfx950/dpp_row_mirror_reduce_i32": {
+          "arch": "gfx950",
+          "bytes": 1586,
+          "family": "crosslane",
+          "kernel_name": "irhash_dpp_row_mirror_reduce_gfx950",
+          "sha256": "d647c108a19473fb8ace4c31a80f2155b189851e1e9e128da376e152ffcfbf91",
           "status": "ok"
         },
         "crosslane/gfx950/warp_shuffle_xor_dpp_masks_f32": {
@@ -4377,8 +4409,8 @@
           "gfx1201": 8,
           "gfx1250": 12,
           "gfx90a": 5,
-          "gfx942": 52,
-          "gfx950": 178
+          "gfx942": 53,
+          "gfx950": 179
         },
         "expected_failures": 6,
         "families": {
@@ -4396,7 +4428,7 @@
           "conv_wgrad": 21,
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
-          "crosslane": 5,
+          "crosslane": 7,
           "deep_fused_conv": 10,
           "gemm": 13,
           "grouped_gemm": 1,
@@ -4405,7 +4437,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 267
+        "ok_cases": 269
       }
     },
     "llvm23": {
@@ -6066,6 +6098,14 @@
           "sha256": "759d8028dd3fa1e6d8726fcf6676a894ea90a8151c26814188dbd1886319ed63",
           "status": "ok"
         },
+        "crosslane/gfx942/dpp_row_mirror_reduce_i32": {
+          "arch": "gfx942",
+          "bytes": 1650,
+          "family": "crosslane",
+          "kernel_name": "irhash_dpp_row_mirror_reduce_gfx942",
+          "sha256": "7ef45e9f1e2871a2ac9855498b08aff6df366a87fec2430c74d014b81936678d",
+          "status": "ok"
+        },
         "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
           "arch": "gfx942",
           "bytes": 2382,
@@ -6080,6 +6120,14 @@
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx942",
           "sha256": "5fb17686bcc9cc7d2a5eb55881449ffaffe4d34104f4c2ba2fe3890430005418",
+          "status": "ok"
+        },
+        "crosslane/gfx950/dpp_row_mirror_reduce_i32": {
+          "arch": "gfx950",
+          "bytes": 1650,
+          "family": "crosslane",
+          "kernel_name": "irhash_dpp_row_mirror_reduce_gfx950",
+          "sha256": "075b43cde5afbf0f10e260cc6927aec81940aa94638164dd991bd34e21d4c5b1",
           "status": "ok"
         },
         "crosslane/gfx950/warp_shuffle_xor_dpp_masks_f32": {
@@ -6604,8 +6652,8 @@
           "gfx1201": 8,
           "gfx1250": 18,
           "gfx90a": 5,
-          "gfx942": 52,
-          "gfx950": 178
+          "gfx942": 53,
+          "gfx950": 179
         },
         "expected_failures": 0,
         "families": {
@@ -6624,7 +6672,7 @@
           "conv_wgrad": 21,
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
-          "crosslane": 5,
+          "crosslane": 7,
           "deep_fused_conv": 10,
           "gemm": 17,
           "grouped_gemm": 1,
@@ -6633,7 +6681,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 273
+        "ok_cases": 275
       }
     }
   },

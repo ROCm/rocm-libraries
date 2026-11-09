@@ -43,7 +43,7 @@ pub fn run(f: &mut MFunc) {
             early[d.reg as usize] |= inst.op.flags() & F_EARLY != 0;
         }
     }
-    let mut p = Packer { f_vregs: std::mem::take(&mut f.vregs), defs, early, rename: FxHashMap::default() };
+    let mut p = Packer { f_vregs: std::mem::take(&mut f.vregs), scopes: f.scopes.clone(), defs, early, rename: FxHashMap::default() };
     for block in f.blocks.iter_mut() {
         let insts = std::mem::take(&mut block.insts);
         block.insts = p.block(insts);
@@ -68,6 +68,8 @@ pub fn run(f: &mut MFunc) {
 
 struct Packer {
     f_vregs: Vec<VRegInfo>,
+    /// The function's lever scopes (`MInst::scope`).
+    scopes: Vec<std::sync::Arc<crate::rir::LeverDelta>>,
     defs: Vec<u32>,
     /// Written by an instruction whose destination must not overlap its
     /// sources: never made half of a pair.
@@ -92,19 +94,63 @@ enum Operand {
 impl Packer {
     fn block(&mut self, insts: Vec<MInst>) -> Vec<MInst> {
         let mut out = Vec::with_capacity(insts.len());
+        let mut taken = vec![false; insts.len()];
         let mut i = 0;
         while i < insts.len() {
-            if i + 1 < insts.len() {
+            if taken[i] {
+                i += 1;
+                continue;
+            }
+            if i + 1 < insts.len() && !taken[i + 1] {
                 if let Some(pk) = self.pair(&insts[i], &insts[i + 1]) {
                     out.push(pk);
                     i += 2;
                     continue;
                 }
             }
+            if let Some((j, pk)) = self.pair_far(&insts, i, &taken) {
+                taken[j] = true;
+                out.push(pk);
+                i += 1;
+                continue;
+            }
             out.push(insts[i].clone());
             i += 1;
         }
         out
+    }
+
+    /// Lever `packfar` (PLAN decision 18): a partner for `insts[i]` among the next `FAR` instructions, as LLVM's SLP
+    /// vectorizer pairs independent lanes that are not adjacent (the HC stages' sums of squares). The partner moves up
+    /// to `i`: its sources are written by nothing in between, nothing in between reads its result, and nothing in
+    /// between changes EXEC, branches or fences (readers of the first result in between read the pair's low half,
+    /// written at `i` as before). Both lanes compute what they computed.
+    fn pair_far(&mut self, insts: &[MInst], i: usize, taken: &[bool]) -> Option<(usize, MInst)> {
+        const FAR: usize = 24;
+        let first = &insts[i];
+        if !matches!(first.op, Opc::VMulF32 | Opc::VAddF32 | Opc::VSubF32 | Opc::VFmaF32) || !crate::rir::lever_at(&self.scopes, first.scope, "packfar") {
+            return None;
+        }
+        for j in i + 2..insts.len().min(i + 2 + FAR) {
+            let x = &insts[j];
+            if x.op.flags() & (F_DEF_EXEC | F_BRANCH | F_END | F_FENCE) != 0 || x.defs.iter().any(|d| matches!(d, Opnd::P(Phys::ExecLo, _))) {
+                return None;
+            }
+            if taken[j] || x.op != first.op || !crate::rir::lever_at(&self.scopes, x.scope, "packfar") {
+                continue;
+            }
+            let Some(d2) = x.defs.first().and_then(|d| d.vref()).map(|v| v.reg) else { continue };
+            let between = &insts[i + 1..j];
+            let writes_src = between.iter().any(|b| b.defs.iter().any(|d| x.uses.iter().any(|u| crate::target::gfx9::dpp::overlaps(d, u))));
+            let reads = |reg: u32| between.iter().any(|b| b.uses.iter().any(|u| u.vref().is_some_and(|v| v.reg == reg)));
+            if writes_src || reads(d2) {
+                continue;
+            }
+            if let Some(pk) = self.pair(first, x) {
+                return Some((j, pk));
+            }
+        }
+        None
     }
 
     /// `o` with the renames decided so far.

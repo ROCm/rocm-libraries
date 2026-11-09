@@ -161,13 +161,22 @@ impl Emit<'_> {
     /// instruction reads after C.
     fn scaled_mfma(&mut self, shape: Shape, (na, nb): (u8, u8), a: VRef, b: VRef, c: VRef, (sa, sb): (Opnd, Opnd)) -> VRef {
         let (a, b) = (self.in_vgprs(a), self.in_vgprs(b));
-        let pair = self.reg(Class::V, 2);
-        self.copy(VRef { n: 1, ..pair }, sa);
-        self.copy(VRef { off: 1, n: 1, ..pair }, sb);
+        // The scales: copied into a fresh VGPR pair, or with lever `scalesep` (the rust track) read where
+        // they are when they are single VGPRs already (no move and no VALU-to-MFMA wait per MFMA).
+        let vgpr1 = |e: &Self, o: Opnd| matches!(o, Opnd::R(v) if v.n == 1 && e.f.vregs[v.reg as usize].class == Class::V);
+        let (sa, sb) = if crate::rir::lever("scalesep") {
+            let one = |e: &mut Self, o: Opnd| if vgpr1(e, o) { o } else { let t = e.reg(Class::V, 1); e.copy(t, o); Opnd::R(t) };
+            (one(self, sa), one(self, sb))
+        } else {
+            let pair = self.reg(Class::V, 2);
+            self.copy(VRef { n: 1, ..pair }, sa);
+            self.copy(VRef { off: 1, n: 1, ..pair }, sb);
+            (Opnd::R(VRef { n: 1, ..pair }), Opnd::R(VRef { off: 1, n: 1, ..pair }))
+        };
         let d = self.reg(Class::V, shape.cd);
         self.copy(d, Opnd::R(c));
         let (a, b) = (VRef { n: na, ..a }, VRef { n: nb, ..b });
-        let uses = [Opnd::R(a), Opnd::R(b), Opnd::R(d), Opnd::R(pair)];
+        let uses = [Opnd::R(a), Opnd::R(b), Opnd::R(d), sa, sb];
         self.push(MInst::new(Opc::Gfx9(shape.op), [Opnd::R(d)], uses).with_imm(shape.ctl));
         d
     }
@@ -218,6 +227,39 @@ impl Emit<'_> {
         }
         d
     }
+}
+
+/// Selects `tile.mfma_scale_mx` (the Qwen3.8 MX form: free A and B formats,
+/// `fmt_a` / `fmt_b` 0..4 = fp8, bf8, fp6, bf6, fp4, and scale byte selects
+/// `opsel_a` / `opsel_b` 0..3) over A, B and C of exactly the formats' sizes
+/// into block `block` of `f`: the 16x16x128 (`wide` false, a 4-dword C) or the
+/// 32x32x64 (16 dwords) block-scaled MFMA. Returns D.
+#[allow(clippy::too_many_arguments)]
+pub fn select_mx(
+    f: &mut MFunc,
+    block: usize,
+    wide: bool,
+    (fmt_a, fmt_b): (u8, u8),
+    (opsel_a, opsel_b): (u8, u8),
+    a: VRef,
+    b: VRef,
+    c: VRef,
+    scales: (Opnd, Opnd),
+) -> Result<VRef, CompileError> {
+    let dwords = |format: u8| [8u8, 8, 6, 6, 4].get(format as usize).copied();
+    let (Some(na), Some(nb)) = (dwords(fmt_a), dwords(fmt_b)) else {
+        return Err(unsupported(format!("tile.mfma_scale_mx formats {fmt_a}, {fmt_b}")));
+    };
+    let (op, cd) = if wide { (Gfx9Op::VMfmaScale32x32x64F8f6f4, 16) } else { (Gfx9Op::VMfmaScale16x16x128F8f6f4, 4) };
+    if (a.n, b.n, c.n) != (na, nb, cd) || opsel_a > 3 || opsel_b > 3 {
+        return Err(unsupported(format!(
+            "tile.mfma_scale_mx: operands of {}, {} and {} dwords (formats {fmt_a}, {fmt_b} take {na}, {nb} and {cd}) or scale selects {opsel_a}, {opsel_b}",
+            a.n, b.n, c.n
+        )));
+    }
+    let ctl = fmt_a as i64 | (fmt_b as i64) << 7 | (opsel_a as i64) << 10 | (opsel_b as i64) << 12;
+    let mut emit = Emit { f, block };
+    Ok(emit.scaled_mfma(Shape { op, ab: 8, cd, ctl }, (na, nb), a, b, c, scales))
 }
 
 /// Selects `tile.mma` `op_id` over the tuples A, B and C (and a block-scaled
@@ -430,9 +472,9 @@ mod tests {
         let lines = mfma_lines(&listing);
         assert_eq!(lines.len(), 1, "{listing}");
         assert!(lines[0].starts_with("v_mfma_scale_f32_32x32x64_f8f6f4"), "{}", lines[0]);
-        // D (16) on C, A as fp6 (6 dwords), B as fp4 (4), the scale pair; cbsz 2, blgp 4.
+        // D (16) on C, A as fp6 (6 dwords), B as fp4 (4), the A and B scales; cbsz 2, blgp 4.
         let ops = operands(lines[0].split(" imm:").next().unwrap());
-        assert_eq!(ops.iter().map(|o| span(o)).collect::<Vec<_>>(), [16, 6, 4, 16, 2], "{}", lines[0]);
+        assert_eq!(ops.iter().map(|o| span(o)).collect::<Vec<_>>(), [16, 6, 4, 16, 1, 1], "{}", lines[0]);
         assert_eq!(ops[0], ops[3]);
         assert!(lines[0].ends_with(&format!("imm:{}", 2 | 4 << 7)), "{}", lines[0]);
         assert_eq!(scaled("mfma_gfx950_f32_32x32x64_bf8_bf6_scale_e8m0_e8m0_k32").map(|(s, a, b)| (s.ctl, a, b)), Some((1 | 3 << 7, 8, 6)));

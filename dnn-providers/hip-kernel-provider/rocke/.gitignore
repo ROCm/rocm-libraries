@@ -25,6 +25,9 @@ _deps/
 *.so
 *.hsaco
 
+# --- Cargo build output of the direct compiler crate(s) ---
+platform/rust/*/target/
+
 # --- AOT kernel cache: the conv benchmarks' --compile-all default output
 #     (./kernel_cache, relative to wherever the benchmark is run from) ---
 kernel_cache/

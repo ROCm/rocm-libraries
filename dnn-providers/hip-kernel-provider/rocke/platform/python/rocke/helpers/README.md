@@ -75,6 +75,17 @@ rocke/helpers/
 │ # Reduction strategies. Pairs with
 │ # ``persistent.py`` -- the partitioner picks the
 │ # work, the persistent loop drives it.
+├── mailbox.py # Tagged (payload, tag) mailboxes for resident-
+│ # grid kernels: put / put2 / put_bf, sc1 asm
+│ # poll loop (both engines), pre_poll throttle,
+│ # payload_wait, bulk release / acquire, NUMA
+│ # dual copies. Mirrored ops only; the direct
+│ # compiler lifts the asm poll loop to
+│ # tile.tagged_poll (runtime/direct_lift.py).
+├── device_ops.py # ptr_from_i64, asm buffer descriptor,
+│ # s_sleep, memrealtime, xcc_id, buffer_wbl2 /
+│ # buffer_inv release / acquire, scoped
+│ # atomic add, fresh_v / fresh_s (inline asm).
 ├── i4_dequant.py # Packed-i4 byte unpack (sign-extend
 │ # 4-bit nibbles to i32 / f32 / fp8 / bf8) for
 │ # the i4-quant weight path in block-scale GEMM

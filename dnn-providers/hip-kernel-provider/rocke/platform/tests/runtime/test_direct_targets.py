@@ -113,14 +113,14 @@ def _scale_kernel():
 
 
 def _asm_kernel():
-    # tile.inline_asm with an instruction in it: COMGR assembles it; the
-    # direct compiler takes only the empty "=v,0" barrier.
+    # tile.inline_asm with an instruction of its own syntax (SDWA): COMGR
+    # assembles it; the direct compiler's assembler refuses it.
     b = IRBuilder("direct_target_asm")
     b.kernel.attrs["max_workgroup_size"] = 64
     x = b.param("X", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
     y = b.param("Y", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
     tid = b.thread_id_x()
-    moved = b.inline_asm("v_mov_b32 $0, $1", "=v,v", [b.global_load_f32(x, tid)], F32)
+    moved = b.inline_asm("v_mov_b32_sdwa $0, $1 dst_sel:WORD_1", "=v,v", [b.global_load_f32(x, tid)], F32)
     b.global_store(y, tid, moved, align=4)
     return b.kernel
 
@@ -144,3 +144,90 @@ def test_compile_kernel_falls_back_to_comgr_for_what_direct_refuses() -> None:
     # A target the library does not compile for goes to COMGR too.
     other = compile_kernel(_scale_kernel(), arch="gfx942", code_object_backend="direct")
     assert other.code_object_backend == "comgr" and "gfx942" in other.direct_fallback
+
+
+def test_a_kernels_direct_levers_apply_to_its_compile_only(monkeypatch) -> None:
+    """``attrs["direct_levers"]`` joins ROCKE_DIRECT_LEVERS for that one compile, as setting it would."""
+    import os
+
+    _require_direct_library()
+    monkeypatch.delenv("ROCKE_DIRECT_LEVERS", raising=False)
+    tagged = _scale_kernel()
+    tagged.attrs["direct_levers"] = "litreuse+litshare"
+    via_attr = compile_kernel(tagged, arch="gfx950", code_object_backend="direct")
+    assert via_attr.code_object_backend == "direct", via_attr.direct_fallback
+    assert "ROCKE_DIRECT_LEVERS" not in os.environ
+    monkeypatch.setenv("ROCKE_DIRECT_LEVERS", "litreuse,litshare")
+    via_env = compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
+    assert via_attr.hsaco == via_env.hsaco
+    # The environment's levers stay when the kernel names its own.
+    tagged = _scale_kernel()
+    tagged.attrs["direct_levers"] = ["minmax"]
+    compile_kernel(tagged, arch="gfx950", code_object_backend="direct")
+    assert os.environ["ROCKE_DIRECT_LEVERS"] == "litreuse,litshare"
+
+
+def test_strict_mode_turns_a_refusal_into_an_error(monkeypatch) -> None:
+    """``ROCKE_DIRECT_STRICT=1``: a kernel the direct compiler refuses raises instead of falling back."""
+    _require_direct_library()
+    monkeypatch.setenv("ROCKE_DIRECT_STRICT", "1")
+    with pytest.raises(DirectUnsupported):
+        compile_kernel(_asm_kernel(), arch="gfx950", code_object_backend="direct")
+
+
+def _scoped_scale_kernel(levers):
+    b = IRBuilder("direct_target_scale")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    x = b.param("X", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
+    y = b.param("Y", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
+    with b.lever_scope(levers):
+        tid = b.thread_id_x()
+        b.global_store(y, tid, b.fmul(b.global_load_f32(x, tid), b.const_f32(2.0)), align=4)
+    return b.kernel
+
+
+def test_lever_scopes_mark_their_ops_and_nothing_else() -> None:
+    """``IRBuilder.lever_scope`` puts ``dlevers`` on the ops emitted inside only; an empty scope adds nothing."""
+    from rocke.core.ir_serialize import serialize
+
+    kernel = _scoped_scale_kernel(["nofence", "-loadorder"])
+    scoped = [op for op in kernel.body.ops if "dlevers" in op.attrs]
+    assert scoped and all(op.attrs["dlevers"] == "nofence,-loadorder" for op in scoped)
+    assert all("dlevers" not in op.attrs for op in kernel.body.ops if op not in scoped)
+    assert 'dlevers = s:"nofence,-loadorder"' in serialize(kernel)
+    assert serialize(_scoped_scale_kernel(None)) == serialize(_scale_kernel())
+    assert serialize(_scoped_scale_kernel("")) == serialize(_scale_kernel())
+    # Nested scopes: the inner one wins inside, the outer one is back after it.
+    b = IRBuilder("nested")
+    with b.lever_scope("a"):
+        b.thread_id_x()
+        with b.lever_scope("b+c"):
+            b.thread_id_x()
+        b.thread_id_x()
+    assert [op.attrs.get("dlevers") for op in b.kernel.body.ops] == ["a", "b,c", "a"]
+
+
+def test_lever_scopes_leave_the_llvm_lowering_alone() -> None:
+    """COMGR builds ignore the scopes: the same LLVM text with and without."""
+    from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+    plain = lower_kernel_to_llvm(_scale_kernel(), arch="gfx950", llvm_flavor="llvm22")
+    scoped = lower_kernel_to_llvm(_scoped_scale_kernel("nofence,litreuse"), arch="gfx950", llvm_flavor="llvm22")
+    assert plain == scoped
+
+
+def test_a_scope_over_every_op_is_the_kernels_levers(monkeypatch) -> None:
+    """Scoping every op with levers L builds what ``ROCKE_DIRECT_LEVERS=L`` does; ``-L`` scopes undo L."""
+    _require_direct_library()
+    monkeypatch.delenv("ROCKE_DIRECT_LEVERS", raising=False)
+    levers = "litreuse,litshare,minmax,vmemfirst"
+    scoped = compile_kernel(_scoped_scale_kernel(levers), arch="gfx950", code_object_backend="direct")
+    assert scoped.code_object_backend == "direct", scoped.direct_fallback
+    monkeypatch.setenv("ROCKE_DIRECT_LEVERS", levers)
+    via_env = compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
+    assert scoped.hsaco == via_env.hsaco
+    off = ",".join("-" + x for x in levers.split(","))
+    undone = compile_kernel(_scoped_scale_kernel(off), arch="gfx950", code_object_backend="direct")
+    monkeypatch.delenv("ROCKE_DIRECT_LEVERS")
+    plain = compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
+    assert undone.hsaco == plain.hsaco

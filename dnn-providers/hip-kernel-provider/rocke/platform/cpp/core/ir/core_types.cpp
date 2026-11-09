@@ -892,7 +892,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "arith.assume_range",
 
     /* arith.fdot2 */
-    "arith.fdot2"};
+    "arith.fdot2",
+
+    /* tile.dpp_row_mirror */
+    "tile.dpp_row_mirror"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1177,7 +1180,9 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* arith.assume_range         */ true,
 
     /* arith.fdot2 */
-    /* arith.fdot2                */ false};
+    /* arith.fdot2                */ false,
+
+    /* tile.dpp_row_mirror        */ true};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

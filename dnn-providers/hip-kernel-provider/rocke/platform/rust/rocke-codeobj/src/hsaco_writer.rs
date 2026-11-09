@@ -266,6 +266,9 @@ pub struct KernelObjectSpec<'a> {
     pub private_segment_size: u32,
     /// VGPR dwords spilled, for the metadata.
     pub vgpr_spill_count: u32,
+    /// The descriptor's `kernarg_preload` (gfx950): preloaded kernarg dwords
+    /// (`KERNARG_PRELOAD_SPEC_LENGTH`, bits 6:0) from dword offset 0.
+    pub kernarg_preload: u16,
 }
 
 fn metadata_argument(bytes: &mut Vec<u8>, arg: &KernelArgMeta) {
@@ -323,6 +326,7 @@ fn gemm_spec<'a>(symbol: &'a str, code: &'a [u8]) -> KernelObjectSpec<'a> {
         rsrc3: 0x60,
         private_segment_size: 0,
         vgpr_spill_count: 0,
+        kernarg_preload: 0,
     }
 }
 
@@ -611,6 +615,7 @@ fn kernel_descriptor(text_vaddr: usize, rodata: usize, spec: &KernelObjectSpec) 
     put_u32(&mut descriptor, 48, spec.rsrc1);
     put_u32(&mut descriptor, 52, spec.rsrc2);
     put_u16(&mut descriptor, 56, spec.target.kernel_code_properties);
+    put_u16(&mut descriptor, 58, spec.kernarg_preload);
     descriptor
 }
 
@@ -689,7 +694,7 @@ pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
         || symbol.len() > MAX_SYMBOL
         || !symbol
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'$'))
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'$' | b'-'))
     {
         return Err(format!("unsupported ELF kernel symbol {symbol:?}"));
     }
@@ -1200,6 +1205,7 @@ mod tests {
             rsrc3: r.rsrc3,
             private_segment_size: 0,
             vgpr_spill_count: 0,
+            kernarg_preload: 0,
         };
         let image = write_kernel_object(&spec).unwrap();
         let comment = 0xaf0;
