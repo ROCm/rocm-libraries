@@ -414,7 +414,12 @@ int main(int argc, char* argv[])
         ->check(CLI::IsMember(
             {emulation_quick, emulation_smoke, emulation_regression, emulation_extended}))
         ->expected(1)
-        ->excludes("--test_prob", "--emulation_prob", "--unittest_prob", "--callback_prob", "--R")
+        ->excludes("--test_prob",
+                   "--emulation_prob",
+                   "--unittest_prob",
+                   "--callback_prob",
+                   "--input_preservation_prob",
+                   "--R")
         ->each([&](const std::string& emulationtype) {
             // Emulation test suites focus on well-established software paths.
 
@@ -423,6 +428,9 @@ int main(int argc, char* argv[])
 
             // Callbacks are not an emulation test target.
             callback_prob_factor = 0;
+
+            // Input preservation is not an emulation test target.
+            input_preservation_prob = 0;
 
             // Very large transforms are not an emulation test target.
             quick_tests_only = true;
