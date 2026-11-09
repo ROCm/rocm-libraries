@@ -96,6 +96,7 @@ Use it to see the full picture of an engine. Do not use it to reproduce a tier.
 | hipblaslt-provider | `hipblaslt-provider-external-integration-check` | `HIPBLASLT_ENGINE` | runs with `--gtest_filter=*Matmul*` |
 | hip-kernel-provider | `hip-kernel-provider-external-integration-check` | `HIP_MLOPS_ENGINE` | |
 | hip-kernel-provider | `hip-kernel-provider-asm-sdpa-external-integration-check` | `ASM_SDPA_ENGINE` | |
+| hipblaslt-provider, hip-kernel-provider | `<lane stem>-graph-capture-external-integration-check` | each engine that reports `SUPPORTS_GRAPH_CAPTURE` | runs a few quick suites with `--graph-capture`; see [Check stream capture](#5-check-stream-capture---graph-capture) |
 | hip-kernel-provider | `hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests` | `ASM_SDPA_ENGINE` | GPU reference, C++ SDPA tests only, no tiers |
 
 A lane registered without a tier YAML, like the last row, is a single CTest
@@ -235,9 +236,21 @@ build/bin/hipdnn_integration_tests \
   BUILDABLE) and a skip are not captured, so count the `[ CAPTURE ]` lines.
 - Each captured test prints a `[ CAPTURE ]` line and records the `graph_capture`
   property (`replayed`, `declined`, `failed` or `mismatch`) in `--gtest_output`
-  files.
+  files. The coverage summary counts them on a `Graph capture:` line.
+- A run in which tests passed but no graph was replayed fails with
+  `FATAL: --graph-capture is active ...`: every pass stopped short of the
+  capture step, so the run checked nothing it was asked to. A run in which
+  every test skipped does not fail.
 - It cannot be combined with `--benchmark`: autotune synchronizes and times
   with events, which a capturing stream forbids.
+
+Every engine that reports the note and has a lane also has a graph-capture lane,
+`<lane stem>-graph-capture-external-integration-check`, with the same tiers as
+the other lanes. It runs a few quick bundle suites with `--graph-capture`. Its
+suites are in `GRAPH_CAPTURE_test_categories_integration.yaml`
+(hip-kernel-provider) and `test_categories_graph_capture.yaml`
+(hipblaslt-provider). To add one, see
+[Add a graph-capture lane](adding-tests.md#add-a-graph-capture-lane).
 
 ### The build reads a copy of the bundles
 

@@ -25,6 +25,7 @@
 #include "common/Utilities.hpp"
 #include "harness/Benchmark.hpp"
 #include "harness/Capture.hpp"
+#include "harness/CaptureReport.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
@@ -496,8 +497,10 @@ int main(int argc, char** argv) noexcept
         testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
         listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
         // With --gtest_repeat=N the coverage summary's counts are the last iteration's;
-        // the verifier tally printed beside them has to restart with each iteration too.
+        // the verifier and capture tallies printed beside them have to restart with each
+        // iteration too.
         listeners.Append(new hipdnn_integration_tests::bundle::VerifierTallyIterationReset);
+        listeners.Append(new hipdnn_integration_tests::CaptureTallyIterationReset);
 
         // Create shared handle (triggers engine loading). The guards below own
         // teardown for every exit path from here on, including the outer catch,
@@ -733,6 +736,27 @@ int main(int argc, char** argv) noexcept
                           << verifiers.gpuReference << ", cpu_ref " << verifiers.cpuReference
                           << ", rejected " << verifiers.rejected << ", none " << verifiers.none
                           << "\n";
+            }
+
+            if(graphCapture.settings.has_value())
+            {
+                const auto captures = hipdnn_integration_tests::CaptureTally::get().counts();
+                std::cerr << "Graph capture: replayed " << captures.replayed << ", mismatch "
+                          << captures.mismatch << ", declined " << captures.declined << ", failed "
+                          << captures.failed << "\n";
+
+                // A pass that never reached the capture step (an enforcement-level rung,
+                // or a C++ graph test) checks nothing --graph-capture asked for. A run
+                // whose passes were all of that kind would otherwise report success
+                // having captured nothing. A run where every test skipped is left
+                // alone: on another architecture an engine-pinned lane skips by design.
+                if(passed > 0 && captures.replayed == 0)
+                {
+                    std::cerr << "\nFATAL: --graph-capture is active and " << passed
+                              << " test(s) passed, but not one graph was captured and "
+                                 "replayed.\n";
+                    exitCode = 1;
+                }
             }
         }
 
