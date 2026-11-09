@@ -1816,51 +1816,6 @@ hipDataType derive_unset_aux_type(const Arguments& arg)
     return real_aux_type;
 }
 
-// A function to determine the default compute_input_type
-std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Arguments& arg)
-{
-    static const std::set<hipDataType> supported_compute_input_types = {
-        HIP_R_32F,
-        HIP_R_16BF,
-        HIP_R_16F,
-        HIP_R_8F_E4M3,
-        HIP_R_8F_E5M2,
-        HIP_R_8F_E4M3_FNUZ,
-        HIP_R_8F_E5M2_FNUZ,
-        static_cast<hipDataType>(HIP_R_6F_E2M3),
-        static_cast<hipDataType>(HIP_R_6F_E3M2),
-        static_cast<hipDataType>(HIP_R_4F_E2M1),
-    };
-
-    hipDataType real_compute_input_typeA = arg.compute_input_typeA;
-    hipDataType real_compute_input_typeB = arg.compute_input_typeB;
-
-    if(real_compute_input_typeA != HIPBLASLT_DATATYPE_INVALID
-       && !supported_compute_input_types.count(real_compute_input_typeA))
-        throw std::invalid_argument(
-            "Invalid compute_input_typeA "
-            + std::string(hip_datatype_to_string(real_compute_input_typeA)));
-
-    if(real_compute_input_typeA != HIPBLASLT_DATATYPE_INVALID
-       && !supported_compute_input_types.count(real_compute_input_typeB))
-        throw std::invalid_argument(
-            "Invalid compute_input_typeB "
-            + std::string(hip_datatype_to_string(real_compute_input_typeB)));
-
-    // when compute_input_type type is unset
-    if(real_compute_input_typeA == HIPBLASLT_DATATYPE_INVALID)
-    {
-        real_compute_input_typeA = computeTypeToRealDataType(arg.compute_type);
-    }
-
-    if(real_compute_input_typeB == HIPBLASLT_DATATYPE_INVALID)
-    {
-        real_compute_input_typeB = computeTypeToRealDataType(arg.compute_type);
-    }
-
-    return {real_compute_input_typeA, real_compute_input_typeB};
-}
-
 void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      TiA,
                               hipDataType      TiB,
