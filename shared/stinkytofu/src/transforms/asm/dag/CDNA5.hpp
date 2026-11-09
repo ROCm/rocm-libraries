@@ -1005,7 +1005,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool isPromote(PromotePhase phase) const {
         return promotedPhase_ == PromotePhase::None || promotedPhase_ == phase;
     }
-    DAGNode* extractForcedBarrier();
     std::unordered_map<StinkyInstruction*, BarrierAfterOutput> computeBarrierAfterThresholds(
         IRList::iterator regionStart, IRList::iterator regionEnd);
     std::unordered_map<StinkyInstruction*, BarrierBeforeOutput> computeBarrierBeforeThresholds(
@@ -1944,24 +1943,6 @@ bool CDNA5ReadyQueue::issuableNow(DAGNode* node) const {
     return !destOverlapsActiveWmmaSrc(node);
 }
 
-// Drain barrierQueue to find the lowest-id barrier whose WMMA threshold is met,
-// remove it, and push the rest back. Returns nullptr if no barrier qualifies.
-DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
-    if (barrierQueue.empty() || barrierWmmaThresholds_.empty()) return nullptr;
-
-    DAGNode* forced = nullptr;
-    for (DAGNode* node : barrierQueue) {
-        if (!isBarrierEligibleNow(node)) continue;
-        auto thIt = barrierWmmaThresholds_.find(node->inst);
-        if (thIt != barrierWmmaThresholds_.end() && wmmaIssuedCountThisRegion_ >= thIt->second) {
-            forced = node;
-            break;
-        }
-    }
-    if (forced) barrierQueue.erase(forced);
-    return forced;
-}
-
 // WMMA windows needed to issue dsLoadCount ds_reads at the even-spread density of the region
 // (wmmaTotal / dsTotal windows per ds_load, as DsSpreadPacer plans them).
 int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
@@ -2689,7 +2670,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     if (isPromote(PromotePhase::Barrier) && !barrierQueue.empty()) {
         DAGNode* barrier = nullptr;
         if (promotedPhase_ == PromotePhase::Barrier) {
-            barrier = extractForcedBarrier();  // removes the promoted (threshold-met) node
+            barrier = promotedNode_;
+            barrierQueue.erase(barrier);
         } else {
             for (DAGNode* cand : barrierQueue) {
                 if (!isBarrierEligibleNow(cand)) continue;
