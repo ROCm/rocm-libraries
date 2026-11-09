@@ -9,12 +9,10 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-from rocke.dispatch.core import opt_in_probe
 
-from ..._dense_paged_stand_ins import CacheStandIn, I32DeviceTensor
+from ..._dense_paged_stand_ins import CacheStandIn, I32DeviceTensor, pinned
 from dispatch.attention import (
     AttentionRequest,
-    attention_execution_candidates,
     dispatch_attention,
 )
 
@@ -46,11 +44,6 @@ def _request(arch, **overrides):
     return AttentionRequest(**fields)
 
 
-def _pinned(req, spec_id):
-    candidates = {c.spec_id: c for c in attention_execution_candidates()}
-    return opt_in_probe(req, candidates[spec_id])
-
-
 @pytest.mark.parametrize("arch,spec_id", _CASES)
 @pytest.mark.parametrize(
     "overrides",
@@ -65,7 +58,7 @@ def _pinned(req, spec_id):
 )
 def test_paged_request_builds_a_paged_spec(arch, spec_id, overrides):
     req = _request(arch, **overrides)
-    spec = dispatch_attention(_pinned(req, spec_id)).spec.kernel_spec
+    spec = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
     assert spec.paged and spec.block_size == _BS
     assert spec.num_kv_blocks == _SQ // _BS  # the smallest cache, until binding
     assert not spec.persistent
@@ -76,7 +69,7 @@ def test_paged_request_builds_a_paged_spec(arch, spec_id, overrides):
 )
 def test_persistent_variants_decline_paged(spec_id):
     with pytest.raises(ValueError, match="layout_paged"):
-        dispatch_attention(_pinned(_request("gfx950"), spec_id))
+        dispatch_attention(pinned(_request("gfx950"), spec_id))
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
@@ -92,7 +85,7 @@ def test_persistent_variants_decline_paged(spec_id):
 )
 def test_paged_outside_the_cohort_is_refused(arch, spec_id, overrides, error):
     with pytest.raises(ValueError, match=error):
-        dispatch_attention(_pinned(_request(arch, **overrides), spec_id))
+        dispatch_attention(pinned(_request(arch, **overrides), spec_id))
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
@@ -100,9 +93,9 @@ def test_paged_ragged_query_tail_follows_the_contiguous_kernel(arch, spec_id):
     req = _request(arch, seqlen_q=1088, seqlen_k=1088, sliding_window=0)
     if arch == "gfx942":  # no partial-tile (ragged) body on gfx942
         with pytest.raises(ValueError, match="seqlen_q 1088 is not a multiple of"):
-            dispatch_attention(_pinned(req, spec_id))
+            dispatch_attention(pinned(req, spec_id))
     else:
-        spec = dispatch_attention(_pinned(req, spec_id)).spec.kernel_spec
+        spec = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
         assert spec.paged and spec.ragged
 
 
@@ -116,7 +109,7 @@ def _tiles(arch, spec_id, **overrides):
     req = _request(arch, **{**_SMALL, **overrides})
     tiles = []
     for r in (req, dataclasses.replace(req, layout="auto")):
-        s = dispatch_attention(_pinned(r, spec_id)).spec.kernel_spec
+        s = dispatch_attention(pinned(r, spec_id)).spec.kernel_spec
         tiles.append((s.block_m, s.block_n, getattr(s, "window_wave_skip", False)))
     return tiles
 
@@ -163,14 +156,14 @@ def test_layout_is_matched_like_the_capability(arch, spec_id):
     """The request's layout spelling is normalized as in its feature set, so the
     candidate that matched ``layout_paged`` also builds the paged spec."""
     req = _request(arch, layout=" Paged ")
-    assert dispatch_attention(_pinned(req, spec_id)).spec.kernel_spec.paged
+    assert dispatch_attention(pinned(req, spec_id)).spec.kernel_spec.paged
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
 @pytest.mark.parametrize("block_size", [0, 16.9, "16"])
 def test_malformed_kv_block_size_is_refused(arch, spec_id, block_size):
     with pytest.raises(ValueError, match="kv_block_size"):
-        dispatch_attention(_pinned(_request(arch, kv_block_size=block_size), spec_id))
+        dispatch_attention(pinned(_request(arch, kv_block_size=block_size), spec_id))
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
@@ -181,7 +174,7 @@ def test_binding_retargets_the_cache_and_forwards_the_block_table(arch, spec_id)
     import importlib
 
     ad = importlib.import_module(f"kernels.{arch}.attention_dense")
-    result = dispatch_attention(_pinned(_request(arch), spec_id))
+    result = dispatch_attention(pinned(_request(arch), spec_id))
     num_kv_blocks = 4 * (_SQ // _BS)
     q = SimpleNamespace(shape=(1, _SQ, _HQ, _D))
     cache = CacheStandIn((num_kv_blocks, _BS, _HKV, _D))
@@ -218,7 +211,7 @@ def test_binding_retargets_the_cache_and_forwards_the_block_table(arch, spec_id)
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_binding_and_spec_refuse_non_bool_paged_flags(arch, spec_id):
-    result = dispatch_attention(_pinned(_request(arch), spec_id))
+    result = dispatch_attention(pinned(_request(arch), spec_id))
     cache = CacheStandIn((_SQ // _BS, _BS, _HKV, _D))
     tensors = {"q": None, "k": cache, "v": cache, "out": None}
     with pytest.raises(ValueError, match="must be a bool"):
@@ -230,7 +223,7 @@ def test_binding_and_spec_refuse_non_bool_paged_flags(arch, spec_id):
 @pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_launch_refuses_unknown_keywords(arch, spec_id):
     """A bind-only option passed to launch() is refused, not dropped."""
-    result = dispatch_attention(_pinned(_request(arch), spec_id))
+    result = dispatch_attention(pinned(_request(arch), spec_id))
     cache = CacheStandIn((_SQ // _BS, _BS, _HKV, _D))
     launch = result.bind_torch({"q": None, "k": cache, "v": cache, "out": None}).launch
     for kw in ({"unsafe_skip_paged_value_validation": True}, {"softmax_scale": 0.5}):
@@ -241,7 +234,7 @@ def test_launch_refuses_unknown_keywords(arch, spec_id):
 @pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_bind_refuses_unknown_keywords(arch, spec_id):
     """The unified binding's softmax_scale is refused, not run with 1/sqrt(d)."""
-    result = dispatch_attention(_pinned(_request(arch), spec_id))
+    result = dispatch_attention(pinned(_request(arch), spec_id))
     cache = CacheStandIn((_SQ // _BS, _BS, _HKV, _D))
     with pytest.raises(TypeError, match="softmax_scale"):
         result.bind_torch(
@@ -252,6 +245,6 @@ def test_bind_refuses_unknown_keywords(arch, spec_id):
 @pytest.mark.parametrize("arch", sorted(_PAGED_SPEC_IDS))
 def test_contiguous_dense_spec_ignores_the_block_count(arch):
     spec_id = _PAGED_SPEC_IDS[arch][0]
-    tuning = dispatch_attention(_pinned(_request(arch, layout="auto"), spec_id)).spec
+    tuning = dispatch_attention(pinned(_request(arch, layout="auto"), spec_id)).spec
     assert not tuning.kernel_spec.paged
     assert tuning.with_num_kv_blocks(512) is tuning

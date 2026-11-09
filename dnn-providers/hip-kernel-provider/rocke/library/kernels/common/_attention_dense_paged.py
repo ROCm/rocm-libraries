@@ -111,6 +111,10 @@ def validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged: boo
     ``[0, num_kv_blocks)``, and ``kv_lens[i]`` must equal ``seqlen_kv``, since the
     kernel visits all ``seqlen_kv`` keys.
     """
+    if type(validate_paged) is not bool:
+        raise ValueError(
+            f"validate_paged must be a bool, got {type(validate_paged).__name__}"
+        )
     if spec.paged and (block_tables is None or kv_lens is None):
         raise ValueError("paged=True requires block_tables and kv_lens")
     if not spec.paged and (block_tables is not None or kv_lens is not None):

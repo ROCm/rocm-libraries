@@ -153,7 +153,7 @@ class TestDensePagedLaunch(unittest.TestCase):
         """Inputs the kernel cannot read as laid out -- block_tables / kv_lens that are
         not [batch, >= pages] / [batch] int32 arrays on the K/V device, a strided K/V
         cache or a V cache off K's device -- are rejected from metadata alone, even
-        with validate_paged=False.
+        with validate_paged=False; a validate_paged that is no bool is rejected too.
         Host-only: tensor stand-ins, the check raises before compile."""
         from types import SimpleNamespace
 
@@ -243,6 +243,22 @@ class TestDensePagedLaunch(unittest.TestCase):
                             block_tables=i32(table),
                             kv_lens=i32(lens),
                             validate_paged=False,
+                        )
+            for flag in (None, 0, 1, "no"):
+                with self.subTest(arch=arch, validate_paged=flag):
+                    with self.assertRaisesRegex(
+                        ValueError, "validate_paged must be a bool"
+                    ):
+                        ad.run_attention_dense_torch(
+                            spec=spec,
+                            q=q,
+                            k=cache,
+                            v=cache,
+                            out=q,
+                            scale=1.0,
+                            block_tables=i32(table),
+                            kv_lens=i32(lens),
+                            validate_paged=flag,
                         )
 
     def test_dense_paged_launcher_validates_block_table_bounds(self):

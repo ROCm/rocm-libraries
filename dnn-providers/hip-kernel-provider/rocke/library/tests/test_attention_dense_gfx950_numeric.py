@@ -32,6 +32,8 @@ from kernels.gfx950.attention_dense import (
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
+from ._dense_paged_gpu import paged_cache, run_dispatched_paged  # noqa: E402
+
 
 def _gpu_ready():
     """True only on a gfx950 box with ROCm torch. Gate on ``gcnArchName`` (the ISA
@@ -2109,26 +2111,6 @@ class TestDenseLseNumeric:
                     _DENSE_LAUNCHER_CACHE[key] = entry
 
 
-def _paged_cache(k, v, block_size):
-    """Scatter one sequence's K/V into pages at permuted ids of a cache twice the
-    needed size whose unused pages are NaN, so a wrong page or in-page row reads a
-    NaN page or the wrong keys rather than a near miss."""
-    import torch
-
-    _, sk, hkv, d = k.shape
-    npages = sk // block_size
-    phys = torch.randperm(2 * npages, device=k.device)[:npages]
-    k_cache = torch.full(
-        (2 * npages, block_size, hkv, d), float("nan"), device=k.device, dtype=k.dtype
-    )
-    v_cache = torch.full_like(k_cache, float("nan"))
-    k_cache[phys] = k[0].view(npages, block_size, hkv, d)
-    v_cache[phys] = v[0].view(npages, block_size, hkv, d)
-    block_tables = phys.to(torch.int32).view(1, npages).contiguous()
-    kv_lens = torch.tensor([sk], device=k.device, dtype=torch.int32)
-    return k_cache, v_cache, block_tables, kv_lens
-
-
 class TestDensePagedNumeric:
     """Paged K/V (block_tables indirection) on the non-persistent dense body."""
 
@@ -2173,50 +2155,10 @@ class TestDensePagedNumeric:
     def test_dispatched_paged(self, spec_id):
         """Request -> dispatch -> bind -> launch, with the block count taken from the
         cache at bind."""
-        import torch
-        from dispatch.attention import (
-            AttentionRequest,
-            attention_execution_candidates,
-            dispatch_attention,
-        )
-
-        sq, hq, hkv, d, window = 2048, 16, 4, 128, 1024
-        candidate = next(
-            c for c in attention_execution_candidates() if c.spec_id == spec_id
-        )
-        result = dispatch_attention(
-            AttentionRequest(
-                batch=1,
-                nhead_q=hq,
-                nhead_k=hkv,
-                seqlen_q=sq,
-                seqlen_k=sq,
-                hdim_q=d,
-                hdim_v=d,
-                arch="gfx950",
-                mask_type=1,
-                dtype="fp16",
-                sliding_window=window,
-                layout="paged",
-                kv_block_size=16,
-                algorithm=candidate.algorithm,
-                spec_id=spec_id,
-            )
-        )
-        torch.manual_seed(0)
-        q = torch.randn(1, sq, hq, d, device="cuda", dtype=torch.float16)
-        k = torch.randn(1, sq, hkv, d, device="cuda", dtype=torch.float16)
-        v = torch.randn_like(k)
-        k_cache, v_cache, block_tables, kv_lens = _paged_cache(k, v, 16)
-        out = torch.empty_like(q)
-        tensors = {"q": q, "k": k_cache, "v": v_cache, "out": out}
-        result.bind_torch(
-            {**tensors, "block_tables": block_tables, "kv_lens": kv_lens}
-        ).launch()
-        torch.cuda.synchronize()
-
+        window = 1024
+        q, k, v, out = run_dispatched_paged("gfx950", spec_id, window=window)
         assert torch.isfinite(out).all()
-        scale = 1.0 / math.sqrt(d)
+        scale = 1.0 / math.sqrt(q.shape[-1])
         ref = _standard_reference(q, k, v, scale, sliding_window=window)
         assert (out.float() - ref).abs().max().item() < _tolerance("fp16")
 
@@ -2233,7 +2175,7 @@ class TestDensePagedNumeric:
         k = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
         v = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
 
-        k_cache, v_cache, block_tables, kv_lens = _paged_cache(k, v, block_size)
+        k_cache, v_cache, block_tables, kv_lens = paged_cache(k, v, block_size)
         num_kv_blocks = k_cache.shape[0]
 
         # The shipped paged spec (its tile can differ from the contiguous one's),
@@ -2275,8 +2217,8 @@ class TestDensePagedNumeric:
         assert torch.isfinite(paged_out).all(), f"{name}: read a NaN (unused) page"
         assert torch.equal(paged_out, dense_out), f"{name}: paged != dense bits"
         ref = _standard_reference(q, k, v, scale, sliding_window=window)
-        # A row whose window holds no key has no SDPA reference (NaN); the
-        # bit-exact comparison above covers it.
+        # A row whose window holds no key has no SDPA reference (NaN); its output
+        # must be zero.
         qi = torch.arange(sq, device="cuda").view(-1, 1)
         ki = torch.arange(sk, device="cuda").view(1, -1)
         keep = ki <= qi
@@ -2285,6 +2227,9 @@ class TestDensePagedNumeric:
         live = keep.any(dim=1)
         max_abs = (ref - paged_out.float())[:, live].abs().max().item()
         assert max_abs < _tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+        if not live.all():
+            worst = paged_out.float()[:, ~live].abs().max().item()
+            assert worst == 0.0, f"{name}: {int((~live).sum())} keyless rows: {worst}"
 
 
 # Cross-length top-left (unshifted diagonal): sq < sk and sq > sk, ragged and

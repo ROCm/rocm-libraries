@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """Host-only stand-ins for the GPU tensors a paged dense launch takes, and the
-per-arch dense spec lookup the paged host tests share.
+per-arch dense spec and pinned dispatch lookups the paged tests share.
 
 The stand-ins expose just what the launcher's checks read (shape, dtype, device,
 strides, indexing, values), so the paged launch validation is testable without torch
@@ -15,6 +15,16 @@ def dense_arch_spec_class(module):
     return (
         getattr(module, "Gfx942AttentionDenseSpec", None) or module.AttentionDenseSpec
     )
+
+
+def pinned(req, spec_id):
+    """``req`` pinned to the execution candidate ``spec_id`` (``KeyError`` names an
+    unknown id)."""
+    from dispatch.attention import attention_execution_candidates
+    from rocke.dispatch.core import opt_in_probe
+
+    candidates = {c.spec_id: c for c in attention_execution_candidates()}
+    return opt_in_probe(req, candidates[spec_id])
 
 
 class I32DeviceTensor:
