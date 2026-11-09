@@ -6,7 +6,9 @@
 #include <roc/hostnumerics/amd_gpu_layout/operand.hpp>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
+#include "copy_permutation.hpp"
 #include "detail/checked_arithmetic.hpp"
 
 namespace roc::hostnumerics::amd_gpu_layout::detail {
@@ -52,23 +54,21 @@ void requireDivisible(size_t extent, size_t tile, const char* message) {
     if (extent % tile != 0) throw std::runtime_error(message);
 }
 
-// Factors of the natural element index, fastest first, and the order in which
-// the physical layout stores those factors, fastest first.
-struct OperandPermutation {
-    std::vector<size_t> sizes;
-    std::vector<size_t> physicalOrder;
-};
-
-OperandPermutation operandPermutation(OperandExtents extents,
+// Factor the contiguous [MN, K] input into tile and lane axes. The shapes and
+// permutations both list axes from slowest to fastest.
+ReshapePermutation operandPermutation(OperandExtents extents,
                                       const std::optional<OperandSwizzle>& swizzle,
                                       const std::optional<OperandTile>& tile) {
+    const Shape natural{extents.mn, extents.k};
     if (tile && (tile->k == 0 || tile->mn == 0))
         throw std::runtime_error("Operand tile extents must be nonzero.");
 
     if (!swizzle) {
         requireDivisible(extents.k, tile->k, "Operand K extent must be divisible by the tile.");
         requireDivisible(extents.mn, tile->mn, "Operand MN extent must be divisible by the tile.");
-        return {{tile->k, extents.k / tile->k, tile->mn, extents.mn / tile->mn}, {0, 2, 1, 3}};
+        return {natural, natural,
+                Shape{extents.mn / tile->mn, tile->mn, extents.k / tile->k, tile->k},
+                Permutation{0, 2, 1, 3}};
     }
 
     const SwizzleFactors factors = swizzleFactors(*swizzle);
@@ -77,18 +77,22 @@ OperandPermutation operandPermutation(OperandExtents extents,
                          "Operand K extent must be divisible by the swizzle tile.");
         requireDivisible(extents.mn, swizzle->tileMN,
                          "Operand MN extent must be divisible by the swizzle tile.");
-        OperandPermutation permutation{
-            {factors.vgprIndex, factors.vgprBlock, factors.simdBlock, extents.k / swizzle->tileK,
-             lanesPerSimd, factors.simdIndexIndex, factors.simdIndexBlock,
-             extents.mn / swizzle->tileMN},
-            {}};
+        const Shape factorsShape{extents.mn / swizzle->tileMN,
+                                 factors.simdIndexBlock,
+                                 factors.simdIndexIndex,
+                                 lanesPerSimd,
+                                 extents.k / swizzle->tileK,
+                                 factors.simdBlock,
+                                 factors.vgprBlock,
+                                 factors.vgprIndex};
+        std::vector<size_t> order;
         if (swizzle->tileMN == 64)
-            permutation.physicalOrder = {6, 1, 2, 3, 4, 5, 0, 7};
+            order = {0, 7, 2, 3, 4, 5, 6, 1};
         else if (swizzle->subTileK == 4)
-            permutation.physicalOrder = {6, 2, 1, 3, 4, 5, 0, 7};
+            order = {0, 7, 2, 3, 4, 6, 5, 1};
         else
-            permutation.physicalOrder = {1, 2, 0, 3, 4, 5, 6, 7};
-        return permutation;
+            order = {0, 1, 2, 3, 4, 7, 5, 6};
+        return {natural, natural, factorsShape, Permutation(std::move(order))};
     }
 
     requireDivisible(tile->k, swizzle->tileK,
@@ -97,18 +101,24 @@ OperandPermutation operandPermutation(OperandExtents extents,
                      "Operand tile MN extent must be divisible by the swizzle tile.");
     requireDivisible(extents.k, tile->k, "Operand K extent must be divisible by the tile.");
     requireDivisible(extents.mn, tile->mn, "Operand MN extent must be divisible by the tile.");
-    OperandPermutation permutation{
-        {factors.vgprIndex, factors.vgprBlock, factors.simdBlock, tile->k / swizzle->tileK,
-         extents.k / tile->k, lanesPerSimd, factors.simdIndexIndex, factors.simdIndexBlock,
-         tile->mn / swizzle->tileMN, extents.mn / tile->mn},
-        {}};
+    const Shape factorsShape{extents.mn / tile->mn,
+                             tile->mn / swizzle->tileMN,
+                             factors.simdIndexBlock,
+                             factors.simdIndexIndex,
+                             lanesPerSimd,
+                             extents.k / tile->k,
+                             tile->k / swizzle->tileK,
+                             factors.simdBlock,
+                             factors.vgprBlock,
+                             factors.vgprIndex};
+    std::vector<size_t> order;
     if (swizzle->tileMN == 64)
-        permutation.physicalOrder = {7, 1, 2, 3, 5, 6, 0, 8, 4, 9};
+        order = {0, 5, 1, 9, 3, 4, 6, 7, 8, 2};
     else if (swizzle->subTileK == 4)
-        permutation.physicalOrder = {7, 2, 1, 3, 5, 6, 0, 8, 4, 9};
+        order = {0, 5, 1, 9, 3, 4, 6, 8, 7, 2};
     else
-        permutation.physicalOrder = {1, 2, 0, 3, 5, 6, 7, 8, 4, 9};
-    return permutation;
+        order = {0, 5, 1, 2, 3, 4, 6, 9, 7, 8};
+    return {natural, natural, factorsShape, Permutation(std::move(order))};
 }
 }  // namespace
 
@@ -130,25 +140,8 @@ void copyOperandBytes(const std::byte* operand, std::byte* output, size_t elemen
         return;
     }
 
-    const OperandPermutation permutation = operandPermutation(extents, swizzle, tile);
-    const std::vector<size_t>& sizes = permutation.sizes;
-    std::vector<size_t> physicalStrides(sizes.size());
-    size_t stride = 1;
-    for (const size_t dimension : permutation.physicalOrder) {
-        physicalStrides[dimension] = stride;
-        stride *= sizes[dimension];
-    }
-
-    for (size_t source = 0; source < elementCount; ++source) {
-        size_t remaining = source;
-        size_t destination = 0;
-        for (size_t dimension = 0; dimension < sizes.size(); ++dimension) {
-            destination += remaining % sizes[dimension] * physicalStrides[dimension];
-            remaining /= sizes[dimension];
-        }
-        std::memcpy(output + destination * elementSize, operand + source * elementSize,
-                    elementSize);
-    }
+    const auto transform = operandPermutation(extents, swizzle, tile);
+    copyPermutationBytes(operand, output, elementSize, transform);
 }
 
 }  // namespace roc::hostnumerics::amd_gpu_layout::detail

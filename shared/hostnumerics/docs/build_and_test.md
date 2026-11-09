@@ -71,18 +71,23 @@ target_link_libraries(my_target PRIVATE roc::hostnumerics)
 ```
 
 The installed package exports `roc::hostnumerics-core`, `roc::hostnumerics`
-and `roc::hostnumerics-amd-gpu-layout`. The first two are currently `INTERFACE`
-libraries exposing the header-only core APIs, and the operations target links
-core transitively. Their responsibilities, as implementation lands, are:
+and `roc::hostnumerics-amd-gpu-layout`. Core is a static library containing the
+generic reshape/permutation descriptor and exposing the scalar and logical
+layout headers. The operations target is currently an `INTERFACE` library that
+links Core transitively. Their responsibilities, as implementation lands, are:
 
 | Target | Responsibility |
 | --- | --- |
-| `roc::hostnumerics-core` | Scalar types and conversions, plus shape, layout, and tensor storage. |
+| `roc::hostnumerics-core` | Scalar types and conversions, shape, logical layouts, generic reshape/permutation descriptors, and tensor storage. |
 | `roc::hostnumerics` | Input generation, reference operations, and numerical comparison. |
 | `roc::hostnumerics-amd-gpu-layout` | CPU conversions of MX scales and operands to the physical storage orders AMD GPU kernels read. |
 
-The AMD GPU layout target is a static library that does not depend on the other
-targets.
+The AMD GPU layout target is a static library with a public dependency on Core.
+Linking it also provides the descriptor API exposed by an MX storage plan; an
+installed consumer needs only `roc::hostnumerics-amd-gpu-layout` in its link
+list. Both libraries require only the C++ standard library. Layout copies are
+serial. See [physical layouts](physical_layouts.md) for the distinction between
+the generic descriptor and kernel presets.
 
 The Python package installs under the prefix's library directory in
 `python<major>.<minor>/site-packages`. Add that directory to `PYTHONPATH` to

@@ -19,12 +19,12 @@ configure_file(
     @ONLY
 )
 
-# Consumers needing only scalar and tensor APIs can link core directly.
-add_library(hostnumerics-core INTERFACE)
+# Scalar and layout APIs, including the generic physical-layout descriptor.
+add_library(hostnumerics-core STATIC src/reshape_permutation.cpp)
 add_library(roc::hostnumerics-core ALIAS hostnumerics-core)
-target_compile_features(hostnumerics-core INTERFACE cxx_std_20)
+target_compile_features(hostnumerics-core PUBLIC cxx_std_20)
 target_sources(hostnumerics-core
-    INTERFACE
+    PUBLIC
         FILE_SET HEADERS
         BASE_DIRS
             "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -42,6 +42,14 @@ target_sources(hostnumerics-core
             include/roc/hostnumerics/detail/prime.hpp
             include/roc/hostnumerics/expected.hpp
             include/roc/hostnumerics/layout.hpp
+            include/roc/hostnumerics/reshape_permutation.hpp
+)
+
+set_target_properties(hostnumerics-core
+    PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        POSITION_INDEPENDENT_CODE ON
+        VISIBILITY_INLINES_HIDDEN ON
 )
 
 add_library(hostnumerics INTERFACE)
@@ -49,14 +57,13 @@ add_library(roc::hostnumerics ALIAS hostnumerics)
 target_link_libraries(hostnumerics INTERFACE roc::hostnumerics-core)
 
 # CPU conversions to the physical storage layouts that AMD GPU kernels read.
-# They need only the standard library, so this target does not link the other
-# HostNumerics targets.
+# Kernel presets use the generic reshape/permutation descriptor in Core.
 add_library(hostnumerics-amd-gpu-layout STATIC
     src/amd_gpu_layout/mx.cpp
     src/amd_gpu_layout/operand.cpp
 )
 add_library(roc::hostnumerics-amd-gpu-layout ALIAS hostnumerics-amd-gpu-layout)
-target_compile_features(hostnumerics-amd-gpu-layout PUBLIC cxx_std_20)
+target_link_libraries(hostnumerics-amd-gpu-layout PUBLIC roc::hostnumerics-core)
 target_include_directories(hostnumerics-amd-gpu-layout
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )

@@ -5,41 +5,41 @@
 
 #include <array>
 #include <cstddef>
-#include <string_view>
+#include <roc/hostnumerics/reshape_permutation.hpp>
 #include <vector>
 
 namespace roc::hostnumerics::amd_gpu_layout {
 
+// Presets for the global-memory storage a kernel expects. A matrix instruction
+// fixes the association of scales with operand values in registers; its kernel
+// chooses a memory layout that reduces the rearrangement needed after loads.
+// These names identify current storage conventions, not GPU architectures.
 enum class MxScaleStorageLayout {
-    // Contiguous [slow, fast] scale bytes with no architecture-specific padding or permutation.
     Natural,
 
-    // GFX950 block-scale ABI: pad the natural dimensions to multiples of 32 x 8 and permute the
-    // bytes of each 32 x 8 tile into the order in which the kernel's lanes read them.
-    Gfx950,
+    // Pad [rows, K blocks] to multiples of [32, 8], reshape to
+    // [rows/32, 2, 16, blocks/8, 2, 4], then permute (0, 3, 5, 2, 4, 1).
+    // Each 32 x 8 tile is contiguous, with row-half changing fastest.
+    Tile32x8,
 
-    // GFX1250 block-scale ABI: tile the padded fast dimension in groups of 128 / blockSize,
-    // ordered as [fast tile, slow coordinate, coordinate within the tile].
-    Gfx1250,
+    // With q = 128 / blockSize, pad the fast dimension to q, reshape to
+    // [slow, fast/q, q], then permute (1, 0, 2). Each group of q scales is
+    // contiguous. Current kernels use blocks of 16 or 32 data elements.
+    FastDimensionTiles,
 };
-
-// Maps an AMD GPU architecture name, as a device reports it, to its required
-// physical MX scale layout. The name must be exactly "gfx950", "gfx1250" or
-// "gfx1250-strict", optionally followed by ':' and feature flags such as
-// "gfx950:sramecc+:xnack-". Any other name, including a longer name that merely
-// contains one of these, maps to Natural.
-MxScaleStorageLayout mxScaleStorageLayoutForArchitectureName(std::string_view architectureName);
 
 // Storage sizes for converting one natural rank-two MX scale tensor, with one
 // byte per scale, to the byte layout an AMD GPU kernel reads.
 class MxScaleStoragePlan {
    public:
-    // `naturalShape` is [slow, fast]. `blockSize` is the number of data
-    // elements sharing each scale and must be nonzero. Gfx1250 groups
+    // For one scale per row and block of K values, naturalShape is
+    // [rows, ceil(K / blockSize)]. Callers first put their scales in the
+    // [slow, fast] order the selected kernel expects. blockSize is the number of data
+    // elements sharing each scale and must be nonzero. FastDimensionTiles groups
     // 128 / blockSize scales along the fast dimension and requires a block size
-    // of 16 or 32; the Natural and Gfx950 byte layouts do not depend on it.
+    // of 16 or 32; the Natural and Tile32x8 byte layouts do not depend on it.
     // Throws std::runtime_error for a zero or unsupported block size, an invalid
-    // layout, or a byte count that overflows size_t.
+    // layout, or shapes whose sizes or strides overflow the descriptor's limits.
     MxScaleStoragePlan(std::array<size_t, 2> naturalShape, size_t blockSize,
                        MxScaleStorageLayout layout);
 
@@ -47,25 +47,28 @@ class MxScaleStoragePlan {
         return m_layout;
     }
     std::array<size_t, 2> naturalShape() const {
-        return m_naturalShape;
+        return {m_transform.naturalShape()[0], m_transform.naturalShape()[1]};
     }
     size_t blockSize() const {
         return m_blockSize;
     }
     size_t naturalByteCount() const {
-        return m_naturalByteCount;
+        return m_transform.naturalElementCount();
     }
     // Includes any zero padding the layout requires.
     size_t physicalByteCount() const {
-        return m_physicalByteCount;
+        return m_transform.physicalElementCount();
+    }
+
+    // The complete padding, reshape and axis order, in scale-element units.
+    const ReshapePermutation& transform() const {
+        return m_transform;
     }
 
    private:
     MxScaleStorageLayout m_layout = MxScaleStorageLayout::Natural;
-    std::array<size_t, 2> m_naturalShape{};
     size_t m_blockSize = 0;
-    size_t m_naturalByteCount = 0;
-    size_t m_physicalByteCount = 0;
+    ReshapePermutation m_transform;
 };
 
 // Copies natural [slow, fast] scale bytes into a plan's physical layout and
