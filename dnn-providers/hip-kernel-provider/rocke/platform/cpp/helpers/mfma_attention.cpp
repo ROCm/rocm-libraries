@@ -7,8 +7,6 @@
  * Python builder-call order, operands and compile-time constants op-for-op so
  * the emitted IR is byte-identical to the Python helper's emission.
  */
-#include "rocke/helper_rocke.helpers.mfma_attention.h"
-
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,11 +16,12 @@
 #include "rocke/helper_rocke.helpers.atoms.h"
 #include "rocke/helper_rocke.helpers.attention.h"
 #include "rocke/helper_rocke.helpers.distribution.h"
+#include "rocke/helper_rocke.helpers.mfma_attention.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* Largest per-lane fragment / accumulator length the attention atoms produce.
- * fp8/bf8 16x16x32 -> a_per_lane=8; wmma f16 -> a_frag_len=16, c_frag_len=8.
+ * fp8/bf8 16x16x32 -> a_per_lane=8; wmma f16 -> a_frag_len=16, dst.frag_len=8.
  * head_size up to 256 -> n_pv_atoms up to 16, n_qk_atoms up to 16. */
 #define ROCKE_ATTN_MAX_LANE 16
 #define ROCKE_ATTN_MAX_ATOMS 16
@@ -830,10 +829,10 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     }
     const bool fp8_kv = p->kv_dtype != NULL && strcmp(p->kv_dtype, "fp8e4m3") == 0;
 
-    const rocke_layout_map_t* a_map = op->a_layout;
-    const rocke_layout_map_t* c_map = op->c_layout;
-    int a_frag = op->a_frag_len;
-    int c_frag = op->c_frag_len;
+    const rocke_layout_map_t* a_map = op->srcs[0].layout;
+    const rocke_layout_map_t* c_map = op->dst.layout;
+    int a_frag = op->srcs[0].frag_len;
+    int c_frag = op->dst.frag_len;
     int n_dk = head_size / 16;
     int v_total = p->wmma_v_head_size != 0 ? p->wmma_v_head_size : head_size;
     int value_head_size = p->wmma_value_tile_size != 0 ? p->wmma_value_tile_size : v_total;
@@ -1013,7 +1012,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     {
         snprintf(name_buf[n_ia], sizeof(name_buf[0]), "acc%d", d);
         iter_args[n_ia].name = name_buf[n_ia];
-        iter_args[n_ia].init = rocke_b_zero_vec_f32(b, c_frag);
+        iter_args[n_ia].init = rocke_b_zero_vec_f32(b, op->srcs[2].frag_len);
         ++n_ia;
     }
 
@@ -1096,7 +1095,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             if(k_half_off != NULL)
                 k_elem_base = rocke_b_add(b, k_elem_base, k_half_off);
         }
-        rocke_value_t* score = rocke_b_zero_vec_f32(b, c_frag);
+        rocke_value_t* score = rocke_b_zero_vec_f32(b, op->srcs[2].frag_len);
         for(int d = 0; d < n_dk; ++d)
         {
             rocke_value_t* k_frag;
