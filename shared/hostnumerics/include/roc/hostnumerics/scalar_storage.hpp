@@ -247,11 +247,7 @@ inline void writePackedCode(std::span<std::byte> storage, uint64_t bitOffset, ui
 }
 }  // namespace detail
 
-// encodeScalar converts value to type and writes element index, leaving every
-// other bit unchanged. decodeScalar reads element index and converts it to Target.
-// Both functions support every concrete ScalarType: Boolean, signed and unsigned
-// integers, floating types, scales and complex types. ScalarType::Count and unnamed
-// enum values are invalid. Source and Target must be supported NativeScalar types.
+// Every ScalarType is supported.
 //
 // Examples with options{IntegerRounding::NearestEven, IntegerOverflow::Saturate}:
 //
