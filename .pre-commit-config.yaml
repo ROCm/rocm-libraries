@@ -211,15 +211,18 @@ repos:
         pass_filenames: false
         files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(render_support_matrix|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py|migration-scripts/bundle_utils\.py)$
 
-      # SUPPORT_MATRIX_OVERVIEW.md *is* committed, so check it for staleness.
-      # It is the by-API-option view, rendered by support_features/feature_matrix.py
-      # through the same support_matrix_units.py collection.
-      - id: check-support-matrix-overview
-        name: Support matrix overview is current (RFC 0015)
-        entry: python dnn-providers/integration-tests/scripts/support_features/feature_matrix.py --check
+      # SUPPORT_MATRIX_OVERVIEW.md is committed but refreshed on its own, not
+      # with each claim change: every claim PR regenerating it made concurrent
+      # claim PRs conflict on it. So, like render-support-matrix, this only
+      # renders and discards, to catch errors in support_features/ and the
+      # sidecars it reads. It goes through the same support_matrix_units.py
+      # collection.
+      - id: render-support-matrix-overview
+        name: Support matrix overview renders without errors (RFC 0015)
+        entry: python dnn-providers/integration-tests/scripts/support_features/feature_matrix.py --output -
         language: python
         pass_filenames: false
-        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(support_features/\w+|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py|migration-scripts/bundle_utils\.py|SUPPORT_MATRIX_OVERVIEW\.md)$
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(support_features/\w+|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py|migration-scripts/bundle_utils\.py)$
 
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)

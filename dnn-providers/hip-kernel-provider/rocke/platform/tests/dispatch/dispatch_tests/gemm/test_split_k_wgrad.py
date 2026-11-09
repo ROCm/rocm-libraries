@@ -20,6 +20,7 @@ from rocke.helpers.split_k import (
     WGRAD_TARGET_WAVES_PER_CU,
     select_split_k_wgrad,
 )
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 # Per-group wgrad GEMM dims for the grouped conv shapes the library benchmarks
 # cover: (wg_M, wg_N, wg_K, groups). All are depthwise (cpg == kpg == 1) except
@@ -60,17 +61,24 @@ class TestUngroupedUnchanged(unittest.TestCase):
     """The legacy branch. These values predate the groups-aware path."""
 
     def test_default_groups_is_the_ck_formula(self):
-        # floor(waves_per_cu * num_cus / base_grid), num_cus(gfx950) = 256.
-        for tile, expected in [((64, 64, 64), 3), ((128, 128, 32), 14)]:
-            d = _pick("ungrouped", tile)
-            base_grid = math.ceil(256 / tile[0]) * math.ceil(2304 / tile[1])
-            self.assertEqual(d.base_grid, base_grid)
-            self.assertEqual(
-                d.split_k,
-                max(1, (WGRAD_ASSUMED_WAVES_PER_CU * 256) // base_grid),
-                f"ungrouped decision moved at tile {tile}",
-            )
-            self.assertEqual(d.split_k, expected)
+        # floor(waves_per_cu * num_cus / base_grid), num_cus(gfx942) = 304 and
+        # num_cus(gfx950) = 256.
+        expected_degrees = {
+            "gfx942": (304, [((64, 64, 64), 4), ((128, 128, 32), 16)]),
+            "gfx950": (256, [((64, 64, 64), 3), ((128, 128, 32), 14)]),
+        }
+        for arch, (num_cus, cases) in expected_degrees.items():
+            for tile, expected in cases:
+                with self.subTest(arch=arch, tile=tile):
+                    d = _pick("ungrouped", tile, arch=arch)
+                    base_grid = math.ceil(256 / tile[0]) * math.ceil(2304 / tile[1])
+                    self.assertEqual(d.base_grid, base_grid)
+                    self.assertEqual(
+                        d.split_k,
+                        max(1, (WGRAD_ASSUMED_WAVES_PER_CU * num_cus) // base_grid),
+                        f"ungrouped decision moved at tile {tile}",
+                    )
+                    self.assertEqual(d.split_k, expected)
 
     def test_groups_one_ignores_block_size(self):
         # block_size only feeds the grouped occupancy target. If it ever leaks
@@ -371,21 +379,23 @@ class TestGfx1250Policy(unittest.TestCase):
         self.assertIn("CK formula", d.reason)
 
     def test_other_arches_ignore_dtype(self):
-        # The policy is gfx1250-only: gfx950 gives the same degree with or
-        # without a dtype.
-        kw = dict(
-            wg_M=128,
-            wg_N=9 * 128,
-            wg_K=42 * 120 * 160,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-            arch="gfx950",
-        )
-        self.assertEqual(
-            select_split_k_wgrad(**kw).split_k,
-            select_split_k_wgrad(**kw, dtype_d="bf16").split_k,
-        )
+        # The policy is gfx1250-only: gfx942 and gfx950 give the same degree
+        # with or without a dtype.
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                kw = dict(
+                    wg_M=128,
+                    wg_N=9 * 128,
+                    wg_K=42 * 120 * 160,
+                    tile_m=64,
+                    tile_n=64,
+                    tile_k=64,
+                    arch=arch,
+                )
+                self.assertEqual(
+                    select_split_k_wgrad(**kw).split_k,
+                    select_split_k_wgrad(**kw, dtype_d="bf16").split_k,
+                )
 
 
 if __name__ == "__main__":

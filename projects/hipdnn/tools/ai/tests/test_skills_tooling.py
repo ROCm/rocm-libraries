@@ -294,12 +294,15 @@ def test_validate_skill_ignores_claude_fields_outside_frontmatter(
     assert any("allowed-tools" in error for error in errors)
 
 
-def test_expected_scripts_cover_every_deep_review_script(validate_mod):
-    """A deep-review script added or removed shows up in EXPECTED_SCRIPTS."""
-    on_disk = {
-        p.name for p in (SKILLS_DIR / "hipdnn-deep-review" / "scripts").glob("*.py")
-    }
-    assert set(validate_mod.EXPECTED_SCRIPTS["hipdnn-deep-review"]) == on_disk
+@pytest.mark.parametrize("skill", ["hipdnn-deep-review", "hipdnn-ingestor-impact"])
+def test_expected_scripts_cover_every_script_of_a_fully_listed_skill(
+    validate_mod, skill
+):
+    """A script added or removed in these skills' scripts/ dir shows up in EXPECTED_SCRIPTS."""
+    # catches: deleting the skill's EXPECTED_SCRIPTS entry (validate-skills then stops
+    # checking its scripts exist) or shipping a script the entry never lists.
+    on_disk = {p.name for p in (SKILLS_DIR / skill / "scripts").glob("*.py")}
+    assert set(validate_mod.EXPECTED_SCRIPTS[skill]) == on_disk
 
 
 def test_symlink_target_recognises_a_git_materialized_link(validate_mod, tmp_path):
