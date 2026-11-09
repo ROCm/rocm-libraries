@@ -820,6 +820,9 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
         kv0_ = b.mul(t, ci(T))
         phys = b.readfirstlane(page_of(kv0_, valid))
         in_cache = page_ok(phys)
+        # A page id outside [0, num_blocks) is based at page 0 instead (its
+        # resource has no records), so no out-of-cache pointer is formed.
+        phys = b.select(in_cache, phys, c0)
         page_off = b.mul(
             b.mul(b.zext(phys, I64), b.zext(blk_stride, I64)), b.const_i64(kv_eb)
         )
