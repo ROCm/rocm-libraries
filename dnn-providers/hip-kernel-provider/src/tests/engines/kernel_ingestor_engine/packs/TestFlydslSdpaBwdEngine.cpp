@@ -117,28 +117,6 @@ SdpaBwdSpec specOf(const Shape& shape, DataType dtype = DataType::HALF)
     return spec;
 }
 
-SdpaBwdSpec baseSpec()
-{
-    return SdpaBwdSpec{};
-}
-
-SdpaBwdSpec withCausal(const SdpaBwdSpec& spec)
-{
-    return spec.withEdit([](SdpaBwdGraph& g) { g.attributes.causalMask = true; });
-}
-
-/// A bias of the graph's full dims and, with @p withDbias, its gradient.
-SdpaBwdSpec withBias(const SdpaBwdSpec& spec, bool withDbias, const std::vector<int64_t>& dims = {})
-{
-    return spec.withEdit([=](SdpaBwdGraph& g) {
-        addBias(g, dims);
-        if(withDbias)
-        {
-            addDbias(g);
-        }
-    });
-}
-
 SdpaBwdSpec withDropout(const SdpaBwdSpec& spec,
                         float probability = 0.2F,
                         DataType seedType = DataType::INT64,
@@ -286,21 +264,6 @@ bool anyServes(const SdpaBwdSpec& spec, const std::vector<RowSpec>& rows)
 // Launches
 // ---------------------------------------------------------------------------
 
-/// A fake device address per tensor uid, and a workspace base; only ever compared.
-uint64_t ptrOf(int64_t uid)
-{
-    return static_cast<uint64_t>(uid) * 0x100000;
-}
-
-constexpr uint64_t WORKSPACE = 0x70000000;
-
-void* asPointer(uint64_t address)
-{
-    // A fake address, only ever compared and offset into, never dereferenced.
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    return reinterpret_cast<void*>(static_cast<uintptr_t>(address));
-}
-
 /// Every uid the test graphs use, and the host address of a runtime scale when one is given.
 std::vector<hipdnnPluginDeviceBuffer_t> buffersFor(float* hostScale = nullptr)
 {
@@ -324,20 +287,6 @@ FlydslSdpaBwdMergedLaunchDump dumpOf(const SdpaBwdSpec& spec,
     const GraphFixture fixture(buildSdpaBwdGraph(spec));
     return describeFlydslSdpaBwdMergedLaunchForTesting(
         fixture.context(), makeRow(row), buffersFor(hostScale), asPointer(workspace));
-}
-
-void expectBadParam(const std::function<void()>& action)
-{
-    try
-    {
-        action();
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
-    {
-        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << e.what();
-        return;
-    }
-    FAIL() << "expected a BAD_PARAM exception";
 }
 
 // ---------------------------------------------------------------------------

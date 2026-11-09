@@ -109,11 +109,6 @@ const std::array<Slot, 3> SLOTS{Slot::PREP, Slot::DKDV, Slot::DQ};
 // Graphs
 // ---------------------------------------------------------------------------
 
-SdpaBwdSpec baseSpec()
-{
-    return SdpaBwdSpec{};
-}
-
 SdpaBwdSpec dimsSpec(int64_t batch, int64_t heads, int64_t seqQ, int64_t seqKv, int64_t headDim)
 {
     SdpaBwdSpec spec;
@@ -127,27 +122,11 @@ SdpaBwdSpec dimsSpec(int64_t batch, int64_t heads, int64_t seqQ, int64_t seqKv, 
     return spec;
 }
 
-SdpaBwdSpec withCausal(const SdpaBwdSpec& spec)
-{
-    return spec.withEdit([](SdpaBwdGraph& g) { g.attributes.causalMask = true; });
-}
-
 SdpaBwdSpec withWindow(const SdpaBwdSpec& spec)
 {
     return spec.withEdit([](SdpaBwdGraph& g) {
         g.attributes.causalMask = true;
         g.attributes.leftBound = 4;
-    });
-}
-
-SdpaBwdSpec withBias(const SdpaBwdSpec& spec, bool withDbias, const std::vector<int64_t>& dims = {})
-{
-    return spec.withEdit([=](SdpaBwdGraph& g) {
-        addBias(g, dims);
-        if(withDbias)
-        {
-            addDbias(g);
-        }
     });
 }
 
@@ -359,21 +338,6 @@ bool serves(Slot slot, const SdpaBwdSpec& spec, const RowSpec& row)
 // Launches
 // ---------------------------------------------------------------------------
 
-/// A fake device address per tensor uid, and a workspace base; only ever compared.
-uint64_t ptrOf(int64_t uid)
-{
-    return static_cast<uint64_t>(uid) * 0x100000;
-}
-
-constexpr uint64_t WORKSPACE = 0x70000000;
-
-void* asPointer(uint64_t address)
-{
-    // A fake address, only ever compared and offset into, never dereferenced.
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    return reinterpret_cast<void*>(static_cast<uintptr_t>(address));
-}
-
 std::vector<hipdnnPluginDeviceBuffer_t> buffersFor()
 {
     std::vector<hipdnnPluginDeviceBuffer_t> buffers;
@@ -408,20 +372,6 @@ FlydslSdpaBwdMergedLaunchDump mergedDumpOf(const SdpaBwdSpec& spec, const RowSpe
     const GraphFixture fixture(buildSdpaBwdGraph(spec));
     return describeFlydslSdpaBwdMergedLaunchForTesting(
         fixture.context(), makeMergedRow(row), buffersFor(), asPointer(WORKSPACE));
-}
-
-void expectBadParam(const std::function<void()>& action)
-{
-    try
-    {
-        action();
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
-    {
-        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << e.what();
-        return;
-    }
-    FAIL() << "expected a BAD_PARAM exception";
 }
 
 int64_t tokenOf(const BoundTokens& bound, const std::string& name)

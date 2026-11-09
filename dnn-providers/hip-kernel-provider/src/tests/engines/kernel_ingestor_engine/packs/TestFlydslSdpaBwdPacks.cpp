@@ -69,14 +69,6 @@ constexpr size_t MERGED_ROWS = 309;
 constexpr size_t BIAS_ROWS = 120;
 constexpr size_t REDUCE_ROWS = 44;
 
-/// A metadata field of type @p T, or nullptr when absent or of another type.
-template <typename T>
-const T* tryGetMetadataField(const MetadataValues& values, const char* field)
-{
-    const auto it = values.find(std::string(field));
-    return it == values.end() ? nullptr : std::get_if<T>(&it->second);
-}
-
 TEST(TestFlydslSdpaBwdPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
 {
     const auto& set = loadedSet(ENGINE_NAME);

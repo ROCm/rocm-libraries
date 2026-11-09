@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -15,12 +16,17 @@
 #include <variant>
 #include <vector>
 
+#include <gtest/gtest.h>
+
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
@@ -670,6 +676,69 @@ inline std::variant<flydsl_sdpa_bwd::SdpaBwdProblem, flydsl_sdpa_bwd::Decline>
     properties.warpSize = 64;
     return flydsl_sdpa_bwd::matchSdpaBackward(
         hipdnn_plugin_sdk::ingestor::MatchContext{graph, 0, properties}, options);
+}
+
+/// The default spec: the graph the header's description states, with no edit.
+inline SdpaBwdSpec baseSpec()
+{
+    return SdpaBwdSpec{};
+}
+
+inline SdpaBwdSpec withCausal(const SdpaBwdSpec& spec)
+{
+    return spec.withEdit([](SdpaBwdGraph& g) { g.attributes.causalMask = true; });
+}
+
+/// A bias of the graph's full dims and, with @p withDbias, its gradient.
+inline SdpaBwdSpec
+    withBias(const SdpaBwdSpec& spec, bool withDbias, const std::vector<int64_t>& dims = {})
+{
+    return spec.withEdit([=](SdpaBwdGraph& g) {
+        addBias(g, dims);
+        if(withDbias)
+        {
+            addDbias(g);
+        }
+    });
+}
+
+/// A fake device address per tensor uid, and a workspace base; only ever compared.
+inline uint64_t ptrOf(int64_t uid)
+{
+    return static_cast<uint64_t>(uid) * 0x100000;
+}
+
+inline constexpr uint64_t WORKSPACE = 0x70000000;
+
+inline void* asPointer(uint64_t address)
+{
+    // A fake address, only ever compared and offset into, never dereferenced.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(address));
+}
+
+/// Runs @p action and expects it to throw a BAD_PARAM plugin exception.
+inline void expectBadParam(const std::function<void()>& action)
+{
+    try
+    {
+        action();
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << e.what();
+        return;
+    }
+    FAIL() << "expected a BAD_PARAM exception";
+}
+
+/// A metadata field of type @p T, or nullptr when absent or of another type.
+template <typename T>
+const T* tryGetMetadataField(const hipdnn_plugin_sdk::ingestor::MetadataValues& values,
+                             const char* field)
+{
+    const auto it = values.find(std::string(field));
+    return it == values.end() ? nullptr : std::get_if<T>(&it->second);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
