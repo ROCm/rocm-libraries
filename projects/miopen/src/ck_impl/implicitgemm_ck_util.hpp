@@ -463,12 +463,19 @@ inline constexpr bool IsSplitKNeeded()
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<ck::bhalf_t>>;
 }
 
-// Candidate selection calls IsCKArgsSupported once per (kernel, split_k).
+// Candidate selection calls IsCKArgsSupported once per (kernel, split_k), and
 // GetInstances() rebuilds every instance on each call, so keep one list and a
-// type-string index per DeviceOpType. emplace keeps the first index, the same
-// instance FindConvPtrByID would return. The validator only calls const CK
-// methods (GetWorkSpaceSize, SetWorkSpacePointer, IsSupportedArgument), and
-// those write the Argument, not the instance.
+// type-string index per DeviceOpType; IsCKSplitKSupported shares the same cache.
+// emplace keeps the first index, the same instance FindConvPtrByID would return.
+// Sharing one list is safe because the grouped-conv device ops have no data
+// members of their own: per-call state lives in the Argument, not the instance.
+// IsSupportedArgument and MakeArgumentPointer are non-const (they bind through a
+// const unique_ptr& only because constness is not propagated), but they write the
+// Argument, not the shared instance. GetInstances() is now called once per process
+// and must return a fixed list; some CK factories gate on ck::get_device_name()
+// (the calling thread's current device), so the first call fixes the list, which
+// is deterministic in practice because the plugin is per-arch. FillValidKernels,
+// IsCKApplicable and InitAnyInvokerFactory still call GetInstances() fresh.
 template <typename DeviceOpType>
 const auto& CachedCKInstances()
 {

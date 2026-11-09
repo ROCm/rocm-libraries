@@ -164,6 +164,31 @@ struct DuplicateTypeCKArgs
     }
 };
 
+// Counts how many times GetInstances() runs. The cache must enumerate once per
+// DeviceOpType for the whole process, so repeated validator calls add no calls.
+struct CountingDeviceOp
+{
+    CountingDeviceOp(const std::string& op) : typeString(op) {}
+
+    std::string typeString;
+
+    std::string GetTypeString() { return typeString; }
+};
+
+struct CountingDeviceOps
+{
+    static int instanceCalls;
+
+    static std::vector<std::unique_ptr<CountingDeviceOp>> GetInstances()
+    {
+        ++instanceCalls;
+        std::vector<std::unique_ptr<CountingDeviceOp>> ops;
+        ops.push_back(std::make_unique<CountingDeviceOp>("counting_kernel"));
+        return ops;
+    }
+};
+int CountingDeviceOps::instanceCalls = 0;
+
 template <typename CKArgsType, typename DeviceOpType>
 class CKArgParsingTest : public ::testing::TestWithParam<ParsingTestCase>
 {
@@ -222,6 +247,30 @@ TEST(CPU_UnitTestImplicitGemmCKUtilDuplicateType_NONE, FirstIndexWins)
         miopen::solver::IsCKArgsSupported<DuplicateTypeDeviceOps, DuplicateTypeCKArgs>(
             ProblemDescription{}, "duplicate_type");
     EXPECT_TRUE(success);
+#else
+    GTEST_SKIP();
+#endif
+}
+
+// GetInstances() must be enumerated once per DeviceOpType and cached: validation
+// of many (kernel, split_k) candidates, across the plain and split-k
+// IsCKArgsSupported overloads and IsCKSplitKSupported, must not re-enumerate.
+TEST(CPU_UnitTestImplicitGemmCKUtilInstanceCache_NONE, GetInstancesEnumeratedOnce)
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    CountingDeviceOps::instanceCalls = 0;
+    const ProblemDescription problem{};
+
+    miopen::solver::IsCKArgsSupported<CountingDeviceOps, StubbedCKArgs>(problem, "counting_kernel");
+    miopen::solver::IsCKArgsSupported<CountingDeviceOps, StubbedCKArgs, ProblemDescription, true>(
+        problem, "counting_kernel+1");
+    miopen::solver::IsCKSplitKSupported<CountingDeviceOps, StubbedCKArgs>(
+        problem, "counting_kernel", 1);
+    for(int i = 0; i < 5; ++i)
+        miopen::solver::IsCKArgsSupported<CountingDeviceOps, StubbedCKArgs>(problem,
+                                                                            "counting_kernel");
+
+    EXPECT_EQ(CountingDeviceOps::instanceCalls, 1);
 #else
     GTEST_SKIP();
 #endif
