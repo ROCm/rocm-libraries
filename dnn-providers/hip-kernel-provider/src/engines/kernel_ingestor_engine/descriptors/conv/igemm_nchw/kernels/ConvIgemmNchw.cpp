@@ -1,0 +1,50 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+// The channels-first backward-data implicit-GEMM kernel (CONV_IGEMM_NCHW_BWD), compiled by
+// HIPRTC per catalog config. The pack defines:
+//   CONV_K7_T        element type: float, _Float16, or unsigned short (bf16 bits)
+//   CONV_K7_FMA      1 for the FMA kernel; else CONV_K7_ATOM names the matrix-core atom (K1's)
+//   CONV_K7_BMQ, _BN, _BK   tile: phase indices, channels, k-step
+//   CONV_K7_WM, _WN, _WP  waves over phase indices, channels and phase groups (matrix core)
+//   CONV_K7_TQ, _TC  phase indices and channels per thread (FMA)
+//   CONV_K7_STAGES   LDS tiles in turn (FMA: 1, or 2 with one barrier per k-step)
+//   CONV_K7_VEC      elements per global load
+//   CONV_K7_STRIDE   the convolution's stride along the width
+//   CONV_K7_TAPS     the most filter taps a stride phase holds (ceil(S / stride) at most this)
+
+#include "ConvIgemmNchwCore.h"
+
+#if CONV_K7_FMA
+#define CONV_K7_BLOCK ((CONV_K7_BN / CONV_K7_TC) * (CONV_K7_BMQ / CONV_K7_TQ))
+#else
+#define CONV_K7_BLOCK (CONV_K7_WM * CONV_K7_WN * CONV_K7_WP * CONV_K7_ATOM::WAVE)
+#endif
+
+extern "C" __global__ void __launch_bounds__(CONV_K7_BLOCK) ConvIgemmNchw(K7Args a)
+{
+#if CONV_K7_FMA
+    k7DgradFma<CONV_K7_T,
+               CONV_K7_BMQ,
+               CONV_K7_BN,
+               CONV_K7_BK,
+               CONV_K7_TQ,
+               CONV_K7_TC,
+               CONV_K7_VEC,
+               CONV_K7_STRIDE,
+               CONV_K7_TAPS,
+               CONV_K7_STAGES>(a);
+#else
+    k7DgradMma<CONV_K7_T,
+               CONV_K7_ATOM,
+               CONV_K7_BMQ,
+               CONV_K7_BN,
+               CONV_K7_BK,
+               CONV_K7_WM,
+               CONV_K7_WN,
+               CONV_K7_WP,
+               CONV_K7_VEC,
+               CONV_K7_STRIDE,
+               CONV_K7_TAPS>(a);
+#endif
+}
