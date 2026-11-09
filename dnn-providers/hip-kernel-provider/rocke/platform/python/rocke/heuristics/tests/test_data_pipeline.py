@@ -236,11 +236,12 @@ class TestParseStreamingLog:
         f.close()
         return Path(f.name)
 
-    def test_basic_parse(self):
+    @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+    def test_basic_parse(self, arch):
         path = self._write_log(SAMPLE_LOG)
-        df = parse_streaming_log(path, arch="gfx950")
+        df = parse_streaming_log(path, arch=arch)
         assert len(df) == 3
-        assert df["arch"].iloc[0] == "gfx950"
+        assert df["arch"].iloc[0] == arch
         assert df["m"].tolist() == [16, 16, 20480]
         assert df["n"].tolist() == [1536, 1536, 7168]
         assert df["k"].tolist() == [7168, 7168, 256]

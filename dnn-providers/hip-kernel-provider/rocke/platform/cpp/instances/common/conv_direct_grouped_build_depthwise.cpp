@@ -156,7 +156,7 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
 void rocke_dconv_dw_build_descriptors(rocke_dconv_dw_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    int total_k = rocke_direct_conv_problem_total_k(&ctx->p);
+    int total_k = (int)rocke_direct_conv_problem_total_k(&ctx->p);
 
     /* b_desc = naive("B", [total_k, KH, KW, 1], coord_names=(k,r,s,c)) */
     {

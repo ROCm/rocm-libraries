@@ -7,10 +7,11 @@
 
 namespace
 {
-    TEST(ScaleBufferSize, smoke_PaddedLayoutsRequireKAlongRows)
+    TEST(ScaleBufferSize, smoke_RocrollerLayoutRequiresKAlongRows)
     {
-        // An NT operand has M or N rows and K columns. The padded helper expects
-        // the TN orientation instead; debug builds must reject this misuse.
+        // An NT operand has M or N rows and K columns. The preswizzled layout
+        // accepts it; the rocRoller layout expects the TN orientation and debug
+        // builds must reject this misuse.
         for(bool rocroller : {false, true})
         {
             SCOPED_TRACE(rocroller);
@@ -18,10 +19,10 @@ namespace
                 blockScaleBufferSize(
                     256, 1, hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT, true, rocroller),
                 256);
-            EXPECT_DEBUG_DEATH(
+            EXPECT_EQ(
                 blockScaleBufferSize(
                     1, 256, hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT, false, rocroller),
-                "require K along the rows");
+                256);
         }
         for(auto format : {hipblaslt_scaling_format::Block_32_UE8M0,
                            hipblaslt_scaling_format::Block_32_UE4M3,
@@ -74,6 +75,13 @@ namespace
                                                c.mn,
                                                hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT,
                                                true,
+                                               rocroller),
+                          c.expected);
+                // The non-TN operand stores the same scales, so it needs the same bytes.
+                EXPECT_EQ(blockScaleBufferSize(c.mn,
+                                               c.k,
+                                               hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT,
+                                               false,
                                                rocroller),
                           c.expected);
             }

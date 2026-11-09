@@ -3,11 +3,13 @@
 
 #include <functional>
 #include <gtest/gtest.h>
+
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
+#include <optional>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -57,6 +59,32 @@ TEST(TestSdpaBwdNode, PreValidateSucceedsMinimal)
     const SdpaBwdNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaBwdNode, PreValidateChecksDiagonalBandBounds)
+{
+    // left_bound must be positive or -1 (unbounded); right_bound must be >= -1.
+    const auto validate = [](std::optional<int64_t> left, std::optional<int64_t> right) {
+        auto attrs = makeMinimalAttrs(
+            makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
+        if(left.has_value())
+        {
+            attrs.set_diagonal_band_left_bound(*left);
+        }
+        if(right.has_value())
+        {
+            attrs.set_diagonal_band_right_bound(*right);
+        }
+        const GraphAttributes graphAttrs;
+        const SdpaBwdNode node(std::move(attrs), graphAttrs);
+        return node.pre_validate_node().code;
+    };
+    EXPECT_EQ(validate(1, 0), error_code_t::OK);
+    EXPECT_EQ(validate(-1, 0), error_code_t::OK);
+    EXPECT_EQ(validate(std::nullopt, -1), error_code_t::OK);
+    EXPECT_EQ(validate(0, 0), error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate(-2, std::nullopt), error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate(std::nullopt, -2), error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaBwdNode, PreValidateSucceedsGQA)
@@ -961,30 +989,4 @@ TEST(TestSdpaBwdNode, PreValidateFailsEachUnsupportedSetter)
     expectUnsupported(
         [](SdpaBackwardAttributes& a) { a.set_dsink_token(std::make_shared<TensorAttributes>()); },
         "sink-token gradient");
-}
-
-// left_bound follows cuDNN: L keeps the L keys ending at the diagonal; 0 is rejected and
-// -1 is unbounded.
-TEST(TestSdpaBwdNode, PreValidateChecksLeftBound)
-{
-    const auto validateWithLeftBound = [](int64_t leftBound) {
-        auto attrs = makeMinimalAttrs(
-            makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
-        attrs.set_diagonal_band_left_bound(leftBound);
-        const GraphAttributes graphAttrs;
-        const SdpaBwdNode node(std::move(attrs), graphAttrs);
-        return node.pre_validate_node();
-    };
-
-    for(const int64_t valid : {int64_t{-1}, int64_t{1}, int64_t{64}})
-    {
-        const auto err = validateWithLeftBound(valid);
-        EXPECT_EQ(err.code, error_code_t::OK) << "left_bound=" << valid << ": " << err.err_msg;
-    }
-    for(const int64_t invalid : {int64_t{0}, int64_t{-2}})
-    {
-        const auto err = validateWithLeftBound(invalid);
-        EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << "left_bound=" << invalid;
-        EXPECT_NE(err.err_msg.find("left_bound"), std::string::npos) << err.err_msg;
-    }
 }

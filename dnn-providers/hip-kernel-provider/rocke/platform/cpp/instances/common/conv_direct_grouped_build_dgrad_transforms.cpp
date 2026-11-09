@@ -84,11 +84,6 @@ static void dconv_xform_params(rocke_ir_builder_t* b,
     }
 }
 
-static bool dconv_xform_is_bf16(const rocke_direct_conv_problem_t* p)
-{
-    return p->dtype != NULL && strcmp(p->dtype, "bf16") == 0;
-}
-
 /* ===================================================================== *
  *  build_direct_transpose_weights_dgrad
  * ===================================================================== */
@@ -98,7 +93,7 @@ static rocke_kernel_def_t*
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const bool RTC = spec->runtime_channels;
-    const bool is_bf16 = dconv_xform_is_bf16(p);
+    const bool is_bf16 = rocke_direct_conv_problem_is_bf16(p);
     const int BLOCK = 64;
     const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype);
     dconv_xform_params_t prm;
@@ -165,7 +160,7 @@ static rocke_kernel_def_t*
     else
     {
         int lengths[4];
-        lengths[0] = rocke_direct_conv_problem_total_k(p);
+        lengths[0] = (int)rocke_direct_conv_problem_total_k(p);
         lengths[1] = p->KH;
         lengths[2] = p->KW;
         lengths[3] = p->cpg;
@@ -199,7 +194,7 @@ static rocke_kernel_def_t*
     else
     {
         int lengths[4];
-        lengths[0] = rocke_direct_conv_problem_total_c(p);
+        lengths[0] = (int)rocke_direct_conv_problem_total_c(p);
         lengths[1] = p->KH;
         lengths[2] = p->KW;
         lengths[3] = p->kpg;
@@ -368,7 +363,7 @@ static rocke_kernel_def_t*
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const bool fold_k32 = spec->fold_k32;
     const bool RTC = spec->runtime_channels;
-    const bool is_bf16 = dconv_xform_is_bf16(p);
+    const bool is_bf16 = rocke_direct_conv_problem_is_bf16(p);
     const int K_ATOM_SZ = fold_k32 ? 32 : 16;
     const int ELEMS_PER_LANE = fold_k32 ? 8 : 4;
     const int N_K_ATOMS = (p->kpg + K_ATOM_SZ - 1) / K_ATOM_SZ;

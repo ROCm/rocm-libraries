@@ -37,6 +37,7 @@ advertises the transpose-read family is taken to have the wide-K atoms too.
 
 from __future__ import annotations
 
+import functools
 from typing import Tuple
 
 from rocke.core.arch import ArchTarget
@@ -83,6 +84,9 @@ def _narrow_k_mfma_available(target: ArchTarget) -> bool:
     )
 
 
+# A function of the arch string alone (the catalog is static), and every tiled
+# support gate calls it, so it is computed once per arch.
+@functools.lru_cache(maxsize=None)
 def validate_tiled_attention_arch(arch: str) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for running a tiled attention kernel on ``arch``.
 

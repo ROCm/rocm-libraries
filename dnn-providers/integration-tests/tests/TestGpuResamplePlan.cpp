@@ -10,13 +10,14 @@
 #include <vector>
 
 #include "RaggedGraphTestUtils.hpp"
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/gpu-graph-executor/detail/GpuResamplePlan.hpp"
 #include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceResampleFwd.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
@@ -556,7 +557,7 @@ void runResampleFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
         cpuVariantPack[INDEX_UID] = cpuIndex.rawHostData();
     }
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), cpuVariantPack);
     cpuY.markHostModified();
     cpuIndex.markHostModified();
@@ -716,7 +717,7 @@ void runResampleBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& dxDims,
         cpuVariantPack[INDEX_UID] = indexTensor.rawHostData();
     }
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), cpuVariantPack);
     cpuDx.markHostModified();
 
