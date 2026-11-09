@@ -1011,7 +1011,8 @@ def build_attention_dense(
         )
         # The bias seeds the QK accumulator, so it is in raw (unscaled) score units.
         alibi_slope_raw = b.fdiv(alibi_slope, qk_scale)
-        # Per-row anchor: the row's last visible key (see _attention_alibi).
+        # Per-row anchor: the query's diagonal if causal, else the last key
+        # (see _attention_alibi).
         alibi_query = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
         if causal:
             alibi_anchor = b.add(alibi_query, b.const_i32(DIAG_OFF + RIGHT))

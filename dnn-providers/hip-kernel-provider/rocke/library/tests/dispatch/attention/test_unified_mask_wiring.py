@@ -814,21 +814,34 @@ class TestMaskGates(unittest.TestCase):
             self.assertFalse(ok)
             self.assertIn("causal masks", why)
 
-    def test_alibi_lse_and_sinks_need_the_top_left_diagonal(self):
-        for over in (dict(emit_lse=True), dict(use_sinks=True)):
+    def test_alibi_lse_needs_the_top_left_diagonal(self):
+        problem = au.UnifiedAttentionProblem(
+            **_problem_kw(right_bound=0, use_alibi=True, emit_lse=True)
+        )
+        ok, why = au._reject_mask_semantics(problem)
+        self.assertFalse(ok)
+        self.assertIn("top-left", why)
+        top_left = au.UnifiedAttentionProblem(
+            **_problem_kw(
+                right_bound=0, causal_top_left=True, use_alibi=True, emit_lse=True
+            )
+        )
+        self.assertIsNone(au._reject_mask_semantics(top_left))
+
+    def test_alibi_with_sinks_is_rejected_under_every_mask(self):
+        for over in (
+            dict(right_bound=0),
+            dict(right_bound=0, causal_top_left=True),
+            dict(right_bound=0, sliding_window=64),
+            dict(right_bound=0, causal_top_left=True, sliding_window=64),
+        ):
             with self.subTest(**over):
                 problem = au.UnifiedAttentionProblem(
-                    **_problem_kw(right_bound=0, use_alibi=True, **over)
+                    **_problem_kw(use_alibi=True, use_sinks=True, **over)
                 )
                 ok, why = au._reject_mask_semantics(problem)
                 self.assertFalse(ok)
-                self.assertIn("top-left", why)
-                top_left = au.UnifiedAttentionProblem(
-                    **_problem_kw(
-                        right_bound=0, causal_top_left=True, use_alibi=True, **over
-                    )
-                )
-                self.assertIsNone(au._reject_mask_semantics(top_left))
+                self.assertIn("sinks", why)
 
     def test_a_window_with_any_right_bound_is_valid(self):
         for right in (-1, 0, 8):
@@ -953,6 +966,45 @@ class TestUnifiedAlibiRouting(unittest.TestCase):
             dispatch_attention(req)
         top_left = _req(mask_type=TOP_LEFT, use_alibi=True, emit_lse=True)
         self.assertTrue(dispatch_attention(top_left).spec.causal_top_left)
+
+
+class TestTuningBindingAlibiSlopes(unittest.TestCase):
+    """The unified tuning binding takes ``alibi_slopes`` exactly when the request
+    asks for caller slopes: a null pointer selects the built-in slopes, so a
+    forgotten tensor would silently change the bias."""
+
+    def test_slopes_bound_iff_the_request_says_external(self):
+        from types import SimpleNamespace
+
+        from dispatch.attention import bindings
+
+        problem = au.UnifiedAttentionProblem(
+            **_problem_kw(use_alibi=True, causal_top_left=True)
+        )
+        tensors = {"problem": problem, "q": None, "k": None, "v": None, "out": None}
+        for external, slopes, match in (
+            (True, None, "requires tensors\\['alibi_slopes'\\]"),
+            (False, object(), "use_alibi_external_slopes is off"),
+        ):
+            request = SimpleNamespace(use_alibi_external_slopes=external)
+            with (
+                self.subTest(external=external),
+                mock.patch.object(bindings, "validate_tuning_attention_contract"),
+                mock.patch.object(
+                    bindings, "validate_tuning_attention_tensors", return_value=64
+                ),
+            ):
+                binding = bindings.bind_tuning_attention_torch(
+                    request,
+                    SimpleNamespace(
+                        path="2d",
+                        launch_grid=lambda _problem: (1, 1, 1),
+                        launch_block=lambda: (256, 1, 1),
+                    ),
+                    tensors,
+                )
+                with self.assertRaisesRegex(ValueError, match):
+                    binding.launch(alibi_slopes=slopes)
 
 
 if __name__ == "__main__":

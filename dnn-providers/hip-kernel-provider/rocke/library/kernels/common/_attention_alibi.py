@@ -14,9 +14,12 @@ built in, derived from the query head count as hipDNN does (Press et al.)::
     slope(h) = 2 ** (-8 * (h - n + 0.5) / n)    for h >= n
 
 Kernels evaluate ``slope * (j - a_i)`` against a per-row anchor ``a_i`` instead
-of ``j - i``: with ``a_i`` the row's last visible key, the term is never
-positive, so the scores the row max sees keep their fp32 precision however far
-apart ``i`` and ``j`` are. The difference ``slope * (a_i - i)`` is constant per
+of ``j - i``: the query's diagonal under a causal mask, the last key otherwise.
+No visible key lies past the anchor, so the term is never positive and the
+scores the row max sees keep their fp32 precision however far apart ``i`` and
+``j`` are. The causal anchor is not clamped to the last key: for rows past it
+(``Sq > Skv``, top-left) the nearest visible key's term grows with the row, so
+precision drops slowly there. The difference ``slope * (a_i - i)`` is constant per
 row, so softmax and O are unchanged; only the log-sum-exp moves, and
 :func:`alibi_lse_shift` gives the correction to add to the log2-domain row max
 before the LSE store. A sink logit is not shifted, so kernels refuse sinks with
@@ -43,23 +46,11 @@ __all__ = [
     "alibi_lse_shift",
     "alibi_slope",
     "alibi_slope_log2",
-    "alibi_slopes_host",
     "alibi_tile_bias",
     "check_alibi_slopes",
 ]
 
 _LOG2E = 1.4426950408889634
-
-
-def alibi_slopes_host(num_heads: int) -> list:
-    """Built-in slopes for ``num_heads`` query heads, as Python floats."""
-    if num_heads <= 0:
-        raise ValueError(f"num_heads must be positive, got {num_heads}")
-    n = 1 << (num_heads.bit_length() - 1)
-    return [
-        2.0 ** (-8.0 * (h + 1) / n) if h < n else 2.0 ** (-8.0 * (h - n + 0.5) / n)
-        for h in range(num_heads)
-    ]
 
 
 def check_alibi_slopes(spec, alibi_slopes) -> None:

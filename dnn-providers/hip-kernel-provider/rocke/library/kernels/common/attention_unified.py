@@ -550,19 +550,17 @@ def _reject_mask_semantics(
 
     hipDNN defines ALiBi on the top-left diagonal only. The kernels measure it from
     each query's own diagonal, which fixes O for any alignment, but on a bottom-right
-    diagonal the LSE and the weight of a sink would depend on which query index the
-    term uses, so those combinations are rejected too.
+    diagonal the LSE would depend on which query index the term uses, so ALiBi with
+    LSE output is rejected there. A sink logit gets no ALiBi term, and no reference
+    defines its weight next to the biased scores, so ALiBi with sinks is rejected
+    under every mask, as in the dense kernels.
     """
     if problem.right_bound != 0 and (problem.use_alibi or problem.use_qq_bias):
         return False, "ALiBi / QQ-bias are only defined for causal masks"
-    if (
-        problem.use_alibi
-        and not problem.causal_top_left
-        and (problem.emit_lse or problem.use_sinks)
-    ):
-        return False, (
-            "ALiBi with LSE output or sinks is only defined on the top-left diagonal"
-        )
+    if problem.use_alibi and problem.use_sinks:
+        return False, "ALiBi with sinks is not supported"
+    if problem.use_alibi and not problem.causal_top_left and problem.emit_lse:
+        return False, "ALiBi with LSE output is only defined on the top-left diagonal"
     return None
 
 
@@ -6327,9 +6325,9 @@ def run_unified_attention_torch(
     # arch is the explicit ``arch`` parameter threaded through
     # ``supports_native_unified_attention*``.
     _launch_arch = _resolve_attention_arch()
-    if problem.use_alibi and alibi_slopes is None and _launch_arch == "gfx1250":
-        # The gfx1250 tiled kernels always read the slopes tensor.
-        raise NotImplementedError("gfx1250 unified attention needs alibi_slopes")
+    if problem.use_alibi and _launch_arch == "gfx1250":
+        # No gfx1250 unified kernel (tiled or scalar) implements ALiBi.
+        raise NotImplementedError("gfx1250 unified attention does not support ALiBi")
     if tuning_spec is not None:
         _require_explicit_tuning_spec(tuning_spec)
         # The spec's kernel declares the bias params iff its use_additive_bias is

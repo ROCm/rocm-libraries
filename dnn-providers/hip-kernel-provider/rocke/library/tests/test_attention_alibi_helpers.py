@@ -139,20 +139,15 @@ class _NumpyIfElse:
         self.b._live = True
 
 
-@pytest.mark.parametrize("num_heads", [1, 2, 6, 8, 12, 40, 56, 112, 128])
-def test_host_slopes_match_reference(num_heads):
-    assert alibi.alibi_slopes_host(num_heads) == list(alibi_slopes(num_heads))
-
-
-def test_host_slopes_match_hipdnn_values():
-    assert alibi.alibi_slopes_host(6) == _HIPDNN_H6
+def test_reference_slopes_match_hipdnn_values():
+    assert list(alibi_slopes(6)) == _HIPDNN_H6
 
 
 @pytest.mark.parametrize("num_heads", [1, 3, 6, 8, 12, 40, 56, 112, 128])
 @pytest.mark.parametrize("runtime_heads", [False, True])
-def test_builtin_slope_matches_host(num_heads, runtime_heads):
+def test_builtin_slope_matches_reference(num_heads, runtime_heads):
     b = _NumpyBuilder()
-    want = alibi.alibi_slopes_host(num_heads)
+    want = list(alibi_slopes(num_heads))
     nh = np.int32(num_heads) if runtime_heads else num_heads
     for h in range(num_heads):
         got = alibi.alibi_slope_log2(b, np.int32(h), num_heads=nh, slopes=None)
@@ -180,7 +175,7 @@ def test_lse_shift():
 @pytest.mark.parametrize("num_heads", [1, 6, 12, 40])
 def test_null_slopes_pointer_gives_builtin_slopes(num_heads):
     b = _NumpyBuilder()
-    want = alibi.alibi_slopes_host(num_heads)
+    want = list(alibi_slopes(num_heads))
     for h in range(num_heads):
         got = alibi.alibi_slope(b, np.int32(h), num_heads=num_heads, slopes=None)
         assert got == pytest.approx(want[h], rel=2**-22)
