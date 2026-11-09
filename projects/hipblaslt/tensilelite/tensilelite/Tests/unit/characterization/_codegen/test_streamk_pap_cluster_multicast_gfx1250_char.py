@@ -108,7 +108,7 @@ def _max_sgpr(src):
 
 def _expected_handoff_timing(cluster_dim):
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
 
     # The legacy-named fixture resolves to DataParallel/StaticGrid. Its SIA0
     # kernels retain the early handoff; eligible SIA4 kernels defer it. Derive

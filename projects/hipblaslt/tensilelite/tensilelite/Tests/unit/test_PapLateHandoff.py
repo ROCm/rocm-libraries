@@ -142,10 +142,23 @@ def test_preparation_and_handoff_follow_supported_order(monkeypatch, multicast, 
     # Primed re-entry and close must not issue, advance the token, or release
     # a cluster phase twice.
     machine.run(module)
-    machine.run(assignment.persistentClusterNextTileArrive(writer, kernel))
+    close = assignment.closeLoop(writer, kernel)
+    assert machine.run(close) == "label_PersistentLoopStart"
     assert machine["Mapped"] == 1
     assert machine["Loads"] == machine["TensorToken"] == 1
-    assert machine.barrier_operations == expected
+    assert machine.barrier_operations == expected + [
+        ("s_barrier_signal", "-1"), ("s_barrier_wait", "-1"),
+    ]
+    close_text = str(close)
+    assert close_text.count("s_wait_dscnt 0") == 1
+    assert "s_wait_tensorcnt" not in close_text
+    assert close_text.index("s_cbranch_scc1") < close_text.index("s_wait_dscnt 0")
+    assert close_text.index("s_wait_dscnt 0") < close_text.index("s_barrier_signal -1")
+    # Exhaustion skips the reentry fence as well as the external backedge.
+    before = list(machine.barrier_operations)
+    machine["TotalTiles"] = machine["NextTile"]
+    assert machine.run(close) is None
+    assert machine.barrier_operations == before
     text = str(module)
     handoff = text.index("s_wait_dscnt" if multicast else "s_barrier_signal -1")
     assert text.rindex("s[sgprDescriptorJoined]") < handoff
