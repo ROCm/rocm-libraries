@@ -2012,7 +2012,8 @@ def _registerSpan(register):
     """Return (kind, start, count) for one register operand.
 
     A negative regIdx is a named scalar such as sgprSrdA. Those names do
-    not share an integer range, so identity is the name.
+    not share an integer range, so identity is the name's text, with any
+    lane offset kept as "+N".
     """
     if register is None or isinstance(register, (int, float)):
         return None
@@ -2024,7 +2025,11 @@ def _registerSpan(register):
     index = getattr(register, "regIdx", None)
     if isinstance(index, int) and index >= 0:
         return (kind, index, count)
-    name = getattr(register, "regName", None)
+    name = getattr(register, "holderName", None)
+    if not (isinstance(name, str) and name):
+        # regName is a RegName, not a str; str() is its name plus "+N".
+        name = getattr(register, "regName", None)
+        name = str(name) if name is not None else ""
     if not name:
         return None
     return (kind, name, count)
@@ -2182,11 +2187,12 @@ def _bundleEarliestSlot(setupPos: int, width: int) -> int:
     return earliest
 
 
-def _blocksEarlierVmem(inst, sources, dests) -> bool:
+def _blocksEarlierVmem(inst, sources, dests, registers=True) -> bool:
     """Whether a VMEM-stream instruction must stay after inst.
 
     LDS readers of the buffer a load overwrites all sit before its
     overwrite barrier, so the barrier is the only LDS fence needed.
+    With registers False only these fences count, not register overlap.
     """
     if isinstance(inst, TextBlock):
         return False
@@ -2194,6 +2200,8 @@ def _blocksEarlierVmem(inst, sources, dests) -> bool:
         return True
     if _isWaitCnt(inst) and getattr(inst, "vlcnt", -1) >= 0:
         return True
+    if not registers:
+        return False
     for role, span in _instructionRegisterSpans(inst):
         if role == "dst" and any(
                 _spansOverlap(span, wanted) for wanted in sources + dests):
@@ -2204,15 +2212,19 @@ def _blocksEarlierVmem(inst, sources, dests) -> bool:
     return False
 
 
-def _earliestVmemSlot(placer, pos, insts) -> int:
-    """Return the first slot a VMEM-stream instruction may move back to."""
+def _earliestVmemSlot(placer, pos, insts, stream=frozenset()) -> int:
+    """Return the first slot a VMEM-stream instruction may move back to.
+
+    stream holds the ids of stream instructions that stay after insts, so
+    sharing a register with them is no reason to stop.
+    """
     sources = []
     dests = []
     for inst in insts:
         for role, span in _instructionRegisterSpans(inst):
             (sources if role == "src" else dests).append(span)
     for slot in range(min(pos, placer.totalSlots) - 1, -1, -1):
-        if any(_blocksEarlierVmem(inst, sources, dests)
+        if any(_blocksEarlierVmem(inst, sources, dests, id(inst) not in stream)
                for _mid, inst in placer._placed[slot]):
             return slot + 1
     return 0
@@ -2286,13 +2298,15 @@ def _rightAlignM0AndVmem(placer, endSlot=None):
         return True
     _liftPlaced(placer, sequence)
     stacked = False
+    streamIds = frozenset(id(item[1]) for _pos, item in sequence)
 
     def floor(pos, insts):
         # Toward a memory boundary the stream may also move ahead of the
         # forward pass, down to the nearest instruction it must not cross.
+        # The stream already placed is behind insts and stays behind them.
         if endSlot is None:
             return pos
-        return _earliestVmemSlot(placer, pos, insts)
+        return _earliestVmemSlot(placer, pos, insts, streamIds)
 
     def place_single(pos, item, limit):
         inst = item[1]
@@ -2443,8 +2457,7 @@ def _rightAlignM0AndVmem(placer, endSlot=None):
     if stacked:
         return False
     if endSlot is not None:
-        return _streamCarriesIntact(
-            placer, {id(item[1]) for _pos, item in sequence})
+        return _streamCarriesIntact(placer, streamIds)
     return True
 
 
@@ -2731,11 +2744,7 @@ def _mayReorder(first, second, scc=True) -> bool:
             found += [("src", _registerSpan(p)) for p in params[1:]]
             if _isBufferLoad(inst):
                 found.append(("src", ("m", 0, 1)))
-        # A named scalar's regName is a RegName, which compares by
-        # identity; its text is what _spansOverlap matches lanes on.
-        return [(role, span if isinstance(span[1], int)
-                 else (span[0], str(span[1]), span[2]))
-                for role, span in found if span is not None]
+        return [(role, span) for role, span in found if span is not None]
 
     left, right = spans(first), spans(second)
     for roleA, a in left:
