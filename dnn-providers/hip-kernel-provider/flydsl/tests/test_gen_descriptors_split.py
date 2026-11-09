@@ -191,7 +191,7 @@ def test_the_engine_is_one_ued_and_each_slot_is_its_op() -> None:
 def test_the_ued_is_slotted_1_1_and_carries_no_engine_wide_selection() -> None:
     ued = _ued(_split())
     assert ued["version"] == "1.1"
-    assert ued["sdk_version"] == "1.4.0"
+    assert ued["sdk_version"] == gd.SDK_VERSION_BY_OP["sdpa_bwd_split"]
     assert ued["shared_workspace"] == "ws.bytes"
     assert ued["graph_match"] == {
         "native": "hipkernel.flydsl_sdpa_bwd_split.graph_match"

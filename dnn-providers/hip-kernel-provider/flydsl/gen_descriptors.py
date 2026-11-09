@@ -118,11 +118,16 @@ SDPA_OPS = (
     "sdpa_cdna_decode",
     "sdpa_aiw",
 )
+# The backward engines (both are in the map) read ragged tensors (1.3.0), non-default tensor
+# alignment (1.3.0) and ragged offset multipliers (1.4.0) straight from the graph, so they
+# declare the schema that introduced the last of them.
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
 SDPA_SDK_VERSION = "1.4.0"
 SDK_VERSION_BY_OP: dict[str, str] = {
     "rmsnorm": PASS_BY_VALUE_SDK_VERSION,
     **{op: SDPA_SDK_VERSION for op in SDPA_OPS},
+    "sdpa_bwd_split": SDPA_SDK_VERSION,
+    "sdpa_bwd_merged": SDPA_SDK_VERSION,
 }
 # Ops whose engines carry `supports_graph_capture` (capture-safe with default settings,
 # benchmarking off). Capture and graph replay are bit-exact on gfx950 (CDNA ops), on
@@ -143,14 +148,6 @@ GRAPH_CAPTURE_OPS: tuple[str, ...] = (
     "sdpa_rdna_decode",
     "sdpa_aiw",
 )
-
-# The backward engines' matcher reads ragged tensors (1.3.0), non-default tensor alignment
-# (1.3.0) and ragged offset multipliers (1.4.0) straight from the graph, and the ingestor
-# declines a graph whose schema floor is above the engine's before any matcher runs, so both
-# backward engines declare the schema that introduced the last of them
-# (PluginVersionConstants.hpp, K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION).
-SDPA_BWD_SDK_VERSION = "1.4.0"
-SDPA_BWD_OPS = ("sdpa_bwd_merged",)
 
 # The slotted descriptor formats (RFC 0021 section 9): UED and KDP are 1.1 only when
 # slotted; every other document stays at DESCRIPTOR_VERSION.
@@ -826,8 +823,6 @@ class OpDescriptors:
         # ingestor declines any graph whose schema floor is above it.
         if self.op in SDK_VERSION_BY_OP:
             ued["sdk_version"] = SDK_VERSION_BY_OP[self.op]
-        elif self.op in SDPA_BWD_OPS:
-            ued["sdk_version"] = SDPA_BWD_SDK_VERSION
         kmd_fields = []
         for name, type_token in self.fields.items():
             field: dict[str, Any] = {"name": name, "type": type_token}
@@ -1274,7 +1269,7 @@ class SplitEngine:
                 "name": f"hipkernel:{self.stem}",
                 # Pass-by-value scalars (softmax scale, dropout seed and offset), ragged
                 # tensors, non-default alignment and ragged offset multipliers.
-                "sdk_version": SDPA_BWD_SDK_VERSION,
+                "sdk_version": SDK_VERSION_BY_OP[SPLIT_ENGINE],
                 "graph_match": {"native": f"{self.symbols}.graph_match"},
                 "shared_workspace": SPLIT_SHARED_WORKSPACE,
                 "slots": [

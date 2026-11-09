@@ -162,8 +162,8 @@ def test_op_level_documents_have_a_sibling_ops_shape(documents):
     assert ued["name"] == "hipkernel:flydsl_sdpa_bwd_merged"
     assert ued["sort_kernel_catalog"] == {"default": uhd["id"]}
     # The backward engines read ragged operands and offset multipliers, so they declare the
-    # schema of the last of them (1.4.0).
-    assert ued["sdk_version"] == "1.4.0"
+    # schema of the last of them.
+    assert ued["sdk_version"] == gd.SDK_VERSION_BY_OP["sdpa_bwd_merged"]
 
 
 def test_kernel_metadata_carries_every_manifest_knob(documents):
