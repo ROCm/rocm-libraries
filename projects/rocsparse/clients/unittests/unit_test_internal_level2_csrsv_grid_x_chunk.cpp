@@ -38,11 +38,16 @@
 // checked against a host triangular solve.
 //
 // The large case has 100,003 rows, coupled to the row before, so the dependency
-// chain is serial and crosses every chunk boundary. With grid.x clamped to 2000
-// blocks, every block walks two to four row blocks and several times more
-// blocks are launched than a device holds resident. A grid-stride loop would
-// hang there, because the first blocks would wait on rows owned by blocks that
-// cannot start: run this binary under a timeout.
+// chain is serial and crosses every chunk boundary. It has 3126 row blocks on
+// wave32 devices and 6251 on wave64 devices. With grid.x clamped to 2000
+// blocks, blocks 0 to 1562 walk 2 (wave32) or 4 (wave64) row blocks and blocks
+// 1563 and up get an empty range, and several times more blocks are launched
+// than a device holds resident. A grid-stride loop would hang there, because
+// the first blocks would wait on rows owned by blocks that cannot start: run
+// this binary under a timeout.
+//
+// The output vector is filled with NaN before every solve, so a row that a
+// clamped run skips cannot inherit the value of an earlier run.
 //
 
 #include "unit_test_utils.hpp"
@@ -53,6 +58,7 @@
 #include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
+#include <limits>
 #include <vector>
 
 namespace
@@ -201,7 +207,8 @@ namespace
         rocsparse_ut::device_vector<rocsparse_int> d_col_ind(A.col_ind);
         rocsparse_ut::device_vector<double>        d_val(A.val);
         rocsparse_ut::device_vector<double>        d_x(x);
-        rocsparse_ut::device_vector<double>        d_y(static_cast<size_t>(A.m));
+        rocsparse_ut::device_vector<double>        d_y(
+            std::vector<double>(A.m, std::numeric_limits<double>::quiet_NaN()));
         ASSERT_NE(d_row_ptr.ptr, nullptr);
         ASSERT_NE(d_col_ind.ptr, nullptr);
         ASSERT_NE(d_val.ptr, nullptr);
@@ -328,10 +335,32 @@ namespace
         }
     }
 
-    // 1000 rows do not divide evenly into row blocks of 16 or 32 rows, nor the
-    // row blocks into 2, 3 or 7 chunks. Without an offset of 1, rows share
-    // levels, so the solve walks a row map that is not the identity.
+    // Row blocks of the 1000-row matrix: 32 of 32 rows on wave32 devices, 63 of
+    // 16 rows on wave64 devices, the last one partial either way. They split
+    // unevenly into some of the 2, 3 and 7 chunks (3 and 7 on wave32, 2 on
+    // wave64). Without an offset of 1, rows share levels, so the solve walks a
+    // row map that is not the identity.
     const std::vector<int> small_grids = {1, 2, 3, 7};
+
+    rocsparse_int row_blocks(rocsparse_int m)
+    {
+        rocsparse_handle handle = nullptr;
+        EXPECT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
+        const rocsparse_int rows = 1024 / handle->wavefront_size;
+        EXPECT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
+        return (m - 1) / rows + 1;
+    }
+
+    // The small grids plus the edge where the launch switches kernels: one block
+    // per row block runs the unchunked kernel, one fewer the chunked kernel with
+    // a chunk of 2 row blocks for the first blocks and empty ranges at the end.
+    std::vector<int> small_and_edge_grids(rocsparse_int m)
+    {
+        std::vector<int> grids = small_grids;
+        grids.push_back(row_blocks(m) - 1);
+        grids.push_back(row_blocks(m));
+        return grids;
+    }
 
     csr_matrix small_matrix()
     {
@@ -347,7 +376,8 @@ namespace
 #define CSRSV_GRID_TESTS(NAME, FILL, TRANS)                                                     \
     TEST(internal_level2_csrsv_grid_x_chunk, NAME##_small_grids)                                \
     {                                                                                           \
-        expect_same_result_on_small_grids(small_matrix(), FILL, TRANS, small_grids);            \
+        expect_same_result_on_small_grids(                                                      \
+            small_matrix(), FILL, TRANS, small_and_edge_grids(1000));                           \
     }                                                                                           \
     TEST(internal_level2_csrsv_grid_x_chunk, NAME##_more_blocks_than_resident)                  \
     {                                                                                           \
@@ -360,19 +390,25 @@ CSRSV_GRID_TESTS(lower_transpose, rocsparse_fill_mode_lower, rocsparse_operation
 CSRSV_GRID_TESTS(upper_transpose, rocsparse_fill_mode_upper, rocsparse_operation_transpose)
 #undef CSRSV_GRID_TESTS
 
-// A structural zero pivot found by the chunked analysis, in a chunk other than
-// the first, for both analysis kernels.
+// A structural zero pivot found by the chunked analysis in a chunk other than
+// the first, for both analysis kernels. The lower kernel numbers row blocks
+// from the first row and the upper kernel from the last, so each gets its own
+// missing diagonal: row 613 and row 386 lie in row block 19 (wave32) or 38
+// (wave64) of their kernel, past the first chunk for grid.x 2, 3 and 7.
 TEST(internal_level2_csrsv_grid_x_chunk, zero_pivot_on_small_grid)
 {
-    const rocsparse_int       missing = 613;
-    const csr_matrix          A       = build_matrix(1000, {2, 3, 7, 23, 41}, missing);
-    const std::vector<double> x       = right_hand_side(A.m);
-
     for(rocsparse_fill_mode fill : {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper})
     {
         for(rocsparse_operation trans : {rocsparse_operation_none, rocsparse_operation_transpose})
         {
-            for(int grid : small_grids)
+            // Lower non-transposed and upper transposed take the lower kernel.
+            const bool lower_kernel
+                = (fill == rocsparse_fill_mode_lower) == (trans == rocsparse_operation_none);
+            const rocsparse_int       missing = lower_kernel ? 613 : 1000 - 1 - 613;
+            const csr_matrix          A       = build_matrix(1000, {2, 3, 7, 23, 41}, missing);
+            const std::vector<double> x       = right_hand_side(A.m);
+
+            for(int grid : {2, 3, 7})
             {
                 std::vector<double> y;
                 rocsparse_int       pivot = -1;
@@ -399,6 +435,7 @@ TEST(internal_level2_csrsv_grid_x_chunk, spsv_int64_small_grids)
     rocsparse_ut::device_vector<double>  d_val(A.val);
     rocsparse_ut::device_vector<double>  d_x(x);
     rocsparse_ut::device_vector<double>  d_y(static_cast<size_t>(A.m));
+    const std::vector<double>            nan(A.m, std::numeric_limits<double>::quiet_NaN());
     ASSERT_NE(d_row_ptr.ptr, nullptr);
     ASSERT_NE(d_col_ind.ptr, nullptr);
     ASSERT_NE(d_val.ptr, nullptr);
@@ -439,6 +476,10 @@ TEST(internal_level2_csrsv_grid_x_chunk, spsv_int64_small_grids)
                           rocsparse_status_success);
                 ASSERT_EQ(rocsparse_create_dnvec_descr(&vy, A.m, d_y.ptr, rocsparse_datatype_f64_r),
                           rocsparse_status_success);
+
+                ASSERT_EQ(
+                    hipMemcpy(d_y.ptr, nan.data(), sizeof(double) * A.m, hipMemcpyHostToDevice),
+                    hipSuccess);
 
                 size_t buffer_size = 0;
                 ASSERT_EQ(rocsparse_spsv(handle,
@@ -496,4 +537,332 @@ TEST(internal_level2_csrsv_grid_x_chunk, spsv_int64_small_grids)
             }
         }
     }
+}
+
+namespace
+{
+    // Batched rocsparse_sptrsv on CSR: batch_count instances of the same
+    // pattern, instance b with its values scaled by 1 + b. max_grid_x > 0
+    // replaces handle->properties.maxGridSize[0] for the analysis and the solve.
+    void sptrsv_batched(const csr_matrix&          A,
+                        int64_t                    batch_count,
+                        double                     alpha,
+                        const std::vector<double>& x,
+                        int                        max_grid_x,
+                        std::vector<double>&       y)
+    {
+        const int64_t m   = A.m;
+        const int64_t nnz = static_cast<int64_t>(A.col_ind.size());
+
+        std::vector<rocsparse_int> row_ptr;
+        std::vector<rocsparse_int> col_ind;
+        std::vector<double>        val;
+        for(int64_t b = 0; b < batch_count; ++b)
+        {
+            row_ptr.insert(row_ptr.end(), A.row_ptr.begin(), A.row_ptr.end());
+            col_ind.insert(col_ind.end(), A.col_ind.begin(), A.col_ind.end());
+            for(double v : A.val)
+            {
+                val.push_back(v * (1.0 + b));
+            }
+        }
+
+        rocsparse_ut::device_vector<rocsparse_int> d_row_ptr(row_ptr);
+        rocsparse_ut::device_vector<rocsparse_int> d_col_ind(col_ind);
+        rocsparse_ut::device_vector<double>        d_val(val);
+        rocsparse_ut::device_vector<double>        d_x(x);
+        rocsparse_ut::device_vector<double>        d_y(
+            std::vector<double>(m * batch_count, std::numeric_limits<double>::quiet_NaN()));
+        ASSERT_NE(d_row_ptr.ptr, nullptr);
+        ASSERT_NE(d_col_ind.ptr, nullptr);
+        ASSERT_NE(d_val.ptr, nullptr);
+        ASSERT_NE(d_x.ptr, nullptr);
+        ASSERT_NE(d_y.ptr, nullptr);
+
+        rocsparse_handle handle = nullptr;
+        ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
+        if(max_grid_x > 0)
+        {
+            handle->properties.maxGridSize[0] = max_grid_x;
+        }
+
+        rocsparse_spmat_descr mat = nullptr;
+        rocsparse_dnvec_descr vx  = nullptr;
+        rocsparse_dnvec_descr vy  = nullptr;
+        ASSERT_EQ(rocsparse_create_csr_descr(&mat,
+                                             m,
+                                             m,
+                                             nnz,
+                                             d_row_ptr.ptr,
+                                             d_col_ind.ptr,
+                                             d_val.ptr,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_index_base_zero,
+                                             rocsparse_datatype_f64_r),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_csr_set_strided_batch(mat, batch_count, m + 1, nnz),
+                  rocsparse_status_success);
+        const rocsparse_fill_mode fill = rocsparse_fill_mode_lower;
+        ASSERT_EQ(
+            rocsparse_spmat_set_attribute(mat, rocsparse_spmat_fill_mode, &fill, sizeof(fill)),
+            rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_dnvec_descr(&vx, m, d_x.ptr, rocsparse_datatype_f64_r),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(vx, batch_count, m), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_dnvec_descr(&vy, m, d_y.ptr, rocsparse_datatype_f64_r),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(vy, batch_count, m), rocsparse_status_success);
+
+        rocsparse_sptrsv_descr descr = nullptr;
+        ASSERT_EQ(rocsparse_create_sptrsv_descr(&descr), rocsparse_status_success);
+        const rocsparse_sptrsv_alg      alg  = rocsparse_sptrsv_alg_default;
+        const rocsparse_operation       op   = rocsparse_operation_none;
+        const rocsparse_datatype        type = rocsparse_datatype_f64_r;
+        const rocsparse_analysis_policy apol = rocsparse_analysis_policy_force;
+        ASSERT_EQ(rocsparse_sptrsv_set_input(
+                      handle, descr, rocsparse_sptrsv_input_alg, &alg, sizeof(alg), nullptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_sptrsv_set_input(
+                      handle, descr, rocsparse_sptrsv_input_operation, &op, sizeof(op), nullptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_sptrsv_set_input(handle,
+                                             descr,
+                                             rocsparse_sptrsv_input_scalar_datatype,
+                                             &type,
+                                             sizeof(type),
+                                             nullptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_sptrsv_set_input(handle,
+                                             descr,
+                                             rocsparse_sptrsv_input_compute_datatype,
+                                             &type,
+                                             sizeof(type),
+                                             nullptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_sptrsv_set_input(handle,
+                                             descr,
+                                             rocsparse_sptrsv_input_analysis_policy,
+                                             &apol,
+                                             sizeof(apol),
+                                             nullptr),
+                  rocsparse_status_success);
+
+        for(rocsparse_sptrsv_stage stage :
+            {rocsparse_sptrsv_stage_analysis, rocsparse_sptrsv_stage_compute})
+        {
+            if(stage == rocsparse_sptrsv_stage_compute)
+            {
+                ASSERT_EQ(rocsparse_sptrsv_set_input(handle,
+                                                     descr,
+                                                     rocsparse_sptrsv_input_scalar_alpha,
+                                                     &alpha,
+                                                     sizeof(&alpha),
+                                                     nullptr),
+                          rocsparse_status_success);
+            }
+            size_t buffer_size = 0;
+            ASSERT_EQ(rocsparse_sptrsv_buffer_size(
+                          handle, descr, mat, vx, vy, stage, &buffer_size, nullptr),
+                      rocsparse_status_success);
+            rocsparse_ut::device_vector<char> d_buffer(buffer_size > 0 ? buffer_size : 1);
+            ASSERT_NE(d_buffer.ptr, nullptr);
+            ASSERT_EQ(rocsparse_sptrsv(handle,
+                                       descr,
+                                       mat,
+                                       vx,
+                                       vy,
+                                       stage,
+                                       buffer_size,
+                                       buffer_size > 0 ? d_buffer.ptr : nullptr,
+                                       nullptr),
+                      rocsparse_status_success);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        }
+
+        y = rocsparse_ut::to_host(d_y);
+
+        EXPECT_EQ(rocsparse_destroy_sptrsv_descr(descr), rocsparse_status_success);
+        EXPECT_EQ(rocsparse_destroy_dnvec_descr(vy), rocsparse_status_success);
+        EXPECT_EQ(rocsparse_destroy_dnvec_descr(vx), rocsparse_status_success);
+        EXPECT_EQ(rocsparse_destroy_spmat_descr(mat), rocsparse_status_success);
+        EXPECT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
+    }
+}
+
+// Batched rocsparse_sptrsv on a clamped grid: the chunked solve with grid.y
+// over the batch instances, each with its own values, right-hand side, done
+// flags and singularity position.
+TEST(internal_level2_csrsv_grid_x_chunk, sptrsv_batched_small_grids)
+{
+    const csr_matrix    A           = small_matrix();
+    const int64_t       batch_count = 3;
+    const double        alpha       = 1.5;
+    std::vector<double> x;
+    for(int64_t b = 0; b < batch_count; ++b)
+    {
+        const std::vector<double> xb = right_hand_side(A.m);
+        for(double v : xb)
+        {
+            x.push_back(v * (1.0 + 0.5 * b));
+        }
+    }
+
+    std::vector<double> full;
+    ASSERT_NO_FATAL_FAILURE(sptrsv_batched(A, batch_count, alpha, x, 0, full));
+    ASSERT_EQ(full.size(), x.size());
+
+    for(int64_t b = 0; b < batch_count; ++b)
+    {
+        csr_matrix Ab = A;
+        for(double& v : Ab.val)
+        {
+            v *= 1.0 + b;
+        }
+        const std::vector<double> xb(x.begin() + b * A.m, x.begin() + (b + 1) * A.m);
+        const std::vector<double> ref
+            = host_solve(Ab, rocsparse_fill_mode_lower, rocsparse_operation_none, alpha, xb);
+        for(rocsparse_int i = 0; i < A.m; ++i)
+        {
+            ASSERT_NEAR(full[b * A.m + i], ref[i], 1e-12 * (1.0 + std::abs(ref[i])))
+                << "full grid, batch " << b << ", row " << i;
+        }
+    }
+
+    for(int grid : {2, row_blocks(A.m) - 1})
+    {
+        std::vector<double> got;
+        ASSERT_NO_FATAL_FAILURE(sptrsv_batched(A, batch_count, alpha, x, grid, got));
+        ASSERT_EQ(got.size(), full.size());
+        for(size_t k = 0; k < full.size(); ++k)
+        {
+            ASSERT_EQ(std::memcmp(&got[k], &full[k], sizeof(double)), 0)
+                << "batch " << k / A.m << ", row " << k % A.m << " is " << got[k]
+                << " with grid.x clamped to " << grid << " and " << full[k] << " on the full grid";
+        }
+    }
+}
+// The real dispatch limit, without a forced clamp: one row block more than
+// grid.x can hold, 134,217,697 rows on wave32 devices and 67,108,849 on wave64
+// devices. Before the clamp the analysis launch was rejected at this size.
+// Every row at the start of a 32-row group couples to the row before, so
+// dependencies cross every row block and chunk boundary while the chain stays
+// two rows long. It needs about 6 GB of device memory and skips without it.
+TEST(internal_level2_csrsv_grid_x_chunk, real_dispatch_limit)
+{
+    rocsparse_handle handle = nullptr;
+    ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
+    const int64_t       rows = 1024 / handle->wavefront_size;
+    const rocsparse_int m    = static_cast<rocsparse_int>(4194303 * rows + 1);
+
+    size_t free_bytes  = 0;
+    size_t total_bytes = 0;
+    ASSERT_EQ(hipMemGetInfo(&free_bytes, &total_bytes), hipSuccess);
+    if(free_bytes < static_cast<size_t>(m) * 48)
+    {
+        EXPECT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
+        GTEST_SKIP() << "Insufficient device memory: need about " << static_cast<size_t>(m) * 48
+                     << " bytes";
+    }
+
+    std::vector<rocsparse_int> row_ptr(static_cast<size_t>(m) + 1);
+    std::vector<rocsparse_int> col_ind;
+    std::vector<float>         val;
+    col_ind.reserve(static_cast<size_t>(m) + m / 32 + 1);
+    val.reserve(static_cast<size_t>(m) + m / 32 + 1);
+    row_ptr[0] = 0;
+    for(rocsparse_int i = 0; i < m; ++i)
+    {
+        if(i > 0 && i % 32 == 0)
+        {
+            col_ind.push_back(i - 1);
+            val.push_back(-0.5f);
+        }
+        col_ind.push_back(i);
+        val.push_back(2.0f);
+        row_ptr[i + 1] = static_cast<rocsparse_int>(col_ind.size());
+    }
+    const rocsparse_int nnz = static_cast<rocsparse_int>(col_ind.size());
+
+    rocsparse_ut::device_vector<rocsparse_int> d_row_ptr(row_ptr);
+    rocsparse_ut::device_vector<rocsparse_int> d_col_ind(col_ind);
+    rocsparse_ut::device_vector<float>         d_val(val);
+    rocsparse_ut::device_vector<float>         d_x(std::vector<float>(m, 1.0f));
+    rocsparse_ut::device_vector<float>         d_y(
+        std::vector<float>(m, std::numeric_limits<float>::quiet_NaN()));
+    ASSERT_NE(d_row_ptr.ptr, nullptr);
+    ASSERT_NE(d_col_ind.ptr, nullptr);
+    ASSERT_NE(d_val.ptr, nullptr);
+    ASSERT_NE(d_x.ptr, nullptr);
+    ASSERT_NE(d_y.ptr, nullptr);
+
+    rocsparse_mat_descr descr = nullptr;
+    rocsparse_mat_info  info  = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+
+    const rocsparse_operation trans       = rocsparse_operation_none;
+    size_t                    buffer_size = 0;
+    ASSERT_EQ(rocsparse_scsrsv_buffer_size(handle,
+                                           trans,
+                                           m,
+                                           nnz,
+                                           descr,
+                                           d_val.ptr,
+                                           d_row_ptr.ptr,
+                                           d_col_ind.ptr,
+                                           info,
+                                           &buffer_size),
+              rocsparse_status_success);
+    rocsparse_ut::device_vector<char> d_buffer(buffer_size);
+    ASSERT_NE(d_buffer.ptr, nullptr);
+
+    ASSERT_EQ(rocsparse_scsrsv_analysis(handle,
+                                        trans,
+                                        m,
+                                        nnz,
+                                        descr,
+                                        d_val.ptr,
+                                        d_row_ptr.ptr,
+                                        d_col_ind.ptr,
+                                        info,
+                                        rocsparse_analysis_policy_force,
+                                        rocsparse_solve_policy_auto,
+                                        d_buffer.ptr),
+              rocsparse_status_success);
+
+    const float alpha = 1.0f;
+    ASSERT_EQ(rocsparse_scsrsv_solve(handle,
+                                     trans,
+                                     m,
+                                     nnz,
+                                     &alpha,
+                                     descr,
+                                     d_val.ptr,
+                                     d_row_ptr.ptr,
+                                     d_col_ind.ptr,
+                                     info,
+                                     d_x.ptr,
+                                     d_y.ptr,
+                                     rocsparse_solve_policy_auto,
+                                     d_buffer.ptr),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    rocsparse_int pivot = 0;
+    EXPECT_EQ(rocsparse_csrsv_zero_pivot(handle, descr, info, &pivot), rocsparse_status_success);
+    EXPECT_EQ(pivot, -1);
+
+    // y = 1 / 2 on rows without the coupling, (1 + 0.5 * 0.5) / 2 on the others,
+    // exact in single precision.
+    const std::vector<float> y = rocsparse_ut::to_host(d_y);
+    for(rocsparse_int i = 0; i < m; ++i)
+    {
+        const float want = (i > 0 && i % 32 == 0) ? 0.625f : 0.5f;
+        ASSERT_EQ(y[i], want) << "row " << i << " of " << m;
+    }
+
+    EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
 }

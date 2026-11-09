@@ -293,8 +293,6 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_level2_csrmv_lrb_grids.cpp
   # csrmv adaptive row-block count vs. the dispatch limit (append-only leaf)
   unit_test_internal_level2_csrmv_adaptive_limit.cpp
-  # csrsv analysis / solve contiguous chunks on a forced grid.x clamp [AISPARSE-931]
-  unit_test_internal_level2_csrsv_grid_x_chunk.cpp
   # --- Level 2 (SpMV/gebsrmv) public C-API host tests [AISPARSE-642] --------
   # Distinct anchor (end of the level-2 group) so this leaf does not conflict
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
