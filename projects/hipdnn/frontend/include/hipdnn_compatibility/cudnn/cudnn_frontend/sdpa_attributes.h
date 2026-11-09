@@ -19,7 +19,7 @@
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_helpers.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_properties.h>
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
+#include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 
 // Unconditional: only the SDPA node methods are gated on HIPDNN_ENABLE_SDPA, not
 // these attribute types.
