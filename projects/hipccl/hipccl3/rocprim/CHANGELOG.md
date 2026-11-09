@@ -2,6 +2,12 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM x.y.z for ROCm x.y.z
+
+### Added
+
+* Added a benchmark mode for striped/blocked block load/store in `block_adjacent_difference`.
+
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 
 ### Added
