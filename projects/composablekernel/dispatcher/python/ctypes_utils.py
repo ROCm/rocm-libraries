@@ -132,7 +132,11 @@ def get_arch_filter_data() -> Dict[str, Any]:
     codegen_dir = get_dispatcher_root() / "codegen"
     import sys
 
-    sys.path.insert(0, str(codegen_dir))
+    # Called once per validated config: insert the path only once, or sys.path
+    # grows by one entry per call (thousands in a large sweep), which overflows
+    # the argument list of the Python 3.14 forkserver build workers (E2BIG).
+    if str(codegen_dir) not in sys.path:
+        sys.path.insert(0, str(codegen_dir))
 
     try:
         from arch_specs_generated import (
@@ -338,8 +342,11 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
         )
         suggested_fixes["scheduler"] = "intrawave"
 
-    # Check wave configuration for this arch
-    warp_combos = arch_data["warp_combos"].get(arch, [[2, 2, 1]])
+    # Check wave configuration for this arch (plus the pipeline's own extra maps)
+    from codegen_common import pipeline_warp_combos
+    warp_combos = pipeline_warp_combos(
+        pipeline, arch, arch_data["warp_combos"].get(arch, [[2, 2, 1]])
+    )
     wave_cfg = [wave_m, wave_n, wave_k]
     if wave_cfg not in warp_combos:
         valid_str = ", ".join(f"[{c[0]},{c[1]},{c[2]}]" for c in warp_combos)

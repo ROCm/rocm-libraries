@@ -25,6 +25,11 @@ Examples:
     # Explicit config on 4 GPUs with correctness checking:
     python streamk_gemm_full_benchmark.py gemm_streamk/configs/default_config.json \
         --devices 4 --verify --csv streamk_gemm_results.csv
+
+    # gfx1250 TDM pipelines (comp_tdm, comp_tdm_v2, comp_tdm_v3), persistent and
+    # not, at the default Stream-K workgroup budget and at half of it:
+    python streamk_gemm_full_benchmark.py gemm_streamk/configs/gfx1250_tdm_config.json \
+        --arch gfx1250 --dtype bf16 --verify --budget-pct 100,50
 """
 
 import argparse
@@ -140,7 +145,7 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
     Returns (rows, lines, n_fail) where rows are dicts ready for the CSV writer,
     lines are formatted strings to print, and n_fail counts failures.
     """
-    prob_idx, prob_dict, batch = unit
+    prob_idx, prob_dict, batch, budget_pct = unit
     M, N, K = prob_dict["M"], prob_dict["N"], prob_dict["K"]
 
     items = [
@@ -153,6 +158,7 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
 
     env = base_env.copy()
     env["HIP_VISIBLE_DEVICES"] = str(device_id)
+    env["CK_TILE_STREAMK_BUDGET_PCT"] = str(budget_pct)
 
     rows, lines, n_fail = [], [], 0
     proc = None
@@ -193,8 +199,8 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
                         mismatch = True
                 extra = f" rel={result['max_rel']:.2e}" if "max_rel" in result else ""
                 lines.append(
-                    f"  [gpu{device_id}] {cfg.name:<58} {result['ms']:>10.3f} "
-                    f"{result['tflops']:>10.2f} {status:>8}{extra}"
+                    f"  [gpu{device_id}] {cfg.name:<58} {budget_pct:>4}% "
+                    f"{result['ms']:>10.3f} {result['tflops']:>10.2f} {status:>8}{extra}"
                 )
                 rows.append(
                     {
@@ -204,6 +210,7 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
                         "N": N,
                         "K": K,
                         "device": device_id,
+                        "budget_pct": budget_pct,
                         "latency_ms": result["ms"],
                         "tflops": result["tflops"],
                         "non_zero": result.get("non_zero", 0),
@@ -305,6 +312,13 @@ def main():
         help="Limit to first N kernels plus their vector-width variants (0=all)",
     )
     parser.add_argument(
+        "--budget-pct",
+        default="100",
+        help="Comma-list of Stream-K workgroup budgets, in percent of the kernel's "
+        "default (CUs x occupancy, 100); each kernel x problem runs once per value "
+        "(e.g. 100,75,50,25)",
+    )
+    parser.add_argument(
         "--verify",
         action="store_true",
         help="Check each kernel's output against an fp32 numpy reference "
@@ -320,6 +334,9 @@ def main():
     add_vector_fallback_arg(parser)
     args = parser.parse_args()
     args.arch = _resolve_arch(args.arch)
+    budget_pcts = [int(p) for p in str(args.budget_pct).split(",") if p.strip()]
+    if not budget_pcts or any(not 0 < p <= 100 for p in budget_pcts):
+        parser.error("--budget-pct values must be in 1..100")
 
     config_paths = resolve_configs(args)
     devices = resolve_devices(args.devices)
@@ -424,6 +441,7 @@ def main():
         "N",
         "K",
         "device",
+        "budget_pct",
         "latency_ms",
         "tflops",
         "non_zero",
@@ -447,7 +465,8 @@ def main():
         prob_dict = {"M": int(prob["M"]), "N": int(prob["N"]), "K": int(prob["K"])}
         for start in range(0, len(idx), args.batch_size):
             batch = [(i, *built_kernels[i]) for i in idx[start : start + args.batch_size]]
-            work_q.put((prob_idx, prob_dict, batch))
+            for budget_pct in budget_pcts:
+                work_q.put((prob_idx, prob_dict, batch, budget_pct))
 
     io_lock = threading.Lock()
     stats = {"measurements": 0, "failures": 0}

@@ -4,7 +4,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-10-30T14:59:00.519447
+Generated at: 2026-11-09T14:43:45.864094
 
 To update this file:
 1. Edit arch_specs.json
@@ -330,6 +330,9 @@ TRAIT_UNSUPPORTED_COMBINATIONS: Set[Tuple[str, str, str]] = {
     ("comp_tdm_pc", "cshuffle", "interwave"),
     ("comp_tdm_pc", "default", "interwave"),
     ("comp_tdm_pc", "tdm", "interwave"),
+    ("comp_tdm_v3", "cshuffle", "interwave"),
+    ("comp_tdm_v3", "default", "interwave"),
+    ("comp_tdm_v3", "tdm", "interwave"),
 }
 
 # Valid dtype combinations: (A_dtype, B_dtype) -> acc_dtype and notes
@@ -382,6 +385,7 @@ def get_warp_tile_combos(gpu_arch: str, dtype_key: str) -> List[List[int]]:
 LDS_PIPELINE_BUDGET_ALIASES: Dict[str, str] = {
     "comp_tdm": "comp_async",
     "comp_tdm_v2": "comp_async",
+    "comp_tdm_v3": "comp_async",
 }
 
 
