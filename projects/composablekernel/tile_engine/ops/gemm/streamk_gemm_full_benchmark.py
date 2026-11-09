@@ -52,9 +52,11 @@ sys.path.insert(0, str(_COMMON_DIR))
 sys.path.insert(0, str(_THIS_DIR))
 
 from gemm_utils import (  # noqa: E402
+    STREAMK_BUDGET_ENV,
     STREAMK_REDUCTION_STRATEGIES,
     _resolve_arch,
     expand_sweep,
+    parse_streamk_budgets,
     setup_multiple_gemm_dispatchers,
     unique_by_name,
 )
@@ -158,7 +160,7 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
 
     env = base_env.copy()
     env["HIP_VISIBLE_DEVICES"] = str(device_id)
-    env["CK_TILE_STREAMK_BUDGET_PCT"] = str(budget_pct)
+    env[STREAMK_BUDGET_ENV] = str(budget_pct)
 
     rows, lines, n_fail = [], [], 0
     proc = None
@@ -334,9 +336,10 @@ def main():
     add_vector_fallback_arg(parser)
     args = parser.parse_args()
     args.arch = _resolve_arch(args.arch)
-    budget_pcts = [int(p) for p in str(args.budget_pct).split(",") if p.strip()]
-    if not budget_pcts or any(not 0 < p <= 100 for p in budget_pcts):
-        parser.error("--budget-pct values must be in 1..100")
+    try:
+        budget_pcts = parse_streamk_budgets(args.budget_pct)
+    except ValueError as e:
+        parser.error(str(e))
 
     config_paths = resolve_configs(args)
     devices = resolve_devices(args.devices)

@@ -1153,6 +1153,59 @@ def test_misleading_rows_never_become_winners(tmp_path, monkeypatch, confirm_ok)
         assert "no finalist passed confirmation" in summary["unresolved"][K1]
 
 
+# Stream-K launch variants: two kernels (atomic, linear) x budgets 100 and 50.
+SK = gemm_utils.with_streamk_budgets(
+    [replace(BASE, variant="stream_k", reduction_strategy=r) for r in ("atomic", "linear")],
+    [100, 50])
+SK_NAMES = [c.name for c in SK]
+SK_KERNELS = [c.kernel_config.name for c in SK]
+ENV = gemm_utils.STREAMK_BUDGET_ENV
+
+
+def test_streamk_budgets_share_one_build_and_reach_the_launch(tmp_path, monkeypatch):
+    # The budgets of a Stream-K kernel are candidates of their own with its
+    # build key: one build and one artifact serve them all. The worker gets
+    # the kernel's name (its identity check passes) and each item's budget in
+    # the environment its library reads at the launch, restored after it.
+    monkeypatch.delenv(ENV, raising=False)
+    tc = Toolchain(tmp_path, monkeypatch)
+    seen = []
+
+    def runner(lib_path, arch=None):
+        r = tc.runner(lib_path, arch)
+        run = r.run
+
+        def launch(A, B, problem):
+            pct = int(os.environ.get(ENV, "100"))
+            seen.append((r.kernel_name, pct))
+            return SimpleNamespace(**{**vars(run(A, B, problem)), "time_ms": 100.0 / pct})
+
+        r.run = launch
+        return r
+
+    monkeypatch.setattr(worker, "GpuGemmRunner", runner)
+    k1, _, k2, _ = SK_KERNELS
+    assert SK_NAMES == [k1, f"{k1}@budget50", k2, f"{k2}@budget50"]
+    ad = _adapter(tmp_path, tc.build, configs=SK, eligible=[SK_NAMES, SK_NAMES])
+    cands = ad.enumerate_eligible()[K1]
+    assert [c.artifact_key for c in cands] == SK_KERNELS
+    assert [(c.record["reduction_strategy"], c.record["budget_pct"]) for c in cands] == [
+        ("atomic", 100), ("atomic", 50), ("linear", 100), ("linear", 50)]
+    got = ad.build_missing([cands[1], cands[2]])  # one candidate per build
+    assert set(got) == {k1, k2} and [b["names"] for b in tc.builds] == [[k1, k2]]
+    art = tmp_path / "out" / "artifacts"
+    assert sorted(p.name for p in art.iterdir()) == sorted([f"{k1}.so", f"{k2}.so"])
+    out = ad.measure_pairs([_req(K1, n, i) for i, n in enumerate(SK_NAMES)])
+    assert [(o.request.kernel_name, o.status, o.latency_ms) for o in out] == [
+        (n, "ok", 100.0 / c.budget_pct) for n, c in zip(SK_NAMES, SK)]
+    assert seen == [(k1, 100), (k1, 50), (k2, 100), (k2, 50)]
+    items = [it for p in tc.payloads for it in p["items"]]
+    assert [(it["kernel_name"], it["env"]) for it in items] == [
+        (k, {ENV: str(c.budget_pct)}) for k, c in zip(SK_KERNELS, SK)]
+    assert all(p["check_identity"] for p in tc.payloads) and ENV not in os.environ
+    assert tc.loaded == [art / f"{k}.so" for k in SK_KERNELS]
+
+
 def test_worker_checks_the_library_identity_only_when_asked(monkeypatch, capsys):
     monkeypatch.setattr(gemm_utils, "_SWEEP_CACHE", {})
     monkeypatch.setattr(worker, "GpuGemmRunner",

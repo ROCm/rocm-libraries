@@ -36,7 +36,7 @@ import multiprocessing
 import subprocess
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -550,6 +550,18 @@ class GemmKernelConfig:
         elif self.variant == "grouped":
             name += "_grouped"
         return name
+
+    @property
+    def kernel_config(self) -> "GemmKernelConfig":
+        """The config that is built for this one: itself (a launch variant,
+        e.g. ``StreamKBudgetConfig``, returns its kernel's)."""
+        return self
+
+    @property
+    def launch_env(self) -> Dict[str, str]:
+        """Environment a run of this config sets for its launches: none (see
+        ``StreamKBudgetConfig``)."""
+        return {}
 
     # ------------------------------------------------------------------ #
     # Serialization
@@ -2907,6 +2919,68 @@ def unique_by_name(configs: List[GemmKernelConfig]) -> List[GemmKernelConfig]:
     for c in configs:
         first.setdefault(c.name, c)
     return list(first.values())
+
+
+# The Stream-K ctypes library (streamk_gemm_ctypes_lib.cpp) reads the
+# workgroup budget from this variable at each launch, in percent of the
+# kernel's default (CUs x occupancy); unset or 100 keeps the default.
+STREAMK_BUDGET_ENV = "CK_TILE_STREAMK_BUDGET_PCT"
+STREAMK_FULL_BUDGET = 100
+
+
+@dataclass
+class StreamKBudgetConfig(GemmKernelConfig):
+    """A Stream-K kernel launched with ``budget_pct`` percent of its default
+    workgroup budget. The budget is a launch setting, not a compile-time one:
+    every budget of a kernel runs its one build (``kernel_config``), and only
+    ``name`` and ``launch_env`` differ. The full budget keeps the kernel's own
+    name; another budget appends ``@budget<pct>``."""
+
+    budget_pct: int = STREAMK_FULL_BUDGET
+
+    @property
+    def kernel_config(self) -> GemmKernelConfig:
+        return GemmKernelConfig(
+            **{f.name: getattr(self, f.name) for f in fields(GemmKernelConfig)}
+        )
+
+    @property
+    def name(self) -> str:
+        kernel = super().name
+        if self.budget_pct == STREAMK_FULL_BUDGET:
+            return kernel
+        return f"{kernel}@budget{self.budget_pct}"
+
+    @property
+    def launch_env(self) -> Dict[str, str]:
+        return {STREAMK_BUDGET_ENV: str(self.budget_pct)}
+
+
+def parse_streamk_budgets(text) -> List[int]:
+    """A ``--budget-pct`` comma list: distinct percents in 1..100, in order.
+    Raises ValueError otherwise."""
+    try:
+        pcts = [int(p) for p in str(text).split(",") if p.strip()]
+    except ValueError:
+        pcts = []
+    if not pcts or any(not 0 < p <= 100 for p in pcts) or len(set(pcts)) < len(pcts):
+        raise ValueError(f"--budget-pct {text!r}: expected distinct values in 1..100")
+    return pcts
+
+
+def with_streamk_budgets(
+    configs: List[GemmKernelConfig], budgets: List[int]
+) -> List[GemmKernelConfig]:
+    """Each Stream-K config of ``configs`` once per budget (percent), kernel
+    by kernel; configs of other variants as they are."""
+    out: List[GemmKernelConfig] = []
+    for c in configs:
+        if c.variant != "stream_k":
+            out.append(c)
+            continue
+        kernel = {f.name: getattr(c, f.name) for f in fields(GemmKernelConfig)}
+        out.extend(StreamKBudgetConfig(**kernel, budget_pct=b) for b in budgets)
+    return out
 
 
 def expand_sweep(
