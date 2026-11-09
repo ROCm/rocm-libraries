@@ -202,8 +202,10 @@ python aotriton/reconcile.py <arch>/<run> --out <arch>/<run>/reconciled.csv
 accounting (`FILE`: `<suite> <k> <N>` per line, so a shard without a directory shows as missing), outcome totals
 (with `native-skip by class:` `kernel-limit` (AOTriton kernel limits such as hdim or register pressure, a missing
 AITER ASM kernel), `api-rule` (an explicit attn_mask with is_causal), `resource` (low-VRAM and OOM guards) and
-`other`, from each skip's reason), passes and per-(direction, engine) counts over every shard (a passing row credits
-the engines of its `fwd` and `bwd` columns (pass 1; every other pass credits the engine it pins), a failing or crashed row only the failing side; `== engines by mode and
+`other`, from each skip's reason), passes and per-(direction, engine) counts over every shard (a passing row of pass 1
+credits the engines of its `fwd` and `bwd` columns and a passing row of a pair pass both engines it pins; the pinned
+and reference-forward passes credit the engine they pin and the discovery pass the backward engine that served; a
+failing or crashed row only the failing side; `== engines by mode and
 test file` splits them by `mode`, `hipdnn` against `ref-fwd`, and by test file, and `--engines` prints it too), the
 engines no case passed with their first decline reasons, every `fail` / `crash` row of every pass with its engine
 (the one served on `fail_side`, else the other side's, else `-`), side, stage and repro path, and the failing node

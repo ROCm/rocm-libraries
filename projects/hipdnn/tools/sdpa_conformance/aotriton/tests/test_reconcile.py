@@ -353,6 +353,38 @@ def test_a_fail_whose_failing_side_served_its_pin_stays_a_fail_in_pair_passes(tm
     assert [f["nodeid"] for f in reconcile.failure_rows(tmp_path)] == ids
 
 
+def test_a_passing_pair_row_credits_both_pinned_engines_and_a_failure_only_its_side(
+    tmp_path,
+):
+    ids = [f"v/test_backward.py::b{i}" for i in (1, 2)]
+    write_pass(tmp_path, "", {}, [], [])
+    pair = {"kind": "pair", "direction": "bwd", "pin_fwd": "A", "pin_bwd": "X"}
+    write_pass(
+        tmp_path, "all-engines/pair/A__X", pair,
+        [row(ids[0], "pass", mode="hipdnn", fwd="hipdnn:A", bwd="hipdnn:X"),
+         row(ids[1], "fail", mode="hipdnn", fwd="hipdnn:A", bwd="hipdnn:X", fail_side="bwd")],
+        ids,
+    )  # fmt: skip
+    refwd = {
+        "kind": "refwd",
+        "direction": "bwd",
+        "pin_fwd": "reference",
+        "pin_bwd": "Y",
+    }
+    write_pass(
+        tmp_path, "all-engines/refwd/Y", refwd,
+        [row(ids[0], "pass", mode="ref-fwd", fwd="ref:pinned reference", bwd="hipdnn:Y")],
+        ids[:1],
+    )  # fmt: skip
+    # The pair's passing row credits its forward A as well as its backward X; its failing row
+    # charges only the failing backward; the reference-forward pass has no forward engine.
+    assert reconcile.engine_counts(reconcile.engine_rows(tmp_path)).splitlines() == [
+        "pair bwd X (fwd A): pass=1 fail=1 declined=0",
+        "pair fwd A (bwd X): pass=1 fail=0 declined=0",
+        "refwd bwd Y: pass=1 fail=0 declined=0",
+    ]
+
+
 def test_a_state_of_an_erroring_call_names_its_engine_like_a_served_one(tmp_path):
     assert reconcile.served_engines("error:X") == {"X"}
     assert reconcile.served_engines("error:") == set()
@@ -648,13 +680,18 @@ def test_a_candidate_pair_pass_pins_both_directions_and_both_candidates(tmp_path
         [row(BWD_T, fwd="hipdnn:A", bwd="hipdnn:X", bwd_kernel="kx")],
         [BWD_T],
     )
-    (got,) = [r for r in table(tmp_path) if r["source"] == "candidate-pair"]
-    assert (got["engine"], got["pin_fwd"], got["pin_bwd"]) == ("X", "A", "X")
-    assert (got["fwd_candidate"], got["bwd_candidate"], got["kernel"]) == (
-        "1",
-        "2",
-        "kx",
-    )
+    # a passing candidate-pair row credits both pinned engines, each with its own kernel column
+    got = {
+        r["direction"]: r for r in table(tmp_path) if r["source"] == "candidate-pair"
+    }
+    assert sorted(got) == ["bwd", "fwd"]
+    assert [(got[d]["engine"], got[d]["kernel"]) for d in ("fwd", "bwd")] == [
+        ("A", ""),
+        ("X", "kx"),
+    ]
+    for d in ("fwd", "bwd"):
+        assert (got[d]["pin_fwd"], got[d]["pin_bwd"]) == ("A", "X")
+        assert (got[d]["fwd_candidate"], got[d]["bwd_candidate"]) == ("1", "2")
 
 
 def test_candidate_passes_have_their_own_slug_and_accounting_lines(tmp_path):

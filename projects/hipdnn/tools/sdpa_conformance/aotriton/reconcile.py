@@ -24,7 +24,9 @@ candidate columns) still reads, with the missing fields empty.
 ``<suite> <k> <N>`` per line, so a shard that left no directory shows as missing), outcome totals (with
 the ``native-skip`` rows by class: ``kernel-limit``, ``api-rule``, ``resource``, ``other``), per-
 pass and per-(direction, engine) counts over every shard (each engine credited from the ``fwd`` and
-``bwd`` columns of every passing row (pass 1; every other pass credits the engine it pins), then split by mode and by test file), the engines no case passed
+``bwd`` columns of every passing row in pass 1 and both pinned engines of a passing pair-pass row;
+the pinned and reference-forward passes credit the engine they pin, the discovery pass the backward
+engine that served), then split by mode and by test file), the engines no case passed
 with their first decline reasons, every ``fail`` / ``crash`` row with engine (the failing side's, else
 the other side's), side, stage and repro path, and with ``--baseline FILE`` (one failing node id per
 line) the failing node ids new to this run and the baseline ids that no longer fail here (outcome
@@ -451,6 +453,12 @@ def _pass_engine_rows(d, meta, expected):
                 wrong = mismatch(row, wanted, only_ran=outcome == "fail")
                 if wrong:
                     outcome, reason = "declined", wrong
+            if kind in _PAIR_KINDS and outcome == "pass":
+                # both pins were honoured and the case passed: credit both engines
+                for direction in ("fwd", "bwd"):
+                    add(nodeid, direction, pin[direction], outcome, reason, row)
+                continue
+            # a failing or crashed row credits the failing side; a declined row stays one row
             side = crashed or failed or "bwd"
             add(nodeid, side, wanted.get(side, "reference"), outcome, reason, row)
     direction = (
@@ -496,9 +504,11 @@ def _count_label(r):
             f"{label} (fwd {r['pin_fwd']} #{r['fwd_candidate'] or '-'}, "
             f"bwd {r['pin_bwd']} #{r['bwd_candidate'] or '-'})"
         )
-    return label + (
-        f" (fwd {r['pin_fwd']})" if r["source"] == contract.PASS_PAIR else ""
-    )
+    if r["source"] == contract.PASS_PAIR:
+        # the partner pin: a backward credit names its forward, a forward credit its backward
+        other = "bwd" if r["direction"] == "fwd" else "fwd"
+        return f"{label} ({other} {r['pin_' + other]})"
+    return label
 
 
 def _tally(rows, counts, splits=None):
