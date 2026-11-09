@@ -31,6 +31,7 @@ namespace rocsparse
     template <rocsparse_int BLOCK_SIZE,
               rocsparse_int ROW_BLOCK_DIM,
               rocsparse_int COL_BLOCK_DIM,
+              bool          GRID_STRIDE,
               typename T>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void gebsr2csr_block_per_row_1_32_kernel(rocsparse_direction  dir,
@@ -49,31 +50,34 @@ namespace rocsparse
     {
         rocsparse_int tid = hipThreadIdx_x;
 
-        if(hipBlockIdx_x == 0 && tid == 0)
-        {
-            csr_row_ptr[0] = csr_base;
-        }
-
-        rocsparse_int lid = tid & (ROW_BLOCK_DIM * COL_BLOCK_DIM - 1);
-        rocsparse_int wid = tid / (ROW_BLOCK_DIM * COL_BLOCK_DIM);
-
-        rocsparse_int c = lid & (COL_BLOCK_DIM - 1);
-        rocsparse_int r = lid / COL_BLOCK_DIM;
-
-        // r and c do not depend on the block row, and this kernel has no barrier, so
-        // threads outside the block can leave before the block-row loop.
-        if(r >= row_block_dim || c >= col_block_dim)
-        {
-            return;
-        }
-
-        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
-        for(int64_t bid64 = hipBlockIdx_x; bid64 < mb; bid64 += hipGridDim_x)
+        // GRID_STRIDE is set when get_grid_size_x clamped grid.x below mb: every
+        // block then starts on a valid block row and strides over the rest.
+        // Otherwise each block converts the block row it is launched for.
+        int64_t bid64 = hipBlockIdx_x;
+        do
         {
             const rocsparse_int bid = static_cast<rocsparse_int>(bid64);
 
             rocsparse_int start = bsr_row_ptr[bid] - bsr_base;
             rocsparse_int end   = bsr_row_ptr[bid + 1] - bsr_base;
+
+            if(bid == 0 && tid == 0)
+            {
+                csr_row_ptr[0] = csr_base;
+            }
+
+            rocsparse_int lid = tid & (ROW_BLOCK_DIM * COL_BLOCK_DIM - 1);
+            rocsparse_int wid = tid / (ROW_BLOCK_DIM * COL_BLOCK_DIM);
+
+            rocsparse_int c = lid & (COL_BLOCK_DIM - 1);
+            rocsparse_int r = lid / COL_BLOCK_DIM;
+
+            // r and c do not depend on the block row and the kernel has no barrier, so
+            // this leaves the block-row loop as well.
+            if(r >= row_block_dim || c >= col_block_dim)
+            {
+                return;
+            }
 
             rocsparse_int prev
                 = row_block_dim * col_block_dim * start + col_block_dim * (end - start) * r;
@@ -100,7 +104,14 @@ namespace rocsparse
                         = bsr_val[row_block_dim * col_block_dim * i + row_block_dim * c + r];
                 }
             }
-        }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
+
+            bid64 += hipGridDim_x;
+        } while(bid64 < mb);
     }
 
     template <rocsparse_int BLOCK_SIZE,
@@ -108,6 +119,7 @@ namespace rocsparse
               rocsparse_int COL_BLOCK_DIM,
               rocsparse_int SUB_ROW_BLOCK_DIM,
               rocsparse_int SUB_COL_BLOCK_DIM,
+              bool          GRID_STRIDE,
               typename T>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void gebsr2csr_block_per_row_33_128_kernel(rocsparse_direction  dir,
@@ -126,18 +138,21 @@ namespace rocsparse
     {
         rocsparse_int tid = hipThreadIdx_x;
 
-        if(hipBlockIdx_x == 0 && tid == 0)
-        {
-            csr_row_ptr[0] = csr_base;
-        }
-
-        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
-        for(int64_t bid64 = hipBlockIdx_x; bid64 < mb; bid64 += hipGridDim_x)
+        // GRID_STRIDE is set when get_grid_size_x clamped grid.x below mb: every
+        // block then starts on a valid block row and strides over the rest.
+        // Otherwise each block converts the block row it is launched for.
+        int64_t bid64 = hipBlockIdx_x;
+        do
         {
             const rocsparse_int bid = static_cast<rocsparse_int>(bid64);
 
             rocsparse_int start = bsr_row_ptr[bid] - bsr_base;
             rocsparse_int end   = bsr_row_ptr[bid + 1] - bsr_base;
+
+            if(bid == 0 && tid == 0)
+            {
+                csr_row_ptr[0] = csr_base;
+            }
 
             for(rocsparse_int y = 0; y < (ROW_BLOCK_DIM / SUB_ROW_BLOCK_DIM); y++)
             {
@@ -187,7 +202,14 @@ namespace rocsparse
                     }
                 }
             }
-        }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
+
+            bid64 += hipGridDim_x;
+        } while(bid64 < mb);
     }
 
     template <rocsparse_int BLOCK_SIZE, rocsparse_int WF_SIZE>

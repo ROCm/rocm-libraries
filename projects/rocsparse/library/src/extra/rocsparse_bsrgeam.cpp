@@ -76,7 +76,7 @@ namespace rocsparse
             idx_base_C);
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, bool GRID_STRIDE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrgeam_wf_per_row_multipass_kernel(rocsparse_direction dir,
                                              rocsparse_int       mb,
@@ -102,16 +102,51 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
         constexpr int64_t ROWS_PER_BLOCK = BLOCKSIZE / (BLOCKDIM * BLOCKDIM);
-        const int64_t     stride         = static_cast<int64_t>(hipGridDim_x) * ROWS_PER_BLOCK;
 
-        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
-        // The bound must stay block-uniform: the device function walks the rows in
-        // chunks behind __syncthreads().
-        for(int64_t row_base = static_cast<int64_t>(hipBlockIdx_x) * ROWS_PER_BLOCK; row_base < mb;
-            row_base += stride)
+        if constexpr(GRID_STRIDE)
+        {
+            const int64_t stride = static_cast<int64_t>(hipGridDim_x) * ROWS_PER_BLOCK;
+
+            // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
+            // The bound must stay block-uniform: the device function walks the rows in
+            // chunks behind __syncthreads().
+            for(int64_t row_base = static_cast<int64_t>(hipBlockIdx_x) * ROWS_PER_BLOCK;
+                row_base < mb;
+                row_base += stride)
+            {
+                rocsparse::bsrgeam_wf_per_row_multipass_device<BLOCKSIZE, BLOCKDIM>(
+                    static_cast<rocsparse_int>(row_base),
+                    dir,
+                    mb,
+                    nb,
+                    block_dim,
+                    alpha,
+                    bsr_row_ptr_A,
+                    bsr_col_ind_A,
+                    bsr_val_A,
+                    beta,
+                    bsr_row_ptr_B,
+                    bsr_col_ind_B,
+                    bsr_val_B,
+                    bsr_row_ptr_C,
+                    bsr_col_ind_C,
+                    bsr_val_C,
+                    idx_base_A,
+                    idx_base_B,
+                    idx_base_C);
+
+                // The device function exits on an unfenced read of sdone; fence it
+                // against the next rows' first store.
+                if(row_base + stride < mb)
+                {
+                    __syncthreads();
+                }
+            }
+        }
+        else
         {
             rocsparse::bsrgeam_wf_per_row_multipass_device<BLOCKSIZE, BLOCKDIM>(
-                static_cast<rocsparse_int>(row_base),
+                static_cast<rocsparse_int>(hipBlockIdx_x * ROWS_PER_BLOCK),
                 dir,
                 mb,
                 nb,
@@ -130,13 +165,6 @@ namespace rocsparse
                 idx_base_A,
                 idx_base_B,
                 idx_base_C);
-
-            // The device function exits on an unfenced read of sdone; fence it
-            // against the next rows' first store.
-            if(row_base + stride < mb)
-            {
-                __syncthreads();
-            }
         }
     }
 
@@ -184,7 +212,7 @@ namespace rocsparse
                                                                                idx_base_C);
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, bool GRID_STRIDE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrgeam_block_per_row_multipass_kernel2(rocsparse_direction dir,
                                                  rocsparse_int       mb,
@@ -208,31 +236,56 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
-        // The bound must stay block-uniform: the device function walks the row in
-        // chunks behind __syncthreads().
-        for(int64_t row = hipBlockIdx_x; row < mb; row += hipGridDim_x)
+        if constexpr(GRID_STRIDE)
         {
-            rocsparse::bsrgeam_block_per_row_multipass_device2<BLOCKSIZE, BLOCKDIM>(
-                static_cast<rocsparse_int>(row),
-                dir,
-                mb,
-                nb,
-                block_dim,
-                alpha,
-                bsr_row_ptr_A,
-                bsr_col_ind_A,
-                bsr_val_A,
-                beta,
-                bsr_row_ptr_B,
-                bsr_col_ind_B,
-                bsr_val_B,
-                bsr_row_ptr_C,
-                bsr_col_ind_C,
-                bsr_val_C,
-                idx_base_A,
-                idx_base_B,
-                idx_base_C);
+            // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
+            // The bound must stay block-uniform: the device function walks the row in
+            // chunks behind __syncthreads().
+            for(int64_t row = hipBlockIdx_x; row < mb; row += hipGridDim_x)
+            {
+                rocsparse::bsrgeam_block_per_row_multipass_device2<BLOCKSIZE, BLOCKDIM>(
+                    static_cast<rocsparse_int>(row),
+                    dir,
+                    mb,
+                    nb,
+                    block_dim,
+                    alpha,
+                    bsr_row_ptr_A,
+                    bsr_col_ind_A,
+                    bsr_val_A,
+                    beta,
+                    bsr_row_ptr_B,
+                    bsr_col_ind_B,
+                    bsr_val_B,
+                    bsr_row_ptr_C,
+                    bsr_col_ind_C,
+                    bsr_val_C,
+                    idx_base_A,
+                    idx_base_B,
+                    idx_base_C);
+            }
+        }
+        else
+        {
+            rocsparse::bsrgeam_block_per_row_multipass_device2<BLOCKSIZE, BLOCKDIM>(hipBlockIdx_x,
+                                                                                    dir,
+                                                                                    mb,
+                                                                                    nb,
+                                                                                    block_dim,
+                                                                                    alpha,
+                                                                                    bsr_row_ptr_A,
+                                                                                    bsr_col_ind_A,
+                                                                                    bsr_val_A,
+                                                                                    beta,
+                                                                                    bsr_row_ptr_B,
+                                                                                    bsr_col_ind_B,
+                                                                                    bsr_val_B,
+                                                                                    bsr_row_ptr_C,
+                                                                                    bsr_col_ind_C,
+                                                                                    bsr_val_C,
+                                                                                    idx_base_A,
+                                                                                    idx_base_B,
+                                                                                    idx_base_C);
         }
     }
 
@@ -392,123 +445,155 @@ namespace rocsparse
         else if(block_dim == 4)
         {
 #define BSRGEAM_DIM 64
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::bsrgeam_wf_per_row_multipass_kernel<BSRGEAM_DIM, 4>),
-                dim3(rocsparse::get_grid_size_x(
-                    handle, (mb - 1) / (BSRGEAM_DIM / (4 * 4)) + 1, BSRGEAM_DIM)),
-                dim3(BSRGEAM_DIM),
-                0,
-                stream,
-                dir,
-                mb,
-                nb,
-                block_dim,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                bsr_row_ptr_A,
-                bsr_col_ind_A,
-                bsr_val_A,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                bsr_row_ptr_B,
-                bsr_col_ind_B,
-                bsr_val_B,
-                bsr_row_ptr_C,
-                bsr_col_ind_C,
-                bsr_val_C,
-                descr_A->base,
-                descr_B->base,
-                descr_C->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                handle,
+                (mb - 1) / (BSRGEAM_DIM / (4 * 4)) + 1,
+                BSRGEAM_DIM,
+                [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                        (rocsparse::bsrgeam_wf_per_row_multipass_kernel<
+                            BSRGEAM_DIM,
+                            4,
+                            decltype(grid_stride)::value>),
+                        dim3(grid),
+                        dim3(BSRGEAM_DIM),
+                        0,
+                        stream,
+                        dir,
+                        mb,
+                        nb,
+                        block_dim,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                        bsr_row_ptr_A,
+                        bsr_col_ind_A,
+                        bsr_val_A,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                        bsr_row_ptr_B,
+                        bsr_col_ind_B,
+                        bsr_val_B,
+                        bsr_row_ptr_C,
+                        bsr_col_ind_C,
+                        bsr_val_C,
+                        descr_A->base,
+                        descr_B->base,
+                        descr_C->base,
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                    return rocsparse_status_success;
+                }));
 #undef BSRGEAM_DIM
         }
         else if(block_dim <= 8)
         {
 #define BSRGEAM_DIM 64
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::bsrgeam_wf_per_row_multipass_kernel<BSRGEAM_DIM, 8>),
-                dim3(rocsparse::get_grid_size_x(
-                    handle, (mb - 1) / (BSRGEAM_DIM / (8 * 8)) + 1, BSRGEAM_DIM)),
-                dim3(BSRGEAM_DIM),
-                0,
-                stream,
-                dir,
-                mb,
-                nb,
-                block_dim,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                bsr_row_ptr_A,
-                bsr_col_ind_A,
-                bsr_val_A,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                bsr_row_ptr_B,
-                bsr_col_ind_B,
-                bsr_val_B,
-                bsr_row_ptr_C,
-                bsr_col_ind_C,
-                bsr_val_C,
-                descr_A->base,
-                descr_B->base,
-                descr_C->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                handle,
+                (mb - 1) / (BSRGEAM_DIM / (8 * 8)) + 1,
+                BSRGEAM_DIM,
+                [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                        (rocsparse::bsrgeam_wf_per_row_multipass_kernel<
+                            BSRGEAM_DIM,
+                            8,
+                            decltype(grid_stride)::value>),
+                        dim3(grid),
+                        dim3(BSRGEAM_DIM),
+                        0,
+                        stream,
+                        dir,
+                        mb,
+                        nb,
+                        block_dim,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                        bsr_row_ptr_A,
+                        bsr_col_ind_A,
+                        bsr_val_A,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                        bsr_row_ptr_B,
+                        bsr_col_ind_B,
+                        bsr_val_B,
+                        bsr_row_ptr_C,
+                        bsr_col_ind_C,
+                        bsr_val_C,
+                        descr_A->base,
+                        descr_B->base,
+                        descr_C->base,
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                    return rocsparse_status_success;
+                }));
 #undef BSRGEAM_DIM
         }
         else if(block_dim <= 16)
         {
 #define BSRGEAM_DIM 256
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::bsrgeam_block_per_row_multipass_kernel2<BSRGEAM_DIM, 16>),
-                dim3(rocsparse::get_grid_size_x(handle, mb, BSRGEAM_DIM)),
-                dim3(BSRGEAM_DIM),
-                0,
-                stream,
-                dir,
-                mb,
-                nb,
-                block_dim,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                bsr_row_ptr_A,
-                bsr_col_ind_A,
-                bsr_val_A,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                bsr_row_ptr_B,
-                bsr_col_ind_B,
-                bsr_val_B,
-                bsr_row_ptr_C,
-                bsr_col_ind_C,
-                bsr_val_C,
-                descr_A->base,
-                descr_B->base,
-                descr_C->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                handle, mb, BSRGEAM_DIM, [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                        (rocsparse::bsrgeam_block_per_row_multipass_kernel2<
+                            BSRGEAM_DIM,
+                            16,
+                            decltype(grid_stride)::value>),
+                        dim3(grid),
+                        dim3(BSRGEAM_DIM),
+                        0,
+                        stream,
+                        dir,
+                        mb,
+                        nb,
+                        block_dim,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                        bsr_row_ptr_A,
+                        bsr_col_ind_A,
+                        bsr_val_A,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                        bsr_row_ptr_B,
+                        bsr_col_ind_B,
+                        bsr_val_B,
+                        bsr_row_ptr_C,
+                        bsr_col_ind_C,
+                        bsr_val_C,
+                        descr_A->base,
+                        descr_B->base,
+                        descr_C->base,
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                    return rocsparse_status_success;
+                }));
 #undef BSRGEAM_DIM
         }
         else if(block_dim <= 32)
         {
 #define BSRGEAM_DIM 256
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::bsrgeam_block_per_row_multipass_kernel2<BSRGEAM_DIM, 32>),
-                dim3(rocsparse::get_grid_size_x(handle, mb, BSRGEAM_DIM)),
-                dim3(BSRGEAM_DIM),
-                0,
-                stream,
-                dir,
-                mb,
-                nb,
-                block_dim,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                bsr_row_ptr_A,
-                bsr_col_ind_A,
-                bsr_val_A,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                bsr_row_ptr_B,
-                bsr_col_ind_B,
-                bsr_val_B,
-                bsr_row_ptr_C,
-                bsr_col_ind_C,
-                bsr_val_C,
-                descr_A->base,
-                descr_B->base,
-                descr_C->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                handle, mb, BSRGEAM_DIM, [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                        (rocsparse::bsrgeam_block_per_row_multipass_kernel2<
+                            BSRGEAM_DIM,
+                            32,
+                            decltype(grid_stride)::value>),
+                        dim3(grid),
+                        dim3(BSRGEAM_DIM),
+                        0,
+                        stream,
+                        dir,
+                        mb,
+                        nb,
+                        block_dim,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                        bsr_row_ptr_A,
+                        bsr_col_ind_A,
+                        bsr_val_A,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                        bsr_row_ptr_B,
+                        bsr_col_ind_B,
+                        bsr_val_B,
+                        bsr_row_ptr_C,
+                        bsr_col_ind_C,
+                        bsr_val_C,
+                        descr_A->base,
+                        descr_B->base,
+                        descr_C->base,
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                    return rocsparse_status_success;
+                }));
 #undef BSRGEAM_DIM
         }
         // LCOV_EXCL_START

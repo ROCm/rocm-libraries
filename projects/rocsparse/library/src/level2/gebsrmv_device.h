@@ -128,16 +128,17 @@ namespace rocsparse
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
         // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows from row_base.
-        // row_base + wid can exceed rocsparse_int when mb is near its maximum.
-        const int64_t row64 = static_cast<int64_t>(row_base) + wid;
+        // row_base + wid can exceed rocsparse_int when mb is near its maximum, but
+        // not uint32_t.
+        const uint32_t row_u = static_cast<uint32_t>(row_base) + wid;
 
         // Do not run out of bounds
-        if(row64 >= mb)
+        if(row_u >= static_cast<uint32_t>(mb))
         {
             return;
         }
 
-        const rocsparse_int row = static_cast<rocsparse_int>(row64);
+        const rocsparse_int row = static_cast<rocsparse_int>(row_u);
 
         // BSR row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
@@ -206,16 +207,17 @@ namespace rocsparse
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
         // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows from row_base.
-        // row_base + wid can exceed rocsparse_int when mb is near its maximum.
-        const int64_t row64 = static_cast<int64_t>(row_base) + wid;
+        // row_base + wid can exceed rocsparse_int when mb is near its maximum, but
+        // not uint32_t.
+        const uint32_t row_u = static_cast<uint32_t>(row_base) + wid;
 
         // Do not run out of bounds
-        if(row64 >= mb)
+        if(row_u >= static_cast<uint32_t>(mb))
         {
             return;
         }
 
-        const rocsparse_int row = static_cast<rocsparse_int>(row64);
+        const rocsparse_int row = static_cast<rocsparse_int>(row_u);
 
         // BSR row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
@@ -315,16 +317,17 @@ namespace rocsparse
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
         // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows from row_base.
-        // row_base + wid can exceed rocsparse_int when mb is near its maximum.
-        const int64_t row64 = static_cast<int64_t>(row_base) + wid;
+        // row_base + wid can exceed rocsparse_int when mb is near its maximum, but
+        // not uint32_t.
+        const uint32_t row_u = static_cast<uint32_t>(row_base) + wid;
 
         // Do not run out of bounds
-        if(row64 >= mb)
+        if(row_u >= static_cast<uint32_t>(mb))
         {
             return;
         }
 
-        const rocsparse_int row = static_cast<rocsparse_int>(row64);
+        const rocsparse_int row = static_cast<rocsparse_int>(row_u);
 
         // BSR row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
@@ -435,16 +438,17 @@ namespace rocsparse
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
         // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows from row_base.
-        // row_base + wid can exceed rocsparse_int when mb is near its maximum.
-        const int64_t row64 = static_cast<int64_t>(row_base) + wid;
+        // row_base + wid can exceed rocsparse_int when mb is near its maximum, but
+        // not uint32_t.
+        const uint32_t row_u = static_cast<uint32_t>(row_base) + wid;
 
         // Do not run out of bounds
-        if(row64 >= mb)
+        if(row_u >= static_cast<uint32_t>(mb))
         {
             return;
         }
 
-        const rocsparse_int row = static_cast<rocsparse_int>(row64);
+        const rocsparse_int row = static_cast<rocsparse_int>(row_u);
 
         // BSR row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;

@@ -32,70 +32,88 @@
 
 namespace rocsparse
 {
-#define LAUNCH_GEBSRMV_GENERAL_KERNEL(BLOCKSIZE, WFSIZE)              \
-    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                \
-        (gebsrmvn_general_kernel<BLOCKSIZE, WFSIZE>),                 \
-        dim3(rocsparse::get_grid_size_x(handle, mb, BLOCKSIZE)),      \
-        dim3(BLOCKSIZE),                                              \
-        0,                                                            \
-        handle->stream,                                               \
-        mb,                                                           \
-        dir,                                                          \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
-        bsr_row_ptr,                                                  \
-        bsr_col_ind,                                                  \
-        bsr_val,                                                      \
-        row_block_dim,                                                \
-        col_block_dim,                                                \
-        x,                                                            \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),  \
-        y,                                                            \
-        base,                                                         \
-        handle->pointer_mode == rocsparse_pointer_mode_host);
+#define LAUNCH_GEBSRMV_GENERAL_KERNEL(BLOCKSIZE, WFSIZE)                                    \
+    THROW_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(                             \
+        handle, mb, BLOCKSIZE, [&](auto grid_stride, uint32_t grid) -> rocsparse_status {   \
+            THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                              \
+                (gebsrmvn_general_kernel<BLOCKSIZE, WFSIZE, decltype(grid_stride)::value>), \
+                dim3(grid),                                                                 \
+                dim3(BLOCKSIZE),                                                            \
+                0,                                                                          \
+                handle->stream,                                                             \
+                mb,                                                                         \
+                dir,                                                                        \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),               \
+                bsr_row_ptr,                                                                \
+                bsr_col_ind,                                                                \
+                bsr_val,                                                                    \
+                row_block_dim,                                                              \
+                col_block_dim,                                                              \
+                x,                                                                          \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                \
+                y,                                                                          \
+                base,                                                                       \
+                handle->pointer_mode == rocsparse_pointer_mode_host);                       \
+            return rocsparse_status_success;                                                \
+        }));
 
-#define LAUNCH_GEBSRMV_MXN_KERNEL(BLOCKSIZE, ROWBSRDIM, COLBSRDIM)    \
-    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                \
-        (gebsrmvn_mxn_kernel<BLOCKSIZE, ROWBSRDIM, COLBSRDIM>),       \
-        dim3(rocsparse::get_grid_size_x(handle, mb, BLOCKSIZE)),      \
-        dim3(BLOCKSIZE),                                              \
-        0,                                                            \
-        handle->stream,                                               \
-        mb,                                                           \
-        dir,                                                          \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
-        bsr_row_ptr,                                                  \
-        bsr_col_ind,                                                  \
-        bsr_val,                                                      \
-        row_block_dim,                                                \
-        col_block_dim,                                                \
-        x,                                                            \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),  \
-        y,                                                            \
-        base,                                                         \
-        handle->pointer_mode == rocsparse_pointer_mode_host);
+#define LAUNCH_GEBSRMV_MXN_KERNEL(BLOCKSIZE, ROWBSRDIM, COLBSRDIM)                        \
+    THROW_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(                           \
+        handle, mb, BLOCKSIZE, [&](auto grid_stride, uint32_t grid) -> rocsparse_status { \
+            THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                            \
+                (gebsrmvn_mxn_kernel<BLOCKSIZE,                                           \
+                                     ROWBSRDIM,                                           \
+                                     COLBSRDIM,                                           \
+                                     decltype(grid_stride)::value>),                      \
+                dim3(grid),                                                               \
+                dim3(BLOCKSIZE),                                                          \
+                0,                                                                        \
+                handle->stream,                                                           \
+                mb,                                                                       \
+                dir,                                                                      \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),             \
+                bsr_row_ptr,                                                              \
+                bsr_col_ind,                                                              \
+                bsr_val,                                                                  \
+                row_block_dim,                                                            \
+                col_block_dim,                                                            \
+                x,                                                                        \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),              \
+                y,                                                                        \
+                base,                                                                     \
+                handle->pointer_mode == rocsparse_pointer_mode_host);                     \
+            return rocsparse_status_success;                                              \
+        }));
 
-#define LAUNCH_GEBSRMV_MXN_16_KERNEL(BLOCKSIZE, ROWBSRDIM, COLBSRDIM) \
-    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                \
-        (gebsrmvn_mxn_16_kernel<BLOCKSIZE, ROWBSRDIM, COLBSRDIM>),    \
-        dim3(rocsparse::get_grid_size_x(handle, mb, BLOCKSIZE)),      \
-        dim3(BLOCKSIZE),                                              \
-        0,                                                            \
-        handle->stream,                                               \
-        mb,                                                           \
-        dir,                                                          \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
-        bsr_row_ptr,                                                  \
-        bsr_col_ind,                                                  \
-        bsr_val,                                                      \
-        row_block_dim,                                                \
-        col_block_dim,                                                \
-        x,                                                            \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),  \
-        y,                                                            \
-        base,                                                         \
-        handle->pointer_mode == rocsparse_pointer_mode_host);
+#define LAUNCH_GEBSRMV_MXN_16_KERNEL(BLOCKSIZE, ROWBSRDIM, COLBSRDIM)                     \
+    THROW_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(                           \
+        handle, mb, BLOCKSIZE, [&](auto grid_stride, uint32_t grid) -> rocsparse_status { \
+            THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                            \
+                (gebsrmvn_mxn_16_kernel<BLOCKSIZE,                                        \
+                                        ROWBSRDIM,                                        \
+                                        COLBSRDIM,                                        \
+                                        decltype(grid_stride)::value>),                   \
+                dim3(grid),                                                               \
+                dim3(BLOCKSIZE),                                                          \
+                0,                                                                        \
+                handle->stream,                                                           \
+                mb,                                                                       \
+                dir,                                                                      \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),             \
+                bsr_row_ptr,                                                              \
+                bsr_col_ind,                                                              \
+                bsr_val,                                                                  \
+                row_block_dim,                                                            \
+                col_block_dim,                                                            \
+                x,                                                                        \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),              \
+                y,                                                                        \
+                base,                                                                     \
+                handle->pointer_mode == rocsparse_pointer_mode_host);                     \
+            return rocsparse_status_success;                                              \
+        }));
 
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool GRID_STRIDE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gebsrmvn_general_kernel(rocsparse_int       mb,
                                  rocsparse_direction dir,
@@ -119,10 +137,29 @@ namespace rocsparse
             return;
         }
 
-        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
-        for(int64_t row = hipBlockIdx_x; row < mb; row += hipGridDim_x)
+        if constexpr(GRID_STRIDE)
         {
-            rocsparse::gebsrmvn_general_device<BLOCKSIZE, WFSIZE>(static_cast<rocsparse_int>(row),
+            // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
+            for(int64_t row = hipBlockIdx_x; row < mb; row += hipGridDim_x)
+            {
+                rocsparse::gebsrmvn_general_device<BLOCKSIZE, WFSIZE>(
+                    static_cast<rocsparse_int>(row),
+                    dir,
+                    alpha,
+                    bsr_row_ptr,
+                    bsr_col_ind,
+                    bsr_val,
+                    row_block_dim,
+                    col_block_dim,
+                    x,
+                    beta,
+                    y,
+                    idx_base);
+            }
+        }
+        else
+        {
+            rocsparse::gebsrmvn_general_device<BLOCKSIZE, WFSIZE>(hipBlockIdx_x,
                                                                   dir,
                                                                   alpha,
                                                                   bsr_row_ptr,
@@ -137,7 +174,11 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t ROWBSRDIM, uint32_t COLBSRDIM, typename T>
+    template <uint32_t BLOCKSIZE,
+              uint32_t ROWBSRDIM,
+              uint32_t COLBSRDIM,
+              bool     GRID_STRIDE,
+              typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gebsrmvn_mxn_kernel(rocsparse_int       mb,
                              rocsparse_direction dir,
@@ -161,33 +202,54 @@ namespace rocsparse
             return;
         }
 
-        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
-        // The bound must stay block-uniform: the device function reduces through
-        // sdata behind __syncthreads().
-        for(int64_t row = hipBlockIdx_x; row < mb; row += hipGridDim_x)
+        if constexpr(GRID_STRIDE)
         {
-            rocsparse::gebsrmvn_mxn_device<BLOCKSIZE, ROWBSRDIM, COLBSRDIM>(
-                static_cast<rocsparse_int>(row),
-                mb,
-                dir,
-                alpha,
-                bsr_row_ptr,
-                bsr_col_ind,
-                bsr_val,
-                x,
-                beta,
-                y,
-                idx_base);
-
-            // Fence this row's last sdata reads against the next row's first store.
-            if(row + hipGridDim_x < mb)
+            // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
+            // The bound must stay block-uniform: the device function reduces through
+            // sdata behind __syncthreads().
+            for(int64_t row = hipBlockIdx_x; row < mb; row += hipGridDim_x)
             {
-                __syncthreads();
+                rocsparse::gebsrmvn_mxn_device<BLOCKSIZE, ROWBSRDIM, COLBSRDIM>(
+                    static_cast<rocsparse_int>(row),
+                    mb,
+                    dir,
+                    alpha,
+                    bsr_row_ptr,
+                    bsr_col_ind,
+                    bsr_val,
+                    x,
+                    beta,
+                    y,
+                    idx_base);
+
+                // Fence this row's last sdata reads against the next row's first store.
+                if(row + hipGridDim_x < mb)
+                {
+                    __syncthreads();
+                }
             }
+        }
+        else
+        {
+            rocsparse::gebsrmvn_mxn_device<BLOCKSIZE, ROWBSRDIM, COLBSRDIM>(hipBlockIdx_x,
+                                                                            mb,
+                                                                            dir,
+                                                                            alpha,
+                                                                            bsr_row_ptr,
+                                                                            bsr_col_ind,
+                                                                            bsr_val,
+                                                                            x,
+                                                                            beta,
+                                                                            y,
+                                                                            idx_base);
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t ROWBSRDIM, uint32_t COLBSRDIM, typename T>
+    template <uint32_t BLOCKSIZE,
+              uint32_t ROWBSRDIM,
+              uint32_t COLBSRDIM,
+              bool     GRID_STRIDE,
+              typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gebsrmvn_mxn_16_kernel(rocsparse_int       mb,
                                 rocsparse_direction dir,
@@ -211,29 +273,46 @@ namespace rocsparse
             return;
         }
 
-        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
-        // The bound must stay block-uniform: the device function reduces through
-        // sdata behind __syncthreads().
-        for(int64_t row = hipBlockIdx_x; row < mb; row += hipGridDim_x)
+        if constexpr(GRID_STRIDE)
         {
-            rocsparse::gebsrmvn_mxn_16_device<BLOCKSIZE, ROWBSRDIM, COLBSRDIM>(
-                static_cast<rocsparse_int>(row),
-                mb,
-                dir,
-                alpha,
-                bsr_row_ptr,
-                bsr_col_ind,
-                bsr_val,
-                x,
-                beta,
-                y,
-                idx_base);
-
-            // Fence this row's last sdata reads against the next row's first store.
-            if(row + hipGridDim_x < mb)
+            // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
+            // The bound must stay block-uniform: the device function reduces through
+            // sdata behind __syncthreads().
+            for(int64_t row = hipBlockIdx_x; row < mb; row += hipGridDim_x)
             {
-                __syncthreads();
+                rocsparse::gebsrmvn_mxn_16_device<BLOCKSIZE, ROWBSRDIM, COLBSRDIM>(
+                    static_cast<rocsparse_int>(row),
+                    mb,
+                    dir,
+                    alpha,
+                    bsr_row_ptr,
+                    bsr_col_ind,
+                    bsr_val,
+                    x,
+                    beta,
+                    y,
+                    idx_base);
+
+                // Fence this row's last sdata reads against the next row's first store.
+                if(row + hipGridDim_x < mb)
+                {
+                    __syncthreads();
+                }
             }
+        }
+        else
+        {
+            rocsparse::gebsrmvn_mxn_16_device<BLOCKSIZE, ROWBSRDIM, COLBSRDIM>(hipBlockIdx_x,
+                                                                               mb,
+                                                                               dir,
+                                                                               alpha,
+                                                                               bsr_row_ptr,
+                                                                               bsr_col_ind,
+                                                                               bsr_val,
+                                                                               x,
+                                                                               beta,
+                                                                               y,
+                                                                               idx_base);
         }
     }
 
