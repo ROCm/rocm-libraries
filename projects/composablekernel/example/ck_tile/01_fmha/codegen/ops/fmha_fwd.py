@@ -85,6 +85,17 @@ FMHA_FWD_KERNEL_HEADER_QR_HPAD = """// SPDX-License-Identifier: MIT
 #include "fmha_fwd.hpp"
 """
 
+FMHA_FWD_LAUNCH_TEMPLATE = """    auto [kargs, grids] = {F_kargs_creator}<k_>(a);
+    if(!k_::IsSupportedArgument(kargs))
+    {{
+        ck_tile::CK_TILE_ERROR("Arguments not supported! Skipping fmha_fwd!");
+        return -1;
+    }}
+    const dim3 blocks                      = k_::BlockSize();
+    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
+    return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu, {F_arch}>(k_{{}}, grids, blocks, 0, kargs));
+"""
+
 FMHA_FWD_KERNEL_BODY_TEMPLATE = """
 #include <iostream>
 
@@ -160,15 +171,7 @@ float fmha_fwd_<trait, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_a
         *a.selected_kernel_name = "{F_kname}";
     if(s.log_level_ > 0)
         std::cout << ", {F_kname}" << std::flush;
-    auto [kargs, grids] = {F_kargs_creator}<k_>(a);
-    if(!k_::IsSupportedArgument(kargs))
-    {{
-        ck_tile::CK_TILE_ERROR("Arguments not supported! Skipping fmha_fwd!");
-        return -1;
-    }}
-    const dim3 blocks                      = k_::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(k_{{}}, grids, blocks, 0, kargs));
+{F_launch}
 }}
 
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
@@ -365,6 +368,8 @@ class FmhaFwdApiTrait:
     def scheck(self) -> str:
         if self.mode == "group":
             return "true/*group mode spad always true*/"  # group mode only generate spad/skpad == true
+        if self.pipeline_tag == "qr_tdm_cr":
+            return "true" if self.spad == "t" else f"a.seqlen_q % {self.bm0} == 0"
         if self.pipeline_tag in [
             "qr_async",
             "qr_async_trload",
@@ -397,6 +402,8 @@ class FmhaFwdApiTrait:
     def skcheck(self) -> str:
         if self.mode == "group":
             return "true/*group mode skpad always true*/"  # group mode only generate spad/skpad == true
+        if self.pipeline_tag == "qr_tdm_cr":
+            return "true" if self.skpad == "t" else f"a.seqlen_k % {self.bn0} == 0"
         if self.pipeline_tag == "qr_async":
             if self.skpad == "t":
                 return f"(a.cu_seqlen_k_ptr != nullptr) || (a.seqlen_k == 0 || a.seqlen_k % {self.bn0} != 0)"
@@ -452,6 +459,7 @@ class FmhaFwdApiTrait:
             "qr_async_trload",
             "qr_async_trload_v3",
             "qr_tdm_sched",
+            "qr_tdm_cr",
         ]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
@@ -479,6 +487,7 @@ class FmhaFwdApiTrait:
             "qr_async_trload",
             "qr_async_trload_v3",
             "qr_tdm_sched",
+            "qr_tdm_cr",
         ]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
@@ -705,12 +714,26 @@ class FmhaFwdApiPool:
                 for i_hdim, ((hdim, hdim_v), pool_by_hdim) in enumerate(
                     item for item in pool_by_dtype.items() if has_traits(item[1])
                 ):
-                    # Dispatch returns on the first matching trait. Try qr_tdm_sched
-                    # before qr_tdm/qr; stable sorting keeps each group's tile order.
+                    # Preserve existing CK heuristics outside CR's fixed tuning
+                    # variants. Generic CR remains available in filtered builds.
                     traits = sorted(
                         (trait for trait in pool_by_hdim if filter_fn(trait)),
-                        key=lambda trait: trait.pipeline_tag != "qr_tdm_sched",
+                        key=lambda trait: {"qr_tdm_cr": 2, "qr_tdm_sched": 0}.get(
+                            trait.pipeline_tag, 1
+                        ),
                     )
+                    preferred_cr = [
+                        replace(
+                            trait,
+                            constraint=trait.constraint
+                            & CppConstraint("fmha_fwd_cr_has_static_tuning(a)"),
+                        )
+                        for trait in traits
+                        if trait.pipeline_tag == "qr_tdm_cr"
+                        and trait.spad == "f"
+                        and trait.skpad == "f"
+                    ]
+                    traits = preferred_cr + traits
                     max_bm0 = max((trait.bm0 for trait in traits), default=0)
                     inners = str()
                     for i_trait, trait in enumerate(traits):
@@ -825,6 +848,8 @@ class FmhaFwdKernel:
 
     @classmethod
     def _get_cpp_kernel_class_name(cls, pipeline_tag):
+        if pipeline_tag == "qr_tdm_cr":
+            return "ck_tile::FmhaFwdTdmCrKernel"
         if pipeline_tag == "qr_async_trload_v3":
             return "ck_tile::FmhaFwdV3Kernel"
         else:
@@ -932,7 +957,16 @@ class FmhaFwdKernel:
                 else ""
             ),
             F_kernel=self._get_cpp_kernel_class_name(self.F_pipeline.tag),
-            F_kargs_creator=self._get_cpp_kargs_creator_func_name(self.F_pipeline.tag),
+            F_launch=(
+                f"    return fmha_fwd_cr_launch<k_, {self.F_arch.tag}>(s, a);"
+                if self.F_pipeline.tag == "qr_tdm_cr"
+                else FMHA_FWD_LAUNCH_TEMPLATE.format(
+                    F_kargs_creator=self._get_cpp_kargs_creator_func_name(
+                        self.F_pipeline.tag
+                    ),
+                    F_arch=self.F_arch.tag,
+                )
+            ),
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_epilogue=self._get_epilogue_decl(),
         )
@@ -1622,7 +1656,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     _DT_FP8FP32 = ("fp8fp32",)
 
     # Pipelines whose tiles carry F_pipeline_tag (see check_tile_owner).
-    _PIPELINES_WITH_OWN_TILES = ("qr_tdm_pingpong",)
+    _PIPELINES_WITH_OWN_TILES = ("qr_tdm_pingpong", "qr_tdm_cr")
 
     # Define scheduled tile configurations once. Codegen inventory and pipeline
     # compatibility share these entries; runtime constraints are attached to copies.
@@ -1647,6 +1681,10 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     def is_tile_supported_by_qr_tdm_sched(
         cls, tile: FmhaFwdTileSize, hdim: int
     ) -> bool:
+        # Owned tiles belong exclusively to their pipeline, even when another
+        # pipeline has the same geometry. Unowned custom-tune tiles still match.
+        if tile.F_pipeline_tag not in (None, "qr_tdm_sched"):
+            return False
         # The name encodes every geometry field and occupancy, but not runtime
         # constraints. Equivalent custom-tune tiles therefore match as well.
         return any(
@@ -1661,6 +1699,13 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         def check_qr_tdm_sched_codegen_compatibility(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
+            if kernel_ctx.pipeline.tag == "qr_tdm_cr":
+                return (
+                    problem_ctx.dtype == "bf16"
+                    and problem_ctx.mode == "batch"
+                    and problem_ctx.hdim == problem_ctx.hdim_v == 128
+                    and kernel_ctx.tile.F_pipeline_tag == "qr_tdm_cr"
+                )
             is_qr_tdm_sched_pipeline = kernel_ctx.pipeline.tag == "qr_tdm_sched"
             matches_qr_tdm_sched_dtype_and_dims = (
                 problem_ctx.dtype in cls._DT_FP16_BF16
@@ -1831,6 +1876,13 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                         d192_n64,
                     ]
                 )
+            if dtype == "bf16":
+                result[(128, 128)].append(
+                    replace(
+                        copy.deepcopy(cls._QR_TDM_SCHED_TILES[(128, 128)][0]),
+                        F_pipeline_tag="qr_tdm_cr",
+                    )
+                )
             return result
         elif dtype in cls._DT_FP8_FP8BF16:
             return {
@@ -1938,6 +1990,19 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     head_pad = "f" if hdim == 64 else "t"
                     pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "f", "f", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
+
+            if dtype == "bf16" and (hdim, hdim_v) == (128, 128):
+                constraint = CppConstraint(
+                    'device_name.compare(0, 7, "gfx1250") == 0 && '
+                    "t.hdim_q == 128 && t.hdim_v == 128 && fmha_fwd_cr_supported_args(a)"
+                )
+                for mask, lse, spad, skpad in itertools.product(
+                    (m for m in get_mask_map(mask_impl) if m != "generic"),
+                    ["t", "f"],
+                    ["f", "t"],
+                    ["f", "t"],
+                ):
+                    pipelines.append(FmhaFwdPipeline("qr_tdm_cr", "row", spad, skpad, "f", "f", "f", "no", lse, "f", "no", mask, "f", "f", "f", F_constraint=constraint))  # fmt: skip
 
             # qr: generic pipeline fallback for the trait combos qr_tdm does
             # not emit -- dropout, skip, logits soft cap -- and for head dim

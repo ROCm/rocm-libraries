@@ -43,6 +43,16 @@ There are 2 template parameters for this kernel template.
 ## codegen
 To speed up compile time, we instantiate the kernels into separate file. In this way we can benefit from parallel building from CMake/Make system. This is achieved by `generate.py` script. Besides, you can look into this script to learn how to instantiate a kernel instance step by step, which is described in `FMHA_FWD_KERNEL_BODY` variable.
 
+### Conditional rescaling TDM forward pipeline
+
+`qr_tdm_cr` uses conditional rescaling (CR) to avoid unnecessary softmax
+rescaling and maximum reductions. It supports BF16 D128 contiguous BSHD
+tensors on gfx1250, with dense or top-left causal attention and optional LSE.
+Square bottom-right causal attention uses the equivalent top-left mask.
+Its fixed tuning variants (B32/H8, equal Q/K lengths of 512 through 32768 in
+powers of two) precede `qr_tdm_sched`. Other shapes retain the existing CK
+heuristics, with generic CR available as a fallback or in CR-only filtered builds.
+
 ### Scheduled TDM forward pipeline
 
 `qr_tdm_sched` shares the gfx125 TDM architecture requirements with `qr_tdm`.
@@ -54,7 +64,7 @@ Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; a finite virtual-si
 logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
 of the compile-time sink-token flag.
 
-The generated API tries matching scheduled traits first. D64/V64 uses a
+After checking CR's fixed tuning variants, the generated API tries matching scheduled traits first. D64/V64 uses a
 128-by-64 Q/K sequence tile, matching the existing `qr_tdm` M128 geometry and
 compiler minimum-waves-per-EU hint of three. The launch API retains the
 historical `MinBlockPerCu` name; this hint does not establish achieved workgroup

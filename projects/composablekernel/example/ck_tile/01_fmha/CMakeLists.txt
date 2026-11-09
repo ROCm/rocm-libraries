@@ -152,6 +152,7 @@ add_custom_command(
   --output_dir ${CMAKE_CURRENT_BINARY_DIR}
   DEPENDS ${CODE_GEN_SCRIPTS}
   COMMENT "Generate CK Tile FMHA FWD kernels"
+  VERBATIM
 )
 
 add_custom_command(
@@ -171,7 +172,7 @@ add_library(${FMHA_FWD_INSTANCES} OBJECT EXCLUDE_FROM_ALL)
 target_include_directories(${FMHA_FWD_INSTANCES} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_sources(${FMHA_FWD_INSTANCES} PRIVATE ${FMHA_FWD_GEN_BLOBS})
 set_source_files_properties(${FMHA_FWD_GEN_BLOBS} PROPERTIES LANGUAGE HIP)
-if("gfx1250" IN_LIST INST_TARGETS)
+if("gfx1250" IN_LIST INST_TARGETS OR "gfx1250-strict" IN_LIST INST_TARGETS)
   foreach(fwd_blob IN LISTS FMHA_FWD_GEN_BLOBS)
     get_filename_component(fwd_blob_name "${fwd_blob}" NAME)
     ck_tile_fmha_fwd_get_source_compile_options(

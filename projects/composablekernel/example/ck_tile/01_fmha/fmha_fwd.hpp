@@ -10,6 +10,7 @@
 #include "ck_tile/ops/fmha.hpp"
 
 #include "bias.hpp"
+#include "fmha_fwd_cr.hpp"
 #include "mask.hpp"
 #include "quant.hpp"
 #include "rotary.hpp"

@@ -102,7 +102,7 @@ inline std::string get_device_name() {
     return value == nullptr ? "gfx1250" : value;
 }
 template <bool> struct SimplifiedGenericAttentionMask {};
-enum class BlockFmhaPipelineEnum { QRKSVS, QRKSVS_TDM, QRKSVS_TDM_SCHED, QRKSVS_TDM_PINGPONG };
+enum class BlockFmhaPipelineEnum { QRKSVS, QRKSVS_TDM, QRKSVS_TDM_SCHED, QRKSVS_TDM_PINGPONG, QRKSVS_TDM_CR };
 enum class BlockAttentionBiasEnum { NO_BIAS, ELEMENTWISE_BIAS, ALIBI };
 enum class BlockAttentionQuantScaleEnum { NO_SCALE, PERTENSOR, BLOCKSCALE, KV_BLOCKSCALE, MX };
 }
@@ -140,6 +140,14 @@ struct fmha_fwd_args {
     const void* cu_seqlen_k_ptr = nullptr;
     const void* o_ptr = nullptr;
     int stride_o = 1024, nhead_stride_o = 128, batch_stride_o = 262144;
+    const void *q_ptr = nullptr, *k_ptr = nullptr, *v_ptr = nullptr, *lse_ptr = nullptr;
+    const void *seqstart_q_ptr = nullptr, *seqstart_k_ptr = nullptr;
+    const void *seqlen_q_ptr = nullptr, *cu_seqlen_q_ptr = nullptr;
+    int stride_k = 1024, stride_v = 1024;
+    int nhead_stride_k = 128, nhead_stride_v = 128, nhead_stride_lse = 128;
+    int batch_stride_q = 131072, batch_stride_k = 131072, batch_stride_v = 131072;
+    int batch_stride_lse = 1024, mask_type = 0;
+    float scale_s = 0.08838835f;
 };
 template <typename Trait, typename Arch> struct dispatch_id;
 template <typename Trait, typename Arch>
@@ -153,14 +161,16 @@ _HOST_MAIN = """
 int main() {
     fmha_fwd_traits t;
     fmha_fwd_args a;
-    int mask, bias, scale, arg_q, arg_v, max_q, has_cu_sk, has_sk_ptr, has_sink_ptr, o_offset;
+    int mask, bias, scale, arg_q, arg_v, max_q, has_cu_sk, has_sk_ptr, has_sink_ptr, o_offset, bshd;
+    int lse_offset, lse_head_stride, lse_batch_stride;
     if(!(std::cin >> t.hdim_q >> t.hdim_v >> a.seqlen_q >> a.seqlen_k
          >> t.is_group_mode >> t.is_v_rowmajor >> t.has_logits_soft_cap >> mask >> bias
          >> t.has_lse >> t.has_dropout >> scale >> t.skip_min_seqlen_q >> t.has_sink
          >> t.data_type >> arg_q >> arg_v >> max_q >> a.batch >> a.nhead_q
          >> a.nhead_k >> a.window_size_left >> a.window_size_right
          >> has_cu_sk >> has_sk_ptr >> has_sink_ptr >> o_offset >> a.stride_o
-         >> a.nhead_stride_o >> a.batch_stride_o)) return 2;
+         >> a.nhead_stride_o >> a.batch_stride_o >> bshd
+         >> lse_offset >> lse_head_stride >> lse_batch_stride)) return 2;
     t.mask_type = static_cast<mask_enum>(mask);
     t.bias_type = static_cast<bias_enum>(bias);
     t.qscale_type = static_cast<quant_scale_enum>(scale);
@@ -171,6 +181,17 @@ int main() {
     a.seqlen_k_ptr = has_sk_ptr ? &a : nullptr;
     a.sink_ptr = has_sink_ptr ? &a : nullptr;
     a.o_ptr = reinterpret_cast<const void*>(std::uintptr_t{4096} + o_offset);
+    if(bshd) {
+        a.q_ptr = a.k_ptr = a.v_ptr = reinterpret_cast<const void*>(std::uintptr_t{4096});
+        a.stride_q = a.stride_k = a.stride_v = a.nhead_q * 128;
+        a.nhead_stride_q = a.nhead_stride_k = a.nhead_stride_v = 128;
+        a.batch_stride_q = a.stride_q * a.seqlen_q;
+        a.batch_stride_k = a.batch_stride_v = a.stride_k * a.seqlen_k;
+        a.lse_ptr = t.has_lse ? reinterpret_cast<const void*>(std::uintptr_t{4096} + lse_offset) : nullptr;
+        a.nhead_stride_lse = lse_head_stride < 0 ? a.seqlen_q : lse_head_stride;
+        a.batch_stride_lse = lse_batch_stride < 0 ? a.nhead_q * a.seqlen_q : lse_batch_stride;
+        a.mask_type = mask;
+    }
     std::cout << fmha_fwd(t, a, {}) << '\\n';
 }
 """
@@ -197,7 +218,9 @@ class _CompiledDispatcher:
         for kernel in kernels:
             single = FmhaFwdApiPool()
             single.register_traits(kernel.api_trait())
-            (signature,) = _RENDERED_CALL.findall(single.render("unused"))
+            (signature,) = dict.fromkeys(
+                _RENDERED_CALL.findall(single.render("unused"))
+            )
             if signature in ids:
                 self.kernel_ids.append((kernel, ids[signature]))
         test.assertEqual(set(ids.values()), {value for _, value in self.kernel_ids})
@@ -208,7 +231,11 @@ class _CompiledDispatcher:
         )
         (root / "hip").mkdir()
         (root / "hip" / "hip_runtime.h").write_text(_HOST_HIP_STUB)
-        (root / "fmha_fwd.hpp").write_text(_HOST_FMHA_STUB + specializations)
+        (root / "fmha_fwd.hpp").write_text(
+            _HOST_FMHA_STUB
+            + f'\n#include "{_FMHA_EXAMPLE_DIR / "fmha_fwd_cr_support.hpp"}"\n'
+            + specializations
+        )
         (root / "fmha_fwd_api.cpp").write_text(
             (api if mutate is None else mutate(api)) + _HOST_MAIN
         )
@@ -287,6 +314,10 @@ class _CompiledDispatcher:
             stride_o=1024,
             nhead_stride_o=128,
             batch_stride_o=262144,
+            bshd=0,
+            lse_offset=0,
+            lse_head_stride=-1,
+            lse_batch_stride=-1,
         )
         if changes.keys() - case.keys():
             raise ValueError(
@@ -310,6 +341,191 @@ class _CompiledDispatcher:
             check=True,
         )
         return [int(value) for value in result.stdout.split()]
+
+
+class TestGfx125TdmCrCodegen(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
+    def test_cmake_scheduling_flags(self):
+        _, kernels = get_fwd_blobs(["gfx1250"], "*qr_tdm_cr*", 0, [128], "simplified")
+        names = [k.filename for k in kernels]
+        self.assertEqual(len(names), 16)
+        excluded = [
+            names[0].replace("_bf16_", "_fp16_"),
+            names[0].replace("_d128_", "_d256_"),
+            names[0].replace("_batch_", "_group_"),
+            names[0].replace("_gfx125.", "_gfx12."),
+            names[0].replace("_qr_tdm_cr_", "_qr_tdm_"),
+        ]
+        flags = "-mllvm;-amdgpu-expert-scheduling-mode;-mllvm;-amdgpu-sched-strategy=max-ilp;-mllvm;-amdgpu-barrier-signal-wait-latency=32"
+        source_flags = _FMHA_EXAMPLE_DIR / "cmake/fmha_fwd_source_flags.cmake"
+        script = f'include("{source_flags}")\n'
+        for name in names + excluded:
+            expected = flags if name in names else ""
+            script += (
+                f'ck_tile_fmha_fwd_get_source_compile_options("{name}" actual)\n'
+                f'if(NOT "${{actual}}" STREQUAL "{expected}")\n'
+                f'  message(FATAL_ERROR "{name}: ${{actual}}")\n'
+                "endif()\n"
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "check.cmake"
+            path.write_text(script)
+            subprocess.run(
+                ["cmake", "-P", str(path)], check=True, capture_output=True, text=True
+            )
+
+    def test_default_priority_and_filtered_generic_fallback(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d128_bf16_*_nlogits*_ndropout*_nskip*_nqscale*_ntrload*",
+            0,
+            [128],
+            "simplified",
+        )
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+        fallback = _CompiledDispatcher(
+            self, pool, kernels, filter_fn=lambda t: t.pipeline_tag != "qr_tdm_cr"
+        )
+        static_lengths = (512, 1024, 2048, 4096, 8192, 16384, 32768)
+        for b, h, sq, sk in tuple((32, 8, n, n) for n in static_lengths) + (
+            (32, 8, 256, 256),
+            (32, 8, 768, 768),
+            (32, 8, 65536, 65536),
+            (2, 3, 193, 257),
+            (2, 3, 2049, 257),
+            (32, 8, 257, 257),
+            (64, 8, 513, 515),
+            (1, 8, 512, 512),
+            (32, 4, 512, 512),
+            (32, 8, 1024, 2048),
+        ):
+            for mask in (0, 1):
+                for lse in (0, 1):
+                    args = dict(
+                        hdim_q=128,
+                        hdim_v=128,
+                        bshd=1,
+                        batch=b,
+                        nhead_q=h,
+                        nhead_k=h,
+                        seqlen_q=sq,
+                        seqlen_k=sk,
+                        stride_o=h * 128,
+                        batch_stride_o=sq * h * 128,
+                        mask=mask,
+                        window_size_right=0 if mask else -1,
+                        lse=lse,
+                    )
+                    with self.subTest(b=b, h=h, sq=sq, sk=sk, mask=mask, lse=lse):
+                        if b == 32 and h == 8 and sq == sk and sq in static_lengths:
+                            expected = dispatch.expected_id(
+                                pipeline="qr_tdm_cr",
+                                mode="batch",
+                                mask="s_mask" if mask else "s_no",
+                                lse="t" if lse else "f",
+                                spad="f",
+                                skpad="f",
+                            )
+                        else:
+                            selected = fallback.run(**args)[0]
+                            kernel = next(
+                                k for k, i in fallback.kernel_ids if i == selected
+                            )
+                            expected = next(
+                                i
+                                for k, i in dispatch.kernel_ids
+                                if k.name == kernel.name
+                            )
+                        self.assertEqual(dispatch.run(**args), [expected])
+
+    def test_inventory_and_filtered_dispatch(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d128_bf16_*_nlogits*_ndropout*_nskip*_nqscale*_ntrload*",
+            0,
+            [128],
+            "simplified",
+        )
+        candidates = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_cr"]
+        self.assertEqual(len(candidates), 16)
+        for k in candidates:
+            self.assertEqual(k.F_mode, "batch")
+            self.assertEqual((k.F_tile.F_bm0, k.F_tile.F_bn0), (128, 128))
+            self.assertIn("fmha_fwd_cr_launch", k.render())
+        dispatch = _CompiledDispatcher(
+            self, pool, kernels, filter_fn=lambda t: t.pipeline_tag == "qr_tdm_cr"
+        )
+        family = {i for k, i in dispatch.kernel_ids if k.F_pipeline.tag == "qr_tdm_cr"}
+        for sq, sk in ((512, 512), (513, 512), (512, 513), (513, 515), (2048, 257)):
+            for mask, lse in ((0, 0), (1, 0), (0, 1), (1, 1)):
+                args = dict(
+                    hdim_q=128,
+                    hdim_v=128,
+                    bshd=1,
+                    batch=32,
+                    nhead_q=8,
+                    nhead_k=8,
+                    seqlen_q=sq,
+                    seqlen_k=sk,
+                    stride_o=1024,
+                    batch_stride_o=sq * 1024,
+                    mask=mask,
+                    window_size_right=0 if mask else -1,
+                    lse=lse,
+                )
+                expected = dispatch.expected_id(
+                    pipeline="qr_tdm_cr",
+                    mode="batch",
+                    mask="s_mask" if mask else "s_no",
+                    lse="t" if lse else "f",
+                    spad="t" if sq % 128 else "f",
+                    skpad="t" if sk % 128 else "f",
+                )
+                self.assertEqual(dispatch.run(**args), [expected])
+                for changes in (
+                    dict(group=1),
+                    dict(row=0),
+                    dict(logits=1),
+                    dict(dropout=1),
+                    dict(bias=1),
+                    dict(has_sink_ptr=1),
+                    dict(nhead_k=2),
+                    dict(has_cu_sk=1),
+                    dict(has_sk_ptr=1),
+                    dict(o_offset=2),
+                    dict(stride_o=128),
+                    dict(batch_stride_o=1),
+                    dict(qscale=1),
+                    dict(seqlen_k=0),
+                    dict(bshd=0),
+                ):
+                    with self.subTest(
+                        sq=sq, sk=sk, mask=mask, lse=lse, changes=changes
+                    ):
+                        self.assertNotIn(dispatch.run(**(args | changes))[0], family)
+                self.assertNotIn(dispatch.run(device="gfx1251", **args)[0], family)
+                if lse:
+                    for changes in (
+                        dict(lse_offset=2),
+                        dict(lse_head_stride=sq + 1),
+                        dict(lse_batch_stride=sq * 8 + 1),
+                    ):
+                        with self.subTest(sq=sq, sk=sk, mask=mask, changes=changes):
+                            self.assertNotIn(
+                                dispatch.run(**(args | changes))[0], family
+                            )
+                if mask:
+                    self.assertNotIn(
+                        dispatch.run(**(args | dict(window_size_left=128)))[0], family
+                    )
+                    if sq != sk:
+                        self.assertNotIn(
+                            dispatch.run(**(args | dict(mask=2)))[0], family
+                        )
+                    else:
+                        self.assertEqual(
+                            dispatch.run(**(args | dict(mask=2))), [expected]
+                        )
 
 
 class TestGfx125D192Codegen(unittest.TestCase):
@@ -438,7 +654,13 @@ endforeach()
             with self.subTest(receipt=receipt):
                 _, kernels = _generate(receipt, [128])
                 self.assertTrue(any(_is_family_kernel(k) for k in kernels))
-                fallback = [k for k in kernels if not _is_family_kernel(k)]
+                # The two N128 specializations precede the existing short-query
+                # N64 fallbacks; adding CR must preserve those fallback tiles.
+                fallback = [
+                    k
+                    for k in kernels
+                    if k.F_pipeline.tag not in ("qr_tdm_sched", "qr_tdm_cr")
+                ]
                 self.assertTrue(fallback)
                 self.assertTrue(all(k.F_hdim == 128 for k in fallback))
                 self.assertTrue(any(k.F_tile.F_bm0 < 128 for k in fallback))
