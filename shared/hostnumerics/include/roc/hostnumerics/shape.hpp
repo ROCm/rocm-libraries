@@ -115,11 +115,12 @@ class Shape {
     // Parameter `order` lists axis numbers from slowest to fastest. For shape (2, 3, 5),
     // order (1, 2, 0) enumerates coordinates as:
     //
-    //   size_t index = 0;
-    //   for (size_t i1 = 0; i1 < 3; ++i1)
-    //       for (size_t i2 = 0; i2 < 5; ++i2)
-    //           for (size_t i0 = 0; i0 < 2; ++i0)
-    //               visit(index++, i0, i1, i2);
+    //   index = 0
+    //   for i1 from 0 through 2:
+    //       for i2 from 0 through 4:
+    //           for i0 from 0 through 1:
+    //               visit index and coordinates (i0, i1, i2)
+    //               increment index
     //
     // Axis 0 changes every step, axis 2 every 2 steps, and axis 1 every 2*5=10 steps.
     // logical strides are therefore (1, 10, 2) for the 3 dimensions.
@@ -127,7 +128,6 @@ class Shape {
     // Other orders for the same shape:
     //   (0, 1, 2): last axis fastest, strides (15, 5, 1); (1, 2, 3) maps to 28.
     //   (2, 1, 0): first axis fastest, strides (1, 2, 6); (1, 2, 3) maps to 23.
-    //   etc.
     //
     // The linear index is the inner product of `indices` and the logical strides.
     size_t linearIndex(std::span<const size_t> indices, const Permutation& order) const {
@@ -140,7 +140,8 @@ class Shape {
     }
 
     // Invert linearIndex with the same traversal order. The result stays in the
-    // original axis order: Shape{2, 3, 5}.coordinates(27, (1, 2, 0)) is (1, 2, 3).
+    // original axis order: for shape (2, 3, 5) and order (1, 2, 0), index 27
+    // maps to coordinates (1, 2, 3).
     // The index must lie in [0, elementCount()).
     std::vector<size_t> coordinates(size_t index, const Permutation& order) const {
         validateCoordinates(index, order);

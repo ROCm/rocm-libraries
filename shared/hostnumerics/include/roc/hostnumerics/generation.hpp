@@ -101,12 +101,11 @@ struct AlternatingSignGenerationParameters {
 // Immutable generation description. Components and recipes are copyable and
 // assignable values; all modifiers return a new Component.
 //
-// For Shape{6}, before destination scalar conversion:
-//   constant({.value = 2.0}) produces [2, 2, 2, 2, 2, 2].
-//   serialIndex() produces [0, 1, 2, 3, 4, 5].
-//   affineIndexRemainder({.dimensionCoefficients = {2}, .offset = 1,
-//                         .positiveDivisor = 5})
-//   produces [1, 3, 0, 2, 4, 1].
+// For six elements, before destination scalar conversion:
+//   constant value 2: [2, 2, 2, 2, 2, 2]
+//   logical index i: [0, 1, 2, 3, 4, 5]
+//   remainder of (2 * i + 1) divided by 5: [1, 3, 0, 2, 4, 1]
+// See GenerationRecipe.ValueSemanticsAndExamples for the C++ recipes.
 //
 // Candidate sets and alternating-sign dimension lists must be nonempty.
 // Interval bounds must be ordered and real bounds must not be NaN. A normal

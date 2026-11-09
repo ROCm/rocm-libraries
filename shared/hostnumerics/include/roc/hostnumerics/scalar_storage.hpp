@@ -37,14 +37,15 @@ namespace roc::hostnumerics::detail {
 //
 // With options specifying NearestEven integer rounding, Saturate integer overflow
 // and the default floating choices (NearestEven, Float32, FormatDefault, Nearest):
-//   encodeScalar(Float4E2M1, storage, 0, 0.5, options), followed by element 1 = 3.0,
-//     turns one zero byte into 0x51 (low code 1, high code 5).
-//   encodeScalar(Float6E3M2, storage, 1, 1.0, options)
-//     turns {0xff, 0xff, 0xff} into {0x3f, 0xf3, 0xff}: code 0b001100 occupies
+//   Float4E2M1: write 0.5 to element 0 and 3.0 to element 1.
+//     One zero byte becomes 0x51 (low code 1, high code 5).
+//   Float6E3M2: write 1.0 to element 1.
+//     Bytes [0xff, 0xff, 0xff] become [0x3f, 0xf3, 0xff]: code 0b001100 occupies
 //     bits 6-11, changing parts of two bytes and preserving all other bits.
-//   encodeScalar(Float8E5M2, storage, 0, infinity, options) writes 0x7c;
-//     a quiet NaN writes 0x7f. decodeScalar<double> returns infinity/NaN respectively.
-//     SaturateFinite instead encodes infinity as 0x7b (57344).
+//   Float8E5M2: infinity encodes as 0x7c and a quiet NaN as 0x7f.
+//     Decoding returns infinity and NaN respectively. SaturateFinite instead
+//     encodes infinity as 0x7b (57344).
+// See the ScalarStorageTutorial tests for these examples in C++.
 
 // Storage decoding truncates and wraps when returning a native C++ value.
 inline constexpr ScalarConversionOptions implicitNativeConversionOptions() {

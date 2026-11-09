@@ -23,13 +23,15 @@ namespace roc::hostnumerics {
 // range, and convert a complex value to a real Target only when its imaginary
 // part is zero.
 //
-// Examples with options{IntegerRounding::NearestEven, IntegerOverflow::Saturate}:
-//   convertScalar<int8_t>(double{2.5}, options) == 2
-//   convertScalar<int8_t>(double{3.5}, options) == 4
-//   convertScalar<int8_t>(int32_t{300}, options) == 127
-//   convertScalar<float>(int32_t{3}, options) == 3.0f
-//   convertScalar<bool>(double{0.25}, options) == true
-//   convertScalar<int32_t>(std::complex<double>{3.5, 0.0}, options) == 4
+// Examples with nearest-even rounding and saturating integer overflow:
+//   source value       target                 result
+//   2.5                signed 8-bit integer   2
+//   3.5                signed 8-bit integer   4
+//   300                signed 8-bit integer   127
+//   3                  float                  3.0
+//   0.25               Boolean                true
+//   3.5 + 0i           signed 32-bit integer  4
+// See the ScalarConversionTutorial tests for C++ examples.
 template <typename Target, typename Source>
 Target convertScalar(Source source, const IntegerConversionOptions& options) noexcept {
     using Destination = std::remove_cv_t<Target>;
