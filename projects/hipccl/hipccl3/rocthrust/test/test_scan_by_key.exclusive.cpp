@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -57,12 +57,19 @@ TYPED_TEST(ScanByKeyExclusiveVectorTests, TestExclusiveScanByKeySimple)
   ASSERT_EQ(output, ref);
 
   thrust::exclusive_scan_by_key(
-    keys.begin(), keys.end(), vals.begin(), output.begin(), T(10), thrust::equal_to<T>(), thrust::multiplies<T>());
+    keys.begin(),
+    keys.end(),
+    vals.begin(),
+    output.begin(),
+    T(10),
+    _THRUST_STD::equal_to<T>(),
+    _THRUST_STD::multiplies<T>());
 
   ref = {10, 10, 20, 60, 10, 10, 60};
   ASSERT_EQ(output, ref);
 
-  thrust::exclusive_scan_by_key(keys.begin(), keys.end(), vals.begin(), output.begin(), T(10), thrust::equal_to<T>());
+  thrust::exclusive_scan_by_key(
+    keys.begin(), keys.end(), vals.begin(), output.begin(), T(10), _THRUST_STD::equal_to<T>());
 
   ref = {10, 10, 12, 15, 10, 10, 16};
   ASSERT_EQ(output, ref);
@@ -131,7 +138,7 @@ TYPED_TEST(ScanByKeyExclusiveVectorTests, TestScanByKeyHeadFlags)
   Vector output(7, 0);
 
   thrust::exclusive_scan_by_key(
-    keys.begin(), keys.end(), vals.begin(), output.begin(), T(10), head_flag_predicate(), thrust::plus<T>());
+    keys.begin(), keys.end(), vals.begin(), output.begin(), T(10), head_flag_predicate(), _THRUST_STD::plus<T>());
 
   Vector ref{10, 10, 12, 15, 10, 10, 16};
   ASSERT_EQ(output, ref);
@@ -341,9 +348,15 @@ TYPED_TEST(ScanByKeyExclusiveVariablesTests, TestScanByKeyDiscardOutput)
     // These are no-ops, but they should compile.
     thrust::exclusive_scan_by_key(d_keys.cbegin(), d_keys.cend(), d_vals.cbegin(), out);
     thrust::exclusive_scan_by_key(d_keys.cbegin(), d_keys.cend(), d_vals.cbegin(), out, T{});
-    thrust::exclusive_scan_by_key(d_keys.cbegin(), d_keys.cend(), d_vals.cbegin(), out, T{}, thrust::equal_to<T>{});
+    thrust::exclusive_scan_by_key(d_keys.cbegin(), d_keys.cend(), d_vals.cbegin(), out, T{}, _THRUST_STD::equal_to<T>{});
     thrust::exclusive_scan_by_key(
-      d_keys.cbegin(), d_keys.cend(), d_vals.cbegin(), out, T{}, thrust::equal_to<T>{}, thrust::multiplies<T>{});
+      d_keys.cbegin(),
+      d_keys.cend(),
+      d_vals.cbegin(),
+      out,
+      T{},
+      _THRUST_STD::equal_to<T>{},
+      _THRUST_STD::multiplies<T>{});
   }
 }
 

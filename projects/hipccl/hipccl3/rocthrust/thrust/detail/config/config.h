@@ -42,3 +42,6 @@
 #include <thrust/detail/config/device_system.h> // IWYU pragma: export
 #include <thrust/detail/config/libcxx.h> // IWYU pragma: export
 #include <thrust/detail/config/namespace.h> // IWYU pragma: export
+
+// Fix thrust.compiler_interface_cpp dependency
+#define THRUST_DISABLE_COMPILER_INTERFACE 1

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -35,17 +35,17 @@ TYPED_TEST(DistanceTests, TestDistance)
 
   Iterator i = v.begin();
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 100);
+  ASSERT_EQ(_THRUST_STD::distance(i, v.end()), 100);
 
   i++;
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 99);
+  ASSERT_EQ(_THRUST_STD::distance(i, v.end()), 99);
 
   i += 49;
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 50);
+  ASSERT_EQ(_THRUST_STD::distance(i, v.end()), 50);
 
-  ASSERT_EQ(thrust::distance(i, i), 0);
+  ASSERT_EQ(_THRUST_STD::distance(i, i), 0);
 }
 
 TYPED_TEST(DistanceTests, TestDistanceLarge)
@@ -59,19 +59,19 @@ TYPED_TEST(DistanceTests, TestDistanceLarge)
 
   Iterator i = v.begin();
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 1000);
+  ASSERT_EQ(_THRUST_STD::distance(i, v.end()), 1000);
 
   i++;
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 999);
+  ASSERT_EQ(_THRUST_STD::distance(i, v.end()), 999);
 
   i += 49;
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 950);
+  ASSERT_EQ(_THRUST_STD::distance(i, v.end()), 950);
 
   i += 950;
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 0);
+  ASSERT_EQ(_THRUST_STD::distance(i, v.end()), 0);
 
-  ASSERT_EQ(thrust::distance(i, i), 0);
+  ASSERT_EQ(_THRUST_STD::distance(i, i), 0);
 }

@@ -56,7 +56,7 @@ THRUST_HOST_DEVICE OutputIterator
 copy(InputIterator first,
      InputIterator last,
      OutputIterator result,
-     thrust::detail::true_type) // is_indirectly_trivially_relocatable_to
+     _THRUST_STD::true_type) // is_indirectly_trivially_relocatable_to
 {
   using Size = thrust::detail::it_difference_t<InputIterator>;
 
@@ -71,7 +71,7 @@ THRUST_HOST_DEVICE OutputIterator
 copy(InputIterator first,
      InputIterator last,
      OutputIterator result,
-     thrust::detail::false_type) // is_indirectly_trivially_relocatable_to
+     _THRUST_STD::false_type) // is_indirectly_trivially_relocatable_to
 {
   return thrust::system::detail::sequential::general_copy(first, last, result);
 } // end copy()
@@ -82,7 +82,7 @@ THRUST_HOST_DEVICE OutputIterator copy_n(
   InputIterator first,
   Size n,
   OutputIterator result,
-  thrust::detail::true_type) // is_indirectly_trivially_relocatable_to
+  _THRUST_STD::true_type) // is_indirectly_trivially_relocatable_to
 {
   thrust::system::detail::sequential::trivial_copy_n(get(&*first), n, get(&*result));
   return result + n;
@@ -94,7 +94,7 @@ THRUST_HOST_DEVICE OutputIterator copy_n(
   InputIterator first,
   Size n,
   OutputIterator result,
-  thrust::detail::false_type) // is_indirectly_trivially_relocatable_to
+  _THRUST_STD::false_type) // is_indirectly_trivially_relocatable_to
 {
   return thrust::system::detail::sequential::general_copy_n(first, n, result);
 } // end copy_n()

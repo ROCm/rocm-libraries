@@ -1,4 +1,4 @@
-// Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -281,8 +281,8 @@ std::string get_iterator_token(const std::string& vec_hash, const std::string& d
 /*! \brief Returns a "token" string that uniquely identifies a functor (callable object).
  *
  * \tparam T The data type that the functor operates on.
- * \param functor_type String representing the functor type, without the <T> datatype (eg. "thrust::plus" for functor
- * thrust::plus<T>). \return Strin gof the form "function<typename>(function_type)"
+ * \param functor_type String representing the functor type, without the <T> datatype (eg. "_THRUST_STD::plus" for
+ * functor _THRUST_STD::plus<T>). \return Strin gof the form "function<typename>(function_type)"
  */
 template <typename T>
 std::string get_functor_token(const std::string& functor_type)
@@ -343,14 +343,14 @@ std::string build_output_token(const std::vector<std::string>& list)
  * \code
  * // Suppose we want to record this call:
  * std::vector<int> input = {...};
- * thrust::inclusive_scan(policy, d_input.begin(), d_input.end(), d_output.begin(), thrust::plus<int>);
+ * thrust::inclusive_scan(policy, d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::plus<int>);
  *
  * TokenHelper helper;
  * token_helper.build_input_token(
  *   "thrust::inclusive_scan",
  *   d_input.begin(),
  *   d_input.end(),
- *   {bwr_utils::get_functor_token<T>("thrust::plus")}
+ *   {bwr_utils::get_functor_token<T>("_THRUST_STD::plus")}
  * );
  *
  * token_helper.build_output_token(d_output.begin(), d_output.size());

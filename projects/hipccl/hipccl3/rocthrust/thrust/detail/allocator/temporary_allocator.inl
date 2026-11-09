@@ -30,12 +30,12 @@
 #include <thrust/detail/temporary_buffer.h>
 #include <thrust/system/detail/bad_alloc.h>
 
-#include <cassert>
+#include _THRUST_STD_INCLUDE(cassert)
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  if (defined(_NVHPC_CUDA) || defined(__CUDA_ARCH__))
+#  if _CCCL_DEVICE_COMPILATION()
 #    include <thrust/system/cuda/detail/terminate.h>
-#  endif // NVCC device pass or NVC++
+#  endif // _CCCL_DEVICE_COMPILATION()
 #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
 #  include <thrust/system/hip/detail/terminate.h>
 #endif // CUDA

@@ -65,7 +65,7 @@ struct unique_benchmark : public primbench::benchmark_interface
 
     // not a warm-up run, we need to run once to determine the size of the output
     const auto new_end = thrust::unique_copy(policy(alloc).on(state.stream), in.cbegin(), in.cend(), out.begin());
-    const size_t unique_items = thrust::distance(out.begin(), new_end);
+    const size_t unique_items = _THRUST_STD::distance(out.begin(), new_end);
 
     state.set_items(m_items);
     state.add_reads<T>(m_items);

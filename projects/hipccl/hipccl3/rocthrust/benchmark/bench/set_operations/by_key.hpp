@@ -90,7 +90,7 @@ struct by_key_set_benchmark : public primbench::benchmark_interface
       out_keys.begin(),
       out_vals.begin());
 
-    const size_t item_in_AB  = thrust::distance(out_keys.begin(), result_ends.first);
+    const size_t item_in_AB  = _THRUST_STD::distance(out_keys.begin(), result_ends.first);
     const size_t values_read = OpT::read_all_values ? m_items : items_in_A;
 
     state.set_items(m_items);

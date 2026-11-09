@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -175,15 +175,15 @@ void TestInclusiveScanByKeyCudaStreams()
     keys.end(),
     vals.begin(),
     output.begin(),
-    thrust::equal_to<T>(),
-    thrust::multiplies<T>());
+    _THRUST_STD::equal_to<T>(),
+    _THRUST_STD::multiplies<T>());
   cudaStreamSynchronize(s);
 
   ref = {1, 2, 6, 24, 5, 6, 42};
   ASSERT_EQUAL(output, ref);
 
   thrust::inclusive_scan_by_key(
-    thrust::cuda::par.on(s), keys.begin(), keys.end(), vals.begin(), output.begin(), thrust::equal_to<T>());
+    thrust::cuda::par.on(s), keys.begin(), keys.end(), vals.begin(), output.begin(), _THRUST_STD::equal_to<T>());
   cudaStreamSynchronize(s);
 
   ref = {1, 2, 5, 9, 5, 6, 13};
@@ -229,15 +229,15 @@ void TestExclusiveScanByKeyCudaStreams()
     vals.begin(),
     output.begin(),
     T(10),
-    thrust::equal_to<T>(),
-    thrust::multiplies<T>());
+    _THRUST_STD::equal_to<T>(),
+    _THRUST_STD::multiplies<T>());
   cudaStreamSynchronize(s);
 
   ref = {10, 10, 20, 60, 10, 10, 60};
   ASSERT_EQUAL(output, ref);
 
   thrust::exclusive_scan_by_key(
-    thrust::cuda::par.on(s), keys.begin(), keys.end(), vals.begin(), output.begin(), T(10), thrust::equal_to<T>());
+    thrust::cuda::par.on(s), keys.begin(), keys.end(), vals.begin(), output.begin(), T(10), _THRUST_STD::equal_to<T>());
   cudaStreamSynchronize(s);
 
   ref = {10, 10, 12, 15, 10, 10, 16};

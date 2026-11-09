@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -63,12 +63,12 @@ TYPED_TEST(MinMaxElementVectorUnitTests, TestMinMaxElementWithTransform)
 
   Vector data{3, 5, 1, 2, 5, 1};
 
-  ASSERT_EQ(*thrust::minmax_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
-                                    thrust::make_transform_iterator(data.end(), thrust::negate<T>()))
+  ASSERT_EQ(*thrust::minmax_element(thrust::make_transform_iterator(data.begin(), _THRUST_STD::negate<T>()),
+                                    thrust::make_transform_iterator(data.end(), _THRUST_STD::negate<T>()))
                .first,
             -5);
-  ASSERT_EQ(*thrust::minmax_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
-                                    thrust::make_transform_iterator(data.end(), thrust::negate<T>()))
+  ASSERT_EQ(*thrust::minmax_element(thrust::make_transform_iterator(data.begin(), _THRUST_STD::negate<T>()),
+                                    thrust::make_transform_iterator(data.end(), _THRUST_STD::negate<T>()))
                .second,
             -1);
 }
@@ -104,10 +104,10 @@ TYPED_TEST(MinMaxElementPrimitiveTests, TestMinMaxElement)
       ASSERT_EQ(h_min - h_data.begin(), d_min - d_data.begin());
       ASSERT_EQ(h_max - h_data.begin(), d_max - d_data.begin());
 
-      h_max = thrust::minmax_element(h_data.begin(), h_data.end(), thrust::greater<T>()).first;
-      d_max = thrust::minmax_element(d_data.begin(), d_data.end(), thrust::greater<T>()).first;
-      h_min = thrust::minmax_element(h_data.begin(), h_data.end(), thrust::greater<T>()).second;
-      d_min = thrust::minmax_element(d_data.begin(), d_data.end(), thrust::greater<T>()).second;
+      h_max = thrust::minmax_element(h_data.begin(), h_data.end(), _THRUST_STD::greater<T>()).first;
+      d_max = thrust::minmax_element(d_data.begin(), d_data.end(), _THRUST_STD::greater<T>()).first;
+      h_min = thrust::minmax_element(h_data.begin(), h_data.end(), _THRUST_STD::greater<T>()).second;
+      d_min = thrust::minmax_element(d_data.begin(), d_data.end(), _THRUST_STD::greater<T>()).second;
 
       ASSERT_EQ(h_min - h_data.begin(), d_min - d_data.begin());
       ASSERT_EQ(h_max - h_data.begin(), d_max - d_data.begin());
@@ -157,13 +157,13 @@ void TestMinMaxElementWithBigIndexesHelper(int magnitude)
   using Iter = thrust::counting_iterator<long long>;
   Iter begin(1);
   Iter end = begin + (1ll << magnitude);
-  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQ(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   thrust::pair<Iter, Iter> result = thrust::minmax_element(thrust::device, begin, end);
   ASSERT_EQ(*result.first, 1);
   ASSERT_EQ(*result.second, (1ll << magnitude));
 
-  result = thrust::minmax_element(thrust::device, begin, end, thrust::greater<long long>());
+  result = thrust::minmax_element(thrust::device, begin, end, _THRUST_STD::greater<long long>());
   ASSERT_EQ(*result.second, 1);
   ASSERT_EQ(*result.first, (1ll << magnitude));
 }

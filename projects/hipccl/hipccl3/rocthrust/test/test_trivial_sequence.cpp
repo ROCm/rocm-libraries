@@ -66,8 +66,8 @@ void test_func(Iterator first, Iterator last)
 
   using TrivialIterator = typename thrust::detail::trivial_sequence<Iterator, System>::iterator_type;
 
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<Iterator>::value, false);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<TrivialIterator>::value, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<Iterator>, false);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<TrivialIterator>, true);
 }
 
 TYPED_TEST(TrivialSequenceTests, TestTrivialSequence)
@@ -79,8 +79,7 @@ TYPED_TEST(TrivialSequenceTests, TestTrivialSequence)
   Vector A{0, 2, 1, 0, 1};
   Vector B{11, 11, 13, 10, 12};
 
-  test_func(thrust::make_zip_iterator(thrust::make_tuple(A.begin(), B.begin())),
-            thrust::make_zip_iterator(thrust::make_tuple(A.end(), B.end())));
+  test_func(thrust::make_zip_iterator(A.begin(), B.begin()), thrust::make_zip_iterator(A.end(), B.end()));
 
   Vector refA{0, 2, 1, 0, 1};
   ASSERT_EQ(A, refA);

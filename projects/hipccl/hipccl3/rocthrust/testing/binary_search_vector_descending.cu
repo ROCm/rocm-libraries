@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@ void TestVectorLowerBoundDescendingSimple()
   // test with integral output type
   IntVector integral_output(10);
   typename IntVector::iterator output_end = thrust::lower_bound(
-    vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), thrust::greater<T>());
+    vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), _THRUST_STD::greater<T>());
 
   ASSERT_EQUAL_QUIET(integral_output.end(), output_end);
 
@@ -77,7 +77,7 @@ void TestVectorUpperBoundDescendingSimple()
   // test with integral output type
   IntVector integral_output(10);
   typename IntVector::iterator output_end = thrust::upper_bound(
-    vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), thrust::greater<T>());
+    vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), _THRUST_STD::greater<T>());
 
   ASSERT_EQUAL_QUIET(output_end, integral_output.end());
 
@@ -102,7 +102,7 @@ void TestVectorBinarySearchDescendingSimple()
   // test with boolean output type
   BoolVector bool_output(10);
   typename BoolVector::iterator bool_output_end = thrust::binary_search(
-    vec.begin(), vec.end(), input.begin(), input.end(), bool_output.begin(), thrust::greater<T>());
+    vec.begin(), vec.end(), input.begin(), input.end(), bool_output.begin(), _THRUST_STD::greater<T>());
 
   ASSERT_EQUAL_QUIET(bool_output_end, bool_output.end());
 
@@ -112,7 +112,7 @@ void TestVectorBinarySearchDescendingSimple()
   // test with integral output type
   IntVector integral_output(10, 2);
   typename IntVector::iterator int_output_end = thrust::binary_search(
-    vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), thrust::greater<T>());
+    vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), _THRUST_STD::greater<T>());
 
   ASSERT_EQUAL_QUIET(int_output_end, integral_output.end());
 
@@ -128,7 +128,7 @@ struct TestVectorLowerBoundDescending
   void operator()(const size_t n)
   {
     thrust::host_vector<T> h_vec = unittest::random_integers<T>(n);
-    thrust::sort(h_vec.begin(), h_vec.end(), thrust::greater<T>());
+    thrust::sort(h_vec.begin(), h_vec.end(), _THRUST_STD::greater<T>());
     thrust::device_vector<T> d_vec = h_vec;
 
     thrust::host_vector<T> h_input   = unittest::random_integers<T>(2 * n);
@@ -139,9 +139,9 @@ struct TestVectorLowerBoundDescending
     thrust::device_vector<int_type> d_output(2 * n);
 
     thrust::lower_bound(
-      h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin(), thrust::greater<T>());
+      h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::greater<T>());
     thrust::lower_bound(
-      d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin(), thrust::greater<T>());
+      d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::greater<T>());
 
     ASSERT_EQUAL(h_output, d_output);
   }
@@ -154,7 +154,7 @@ struct TestVectorUpperBoundDescending
   void operator()(const size_t n)
   {
     thrust::host_vector<T> h_vec = unittest::random_integers<T>(n);
-    thrust::sort(h_vec.begin(), h_vec.end(), thrust::greater<T>());
+    thrust::sort(h_vec.begin(), h_vec.end(), _THRUST_STD::greater<T>());
     thrust::device_vector<T> d_vec = h_vec;
 
     thrust::host_vector<T> h_input   = unittest::random_integers<T>(2 * n);
@@ -165,9 +165,9 @@ struct TestVectorUpperBoundDescending
     thrust::device_vector<int_type> d_output(2 * n);
 
     thrust::upper_bound(
-      h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin(), thrust::greater<T>());
+      h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::greater<T>());
     thrust::upper_bound(
-      d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin(), thrust::greater<T>());
+      d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::greater<T>());
 
     ASSERT_EQUAL(h_output, d_output);
   }
@@ -180,7 +180,7 @@ struct TestVectorBinarySearchDescending
   void operator()(const size_t n)
   {
     thrust::host_vector<T> h_vec = unittest::random_integers<T>(n);
-    thrust::sort(h_vec.begin(), h_vec.end(), thrust::greater<T>());
+    thrust::sort(h_vec.begin(), h_vec.end(), _THRUST_STD::greater<T>());
     thrust::device_vector<T> d_vec = h_vec;
 
     thrust::host_vector<T> h_input   = unittest::random_integers<T>(2 * n);
@@ -191,9 +191,9 @@ struct TestVectorBinarySearchDescending
     thrust::device_vector<int_type> d_output(2 * n);
 
     thrust::binary_search(
-      h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin(), thrust::greater<T>());
+      h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::greater<T>());
     thrust::binary_search(
-      d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin(), thrust::greater<T>());
+      d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::greater<T>());
 
     ASSERT_EQUAL(h_output, d_output);
   }
