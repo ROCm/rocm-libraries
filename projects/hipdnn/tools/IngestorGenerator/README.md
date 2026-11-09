@@ -992,8 +992,8 @@ The descriptor loader ties a model only to its engine's UED/KMD/UMD ids, so a ca
 that keeps those ids (a kernel added, removed or renamed) would leave a model bound under
 `engine.heuristics.sort_kernel_catalog` ranking a catalog it never saw, silently.
 `engine.trained_catalog_sha256` records, per bound arch, the catalog the models were trained
-on (`codegen/catalog_fingerprint.py`: each kernel's name, metadata and spec, independent of
-ids and order). It is optional, but when set its keys must equal the arch keys under
+on (`tools/catalog_fingerprint.py`, which hashes each kernel's `catalog_diff.entry_key`, the
+identity the regeneration gate g3 compares, independent of ids and order). It is optional, but when set its keys must equal the arch keys under
 `heuristics.sort_kernel_catalog`, and like `heuristics` it goes in both the manifest and the
 selection. Set it whenever you bind a trained ranker.
 `tests/test_trained_rankers.py` fails when the shipped KDP no longer matches. After a

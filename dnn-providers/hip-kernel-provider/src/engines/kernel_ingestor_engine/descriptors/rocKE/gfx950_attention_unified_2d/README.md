@@ -13,7 +13,7 @@ plan's workspace (`packs/Gfx950AttentionUnified2DGeometry.hpp`).
 - Architecture: gfx950 only.
 - Variants: 420 (all `kernel_source.kind = rocke`, compiled at pack time):
   - 222 without LSE: every one of the 198 cells at the default geometry, plus 24 variants of
-    two other geometries in the D128 (and one D64) cells where an MI355X sweep measured them
+    two other geometries in the D128 (and one D64) cells where a gfx950 sweep measured them
     winning. This is `variant_reduce`'s cut of the 792-variant full space (198 cells at four
     geometries).
   - 198 LSE-on twins (`*_lsehm`, KMD `emit_lse` 1): each cell's default-geometry kernel, which
@@ -49,10 +49,10 @@ agree.
 
 - Trained on 810 SDPA graphs over the 21 multi-variant cells (D64/D128 cells shipping two or three tile geometries), each kernel timed on gfx950
   (`hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`; the `hipdnn-uhd` skill).
-- Validated on 352 held-out graphs (never trained on): geomean regret 1.0028 (tflops) / 1.0032
-  (time) vs native 1.0186; top-1 97.2% / 94.9% vs 82.4%; faster than native by more than 2% on
-  52–53 graphs. One graph is more than 5% slower than native (1.18x). A retrain
-  on 3,330 graphs scored the same, so these models stay. Stage V on gfx950 (`validate_l2.py`,
+- Validated on held-out graphs (never trained on): both models pick the fastest kernel more
+  often than the native scorer and lower its geomean regret, though a few graphs run slower than
+  with the native pick; a retrain on a larger corpus scored
+  the same, so these models stay. The PR that shipped them gives the measured ratios. Stage V on gfx950 (`validate_l2.py`,
   `decide.py l2 --baseline native`): the runtime reads each model, no winner record decides,
   and the regret gate passes.
 - The engine config binds the ids (`engine.heuristics`) and records the fingerprint of the

@@ -36,6 +36,7 @@ test_categories:
       - "quick_SdpaFwd_Default.*"
       - "quick_SdpaFwd_BshdStats.*"
       - "standard_SdpaFwd_Default.*"
+      - "standard_SdpaFwd_BshdStats.*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -48,7 +49,9 @@ test_categories:
       - "quick_SdpaFwd_Default.*"
       - "quick_SdpaFwd_BshdStats.*"
       - "standard_SdpaFwd_Default.*"
+      - "standard_SdpaFwd_BshdStats.*"
       - "comprehensive_SdpaFwd_Default.*"
+      - "comprehensive_SdpaFwd_BshdStats.*"
     exclude: *common_excludes
     labels:
       - "comprehensive"

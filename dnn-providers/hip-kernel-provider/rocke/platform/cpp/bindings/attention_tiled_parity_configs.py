@@ -1,9 +1,10 @@
 """Parity configs for the tiled attention families of prove_parity_binding.py.
 
 Each table mirrors ``library/tests/parity/<family>_emit.{py,c}`` index for
-index (the C emitter is what the binding compares against). The 3D tables set
-``emit_lse`` on the configs whose reduce the emitter builds with LSE
-(``_REDUCE_LSE``). The platform layer keeps its own copy: it must not import
+index (the C emitter is what the binding compares against). In the 3D tables
+``emit_lse`` turns LSE on for the segment and, by default, the reduce;
+``reduce_emit_lse`` sets the reduce alone (the emitter's reduce-only
+``_REDUCE_LSE`` configs). The platform layer keeps its own copy: it must not import
 ``library`` (one-way dependency, library -> platform). prove_parity_binding
 fails a family unless its C emitter reports "unknown config index N" for the
 first index N past the table, and a row that drifts from the emitter shows up
@@ -1641,7 +1642,7 @@ GFX942_ATTENTION_TILED_3D = [
         "sliding_window": 0,
         "has_softcap": False,
         "kv_storage_dtype": None,
-        "emit_lse": True,
+        "reduce_emit_lse": True,
     },
     {
         "head_size": 64,
@@ -1654,7 +1655,7 @@ GFX942_ATTENTION_TILED_3D = [
         "sliding_window": 0,
         "has_softcap": False,
         "kv_storage_dtype": None,
-        "emit_lse": True,
+        "reduce_emit_lse": True,
     },
     {
         "head_size": 128,
@@ -2098,7 +2099,7 @@ GFX950_ATTENTION_TILED_3D = [
         "sliding_window": 0,
         "has_softcap": False,
         "kv_storage_dtype": None,
-        "emit_lse": True,
+        "reduce_emit_lse": True,
     },
     {
         "head_size": 64,
@@ -2111,7 +2112,7 @@ GFX950_ATTENTION_TILED_3D = [
         "sliding_window": 0,
         "has_softcap": False,
         "kv_storage_dtype": None,
-        "emit_lse": True,
+        "reduce_emit_lse": True,
     },
     {
         # Segment AND reduce with emit_lse: the real catalog pairing, where

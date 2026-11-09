@@ -1216,7 +1216,8 @@ std::string t3d942_lower(const py::dict& d, const std::string& arch)
     r.num_segments = s.num_segments;
     r.has_waves_per_eu = s.has_waves_per_eu;
     r.waves_per_eu = s.waves_per_eu;
-    r.emit_lse = a_bool(d, "emit_lse", r.emit_lse);
+    /* reduce_emit_lse defaults to the segment's emit_lse (production pairs them). */
+    r.emit_lse = a_bool(d, "reduce_emit_lse", s.emit_lse);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
@@ -1316,7 +1317,8 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
         r.num_segments = s.num_segments;
         r.has_waves_per_eu = s.has_waves_per_eu;
         r.waves_per_eu = s.waves_per_eu;
-        r.emit_lse = a_bool(d, "emit_lse", r.emit_lse);
+        /* reduce_emit_lse defaults to the segment's emit_lse (production pairs them). */
+        r.emit_lse = a_bool(d, "reduce_emit_lse", s.emit_lse);
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "attention_tiled_3d_reduce");
         rocke_kernel_def_t* k = rocke_build_unified_attention_reduce_tiled_gfx950(&b, &r, a);

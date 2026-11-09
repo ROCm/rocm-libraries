@@ -188,6 +188,10 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # output Gfx942AttentionDense serves.
     set(HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
         "${HKP_SDPA_FWD_DEFAULT_GTEST_FILTER}:*_SdpaFwd_bshd_*_stats_*")
+    # Plus the BSHD stats bundles the gfx950 unified engines' LSE-on twins serve. The
+    # gfx950 rows share one categories YAML, so they share this filter.
+    set(HKP_GFX950_ATTENTION_GTEST_FILTER
+        "${HKP_SDPA_FWD_DEFAULT_GTEST_FILTER}:*_SdpaFwd_BshdStats.*")
 
     # The engine-pinned attention engines, each with an external integration check below,
     # a GPU-reference target in integration_tests/ and a census in tests/. Six fields per
@@ -195,13 +199,13 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # TOML under ../config/ and its categories YAML variable from ../CMakeLists.txt.
     # test_attention_bundle_filters.py reads the rows to pair each filter with its YAML.
     set(HKP_PINNED_ATTENTION_ENGINES
-        gfx950 dense Gfx950AttentionDense HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+        gfx950 dense Gfx950AttentionDense HKP_GFX950_ATTENTION_GTEST_FILTER
             hipkernel_Gfx950Attention.toml
             HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML
-        gfx950 unified_2d Gfx950AttentionUnified2D HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+        gfx950 unified_2d Gfx950AttentionUnified2D HKP_GFX950_ATTENTION_GTEST_FILTER
             hipkernel_Gfx950Attention.toml
             HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML
-        gfx950 unified_3d Gfx950AttentionUnified3D HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+        gfx950 unified_3d Gfx950AttentionUnified3D HKP_GFX950_ATTENTION_GTEST_FILTER
             hipkernel_Gfx950Attention.toml
             HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML
         gfx942 unified_3d Gfx942AttentionUnified3d HKP_SDPA_FWD_DEFAULT_GTEST_FILTER

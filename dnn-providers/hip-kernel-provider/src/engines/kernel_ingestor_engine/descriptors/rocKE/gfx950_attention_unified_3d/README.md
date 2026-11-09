@@ -17,7 +17,7 @@ the plan's workspace ahead of the segment scratch (`packs/Gfx950AttentionUnified
 - Decode only: one query token per sequence (every kernel is built with the decode grid).
 - Variants: 239 (all `kind = rocke` multi-launch kernels, compiled at pack time):
   - 123 without LSE: every one of the 116 cells at 16 segments, plus 7 variants at 32 or 64
-    segments in the 5 cells where an MI355X sweep measured them winning. This is
+    segments in the 5 cells where a gfx950 sweep measured them winning. This is
     `variant_reduce`'s cut of the 348-variant full space (116 cells at three segment counts).
   - 116 LSE-on twins (`*_lse`, KMD `emit_lse` 1): each cell's 16-segment kernel, whose reduce
     also writes the SDPA stats output. At decode its token-major LSE is the head-major
@@ -47,10 +47,10 @@ agree.
 
 - Trained on 994 SDPA graphs over the 5 multi-variant cells (bf16 bottom-right causal D128 cells shipping 16, 32 and/or 64 segments), each kernel timed on gfx950
   (`hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`; the `hipdnn-uhd` skill).
-- Validated on 100 held-out graphs (never trained on): geomean regret 1.0029 (tflops) / 1.0015
-  (time) vs native 1.0962; top-1 96% / 97% vs 73%; native's worst case of 2.47x drops to
-  1.23x / 1.07x. One graph per model is more than 5% slower than native (1.23x and 1.07x).
-  Stage V on gfx950 (`validate_l2.py`, `decide.py
+- Validated on held-out graphs (never trained on): both models pick the fastest kernel more
+  often than the native scorer, lower its geomean regret and shrink its worst case, though a few
+  graphs run slower than with the native pick. The PR that
+  shipped them gives the measured ratios. Stage V on gfx950 (`validate_l2.py`, `decide.py
   l2 --baseline native`): the runtime reads each model, no winner record decides, and the
   regret gate passes.
 - The engine config binds the ids (`engine.heuristics`) and records the fingerprint of the
