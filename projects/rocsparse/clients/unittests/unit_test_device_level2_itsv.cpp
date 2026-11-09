@@ -606,59 +606,66 @@ namespace
                             std::vector<float>(m, 0.0f), to_host(dy), "csritsv non unit nnz=0 y"));
                     }
                 }
-                // Without a tolerance the solve still runs: y = alpha * x for a unit
-                // diagonal, with or without a history array. The step is exact, so one
-                // iteration is reported and history[0] is the initial residual
-                // ||alpha * x - 0||_inf. With an iteration limit <= 0 nothing is done and the
-                // limit is returned unchanged.
+                // With or without a tolerance, an iteration limit <= 0 does nothing and the
+                // limit is returned unchanged. Otherwise y = alpha * x for a unit diagonal,
+                // with or without a history array, and history[0] is the initial residual
+                // ||alpha * x - 0||_inf. With a tolerance the step is exact, so one iteration
+                // is reported. Without one all the iterations are run as for a non-empty
+                // matrix: the limit is returned unchanged and the remaining residuals are zero.
                 if(diag == rocsparse_diag_type_unit)
                 {
                     float initial_residual = 0.0f;
                     for(const float v : scaled)
                         initial_residual = std::max(initial_residual, std::abs(v));
                     for(const bool ex : {false, true})
-                        for(const bool history : {false, true})
-                            for(const rocsparse_int limit : {5, 0, -1})
-                            {
-                                SCOPED_TRACE(::testing::Message()
-                                             << "no tolerance, ex " << ex << ", history " << history
-                                             << ", nmaxiter " << limit);
-                                device_vector<float> dy(std::vector<float>(m, 0.0f));
-                                std::vector<float>   hist(5, -1.0f);
-                                rocsparse_int        nmax = limit;
-                                ASSERT_EQ(itsv_solve<float>(ex,
-                                                            handle,
-                                                            &nmax,
-                                                            0,
-                                                            nullptr,
-                                                            history ? hist.data() : nullptr,
-                                                            rocsparse_operation_none,
-                                                            m,
-                                                            0,
-                                                            &alpha,
-                                                            d2,
-                                                            dA.val,
-                                                            dA.ptr,
-                                                            dA.ind,
-                                                            i2,
-                                                            dx,
-                                                            dy,
-                                                            rocsparse_solve_policy_auto,
-                                                            dbuf),
-                                          rocsparse_status_success);
-                                const bool stepped = (limit > 0);
-                                EXPECT_EQ(nmax, stepped ? 1 : limit);
-                                EXPECT_TRUE(
-                                    expect_near(stepped ? scaled : std::vector<float>(m, 0.0f),
-                                                to_host(dy),
-                                                "csritsv unit nnz=0 no tol y"));
-                                if(history)
+                        for(const bool with_tol : {false, true})
+                            for(const bool history : {false, true})
+                                for(const rocsparse_int limit : {5, 3, 0, -1})
                                 {
-                                    EXPECT_EQ(hist[0], stepped ? initial_residual : -1.0f);
-                                    for(size_t i = 1; i < hist.size(); ++i)
-                                        EXPECT_EQ(hist[i], -1.0f) << "history[" << i << "]";
+                                    SCOPED_TRACE(::testing::Message()
+                                                 << "tolerance " << with_tol << ", ex " << ex
+                                                 << ", history " << history << ", nmaxiter "
+                                                 << limit);
+                                    device_vector<float> dy(std::vector<float>(m, 0.0f));
+                                    std::vector<float>   hist(5, -1.0f);
+                                    rocsparse_int        nmax = limit;
+                                    ASSERT_EQ(itsv_solve<float>(ex,
+                                                                handle,
+                                                                &nmax,
+                                                                0,
+                                                                with_tol ? &tol : nullptr,
+                                                                history ? hist.data() : nullptr,
+                                                                rocsparse_operation_none,
+                                                                m,
+                                                                0,
+                                                                &alpha,
+                                                                d2,
+                                                                dA.val,
+                                                                dA.ptr,
+                                                                dA.ind,
+                                                                i2,
+                                                                dx,
+                                                                dy,
+                                                                rocsparse_solve_policy_auto,
+                                                                dbuf),
+                                              rocsparse_status_success);
+                                    const bool stepped = (limit > 0);
+                                    EXPECT_EQ(nmax, (stepped && with_tol) ? 1 : limit);
+                                    EXPECT_TRUE(
+                                        expect_near(stepped ? scaled : std::vector<float>(m, 0.0f),
+                                                    to_host(dy),
+                                                    "csritsv unit nnz=0 y"));
+                                    if(history)
+                                    {
+                                        EXPECT_EQ(hist[0], stepped ? initial_residual : -1.0f);
+                                        for(rocsparse_int i = 1; i < 5; ++i)
+                                        {
+                                            const bool zero = stepped && !with_tol && i < limit;
+                                            EXPECT_EQ(hist[i], zero ? 0.0f : -1.0f)
+                                                << "history[" << i << "]";
+                                        }
+                                    }
                                 }
-                            }
                 }
                 // y already holds the solution: no step is needed.
                 if(diag == rocsparse_diag_type_unit)

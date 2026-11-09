@@ -380,10 +380,12 @@ rocsparse_status rocsparse_csritsv_clear(rocsparse_handle          handle,
 *
 *  \note
 *  For a matrix with \p m > 0 rows, no non-zero entries and a unit diagonal, \f$y = \alpha x\f$ is exact
-*  after one iteration. That iteration is done if \p host_nmaxiter[0] is positive and either \p host_tol
-*  is null or \f$\Vert \alpha x - y_0 \Vert_{\infty}\f$ exceeds \p host_tol[0]. \p host_nmaxiter[0] is
-*  then set to 1. It is set to 0 if the iteration is not needed, and left unchanged if \p host_nmaxiter[0]
-*  is not positive.
+*  after one iteration. Nothing is done if \p host_nmaxiter[0] is not positive. Otherwise, without
+*  \p host_tol, \f$y\f$ is set to \f$\alpha x\f$ and \p host_nmaxiter[0] is left unchanged, as for a
+*  non-empty matrix: \p host_history[0] is the initial residual and the next \p host_nmaxiter[0] - 1
+*  entries are zero. With \p host_tol, the iteration is done only if
+*  \f$\Vert \alpha x - y_0 \Vert_{\infty}\f$ exceeds \p host_tol[0], \p host_nmaxiter[0] is set to 1
+*  if it is done and to 0 otherwise, and only \p host_history[0] is written.
 *
 *  @param[in]
 *  handle         handle to the rocSPARSE library context queue.
@@ -682,10 +684,12 @@ ROCSPARSE_EXPORT rocsparse_status
 *
 *  \note
 *  For a matrix with \p m > 0 rows, no non-zero entries and a unit diagonal, \f$y = \alpha x\f$ is exact
-*  after one iteration. That iteration is done if \p host_nmaxiter[0] is positive and either \p host_tol
-*  is null or \f$\Vert \alpha x - y_0 \Vert_{\infty}\f$ exceeds \p host_tol[0]. \p host_nmaxiter[0] is
-*  then set to 1. It is set to 0 if the iteration is not needed, and left unchanged if \p host_nmaxiter[0]
-*  is not positive.
+*  after one iteration. Nothing is done if \p host_nmaxiter[0] is not positive. Otherwise, without
+*  \p host_tol, \f$y\f$ is set to \f$\alpha x\f$ and \p host_nmaxiter[0] is left unchanged, as for a
+*  non-empty matrix: \p host_history[0] is the initial residual and the next \p host_nmaxiter[0] - 1
+*  entries are zero. With \p host_tol, the iteration is done only if
+*  \f$\Vert \alpha x - y_0 \Vert_{\infty}\f$ exceeds \p host_tol[0], \p host_nmaxiter[0] is set to 1
+*  if it is done and to 0 otherwise, and only \p host_history[0] is written.
 *
 *  @param[in]
 *  handle      handle to the rocSPARSE library context queue.

@@ -221,14 +221,36 @@ rocsparse_status rocsparse_host_csritsv_solve(rocsparse_handle          handle,
 
     if(m == 0 || nnz == 0)
     {
-        if(nnz == 0 && diag_type == rocsparse_diag_type_unit)
+        if(nnz == 0 && diag_type == rocsparse_diag_type_unit && host_nmaxiter[0] > 0)
         {
             //
-            // copy and scal.
+            // y = alpha * x is exact after one iteration.
             //
+            const rocsparse_int nmaxiter = host_nmaxiter[0];
+            floating_data_t<T>  nrm      = 0;
             for(J i = 0; i < m; ++i)
-                y[i] = alpha[0] * x[i];
-            host_nmaxiter[0] = 1;
+                nrm = std::max(nrm, std::abs(alpha[0] * x[i] - y[i]));
+            if(host_history)
+            {
+                host_history[0] = nrm;
+                if(host_tol == nullptr)
+                {
+                    for(rocsparse_int iter = 1; iter < nmaxiter; ++iter)
+                        host_history[iter] = 0;
+                }
+            }
+            if(host_tol == nullptr || nrm > host_tol[0])
+            {
+                //
+                // copy and scal.
+                //
+                for(J i = 0; i < m; ++i)
+                    y[i] = alpha[0] * x[i];
+            }
+            if(host_tol != nullptr)
+            {
+                host_nmaxiter[0] = (nrm > host_tol[0]) ? 1 : 0;
+            }
         }
         return rocsparse_status_success;
     }
