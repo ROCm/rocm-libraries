@@ -34,12 +34,6 @@
 namespace conv_depthwise_rows
 {
 
-template <typename T>
-__device__ inline float rowsToF32(T v)
-{
-    return static_cast<float>(v);
-}
-
 /// Loads one element as fp32. 16-bit elements are read as a full-width (zero-extended) 16-bit
 /// load: a d16 load keeps the destination's high half, which chains every load in a loop on
 /// the one before it on gfx11.
@@ -64,17 +58,21 @@ __device__ inline int rowsClamp(int v, int extent)
     return v < 0 ? 0 : (v >= extent ? extent - 1 : v);
 }
 
-/// A filter tap converted from a 16-bit element, made opaque to the instruction combiner: on
-/// gfx942, an LLVM 24 build fails instruction selection ("Cannot select: f32 = Constant<-1>")
-/// for the fp16 5x5 bands when it folds these conversions into mixed-precision FMAs. The empty
-/// asm keeps the converted fp32 tap in a VGPR, which also costs nothing measurable.
+/// A band's filter tap as fp32. On gfx9, an fp16 tap converted here is kept an opaque fp32 VGPR:
+/// an LLVM 24 build for gfx942 fails instruction selection ("Cannot select: f32 = Constant<-1>",
+/// an LLVM ERROR that aborts the process) for the fp16 5x5 bands with four or eight rows per
+/// thread when it folds the taps' conversions into mixed-precision FMAs. Elsewhere, and for the
+/// other variants (which that build compiles), the tap stays a scalar register.
 template <typename T>
-__device__ inline float rowsTap(float v)
+__device__ inline float rowsBandTap(const T* p)
 {
-    if constexpr(sizeof(T) == 2)
+    float v = rowsLoad(p);
+#if defined(__GFX9__)
+    if constexpr(sizeof(T) == 2 && !__is_same(T, __bf16))
     {
         asm volatile("" : "+v"(v));
     }
+#endif
     return v;
 }
 
@@ -304,8 +302,7 @@ __device__ inline void rowsFwdNchw(const T* __restrict__ in,
 #pragma unroll
             for(int kx = 0; kx < KW; ++kx)
             {
-                w[ky][kx] = rowsTap<T>(
-                    rowsToF32(FLIP ? wc[(KH - 1 - ky) * KW + (KW - 1 - kx)] : wc[ky * KW + kx]));
+                w[ky][kx] = rowsLoad(&wc[FLIP ? (KH - 1 - ky) * KW + (KW - 1 - kx) : ky * KW + kx]);
             }
         }
         const bool segW = a.sw == 1 && xs == a.dw;
@@ -338,8 +335,8 @@ __device__ inline void rowsFwdNchw(const T* __restrict__ in,
         {
             for(int kx = 0; kx < kw; ++kx)
             {
-                const float wv = rowsTap<T>(
-                    rowsToF32(FLIP ? wc[(kh - 1 - ky) * kw + (kw - 1 - kx)] : wc[ky * kw + kx]));
+                const float wv
+                    = rowsLoad(&wc[FLIP ? (kh - 1 - ky) * kw + (kw - 1 - kx) : ky * kw + kx]);
 #pragma unroll
                 for(int i = 0; i < RH; ++i)
                 {
@@ -446,8 +443,8 @@ __device__ inline void rowsFwdBandNchw(const T* __restrict__ in,
 #pragma unroll
             for(int kx = 0; kx < KW; ++kx)
             {
-                w[ky][kx] = rowsTap<T>(
-                    rowsToF32(FLIP ? wc[(KH - 1 - ky) * KW + (KW - 1 - kx)] : wc[ky * KW + kx]));
+                w[ky][kx]
+                    = rowsBandTap(&wc[FLIP ? (KH - 1 - ky) * KW + (KW - 1 - kx) : ky * KW + kx]);
             }
         }
     }
@@ -518,8 +515,8 @@ __device__ inline void rowsFwdBandNchw(const T* __restrict__ in,
             {
                 for(int kx = 0; kx < kw; ++kx)
                 {
-                    const float wv = rowsTap<T>(rowsToF32(
-                        FLIP ? wc[(kh - 1 - ky) * kw + (kw - 1 - kx)] : wc[ky * kw + kx]));
+                    const float wv = rowsBandTap(
+                        &wc[FLIP ? (kh - 1 - ky) * kw + (kw - 1 - kx) : ky * kw + kx]);
 #pragma unroll
                     for(int i = 0; i < RH; ++i)
                     {
