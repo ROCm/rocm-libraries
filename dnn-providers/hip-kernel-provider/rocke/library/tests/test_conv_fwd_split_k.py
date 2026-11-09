@@ -902,6 +902,64 @@ class TestSplitKSpecDict(unittest.TestCase):
                 with self.assertRaises(AttributeError):
                     conv_implicit_gemm_spec_to_dict(_Without())
 
+    def test_a_spec_or_problem_without_its_group_fields_is_rejected(self):
+        # Neither a missing group_merge nor a missing problem.groups may be
+        # read as the ungrouped / unmerged default.
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
+
+        spec = _spec()
+
+        def _without(obj, field, **override):
+            class _Without:
+                def __getattr__(self, name):
+                    if name == field:
+                        raise AttributeError(name)
+                    if name in override:
+                        return override[name]
+                    return getattr(obj, name)
+
+            return _Without()
+
+        with self.subTest(missing="group_merge"):
+            with self.assertRaises(AttributeError):
+                conv_implicit_gemm_spec_to_dict(_without(spec, "group_merge"))
+        with self.subTest(missing="problem.groups"):
+            bad = _without(spec, None, problem=_without(spec.problem, "groups"))
+            with self.assertRaises(AttributeError):
+                conv_implicit_gemm_spec_to_dict(bad)
+
+    def test_a_malformed_acc_epilogue_is_rejected(self):
+        # relu is a bool and the bounds real numbers: a truthy non-bool or a
+        # non-numeric field is rejected, not coerced by the bridge.
+        from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
+
+        for kw in (
+            dict(relu=1),
+            dict(relu="no"),
+            dict(relu=None),
+            dict(bias="1"),
+            dict(scale=True),
+            dict(clamp_min="0"),
+            dict(clamp_max=[1.0]),
+        ):
+            with self.subTest(**kw):
+                with self.assertRaises(TypeError):
+                    ConvAccumulatorEpilogue(**kw)
+
+    def test_acc_epilogue_fields_are_forwarded_as_typed(self):
+        from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
+
+        epi = ConvAccumulatorEpilogue(bias=1, scale=2.5, relu=True, clamp_max=6)
+        d = conv_implicit_gemm_spec_to_dict(_spec(acc_epilogue=epi))["acc_epilogue"]
+        self.assertIs(d["relu"], True)
+        self.assertEqual(
+            (d["bias"], d["scale"], d["clamp_min"], d["clamp_max"]),
+            (1.0, 2.5, None, 6.0),
+        )
+        self.assertIsInstance(d["bias"], float)
+        self.assertIsInstance(d["clamp_max"], float)
+
 
 def _engine_or_skip(case):
     try:
