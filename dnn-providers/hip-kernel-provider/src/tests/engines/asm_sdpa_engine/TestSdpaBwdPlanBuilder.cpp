@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
@@ -11,6 +12,7 @@
 
 #include "GraphTest.hpp"
 #include "asm_fmha_v3_bwd_configs.hpp"
+#include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlan.hpp"
@@ -168,10 +170,9 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
         // configuration with a calibrated CPU reference today (logs INFO).
         {GraphTest{createSdpaBwdGraph(), "Valid BF16 HD128 backward"}, true},
 
-        // HD=64: rejected by the registry lookup, not by a dtype/hdim gate. The
-        // hd64 registry carries only pddv=0 rows, but the day-one dispatch tuple
-        // requests pddv=1, so no dqdkdv row matches.
-        {GraphTest{createSdpaBwdGraph({4, 8, 256, 64}), "Head dimension 64"}, false},
+        // HD=64: gfx942 serves it with the (pssk = 1, pddv = 0) rows; AITER sends
+        // gfx950 hd64 to CK, so gfx950 declines it.
+        {GraphTest{createSdpaBwdGraph({4, 8, 256, 64}), "Head dimension 64"}, isGfx942},
 
         // HD=192 BF16: registry-supported and dispatched on gfx942. The CPU
         // reference is not yet calibrated, so buildPlan logs a one-time WARN;
@@ -691,341 +692,369 @@ constexpr int MASK_TOP_LEFT_CAUSAL = 1; // MaskType::TOP_LEFT_CAUSAL
 constexpr int MASK_BOTTOM_RIGHT_CAUSAL = 2; // MaskType::BOTTOM_RIGHT_CAUSAL
 constexpr int MASK_SLIDING_WINDOW = 3; // MaskType::SLIDING_WINDOW
 constexpr int MODE_BATCH = 0; // BatchMode::BATCH
+constexpr int MODE_GROUP = 1; // BatchMode::GROUP
+constexpr int ATOMIC_A16 = 0; // AccumulatorMode::A16
 constexpr int ATOMIC_A32 = 1; // AccumulatorMode::A32
-constexpr int ATOMIC_NONE = 0; // odo / dq_convert use atomic32=0
-constexpr int PSSK_ON = 1;
-constexpr int PDDV_ON = 1;
-constexpr int PSSK_OFF = 0;
-constexpr int PDDV_OFF = 0;
 constexpr int BF16_CVT_RTNE = 0; // RoundingMode::RTNE
 using asm_sdpa_engine::bwd_dispatch::BF16_CVT_FP16_SENTINEL;
+
+// A batch-mode A32 request. S_q = S_kv = 256 is not a multiple of any A32
+// K/V tile (192 or 256), so it asks for pssk = 1 on every row.
+bwd_dispatch::KernelRequest makeRequest(const std::string& dtype,
+                                        int hdimQ,
+                                        int hdimV,
+                                        int mask = MASK_NONE,
+                                        int bf16Cvt = BF16_CVT_RTNE)
+{
+    bwd_dispatch::KernelRequest request{};
+    request.dataType = dtype;
+    request.hdimQ = hdimQ;
+    request.hdimV = hdimV;
+    request.seqLenQ = 256;
+    request.seqLenKv = 256;
+    request.mask = mask;
+    request.atomic32 = ATOMIC_A32;
+    request.mode = MODE_BATCH;
+    request.bf16Cvt = dtype == "fp16" ? BF16_CVT_FP16_SENTINEL : bf16Cvt;
+    request.psskOffStridesOk = true;
+    return request;
+}
+
+// The same request with the given sequence lengths.
+bwd_dispatch::KernelRequest
+    withSeqLens(bwd_dispatch::KernelRequest request, int64_t seqLenQ, int64_t seqLenKv)
+{
+    request.seqLenQ = seqLenQ;
+    request.seqLenKv = seqLenKv;
+    return request;
+}
+
+// The registry row the lookup resolves for stage, or std::nullopt.
+std::optional<fmha_v3_bwdConfig> resolvedRow(bwd_dispatch::PipelineStage stage,
+                                             const std::string& arch,
+                                             const bwd_dispatch::KernelRequest& request)
+{
+    const auto key = bwd_dispatch::lookupKernelNameKey(stage, arch, request);
+    if(key.empty())
+    {
+        return std::nullopt;
+    }
+    switch(stage)
+    {
+    case bwd_dispatch::PipelineStage::ODO:
+        return cfg_fmha_bwd_odo.at(key);
+    case bwd_dispatch::PipelineStage::DQDKDV:
+        return cfg_fmha_bwd_dqdkdv.at(key);
+    case bwd_dispatch::PipelineStage::DQ_CONVERT:
+        return cfg_fmha_bwd_dq_convert.at(key);
+    default:
+        return std::nullopt;
+    }
+}
+
+std::optional<fmha_v3_bwdConfig> resolvedDqdkdv(const std::string& arch,
+                                                const bwd_dispatch::KernelRequest& request)
+{
+    return resolvedRow(bwd_dispatch::PipelineStage::DQDKDV, arch, request);
+}
+
+// (pssk, pddv) of the dqdkdv row the lookup resolves, or std::nullopt.
+std::optional<std::pair<int, int>> resolvedPsskPddv(const std::string& arch,
+                                                    const bwd_dispatch::KernelRequest& request)
+{
+    const auto row = resolvedDqdkdv(arch, request);
+    if(!row)
+    {
+        return std::nullopt;
+    }
+    return std::pair<int, int>{row->pssk, row->pddv};
+}
+
+const std::pair<int, int> K_PSSK_PDDV{1, 1};
+const std::pair<int, int> K_PSSK_ONLY{1, 0};
+const std::pair<int, int> K_UNPADDED{0, 0};
 } // namespace
 
-// POC config: hd128 / bf16 / NO_MASK / BATCH must still resolve across all
-// three pipeline-stage registries.
-TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16NoMaskBatch)
+// gfx942 serves hd128 with every mask in batch mode for both dtypes; gfx950
+// adds the bottom-right window kernel (mask 4), which gfx942 does not have.
+TEST(TestSdpaBwdRegistryLookup, Hd128MasksResolveEveryStage)
 {
-    using namespace bwd_dispatch;
-
-    auto odoKey = lookupKernelNameKey(PipelineStage::ODO,
-                                      "gfx942",
-                                      "bf16",
-                                      /*hdimQ=*/128,
-                                      /*hdimV=*/128,
-                                      MASK_NONE,
-                                      ATOMIC_NONE,
-                                      PSSK_OFF,
-                                      PDDV_OFF,
-                                      MODE_BATCH,
-                                      BF16_CVT_FP16_SENTINEL);
-    EXPECT_FALSE(odoKey.empty()) << "odo lookup should resolve";
-
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "bf16",
-                                         /*hdimQ=*/128,
-                                         /*hdimV=*/128,
-                                         MASK_NONE,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_RTNE);
-    EXPECT_FALSE(dqdkdvKey.empty()) << "dqdkdv lookup should resolve";
-
-    auto dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
-                                            "gfx942",
-                                            "bf16",
-                                            /*hdimQ=*/128,
-                                            /*hdimV=*/128,
-                                            MASK_NONE,
-                                            ATOMIC_NONE,
-                                            PSSK_OFF,
-                                            PDDV_OFF,
-                                            MODE_BATCH,
-                                            BF16_CVT_RTNE);
-    EXPECT_FALSE(dqConvertKey.empty()) << "dq_convert lookup should resolve";
-}
-
-// FP16 / hd64 row resolves via the unpadded (pssk=1, pddv=0) layout that the
-// registry actually carries for that head-dim. This exercises the lookup for
-// a hd64 entry even though isApplicable's day-one matrix forces pddv=1 and
-// therefore rejects hd64 at dispatch time.
-TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd64NoMaskBatch)
-{
-    using namespace bwd_dispatch;
-
-    auto odoKey = lookupKernelNameKey(PipelineStage::ODO,
-                                      "gfx942",
-                                      "fp16",
-                                      /*hdimQ=*/64,
-                                      /*hdimV=*/64,
-                                      MASK_NONE,
-                                      ATOMIC_NONE,
-                                      PSSK_OFF,
-                                      PDDV_OFF,
-                                      MODE_BATCH,
-                                      BF16_CVT_FP16_SENTINEL);
-    EXPECT_FALSE(odoKey.empty());
-
-    // hd64 dqdkdv is registered with pssk=1, pddv=0 (no padded-D variant).
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "fp16",
-                                         /*hdimQ=*/64,
-                                         /*hdimV=*/64,
-                                         MASK_NONE,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_OFF,
-                                         MODE_BATCH,
-                                         BF16_CVT_FP16_SENTINEL);
-    EXPECT_FALSE(dqdkdvKey.empty());
-
-    auto dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
-                                            "gfx942",
-                                            "fp16",
-                                            /*hdimQ=*/64,
-                                            /*hdimV=*/64,
-                                            MASK_NONE,
-                                            ATOMIC_NONE,
-                                            PSSK_OFF,
-                                            PDDV_OFF,
-                                            MODE_BATCH,
-                                            BF16_CVT_FP16_SENTINEL);
-    EXPECT_FALSE(dqConvertKey.empty());
-}
-
-// hd192 / bf16 / TOP_LEFT_CAUSAL row resolves via the registry. isApplicable
-// rejects causal day-one but the lookup itself must work.
-TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd192Bf16CausalBatch)
-{
-    using namespace bwd_dispatch;
-
-    // Causal hd192/bf16 dqdkdv batch kernels are pssk=1, pddv=1 in the registry.
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "bf16",
-                                         /*hdimQ=*/192,
-                                         /*hdimV=*/192,
-                                         MASK_TOP_LEFT_CAUSAL,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_RTNE);
-    EXPECT_FALSE(dqdkdvKey.empty()) << "hd192 bf16 causal_tl dqdkdv lookup should resolve";
-
-    // odo is mask-agnostic.
-    auto odoKey = lookupKernelNameKey(PipelineStage::ODO,
-                                      "gfx942",
-                                      "bf16",
-                                      /*hdimQ=*/192,
-                                      /*hdimV=*/192,
-                                      MASK_NONE,
-                                      ATOMIC_NONE,
-                                      PSSK_OFF,
-                                      PDDV_OFF,
-                                      MODE_BATCH,
-                                      BF16_CVT_FP16_SENTINEL);
-    EXPECT_FALSE(odoKey.empty()) << "hd192 bf16 odo lookup should resolve";
-}
-
-// The gfx950 hd128 BF16 rows store bf16_cvt=3: one kernel serves every rounding
-// mode, so a caller passing the graph-derived RoundingMode (e.g. RTNE = 0)
-// still resolves the row.
-TEST(TestSdpaBwdRegistryLookup, RegistryLookupGfx950Hd128Bf16NoMaskBatch)
-{
-    using namespace bwd_dispatch;
-
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx950",
-                                         "bf16",
-                                         /*hdimQ=*/128,
-                                         /*hdimV=*/128,
-                                         MASK_NONE,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_RTNE);
-    EXPECT_FALSE(dqdkdvKey.empty())
-        << "gfx950 bf16 hd128 a32 dqdkdv lookup should resolve despite bf16_cvt mismatch";
-
-    auto dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
-                                            "gfx950",
-                                            "bf16",
-                                            /*hdimQ=*/128,
-                                            /*hdimV=*/128,
-                                            MASK_NONE,
-                                            ATOMIC_NONE,
-                                            PSSK_OFF,
-                                            PDDV_OFF,
-                                            MODE_BATCH,
-                                            BF16_CVT_RTNE);
-    EXPECT_FALSE(dqConvertKey.empty())
-        << "gfx950 bf16 hd128 dq_convert lookup should resolve despite bf16_cvt mismatch";
-
-    auto odoKey = lookupKernelNameKey(PipelineStage::ODO,
-                                      "gfx950",
-                                      "bf16",
-                                      /*hdimQ=*/128,
-                                      /*hdimV=*/128,
-                                      MASK_NONE,
-                                      ATOMIC_NONE,
-                                      PSSK_OFF,
-                                      PDDV_OFF,
-                                      MODE_BATCH,
-                                      BF16_CVT_FP16_SENTINEL);
-    EXPECT_FALSE(odoKey.empty()) << "gfx950 bf16 hd128 odo lookup should resolve";
-}
-
-// Causal (mask=1) dispatch: DQDKDV uses mask=1 row; ODO and DQ_CONVERT remain
-// mask=0 (mask-agnostic stages).
-TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16CausalBatch)
-{
-    using namespace bwd_dispatch;
-
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "bf16",
-                                         /*hdimQ=*/128,
-                                         /*hdimV=*/128,
-                                         MASK_TOP_LEFT_CAUSAL,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_RTNE);
-    EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 causal_tl dqdkdv lookup should resolve";
-
-    // ODO is mask-agnostic (always mask=0).
-    auto odoKey = lookupKernelNameKey(PipelineStage::ODO,
-                                      "gfx942",
-                                      "bf16",
-                                      /*hdimQ=*/128,
-                                      /*hdimV=*/128,
-                                      MASK_NONE,
-                                      ATOMIC_NONE,
-                                      PSSK_OFF,
-                                      PDDV_OFF,
-                                      MODE_BATCH,
-                                      BF16_CVT_FP16_SENTINEL);
-    EXPECT_FALSE(odoKey.empty()) << "hd128 bf16 odo lookup should resolve for causal dispatch";
-
-    // DQ_CONVERT is mask-agnostic (always mask=0).
-    auto dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
-                                            "gfx942",
-                                            "bf16",
-                                            /*hdimQ=*/128,
-                                            /*hdimV=*/128,
-                                            MASK_NONE,
-                                            ATOMIC_NONE,
-                                            PSSK_OFF,
-                                            PDDV_OFF,
-                                            MODE_BATCH,
-                                            BF16_CVT_RTNE);
-    EXPECT_FALSE(dqConvertKey.empty())
-        << "hd128 bf16 dq_convert lookup should resolve for causal dispatch";
-}
-
-// Bottom-right causal (mask=2) dispatch.
-TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16CausalBrBatch)
-{
-    using namespace bwd_dispatch;
-
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "bf16",
-                                         /*hdimQ=*/128,
-                                         /*hdimV=*/128,
-                                         MASK_BOTTOM_RIGHT_CAUSAL,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_RTNE);
-    EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 causal_br dqdkdv lookup should resolve";
-}
-
-// SWA / window (mask=3) dispatch on gfx942.
-TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16SwaBatch)
-{
-    using namespace bwd_dispatch;
-
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "bf16",
-                                         /*hdimQ=*/128,
-                                         /*hdimV=*/128,
-                                         MASK_SLIDING_WINDOW,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_RTNE);
-    EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 swa dqdkdv lookup should resolve";
-}
-
-// FP16 causal (mask=1) dispatch.
-TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd128CausalBatch)
-{
-    using namespace bwd_dispatch;
-
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "fp16",
-                                         /*hdimQ=*/128,
-                                         /*hdimV=*/128,
-                                         MASK_TOP_LEFT_CAUSAL,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_FP16_SENTINEL);
-    EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 fp16 causal_tl dqdkdv lookup should resolve";
-}
-
-// gfx950 window kernels: mask 3 (top-left) and mask 4 (bottom-right), hd128,
-// both dtypes, A32 batch (AITER v0.1.29 hsa/gfx950/fmha_v3_bwd/fmha_bwd_dqdkdv.csv).
-// gfx942 has no mask-4 rows: its one window kernel takes both alignments.
-TEST(TestSdpaBwdRegistryLookup, RegistryLookupGfx950Hd128WindowBatch)
-{
-    using namespace bwd_dispatch;
-
-    for(const char* dtype : {"bf16", "fp16"})
+    using bwd_dispatch::PipelineStage;
+    struct Case
     {
-        for(const int mask : {MASK_SLIDING_WINDOW, BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW})
+        const char* arch;
+        int mask;
+    };
+    for(const auto& [arch, mask] :
+        std::vector<Case>{{"gfx942", MASK_NONE},
+                          {"gfx942", MASK_TOP_LEFT_CAUSAL},
+                          {"gfx942", MASK_BOTTOM_RIGHT_CAUSAL},
+                          {"gfx942", MASK_SLIDING_WINDOW},
+                          {"gfx950", MASK_NONE},
+                          {"gfx950", MASK_SLIDING_WINDOW},
+                          {"gfx950", BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW}})
+    {
+        for(const char* dtype : {"bf16", "fp16"})
         {
-            SCOPED_TRACE(std::string(dtype) + " mask=" + std::to_string(mask));
-            EXPECT_FALSE(lookupKernelNameKey(PipelineStage::DQDKDV,
-                                             "gfx950",
-                                             dtype,
-                                             /*hdimQ=*/128,
-                                             /*hdimV=*/128,
-                                             mask,
-                                             ATOMIC_A32,
-                                             PSSK_ON,
-                                             PDDV_ON,
-                                             MODE_BATCH,
-                                             std::string(dtype) == "fp16" ? BF16_CVT_FP16_SENTINEL
-                                                                          : BF16_CVT_RTNE)
-                             .empty());
+            SCOPED_TRACE(std::string(arch) + " " + dtype + " mask=" + std::to_string(mask));
+            const auto request = makeRequest(dtype, 128, 128, mask);
+            for(const auto stage :
+                {PipelineStage::ODO, PipelineStage::DQDKDV, PipelineStage::DQ_CONVERT})
+            {
+                EXPECT_TRUE(resolvedRow(stage, arch, request).has_value());
+            }
         }
     }
 
-    EXPECT_TRUE(lookupKernelNameKey(PipelineStage::DQDKDV,
-                                    "gfx942",
-                                    "bf16",
-                                    /*hdimQ=*/128,
-                                    /*hdimV=*/128,
-                                    BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW,
-                                    ATOMIC_A32,
-                                    PSSK_ON,
-                                    PDDV_ON,
-                                    MODE_BATCH,
-                                    BF16_CVT_RTNE)
-                    .empty());
+    EXPECT_FALSE(resolvedDqdkdv("gfx942",
+                                makeRequest("bf16", 128, 128, BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW))
+                     .has_value());
+}
+
+// get_padded_hdim(): D_qk == D_v rounds up to 64, 128 or 192; gfx950 (192, 128)
+// keeps its dims, and every other pair passes through unpadded.
+TEST(TestSdpaBwdPaddedHeadDims, RoundsUpToTheRegistryHeadDims)
+{
+    using bwd_dispatch::paddedHeadDims;
+    struct Case
+    {
+        const char* arch;
+        int hdimQ;
+        int hdimV;
+        int paddedQ;
+        int paddedV;
+    };
+    for(const auto& c : std::vector<Case>{{"gfx942", 8, 8, 64, 64},
+                                          {"gfx942", 64, 64, 64, 64},
+                                          {"gfx942", 72, 72, 128, 128},
+                                          {"gfx942", 128, 128, 128, 128},
+                                          {"gfx942", 136, 136, 192, 192},
+                                          {"gfx942", 192, 192, 192, 192},
+                                          {"gfx942", 256, 256, 256, 256},
+                                          {"gfx942", 192, 128, 192, 128},
+                                          {"gfx942", 96, 64, 96, 64},
+                                          {"gfx950", 96, 96, 128, 128},
+                                          {"gfx950", 192, 128, 192, 128}})
+    {
+        SCOPED_TRACE(std::string(c.arch) + " " + std::to_string(c.hdimQ) + "x"
+                     + std::to_string(c.hdimV));
+        const auto padded = paddedHeadDims(c.arch, c.hdimQ, c.hdimV);
+        EXPECT_EQ(padded.q, c.paddedQ);
+        EXPECT_EQ(padded.v, c.paddedV);
+    }
+}
+
+// Each stage matches on its own AITER key: odo on padded hdim_v, dq_convert on
+// padded hdim_q. gfx950 (192, 128) therefore runs the hd128 odo kernel, the
+// 192 x 128 dqdkdv kernel and the hd192 dq_convert kernel.
+TEST(TestSdpaBwdRegistryLookup, Gfx950Hd192x128ResolvesPerStageHeadDims)
+{
+    using bwd_dispatch::PipelineStage;
+    for(const char* dtype : {"bf16", "fp16"})
+    {
+        SCOPED_TRACE(dtype);
+        const auto request = makeRequest(dtype, 192, 128);
+
+        const auto odo = resolvedRow(PipelineStage::ODO, "gfx950", request);
+        ASSERT_TRUE(odo.has_value());
+        EXPECT_EQ(odo->hdim_v, 128);
+
+        const auto dqdkdv = resolvedDqdkdv("gfx950", request);
+        ASSERT_TRUE(dqdkdv.has_value());
+        EXPECT_EQ(std::make_pair(dqdkdv->hdim_q, dqdkdv->hdim_v), std::make_pair(192, 128));
+
+        const auto dqConvert = resolvedRow(PipelineStage::DQ_CONVERT, "gfx950", request);
+        ASSERT_TRUE(dqConvert.has_value());
+        EXPECT_EQ(dqConvert->hdim_q, 192);
+        EXPECT_EQ(dqConvert->dtype, dtype);
+    }
+}
+
+// gfx942 hd64 ships only (pssk = 1, pddv = 0) A32 rows; with no padding the
+// lookup requests pddv = 0 and resolves them.
+TEST(TestSdpaBwdRegistryLookup, Gfx942Hd64ResolvesThePsskRows)
+{
+    using bwd_dispatch::PipelineStage;
+    for(const char* dtype : {"bf16", "fp16"})
+    {
+        for(const int mask : {MASK_NONE, MASK_TOP_LEFT_CAUSAL, MASK_BOTTOM_RIGHT_CAUSAL})
+        {
+            SCOPED_TRACE(std::string(dtype) + " mask=" + std::to_string(mask));
+            const auto request = makeRequest(dtype, 64, 64, mask);
+            EXPECT_TRUE(resolvedRow(PipelineStage::ODO, "gfx942", request).has_value());
+            EXPECT_TRUE(resolvedRow(PipelineStage::DQ_CONVERT, "gfx942", request).has_value());
+            EXPECT_EQ(resolvedPsskPddv("gfx942", request), K_PSSK_ONLY);
+            // S_q == S_kv on a tile multiple asks for (0, 0); hd64 A32 has no
+            // such row, so the (1, 0) row above it serves.
+            EXPECT_EQ(resolvedPsskPddv("gfx942", withSeqLens(request, 384, 384)), K_PSSK_ONLY);
+        }
+    }
+}
+
+// A padded head dim asks for pddv = 1. D = 96 runs the hd128 psskddv kernel on
+// gfx942 even when S_q == S_kv is a multiple of the tile: the unpadded (0, 0)
+// row does not handle padding and is not above (pssk, 1).
+TEST(TestSdpaBwdRegistryLookup, PaddedHeadDimSelectsAPddvRow)
+{
+    using bwd_dispatch::PipelineStage;
+    for(const auto& [arch, hdim] :
+        std::vector<std::pair<const char*, int>>{{"gfx942", 96}, {"gfx942", 72}, {"gfx950", 72}})
+    {
+        for(const auto& request : {makeRequest("bf16", hdim, hdim),
+                                   withSeqLens(makeRequest("bf16", hdim, hdim), 384, 384)})
+        {
+            SCOPED_TRACE(std::string(arch) + " D=" + std::to_string(hdim)
+                         + " S=" + std::to_string(request.seqLenKv));
+            const auto dqdkdv = resolvedDqdkdv(arch, request);
+            ASSERT_TRUE(dqdkdv.has_value());
+            EXPECT_EQ(dqdkdv->hdim_q, 128);
+            EXPECT_EQ(std::make_pair(dqdkdv->pssk, dqdkdv->pddv), K_PSSK_PDDV);
+            EXPECT_EQ(resolvedRow(PipelineStage::ODO, arch, request).value().hdim_v, 128);
+            EXPECT_EQ(resolvedRow(PipelineStage::DQ_CONVERT, arch, request).value().hdim_q, 128);
+        }
+    }
+}
+
+// gfx942 hd128 A32: S_q == S_kv on a multiple of the 192-row tile asks for
+// pssk = 0, and the unpadded (0, 0) kernel serves it when the strides allow.
+// Any other sequence pair, or strides the pssk = 0 kernels cannot take, falls
+// back to the psskddv row.
+TEST(TestSdpaBwdRegistryLookup, Gfx942Hd128SelectsTheUnpaddedRowOnlyWhenItApplies)
+{
+    for(const char* dtype : {"bf16", "fp16"})
+    {
+        for(const int mask : {MASK_NONE, MASK_TOP_LEFT_CAUSAL})
+        {
+            SCOPED_TRACE(std::string(dtype) + " mask=" + std::to_string(mask));
+            const auto request = makeRequest(dtype, 128, 128, mask);
+            EXPECT_EQ(resolvedPsskPddv("gfx942", withSeqLens(request, 384, 384)), K_UNPADDED);
+            EXPECT_EQ(resolvedPsskPddv("gfx942", withSeqLens(request, 256, 256)), K_PSSK_PDDV);
+            EXPECT_EQ(resolvedPsskPddv("gfx942", withSeqLens(request, 384, 768)), K_PSSK_PDDV);
+
+            auto stridesOff = withSeqLens(request, 384, 384);
+            stridesOff.psskOffStridesOk = false;
+            EXPECT_EQ(resolvedPsskPddv("gfx942", stridesOff), K_PSSK_PDDV);
+        }
+    }
+    // Bottom-right causal and window kernels ship only as psskddv rows.
+    for(const int mask : {MASK_BOTTOM_RIGHT_CAUSAL, MASK_SLIDING_WINDOW})
+    {
+        SCOPED_TRACE(mask);
+        EXPECT_EQ(
+            resolvedPsskPddv("gfx942", withSeqLens(makeRequest("bf16", 128, 128, mask), 384, 384)),
+            K_PSSK_PDDV);
+    }
+}
+
+// gfx942 A16 rows count 64-row K/V tiles whatever their ts (192): S = 128
+// asks for pssk = 0. They are all pssk = 0, so without the stride layout no
+// row is left.
+TEST(TestSdpaBwdRegistryLookup, Gfx942A16RowsUse64RowTilesAndNeedTheStrideLayout)
+{
+    auto request = withSeqLens(makeRequest("bf16", 128, 128), 128, 128);
+    request.atomic32 = ATOMIC_A16;
+    EXPECT_EQ(resolvedPsskPddv("gfx942", request), K_UNPADDED);
+
+    request.psskOffStridesOk = false;
+    EXPECT_FALSE(resolvedPsskPddv("gfx942", request).has_value());
+}
+
+// When the requested (pssk, pddv) row is missing and more than one row lies
+// above it, the smallest wins; AITER keeps whichever its unordered_map yields
+// last. gfx942 hd128 A32 group mode ships (1, 0) and (1, 1); a request for
+// (0, 0) gets (1, 0).
+TEST(TestSdpaBwdRegistryLookup, FallbackPicksTheSmallestRowAboveTheRequest)
+{
+    auto request = withSeqLens(makeRequest("bf16", 128, 128), 384, 384);
+    request.mode = MODE_GROUP;
+    EXPECT_EQ(resolvedPsskPddv("gfx942", request), K_PSSK_ONLY);
+}
+
+// gfx950 serves only psskddv rows on its ASM path; the (192, 128) request is
+// unpadded (pddv = 0) and resolves the (1, 1) row above it.
+TEST(TestSdpaBwdRegistryLookup, Gfx950ResolvesThePsskddvRows)
+{
+    for(const auto& request : {withSeqLens(makeRequest("bf16", 128, 128), 512, 512),
+                               withSeqLens(makeRequest("bf16", 192, 128), 384, 384)})
+    {
+        SCOPED_TRACE(std::to_string(request.hdimQ) + "x" + std::to_string(request.hdimV));
+        EXPECT_EQ(resolvedPsskPddv("gfx950", request), K_PSSK_PDDV);
+    }
+}
+
+// =============================================================================
+// The stride layout the pssk = 0 kernels need
+// =============================================================================
+
+namespace
+{
+// Packed [B, H, S, D] strides for H heads, S rows and head dim D.
+bwd_dispatch::BhsStrides packedBhs(int64_t heads, int64_t seq, int64_t headDim)
+{
+    return {heads * seq * headDim, seq * headDim, headDim};
+}
+
+bool stridesMatch(const bwd_dispatch::BhsStrides& q,
+                  const bwd_dispatch::BhsStrides& k,
+                  const bwd_dispatch::BhsStrides& v,
+                  const bwd_dispatch::BhsStrides& dO,
+                  const bwd_dispatch::BhsStrides& dk,
+                  const bwd_dispatch::BhsStrides& dv,
+                  int64_t nheadQ = 8,
+                  int64_t nheadK = 8)
+{
+    return bwd_dispatch::psskOffStridesMatch(q, k, v, dO, dk, dv, nheadQ, nheadK);
+}
+} // namespace
+
+TEST(TestSdpaBwdPsskOffStrides, PackedTensorsMatch)
+{
+    const auto packed = packedBhs(8, 384, 128);
+    EXPECT_TRUE(stridesMatch(packed, packed, packed, packed, packed, packed));
+}
+
+// One mismatch per AITER condition: Q vs dO on each axis, K vs V on each axis,
+// the dK and dV head strides, and the dK and dV batch strides.
+TEST(TestSdpaBwdPsskOffStrides, EachAiterConditionIsChecked)
+{
+    const auto p = packedBhs(8, 384, 128);
+    const bwd_dispatch::BhsStrides bshd{384 * 8 * 128, 128, 8 * 128};
+    const bwd_dispatch::BhsStrides paddedRows{8 * 384 * 136, 384 * 136, 136};
+    const bwd_dispatch::BhsStrides biggerBatch{p.batch * 2, p.head, p.seq};
+
+    EXPECT_FALSE(stridesMatch(p, p, p, bshd, p, p)) << "dO layout differs from Q";
+    EXPECT_FALSE(stridesMatch(p, p, p, paddedRows, p, p)) << "dO rows differ from Q";
+    EXPECT_FALSE(stridesMatch(p, p, p, biggerBatch, p, p)) << "dO batch stride differs from Q";
+    EXPECT_FALSE(stridesMatch(p, p, bshd, p, p, p)) << "V layout differs from K";
+    EXPECT_FALSE(stridesMatch(p, p, paddedRows, p, p, p)) << "V rows differ from K";
+    EXPECT_FALSE(stridesMatch(p, p, biggerBatch, p, p, p)) << "V batch stride differs from K";
+    EXPECT_FALSE(stridesMatch(p, p, p, p, bshd, p)) << "dK head stride differs from K";
+    EXPECT_FALSE(stridesMatch(p, p, p, p, p, bshd)) << "dV head stride differs from V";
+    EXPECT_FALSE(stridesMatch(p, p, p, p, biggerBatch, p)) << "dK batch stride differs from K";
+    EXPECT_FALSE(stridesMatch(p, p, p, p, p, biggerBatch)) << "dV batch stride differs from V";
+}
+
+// Not checked by AITER: O and dQ, and the dK and dV row strides.
+TEST(TestSdpaBwdPsskOffStrides, DkDvRowStridesAreNotChecked)
+{
+    const auto p = packedBhs(8, 384, 128);
+    const bwd_dispatch::BhsStrides widerRows{p.batch, p.head, 136};
+    EXPECT_TRUE(stridesMatch(p, p, p, p, widerRows, widerRows));
+}
+
+// The batch ratio is nhead_q / nhead_k: GQA dK and dV hold nhead_q heads.
+// A zero K batch stride (a broadcast) fails it, as it raises in Python.
+TEST(TestSdpaBwdPsskOffStrides, BatchStrideRatioFollowsTheHeadRatio)
+{
+    const auto kv = packedBhs(2, 384, 128);
+    const auto qo = packedBhs(8, 384, 128);
+    const bwd_dispatch::BhsStrides expandedGrad{kv.batch * 4, kv.head, kv.seq};
+    EXPECT_TRUE(stridesMatch(qo, kv, kv, qo, expandedGrad, expandedGrad, 8, 2));
+    EXPECT_FALSE(stridesMatch(qo, kv, kv, qo, kv, kv, 8, 2));
+
+    const bwd_dispatch::BhsStrides broadcastBatch{0, kv.head, kv.seq};
+    EXPECT_FALSE(
+        stridesMatch(qo, broadcastBatch, broadcastBatch, qo, broadcastBatch, broadcastBatch, 2, 2));
 }
 
 // =============================================================================
@@ -1036,22 +1065,14 @@ TEST(TestSdpaBwdRegistryLookup, RegistryLookupGfx950Hd128WindowBatch)
 // when no row matches.
 std::optional<int> resolvedDqdkdvBf16Cvt(const char* arch, const char* dtype, int hdim, int bf16Cvt)
 {
-    const auto key = bwd_dispatch::lookupKernelNameKey(bwd_dispatch::PipelineStage::DQDKDV,
-                                                       arch,
-                                                       dtype,
-                                                       hdim,
-                                                       hdim,
-                                                       MASK_NONE,
-                                                       ATOMIC_A32,
-                                                       PSSK_ON,
-                                                       PDDV_ON,
-                                                       MODE_BATCH,
-                                                       bf16Cvt);
-    if(key.empty())
+    auto request = makeRequest(dtype, hdim, hdim);
+    request.bf16Cvt = bf16Cvt;
+    const auto row = resolvedDqdkdv(arch, request);
+    if(!row)
     {
         return std::nullopt;
     }
-    return cfg_fmha_bwd_dqdkdv.at(key).bf16_cvt;
+    return row->bf16_cvt;
 }
 
 // gfx950 hd192 bf16 ships one row per rounding mode (0, 1, 2) for an otherwise
@@ -1086,6 +1107,21 @@ TEST(TestSdpaBwdRegistryLookup, AllModeRowServesEveryRoundingMode)
 TEST(TestSdpaBwdRegistryLookup, PerRoundingModeRowsDoNotServeTheSentinel)
 {
     EXPECT_FALSE(resolvedDqdkdvBf16Cvt("gfx942", "bf16", 128, BF16_CVT_FP16_SENTINEL).has_value());
+}
+
+// Every gfx950 dq_convert row carries bf16_cvt = 3, so for the A32 accumulator
+// only the dtype key keeps an fp16 graph off the bf16 cast kernel and the
+// reverse (AITER matches dtype unless atomic32 == 0).
+TEST(TestSdpaBwdRegistryLookup, A32DqConvertMatchesTheDtype)
+{
+    for(const char* dtype : {"bf16", "fp16"})
+    {
+        SCOPED_TRACE(dtype);
+        const auto row = resolvedRow(
+            bwd_dispatch::PipelineStage::DQ_CONVERT, "gfx950", makeRequest(dtype, 128, 128));
+        ASSERT_TRUE(row.has_value());
+        EXPECT_EQ(row->dtype, dtype);
+    }
 }
 
 // =============================================================================
@@ -1163,22 +1199,6 @@ TEST(TestSdpaBwdDqdkdvMaskCoordinates, NonWindowMasksPassZero)
     }
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)
-{
-    SKIP_IF_NO_DEVICES();
-
-    if(!bwd_dispatch::isSupportedArch(deviceString()))
-    {
-        GTEST_SKIP();
-    }
-
-    auto builder = createSdpaBwdGraph({2, 8, 256, 96});
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
-        builder.GetBufferPointer(), builder.GetSize());
-
-    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
-}
-
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFp8)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -1198,41 +1218,86 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFp8)
 }
 
 // =============================================================================
-// Head dims AITER v0.1.29 routes to CK although the registry has rows for them
+// Head dims AITER v0.1.29 sends to the ASM kernels
 // =============================================================================
 
-// AITER sends gfx950 hd64 and hd192x192 to CK; the engine serves gfx950 hd128
-// only. gfx942 head dims are left to the registry.
-TEST(TestSdpaBwdBatchShape, Gfx950ServesOnlyHd128)
+namespace
 {
-    EXPECT_TRUE(bwd_dispatch::isBatchShapeSupported("gfx950", 128, 128));
-    EXPECT_FALSE(bwd_dispatch::isBatchShapeSupported("gfx950", 64, 64));
-    EXPECT_FALSE(bwd_dispatch::isBatchShapeSupported("gfx950", 192, 192));
-    EXPECT_FALSE(bwd_dispatch::isBatchShapeSupported("gfx950", 192, 128));
-
-    EXPECT_TRUE(bwd_dispatch::isBatchShapeSupported("gfx942", 64, 64));
-    EXPECT_TRUE(bwd_dispatch::isBatchShapeSupported("gfx942", 192, 192));
+// A packed bf16 backward graph with D_qk on Q, K, dQ, dK and D_v on V, O, dO,
+// dV.
+flatbuffers::FlatBufferBuilder createSdpaBwdGraphForHeadDims(int64_t headDimQk, int64_t headDimV)
+{
+    const std::vector<int64_t> qkDims = {2, 4, 256, headDimQk};
+    const std::vector<int64_t> voDims = {2, 4, 256, headDimV};
+    return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+        qkDims,
+        hipdnn_data_sdk::utilities::generateStrides(qkDims),
+        qkDims,
+        hipdnn_data_sdk::utilities::generateStrides(qkDims),
+        voDims,
+        hipdnn_data_sdk::utilities::generateStrides(voDims),
+        voDims,
+        hipdnn_data_sdk::utilities::generateStrides(voDims),
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesGfx950HeadDimsAiterSendsToCk)
+struct HeadDimCase
+{
+    int64_t headDimQk;
+    int64_t headDimV;
+    bool gfx942;
+    bool gfx950;
+};
+
+// gfx942: 64 <= D <= 192, D % 8 == 0, D_qk == D_v (mha.py can_impl_fmha_v3_bwd).
+// gfx950: 64 < D <= 128 with D_qk == D_v, or D_qk = 192 with D_v = 128
+// (can_impl_fmha_v3_bwd_gfx950); its hd64 and hd192 x hd192 rows go to CK.
+const std::vector<HeadDimCase> K_HEAD_DIM_CASES = {
+    {56, 56, false, false},
+    {64, 64, true, false},
+    {72, 72, true, true},
+    {96, 96, true, true},
+    {100, 100, false, false},
+    {128, 128, true, true},
+    {136, 136, true, false},
+    {192, 192, true, false},
+    {200, 200, false, false},
+    {192, 128, false, true},
+    {128, 64, false, false},
+    {128, 192, false, false},
+};
+} // namespace
+
+TEST(TestSdpaBwdBatchShape, HeadDimsPerArch)
+{
+    for(const auto& c : K_HEAD_DIM_CASES)
+    {
+        SCOPED_TRACE(std::to_string(c.headDimQk) + "x" + std::to_string(c.headDimV));
+        EXPECT_EQ(bwd_dispatch::isBatchShapeSupported("gfx942", c.headDimQk, c.headDimV), c.gfx942);
+        EXPECT_EQ(bwd_dispatch::isBatchShapeSupported("gfx950", c.headDimQk, c.headDimV), c.gfx950);
+    }
+}
+
+// End to end: every head dim the arch serves also resolves all three kernels
+// (padded dims included), and the others are declined.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableServesTheHeadDimsAiterSendsToAsm)
 {
     SKIP_IF_NO_DEVICES();
 
-    if(deviceString() != "gfx950")
+    const auto arch = deviceString();
+    if(!bwd_dispatch::isSupportedArch(arch))
     {
-        GTEST_SKIP() << "gfx950 head-dim limits";
+        GTEST_SKIP();
     }
 
-    const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
-        {GraphTest{createSdpaBwdGraph({4, 8, 256, 128}), "hd128"}, true},
-        {GraphTest{createSdpaBwdGraph({4, 8, 256, 64}), "hd64"}, false},
-        {GraphTest{createSdpaBwdGraph({4, 8, 256, 192}), "hd192x192"}, false},
-    };
-
-    for(const auto& [test, applicability] : applicabilityTests)
+    for(const auto& c : K_HEAD_DIM_CASES)
     {
-        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
-            << test.message;
+        SCOPED_TRACE(std::to_string(c.headDimQk) + "x" + std::to_string(c.headDimV));
+        auto builder = createSdpaBwdGraphForHeadDims(c.headDimQk, c.headDimV);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, graphWrapper),
+                  arch == "gfx942" ? c.gfx942 : c.gfx950);
     }
 }
 
@@ -1292,43 +1357,6 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsIntegralGqaRatio)
     const std::vector<int64_t> kDims = {1, 8, 256, 128};
     const std::vector<int64_t> vDims = {1, 8, 256, 128};
     const std::vector<int64_t> oDims = {1, 32, 256, 128};
-
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
-        qDims,
-        hipdnn_data_sdk::utilities::generateStrides(qDims),
-        kDims,
-        hipdnn_data_sdk::utilities::generateStrides(kDims),
-        vDims,
-        hipdnn_data_sdk::utilities::generateStrides(vDims),
-        oDims,
-        hipdnn_data_sdk::utilities::generateStrides(oDims),
-        DataType::BFLOAT16);
-
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
-        builder.GetBufferPointer(), builder.GetSize());
-
-    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
-}
-
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    SKIP_IF_NO_DEVICES();
-
-    if(!bwd_dispatch::isSupportedArch(deviceString()))
-    {
-        GTEST_SKIP();
-    }
-
-    // createSdpaBwdGraph enforces D_qk == D_v, so this test builds the graph
-    // directly to exercise an asymmetric layout (D_qk=128, D_v=64).
-    // V tensor has D_v = 64 while Q/K have D_qk = 128 — backward kernels
-    // require square head dimensions (D_qk == D_v).
-    const std::vector<int64_t> qDims = {2, 8, 256, 128};
-    const std::vector<int64_t> kDims = {2, 8, 256, 128};
-    const std::vector<int64_t> vDims = {2, 8, 256, 64};
-    const std::vector<int64_t> oDims = {2, 8, 256, 64};
 
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
         qDims,
@@ -1877,20 +1905,21 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsZeroStrideOutputs)
 
 // Build a backward SDPA graph that sets the deprecated causal booleans and the
 // modern bounds trio explicitly, so contradictory combinations can be
-// constructed. Returns the FlatBufferBuilder owning the graph buffer.
+// constructed. Every tensor but the stats takes `dims`, packed. Returns the
+// FlatBufferBuilder owning the graph buffer.
 flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithMask(
     bool causalMask,
     bool causalMaskBottomRight,
     flatbuffers::Optional<int64_t> leftBound,
     flatbuffers::Optional<int64_t> rightBound,
-    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment diagAlignment)
+    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment diagAlignment,
+    const std::vector<int64_t>& dims = {4, 8, 256, 128})
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
 
-    const std::vector<int64_t> dims = {4, 8, 256, 128};
     const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
 
     int64_t uid = 1;
@@ -2372,6 +2401,106 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsWindowMask)
 }
 
 // =============================================================================
+// Sliding windows AITER v0.1.29 sends to CK
+// =============================================================================
+
+TEST(TestSdpaBwdBatchWindow, WindowRulesPerArch)
+{
+    using bwd_dispatch::isBatchWindowSupported;
+
+    // gfx950: windows need D_qk <= 128.
+    EXPECT_TRUE(isBatchWindowSupported("gfx950", 72));
+    EXPECT_TRUE(isBatchWindowSupported("gfx950", 128));
+    EXPECT_FALSE(isBatchWindowSupported("gfx950", 192));
+
+    // gfx942: windows need 64 < D_qk <= 128.
+    EXPECT_FALSE(isBatchWindowSupported("gfx942", 64));
+    EXPECT_TRUE(isBatchWindowSupported("gfx942", 72));
+    EXPECT_TRUE(isBatchWindowSupported("gfx942", 128));
+    EXPECT_FALSE(isBatchWindowSupported("gfx942", 136));
+}
+
+namespace
+{
+struct WindowCase
+{
+    const char* label;
+    std::vector<int64_t> dims; // Q and K dims; V, O, dO and dV take headDimV.
+    int64_t headDimV;
+    // Graph bounds (cuDNN convention: the left bound counts the diagonal key).
+    flatbuffers::Optional<int64_t> leftBound;
+    flatbuffers::Optional<int64_t> rightBound;
+    bool gfx942;
+    bool gfx950;
+};
+
+flatbuffers::FlatBufferBuilder createWindowGraph(const WindowCase& c)
+{
+    using hipdnn_data_sdk::utilities::generateStrides;
+
+    auto builder = createSdpaBwdGraphWithMask(
+        false, false, c.leftBound, c.rightBound, ALIGN_TOP_LEFT, c.dims);
+    std::vector<LayoutOverride> layouts;
+    if(c.headDimV != c.dims[3])
+    {
+        const std::vector<int64_t> voDims = {c.dims[0], c.dims[1], c.dims[2], c.headDimV};
+        for(const char* name : {"v", "o", "do", "dv"})
+        {
+            layouts.push_back({name, generateStrides(voDims), voDims});
+        }
+    }
+    return layouts.empty() ? std::move(builder) : withLayouts(builder, layouts);
+}
+} // namespace
+
+// End to end through isApplicable. A window that keeps only the diagonal
+// (graph left 1, right 0 or unset) is a window like any other on both archs:
+// AITER's gfx942 Python gate does not classify it as one (left 0 is not > 0),
+// but that is not a kernel limit, so the engine serves it.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAppliesTheAiterWindowRules)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto arch = deviceString();
+    if(!bwd_dispatch::isSupportedArch(arch))
+    {
+        GTEST_SKIP();
+    }
+
+    const flatbuffers::Optional<int64_t> left64(64);
+    const flatbuffers::Optional<int64_t> right64(64);
+    const flatbuffers::Optional<int64_t> diagonalLeft(1);
+    const flatbuffers::Optional<int64_t> diagonalRight(0);
+    const std::vector<WindowCase> cases = {
+        {"window D=96", {2, 4, 256, 96}, 96, left64, right64, true, true},
+        {"window D=64", {2, 4, 256, 64}, 64, left64, right64, false, false},
+        {"window D=192x128", {2, 4, 256, 192}, 128, left64, right64, false, false},
+        {"causal D=192x128", {2, 4, 256, 192}, 128, NO_BOUND, diagonalRight, false, true},
+        {"diagonal D=128", {2, 4, 256, 128}, 128, diagonalLeft, diagonalRight, true, true},
+        {"diagonal, right unbounded, D=128",
+         {2, 4, 256, 128},
+         128,
+         diagonalLeft,
+         NO_BOUND,
+         true,
+         true},
+        {"diagonal D=128 S=200", {2, 4, 200, 128}, 128, diagonalLeft, diagonalRight, true, true},
+        {"diagonal D=96", {2, 4, 256, 96}, 96, diagonalLeft, diagonalRight, true, true},
+        {"diagonal D=64", {2, 4, 256, 64}, 64, diagonalLeft, diagonalRight, false, false},
+    };
+
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.label);
+        auto builder = createWindowGraph(c);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, graphWrapper),
+                  arch == "gfx942" ? c.gfx942 : c.gfx950);
+    }
+}
+
+// =============================================================================
 // Kernarg range guards
 // =============================================================================
 //
@@ -2486,11 +2615,10 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesDimensionsPastTheir32BitLimit
     }
 }
 
-// The head dims are narrowed to int before the {64, 128, 192} membership test
-// and the registry lookup, so a head dim whose low 32 bits are a supported
-// value used to resolve a kernel built for that supported value. That registry
-// set is what bounds the head dims in practice, which is why there is no case
-// at INT32_MAX here.
+// The head dims are narrowed to int before the head-dim gate and the registry
+// lookup, so a head dim whose low 32 bits are a supported value used to resolve
+// a kernel built for that supported value. The head-dim gate is what bounds
+// the head dims in practice, which is why there is no case at INT32_MAX here.
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesHeadDimsThatTruncateToASupportedValue)
 {
     SKIP_IF_NO_DEVICES();
@@ -2526,25 +2654,16 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesHeadDimsThatTruncateToASuppor
 }
 
 // The `ts` of the DQDKDV row isApplicable resolves on arch for a bf16 hd128
-// no-mask batch graph on the default A32 accumulator path (RTNE).
+// no-mask batch graph with S_q = S_kv = 256 on the default A32 accumulator path
+// (RTNE).
 std::optional<int> resolveBwdTileSizeKv(const std::string& arch)
 {
-    const auto key = bwd_dispatch::lookupKernelNameKey(bwd_dispatch::PipelineStage::DQDKDV,
-                                                       arch,
-                                                       "bf16",
-                                                       128,
-                                                       128,
-                                                       MASK_NONE,
-                                                       ATOMIC_A32,
-                                                       PSSK_ON,
-                                                       PDDV_ON,
-                                                       MODE_BATCH,
-                                                       BF16_CVT_RTNE);
-    if(key.empty())
+    const auto row = resolvedDqdkdv(arch, makeRequest("bf16", 128, 128));
+    if(!row)
     {
         return std::nullopt;
     }
-    return cfg_fmha_bwd_dqdkdv.at(key).ts;
+    return row->ts;
 }
 
 // The Ts kernarg is tsKv * stride_k * sizeof(bf16). The per-field stride guard
@@ -2720,6 +2839,32 @@ TEST_F(TestSdpaBwdPlanBuilder, WorkspaceSizeDefaultSettingsIsA32)
 
     EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, defaultSettings),
               _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, a32Settings));
+}
+
+// The plan implements only the A32 path; an A16 request is refused with
+// BAD_PARAM before any device query or kernel load, and no plan is set.
+TEST_F(TestSdpaBwdPlanBuilder, BuildPlanRejectsTheA16Accumulator)
+{
+    auto graphBuilder = createSdpaBwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper noConfig(nullptr, 0);
+
+    Settings a16Settings;
+    a16Settings.accumulatorType = AccumulatorType::A16;
+    Context context;
+    context.setExecutionSettings(a16Settings);
+
+    try
+    {
+        _planBuilder.buildPlan(_handle, graphWrapper, noConfig, context);
+        FAIL() << "buildPlan accepted the a16 accumulator";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+    }
+    EXPECT_FALSE(context.hasValidPlan());
 }
 
 } // namespace

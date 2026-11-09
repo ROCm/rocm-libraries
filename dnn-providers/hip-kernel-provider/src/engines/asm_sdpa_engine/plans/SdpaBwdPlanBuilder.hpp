@@ -73,12 +73,54 @@ inline constexpr int BF16_CVT_FP16_SENTINEL = 3;
 // True for the device architectures the backward engine dispatches on.
 bool isSupportedArch(const std::string& archId);
 
-// False for batch-mode head dims that AITER v0.1.29 sends to CK instead of the
-// ASM backward on archId although the kernel registry has rows for them
-// (aiter/ops/mha.py _flash_attn_backward): on gfx950 everything except
-// 64 < D <= 128 with D_qk == D_v, or D_qk = 192 with D_v = 128. Of those the
-// engine serves D_qk == D_v == 128. gfx942 head dims are left to the registry.
+// Head dims of a registry row.
+struct HeadDims
+{
+    int q;
+    int v;
+};
+
+// The head dims of the registry rows that serve (hdimQ, hdimV) on archId.
+// Mirrors AITER v0.1.29 mha_bwd.cu get_padded_hdim(): D_qk == D_v rounds up
+// to 64, 128 or 192; gfx950 (192, 128) and every other pair stay as they are.
+HeadDims paddedHeadDims(const std::string& archId, int hdimQ, int hdimV);
+
+// False for batch-mode head dims that AITER v0.1.29 does not send to the ASM
+// backward on archId (aiter/ops/mha.py _flash_attn_backward and
+// mha_bwd.cu fmha_v3_bwd()): D % 8 != 0 on either tensor; on gfx942 anything
+// but 64 <= D <= 192 with D_qk == D_v; on gfx950 anything but
+// 64 < D <= 128 with D_qk == D_v, or D_qk = 192 with D_v = 128.
 bool isBatchShapeSupported(const std::string& archId, int64_t headDimQk, int64_t headDimV);
+
+// False for a batch-mode sliding window (MaskType::SLIDING_WINDOW) that AITER
+// v0.1.29 sends to CK on archId: gfx950 serves windows for D_qk <= 128 and
+// gfx942 for 64 < D_qk <= 128 (aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950()
+// and can_impl_fmha_v3_bwd() psskddv()). Any band the engine classifies as a
+// window counts, including one that keeps only the diagonal.
+bool isBatchWindowSupported(const std::string& archId, int64_t headDimQk);
+
+// Element strides of one [B, H, S, D] tensor (the head-dim stride is 1).
+struct BhsStrides
+{
+    int64_t batch;
+    int64_t head;
+    int64_t seq;
+};
+
+// True when the strides satisfy what the dqdkdv kernels without sequence
+// padding (pssk = 0) assume. Mirrors the stride equalities of AITER v0.1.29
+// aiter/ops/mha.py can_impl_fmha_v3_bwd() np() and pddv(): Q and dO share
+// strides, K and V share strides, dK and dV share the K and V head strides,
+// and the dK and dV batch strides are the K and V batch strides scaled by
+// nhead_q / nhead_k.
+bool psskOffStridesMatch(const BhsStrides& q,
+                         const BhsStrides& k,
+                         const BhsStrides& v,
+                         const BhsStrides& dO,
+                         const BhsStrides& dk,
+                         const BhsStrides& dv,
+                         int64_t nheadQ,
+                         int64_t nheadK);
 
 // The dqdkdv CSV `mask` ordinal for a classified mask on archId. Mirrors AITER
 // mha_bwd.cu asm_mask_type(): on gfx950 a sliding window with bottom-right
@@ -88,23 +130,43 @@ int dqdkdvMaskOrdinal(const std::string& archId,
                       plan_utils::MaskType maskType,
                       hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment);
 
-// Resolves a registry row matching the supplied dispatch tuple. Returns the
-// composite key (arch + knl_name) on a hit, or an empty string when no row
-// in the chosen registry matches. The bf16Cvt argument is the rounding mode the
-// CSV column encodes (0/1/2 for the bf16 rounding modes; 3 for fp16). A row
-// matches when its bf16_cvt equals bf16Cvt or is BF16_CVT_FP16_SENTINEL.
+// The graph-side inputs of AITER v0.1.29 mha_bwd.cu get_heuristic_kernel().
+// Head dims and sequence lengths are the graph's; the lookups pad the head
+// dims themselves (paddedHeadDims).
+struct KernelRequest
+{
+    std::string dataType; // "bf16" or "fp16"
+    int hdimQ;
+    int hdimV;
+    int64_t seqLenQ;
+    int64_t seqLenKv;
+    int mask; // dqdkdv CSV mask ordinal (dqdkdvMaskOrdinal)
+    int atomic32; // requested accumulator: 1 = A32, 0 = A16
+    int mode; // 0 = batch, 1 = group
+    // Rounding mode the CSV column encodes: 0/1/2 for the bf16 modes, 3 for fp16.
+    // A row matches when its bf16_cvt equals this or is BF16_CVT_FP16_SENTINEL.
+    int bf16Cvt;
+    // psskOffStridesMatch() for the graph. False excludes every pssk = 0 row.
+    bool psskOffStridesOk;
+};
+
+// Resolves the registry row AITER v0.1.29 get_heuristic_kernel() picks for
+// `stage`, and returns its composite key (arch + knl_name), or an empty string
+// when no row matches. Each stage matches on AITER's key for it:
+// - ODO: dtype, padded hdim_v and mode.
+// - DQDKDV: dtype, padded hdim_q and hdim_v, mask, atomic32, bf16_cvt and mode,
+//   then (pssk, pddv). pddv is 1 when padding changed a head dim; pssk is 1
+//   unless seqlen_q == seqlen_k and seqlen_k is a multiple of the row's tile
+//   (64 for A16 rows on gfx942 and for *recompile* A16 rows). The exact
+//   (pssk, pddv) row wins; otherwise the smallest (pssk, pddv) above the
+//   requested one in both fields, in (pssk, pddv) order (AITER takes whichever
+//   such row its unordered_map yields last). pssk = 0 rows also need
+//   request.psskOffStridesOk.
+// - DQ_CONVERT: padded hdim_q, mode and bf16_cvt, plus dtype when atomic32 = 1.
 // Exposed for unit testing of the dispatch logic.
 std::string lookupKernelNameKey(PipelineStage stage,
                                 const std::string& archId,
-                                const std::string& dataType,
-                                int hdimQ,
-                                int hdimV,
-                                int mask,
-                                int atomic32,
-                                int pssk,
-                                int pddv,
-                                int mode,
-                                int bf16Cvt);
+                                const KernelRequest& request);
 
 } // namespace bwd_dispatch
 

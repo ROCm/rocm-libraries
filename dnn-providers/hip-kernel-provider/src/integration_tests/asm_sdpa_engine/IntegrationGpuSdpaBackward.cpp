@@ -14,6 +14,10 @@
 
 #include "../IntegrationGraphVerificationHarness.hpp"
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
@@ -47,7 +51,7 @@ struct SdpaBwdTestCase
     }
 
     // Non-packed layouts the kernels address: Q, K, V and dO stored [B, S, H, D],
-    // and O and dQ rows padded to D+1 elements. O, dO and dQ have Q's dims.
+    // and O and dQ rows padded to one element past their head dim.
     SdpaBwdTestCase& withNonPackedLayouts()
     {
         // Stride order (lower = tighter) for [B, H, S, D] dims stored as [B, S, H, D].
@@ -55,11 +59,36 @@ struct SdpaBwdTestCase
         qStrides = generateStrides(qDims, bshdOrder);
         kStrides = generateStrides(kDims, bshdOrder);
         vStrides = generateStrides(vDims, bshdOrder);
-        doStrides = generateStrides(qDims, bshdOrder);
-        const int64_t paddedRow = qDims[3] + 1;
-        oStrides = {qDims[1] * qDims[2] * paddedRow, qDims[2] * paddedRow, paddedRow, 1};
-        dqStrides = oStrides;
+        doStrides = generateStrides(oDims(), bshdOrder);
+        const auto paddedRows = [&](int64_t headDim) {
+            const int64_t row = headDim + 1;
+            return std::vector<int64_t>{qDims[1] * qDims[2] * row, qDims[2] * row, row, 1};
+        };
+        oStrides = paddedRows(vDims[3]);
+        dqStrides = paddedRows(qDims[3]);
         return *this;
+    }
+
+    // dO alone stored [B, S, H, D]; every other tensor stays packed. The gfx942
+    // kernels without sequence padding (pssk = 0) assume dO shares Q's strides,
+    // so this layout must run the padded (psskddv) kernel instead.
+    SdpaBwdTestCase& withBshdDo()
+    {
+        doStrides = generateStrides(oDims(), {3, 1, 2, 0});
+        return *this;
+    }
+
+    // Run the case only on these architectures; the others skip it.
+    SdpaBwdTestCase& onlyOn(std::vector<std::string> archsIn)
+    {
+        archs = std::move(archsIn);
+        return *this;
+    }
+
+    // O and dO: Q's batch, heads and sequence with V's head dim.
+    std::vector<int64_t> oDims() const
+    {
+        return {qDims[0], qDims[1], qDims[2], vDims[3]};
     }
 
     std::vector<int64_t> qDims;
@@ -68,7 +97,7 @@ struct SdpaBwdTestCase
     std::vector<int64_t> qStrides;
     std::vector<int64_t> kStrides;
     std::vector<int64_t> vStrides;
-    // Empty: packed strides for Q's dims (dO takes O's strides).
+    // Empty: packed strides for O's dims (dO takes O's strides).
     std::vector<int64_t> oStrides;
     std::vector<int64_t> doStrides;
     std::vector<int64_t> dqStrides;
@@ -77,7 +106,16 @@ struct SdpaBwdTestCase
     int64_t leftBound;
     int64_t rightBound;
     bool topLeftAlignment;
+
+    // Empty: every architecture the engine serves.
+    std::vector<std::string> archs;
 };
+
+// gfx942 serves 64 <= D <= 192 with D_qk == D_v; gfx950 serves 64 < D <= 128
+// with D_qk == D_v, and D_qk = 192 with D_v = 128 (AITER v0.1.29 aiter/ops/mha.py
+// can_impl_fmha_v3_bwd and can_impl_fmha_v3_bwd_gfx950).
+const std::vector<std::string> K_GFX942_ONLY = {"gfx942"};
+const std::vector<std::string> K_GFX950_ONLY = {"gfx950"};
 
 std::vector<SdpaBwdTestCase> getSdpaBwdTestCases()
 {
@@ -123,6 +161,31 @@ std::vector<SdpaBwdTestCase> getSdpaBwdTestCases()
         SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}).withNonPackedLayouts(),
         SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}, std::nullopt, -1, 0, true)
             .withNonPackedLayouts(),
+        // Head dims other than 128. Padded ones (72, 96, 136) run the next
+        // registry head dim's kernel with the graph's head dim in the kernargs.
+        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 256, 64}).onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 512, 64}, std::nullopt, -1, 0, false)
+            .onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 72}, {1, 2, 256, 72}),
+        SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}),
+        SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}, std::nullopt, -1, 0, true),
+        SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}, std::nullopt, 64, 64, false),
+        SdpaBwdTestCase({1, 2, 256, 136}, {1, 2, 256, 136}).onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}).onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}, std::nullopt, -1, 0, true)
+            .onlyOn(K_GFX942_ONLY),
+        // D_qk = 192 with D_v = 128: the hd128 odo, the 192 x 128 dqdkdv and the
+        // hd192 dq_convert kernels.
+        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 128}).onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 512, 128}, std::nullopt, -1, 0, false)
+            .onlyOn(K_GFX950_ONLY),
+        // S_q == S_kv on a multiple of the gfx942 192-row K/V tile: with packed
+        // strides gfx942 runs the dqdkdv kernels without sequence padding
+        // (pssk = 0); with dO stored [B, S, H, D] it keeps the padded kernels.
+        SdpaBwdTestCase({1, 2, 384, 128}, {1, 2, 384, 128}),
+        SdpaBwdTestCase({1, 2, 384, 128}, {1, 2, 384, 128}, std::nullopt, -1, 0, true),
+        SdpaBwdTestCase({1, 2, 384, 128}, {1, 2, 384, 128}).withBshdDo(),
+        SdpaBwdTestCase({1, 2, 384, 128}, {1, 2, 384, 128}, std::nullopt, -1, 0, true).withBshdDo(),
         // ALMIOPEN-2079: Re-enable when GQA support is implemented
         // // GQA: 4 Q heads, 1 KV head — no mask
         // SdpaBwdTestCase({1, 4, 256, 128}, {1, 1, 256, 128}),
@@ -196,9 +259,16 @@ protected:
         }
 
         const SdpaBwdTestCase& testCase = this->GetParam();
+        if(!testCase.archs.empty()
+           && std::find(testCase.archs.begin(), testCase.archs.end(), deviceString)
+                  == testCase.archs.end())
+        {
+            GTEST_SKIP() << "Skipped: " << deviceString
+                         << " backward does not serve this case (see SdpaBwdTestCase::archs).";
+        }
 
-        // O has same dims as Q (with V's head dim for the last dimension)
-        auto oDims = testCase.qDims;
+        // O has Q's batch, heads and sequence with V's head dim
+        const auto oDims = testCase.oDims();
         auto oStrides = testCase.oStrides.empty() ? generateStrides(oDims) : testCase.oStrides;
 
         // dO has same dims as O, and O's strides unless the test case sets its own

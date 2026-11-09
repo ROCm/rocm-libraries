@@ -27,6 +27,12 @@ namespace asm_sdpa_engine
 /// window sizes, the sequence lengths and the alignment.
 std::pair<int32_t, int32_t> dqdkdvMaskCoordinates(const SdpaBwdParams& params);
 
+/// True when the DQDKDV kernel for dqdkdv CSV mask `maskOrdinal` runs on half
+/// the K/V tiles, rounded up. Mirrors AITER v0.1.29 mha_bwd.cu fmha_v3_bwd()
+/// (:713-716): only the causal kernels (masks 1 and 2) halve the grid; the
+/// sliding-window kernels (masks 3 and 4) take the full grid.
+bool halvesDqdkdvGrid(int32_t maskOrdinal);
+
 /**
  * @brief SDPA backward kernel plan.
  *

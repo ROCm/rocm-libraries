@@ -151,6 +151,9 @@ asm_sdpa_engine::fmha_bwd_odo_args buildOdoArgs(const MhaBwdArgs& a)
     odo.BAs_d = a.batch_stride_lsed * K_FP32_SIZE;
     odo.Seqs_d = 1 * K_FP32_SIZE; // contiguous along seq dim
     odo.seqlen_q = a.seqlen_q;
+    // D_qk, unpadded, as AITER passes it (mha_bwd.cu:493), although the odo row
+    // is selected by padded D_v: gfx950 D_qk = 192, D_v = 128 runs the hd128 odo
+    // kernel with head_dim = 192.
     odo.head_dim = a.hdim_q;
     odo.ptr_qseq = nullptr; // batch mode (POC)
     odo.ptr_qseq_padded = nullptr;
@@ -237,9 +240,11 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args
     dqdkdv.ptr_qseq_padded = nullptr;
     dqdkdv.ptr_kseq_padded = nullptr;
 
-    // a32: max_seqlen_dq = seqlen_q (AITER: v3_atomic_fp32 path)
-    // a16: max_seqlen_dq = 0 (AITER convention: a16 path, no dq_convert)
-    dqdkdv.max_seqlen_dq = (a.accType == asm_sdpa_engine::AccumulatorType::A32) ? a.seqlen_q : 0;
+    // AITER mha_bwd.cu:658: S_q for A32, S_q rounded up to 16 for A16 (the rows
+    // of its 16-bit dq_acc).
+    dqdkdv.max_seqlen_dq = (a.accType == asm_sdpa_engine::AccumulatorType::A32)
+                               ? a.seqlen_q
+                               : (a.seqlen_q + 15U) / 16U * 16U;
 
     // Window attention mask coordinates. The masks other than the sliding
     // windows are baked into the kernel binary, which ignores mask_y/mask_x.
@@ -410,6 +415,12 @@ std::pair<int32_t, int32_t> dqdkdvMaskCoordinates(const SdpaBwdParams& params)
                                               params.topLeftAlignment);
 }
 
+bool halvesDqdkdvGrid(int32_t maskOrdinal)
+{
+    return maskOrdinal == static_cast<int32_t>(plan_utils::MaskType::TOP_LEFT_CAUSAL)
+           || maskOrdinal == static_cast<int32_t>(plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+}
+
 // =============================================================================
 // Constructors
 // =============================================================================
@@ -551,10 +562,8 @@ void SdpaBwdPlan::execute(const Handle& handle,
     // 7b. Build args and launch kernel 2: DQDKDV
     auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs, _params.dqdkdvTiles.ts, _params);
 
-    // Only the causal kernels (masks 1 and 2) halve the grid; the sliding-window
-    // kernels (masks 3 and 4) take the full grid, as in AITER.
-    const bool isCausal = (_params.maskOrdinal == 1 || _params.maskOrdinal == 2);
-    const unsigned int gdxDqdkdv = _params.dqdkdvTiles.gridDim(mhaArgs.seqlen_k, isCausal);
+    const unsigned int gdxDqdkdv
+        = _params.dqdkdvTiles.gridDim(mhaArgs.seqlen_k, halvesDqdkdvGrid(_params.maskOrdinal));
 
     // A32: zero dq_acc before DQDKDV. The atomic-accumulator kernel adds per-K-tile
     // dQ contributions atomically and does not pre-zero; stale residue from a

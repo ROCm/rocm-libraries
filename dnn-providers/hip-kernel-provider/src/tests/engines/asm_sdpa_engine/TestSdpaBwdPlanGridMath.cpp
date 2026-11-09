@@ -3,11 +3,10 @@
 
 #include <gtest/gtest.h>
 
-#include "asm_fmha_v3_bwd_configs.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaBwdParams.hpp"
-#include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaBwdPlan.hpp"
 
-#include <string>
+#include <cstdint>
 
 using asm_sdpa_engine::SdpaBwdParams;
 
@@ -30,16 +29,6 @@ constexpr unsigned int K_HISTORICAL_TS_ODO = 128U;
 constexpr unsigned int K_HISTORICAL_TS_KV = 192U;
 constexpr unsigned int K_HISTORICAL_TS_DQ = 64U;
 
-// gfx950 tile sizes sourced from
-// asm_kernels/gfx950/fmha_v3_bwd/fmha_bwd_{odo,dqdkdv,dq_convert}.csv for the
-// hd128/bf16/a32/psskddv configuration ('ts' column):
-//   bwd_hd128_odo_bf16         -> ts=128
-//   bwd_hd128_bf16_a32_psskddv -> ts=256
-//   bwd_hd128_dq_convert_bf16  -> ts=64
-constexpr SdpaBwdParams::KernelTiles K_GFX950_ODO_TILES{128U};
-constexpr SdpaBwdParams::KernelTiles K_GFX950_DQDKDV_TILES{256U};
-constexpr SdpaBwdParams::KernelTiles K_GFX950_DQ_CONVERT_TILES{64U};
-
 SdpaBwdParams makePocParams(unsigned int seqLenQ, unsigned int seqLenKv)
 {
     SdpaBwdParams p{};
@@ -54,41 +43,6 @@ SdpaBwdParams makePocParams(unsigned int seqLenQ, unsigned int seqLenKv)
     p.dqdkdvTiles = K_POC_DQDKDV_TILES;
     p.dqConvertTiles = K_POC_DQ_CONVERT_TILES;
     return p;
-}
-
-SdpaBwdParams makeGfx950Params(unsigned int seqLenQ, unsigned int seqLenKv)
-{
-    SdpaBwdParams p = makePocParams(seqLenQ, seqLenKv);
-    p.archString = "gfx950";
-    p.odoTiles = K_GFX950_ODO_TILES;
-    p.dqdkdvTiles = K_GFX950_DQDKDV_TILES;
-    p.dqConvertTiles = K_GFX950_DQ_CONVERT_TILES;
-    return p;
-}
-
-// The `ts` of the gfx950 bf16 hd128 batch-mode row the backward dispatch
-// resolves for a stage, or 0 when no row matches.
-unsigned int gfx950Hd128TileSize(asm_sdpa_engine::bwd_dispatch::PipelineStage stage)
-{
-    using namespace asm_sdpa_engine::bwd_dispatch;
-    const bool isDqdkdv = stage == PipelineStage::DQDKDV;
-    const std::string key
-        = lookupKernelNameKey(stage,
-                              "gfx950",
-                              "bf16",
-                              128,
-                              128,
-                              /*mask=*/0,
-                              /*atomic32=*/isDqdkdv ? 1 : 0,
-                              /*pssk=*/isDqdkdv ? 1 : 0,
-                              /*pddv=*/isDqdkdv ? 1 : 0,
-                              /*mode=*/0,
-                              stage == PipelineStage::ODO ? BF16_CVT_FP16_SENTINEL : /*RTNE=*/0);
-    const CFG& registry = stage == PipelineStage::ODO      ? cfg_fmha_bwd_odo
-                          : stage == PipelineStage::DQDKDV ? cfg_fmha_bwd_dqdkdv
-                                                           : cfg_fmha_bwd_dq_convert;
-    const auto it = registry.find(key);
-    return it == registry.end() ? 0U : static_cast<unsigned int>(it->second.ts);
 }
 
 } // namespace
@@ -173,36 +127,22 @@ TEST(TestSdpaBwdPlanGridMath, PocHd128Bf16NonMultipleSeqLenStillRoundsUp)
 }
 
 // =============================================================================
-// gfx950 hd128 — the dqdkdv tile is 256 (192 on gfx942)
+// DQDKDV grid halving: only the causal kernels tile half the K/V blocks
 // =============================================================================
 
-TEST(TestSdpaBwdPlanGridMath, Gfx950Hd128TilesMatchRegistry)
+// AITER v0.1.29 mha_bwd.cu fmha_v3_bwd() halves gdx for masks 1 and 2 only.
+// The sliding-window kernels (mask 3, and mask 4 on gfx950) and the unmasked
+// kernels take one workgroup per K/V tile.
+TEST(TestSdpaBwdPlanGridMath, OnlyCausalMasksHalveTheDqdkdvGrid)
 {
-    using asm_sdpa_engine::bwd_dispatch::PipelineStage;
-    EXPECT_EQ(gfx950Hd128TileSize(PipelineStage::ODO), K_GFX950_ODO_TILES.ts);
-    EXPECT_EQ(gfx950Hd128TileSize(PipelineStage::DQDKDV), K_GFX950_DQDKDV_TILES.ts);
-    EXPECT_EQ(gfx950Hd128TileSize(PipelineStage::DQ_CONVERT), K_GFX950_DQ_CONVERT_TILES.ts);
-}
-
-TEST(TestSdpaBwdPlanGridMath, Gfx950Hd128Bf16Seq2048)
-{
-    // 2048 / 128 = 16 odo tiles
-    // 2048 / 256 = 8 dqdkdv tiles, halved to 4 by a causal mask
-    // 2048 / 64  = 32 dq_convert tiles
-    const auto params = makeGfx950Params(2048U, 2048U);
-    EXPECT_EQ(params.odoTiles.gridDim(params.seqLenQ), 16U);
-    EXPECT_EQ(params.dqdkdvTiles.gridDim(params.seqLenKv), 8U);
-    EXPECT_EQ(params.dqdkdvTiles.gridDim(params.seqLenKv, /*isCausal=*/true), 4U);
-    EXPECT_EQ(params.dqConvertTiles.gridDim(params.seqLenQ), 32U);
-}
-
-TEST(TestSdpaBwdPlanGridMath, Gfx950Hd128Bf16NonMultipleSeqLenStillRoundsUp)
-{
-    const auto params = makeGfx950Params(513U, 257U);
-    // 513 / 128 = ceil(4.0078) = 5
-    EXPECT_EQ(params.odoTiles.gridDim(params.seqLenQ), 5U);
-    // 257 / 256 = ceil(1.004) = 2
-    EXPECT_EQ(params.dqdkdvTiles.gridDim(params.seqLenKv), 2U);
-    // 513 / 64 = ceil(8.015) = 9
-    EXPECT_EQ(params.dqConvertTiles.gridDim(params.seqLenQ), 9U);
+    for(const int32_t mask : {1, 2})
+    {
+        SCOPED_TRACE(mask);
+        EXPECT_TRUE(asm_sdpa_engine::halvesDqdkdvGrid(mask));
+    }
+    for(const int32_t mask : {0, 3, 4})
+    {
+        SCOPED_TRACE(mask);
+        EXPECT_FALSE(asm_sdpa_engine::halvesDqdkdvGrid(mask));
+    }
 }

@@ -57,8 +57,8 @@ struct SdpaBwdParams
     unsigned int numHeadsKv; // H_kv
     unsigned int seqLenQ; // S_q
     unsigned int seqLenKv; // S_kv (= S_k)
-    unsigned int headDimQk; // D_qk (128 for POC)
-    unsigned int headDimV; // D_v  (128 for POC)
+    unsigned int headDimQk; // D_qk, unpadded (the kernels take the graph's head dims)
+    unsigned int headDimV; // D_v, unpadded
 
     // --- Tensor strides (in elements) ---
     // Q: [B, H_q, S_q, D_qk]

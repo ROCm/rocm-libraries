@@ -96,7 +96,7 @@ struct __attribute__((packed)) fmha_bwd_odo_args
     // ---- Dimensions --------------------------------------------------------
     uint32_t seqlen_q; // co:seqlen_q  Query sequence length
     SgprPad3 _p12;
-    uint32_t head_dim; // co:head_dim  Head dimension (D_v)
+    uint32_t head_dim; // co:head_dim  Head dimension (D_qk, as AITER passes it)
     SgprPad3 _p13;
 
     // ---- Group mode sequence pointers (nullptr for batch mode) -------------
