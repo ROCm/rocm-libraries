@@ -39,10 +39,6 @@
 #define _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR 3
 #define _THRUST_REQUIRED_LIBCXX_VERSION_MINOR 0
 
-// TODO: remove this once we truly depend on libhipcxx 3.4.
-// When this is dropped, verify with 'LIBHIPCXX_NO_LEGACY_COMPAT=1'.
-#define LIBHIPCXX_IGNORE_DEPRECATED_LEGACY_COMPAT 1
-
 // Set default values if not explictly set
 #ifndef USE_LIBCUDACXX
     #define USE_LIBCUDACXX 1
@@ -57,12 +53,12 @@
 #  include <cuda/std/version>
 // If version matches and '_CUDA_VSTD' is available.
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
-    && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR
+    && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR && defined(_CUDA_VSTD)
 #    define _THRUST_LIBCXX_INCLUDE(LIB)   <cuda/LIB>
 #    define _THRUST_STD_INCLUDE(LIB)      <cuda/std/LIB>
 #    define _THRUST_LIBCXX                ::cuda
-#    define _THRUST_STD_NOVERSION         ::cuda::std
-#    define _THRUST_STD                   ::cuda::std
+#    define _THRUST_STD_NOVERSION         _CUDA_VSTD_NOVERSION
+#    define _THRUST_STD                   _CUDA_VSTD
 #    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
 #    define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
 #    define _THRUST_STD_NAMESPACE_END     _LIBCUDACXX_END_NAMESPACE_STD
@@ -74,14 +70,14 @@
 #  include <hip/std/version>
 // If version matches and '_CUDA_VSTD' is available.
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
-    && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR
+    && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR && defined(_CUDA_VSTD)
 #    define _THRUST_LIBCXX_INCLUDE(LIB)   <hip/LIB>
 #    define _THRUST_STD_INCLUDE(LIB)      <hip/std/LIB>
 // In 'libhipcxx' the '::hip' namespace is synonymous with '::cuda'.
 #    define _THRUST_LIBCXX                ::hip
 // In 'libhipcxx' the macro '_CUDA_VSTD' is also defined.
 #    define _THRUST_STD_NOVERSION         ::hip::std
-#    define _THRUST_STD                   ::hip::std
+#    define _THRUST_STD                   _CUDA_VSTD
 #    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
 #    define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
 #    define _THRUST_STD_NAMESPACE_END     _LIBCUDACXX_END_NAMESPACE_STD
@@ -91,7 +87,7 @@
 
 // If 'libcudacxx' or 'libhipcxx' is not found, or the
 // feature flag ROCTHRUST_USE_LIBHIPCXX is not ON, use fallback.
-#ifndef _THRUST_HAS_DEVICE_SYSTEM_STD
+#ifndef _THRUST_HAS_DEVICE_SYSTEM_STD 
 #  define _THRUST_LIBCXX_INCLUDE(LIB)
 #  define _THRUST_STD_INCLUDE(LIB) <LIB>
 #  define _THRUST_LIBCXX

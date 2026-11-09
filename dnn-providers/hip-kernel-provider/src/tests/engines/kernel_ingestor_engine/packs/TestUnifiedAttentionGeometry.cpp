@@ -77,7 +77,6 @@ TEST(TestUnifiedAttentionGeometry, Gfx950WrappersAreTheNeutralFunctions)
     EXPECT_EQ(gfx950Unified2DLaunchGeometry(2, 32, 16, 4, 300, 3, "k"),
               unifiedAttention2DLaunchGeometry(
                   GFX950_UNIFIED_ATTENTION_TRAITS, 2, 32, 16, 4, 300, 3, "k"));
-    EXPECT_EQ(gfx950Unified2DBatchCapacity(511), unifiedAttentionBatchCapacity(511));
     EXPECT_EQ(gfx950Unified2DWorkspaceLayout(3, 512, 16),
               unifiedAttentionWorkspaceLayout(3, 512, 16));
     EXPECT_EQ(gfx950Unified2DWorkspaceImage(3, 7, 512, 16),

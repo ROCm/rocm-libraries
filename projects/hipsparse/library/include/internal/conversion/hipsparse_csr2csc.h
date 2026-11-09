@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -76,7 +76,7 @@ extern "C" {
 *  It can return before the actual computation has finished.
 *
 *  \deprecated
-*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be
 *  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
@@ -135,6 +135,97 @@ hipsparseStatus_t hipsparseScsr2csc(hipsparseHandle_t    handle,
                                     int*                 cscSortedColPtr,
                                     hipsparseAction_t    copyValues,
                                     hipsparseIndexBase_t idxBase);
+/*! \ingroup conv_module
+*  \brief Convert a sparse CSR matrix into a sparse CSC matrix.
+*
+*  \details
+*  \p hipsparseXcsr2csc converts a CSR matrix into a CSC matrix. \p hipsparseXcsr2csc
+*  can also be used to convert a CSC matrix into a CSR matrix. \p copyValues decides
+*  whether \p cscSortedVal is being filled during conversion (\ref HIPSPARSE_ACTION_NUMERIC)
+*  or not (\ref HIPSPARSE_ACTION_SYMBOLIC).
+*
+*  For example given the matrix:
+*  \f[
+*    \begin{bmatrix}
+*    1 & 0 & 0 & 2 \\
+*    3 & 4 & 0 & 0 \\
+*    5 & 0 & 6 & 7
+*    \end{bmatrix}
+*  \f]
+*
+*  Represented using the sparse CSR format as:
+*  \f[
+*    \begin{align}
+*    \text{csrSortedRowPtr} &= \begin{bmatrix} 0 & 2 & 4 & 7 \end{bmatrix} \\
+*    \text{csrSortedColInd} &= \begin{bmatrix} 0 & 3 & 0 & 1 & 0 & 2 & 3 \end{bmatrix} \\
+*    \text{csrSortedVal} &= \begin{bmatrix} 1 & 2 & 3 & 4 & 5 & 6 & 7 \end{bmatrix}
+*    \end{align}
+*  \f]
+*
+*  this function converts it to the sparse CSC format:
+*  \f[
+*    \begin{align}
+*    \text{cscSortedRowInd} &= \begin{bmatrix} 0 & 1 & 2 & 1 & 2 & 0 & 2 \end{bmatrix} \\
+*    \text{cscSortedColPtr} &= \begin{bmatrix} 0 & 3 & 4 & 5 & 7 \end{bmatrix} \\
+*    \text{cscSortedVal} &= \begin{bmatrix} 1 & 3 & 5 & 4 & 6 & 2 & 7 \end{bmatrix}
+*    \end{align}
+*  \f]
+*
+*  The CSC arrays \p cscSortedRowInd, \p cscSortedColPtr, and \p cscSortedVal must be allocated by the
+*  user prior to calling \p hipsparseXcsr2csc().
+*
+*  \note
+*  The resulting matrix can also be seen as the transpose of the input matrix.
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m               number of rows of the sparse CSR matrix, which must be non-negative.
+*  @param[in]
+*  n               number of columns of the sparse CSR matrix, which must be non-negative.
+*  @param[in]
+*  nnz             number of non-zero entries of the sparse CSR matrix, which must be non-negative.
+*  @param[in]
+*  csrSortedVal    array of \p nnz elements of the sparse CSR matrix.
+*  @param[in]
+*  csrSortedRowPtr array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix.
+*  @param[in]
+*  csrSortedColInd array of \p nnz elements containing the column indices of the sparse
+*                  CSR matrix.
+*  @param[out]
+*  cscSortedVal    array of \p nnz elements of the sparse CSC matrix.
+*  @param[out]
+*  cscSortedRowInd array of \p nnz elements containing the row indices of the sparse CSC
+*                  matrix.
+*  @param[out]
+*  cscSortedColPtr array of \p n+1 elements that point to the start of every column of the
+*                  sparse CSC matrix.
+*  @param[in]
+*  copyValues      \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
+*  @param[in]
+*  idxBase         index base. \ref HIPSPARSE_INDEX_BASE_ZERO for zero-based indexing or
+*                  \ref HIPSPARSE_INDEX_BASE_ONE for one-based indexing.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p m, \p n, or \p nnz is negative,
+*          \p csrSortedVal, \p csrSortedRowPtr, \p csrSortedColInd, \p cscSortedVal, \p cscSortedRowInd,
+*          or \p cscSortedColPtr is nullptr when \p nnz is greater than zero, \p copyValues is neither
+*          \ref HIPSPARSE_ACTION_SYMBOLIC nor \ref HIPSPARSE_ACTION_NUMERIC, or \p idxBase is neither
+*          \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*
+*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDcsr2csc(hipsparseHandle_t    handle,
@@ -149,6 +240,97 @@ hipsparseStatus_t hipsparseDcsr2csc(hipsparseHandle_t    handle,
                                     int*                 cscSortedColPtr,
                                     hipsparseAction_t    copyValues,
                                     hipsparseIndexBase_t idxBase);
+/*! \ingroup conv_module
+*  \brief Convert a sparse CSR matrix into a sparse CSC matrix.
+*
+*  \details
+*  \p hipsparseXcsr2csc converts a CSR matrix into a CSC matrix. \p hipsparseXcsr2csc
+*  can also be used to convert a CSC matrix into a CSR matrix. \p copyValues decides
+*  whether \p cscSortedVal is being filled during conversion (\ref HIPSPARSE_ACTION_NUMERIC)
+*  or not (\ref HIPSPARSE_ACTION_SYMBOLIC).
+*
+*  For example given the matrix:
+*  \f[
+*    \begin{bmatrix}
+*    1 & 0 & 0 & 2 \\
+*    3 & 4 & 0 & 0 \\
+*    5 & 0 & 6 & 7
+*    \end{bmatrix}
+*  \f]
+*
+*  Represented using the sparse CSR format as:
+*  \f[
+*    \begin{align}
+*    \text{csrSortedRowPtr} &= \begin{bmatrix} 0 & 2 & 4 & 7 \end{bmatrix} \\
+*    \text{csrSortedColInd} &= \begin{bmatrix} 0 & 3 & 0 & 1 & 0 & 2 & 3 \end{bmatrix} \\
+*    \text{csrSortedVal} &= \begin{bmatrix} 1 & 2 & 3 & 4 & 5 & 6 & 7 \end{bmatrix}
+*    \end{align}
+*  \f]
+*
+*  this function converts it to the sparse CSC format:
+*  \f[
+*    \begin{align}
+*    \text{cscSortedRowInd} &= \begin{bmatrix} 0 & 1 & 2 & 1 & 2 & 0 & 2 \end{bmatrix} \\
+*    \text{cscSortedColPtr} &= \begin{bmatrix} 0 & 3 & 4 & 5 & 7 \end{bmatrix} \\
+*    \text{cscSortedVal} &= \begin{bmatrix} 1 & 3 & 5 & 4 & 6 & 2 & 7 \end{bmatrix}
+*    \end{align}
+*  \f]
+*
+*  The CSC arrays \p cscSortedRowInd, \p cscSortedColPtr, and \p cscSortedVal must be allocated by the
+*  user prior to calling \p hipsparseXcsr2csc().
+*
+*  \note
+*  The resulting matrix can also be seen as the transpose of the input matrix.
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m               number of rows of the sparse CSR matrix, which must be non-negative.
+*  @param[in]
+*  n               number of columns of the sparse CSR matrix, which must be non-negative.
+*  @param[in]
+*  nnz             number of non-zero entries of the sparse CSR matrix, which must be non-negative.
+*  @param[in]
+*  csrSortedVal    array of \p nnz elements of the sparse CSR matrix.
+*  @param[in]
+*  csrSortedRowPtr array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix.
+*  @param[in]
+*  csrSortedColInd array of \p nnz elements containing the column indices of the sparse
+*                  CSR matrix.
+*  @param[out]
+*  cscSortedVal    array of \p nnz elements of the sparse CSC matrix.
+*  @param[out]
+*  cscSortedRowInd array of \p nnz elements containing the row indices of the sparse CSC
+*                  matrix.
+*  @param[out]
+*  cscSortedColPtr array of \p n+1 elements that point to the start of every column of the
+*                  sparse CSC matrix.
+*  @param[in]
+*  copyValues      \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
+*  @param[in]
+*  idxBase         index base. \ref HIPSPARSE_INDEX_BASE_ZERO for zero-based indexing or
+*                  \ref HIPSPARSE_INDEX_BASE_ONE for one-based indexing.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p m, \p n, or \p nnz is negative,
+*          \p csrSortedVal, \p csrSortedRowPtr, \p csrSortedColInd, \p cscSortedVal, \p cscSortedRowInd,
+*          or \p cscSortedColPtr is nullptr when \p nnz is greater than zero, \p copyValues is neither
+*          \ref HIPSPARSE_ACTION_SYMBOLIC nor \ref HIPSPARSE_ACTION_NUMERIC, or \p idxBase is neither
+*          \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*
+*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCcsr2csc(hipsparseHandle_t    handle,
@@ -163,6 +345,97 @@ hipsparseStatus_t hipsparseCcsr2csc(hipsparseHandle_t    handle,
                                     int*                 cscSortedColPtr,
                                     hipsparseAction_t    copyValues,
                                     hipsparseIndexBase_t idxBase);
+/*! \ingroup conv_module
+*  \brief Convert a sparse CSR matrix into a sparse CSC matrix.
+*
+*  \details
+*  \p hipsparseXcsr2csc converts a CSR matrix into a CSC matrix. \p hipsparseXcsr2csc
+*  can also be used to convert a CSC matrix into a CSR matrix. \p copyValues decides
+*  whether \p cscSortedVal is being filled during conversion (\ref HIPSPARSE_ACTION_NUMERIC)
+*  or not (\ref HIPSPARSE_ACTION_SYMBOLIC).
+*
+*  For example given the matrix:
+*  \f[
+*    \begin{bmatrix}
+*    1 & 0 & 0 & 2 \\
+*    3 & 4 & 0 & 0 \\
+*    5 & 0 & 6 & 7
+*    \end{bmatrix}
+*  \f]
+*
+*  Represented using the sparse CSR format as:
+*  \f[
+*    \begin{align}
+*    \text{csrSortedRowPtr} &= \begin{bmatrix} 0 & 2 & 4 & 7 \end{bmatrix} \\
+*    \text{csrSortedColInd} &= \begin{bmatrix} 0 & 3 & 0 & 1 & 0 & 2 & 3 \end{bmatrix} \\
+*    \text{csrSortedVal} &= \begin{bmatrix} 1 & 2 & 3 & 4 & 5 & 6 & 7 \end{bmatrix}
+*    \end{align}
+*  \f]
+*
+*  this function converts it to the sparse CSC format:
+*  \f[
+*    \begin{align}
+*    \text{cscSortedRowInd} &= \begin{bmatrix} 0 & 1 & 2 & 1 & 2 & 0 & 2 \end{bmatrix} \\
+*    \text{cscSortedColPtr} &= \begin{bmatrix} 0 & 3 & 4 & 5 & 7 \end{bmatrix} \\
+*    \text{cscSortedVal} &= \begin{bmatrix} 1 & 3 & 5 & 4 & 6 & 2 & 7 \end{bmatrix}
+*    \end{align}
+*  \f]
+*
+*  The CSC arrays \p cscSortedRowInd, \p cscSortedColPtr, and \p cscSortedVal must be allocated by the
+*  user prior to calling \p hipsparseXcsr2csc().
+*
+*  \note
+*  The resulting matrix can also be seen as the transpose of the input matrix.
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m               number of rows of the sparse CSR matrix, which must be non-negative.
+*  @param[in]
+*  n               number of columns of the sparse CSR matrix, which must be non-negative.
+*  @param[in]
+*  nnz             number of non-zero entries of the sparse CSR matrix, which must be non-negative.
+*  @param[in]
+*  csrSortedVal    array of \p nnz elements of the sparse CSR matrix.
+*  @param[in]
+*  csrSortedRowPtr array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix.
+*  @param[in]
+*  csrSortedColInd array of \p nnz elements containing the column indices of the sparse
+*                  CSR matrix.
+*  @param[out]
+*  cscSortedVal    array of \p nnz elements of the sparse CSC matrix.
+*  @param[out]
+*  cscSortedRowInd array of \p nnz elements containing the row indices of the sparse CSC
+*                  matrix.
+*  @param[out]
+*  cscSortedColPtr array of \p n+1 elements that point to the start of every column of the
+*                  sparse CSC matrix.
+*  @param[in]
+*  copyValues      \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
+*  @param[in]
+*  idxBase         index base. \ref HIPSPARSE_INDEX_BASE_ZERO for zero-based indexing or
+*                  \ref HIPSPARSE_INDEX_BASE_ONE for one-based indexing.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p m, \p n, or \p nnz is negative,
+*          \p csrSortedVal, \p csrSortedRowPtr, \p csrSortedColInd, \p cscSortedVal, \p cscSortedRowInd,
+*          or \p cscSortedColPtr is nullptr when \p nnz is greater than zero, \p copyValues is neither
+*          \ref HIPSPARSE_ACTION_SYMBOLIC nor \ref HIPSPARSE_ACTION_NUMERIC, or \p idxBase is neither
+*          \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*
+*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,

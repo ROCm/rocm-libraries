@@ -25,9 +25,9 @@ namespace ckc
 /* The MMA operand role a call argument passes, and its Python spelling. */
 static rocke_mma_role_t role_of(rocke_matrix_arg_kind_t kind)
 {
-    return kind == ROCKE_MATRIX_ARG_A   ? ROCKE_MMA_ROLE_A
-           : kind == ROCKE_MATRIX_ARG_B ? ROCKE_MMA_ROLE_B
-                                        : ROCKE_MMA_ROLE_ACC;
+    return kind == ROCKE_MATRIX_ARG_A   ? ROCKE_MMA_ROLE_SRC0
+           : kind == ROCKE_MATRIX_ARG_B ? ROCKE_MMA_ROLE_SRC1
+                                        : ROCKE_MMA_ROLE_SRC2;
 }
 
 static const char* role_name(rocke_matrix_arg_kind_t kind)
@@ -63,12 +63,12 @@ static const char* as_is_operand(rocke_lower_t* L,
 /* Python ZeroPadded.operand: a packed payload of exactly `words` 32-bit words
  * widened to the <m x i32> register with zero high words, or the whole register
  * passed unchanged. */
-static const char* zero_padded_operand(rocke_lower_t* L,
-                                       const rocke_op_t* op,
-                                       const char* op_id,
-                                       rocke_matrix_arg_kind_t kind,
-                                       const rocke_type_t* register_type,
-                                       int words)
+static void check_zero_padded_operand(rocke_lower_t* L,
+                                      const rocke_op_t* op,
+                                      const char* op_id,
+                                      rocke_matrix_arg_kind_t kind,
+                                      const rocke_type_t* register_type,
+                                      int words)
 {
     const rocke_value_t* value = rocke_mma_operand_value(op, role_of(kind));
     const rocke_type_t* payload = value->type;
@@ -85,6 +85,18 @@ static const char* zero_padded_operand(rocke_lower_t* L,
                       words,
                       words,
                       rocke_ll_llvm_type(L, register_type));
+}
+
+static const char* zero_padded_operand(rocke_lower_t* L,
+                                       const rocke_op_t* op,
+                                       const char* op_id,
+                                       rocke_matrix_arg_kind_t kind,
+                                       const rocke_type_t* register_type,
+                                       int words)
+{
+    check_zero_padded_operand(L, op, op_id, kind, register_type, words);
+    const rocke_value_t* value = rocke_mma_operand_value(op, role_of(kind));
+    const rocke_type_t* payload = value->type;
     if(payload->count == register_type->count)
         return rocke_ll_operand(L, value);
     const int width = register_type->count;
@@ -126,19 +138,7 @@ static const char* even_halves_operand(rocke_lower_t* L,
                                        const rocke_type_t* register_type)
 {
     const rocke_type_t* logical = even_halves_logical(L, register_type);
-    const rocke_value_t* value = rocke_mma_operand_value(op, role_of(kind));
-    if(!(is_vector(value->type) && value->type->count == logical->count
-         && rocke_i_type_bits(value->type->elem) == 16))
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "MMA operand %s of '%s' is %s; the instruction keeps %d results in the "
-                      "even halves of %s -- pass the %d logical accumulator values",
-                      role_name(kind),
-                      op_id,
-                      value->type->name,
-                      logical->count,
-                      rocke_ll_llvm_type(L, register_type),
-                      logical->count);
+    /* The public operand renderer has already checked this form. */
     const char* values = as_is_operand(L, op, op_id, kind, logical);
     std::string mask;
     for(int i = 0; i < logical->count; ++i)
@@ -159,6 +159,31 @@ static const char* even_halves_operand(rocke_lower_t* L,
     return spread;
 }
 
+/* Pure result admission shared by preflight and the two result renderers. */
+static bool check_matrix_result(rocke_lower_t* L,
+                                const rocke_op_t* op,
+                                const char* op_id,
+                                const rocke_type_t* register_type,
+                                bool even_halves)
+{
+    const auto* result = op->results[0];
+    if(!result || !result->type)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "MMA result of '%s' must define an IR type", op_id);
+    const auto* logical = even_halves ? even_halves_logical(L, register_type) : register_type;
+    if(even_halves
+       && !(is_vector(result->type) && rocke_i_type_bits(result->type) == rocke_i_type_bits(logical)
+            && result->type->count == logical->count))
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "MMA result of '%s' is %s; the instruction returns %d results in the even "
+                      "halves of %s",
+                      op_id,
+                      result->type->name,
+                      logical->count,
+                      rocke_ll_llvm_type(L, register_type));
+    return rocke_mma_result_needs_reinterpret(op_id, result->type, logical, L->backend->gfx);
+}
+
 /* Python AsIs.emit_result: the call's value, or one bitcast of it, as the
  * result rule (rocke_mma_result_needs_reinterpret) decides. */
 static void as_is_result(rocke_lower_t* L,
@@ -168,7 +193,7 @@ static void as_is_result(rocke_lower_t* L,
                          const std::string& call)
 {
     const rocke_value_t* result = op->results[0];
-    if(!rocke_mma_result_needs_reinterpret(op_id, result->type, register_type, L->backend->gfx))
+    if(!check_matrix_result(L, op, op_id, register_type, false))
     {
         rocke_ll_emitf(L, "  %s = %s", result->name, call.c_str());
         return;
@@ -192,18 +217,7 @@ static void even_halves_result(rocke_lower_t* L,
 {
     const rocke_type_t* logical = even_halves_logical(L, register_type);
     const rocke_value_t* result = op->results[0];
-    if(!(is_vector(result->type) && rocke_i_type_bits(result->type) == rocke_i_type_bits(logical)
-         && result->type->count == logical->count))
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "MMA result of '%s' is %s; the instruction returns %d results in the even "
-                      "halves of %s",
-                      op_id,
-                      result->type->name,
-                      logical->count,
-                      rocke_ll_llvm_type(L, register_type));
-    const bool reinterpret
-        = rocke_mma_result_needs_reinterpret(op_id, result->type, logical, L->backend->gfx);
+    const bool reinterpret = check_matrix_result(L, op, op_id, register_type, true);
     const char* returned = rocke_ll_fresh(L, "mma_d");
     rocke_ll_emitf(L, "  %s = %s", returned, call.c_str());
     const char* gathered = reinterpret ? rocke_ll_fresh(L, "mma_gather") : result->name;
@@ -228,12 +242,53 @@ static void even_halves_result(rocke_lower_t* L,
                        rocke_ll_llvm_type(L, result->type));
 }
 
+void rocke_ll_check_matrix_operand(rocke_lower_t* L,
+                                   const rocke_op_t* op,
+                                   const char* op_id,
+                                   rocke_matrix_arg_kind_t kind,
+                                   const rocke_matrix_form_t* form)
+{
+    const auto* value = rocke_mma_operand_value(op, role_of(kind));
+    if(!value || !value->type)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "MMA operand %s of '%s' must define an IR type",
+                      role_name(kind),
+                      op_id);
+    const auto* register_type = rocke_matrix_form_type_at(&L->arena, form, L->flavor);
+    if(form->kind == ROCKE_MATRIX_FORM_ZERO_PADDED)
+    {
+        check_zero_padded_operand(L, op, op_id, kind, register_type, form->payload_words);
+        return;
+    }
+    if(form->kind == ROCKE_MATRIX_FORM_EVEN_HALVES)
+    {
+        const auto* logical = even_halves_logical(L, register_type);
+        if(!(is_vector(value->type) && value->type->count == logical->count
+             && rocke_i_type_bits(value->type->elem) == 16))
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "MMA operand %s of '%s' is %s; the instruction keeps %d results in the "
+                          "even halves of %s -- pass the %d logical accumulator values",
+                          role_name(kind),
+                          op_id,
+                          value->type->name,
+                          logical->count,
+                          rocke_ll_llvm_type(L, register_type),
+                          logical->count);
+        register_type = logical;
+    }
+    rocke_mma_operand_needs_reinterpret(
+        op_id, role_of(kind), value->type, register_type, L->backend->gfx);
+}
+
 const char* rocke_ll_matrix_operand(rocke_lower_t* L,
                                     const rocke_op_t* op,
                                     const char* op_id,
                                     rocke_matrix_arg_kind_t kind,
                                     const rocke_matrix_form_t* form)
 {
+    rocke_ll_check_matrix_operand(L, op, op_id, kind, form);
     const rocke_type_t* register_type = rocke_matrix_form_type_at(&L->arena, form, L->flavor);
     switch(form->kind)
     {
@@ -268,7 +323,7 @@ static std::string
     signedness_argument(rocke_lower_t* L, const char* op_id, rocke_matrix_arg_kind_t operand)
 {
     const rocke_mma_op_t* catalog_op = rocke_ll_require_catalog_op(L, op_id);
-    const char* dtype = operand == ROCKE_MATRIX_ARG_A ? catalog_op->a_dtype : catalog_op->b_dtype;
+    const char* dtype = catalog_op->srcs[operand == ROCKE_MATRIX_ARG_A ? 0 : 1].dtype;
     if(rocke_require_dtype_info(dtype)->category != ROCKE_DTYPE_INTEGER)
         rocke_ll_fail(L,
                       ROCKE_ERR_VALUE,
@@ -315,9 +370,7 @@ void rocke_ll_emit_matrix_call(rocke_lower_t* L,
     const char* key = rocke_matrix_call_key(call);
     const char* derived = rocke_matrix_call_declaration(call, L->flavor);
     const char* declared = declared_text(L, key);
-    if(!declared)
-        rocke_ll_need_dynamic(L, key, derived);
-    else if(strcmp(declared, derived) != 0)
+    if(declared && strcmp(declared, derived) != 0)
         rocke_ll_fail(L,
                       ROCKE_ERR_VALUE,
                       "matrix call for '%s' declares '%s' as '%s', but the declaration table "
@@ -326,6 +379,21 @@ void rocke_ll_emit_matrix_call(rocke_lower_t* L,
                       key,
                       derived,
                       declared);
+    /* Every source and result must pass before declarations or transformations
+     * can change the lowerer. Rendering reuses the same admission functions. */
+    for(int i = 0; i < call->num_args; ++i)
+    {
+        const auto& arg = call->args[i];
+        if(arg.kind == ROCKE_MATRIX_ARG_SIGNEDNESS)
+            signedness_argument(L, op_id, arg.operand);
+        else if(arg.kind != ROCKE_MATRIX_ARG_IMM)
+            rocke_ll_check_matrix_operand(L, op, op_id, arg.kind, &form_of(call, arg.kind));
+    }
+    const auto* result_type = rocke_matrix_form_type_at(&L->arena, &call->result, L->flavor);
+    check_matrix_result(
+        L, op, op_id, result_type, call->result.kind == ROCKE_MATRIX_FORM_EVEN_HALVES);
+    if(!declared)
+        rocke_ll_need_dynamic(L, key, derived);
     rocke_ll_need(L, key);
 
     std::string arguments;

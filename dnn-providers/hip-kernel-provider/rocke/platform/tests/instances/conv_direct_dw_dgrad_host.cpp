@@ -35,12 +35,15 @@
  *   - the forward WMMA validator tail's refusal of an unknown scheduler, which
  *     must carry normalize_scheduler_strategy's text, choices included (and
  *     so must the dgrad WMMA and Winograd GEMM validators), the name quoted
- *     as Python's repr (rocke_py_str_repr);
+ *     as Python's repr (rocke_py_str_repr, the engine's one port);
  *   - the direct wgrad validators' refusal of a dilated problem, which must
  *     carry conv_direct_grouped.dilation_reason's text;
  *   - a zero or negative extent (N, H, W, groups, cpg, kpg, KH, KW) given to
  *     the dw fwd and forward WMMA validators, which must refuse it first with
  *     conv_direct_grouped.problem_dims_reason's text.
+ *   - the specs the Toeplitz form of the windowed depthwise dgrad refuses
+ *     (parity configs 68..72 of conv_direct_dgrad_ext_emit): the CI goldens
+ *     run the Python engine only, so the C++ reasons are checked here.
  */
 #include <initializer_list>
 #include <stdint.h>
@@ -469,6 +472,92 @@ static void test_stem_wmma_kernels_refuse_per_axis_padding(void)
     check_wmma_padding("dgrad_smallc_wmma", smallc, rocke_dgrad_smallc_wmma_is_valid_spec);
 }
 
+/* The Toeplitz windowed depthwise dgrad on the wave32 WMMA (gfx1250), in the
+ * shape of conv_direct_dgrad_ext_emit config 62 (7x7, 8 waves, 28-row tile). */
+static rocke_direct_depthwise_dgrad_win_spec_t win_wmma(int KH, int PAD, const char* dtype)
+{
+    rocke_direct_depthwise_dgrad_win_spec_t s = rocke_direct_depthwise_dgrad_win_spec_default();
+    s.problem = rocke_direct_conv_problem_default();
+    s.problem.N = 2;
+    s.problem.H = 14;
+    s.problem.W = 14;
+    s.problem.groups = 64;
+    s.problem.cpg = 1;
+    s.problem.kpg = 1;
+    s.problem.KH = KH;
+    s.problem.KW = KH;
+    s.problem.PAD = PAD;
+    s.problem.dtype = dtype;
+    s.block_waves = 8;
+    s.block_h = 14;
+    s.mfma = true;
+    s.w_fold = 2;
+    s.prefetch_rows = 2;
+    s.wave_size = 32;
+    return s;
+}
+
+static void check_win_refused(const char* what,
+                              const rocke_direct_depthwise_dgrad_win_spec_t* s,
+                              const char* arch,
+                              const char* expected)
+{
+    char reason[ERR_CAP];
+    reason[0] = '\0';
+    CHECK(!rocke_direct_depthwise_dgrad_win_is_valid_spec(s, arch, reason, sizeof(reason)),
+          "%s accepted on %s",
+          what,
+          arch);
+    CHECK(strstr(reason, expected) != NULL, "%s reason: %s", what, reason);
+}
+
+static void test_toeplitz_wmma_refusals(void)
+{
+    char reason[ERR_CAP];
+    rocke_direct_depthwise_dgrad_win_spec_t s = win_wmma(7, 3, "bf16");
+    CHECK(rocke_direct_depthwise_dgrad_win_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "the wave32 Toeplitz form refused on gfx1250: %s",
+          reason);
+
+    /* 68: a 9x9 filter's wave32 fragments exceed the VGPR cap. */
+    s = win_wmma(9, 4, "bf16");
+    s.block_waves = 2;
+    s.w_fold = 4;
+    s.prefetch_rows = 1;
+    s.block_h = 5;
+    check_win_refused("9x9 at wave32", &s, "gfx1250", "VGPRs (> 224)");
+    /* 69: the wave32 form on the wave64 MFMA target. */
+    s = win_wmma(7, 3, "bf16");
+    check_win_refused(
+        "wave32 on gfx950", &s, "gfx950", "wave32 mfma needs one of ('gfx1250',) (got gfx950)");
+    /* 70: the wave64 MFMA form on gfx1250, with the wave32 hint. */
+    s.wave_size = 64;
+    check_win_refused("wave64 on gfx1250",
+                      &s,
+                      "gfx1250",
+                      "mfma needs one of ('gfx950',) (got gfx1250); set wave_size=32");
+    /* No wave32 hint on a target without the WMMA form. */
+    CHECK(!rocke_direct_depthwise_dgrad_win_is_valid_spec(&s, "gfx942", reason, sizeof(reason)),
+          "wave64 accepted on gfx942");
+    CHECK(strcmp(reason, "mfma needs one of ('gfx950',) (got gfx942)") == 0,
+          "gfx942 reason: %s",
+          reason);
+    /* 71 / 72: fwd at stride 1 and 2; the forward mode is wave64 only. */
+    s = win_wmma(3, 1, "fp16");
+    s.fwd = true;
+    check_win_refused(
+        "fwd at wave32", &s, "gfx1250", "fwd needs the wave64 MFMA form (got wave_size=32)");
+    s.problem.dtype = "bf16";
+    s.out_stride = 2;
+    check_win_refused(
+        "fwd s2 at wave32", &s, "gfx1250", "fwd needs the wave64 MFMA form (got wave_size=32)");
+    /* The same forward spec at wave64 stays valid on gfx950. */
+    s.wave_size = 64;
+    CHECK(rocke_direct_depthwise_dgrad_win_is_valid_spec(&s, "gfx950", reason, sizeof(reason)),
+          "the wave64 forward form refused on gfx950: %s",
+          reason);
+}
+
 /* The validator tail (rocke_wmma_fwd_limits_ok) refuses an unknown scheduler
  * with Python's ValueError text, word for word. */
 static void test_fwd_wmma_scheduler_reason(void)
@@ -514,9 +603,10 @@ static void test_fwd_wmma_scheduler_reason(void)
     CHECK(rocke_scheduler_strategy_is_valid(NULL), "NULL strategy refused");
 }
 
-/* rocke_py_str_repr is Python's repr() of a str: the quote choice, the
- * escapes, the snprintf-style length and truncation. The scheduler refusal
- * quotes the name with it, as Python's {value!r}. */
+/* rocke_py_str_repr is Python's repr() of a str (or of None): the quote
+ * choice, the escapes, the snprintf-style length and truncation. The
+ * scheduler refusal quotes the name with it, as Python's {value!r}, and the
+ * IR printer its region labels and list attrs. */
 static void test_py_str_repr(void)
 {
     const char* cases[][2] = {
@@ -529,17 +619,24 @@ static void test_py_str_repr(void)
         {"\x01\x1f\x7f", "'\\x01\\x1f\\x7f'"},
         {"caf\xc3\xa9", "'caf\xc3\xa9'"},
         {"", "''"},
+        {NULL, "None"},
     };
     char out[64];
     for(const auto& c : cases)
     {
         const size_t n = rocke_py_str_repr(c[0], out, sizeof out);
-        CHECK(strcmp(out, c[1]) == 0 && n == strlen(c[1]), "repr(%s) = %s", c[0], out);
+        CHECK(strcmp(out, c[1]) == 0 && n == strlen(c[1]),
+              "repr(%s) = %s",
+              c[0] != NULL ? c[0] : "None",
+              out);
     }
     CHECK(rocke_py_str_repr("abcdef", out, 4) == 8 && strcmp(out, "'ab") == 0,
           "truncated repr: %s",
           out);
     CHECK(rocke_py_str_repr("abc", NULL, 0) == 5, "repr length without a buffer");
+    CHECK(rocke_py_str_repr(NULL, out, 3) == 4 && strcmp(out, "No") == 0,
+          "truncated repr(None): %s",
+          out);
     char reason[ERR_CAP];
     CHECK(rocke_scheduler_strategy_reason("it's", reason, sizeof reason)
               && strcmp(reason,
@@ -548,6 +645,16 @@ static void test_py_str_repr(void)
                      == 0,
           "sched it's: %s",
           reason);
+    char small[8];
+    CHECK(rocke_scheduler_strategy_reason("bogus", small, sizeof small)
+              && strcmp(small, "unsuppo") == 0,
+          "truncated sched reason: %s",
+          small);
+    char mid[34];
+    CHECK(rocke_scheduler_strategy_reason("bogus", mid, sizeof mid)
+              && strcmp(mid, "unsupported scheduler_strategy 'b") == 0,
+          "sched reason cut inside the name: %s",
+          mid);
     const char* prefix = "unsupported scheduler_strategy 'a\\\\b'; expected";
     CHECK(rocke_scheduler_strategy_reason("a\\b", reason, sizeof reason)
               && strncmp(reason, prefix, strlen(prefix)) == 0,
@@ -925,6 +1032,7 @@ int main(void)
     test_tiled_dgrad_refuses_cpl();
     test_wmma_kernels_refuse_per_axis_padding();
     test_stem_wmma_kernels_refuse_per_axis_padding();
+    test_toeplitz_wmma_refusals();
     test_fwd_wmma_strided_view_refusals();
     test_fwd_wmma_poly_view_refusals();
     test_fwd_wmma_padded_poly_view_chunk();

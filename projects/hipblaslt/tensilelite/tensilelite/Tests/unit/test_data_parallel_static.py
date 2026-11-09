@@ -60,11 +60,10 @@ from test_PrefetchAcrossPersistent import (
     _tensor_parameters,
 )
 
-# Real-Solution gfx1250 toolchain fixtures. Imported so pytest resolves them as
-# fixtures in this module (they auto-skip when amdclang++ cannot target gfx1250).
+# Reuse the gfx1250 global setup and PrefetchGL2 capability gate. The assembler
+# fixture is inherited from unit/conftest.py.
 from test_prefetchgl2_streamk_guard import (  # noqa: F401  (fixtures used by name)
     _gp_gfx1250,
-    assembler,
     gfx1250_iim,
 )
 
