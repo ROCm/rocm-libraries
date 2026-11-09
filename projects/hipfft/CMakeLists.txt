@@ -40,6 +40,7 @@ endif()
 if( NOT DEFINED ROCM_LIBRARIES_ROOT )
   set( ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." )
 endif()
+list(APPEND CMAKE_MODULE_PATH "${ROCM_LIBRARIES_ROOT}/shared/arch/cmake")
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.
@@ -76,27 +77,10 @@ endif( )
 
 option( WERROR "Treat warnings as errors" OFF )
 
-set(DEFAULT_GPUS
-  gfx803
-  gfx900
-  gfx906
-  gfx908
-  gfx90a
-  gfx90c
-  gfx942
-  gfx950
-  gfx1030
-  gfx1100
-  gfx1101
-  gfx1102
-  gfx1150
-  gfx1151
-  gfx1152
-  gfx1153
-  gfx1200
-  gfx1201
-  gfx1250
-)
+include(rocm-arch-dependency)
+# Known identities with FFT-specific default exclusions.
+rocm_arch_list(DEFAULT_GPUS KIND PROCESSOR)
+list(REMOVE_ITEM DEFAULT_GPUS gfx1170 gfx1171 gfx1250-strict)
 
 if(BUILD_ADDRESS_SANITIZER)
   add_compile_options(-fsanitize=address)

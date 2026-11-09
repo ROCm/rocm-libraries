@@ -8,6 +8,10 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'shared/ctest/**'
+      - 'shared/arch/**'
+      - 'projects/rocfft/CMakeLists.txt'
+      - 'projects/rocfft/library/src/device/kernels/configs/config_arch.py'
+      - 'projects/hipfft/CMakeLists.txt'
       - 'CMakeLists.txt'
       - '.github/workflows/shared-ctest-ci.yml'
 
@@ -19,6 +23,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  architecture-consumers:
+    name: Architecture Catalog Consumers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            shared/arch
+            projects/rocfft/cmake
+            projects/rocfft/library/src/device/kernels/configs
+            projects/hipfft/cmake
+          sparse-checkout-cone-mode: true
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+      - name: Configure catalog and consumer tests
+        run: |
+          cmake -S shared/arch -B build/arch \
+            -DROCM_ARCH_BUILD_TESTING=ON \
+            -DROCM_ARCH_BUILD_INTEGRATION_TESTING=ON
+      - name: Build catalog tests
+        run: cmake --build build/arch --parallel 2
+      - name: Test catalog and FFT consumers
+        run: ctest --test-dir build/arch --output-on-failure
+
   optional-args-regression:
     name: Optional Argument Regression
     runs-on: ubuntu-24.04

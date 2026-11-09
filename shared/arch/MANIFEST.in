@@ -1,0 +1,4 @@
+include CMakeLists.txt README.md TESTING.md LICENSE.md
+recursive-include cmake *.cmake *.in
+recursive-include tools *.py
+recursive-include tests *.py *.cpp *.cmake
