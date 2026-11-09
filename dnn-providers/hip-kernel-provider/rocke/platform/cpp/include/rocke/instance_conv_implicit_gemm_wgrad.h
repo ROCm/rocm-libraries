@@ -217,6 +217,15 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * Default false: every existing config, including pipeline="compv3" +
      * prefetch_addr=true, emits byte-identical IR. */
     bool register_prefetch; /* default false */
+    /* prefetch_regs: the register-prefetch form of the plain single-buffer
+     * synchronous K loop (no carried offsets): tile k+1's global reads are
+     * issued right after the LDS-only barrier that publishes tile k, stay in
+     * VGPRs under tile k's MFMAs, and are written to LDS at the top of the next
+     * iteration. Rejected with async_dma, unroll_k, prefetch_addr, stream-K
+     * and on WMMA. Mirrors WgradConvSpec.prefetch_regs. Appended last so
+     * existing aggregate initialisers keep their layout.
+     * Default false: every existing config emits byte-identical IR. */
+    bool prefetch_regs; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

@@ -94,6 +94,14 @@
 #         False (the carried-offset prologue rewrite alone, no register
 #         prefetch): split-K packed fp16 atomic on the K-outer cshuffle base
 #         (73, sibling of 71), and two-stage (74, sibling of 72)
+#   75-86 -- prefetch_regs=True on a base config (see _PFR_BASES): the
+#         register-prefetch K loop across mem/compv3/compv4, M-outer and
+#         K-outer, the cshuffle epilogue with split_k = 1 and the packed fp16 /
+#         bf16 atomic, two-stage into fp16 and bf16 dW, and the 16x16x32 atom
+#         on a 128x128 tile; 82-86 pair it with async_dma, unroll_k,
+#         prefetch_addr, WMMA and stream-K, which both engines must reject.
+#         bf16 dW stands in for the bf16 kernels: the C++ synchronous wgrad
+#         loader loads 16-bit operands as f16.
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
 #    loader has no elem_dtype, so no other case loads bf16 operands: the
 #    async loop's copy carries no element type, only its zero-fill does. The stream-K
@@ -110,7 +118,7 @@
 #   107 -- streamk with unroll_k (must raise ValueError)
 #   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-74, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-86, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -158,6 +166,34 @@ _PFA_BASES = {
 }
 
 
+# prefetch_regs configs: index -> (base config index, extra overrides).
+_PFR_BASES = {
+    75: (1, {}),  # mem/cshuffle, M-outer
+    76: (11, {}),  # mem/cshuffle, K-outer
+    77: (11, {"split_k": 2, "pipeline": "compv3"}),  # packed fp16 atomic
+    78: (15, {"pipeline": "compv4"}),  # two-stage, fp16 dW
+    79: (15, {"dtype_d": "bf16"}),  # two-stage, bf16 dW
+    80: (11, {"split_k": 2, "dtype_d": "bf16"}),  # packed bf16 atomic
+    # The 16x16x32 atom on a 128x128 tile, compv3.
+    81: (
+        11,
+        {
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16,
+            "warp_tile_k": 32,
+            "pipeline": "compv3",
+        },
+    ),
+    82: (12, {}),  # + async_dma: rejected
+    83: (18, {}),  # + unroll_k: rejected
+    84: (0, {"prefetch_addr": True}),  # + prefetch_addr: rejected
+    85: (5, {}),  # WMMA gfx1151: rejected
+    86: (21, {}),  # stream-K: rejected
+}
+
+
 def _spec(idx: int):
     """Return (spec, arch) for config index `idx`.
 
@@ -166,6 +202,16 @@ def _spec(idx: int):
     illustrative of the validator contract; no differential harness consumes
     them (see the module header).
     """
+    if idx in _PFR_BASES:
+        from dataclasses import replace
+
+        base_idx, extra = _PFR_BASES[idx]
+        spec, arch = _spec(base_idx)
+        extra = dict(extra)
+        if "dtype_d" in extra:
+            extra["data"] = replace(spec.data, dtype_d=extra.pop("dtype_d"))
+        return replace(spec, prefetch_regs=True, **extra), arch
+
     if idx in _PFA_BASES:
         from dataclasses import replace
 
