@@ -864,8 +864,19 @@ ROCSOLVER_KERNEL void reset_info_kernel(T* info, const I n, U val, I incr = 0)
 }
 
 template <typename T, typename I, typename U>
-void reset_info(rocblas_handle handle, T* info, const I n, U val, I incr = 0)
+static void reset_info(rocblas_handle handle, T* info, const I n, U val, I incr = 0)
 {
+    {
+        // ----------------------
+        // check for quick return
+        // ----------------------
+        bool const has_work = (n >= 1);
+        if(!has_work)
+        {
+            return;
+        }
+    }
+
     hipStream_t stream{};
     rocblas_get_stream(handle, &stream);
 
