@@ -627,6 +627,73 @@ static int make_cfg_split_k_mfma(int idx, rocke_implicit_gemm_conv_spec_t* spec,
     }
 }
 
+/* The gfx950 spec gate around the MFMA split: a missing (NULL) pipeline or
+ * epilogue, split or not, and the LDS budget that charges compv4 one A/B
+ * tile. Built on config 54 (mem/cshuffle, 32x32x64 tile, split_k=2). Keep in
+ * lockstep with _mfma_gate_spec() in conv_implicit_gemm_emit.py.
+ *   62: unsplit, pipeline NULL: rejected by both engines
+ *   63: unsplit, epilogue NULL: rejected by both engines
+ *   64: split, pipeline NULL: rejected by both engines
+ *   65: split, epilogue NULL: rejected by both engines
+ *   66: split compv4/cshuffle, 128x64x256 tile, 4x2 warps, lds_k_pad=0 (fits
+ *       only because compv4 is charged one A/B tile)
+ *   67: config 66 unsplit
+ *   68: config 66 unsplit on compv3 with unroll_k (two A/B tiles): rejected
+ *       by both engines on the LDS budget
+ *   69: config 66 at 256x128x256: rejected by both engines on the LDS budget */
+static int make_cfg_mfma_gate(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    if(make_cfg_split_k_mfma(54, spec, arch) != 0)
+        return -1;
+    if(idx >= 66)
+    {
+        spec->tile_m = 128;
+        spec->tile_n = 64;
+        spec->tile_k = 256;
+        spec->warp_m = 4;
+        spec->warp_n = 2;
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 16;
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 0;
+        spec->pipeline = "compv4";
+    }
+    switch(idx)
+    {
+    case 62:
+        spec->split_k = 1;
+        spec->pipeline = NULL;
+        return 0;
+    case 63:
+        spec->split_k = 1;
+        spec->epilogue = NULL;
+        return 0;
+    case 64:
+        spec->pipeline = NULL;
+        return 0;
+    case 65:
+        spec->epilogue = NULL;
+        return 0;
+    case 66:
+        return 0;
+    case 67:
+        spec->split_k = 1;
+        return 0;
+    case 68:
+        spec->split_k = 1;
+        spec->pipeline = "compv3";
+        spec->unroll_k = true;
+        return 0;
+    case 69:
+        spec->tile_m = 256;
+        spec->tile_n = 128;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 /* The default epilogue stores one element per lane, so the validator rejects
  * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
  * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
@@ -644,9 +711,14 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         if(make_cfg_split_k_mfma(idx, spec, arch) != 0)
             return -1;
     }
+    else if(idx >= 62 && idx <= 69)
+    {
+        if(make_cfg_mfma_gate(idx, spec, arch) != 0)
+            return -1;
+    }
     else if(make_cfg_raw(idx, spec, arch) != 0)
         return -1;
-    if(strcmp(spec->epilogue, "default") == 0 && !spec->has_vector_size_c)
+    if(spec->epilogue != NULL && strcmp(spec->epilogue, "default") == 0 && !spec->has_vector_size_c)
     {
         spec->has_vector_size_c = true;
         spec->vector_size_c = 1;

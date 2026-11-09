@@ -603,6 +603,8 @@ def _spec_raw(idx: int):
         return _split_k_spec(idx)
     if 54 <= idx <= 61:
         return _mfma_split_k_spec(idx)
+    if 62 <= idx <= 69:
+        return _mfma_gate_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -785,6 +787,51 @@ def _mfma_split_k_spec(idx: int):
     }[idx]
     cfg = dict(base, **kw)
     return ImplicitGemmConvSpec(problem=_cp(**prob), **cfg), "gfx950"
+
+
+# The gfx950 spec gate around the MFMA split: a missing (None) pipeline or
+# epilogue, split or not, and the LDS budget that charges compv4 one A/B tile.
+# Built on config 54 (mem/cshuffle, 32x32x64 tile, split_k=2). Keep in
+# lockstep with make_cfg_mfma_gate() in conv_implicit_gemm_emit.c.
+#   62: unsplit, pipeline None: rejected by both engines
+#   63: unsplit, epilogue None: rejected by both engines
+#   64: split, pipeline None: rejected by both engines
+#   65: split, epilogue None: rejected by both engines
+#   66: split compv4/cshuffle, 128x64x256 tile, 4x2 warps, lds_k_pad=0 (fits
+#       only because compv4 is charged one A/B tile)
+#   67: config 66 unsplit
+#   68: config 66 unsplit on compv3 with unroll_k (two A/B tiles): rejected by
+#       both engines on the LDS budget
+#   69: config 66 at 256x128x256: rejected by both engines on the LDS budget
+
+
+def _mfma_gate_spec(idx: int):
+    spec, arch = _mfma_split_k_spec(54)
+    if idx >= 66:
+        spec = replace(
+            spec,
+            tile_m=128,
+            tile_n=64,
+            tile_k=256,
+            warp_m=4,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            lds_k_pad=0,
+            pipeline="compv4",
+        )
+    kw = {
+        62: dict(split_k=1, pipeline=None),
+        63: dict(split_k=1, epilogue=None),
+        64: dict(pipeline=None),
+        65: dict(epilogue=None),
+        66: {},
+        67: dict(split_k=1),
+        68: dict(split_k=1, pipeline="compv3", unroll_k=True),
+        69: dict(tile_m=256, tile_n=128),
+    }[idx]
+    return replace(spec, **kw), arch
 
 
 def main() -> int:
