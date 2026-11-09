@@ -8381,6 +8381,40 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrder)
     }
 }
 
+// The two forms above at head dim 53, over the head-dim padding copies (FlydslSdpaHeadPad.hpp):
+// each copy reads and writes a sequence's own length from its table entry, so with the origins
+// out of order every sequence is copied in and its O copied back, and no token between them is
+// written.
+TEST(TestGpuFlydslSdpaCdnaDispatch, PacksSequencesAtOriginsInAnyOrderAtAHeadDimOffEight)
+{
+    auto spec = packedGpuSpec();
+    spec.batch = 4;
+    spec.headDim = 53;
+    spec.seqLenQ = 160;
+    spec.seqLenKv = 160;
+    setPacked(spec, {150, 64, 8, 90}, {160, 100, 40, 33});
+    setPadding(spec, {150, 50, 0, 77}, {100, 3, 40, 33});
+    spec.packedOriginsQ = {400, 10, 600, 100};
+    spec.packedOriginsKv = {300, 0, 520, 120};
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrderAtAHeadDimOffEight)
+{
+    auto spec = packedGpuSpec();
+    spec.batch = 4;
+    spec.headDim = 53;
+    spec.seqLenQ = 64;
+    spec.seqLenKv = 128;
+    setPacked(spec, {48, 1, 64, 17}, {128, 96, 64, 80});
+    setPadding(spec, {48, 1, 64, 17}, {100, 33, 20, 0});
+    spec.omitSeqLenQ = true;
+    spec.slotTailNan = true;
+    spec.packedOriginsKv = {200, 0, 400, 100};
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
 // ---------------------------------------------------------------------------
 // Head dims off 8 (FlydslSdpaHeadPad.hpp): AOTriton's prime head dims, allocated at their own
 // width so every row pitch is odd and no row is 16-byte aligned, run on the bucket objects over

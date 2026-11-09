@@ -969,7 +969,11 @@ table, the sequence extent still the longest sequence.
   CDNA modification 47): `TestGpuFlydsl*Dispatch.PacksSequencesAtOriginsInAnyOrder` (RDNA
   prefill, CDNA) and `...MirrorsSequsedKAtKeyOriginsInAnyOrder` (RDNA prefill, aiw, CDNA) put
   Q's and K's sequences out of order with gaps between them and a last table entry of 0; the
-  harnesses check every token no sequence owns keeps its fill. The frontend lane's
+  harnesses check every token no sequence owns keeps its fill. The `...AtAHeadDimOffEight`
+  variants (RDNA prefill and CDNA both forms, aiw the `seqused_k` one) run them at head dim 53,
+  over the head-dim padding copies (§7.12), which copy each sequence's own length from its
+  table entry in and back; the copies before they took the lengths, which sized a sequence by
+  `offset[b + 1] − offset[b]`, fail them. The frontend lane's
   `RaggedOrigins/*` cases run the same forms through `Graph::sdpa` against hipDNN's CPU
   reference graph executor, which addresses each batch at its origin for its length. The
   objects before modifications 37 and 47, which clamped a length to `offset[b + 1] −
@@ -2154,7 +2158,11 @@ changed.
   the `sdpa_head_pad` op's object (`kernels_src/kernels/head_pad/`, one per target), launched
   by the natives on the attention launch's stream, three times before it and once after; it
   moves 16-bit units, so f32 is two per element. Packed operands are copied through their own
-  token tables, slot by slot, so only rows that exist are read or written.
+  token tables, as the attention kernels read them: each sequence from its table entry, for its
+  per-batch length when the graph gives one (`seq_len_q` for Q and O, `seq_len_kv` for K and V,
+  so origins in any order and with gaps, §5.9), else for the table's difference. Only a
+  sequence's own tokens are read or written; a tensor bound as both a query-side and a key-side
+  operand with different lengths declines.
 - **Matching.** The engine's graph match, kernel match, score, workspace and prepare see a padded
   graph: Q/K/V/O at the padded width, in the padded layout, declaring 16-byte alignment, a packed
   operand's multiplier its new sequence stride; every other field is the graph's own. The scale

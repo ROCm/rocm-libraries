@@ -63,6 +63,11 @@
  *   copies Q, K and V into the workspace (the columns past their width zeroed, so Q·K over the
  *   padding adds exactly 0 and nothing read past a row reaches a score), runs the engine's
  *   launch with Q/K/V/O's buffers pointing at the copies, and copies O's first Dv columns back.
+ *   A packed operand's copies go through its token table: each sequence at its table entry, for
+ *   its per-batch length when the graph gives one (`seq_len_q` for Q and O, `seq_len_kv` for K
+ *   and V: cuDNN's per-batch origins, in any order and with gaps), else for the table's
+ *   difference, as the attention kernels read it; no token outside a sequence is read or
+ *   written (headPadLengths()).
  *   The copies are the `sdpa_head_pad` op's object (`flydsl/kernels_src/kernels/head_pad/`),
  *   found beside the attention kernel's directory as the RNG dump's writer is; all four launch on
  *   the attention launch's stream.
@@ -161,6 +166,39 @@ inline HeadPadLayout headPadLayout(int64_t heads, int64_t sequence, int64_t widt
     return HeadPadLayout{sequence * heads * width, width, heads * width};
 }
 
+/// No per-batch length array: a packed operand's copy takes each sequence's token count from
+/// its table's differences.
+inline constexpr int64_t HEAD_PAD_NO_LENGTHS = -1;
+
+/**
+ * @brief The per-batch length tensor a packed operand @p uid's copy reads (HEAD_PAD_NO_LENGTHS
+ *        for none), or nullopt when the operand plays two roles whose lengths differ.
+ *
+ * The attention kernels read packed sequence b as `seq_len[b]` tokens from its table entry
+ * whenever the graph gives that side's lengths (RDNA prefill modification 37, CDNA
+ * modification 47, the aiw kernel's seqused_k bits): Q and O take `seq_len_q`, K and V
+ * `seq_len_kv`. Without `seq_len_q` (PyTorch's seqused_k) Q's and O's counts are their table's
+ * differences, as the kernels then read them. A dense operand reads none.
+ */
+inline std::optional<int64_t> headPadLengths(const data_objects::SdpaAttributes& attributes,
+                                             const data_objects::TensorAttributes& tensor,
+                                             int64_t uid)
+{
+    if(!tensor.ragged_offset_tensor_uid().has_value())
+    {
+        return HEAD_PAD_NO_LENGTHS;
+    }
+    const int64_t query = attributes.seq_len_q_tensor_uid().value_or(HEAD_PAD_NO_LENGTHS);
+    const int64_t key = attributes.seq_len_kv_tensor_uid().value_or(HEAD_PAD_NO_LENGTHS);
+    const bool queryRole = uid == attributes.q_tensor_uid() || uid == attributes.o_tensor_uid();
+    const bool keyRole = uid == attributes.k_tensor_uid() || uid == attributes.v_tensor_uid();
+    if(queryRole && keyRole && query != key)
+    {
+        return std::nullopt;
+    }
+    return queryRole ? query : key;
+}
+
 /**
  * @brief Whether the copy can read (or, for O, write) @p tensor: a rank-4 device tensor in a
  *        dtype the objects take, head-dim stride 1, every other axis of more than one element at
@@ -233,7 +271,9 @@ struct HeadPadGraph
 /**
  * @brief The padded graph for @p context (the file comment), or nullptr when an operand cannot
  *        be copied: Q, K, V and O each headPadCopyable, and O's elements distinct, since the copy
- *        back writes each once. Also nullptr unless K has Q's head dim and O has V's.
+ *        back writes each once. Also nullptr unless K has Q's head dim and O has V's, and
+ *        when one packed tensor is both a query-side and a key-side operand whose lengths differ
+ *        (headPadLengths()).
  */
 inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext& context)
 {
@@ -249,7 +289,8 @@ inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext&
     for(const int64_t uid : {qUid, kUid, vUid, oUid})
     {
         const auto* tensor = findTensor(context, uid);
-        if(tensor == nullptr || !headPadCopyable(*tensor))
+        if(tensor == nullptr || !headPadCopyable(*tensor)
+           || !headPadLengths(*attributes, *tensor, uid).has_value())
         {
             return nullptr;
         }
@@ -396,25 +437,27 @@ struct HeadPadMatchers
     }
 };
 
-/// The copy's argument list, as `gen_sdpa_head_pad.py` asserts it: the source, destination and
-/// token-table pointers; batch, heads, sequence, units copied, units per destination row
-/// (i32); the source's and the destination's (batch, head, sequence) strides in units (i64).
+/// The copy's argument list, as `gen_sdpa_head_pad.py` asserts it: the source, destination,
+/// token-table and per-batch-length pointers; batch, heads, sequence, units copied, units per
+/// destination row (i32); the source's and the destination's (batch, head, sequence) strides in
+/// units (i64).
 inline const std::vector<KernelArgument>& headPadSignature()
 {
     static const std::vector<KernelArgument> s_signature{{"global_buffer", 8, 0, ""},
                                                          {"global_buffer", 8, 8, ""},
                                                          {"global_buffer", 8, 16, ""},
-                                                         {"by_value", 4, 24, ""},
-                                                         {"by_value", 4, 28, ""},
+                                                         {"global_buffer", 8, 24, ""},
                                                          {"by_value", 4, 32, ""},
                                                          {"by_value", 4, 36, ""},
                                                          {"by_value", 4, 40, ""},
-                                                         {"by_value", 8, 48, ""},
+                                                         {"by_value", 4, 44, ""},
+                                                         {"by_value", 4, 48, ""},
                                                          {"by_value", 8, 56, ""},
                                                          {"by_value", 8, 64, ""},
                                                          {"by_value", 8, 72, ""},
                                                          {"by_value", 8, 80, ""},
-                                                         {"by_value", 8, 88, ""}};
+                                                         {"by_value", 8, 88, ""},
+                                                         {"by_value", 8, 96, ""}};
     return s_signature;
 }
 
@@ -425,6 +468,9 @@ struct HeadPadOperand
     int64_t uid = 0;
     /// The token table a packed operand goes through, or NO_SEQ_LEN.
     int64_t rowOffset = -1;
+    /// The per-batch lengths a packed operand's sequences take (headPadLengths()), or
+    /// HEAD_PAD_NO_LENGTHS.
+    int64_t lengths = HEAD_PAD_NO_LENGTHS;
     int32_t batch = 0;
     int32_t heads = 0;
     int32_t sequence = 0;
@@ -502,6 +548,7 @@ inline HeadPadPlan headPadPlan(const MatchContext& context, size_t innerBytes)
         HeadPadOperand result;
         result.uid = uid;
         result.rowOffset = tensor.ragged_offset_tensor_uid().value_or(-1);
+        result.lengths = headPadLengths(*attributes, tensor, uid).value_or(HEAD_PAD_NO_LENGTHS);
         const int64_t heads = dims->Get(HEAD_AXIS);
         const int64_t sequence = dims->Get(SEQ_AXIS);
         const auto elements = checkedProduct({dims->Get(BATCH_AXIS), sequence, heads, width});
@@ -693,6 +740,14 @@ public:
                                                operand.rowOffset, deviceBuffers, numDeviceBuffers)
                                                .ptr;
         };
+        // Read by the copy only for a packed operand.
+        const auto lengths = [&](const HeadPadOperand& operand) -> void* {
+            return operand.rowOffset < 0 || operand.lengths < 0
+                       ? nullptr
+                       : hipdnn_plugin_sdk::findDeviceBuffer(
+                             operand.lengths, deviceBuffers, numDeviceBuffers)
+                             .ptr;
+        };
 
         std::vector<hipdnnPluginDeviceBuffer_t> buffers(deviceBuffers,
                                                         deviceBuffers + numDeviceBuffers);
@@ -718,6 +773,7 @@ public:
                                                                source,
                                                                copy,
                                                                rowOffset(input),
+                                                               lengths(input),
                                                                input.batch,
                                                                input.heads,
                                                                input.sequence,
@@ -748,6 +804,7 @@ public:
                     outputCopy,
                     destination,
                     rowOffset(output),
+                    lengths(output),
                     output.batch,
                     output.heads,
                     output.sequence,

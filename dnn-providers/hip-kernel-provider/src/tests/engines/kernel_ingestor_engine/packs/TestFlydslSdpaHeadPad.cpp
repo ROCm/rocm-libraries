@@ -237,6 +237,42 @@ TEST(TestFlydslSdpaHeadPad, DeclinesOperandsTheCopyCannotRead)
     }
 }
 
+/// @p spec's graph with K bound to Q's tensor (self-attention over one packed tensor).
+flatbuffers::FlatBufferBuilder withKeyAsQuery(const SdpaGraphSpec& spec)
+{
+    const auto built = buildFlydslSdpaRdnaGraph(spec);
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph(
+        hipdnn_flatbuffers_sdk::data_objects::GetGraph(built.GetBufferPointer())->UnPack());
+    auto* sdpa = graph->nodes.front()->attributes.AsSdpaAttributes();
+    EXPECT_NE(sdpa, nullptr);
+    if(sdpa != nullptr)
+    {
+        sdpa->k_tensor_uid = sdpa->q_tensor_uid;
+    }
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graph.get()));
+    return builder;
+}
+
+// The copies read a packed tensor's sequences for its role's lengths (seq_len_q for Q and O,
+// seq_len_kv for K and V): one tensor bound as both Q and K, with lengths that differ, has no
+// one set of sequences to copy, so it declines; without lengths it is copied through its table.
+TEST(TestFlydslSdpaHeadPad, DeclinesATensorInTwoRolesWithDifferentLengths)
+{
+    auto spec = compactSpec(37);
+    spec.seqLenKv = spec.seqLenQ;
+    spec.kvHeads = spec.heads;
+    setPacked(spec, {37, 11}, {37, 11});
+    {
+        SCOPED_TRACE("control: no lengths");
+        const GraphFixture fixture(withKeyAsQuery(spec));
+        EXPECT_NE(flydsl_sdpa::buildHeadPadGraph(fixture.context()), nullptr);
+    }
+    setPadding(spec, {30, 11}, {37, 5});
+    const GraphFixture fixture(withKeyAsQuery(spec));
+    EXPECT_EQ(flydsl_sdpa::buildHeadPadGraph(fixture.context()), nullptr);
+}
+
 /// @p spec's graph with one tensor's head dim set to @p headDim, its strides contiguous BSHD at
 /// that width: a graph the frontend would reject, as a native criterion must still judge.
 flatbuffers::FlatBufferBuilder withHeadDim(const SdpaGraphSpec& spec, int64_t uid, int64_t headDim)

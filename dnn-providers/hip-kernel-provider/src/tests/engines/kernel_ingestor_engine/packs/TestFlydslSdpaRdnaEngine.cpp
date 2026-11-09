@@ -9187,6 +9187,38 @@ TEST(TestGpuFlydslSdpaAiwDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrder)
     }
 }
 
+// The same forms at head dim 53, over the head-dim padding copies (FlydslSdpaHeadPad.hpp): each
+// copy reads and writes a sequence's own length from its table entry, so with the origins out
+// of order every sequence is copied in and its O copied back, and no token between them is
+// written.
+TEST(TestGpuFlydslSdpaRdnaDispatch, PacksSequencesAtOriginsInAnyOrderAtAHeadDimOffEight)
+{
+    SKIP_IF_NO_DEVICES();
+    auto spec = originsInAnyOrderGpuSpec();
+    spec.headDim = 53;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrderAtAHeadDimOffEight)
+{
+    SKIP_IF_NO_DEVICES();
+    auto spec = sequsedKAtKeyOriginsGpuSpec();
+    spec.headDim = 53;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrderAtAHeadDimOffEight)
+{
+    SKIP_IF_NO_DEVICES();
+    auto spec = sequsedKAtKeyOriginsGpuSpec();
+    spec.headDim = 53;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+}
+
 // The aiw padded-96 dropout objects read Q/K's and V's widths as two runtime arguments, so they
 // drop on a Q/K and V head-dim pair that fit their tile (any multiples of 8 up to 96), as the
 // padded objects without dropout do: the dump against the oracle, O against the reference.

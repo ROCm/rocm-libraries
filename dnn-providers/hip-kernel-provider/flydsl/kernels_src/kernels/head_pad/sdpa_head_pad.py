@@ -20,9 +20,13 @@ where a row starts at ``b * sb + s * ss + h * sh`` (``sb``, ``ss``, ``sh`` the o
 in units). With ``ROW_OFF`` (an int32 ``[B + 1]`` token table, null for a dense operand) the
 operand is packed (THD): row ``(b, h, s)`` is token ``ROW_OFF[b] + s`` at
 ``token * ss + h * sh``, the batch strides are not read, and a row with ``s`` at or past the
-sequence's slot ``ROW_OFF[b + 1] - ROW_OFF[b]`` does not exist and is neither read nor
-written. Padding a row is ``copy_units`` = the head dim and ``dst_units`` = the padded width
-(the tail zeroed); unpadding is ``copy_units`` = ``dst_units`` = the head dim.
+sequence's length does not exist and is neither read nor written. The length is ``LEN[b]``
+when ``LEN`` (an int32 ``[B]`` per-batch length array) is given -- cuDNN's per-batch origins
+and lengths, where the table may list the origins in any order and leave gaps, and its next
+entry bounds nothing -- and the table's difference ``ROW_OFF[b + 1] - ROW_OFF[b]`` when it is
+null. ``LEN`` is read only for a packed operand. Padding a row is ``copy_units`` = the head
+dim and ``dst_units`` = the padded width (the tail zeroed); unpadding is ``copy_units`` =
+``dst_units`` = the head dim.
 
 One thread per 8 destination units (a chunk): a grid of ``cdiv(S * cdiv(dst_units, 8),
 BLOCK_THREADS)`` by ``B * H`` workgroups, each row of the grid one (batch, head) plane, so
@@ -34,9 +38,9 @@ at any 2-byte alignment is read in place and nothing past a row's ``copy_units``
 written as one 16-byte vector when the destination's rows are 16-byte aligned (the padded copy,
 when padding) and unit by unit otherwise, each unit below ``dst_units`` once.
 
-Arguments, in order: ``SRC``, ``DST``, ``ROW_OFF`` (pointers), ``batch``, ``heads``, ``seq_len``,
-``copy_units``, ``dst_units`` (Int32), the source's ``(batch, head, seq)`` strides and the
-destination's (Int64, in units), then the stream.
+Arguments, in order: ``SRC``, ``DST``, ``ROW_OFF``, ``LEN`` (pointers), ``batch``, ``heads``,
+``seq_len``, ``copy_units``, ``dst_units`` (Int32), the source's ``(batch, head, seq)`` strides
+and the destination's (Int64, in units), then the stream.
 """
 
 import flydsl.compiler as flyc
@@ -62,18 +66,26 @@ def _i32_at(ptr, index):
     return fx.Int64(fx.Int32(fx.ptr_load(i32_ptr + fx.Int64(index), fx.Int32)))
 
 
-def _sequence(row_off, batch, seq_len):
-    """``(first, rows)``: the batch's first token and its row count. A packed operand's come
-    from its token table (a branch, so a dense launch loads nothing); a dense operand's are
-    ``(0, seq_len)``, its rows addressed through the batch stride."""
+def _sequence(row_off, lengths, batch, seq_len):
+    """``(first, rows)``: the batch's first token and its row count. A packed operand's first
+    token comes from its token table, and its count from the per-batch lengths when
+    ``lengths`` is given, else from the table's next entry (branches, so a dense launch loads
+    nothing and a launch without lengths reads none); a dense operand's are ``(0, seq_len)``,
+    its rows addressed through the batch stride."""
     from flydsl._mlir.dialects import scf as _scf  # noqa: PLC0415
 
     packed = fx.Int64(fx.ptrtoint(row_off)) != fx.Int64(0)
     if_op = _scf.IfOp(fx.as_ir_value(packed), results_=[T.i64, T.i64], has_else=True)
     with ir.InsertionPoint(if_op.then_block):
         first = _i32_at(row_off, batch)
-        last = _i32_at(row_off, batch + fx.Int64(1))
-        _scf.YieldOp([fx.as_ir_value(first), fx.as_ir_value(last - first)])
+        given = fx.Int64(fx.ptrtoint(lengths)) != fx.Int64(0)
+        len_if = _scf.IfOp(fx.as_ir_value(given), results_=[T.i64], has_else=True)
+        with ir.InsertionPoint(len_if.then_block):
+            _scf.YieldOp([fx.as_ir_value(_i32_at(lengths, batch))])
+        with ir.InsertionPoint(len_if.else_block):
+            last = _i32_at(row_off, batch + fx.Int64(1))
+            _scf.YieldOp([fx.as_ir_value(last - first)])
+        _scf.YieldOp([fx.as_ir_value(first), len_if.results[0]])
     with ir.InsertionPoint(if_op.else_block):
         _scf.YieldOp([fx.as_ir_value(fx.Int64(0)), fx.as_ir_value(fx.Int64(seq_len))])
     return fx.Int64(if_op.results[0]), fx.Int64(if_op.results[1]), packed
@@ -146,6 +158,7 @@ def build_sdpa_head_pad_module(block_threads=256):
         SRC: fx.Pointer,
         DST: fx.Pointer,
         ROW_OFF: fx.Pointer,
+        LEN: fx.Pointer,
         batch: fx.Int32,
         heads: fx.Int32,
         seq_len: fx.Int32,
@@ -173,7 +186,7 @@ def build_sdpa_head_pad_module(block_threads=256):
             s32 = t // chunks
             s = fx.Int64(s32)
             col = fx.Int64(t - s32 * chunks) * fx.Int64(CHUNK)
-            first, rows, packed = _sequence(ROW_OFF, b, seq_len)
+            first, rows, packed = _sequence(ROW_OFF, LEN, b, seq_len)
             if s < rows:
                 token = first + s
                 src_row = packed.select(token * src_ss, b * src_sb + s * src_ss)
@@ -193,6 +206,7 @@ def build_sdpa_head_pad_module(block_threads=256):
         SRC: fx.Pointer,
         DST: fx.Pointer,
         ROW_OFF: fx.Pointer,
+        LEN: fx.Pointer,
         batch: fx.Int32,
         heads: fx.Int32,
         seq_len: fx.Int32,
@@ -215,6 +229,7 @@ def build_sdpa_head_pad_module(block_threads=256):
             SRC,
             DST,
             ROW_OFF,
+            LEN,
             batch,
             heads,
             seq_len,
