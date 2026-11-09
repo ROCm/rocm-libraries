@@ -816,7 +816,6 @@ namespace
         EXPECT_EQ(copy(nullptr, src, dst), st_ok);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 1, 0), st_ok);
 
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
         const auto scalar = [&](Dnvec& a, rocsparse_datatype dt, const void* p) {
             ASSERT_EQ(rocsparse_dnvec_descr_create_scalar(
                           handle, &a, rocsparse_pointer_mode_host, dt, p, nullptr, nullptr),
@@ -839,7 +838,6 @@ namespace
                   st_ok);
         EXPECT_EQ(copy(alpha_double, src, dst_row), rocsparse_status_not_implemented);
         EXPECT_EQ(copy(alpha, src, dst_row), st_val);
-#endif
     }
 
     TEST_F(ConvDescr, DnmatTransposeInvalid)
@@ -876,7 +874,6 @@ namespace
         EXPECT_EQ(transpose(nullptr, src, dst), st_ok);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 1, 0), st_ok);
 
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
         const auto scalar = [&](Dnvec& a, rocsparse_datatype dt, const void* p) {
             ASSERT_EQ(rocsparse_dnvec_descr_create_scalar(
                           handle, &a, rocsparse_pointer_mode_host, dt, p, nullptr, nullptr),
@@ -899,7 +896,6 @@ namespace
                   st_ok);
         EXPECT_EQ(transpose(alpha_double, src, dst_row), rocsparse_status_not_implemented);
         EXPECT_EQ(transpose(alpha, src, dst_row), st_val);
-#endif
     }
 } // namespace
 #endif // ROCSPARSE_WITH_TRSM_REFACTORING
