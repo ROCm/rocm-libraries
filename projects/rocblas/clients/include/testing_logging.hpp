@@ -1443,6 +1443,10 @@ inline void testing_logging_write_error(const Arguments&)
     auto   future = done->get_future();
     float* x      = dx;
 
+    // The failed write below makes rocBLAS print an error to stderr, which is expected
+    rocblas_cerr << "IGNORE next Error writing log file: No space left on device"
+                 << std::endl;
+
     std::thread([done, x, device] {
         if(hipSetDevice(device) != hipSuccess)
         {
