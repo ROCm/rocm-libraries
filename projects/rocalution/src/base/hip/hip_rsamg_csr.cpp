@@ -681,7 +681,8 @@ namespace rocalution
 
             // Ghost columns are global until RenumberGlobalToLocal(), their number is
             // bounded by nnz
-            cast_pg->ncol_ = static_cast<int>(cast_pg->nnz_);
+            cast_pg->ncol_ = static_cast<int>(
+                std::min<int64_t>(cast_pg->nnz_, std::numeric_limits<int>::max()));
 
             // Allocate P ghost
             allocate_hip(cast_pg->nnz_, &cast_pg->mat_.col);
@@ -1331,7 +1332,8 @@ namespace rocalution
 
             // Ghost columns are global until RenumberGlobalToLocal(), their number is
             // bounded by nnz
-            cast_pg->ncol_ = static_cast<int>(cast_pg->nnz_);
+            cast_pg->ncol_ = static_cast<int>(
+                std::min<int64_t>(cast_pg->nnz_, std::numeric_limits<int>::max()));
 
             // Allocate P ghost
             allocate_hip(cast_pg->nnz_, &cast_pg->mat_.col);

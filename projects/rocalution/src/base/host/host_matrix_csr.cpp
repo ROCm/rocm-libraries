@@ -6218,7 +6218,8 @@ namespace rocalution
 
             // Ghost columns are global until RenumberGlobalToLocal(), their number is
             // bounded by nnz
-            cast_pg->ncol_ = static_cast<int>(cast_pg->nnz_);
+            cast_pg->ncol_ = static_cast<int>(
+                std::min<int64_t>(cast_pg->nnz_, std::numeric_limits<int>::max()));
 
             allocate_host(cast_pg->nnz_, &cast_pg->mat_.col);
             allocate_host(cast_pg->nnz_, &cast_pg->mat_.val);
@@ -6565,7 +6566,8 @@ namespace rocalution
 
             // Ghost columns are global until RenumberGlobalToLocal(), their number is
             // bounded by nnz
-            cast_pg->ncol_ = static_cast<int>(cast_pg->nnz_);
+            cast_pg->ncol_ = static_cast<int>(
+                std::min<int64_t>(cast_pg->nnz_, std::numeric_limits<int>::max()));
 
             allocate_host(cast_pg->nnz_, &cast_pg->mat_.col);
             allocate_host(cast_pg->nnz_, &cast_pg->mat_.val);
@@ -7879,7 +7881,8 @@ namespace rocalution
             cast_pg->nnz_ = cast_pg->mat_.row_offset[this->nrow_];
             // Ghost columns are global until RenumberGlobalToLocal(), their number is
             // bounded by nnz
-            cast_pg->ncol_ = static_cast<int>(cast_pg->nnz_);
+            cast_pg->ncol_ = static_cast<int>(
+                std::min<int64_t>(cast_pg->nnz_, std::numeric_limits<int>::max()));
 
             allocate_host(cast_pg->nnz_, &cast_pg->mat_.col);
             allocate_host(cast_pg->nnz_, &cast_pg->mat_.val);
@@ -8654,7 +8657,8 @@ namespace rocalution
             cast_pg->nnz_ = cast_pg->mat_.row_offset[this->nrow_];
             // Ghost columns are global until RenumberGlobalToLocal(), their number is
             // bounded by nnz
-            cast_pg->ncol_ = static_cast<int>(cast_pg->nnz_);
+            cast_pg->ncol_ = static_cast<int>(
+                std::min<int64_t>(cast_pg->nnz_, std::numeric_limits<int>::max()));
 
             allocate_host(cast_pg->nnz_, &cast_pg->mat_.col);
             allocate_host(cast_pg->nnz_, &cast_pg->mat_.val);
@@ -12314,13 +12318,16 @@ namespace rocalution
                             &int_csr_val,
                             int_nnz,
                             nrow,
-                            std::max(nrow, static_cast<int>(int_nnz)));
-        cast_gst->SetDataPtrCSR(&gst_csr_row_ptr,
-                                &gst_csr_col_ind,
-                                &gst_csr_val,
-                                gst_nnz,
-                                nrow,
-                                static_cast<int>(gst_nnz));
+                            std::max(nrow,
+                                     static_cast<int>(std::min<int64_t>(
+                                         int_nnz, std::numeric_limits<int>::max()))));
+        cast_gst->SetDataPtrCSR(
+            &gst_csr_row_ptr,
+            &gst_csr_col_ind,
+            &gst_csr_val,
+            gst_nnz,
+            nrow,
+            static_cast<int>(std::min<int64_t>(gst_nnz, std::numeric_limits<int>::max())));
 
         return true;
     }
@@ -12542,7 +12549,9 @@ namespace rocalution
                                 &csr_val,
                                 nnz,
                                 nrow,
-                                interior ? ncol : static_cast<int>(nnz));
+                                interior ? ncol
+                                         : static_cast<int>(std::min<int64_t>(
+                                               nnz, std::numeric_limits<int>::max())));
         }
 
         return true;
