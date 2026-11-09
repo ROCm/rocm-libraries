@@ -23,6 +23,7 @@ namespace roc::hostnumerics::amd_gpu_layout {
 // The complete padding, reshape and permutation are available through transform().
 // All factories throw std::runtime_error if shapes, padding or strides overflow
 // the ReshapePermutation limits.
+// Assign a new plan before querying or copying from a moved-from plan.
 class MxScaleStoragePlan {
    public:
     // Keeps the input shape and order, with no padding.

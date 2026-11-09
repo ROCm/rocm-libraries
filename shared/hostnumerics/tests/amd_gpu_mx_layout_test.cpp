@@ -4,12 +4,12 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 #include <span>
 #include <stdexcept>
-#include <string_view>
 #include <vector>
 
 #ifdef _OPENMP

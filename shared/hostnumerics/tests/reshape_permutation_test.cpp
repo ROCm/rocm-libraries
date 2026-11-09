@@ -6,10 +6,13 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <numeric>
 #include <roc/hostnumerics/reshape_permutation.hpp>
+#include <span>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 using namespace roc::hostnumerics;
@@ -65,6 +68,17 @@ TEST(ReshapePermutationTest, RejectsInconsistentShapesAndOrder) {
     EXPECT_THROW((ReshapePermutation({2, 3}, {2, 4}, {2, 3}, Permutation{0, 1})),
                  std::runtime_error);
     EXPECT_THROW((ReshapePermutation({2, 3}, {2, 3}, {6}, Permutation{0, 1})), std::runtime_error);
+}
+
+TEST(ReshapePermutationTest, SelfMovePreservesPermutation) {
+    ReshapePermutation transform({2, 3}, {2, 3}, {2, 3}, Permutation{1, 0});
+    auto& alias = transform;
+    transform = std::move(alias);
+    const std::array<int, 6> input{0, 1, 2, 3, 4, 5};
+    std::array<int, 6> output{};
+    copyWithReshapePermutation<int>(input, output, transform);
+    EXPECT_EQ(output, (std::array<int, 6>{0, 3, 1, 4, 2, 5}));
+    EXPECT_EQ(transform.order(), (Permutation{1, 0}));
 }
 
 // Tutorial: store four 2 x 2 tiles from a 4 x 4 matrix. The last dimension

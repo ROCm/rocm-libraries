@@ -1,9 +1,12 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <array>
+#include <cstddef>
 #include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "detail/checked_arithmetic.hpp"
 
