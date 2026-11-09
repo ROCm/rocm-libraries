@@ -10,25 +10,10 @@
 #   - Method:    the layered narrowing of docs/test-plans/sdpa-fwd.md, sections 2 and 3. Its
 #                rules A, B and C are stated at the top of L1-definition.yaml.
 #
-# Amended 2026-10-29. Added by meaning:
-#     - the six model additions: lengths stated without the padding flag (an API spelling of
-#       sequence_lengths = variable, see its note: no new L0 value); paged_kv k_only / v_only and
-#       page_table_sharing; bias_broadcast batch_only / heads_only; descale_* per_head;
-#       alibi_head_count; max_sumexp_output max_only / sum_exp_only;
-#     - found missing while re-checking against the hipDNN frontend and the
-#       reference comparison: batch_packing per side
-#       (ragged_q_side, ragged_kv_side), page_size_k_vs_v, page_table_storage, descale_* finer,
-#       matmul_input_precision fp8, dropout_mask_broadcast. Added to the model 2026-10-29, so that
-#       the usage labels can filter them; rules.yaml CH-NOT-MODELLED-YET is removed.
-#
-# Amended 2026-11-04 (Layer 0 fix). Layer 0 holds the request and the settings that tensor contents
-#   define. A missing engine, reference or frontend feature is never a reason to leave a value out of
-#   Layer 0 or to set it aside. Added by meaning: ragged_offset_unit, ragged_offset_sharing,
-#   ragged_offset_dtype, o_packing, v_packing, length_form, block_mask_granularity, block_mask_dtype,
-#   dropout_mask_dtype, rng_state_storage, sink_values, scale_factor_values, special_values,
-#   value_magnitude, execution_strategy, dropout_scale_storage, descale_storage, and the value
-#   independent_starts of ragged_offsets.
-#   sink_dtype takes every format. Value classes of tensor contents (sink_values,
+# Scope
+#   Layer 0 holds the request and the settings that tensor contents define. A missing engine,
+#   reference or frontend feature is never a reason to leave a value out of Layer 0 or to set it
+#   aside. sink_dtype takes every format. Value classes of tensor contents (sink_values,
 #   scale_factor_values, special_values, value_magnitude, scale_value non_finite) are hints for a
 #   fuzzer: they are not for test-case generation.
 #
@@ -145,13 +130,13 @@ axes:
     values:
       - {id: padded, meaning: "every tensor in equal-length slots; a shorter sequence leaves blank positions"}
       - {id: ragged, meaning: "Q, K, V and O squashed end to end; a list of start positions says where each sequence begins"}
-      - {id: ragged_q_side, meaning: "Q and O squashed end to end; K and V in equal-length slots or pages (the vLLM serving shape). Added 2026-10-29"}
-      - {id: ragged_kv_side, meaning: "K and V squashed end to end; Q and O in equal-length slots. Added 2026-10-29"}
+      - {id: ragged_q_side, meaning: "Q and O squashed end to end; K and V in equal-length slots or pages (the vLLM serving shape)"}
+      - {id: ragged_kv_side, meaning: "K and V squashed end to end; Q and O in equal-length slots"}
     notes: >-
       An output row belongs to its query, and each value to its key, so the values name the two sides.
-      O can be stored differently from Q (o_packing), and V differently from K (v_packing). Added 2026-10-29: the per-side values (ragged Q over a
-      paged K/V cache is in the reference tests; the frontend puts a ragged offset on each tensor
-      separately).
+      O can be stored differently from Q (o_packing), and V differently from K (v_packing). The per-side values exist because ragged Q over a
+      paged K/V cache is in the reference tests, and the frontend puts a ragged offset on each tensor
+      separately.
     source: "axes.md § 1"
 
   - id: ragged_offsets
@@ -242,7 +227,7 @@ axes:
       By meaning they are one thing: positions past a sequence's real length take no part in attention.
       So "padding mask" is not a separate Layer 0 axis; it is sequence_lengths = variable. A padding mask
       with no lengths cannot be stated in this model (see Layer 1 `structural` rules).
-      Amended 2026-10-29: an API flag that switches the lengths on (hipDNN's padding_mask) is not part of
+      An API flag that switches the lengths on (hipDNN's padding_mask) is not part of
       the meaning. Lengths given with the flag, or lengths given without it, both mean variable: hipDNN's
       references treat the lengths as padding whatever the flag says (PlanUtils.hpp::isSupportedSdpaPadding;
       SdpaSemanticsRegister.md SEM-008; cuDNN instead refuses lengths without the
@@ -326,7 +311,7 @@ axes:
       - {id: fp32, meaning: "operands converted to fp32"}
       - {id: fp16, meaning: "operands converted to fp16"}
       - {id: bf16, meaning: "operands converted to bf16"}
-      - {id: fp8, meaning: "operands converted to an 8-bit float format. Added 2026-10-29: every fp8 golden bundle of the references sets it"}
+      - {id: fp8, meaning: "operands converted to an 8-bit float format; every fp8 golden bundle of the references sets it"}
     notes: "The cuDNN-compatibility entry point states fp16 when the caller leaves the value unset: it is an API route to fp16, not a second route to the same request."
     source: "axes.md § 2 'Matrix-unit input precision'; § 2 'Internal working precision'"
 
@@ -544,9 +529,9 @@ axes:
     meaning: "Which score dimensions (batch, head, query position, key position) the bias repeats over."
     values:
       - {id: none, meaning: "a separate value for every batch, head, query and key"}
-      - {id: batch_or_heads, meaning: "repeats over both batch and heads (one query-by-key matrix). The id is kept from before 2026-10-29, when it also meant 'batch only' and 'heads only'"}
-      - {id: batch_only, meaning: "repeats over batch only: one matrix per head. Added 2026-10-29"}
-      - {id: heads_only, meaning: "repeats over heads only: one matrix per sequence of the batch. Added 2026-10-29"}
+      - {id: batch_or_heads, meaning: "repeats over both batch and heads (one query-by-key matrix)"}
+      - {id: batch_only, meaning: "repeats over batch only: one matrix per head"}
+      - {id: heads_only, meaning: "repeats over heads only: one matrix per sequence of the batch"}
       - {id: sequence, meaning: "repeats over query positions and/or key positions"}
       - {id: all, meaning: "one value for every score"}
       - {id: not_broadcastable, meaning: "shape cannot be broadcast to the score shape (meaningless value — see Layer 1)"}
@@ -584,7 +569,7 @@ axes:
     values:
       - {id: power_of_two, meaning: "1, 2, 4, 8, ... query heads"}
       - {id: not_power_of_two, meaning: "any other count, e.g. 6 or 12 (BLOOM-style models)"}
-    notes: "Added 2026-10-29. Not a tile-edge value: it changes which slopes the definition gives each head."
+    notes: "Not a tile-edge value: it changes which slopes the definition gives each head."
     source: "axes.md § 6 'ALiBi'; test_sdk CpuFpReferenceSdpa.hpp::alibiSlope (closest power of two n <= H, then the odd terms); SdpaSemanticsRegister.md SEM-021"
 
   - id: attention_sinks
@@ -712,7 +697,7 @@ axes:
       - {id: batch_only, meaning: "one pattern per head, repeated over the batch"}
       - {id: heads_only, meaning: "one pattern per sequence of the batch, repeated over the heads"}
       - {id: batch_and_heads, meaning: "one pattern for every batch and head"}
-    notes: "Added 2026-10-29: the references take a mask [B or 1, H or 1, Sq, Skv] (PlanUtils.hpp::isSupportedSdpaDropout) and test the batch-broadcast form."
+    notes: "The references take a mask [B or 1, H or 1, Sq, Skv] (PlanUtils.hpp::isSupportedSdpaDropout) and test the batch-broadcast form."
     source: "axes.md § 7 'Caller-supplied dropout mask'"
   - id: dropout_mask_dtype
     kind: child
@@ -768,8 +753,8 @@ axes:
     values:
       - {id: not_requested, meaning: "neither is handed back"}
       - {id: requested, meaning: "both are handed back"}
-      - {id: max_only, meaning: "only the row maximum. Added 2026-10-29"}
-      - {id: sum_exp_only, meaning: "only the row sum of exponentials. Added 2026-10-29"}
+      - {id: max_only, meaning: "only the row maximum"}
+      - {id: sum_exp_only, meaning: "only the row sum of exponentials"}
     notes: "Each part is a meaningful output on its own (cuDNN added them for score monitoring, SdpaSemanticsRegister.md SEM-023)."
     source: "axes.md § 8 'Max and sum-exp outputs'"
 
@@ -787,11 +772,11 @@ axes:
     values: &descale_granularity
       - {id: absent, meaning: "no factor"}
       - {id: present, meaning: "one factor for the whole tensor (per tensor)"}
-      - {id: per_head, meaning: "one factor per sequence of the batch and per head (for Q, per K/V head group). Added 2026-10-29"}
-      - {id: finer, meaning: "factors per token, per channel or per block of the tensor. Added 2026-10-29"}
+      - {id: per_head, meaning: "one factor per sequence of the batch and per head (for Q, per K/V head group)"}
+      - {id: finer, meaning: "factors per token, per channel or per block of the tensor"}
     notes: >-
       Not a child of an fp8 format: scaled storage is meaningful for every format.
-      Amended 2026-10-29: the value `present` keeps its id and now means per tensor; per_head and finer are
+      The value `present` means per tensor; per_head and finer are
       the other granularities (the references take a scalar or [B, H_kv, 1, 1], CpuFpReferenceSdpa.hpp::validateDescaleShape; per-block scaling is a real scheme).
     source: "axes.md § 9 'Which scale/descale tensors are supplied'"
   - {id: descale_k, kind: categorical, meaning: "Multiply stored K by factors to get its real values.", values: *descale_granularity, source: "axes.md § 9"}
@@ -826,8 +811,8 @@ axes:
     values:
       - {id: absent, meaning: "neither is paged"}
       - {id: present, meaning: "K and V are both paged"}
-      - {id: k_only, meaning: "only K is paged; V is stored whole. Added 2026-10-29"}
-      - {id: v_only, meaning: "only V is paged; K is stored whole. Added 2026-10-29"}
+      - {id: k_only, meaning: "only K is paged; V is stored whole"}
+      - {id: v_only, meaning: "only V is paged; K is stored whole"}
     notes: "A ragged offset can be stated on a paged K or V: the request names a start position for tokens that pages hold. Layer 1 D-RAGGED-NOT-THROUGH-PAGES removes it: no specification says whether the position counts tokens before or after paging, or whether a length counts tokens or pages. Paging is a storage form of each tensor, so K and V can be paged separately (SdpaFwdNode.hpp::validatePagedKv: 'K or V may be paged alone, with its own block size')."
     source: "axes.md § 10 'Paged KV cache'"
   - id: page_table_sharing
@@ -838,7 +823,6 @@ axes:
     values:
       - {id: separate, meaning: "K and V each have their own page table"}
       - {id: shared, meaning: "one page table serves K and V: page slot i of K and page slot i of V hold the same tokens (vLLM's single block table)"}
-    notes: "Added 2026-10-29."
     source: "axes.md § 10 'Paged KV cache'; SdpaSemanticsRegister.md SEM-009 (vLLM: one shared block_table)"
   - id: page_size_k_vs_v
     kind: child
@@ -849,7 +833,7 @@ axes:
     values:
       - {id: equal, meaning: "one page size for K and V"}
       - {id: differ, meaning: "K and V have different page sizes"}
-    notes: "Added 2026-10-29 while re-checking: the frontend takes a block size per side (SdpaFwdNode.hpp::validatePagedKv reads each side's block size from its own container) and the references test it. page_size below then describes K's pages."
+    notes: "The frontend takes a block size per side (SdpaFwdNode.hpp::validatePagedKv reads each side's block size from its own container) and the references test it. page_size below then describes K's pages."
     source: "axes.md § 10 'Paged KV cache' ('× every page size')"
   - id: page_table_storage
     kind: child
@@ -859,7 +843,7 @@ axes:
     values:
       - {id: dense, meaning: "every sequence has a row of the same width"}
       - {id: packed, meaning: "the rows are squashed end to end with start positions (a ragged page table)"}
-    notes: "Added 2026-10-29 while re-checking: the frontend accepts a packed table (SdpaFwdNode.hpp::validatePagedKv: a page table 'may be packed with a ragged offset', as in cuDNN 9.10.2+); the references decline it. Open since 2026-10-29."
+    notes: "The frontend accepts a packed table (SdpaFwdNode.hpp::validatePagedKv: a page table 'may be packed with a ragged offset', as in cuDNN 9.10.2+); the references decline it."
     source: "axes.md § 10 'Paged KV cache'"
   - id: page_size
     kind: child

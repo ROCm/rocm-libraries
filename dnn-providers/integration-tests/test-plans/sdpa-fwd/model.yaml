@@ -217,7 +217,7 @@ axes:
     not_in_model: "overlapping (two sequences share memory): Layer 1 D-RAGGED-NO-OVERLAP. A start inside a token: Layer 1 D-RAGGED-WHOLE-TOKENS."
     api_paths: [cpp]
     cite: "TA::set_ragged_offset; DH::createOrFindTensorDesc (checks the offset tensor's own properties only); RaggedTensor.hpp::raggedBatches at 4faed2e1219 (offset[0] any whole-token value of 0 or more, 'ragged whole-token origin violated'; with length tensors each length comes from them, at most S_max, 'ragged length range violated'; without them offsets must not decrease, 'ragged_offset must be monotonic non-decreasing', and each length is the block, capped at S_max); RaggedTensor.hpp::raggedFootprint at 4faed2e1219 (starts in any order; overlapping sequences are refused, 'ragged token intervals overlap'); at 4faed2e1219 the native ragged plan accepts length tensors (RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode, `isSupportedSdpaPadding(attributes, tensorMap)`) and the dense rewrite takes the lengths from the length tensors, else from the offset blocks (RaggedSdpaDensify.hpp::densify, 'seq_len_q (from ragged_offset)')"
-    note: "Both references take any whole-token offset[0] of 0 or more and, with the length tensors, start positions in any order with gaps between them. Without the length tensors the offsets are boundaries and lengths, so gapped, independent_starts and out_of_order need the length tensors (F-RAGGED-OFFSETS-ARE-LENGTHS). The answer_key yes of leading_gap and independent_starts is measured: in the CASE-BUILDER ragged probe (runner, gfx942, 3,581 ragged rows) both references answered every clean row that holds them, and agreed. The labels follow the references, not the meaning: the values stay in the model whatever the references take."
+    note: "Both references take any whole-token offset[0] of 0 or more and, with the length tensors, start positions in any order with gaps between them. Without the length tensors the offsets are boundaries and lengths, so gapped, independent_starts and out_of_order need the length tensors (F-RAGGED-OFFSETS-ARE-LENGTHS). The answer_key yes of leading_gap and independent_starts is measured on gfx942: both references answered every clean row that holds them, and agreed. The labels follow the references, not the meaning: the values stay in the model whatever the references take."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
     labels:
@@ -670,7 +670,7 @@ axes:
      labels: {bhsd: [common, layout, "yes"], bshd: [common, layout, "yes"], other_permutation: [rare, layout, "yes"]}}
 
   - {id: strides_q, kind: class, level: graph, meaning: "Stride pattern of Q.", values: *stride_classes_qo, api_paths: [cpp, python], cite: "TA::set_stride; TA::validate (only the stride count is checked)",
-     note: "zero_broadcast answer_key yes: no reference gate refuses a zero stride on B, H or S, and both references computed the rows that held one (provisional until the reference probe run). The builder puts the zero stride on the head dim only when B, H and S all have extent 1; D-REL-STRIDE-NEEDS-EXTENT removes the rows where D has extent 1 too.",
+     note: "zero_broadcast answer_key yes: no reference gate refuses a zero stride on B, H or S, and both references computed the rows that held one; no other zero-stride placement is measured. The builder puts the zero stride on the head dim only when B, H and S all have extent 1; D-REL-STRIDE-NEEDS-EXTENT removes the rows where D has extent 1 too.",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [rare, layout, "yes"], negative: [rare, layout, "no"], self_overlapping: [rare, layout, "yes"], head_dim_strided: [rare, layout, "yes"]}}
   - {id: strides_k, kind: class, level: graph, meaning: "Stride pattern of K.", values: *stride_classes_kv, api_paths: [cpp, python], cite: "TA::set_stride; TA::validate (only the stride count is checked)",
@@ -1275,7 +1275,7 @@ axes:
       - {id: packed_with_q, meaning: "Stats packed token by token with Q's token boundaries; with per_tensor_elements its own offset tensor counts Stats elements, with shared_tokens it reads Q's token list"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
     cite: "TA::set_ragged_offset; NODE::infer_properties_node (Stats dims and strides filled only when empty; no ragged check); references RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode (native plan: FLOAT Stats, dense or packed), RaggedSdpaDensify.hpp::sdpaRoles (dense rewrite: a Stats role in the query packing)"
-    note: "packed_with_q answer_key partial: the packed Stats must be in a layout the ragged container accepts (AK-RAGGED-TOKEN-MAJOR) and FLOAT (dtype_stats). Provisional until the reference probe run."
+    note: "packed_with_q answer_key partial: the packed Stats must be in a layout the ragged container accepts (AK-RAGGED-TOKEN-MAJOR) and FLOAT (dtype_stats). Read in code; not measured."
     group: G7-aux-outputs
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
     labels:
@@ -1788,7 +1788,7 @@ class_to_value:
     gapped: {offsets: full_slots, count: {of: B, add: 1}, first: 0, last: {of: B, multiply: S},
              note: "offset b = b x S x stride; the length tensors give the live lengths"}
     leading_gap: {offsets: prefix_sum_after_gap, count: {of: B, add: 1}, gap: slack, last: {of: B, multiply: S},
-                  note: "per ragged tensor, slack = B x S - the sum of its side's live lengths; the gap g = slack (all the spare room), or 0 on a side with no slack. offset b = (g + sum of the lengths of sequences 0 .. b-1) x stride, so offset[B] = B x S x stride, the end of the tensor. The length tensors, when present, hold the same live lengths. CaseGraph computes it"}
+                  note: "per ragged tensor, slack = B x S - the sum of its side's live lengths; the gap g = slack (all the spare room), or 0 on a side with no slack. offset b = (g + sum of the lengths of sequences 0 .. b-1) x stride, so offset[B] = B x S x stride, the end of the tensor. The length tensors, when present, hold the same live lengths. The case builder computes it"}
     independent_starts: {offsets: slot_end_aligned, count: {of: B, add: 1}, last: {of: B, multiply: S},
                          note: "offset b = (b x S + S - length b) x stride for b < B, and offset[B] = B x S x stride: each sequence ends at the end of its full slot, so the gap before sequence b is S - length b"}
     out_of_order: {offsets: reversed_slots, count: {of: B, add: 1}, last: {of: B, multiply: S},
@@ -1934,7 +1934,7 @@ generator_hints:
   execute_level_axes_note: "An acceptance-only driver cannot observe level `execute` values; it reports them as 'not observed', never as 'accepted'."
   # Harness capabilities that a row can need before a bundle can carry it. `forbid_any` lists the
   # rows that need the capability, as in rules.yaml; `select_reason` is the matching exclusion
-  # reason of the bundle row selection (select_rows.py). An axis lists per value in `harness_needs`
+  # reason of the bundle row selection. An axis lists per value in `harness_needs`
   # the capabilities the value needs; a value that the axis does not list needs nothing. Among
   # values of equal cost, the low-change step tries a value with no need first. A level with
   # `bundle_first` covers first the pairs that a row with no need can hold, with such rows.
@@ -2013,7 +2013,7 @@ level_labels:
         {dtype_q: [fp8_e4m3_fnuz], dtype_o: [fp32, fp16, fp8_e4m3, fp8_e5m2, fp8_e5m2_fnuz]},
         {dtype_q: [fp8_e5m2], dtype_o: [fp32, fp16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2_fnuz]},
         {dtype_q: [fp8_e5m2_fnuz], dtype_o: [fp32, fp16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2]}],
-       note: "The references compute an fp8 O, but the PoC runner cannot grade it (no element-wise diff for fp8, tolerance finer than one fp8 step). That is a runner gap, not an answer-key gap."}
+       note: "The references compute an fp8 O, but the case runner cannot grade it (no element-wise diff for fp8, tolerance finer than one fp8 step). That is a runner gap, not an answer-key gap."}
     - {id: AK-DESCALE-WITH-FP8, why: "the descale count gate: an fp8 Q needs all three Q, K and V descales, and any other Q takes none (PU::isSupportedSdpaFwdNode `if((fp8Input && numQkvDescales != 3) || (!fp8Input && numQkvDescales != 0))`; fp8Input means the builder's Q is fp8, per the doc comment of isSupportedSdpaFwdNode; SRI § 2.1, row 'fp8 Q/K/V descales'). So a K or V descale beside a bf16 Q is declined even when K and V are fp8", forbid_any: [
         {dtype_q: [fp32, fp16, bf16], descale_q: [present, per_head, finer]},
         {dtype_q: [fp32, fp16, bf16], descale_k: [present, per_head, finer]},
@@ -2028,7 +2028,7 @@ level_labels:
         {alibi: [present], causal_mask: [absent], window_right: [partial, whole_span]},
         {alibi: [present], causal_alignment: [bottom_right]},
         {alibi: [present], window_alignment: [bottom_right]}],
-       note: "A sliding window with window_right zero and top-left alignment is right bound 0 too, so it counts as causal here. With a causal mask the builder leaves right_bound at 0 whatever window_right says (CaseGraph.cpp), and the node has one alignment (rule F-ONE-DIAGONAL), so causal_alignment and window_alignment agree."}
+       note: "A sliding window with window_right zero and top-left alignment is right bound 0 too, so it counts as causal here. With a causal mask the builder leaves right_bound at 0 whatever window_right says, and the node has one alignment (rule F-ONE-DIAGONAL), so causal_alignment and window_alignment agree."}
     - {id: AK-FP8-SCALING-NEEDS-FP8, why: "softmax/output scaling and amax (scale_s with descale_s, scale_o, amax_s, amax_o): one-element FLOAT, fp8 inputs only, not with dropout (PU::isSupportedSdpaFp8Scaling; SRI § 2.1, row 'fp8 softmax / output scaling')", forbid_any: [
         {dtype_q: [fp32, fp16, bf16], s_quantization: [present]}, {dtype_q: [fp32, fp16, bf16], scale_o: [present]},
         {dtype_q: [fp32, fp16, bf16], amax_s: [requested]}, {dtype_q: [fp32, fp16, bf16], amax_o: [requested]},
@@ -2048,7 +2048,7 @@ level_labels:
         {batch_packing: [ragged, ragged_q_side], stats_packing: [packed_with_q], strides_stats: [zero_broadcast, negative, self_overlapping]},
         {batch_packing: [ragged_kv_side], dim_order_k: [inherited], dim_order_q: [bhsd]},
         {batch_packing: [ragged, ragged_kv_side], strides_k: [inherited], strides_q: [zero_broadcast, negative, self_overlapping]}],
-       note: "The case builder writes a ragged tensor with H outside S (bhsd) head-major as [H, T, D] and folds the batch into the token axis for S,B,H,D ([T, H, D]), so every dim order is a layout the references take. Evidence for the dense rewrite is code and the reference unit tests ZeroBiasThroughTheRewrite and ForwardWithBiasMatchesCpu. The PoC runs hold no fp32 or biased ragged row that the references computed. A dense Stats beside a ragged Q is not held to it (RaggedSdpaDensify.hpp::densify, `!role.stats`: Stats is left out of the all-ragged-or-all-dense test); a packed Stats is (RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode, the `stats_tensor_uid` check). A view (`inherited`) has its owner's layout: K inside a dense Q on a ragged K/V side takes Q's strides, so the last two clauses name Q's values (a dense bhsd Q beside a ragged K/V side has per-batch slots, which the ragged container refuses; a ragged Q is head-major itself); V inside K is covered by K's own clauses (both are on the K/V side). bsdh and head_dim_strided keep the H and D strides sorted within one token, so neither breaks the sorted-stride test."}
+       note: "The case builder writes a ragged tensor with H outside S (bhsd) head-major as [H, T, D] and folds the batch into the token axis for S,B,H,D ([T, H, D]), so every dim order is a layout the references take. Evidence for the dense rewrite is code and the reference unit tests ZeroBiasThroughTheRewrite and ForwardWithBiasMatchesCpu. No run has measured an fp32 or biased ragged row through the references. A dense Stats beside a ragged Q is not held to it (RaggedSdpaDensify.hpp::densify, `!role.stats`: Stats is left out of the all-ragged-or-all-dense test); a packed Stats is (RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode, the `stats_tensor_uid` check). A view (`inherited`) has its owner's layout: K inside a dense Q on a ragged K/V side takes Q's strides, so the last two clauses name Q's values (a dense bhsd Q beside a ragged K/V side has per-batch slots, which the ragged container refuses; a ragged Q is head-major itself); V inside K is covered by K's own clauses (both are on the K/V side). bsdh and head_dim_strided keep the H and D strides sorted within one token, so neither breaks the sorted-stride test."}
     - {id: AK-SCALE-FINITE, why: "both references decline a non-finite scale written into the graph as a number: every output would be NaN (PU::isSupportedSdpaScaleOperand, `!std::isfinite(attrs.attn_scale_value().value())`; native ragged plan RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode). A one-element by-value or FLOAT scale tensor holding NaN or inf is not checked (PU::isSupportedSdpaScaleOperand)", forbid_any: [
         {scale_value: [non_finite], scale_source: [attribute_value]}],
        note: "The tensor forms run, and every output is NaN, which no check grades: scale_value non_finite carries answer_key no, and CH-FUZZER-HINTS holds it out of generation. So this rule removes no row that the label leaves in; it states the reference gate."}
@@ -2243,7 +2243,7 @@ level_labels:
                  paged_kv: present, k_head_sharing: gqa, v_head_sharing: gqa, seq_q: one, seq_q_vs_seq_kv: shorter}}
     - {id: S4-fp8-ragged, why: "fp8 descales with ragged packing: crash, hang (cudnn-frontend#563)",
        changes: {dtype_q: fp8_e4m3, dtype_o: bf16, descale_q: present, descale_k: present, descale_v: present, batch_packing: ragged}}
-    - {id: S5-varlen-zero-stats, why: "Stats on empty and fully masked rows (FA#2842, FlashInfer#4452; also seen by the PoC runner)",
+    - {id: S5-varlen-zero-stats, why: "Stats on empty and fully masked rows (FA#2842, FlashInfer#4452; also seen by the case runner)",
        changes: {sequence_lengths: variable, per_seq_len_kv: some_zero, stats_output: requested}}
     - {id: S5b-varlen-zero-stats-maxsum, why: "as S5-varlen-zero-stats, with Max and Sum_exp",
        changes: {sequence_lengths: variable, per_seq_len_kv: some_zero, stats_output: requested, max_sumexp_output: requested}}

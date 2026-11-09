@@ -18,17 +18,6 @@
 # `axes.md § N` citations name sections of the SDPA forward axis catalogue,
 # docs/test-plans/sdpa-fwd/axes.md.
 #
-# Amended 2026-10-29 (for the L0 additions): rules D-REL-ALIBI-HEAD-COUNT and
-# D-REL-PAGED-NOT-RAGGED, two structural facts; and, found in rules.yaml but not here,
-# D-REL-STRIDE-NEEDS-EXTENT and structural D-S-ONE-DROPOUT-SOURCE; six rejected candidates, three equivalences, and the
-# D-S-VARLEN-NEEDS-LENGTHS wording.
-# Amended 2026-11-04 (Layer 0 fix): D-RAGGED-NO-OVERLAP covers inputs and outputs; independent_starts joins
-# D-REL-RAGGED-ORDER and D-REL-GAPPED-NEEDS-SHORT-LENGTHS; new rules D-REL-O-OWN-STARTS-NOT-SHARED and
-# D-REL-SHARED-PAGES-NEEDS-TWO-SEQUENCES;
-# rejected candidates and equivalences for the added Layer 0 axes.
-# Amended 2026-11-05: rule D-RAGGED-NOT-THROUGH-PAGES removes a ragged start position on a paged K
-# or V.
-#
 # Rule format
 #   id       stable identifier.
 #   kind     always `definition` in this file.
@@ -265,7 +254,7 @@ rules:
       - {dtype_v: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_v: [sub_element]}
       - {dtype_o: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_o: [sub_element]}
       - {dtype_stats: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_stats: [sub_element]}
-    source: "byte addressing; added 2026-10-28 (the rule was in rules.yaml only, as D-REL-SUB-ELEMENT-ALIGNMENT)"
+    source: "byte addressing"
 
   - id: D-REL-STRIDE-NEEDS-EXTENT
     kind: definition
@@ -302,7 +291,7 @@ rules:
       - {batch_size: [zero, one], q_heads: [zero, one], seq_kv: [zero, one], strides_v: [self_overlapping]}
       - {batch_size: [zero, one], v_head_sharing: [mqa], seq_kv: [zero, one], strides_v: [self_overlapping]}
     source: "a stride on a dimension of extent 0 or 1 is never used; with non-zero strides two different indices reach one element only when two dimensions have extent > 1"
-    attribution: "Added to Layer 1 2026-10-29: it was in rules.yaml only (added there 2026-10-27 while writing the class-to-value table). Here zero extents count as 'no dimension with more than one element'. Amended 2026-11-04: self_overlapping needs TWO dimensions with extent > 1; the clauses after the strides_stats one state it over the logical dims, and the model also counts the stored page pool of a paged K or V."
+    attribution: "Here zero extents count as 'no dimension with more than one element'. self_overlapping needs TWO dimensions with extent > 1; the clauses after the strides_stats one state it over the logical dims, and the model also counts the stored page pool of a paged K or V."
 
   - id: D-REL-ALIBI-HEAD-COUNT
     kind: definition
@@ -311,8 +300,7 @@ rules:
     forbid_any:
       - {q_heads: [one], alibi_head_count: [not_power_of_two]}
       - {q_heads: [zero], alibi_head_count: [power_of_two]}
-    source: "axes.md § 6 'ALiBi'; L0 alibi_head_count (added 2026-10-29)"
-    attribution: "Added 2026-10-29."
+    source: "axes.md § 6 'ALiBi'; L0 alibi_head_count"
 
   - id: D-REL-GAPPED-NEEDS-SHORT-LENGTHS
     kind: definition
@@ -413,10 +401,10 @@ structural:
   - {id: D-S-QK-HEAD-DIM-SHARED, reason: "A score is the dot product of a query and a key, so they have one head size.", enforced_by: "one axis head_dim_qk", source: "axes.md § 3 'Q/K head size'"}
   - {id: D-S-OUTPUT-SHAPE, reason: "O has Q's batch, heads and length and V's head size; Stats has Q's batch, heads and length and one value per row.", enforced_by: "no separate O or Stats size axes", source: "axes.md § 3, § 8"}
   - {id: D-S-RAGGED-NEEDS-OFFSETS, reason: "Ragged packing without start positions does not say where any sequence is.", enforced_by: "child axis ragged_offsets", source: "axes.md § 10"}
-  - {id: D-S-VARLEN-NEEDS-LENGTHS, reason: "Variable lengths (a padding mask) without the list of lengths do not say which positions take part. (Amended 2026-10-29: the lengths alone, without an API flag, already mean variable lengths; only the flag without lengths is meaningless.)", enforced_by: "child axes per_seq_len_q / per_seq_len_kv", source: "axes.md § 5 'padding mask', § 10; SdpaSemanticsRegister.md SEM-008"}
-  - {id: D-S-ONE-DROPOUT-SOURCE, reason: "One dropout pattern has one source: drawn at random or given by the caller.", enforced_by: "one axis dropout (absent | random | caller_mask)", source: "consistency of a single pattern; added to Layer 1 2026-10-29 (it was in rules.yaml only)"}
-  - {id: D-S-SHARED-TABLE-NEEDS-BOTH-PAGED, reason: "A page table shared by K and V exists only when both are paged.", enforced_by: "child axes page_table_sharing and page_size_k_vs_v under paged_kv = present", source: "axes.md § 10 (added 2026-10-29)"}
-  - {id: D-S-MASK-BROADCAST-NEEDS-MASK, reason: "A dropout pattern's broadcast exists only for a caller-supplied pattern.", enforced_by: "child axis dropout_mask_broadcast", source: "axes.md § 7 'Caller-supplied dropout mask' (added 2026-10-29)"}
+  - {id: D-S-VARLEN-NEEDS-LENGTHS, reason: "Variable lengths (a padding mask) without the list of lengths do not say which positions take part. The lengths alone, without an API flag, already mean variable lengths; only the flag without lengths is meaningless.", enforced_by: "child axes per_seq_len_q / per_seq_len_kv", source: "axes.md § 5 'padding mask', § 10; SdpaSemanticsRegister.md SEM-008"}
+  - {id: D-S-ONE-DROPOUT-SOURCE, reason: "One dropout pattern has one source: drawn at random or given by the caller.", enforced_by: "one axis dropout (absent | random | caller_mask)", source: "consistency of a single pattern"}
+  - {id: D-S-SHARED-TABLE-NEEDS-BOTH-PAGED, reason: "A page table shared by K and V exists only when both are paged.", enforced_by: "child axes page_table_sharing and page_size_k_vs_v under paged_kv = present", source: "axes.md § 10"}
+  - {id: D-S-MASK-BROADCAST-NEEDS-MASK, reason: "A dropout pattern's broadcast exists only for a caller-supplied pattern.", enforced_by: "child axis dropout_mask_broadcast", source: "axes.md § 7 'Caller-supplied dropout mask'"}
   - {id: D-S-CAUSAL-NEEDS-ALIGNMENT, reason: "A causal mask with seq_q ≠ seq_kv is defined only once a diagonal is chosen.", enforced_by: "child axis causal_alignment", source: "axes.md § 5 'Causal alignment'"}
   - {id: D-S-WINDOW-NEEDS-SIZES-AND-ALIGNMENT, reason: "A sliding window is defined only by its two sizes and its diagonal.", enforced_by: "child axes window_left, window_right, window_alignment", source: "axes.md § 5"}
   - {id: D-S-BLOCK-MASK-NEEDS-PATTERN, reason: "A block mask is its pattern.", enforced_by: "child axis block_mask_pattern", source: "axes.md § 5"}
@@ -454,7 +442,6 @@ rejected_candidates:
   - {candidate: "Negative scale, zero scale, negative ALiBi slope, zero ALiBi slope", verdict: unusual_not_meaningless, reason: "Each gives a defined score; zero gives uniform attention or no penalty.", source: "axes.md § 6, § 7; footnote 4"}
   - {candidate: "Dropout probability exactly 0", verdict: unusual_not_meaningless, reason: "Identical to no dropout; defined.", source: "axes.md § 7; footnote 4"}
   - {candidate: "Inputs sharing memory (e.g. Q and K the same buffer)", verdict: unusual_not_meaningless, reason: "Reading the same values twice is defined.", source: "axes.md § 4 'Overlap between tensors'"}
-  # Added 2026-10-29.
   - {candidate: "K and V paged only together, with one page size", verdict: library_limit, reason: "Paging is a storage form of each tensor; K alone, V alone, or different page sizes all address every key and value.", source: "axes.md § 10"}
   - {candidate: "A shared K/V page table only with equal page sizes", verdict: unusual_not_meaningless, reason: "Slot i of the table then names K's page i and V's page i, which cover different key ranges; every key and value is still addressed.", source: "axes.md § 10"}
   - {candidate: "Max and Sum_exp only together", verdict: library_convention, reason: "Each is a defined row statistic on its own.", source: "axes.md § 8"}
@@ -481,7 +468,6 @@ equivalences:
   - "sequence_lengths variable with per_seq_len all_full ≡ sequence_lengths uniform."
   - "softcap_value negative ≡ softcap_value positive of the same size."
   - "page_size whole_sequence ≡ page_size one_token when seq_kv = one."
-  # Added 2026-10-29.
   - "bias_broadcast batch_only ≡ batch_or_heads when q_heads = one; heads_only ≡ batch_or_heads when batch_size = one (also dropout_mask_broadcast)."
   - "descale_* per_head ≡ present when batch_size = one and the K/V head count is one, if every factor is the same."
   - "page_table_sharing shared ≡ separate tables with the same contents."

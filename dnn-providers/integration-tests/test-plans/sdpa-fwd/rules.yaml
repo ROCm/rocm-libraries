@@ -38,7 +38,7 @@
 #   covered_by  for a policy rule with no `forbid`: the rule that already removes every request it
 #               names (form `covered`). It removes nothing itself.
 #   ticket      for policy rules: the Jira issue that asks hipDNN to refuse the request.
-#   debatable   the rule records a validation choice, not an impossibility; it is a draft.
+#   debatable   the rule records a validation choice, not an impossibility; the classification is open.
 #
 # Code citations name a function or field, for example `SA::set_dropout_probability`. The
 # abbreviations are those of model.yaml `api_record.paths`; a full path is written
@@ -696,8 +696,8 @@ rules:
       - {page_count: [exact], max_seq_len_kv: [larger]}
     source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validatePagedKv (\"max_blocks_per_seq must equal ceil(max_seq_len_kv / block_size)\"; its comment states it as cuDNN's rule)"
     note: "page_count exact + larger is stateable only when the page size does not divide S_kv (a maximum in (S_kv, pages x page size]); with the class values (S_kv 1, 128, 256; page size 1, 16, S_kv) it never is. surplus + larger stays stateable: the graph builder sets the maximum to pages x page size. A surplus table with max_seq_len_kv unset is also accepted (an API-path variant), but the model has no unset value."
-    debatable: "A validation choice, not an impossibility: a wider table, or a declared maximum the table more than covers, is well defined (the extra pages are never read). The frontend rejects both to match cuDNN. Draft: not yet confirmed."
-    evidence: "read in code; measured (frontend-rejected on gfx942 and gfx950 in PoC discovery runs)"
+    debatable: "A validation choice, not an impossibility: a wider table, or a declared maximum the table more than covers, is well defined (the extra pages are never read). The frontend rejects both to match cuDNN. Not yet confirmed."
+    evidence: "read in code; measured (frontend-rejected on gfx942 and gfx950)"
 
   - id: F-SHARED-TABLE-ONE-WIDTH
     kind: frontend
@@ -706,7 +706,7 @@ rules:
     forbid: {page_table_sharing: [shared], page_size_k_vs_v: [differ]}
     source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validatePagedKv (each table's dim 2 must equal ceil(max_seq_len_kv / its own block size))"
     note: "Stateable only when the two widths happen to agree (with the class values only at S_kv 1, page 1 vs 2), or with max_seq_len_kv unset (an API-path variant); the graph builder always declares it."
-    debatable: "Draft: not yet confirmed. A shared table read with two page sizes is well defined only if the caller lays out both pools to match; the frontend width check makes it unstateable in general."
+    debatable: "Not yet confirmed. A shared table read with two page sizes is well defined only if the caller lays out both pools to match; the frontend width check makes it unstateable in general."
     evidence: read in code
 
   - id: F-SCALE-TENSOR-BY-VALUE
@@ -716,8 +716,8 @@ rules:
     forbid: {scale_source: [device_tensor]}
     source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::pre_validate_node (Rule 6b) -> node/detail/Utilities.hpp::validateScalarParameter (`get_is_pass_by_value`)"
     note: "The value stays in the model with its labels so the rejection suite can name it (like page_count insufficient). Targeted case X6c asks for it and is skipped by the level script."
-    evidence: "read in code; measured (PoC discovery and runner passes: rows refused with 'attn_scale must be a pass-by-value tensor' on gfx942 and gfx950)"
-    debatable: "Draft: not yet confirmed. A device-memory scale is well defined; the frontend chooses not to accept one."
+    evidence: "read in code; measured (rows refused with 'attn_scale must be a pass-by-value tensor' on gfx942 and gfx950)"
+    debatable: "Not yet confirmed. A device-memory scale is well defined; the frontend chooses not to accept one."
 
   - id: F-SINK-FLOAT-ONLY
     kind: frontend
@@ -928,14 +928,14 @@ rules:
       - {scale_factor_values: [one, zero, non_finite]}
       - {special_values: [infinity, nan, negative_infinity_bias, subnormal, signed_zero]}
       - {value_magnitude: [overflow_prone, precision_loss_prone]}
-    source: "decision 2026-11-04: the content value classes are left as hints for a fuzzer; a NaN or infinite scale is held out with no answer"
+    source: "choice: the content value classes are hints for a fuzzer; a NaN or infinite scale is held out with no answer"
 
   - id: CH-RAGGED-SHARED-MEMORY-LATER
     kind: choice
     form: exclusion
     reason: "Inputs that share memory on a ragged row are left out of generation. ALMIOPEN-3180 tracks aliases whose owner is ragged."
     forbid: {batch_packing: [ragged, ragged_q_side, ragged_kv_side], tensor_overlap: [inputs_overlap]}
-    source: "judgement call, 2026-11-06; ALMIOPEN-3180"
+    source: "judgement call; ALMIOPEN-3180"
 
   - id: CH-STRATIFY-DTYPE
     kind: choice
