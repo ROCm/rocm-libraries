@@ -74,7 +74,9 @@ def _isa_context():
     rocisa.rocIsa.getInstance().setKernel(_ISA, 32)
 
 
-def _emit(mod: Module, name: str, *, logical_ir: bool = False) -> str:
+def _emit(
+    mod: Module, name: str, *, logical_ir: bool = False, insert_waits: bool = False
+) -> str:
     """Convert ``mod`` to a stinkytofu module and return the emitted assembly."""
     mod.setParent()  # resolves symbolic register names before conversion
 
@@ -91,7 +93,10 @@ def _emit(mod: Module, name: str, *, logical_ir: bool = False) -> str:
 
     st = rocisa.toStinkyTofuModule(
         mod, _ISA, name, signature=sig,
-        options={"OptLevel": 0, "LowerViaLogicalIR": int(logical_ir)}
+        options={
+            "OptLevel": 0, "LowerViaLogicalIR": logical_ir,
+            "EnableWaitCntInsertion": insert_waits, "wavefrontSize": 32,
+        }
     )
     st.runOptimizationPipeline()
     return st.emitAssembly()
@@ -302,6 +307,14 @@ def test_sbarrier_rejects_invalid_tensor_count(count):
 @pytest.mark.parametrize("count", [0, 2])
 def test_sbarrier_tensor_count_survives_native_lowering(logical_ir, count):
     mod = Module("sbarrier_tensor_count")
-    mod.add(SBarrier(tensorcnt=count))
-    asm = _emit(mod, "sbarrier_tensor_count", logical_ir=logical_ir)
-    assert re.search(rf"s_wait_tensorcnt\s+{count}\b", asm), asm
+    # Wait insertion operates on named compute regions. Text boundaries survive
+    # logical instruction replacement and keep the region's endpoints valid.
+    region = Module("noLoadLoopBody")
+    region.addComment0("begin tensor barrier region")
+    region.add(SBarrier(tensorcnt=count))
+    region.addComment0("end tensor barrier region")
+    mod.add(region)
+    asm = _emit(mod, "sbarrier_tensor_count", logical_ir=logical_ir, insert_waits=True)
+    wait = re.search(rf"s_wait_tensorcnt\s+{count}\b", asm)
+    assert wait is not None, asm
+    assert wait.start() < asm.index("s_barrier_signal -1"), asm
