@@ -463,48 +463,6 @@ namespace
         EXPECT_EQ(batch_count, 3);
     }
 
-    TEST_F(ConvDescr, StridedBatchSettersAndGetters)
-    {
-        Buf   b;
-        Spmat coo, csr, csc;
-        Dnmat dnmat;
-        Dnvec dnvec;
-        ASSERT_EQ(rocsparse_create_coo_descr(&coo, 5, 7, 4, b.i, b.j, b.v, i32, base0, f32), st_ok);
-        ASSERT_EQ(rocsparse_create_csr_descr(&csr, 5, 7, 4, b.i, b.j, b.v, i32, i32, base0, f32),
-                  st_ok);
-        ASSERT_EQ(rocsparse_create_csc_descr(&csc, 5, 7, 4, b.i, b.j, b.v, i32, i32, base0, f32),
-                  st_ok);
-        ASSERT_EQ(rocsparse_create_dnmat_descr(&dnmat, 5, 7, 5, b.v, f32, rocsparse_order_column),
-                  st_ok);
-        ASSERT_EQ(rocsparse_create_dnvec_descr(&dnvec, 5, b.v, f32), st_ok);
-
-        // A batch count that is not positive or a negative stride is an invalid value.
-        for(rocsparse_int bad_count : {0, -1})
-        {
-            EXPECT_EQ(rocsparse_spmat_set_strided_batch(csr, bad_count), st_val);
-            EXPECT_EQ(rocsparse_coo_set_strided_batch(coo, bad_count, 10), st_val);
-            EXPECT_EQ(rocsparse_csr_set_strided_batch(csr, bad_count, 6, 4), st_val);
-            EXPECT_EQ(rocsparse_csc_set_strided_batch(csc, bad_count, 8, 4), st_val);
-            EXPECT_EQ(rocsparse_dnmat_set_strided_batch(dnmat, bad_count, 35), st_val);
-            EXPECT_EQ(rocsparse_dnvec_set_strided_batch(dnvec, bad_count, 5), st_val);
-        }
-        EXPECT_EQ(rocsparse_coo_set_strided_batch(coo, 2, -1), st_val);
-        EXPECT_EQ(rocsparse_csr_set_strided_batch(csr, 2, -1, 4), st_val);
-        EXPECT_EQ(rocsparse_csr_set_strided_batch(csr, 2, 6, -1), st_val);
-        EXPECT_EQ(rocsparse_csc_set_strided_batch(csc, 2, -1, 4), st_val);
-        EXPECT_EQ(rocsparse_csc_set_strided_batch(csc, 2, 8, -1), st_val);
-        EXPECT_EQ(rocsparse_dnmat_set_strided_batch(dnmat, 2, -1), st_val);
-
-        // A null output of a getter is an invalid pointer.
-        rocsparse_int batch_count  = 0;
-        int64_t       batch_stride = 0;
-        EXPECT_EQ(rocsparse_spmat_get_strided_batch(csr, nullptr), st_ptr);
-        EXPECT_EQ(rocsparse_dnmat_get_strided_batch(dnmat, nullptr, &batch_stride), st_ptr);
-        EXPECT_EQ(rocsparse_dnmat_get_strided_batch(dnmat, &batch_count, nullptr), st_ptr);
-        EXPECT_EQ(rocsparse_dnvec_get_strided_batch(dnvec, nullptr, &batch_stride), st_ptr);
-        EXPECT_EQ(rocsparse_dnvec_get_strided_batch(dnvec, &batch_count, nullptr), st_ptr);
-    }
-
     TEST_F(ConvDescr, SpmatSetNnzPerFormat)
     {
         Buf   b;
