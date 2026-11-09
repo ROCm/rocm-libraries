@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Types.hpp>
+#include <memory>
 
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -143,6 +144,89 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForTwoNodeGraph)
 
     EXPECT_FALSE(applicable);
 }
+
+using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+
+struct ActivationCase
+{
+    bool isBwd;
+    PointwiseMode mode;
+    flatbuffers::Optional<float> slope;
+};
+
+class TestLayernormFusionPlanBuilder : public TestLayernormPlanBuilder,
+                                       public ::testing::WithParamInterface<ActivationCase>
+{
+};
+
+TEST_P(TestLayernormFusionPlanBuilder, DeclinesIdentityReluAndLeakyReluFusion)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const auto& testCase = GetParam();
+    auto original
+        = testCase.isBwd ? createValidLayernormBwdGraph() : createValidLayernormFpropGraph();
+    auto nativeGraph = UnPackGraph(original.GetBufferPointer());
+    auto& normNode = *nativeGraph->nodes[0];
+    const auto intermediateUid
+        = testCase.isBwd ? normNode.attributes.AsLayernormBackwardAttributes()->dy_tensor_uid
+                         : normNode.attributes.AsLayernormAttributes()->y_tensor_uid;
+    const auto intermediate
+        = std::find_if(nativeGraph->tensors.begin(),
+                       nativeGraph->tensors.end(),
+                       [&](const auto& tensor) { return tensor->uid == intermediateUid; });
+    ASSERT_NE(intermediate, nativeGraph->tensors.end());
+    auto ioTensor = std::make_unique<TensorAttributesT>(**intermediate);
+    for(const auto& tensor : nativeGraph->tensors)
+    {
+        ioTensor->uid = std::max(ioTensor->uid, tensor->uid + 1);
+    }
+    ioTensor->name = "activation_io";
+    ioTensor->virtual_ = false;
+    (*intermediate)->virtual_ = true;
+
+    PointwiseAttributesT activation;
+    activation.operation = testCase.mode;
+    activation.relu_lower_clip_slope = testCase.slope;
+    activation.in_0_tensor_uid = testCase.isBwd ? ioTensor->uid : intermediateUid;
+    activation.out_0_tensor_uid = testCase.isBwd ? intermediateUid : ioTensor->uid;
+    if(testCase.isBwd)
+    {
+        activation.in_1_tensor_uid
+            = normNode.attributes.AsLayernormBackwardAttributes()->x_tensor_uid;
+    }
+    nativeGraph->tensors.push_back(std::move(ioTensor));
+    auto activationNode = std::make_unique<NodeT>();
+    activationNode->name = "activation";
+    activationNode->compute_data_type = DataType::FLOAT;
+    activationNode->attributes.Set(activation);
+    if(testCase.isBwd)
+    {
+        nativeGraph->nodes.insert(nativeGraph->nodes.begin(), std::move(activationNode));
+    }
+    else
+    {
+        nativeGraph->nodes.push_back(std::move(activationNode));
+    }
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(CreateGraph(builder, nativeGraph.get()));
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    UnsupportedFusion,
+    TestLayernormFusionPlanBuilder,
+    ::testing::Values(ActivationCase{false, PointwiseMode::IDENTITY, flatbuffers::nullopt},
+                      ActivationCase{true, PointwiseMode::IDENTITY, flatbuffers::nullopt},
+                      ActivationCase{false, PointwiseMode::RELU_FWD, flatbuffers::nullopt},
+                      ActivationCase{true, PointwiseMode::RELU_BWD, flatbuffers::nullopt},
+                      ActivationCase{false, PointwiseMode::RELU_BWD, flatbuffers::nullopt},
+                      ActivationCase{true, PointwiseMode::RELU_FWD, flatbuffers::nullopt},
+                      ActivationCase{false, PointwiseMode::RELU_FWD, 0.1f},
+                      ActivationCase{true, PointwiseMode::RELU_BWD, 0.1f},
+                      ActivationCase{false, PointwiseMode::RELU_FWD, 0.0f},
+                      ActivationCase{true, PointwiseMode::RELU_BWD, 0.0f}));
 
 TEST_F(TestLayernormPlanBuilder, IsNotApplicableForBatchnormGraph)
 {

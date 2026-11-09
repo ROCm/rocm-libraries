@@ -113,6 +113,101 @@ TEST(TestBatchnormValidator, ValidInferenceActivationBackward)
         validator.checkBwdActivationTensorConfigSupported(bnInfAttr, actAttr, bnBwdAttr));
 }
 
+namespace
+{
+using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+
+struct ActivationCase
+{
+    PointwiseMode mode;
+    flatbuffers::Optional<float> slope;
+    bool forwardSupported;
+    bool backwardSupported;
+};
+
+class TestBatchnormActivationValidator : public ::testing::TestWithParam<ActivationCase>
+{
+};
+} // namespace
+
+TEST_P(TestBatchnormActivationValidator, DirectionIdentityAndLeakyRelu)
+{
+    const auto& testCase = GetParam();
+    for(const auto variant : {0, 1, 2, 3})
+    {
+        SCOPED_TRACE(variant);
+        auto original = [&]() {
+            switch(variant)
+            {
+            case 0:
+                return hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
+            case 1:
+                return hipdnn_test_sdk::utilities::
+                    createValidBatchnormWithVarianceInferenceActivGraph();
+            case 2:
+                return hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
+            default:
+                return hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
+            }
+        }();
+        auto nativeGraph
+            = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(original.GetBufferPointer());
+        auto* activation = nativeGraph->nodes[1]->attributes.AsPointwiseAttributes();
+        activation->operation = testCase.mode;
+        activation->relu_lower_clip_slope = testCase.slope;
+        flatbuffers::FlatBufferBuilder builder;
+        builder.Finish(
+            hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, nativeGraph.get()));
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        BatchnormValidator validator(graph.getTensorMap());
+        const auto& attr = *graph.getNode(1).attributes_as_PointwiseAttributes();
+        const auto validate = [&]() {
+            switch(variant)
+            {
+            case 0:
+                validator.checkInferenceActivationTensorConfigSupported(
+                    *graph.getNode(0).attributes_as_BatchnormInferenceAttributes(), attr);
+                break;
+            case 1:
+                validator.checkInferenceVarianceExtActivationTensorConfigSupported(
+                    *graph.getNode(0).attributes_as_BatchnormInferenceAttributesVarianceExt(),
+                    attr);
+                break;
+            case 2:
+                validator.checkFwdTrainingActivationTensorConfigSupported(
+                    *graph.getNode(0).attributes_as_BatchnormAttributes(), attr);
+                break;
+            default:
+                validator.checkBwdActivationTensorConfigSupported(
+                    *graph.getNode(0).attributes_as_BatchnormInferenceAttributes(),
+                    attr,
+                    *graph.getNode(2).attributes_as_BatchnormBackwardAttributes());
+                break;
+            }
+        };
+        if(variant == 3 ? testCase.backwardSupported : testCase.forwardSupported)
+        {
+            EXPECT_NO_THROW(validate());
+        }
+        else
+        {
+            EXPECT_THROW(validate(), hipdnn_plugin_sdk::HipdnnPluginException);
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ActivationContracts,
+    TestBatchnormActivationValidator,
+    ::testing::Values(ActivationCase{PointwiseMode::IDENTITY, flatbuffers::nullopt, true, true},
+                      ActivationCase{PointwiseMode::RELU_FWD, flatbuffers::nullopt, true, false},
+                      ActivationCase{PointwiseMode::RELU_BWD, flatbuffers::nullopt, false, true},
+                      ActivationCase{PointwiseMode::RELU_FWD, 0.1f, false, false},
+                      ActivationCase{PointwiseMode::RELU_BWD, 0.1f, false, false},
+                      ActivationCase{PointwiseMode::RELU_FWD, 0.0f, false, false},
+                      ActivationCase{PointwiseMode::RELU_BWD, 0.0f, false, false}));
+
 TEST(TestBatchnormValidator, MismatchShapes)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
