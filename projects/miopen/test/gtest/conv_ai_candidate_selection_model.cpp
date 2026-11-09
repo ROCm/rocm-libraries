@@ -1232,11 +1232,12 @@ TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, OrderAndUnknownName)
     for(std::size_t i = 0; i < fwd.size(); ++i)
         EXPECT_FLOAT_EQ(rev[i], fwd[fwd.size() - 1 - i]);
     // The throw type is part of the fallback contract: an unknown feature propagates out of the
-    // TunaNet (ExtractTunaNetNDFeatures) and config-selection (EngineerCandidateSelectionInputFeatures)
-    // extractors to their callers' catches so the heuristic drops to LGBM/non-AI instead of
-    // crashing. The config path (CandidateSelectionModel::ModelSelectBestCandidate) catches
-    // miopen::Exception specifically, so the throw must be a miopen::Exception (what MIOPEN_THROW
-    // raises) - a plain std::exception would escape that catch and abort the heuristic.
+    // TunaNet (ExtractTunaNetNDFeatures) and config-selection
+    // (EngineerCandidateSelectionInputFeatures) extractors to their callers' catches so the
+    // heuristic drops to LGBM/non-AI instead of crashing. The config path
+    // (CandidateSelectionModel::ModelSelectBestCandidate) catches miopen::Exception specifically,
+    // so the throw must be a miopen::Exception (what MIOPEN_THROW raises) - a plain std::exception
+    // would escape that catch and abort the heuristic.
     EXPECT_THROW(EngineeredConvFeaturesByName(1,
                                               64,
                                               64,
