@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@ double norm_error(char norm_type,
 
     // norm type can be 'O', 'I', 'F', 'o', 'i', 'f' for one, infinity or
     // Frobenius norm one norm is max column sum infinity norm is max row sum
-    // Frobenius is l2 norm of matrix entries
+    // Frobenius is L2 norm of matrix entries
 
     // (64-bit leading dimensions, so that the index arithmetic below is done in 64 bits)
     const int64_t lda = M;

@@ -1863,6 +1863,102 @@ def test_cache_async_chunk_must_divide_cpg():
     assert narrow_arch == {"async_chunk_a": 2, "async_chunk_b": 2}
 
 
+def test_wmma_wgrad_keeps_the_default_grid_and_covers_the_new_variants():
+    """gfx1250 wgrad: every geometry keeps its synchronous default-epilogue
+    kernels; cshuffle, two-stage and the async loop come only on the cover.
+
+    Walks the real (unshrunk) wgrad generator and :func:`aj.count_jobs`, which
+    must agree on gfx1250 too.
+    """
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx("gfx1250")
+    split_ks = aj.CACHE_WGRAD_SPLIT_KS
+    geos = set()
+    walked = 0
+    for job in aj._wgrad_jobs("gfx1250", "bf16", 32, "wmma", target, split_ks):
+        walked += 1
+        i = job.identity
+        geo = (i.tile_m, i.tile_n, i.tile_k, i.warp_m, i.warp_n)
+        geos.add(geo)
+        # The group-merged depthwise candidates are develop's, walked on every
+        # geometry as before (WMMA rejects them at validation).
+        new_variant = i.epilogue != "default" or i.two_stage or i.async_dma
+        if new_variant and not i.group_merge:
+            assert geo in aj.CACHE_WGRAD_WMMA_GEOMETRIES, i
+    assert set(aj.CACHE_WGRAD_WMMA_GEOMETRIES) < geos
+    assert walked == aj.count_jobs(
+        dtype="bf16", target=target, directions=["wgrad"], split_ks=split_ks
+    )
+
+
+@pytest.mark.parametrize("gfx", ["gfx1250", "gfx1151", "gfx1201"])
+def test_wmma_wgrad_count_matches_the_walk(gfx):
+    """:func:`aj.count_jobs` counts exactly the wgrad jobs the generator
+    yields on every wave32 target. The async loop is built only where the
+    target has ``global_load_async_to_lds`` (gfx1250); gfx1151 / gfx1201 get
+    none, and the count must not include them either.
+    """
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(gfx)
+    split_ks = aj.CACHE_WGRAD_SPLIT_KS
+    jobs = list(aj._wgrad_jobs(gfx, "fp16", 32, "wmma", target, split_ks))
+    n_async = sum(1 for job in jobs if job.identity.async_dma)
+    if target.memory.has_async_global_lds:
+        assert n_async > 0
+    else:
+        assert n_async == 0
+    assert len(jobs) == aj.count_jobs(
+        dtype="fp16", target=target, directions=["wgrad"], split_ks=split_ks
+    )
+
+
+def test_widest_vector_pruning_keeps_the_async_wgrad_kernels():
+    """The from-cache sweep's widest-vector pruning ranks async-DMA kernels
+    apart from synchronous ones.
+
+    On the gfx1250 cover geometry 32x64x32 (2x4 warps) the async loop records
+    A=4 / B=8 chunks, while a synchronous binary records the A=8 / B=8 caps
+    (its loader narrows A at build time). Ranked together, every async kernel
+    lost to the synchronous ones and was dropped before it was benchmarked.
+    """
+    from rocke.core.arch import ArchTarget
+
+    from benchmarks.common.benchmark_implicit_gemm_conv import (
+        _widest_vector_sizes,
+    )
+
+    target = ArchTarget.from_gfx("gfx1250")
+    idents = [
+        job.identity
+        for job in aj._wgrad_jobs("gfx1250", "fp16", 32, "wmma", target, (1,))
+        if (
+            job.identity.tile_m,
+            job.identity.tile_n,
+            job.identity.tile_k,
+            job.identity.warp_m,
+            job.identity.warp_n,
+        )
+        == (32, 64, 32, 2, 4)
+        and job.identity.grouped
+    ]
+    async_ids = [i for i in idents if i.async_dma]
+    assert async_ids and all(
+        (i.async_chunk_a, i.async_chunk_b) == (4, 8) for i in async_ids
+    )
+    kept = [c[0] for c in _widest_vector_sizes([(i, None) for i in idents])]
+    kept_async = [i for i in kept if i.async_dma]
+    kept_sync = [i for i in kept if not i.async_dma]
+    # The async kernels survive (the cshuffle one; a default-epilogue kernel
+    # is dropped where a cshuffle one stores wider, async or not) ...
+    assert [i.epilogue for i in kept_async] == ["cshuffle"]
+    # ... and the synchronous ones are still pruned to their widest copy.
+    assert {(i.vector_size_a, i.vector_size_b, i.vector_size_c) for i in kept_sync} == {
+        (8, 8, 8)
+    }
+
+
 @pytest.mark.parametrize(
     "directions", [("fwd",), ("wgrad",), ("dgrad",), ("fwd", "wgrad", "dgrad")]
 )

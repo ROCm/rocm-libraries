@@ -19,12 +19,12 @@ strategy** for scaling to more toolchains and more targets.
 >
 > **Historical architecture snapshot.** §1–§2 predate the explicit LLVM24
 > compiler lane and emission-profile model. Current code separates qualified
-> compiler lanes from structural profiles; LLVM23 and LLVM24 share one profile,
-> and future compiler majors fail closed. The authoritative current description
+> compiler lanes from structural profiles; LLVM24 retains LLVM23's datalayout
+> and target-op surface but has a distinct named-barrier pointer ABI, and future
+> compiler majors fail closed. The authoritative current description
 > is [`../ir_lowering/backend_details.md`](../ir_lowering/backend_details.md#llvm-intrinsic-flavor).
-> §4's R1 also shipped as `tools/gen_arch_domain.py`; committed columns currently
-> cover llvm20, llvm22, and llvm23, while LLVM24 artifact generation is separate
-> follow-up work. Treat the remaining tables and proposals as historical design
+> §4's R1 also shipped as `tools/gen_arch_domain.py`; committed columns cover
+> llvm20, llvm22, llvm23, and llvm24. Treat the remaining tables and proposals as historical design
 > rationale, not current API documentation.
 
 ---
@@ -95,17 +95,31 @@ when a newer generation lands. The partition is exhaustiveness-checked by
 `test_datalayout_kinds_partition_every_flavor` — a hand-rolled substitute for
 the check a language-level `match` would give for free.
 
-**(b) Intrinsic declare text — modelled as base + per-flavor override dicts.**
+**(b) Intrinsic declare text — modelled as base + an inherited chain of per-generation override dicts.**
 
 ```python
-self._decls = dict(_INTRINSIC_DECLS)                    # LLVM 20 shapes
-if flavor == LLVM_FLAVOR_LLVM22: self._decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
-elif flavor == LLVM_FLAVOR_LLVM23: self._decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
+def _decls_for_flavor(flavor):
+    abi = _emission_profile(flavor).declaration_abi     # the lane's generation
+    generations = list(_LlvmDeclarationAbi)
+    decls = dict(_INTRINSIC_DECLS)                      # LLVM 20 shapes
+    for inherited in generations[: generations.index(abi) + 1]:
+        decls.update(_INTRINSIC_DECL_OVERRIDES_BY_ABI[inherited])
+    for call in MATRIX_CALLS.values():                  # MMA calls described as data
+        decls.setdefault(call.key, call.declaration(flavor))
+    return decls
 ```
 
 The **key is stable across flavors**, so all ~151 `_need(...)` call sites are
-flavor-agnostic. Only the text differs. Five overrides per modern flavor today
-(4 fp8/bf8 MFMA operand-width changes + `make.buffer.rsrc.p1`'s `i32`→`i64`).
+flavor-agnostic. Only the text differs. Each override dict holds only the
+entries whose text changed at its own declaration ABI generation: LLVM22 has
+five (4 fp8/bf8 MFMA operand-width changes + `make.buffer.rsrc.p1`'s
+`i32`→`i64`); LLVM23 inherits them and has no text of its own today; LLVM24
+inherits them too and has four of its own (the named-barrier declarations,
+whose pointer moved to addrspace(15)). Lanes that share an emission profile
+share one table. A `MatrixCall` derives its declaration for each flavor from its
+operand forms, so its per-flavor register types need no override entry. The C++
+engine walks the same chain along `rocke_ll_declaration_abi_t`
+(`rocke_ll_decl_text` / `rocke_ll_decl_at` / `rocke_ll_matrix_decl_key_at`).
 
 Why it has to be emitted correctly up front rather than left to auto-upgrade:
 **comgr verifies the toplevel `declare` lines *before* running the auto-upgrade
@@ -352,8 +366,11 @@ target that lacks the instruction and write it into the object, and only the
 text assembler checks each instruction against the target (`arch_absent`
 otherwise). Every decl key × every wired arch — the committed columns are the count of
 record, not this sentence — ~15 s wall across cores on `llvm22`. Managed like
-golden — a generator tool, a committed artifact, a test asserting regeneration is
-a no-op. Depends only on `clang`, never on install layout (§2.4).
+golden — a generator tool, a committed artifact, and a test asserting
+regeneration is a no-op when run with the exact compiler build recorded in the
+artifact. A different build is explicitly unvalidated because development builds
+within one LLVM major can disagree. Depends only on `clang`, never on install
+layout (§2.4).
 
 Per-cell provenance landed as **one file per flavor, named after it**, rather
 than a `verified`/`unvalidated` marker inside a shared file as §3.2 suggested. A

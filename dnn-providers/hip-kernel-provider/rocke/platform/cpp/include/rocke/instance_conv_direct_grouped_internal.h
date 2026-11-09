@@ -1079,8 +1079,153 @@ bool rocke_dconv_dwcol_prologue(rocke_dconv_dwcol_ctx_t* ctx);
 void rocke_dconv_dwcol_build_descriptors(rocke_dconv_dwcol_ctx_t* ctx);
 rocke_kernel_def_t* rocke_dconv_dwcol_col_loop(rocke_dconv_dwcol_ctx_t* ctx);
 
+/* ===================================================================== *
+ *  Windowed depthwise helpers (conv_direct_grouped_build_depthwise_dgrad_win.cpp)
+ *
+ *  Shared by the windowed depthwise dgrad and the Toeplitz WMMA depthwise
+ *  forward (conv_direct_dw_fwd_wmma.cpp), as their Python builders share them:
+ *
+ *    Python (conv_direct_grouped.py)        C++ (here)
+ *    ------------------------------------   ---------------------------------
+ *    _dw_mfma_passes(KW)                    rocke_dw_mfma_passes
+ *    _dw_mfma_tile_w(w_fold)                rocke_dw_mfma_tile_w
+ *    _dw_mfma_in_passes(...)                rocke_dw_mfma_in_passes
+ *    _dw_mfma_lds_bytes(...)                rocke_dw_mfma_lds_bytes
+ *    DW_DGRAD_MFMA_W_FOLDS                  rocke_dw_mfma_w_fold_ok
+ *    _dw_win_byte_strides(b, params, ...)   rocke_dw_win_byte_strides
+ *    _dw_win_tile(b, p_Hi, rows)            rocke_dw_win_tile
+ *    _buf_load_vN(b, dtype, ...)            rocke_dconv_buf_load_vN
+ *    _buf_store_vN(b, dtype, ...)           rocke_dconv_buf_store_vN
+ *    _trunc_f32(b, dtype, val)              rocke_dconv_trunc_f32
+ *    _trunc_f32_elem(b, dtype, val)         rocke_dconv_trunc_f32_elem
+ *    _buf_load_half(b, dtype, ...)          rocke_dconv_buf_load_half
+ *    the one-trip guarded scf.for_iter      rocke_dw_win_guarded (C++ only)
+ *
+ *  `bf16` stands for Python's `dtype == "bf16"`. Every helper emits its ops in
+ *  the Python order (byte identity).
+ * ===================================================================== */
+
+/* 16x16x32 passes per filter row: ceil((KW + 1) / 4). */
+int rocke_dw_mfma_passes(int KW);
+
+/* w_fold in DW_DGRAD_MFMA_W_FOLDS (1, 2 or 4). */
+bool rocke_dw_mfma_w_fold_ok(int w_fold);
+
+/* Output columns per image of a Toeplitz tile: its 32 columns split over
+ * w_fold images (0 for a w_fold below 1, which the validators refuse). */
+int rocke_dw_mfma_tile_w(int w_fold);
+
+/* 16-byte loads per thread and window row of the Toeplitz form: a window of
+ * tile_w + 4 * passes - 2 columns per image, block_ch / 8 loads per column,
+ * w_fold images (0 without threads, which the validators refuse). */
+int rocke_dw_mfma_in_passes(int tile_w, int KW, int w_fold, int block_ch, int threads);
+
+/* LDS bytes of the Toeplitz form: double-buffered input window rows and
+ * output rows, block_ch + 8 channels per pixel (0 for an empty block). */
+long rocke_dw_mfma_lds_bytes(int in_passes, int threads, int block_ch, int w_fold, int tile_w);
+
+/* Byte strides of the A-slot and D-slot tensors from the element-stride
+ * kernargs: out = (a_img, a_row, a_px, d_img, d_row, d_px) (dY / dX in the
+ * dgrad, X / Y in the forward). c2 is the caller's i32 constant 2, made here
+ * when NULL. */
+void rocke_dw_win_byte_strides(rocke_ir_builder_t* b,
+                               const rocke_dconv_params_t* prm,
+                               rocke_value_t* out[6],
+                               rocke_value_t* c2);
+
+/* (image_tile, h0) of this block: block z is image_tile * h_tiles + h_tile
+ * with h_tiles = ceil(p_Hi / rows). */
+void rocke_dw_win_tile(rocke_ir_builder_t* b,
+                       rocke_value_t* p_Hi,
+                       int rows,
+                       rocke_value_t** n_tile,
+                       rocke_value_t** h0);
+
+rocke_value_t* rocke_dconv_buf_load_half(rocke_ir_builder_t* b,
+                                         bool bf16,
+                                         rocke_value_t* rsrc,
+                                         rocke_value_t* voff,
+                                         rocke_value_t* soff);
+rocke_value_t* rocke_dconv_buf_load_vN(rocke_ir_builder_t* b,
+                                       bool bf16,
+                                       rocke_value_t* rsrc,
+                                       rocke_value_t* voff,
+                                       rocke_value_t* soff,
+                                       int dwords);
+void rocke_dconv_buf_store_vN(rocke_ir_builder_t* b,
+                              bool bf16,
+                              rocke_value_t* rsrc,
+                              rocke_value_t* voff,
+                              rocke_value_t* soff,
+                              rocke_value_t* val,
+                              int dwords);
+/* Truncate a vector of f32 accumulators to the output dtype. */
+rocke_value_t* rocke_dconv_trunc_f32(rocke_ir_builder_t* b, bool bf16, rocke_value_t* val);
+/* Truncate one f32 value to the output dtype. */
+rocke_value_t* rocke_dconv_trunc_f32_elem(rocke_ir_builder_t* b, bool bf16, rocke_value_t* val);
+
+/* One staged pixel chunk of a window row: its LDS column `px`, channel
+ * offset `ch8`, and the guarded global byte offset `g_off`. */
+typedef struct rocke_dw_win_plan
+{
+    rocke_value_t* px;
+    rocke_value_t* ch8;
+    rocke_value_t* g_off;
+} rocke_dw_win_plan_t;
+
 #ifdef __cplusplus
 } /* extern "C" */
+#endif
+
+#ifdef __cplusplus
+#include <string>
+#include <vector>
+
+/* A one-trip (or zero-trip) scf.for_iter guarding `body` on the block-uniform
+ * `ok`, carrying `accs` (updated in place to the loop results). The iter args
+ * are named `<prefix>_y<y>_<i>`, the induction variable `<prefix>_y<y>`.
+ * `body` maps the carried values to the yielded ones; it is a template
+ * parameter so each caller's lambda is called directly. */
+template <typename Body>
+inline void rocke_dw_win_guarded(rocke_ir_builder_t* b,
+                                 rocke_value_t* ok,
+                                 rocke_value_t* c0,
+                                 rocke_value_t* c1,
+                                 std::vector<rocke_value_t*>& accs,
+                                 const char* prefix,
+                                 int y,
+                                 bool elide_trailing_barrier,
+                                 Body body)
+{
+    rocke_value_t* trip = rocke_b_select(b, ok, c1, c0);
+    std::vector<std::string> names(accs.size());
+    std::vector<rocke_iter_arg_t> iargs(accs.size());
+    for(size_t i = 0; i < accs.size(); ++i)
+    {
+        names[i] = std::string(prefix) + "_y" + std::to_string(y) + "_" + std::to_string(i);
+        iargs[i].name = names[i].c_str();
+        iargs[i].init = accs[i];
+    }
+    const std::string iv = std::string(prefix) + "_y" + std::to_string(y);
+    rocke_for_t loop = rocke_b_scf_for_iter(b,
+                                            c0,
+                                            trip,
+                                            c1,
+                                            iargs.data(),
+                                            (int)iargs.size(),
+                                            iv.c_str(),
+                                            /*unroll=*/false,
+                                            elide_trailing_barrier);
+    if(!rocke_ir_builder_ok(b))
+        return;
+    rocke_b_region_enter(b, loop.body);
+    std::vector<rocke_value_t*> carried(loop.iter_vars, loop.iter_vars + loop.num_iter_vars);
+    std::vector<rocke_value_t*> out = body(carried);
+    rocke_b_scf_yield(b, out.data(), (int)out.size());
+    rocke_b_region_leave(b);
+    for(size_t i = 0; i < accs.size(); ++i)
+        accs[i] = loop.op->results[i];
+}
 #endif
 
 #endif /* ROCKE_INSTANCE_CONV_DIRECT_GROUPED_INTERNAL_H */

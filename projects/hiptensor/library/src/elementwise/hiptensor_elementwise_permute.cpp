@@ -105,7 +105,7 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
         return errorCode;
     }
 
-    double alphaD;
+    double alphaD{};
     if(alpha != nullptr)
     {
         alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));

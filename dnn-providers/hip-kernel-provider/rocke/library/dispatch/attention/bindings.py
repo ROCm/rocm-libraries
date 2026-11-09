@@ -108,6 +108,13 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         raise ValueError("kernel spec K/V storage dtype disagrees with problem")
     if bool(spec.fp8_fnuz) != bool(problem.fp8_fnuz):
         raise ValueError("tuning wrapper FP8 encoding disagrees with problem")
+    if spec.path == "2d":
+        spec_lse = bool(getattr(kernel_spec, "emit_lse", False))
+        if spec_lse != problem.emit_lse:
+            raise ValueError(
+                f"kernel_spec.emit_lse={spec_lse} disagrees with "
+                f"problem.emit_lse={problem.emit_lse}"
+            )
 
     reduce_spec = spec.reduce_spec
     if reduce_spec is not None:

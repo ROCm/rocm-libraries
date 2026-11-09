@@ -9,9 +9,9 @@ way in both engines; this file can.
 It holds two kinds of hash (format: `golden_store.py`):
 
 - `ll` -- the lowered LLVM IR text, **one section per distinct emission profile**
-  (`llvm20`, `llvm22`, `llvm23`). The top-level `aliases` map represents qualified lanes
-  that intentionally share a profile; `llvm24` resolves to the `llvm23` hashes while still
-  being lowered and checked as `llvm24`.
+  (`llvm20`, `llvm22`, `llvm23`, `llvm24`). The top-level `aliases` map can represent
+  qualified lanes that intentionally share a profile; it is empty today because LLVM24's
+  named-barrier pointer ABI makes its output structurally distinct from LLVM23.
 - `ir_canonical` -- the canonical `ck.dsl.ir/v1` serialization (stable across SSA-id
   renumbering). It is produced before lowering and is the same in every flavor, so it has one
   section.

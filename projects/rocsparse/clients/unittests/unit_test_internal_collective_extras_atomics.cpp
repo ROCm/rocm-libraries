@@ -223,11 +223,73 @@ namespace
         rocsparse::atomic_add_by_CAS(base, idx, static_cast<rocsparse_bfloat16>(1.0f), size);
     }
 
+    // One lane per block takes the spinlock adds times, so every block contends
+    // for it. Reading the element before each add leaves it in this CU's cache,
+    // which the lock holder must not read back after another block's update.
+    template <typename T>
+    __global__ void
+        k_atomic_add_by_CAS_one_lane(T* base, int64_t idx, int64_t size, int adds, float* sink)
+    {
+        if(threadIdx.x == 0)
+        {
+            float seen = 0.0f;
+            for(int a = 0; a < adds; ++a)
+            {
+                seen += static_cast<float>(base[idx]);
+                rocsparse::atomic_add_by_CAS(base, idx, static_cast<T>(1.0f), size);
+            }
+            sink[blockIdx.x] = seen;
+        }
+    }
+
+    // Each block adds 1 adds times to the last element of an odd-size array.
+    // blocks * adds keeps the sum exact in the 16-bit type, so a lost update shows
+    // as a smaller result.
+    template <typename T>
+    void run_atomic_add_by_CAS_contended(unsigned int blocks, int adds)
+    {
+        const int64_t      size    = 7;
+        const unsigned int threads = require_wavefront_size();
+        for(int rep = 0; rep < 10; ++rep)
+        {
+            std::vector<uint16_t>   zero(static_cast<size_t>(size), 0);
+            device_vector<uint16_t> d_raw(zero);
+            ASSERT_NE(d_raw.ptr, nullptr);
+            T*                   d_base = reinterpret_cast<T*>(d_raw.ptr);
+            device_vector<float> d_sink(std::vector<float>(blocks, 0.0f));
+            ASSERT_NE(d_sink.ptr, nullptr);
+            (void)hipGetLastError();
+            hipLaunchKernelGGL(k_atomic_add_by_CAS_one_lane<T>,
+                               dim3(blocks),
+                               dim3(threads),
+                               0,
+                               0,
+                               d_base,
+                               int64_t{size - 1},
+                               size,
+                               adds,
+                               d_sink.ptr);
+            ASSERT_EQ(hipGetLastError(), hipSuccess);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            std::vector<uint16_t> hraw(static_cast<size_t>(size));
+            ASSERT_EQ(
+                hipMemcpy(
+                    hraw.data(), d_raw.ptr, hraw.size() * sizeof(uint16_t), hipMemcpyDeviceToHost),
+                hipSuccess);
+            T v;
+            std::memcpy(&v, &hraw[size - 1], sizeof(v));
+            EXPECT_EQ(static_cast<float>(v), static_cast<float>(blocks * adds))
+                << "repetition " << rep;
+        }
+    }
+
     // Read one half element back as float.
     float read_half(const half* d_ptr, int64_t idx)
     {
         std::vector<uint16_t> h(static_cast<size_t>(idx) + 1);
-        (void)hipMemcpy(h.data(), d_ptr, h.size() * sizeof(uint16_t), hipMemcpyDeviceToHost);
+        unit_test_throw_hip_error(
+            "hipMemcpy",
+            hipMemcpy(h.data(), d_ptr, h.size() * sizeof(uint16_t), hipMemcpyDeviceToHost));
         _Float16 v;
         std::memcpy(&v, &h[idx], sizeof(v));
         return static_cast<float>(v);
@@ -384,8 +446,17 @@ TEST(internal_collective_extras_atomic_add_by_CAS, bfloat16_even_paired)
     ASSERT_EQ(launch_single_block(k_atomic_add_by_CAS_bf16, n, d_base, int64_t{0}, size),
               hipSuccess);
     std::vector<uint16_t> hraw(static_cast<size_t>(size));
-    (void)hipMemcpy(hraw.data(), d_raw.ptr, hraw.size() * sizeof(uint16_t), hipMemcpyDeviceToHost);
+    UT_CHECK_HIP(
+        hipMemcpy(hraw.data(), d_raw.ptr, hraw.size() * sizeof(uint16_t), hipMemcpyDeviceToHost));
     rocsparse_bfloat16 bf;
     bf.data = hraw[0];
     EXPECT_FLOAT_EQ(static_cast<float>(bf), static_cast<float>(n));
+}
+TEST(internal_collective_extras_atomic_add_by_CAS, half_odd_last_spinlock_contended)
+{
+    run_atomic_add_by_CAS_contended<half>(256, 8);
+}
+TEST(internal_collective_extras_atomic_add_by_CAS, bfloat16_odd_last_spinlock_contended)
+{
+    run_atomic_add_by_CAS_contended<rocsparse_bfloat16>(32, 8);
 }
