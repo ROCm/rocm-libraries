@@ -5,24 +5,15 @@
 """gfx11 / gfx12 helpers over `_if_then`, the `scf.if` context manager that the vendored `kernels.common` (FlyDSL 0.3.4) does not define
 (`fmha_common_gfx1201` reaches the same helper as `common_utils._if_then` of this package's `flyc_polyfill`): the guarded cooperative-load
 staging, the padded-head store, and the context manager under both. Used by `fmha_bwd_dq_gfx11.py`, `fmha_bwd_dq_f32_gfx11.py` and
-`fmha_bwd_dkdv_gfx11.py`. Imports no module of this repository.
+`fmha_bwd_dkdv_gfx11.py`. Imports only this package's `flyc_polyfill`.
 """
 
-import contextlib
+from kernels.attention_bwd_rdna.flyc_polyfill import _if_then
 
 import flydsl.expr as fx
-from flydsl._mlir import ir
 from flydsl._mlir.dialects import scf as _scf
 from flydsl.expr import arith, range_constexpr
 from flydsl.expr.typing import Vector as Vec
-
-
-@contextlib.contextmanager
-def _if_then(if_op):
-    """Body of an `scf.if` without results: the insertion point of its then block, terminated by `scf.yield`."""
-    with ir.InsertionPoint(if_op.then_block):
-        yield
-        _scf.YieldOp([])
 
 
 def _guarded_batches(aperture, base_row, block_rows, body):

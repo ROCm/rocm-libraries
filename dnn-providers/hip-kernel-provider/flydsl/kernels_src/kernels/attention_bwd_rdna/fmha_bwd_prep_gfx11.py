@@ -18,8 +18,8 @@ pairing as on wave64. Rows per block = 256 / TPR; the 256-thread block is 8 wave
 
 **Layout, exact vs padded** as in the gfx950 file: an exact build requires hdim_vo == tile (8-element vector loads), a padded build reads
 `hdim_vo <= tile` columns element by element with the tail masked to zero. O, dO and the caller's LSE are each addressed from
-their own origin (`fmha.tensor_origin`: `off[z] * mul` when ragged, `z * stride_batch` when dense; LSE with its three element strides);
-Delta and LSE' go to the compact `[B, H, max_seqlen_q]` workspace (`fmha.ws_row_base`).
+their own origin (`fmha.tensor_origin_gated`: `off[z] * mul` when ragged, `z * stride_batch` when dense; LSE with its three element strides);
+Delta and LSE' go to the compact `[B, H, max_seqlen_q]` workspace (`fmha.stats_ws_base`).
 
 ABI = the gfx950 plain prep launcher's (argument names, order and annotations); the launcher keeps its gfx950 name:
     O, DO, LSE (in), LSE_ws (out), Delta (out), batch_size, seqinfo_q0, seqinfo_q1,
@@ -33,7 +33,7 @@ Derived from `fmha_bwd_prep_gfx950.py` (a port of AOTriton `kernel/bwd_preproces
 import math
 
 
-from kernels.attention_bwd_rdna import fmha_common_gfx1201 as fmha
+from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -117,12 +117,12 @@ def build_fmha_bwd_prep_gfx11_module_primary(dtype_str, tile, padded):
         seqlen, _, _ = fmha.decode_addressing(
             varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, z
         )
-        o_origin = fmha.tensor_origin(off_O, mul_O, z, stride_o_batch, seqlen)
-        do_origin = fmha.tensor_origin(off_DO, mul_DO, z, stride_do_batch, seqlen)
-        stats_origin = fmha.tensor_origin(
+        o_origin = fmha.tensor_origin_gated(off_O, mul_O, z, stride_o_batch, seqlen)
+        do_origin = fmha.tensor_origin_gated(off_DO, mul_DO, z, stride_do_batch, seqlen)
+        stats_origin = fmha.tensor_origin_gated(
             off_Stats, mul_Stats, z, stride_stats_batch, seqlen
         )
-        ws_base = fmha.ws_row_base(z, head, num_head_q, max_seqlen_q)
+        ws_base = fmha.stats_ws_base(z, head, num_head_q, max_seqlen_q)
 
         valid = row < seqlen
         # An out-of-range row reads row 0 of its sequence (always in bounds) and stores nothing.

@@ -26,7 +26,7 @@ vector store; otherwise it takes element stores masked at the row's column count
     mask                          bit 0 / 1 / 2: write the dQ / dK / dV tail
 """
 
-from kernels.attention_bwd_rdna import fmha_bwd_tailzero_addressing as addr
+from kernels.attention_bwd_cdna import fmha_bwd_tailzero_addressing as addr
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx

@@ -4,7 +4,7 @@
 
 """FlyDSL backward prep for the fp32 split backward (gfx11-generic): Delta and the workspace LSE'.
 
-The gfx11 wave32 twin of `fmha_bwd_prep_f32_gfx950` (same math, ABI and lane order, the same addressing arithmetic under other helper names and in another statement order, see the comment at the origins; no sink twin: fp32 sinks are out of scope). Per query row:
+The gfx11 wave32 twin of `fmha_bwd_prep_f32_gfx950` (same math, ABI and lane order, the same addressing arithmetic in another statement order, see the comment at the origins; no sink twin: fp32 sinks are out of scope). Per query row:
 
     Delta[row]  = sum_d O[row, d] * dO[row, d]        fp32 accumulate
     LSE'[row]   = LSE[row] with -inf -> +inf          (NaN and finite values unchanged)
@@ -12,9 +12,9 @@ The gfx11 wave32 twin of `fmha_bwd_prep_f32_gfx950` (same math, ABI and lane ord
 The dK/dV and dQ kernels read `exp2(s - lse * log2e)`: an empty row (LSE = -inf, what hipDNN writes) would give `exp2(+inf)`, so they
 need +inf. The input LSE is never written; LSE' goes to its own workspace.
 
-**Layout.** As the 16-bit prep: O, dO and the caller's LSE are each addressed from their own origin (`fmha.tensor_origin`: `off[z] * mul` when
+**Layout.** As the 16-bit prep: O, dO and the caller's LSE are each addressed from their own origin (`fmha.tensor_origin_gated`: `off[z] * mul` when
 ragged, `z * stride_batch` when dense; LSE with its three element strides); Delta and LSE' go to the compact `[B, H, max_seqlen_q]` workspace
-(`fmha.ws_row_base`) that the dK/dV and dQ kernels read. Rows past a sequence's length are
+(`fmha.stats_ws_base`) that the dK/dV and dQ kernels read. Rows past a sequence's length are
 neither read nor written; grid = (cdiv(max_seqlen_q, ROWS), num_head_q, num_seqlens or batch_size). O and dO are `(batch, head, row,
 col)` with unit column stride and (batch, head, seq) strides in elements (4-byte elements).
 
@@ -34,7 +34,7 @@ ABI (the argument names, order and annotations of `fmha_bwd_prep_f32_gfx950`; th
 import math
 
 
-from kernels.attention_bwd_rdna import fmha_common_gfx1201 as fmha
+from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -114,14 +114,13 @@ def build_fmha_bwd_prep_f32_gfx11_module_primary(dtype_str, tile, padded):
         seqlen, _, _ = fmha.decode_addressing(
             varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, z
         )
-        # The gfx950 twin computes the workspace base (`fmha.stats_ws_base`, here `fmha.ws_row_base`) before the Stats origin, and its
-        # `tensor_origin` tests the pointer inline where this package's calls `fmha.ptr_is_set`.
-        o_origin = fmha.tensor_origin(off_O, mul_O, z, stride_o_batch, seqlen)
-        do_origin = fmha.tensor_origin(off_DO, mul_DO, z, stride_do_batch, seqlen)
-        stats_origin = fmha.tensor_origin(
+        # The gfx950 twin computes the workspace base before the Stats origin and takes `fmha.tensor_origin`.
+        o_origin = fmha.tensor_origin_gated(off_O, mul_O, z, stride_o_batch, seqlen)
+        do_origin = fmha.tensor_origin_gated(off_DO, mul_DO, z, stride_do_batch, seqlen)
+        stats_origin = fmha.tensor_origin_gated(
             off_Stats, mul_Stats, z, stride_stats_batch, seqlen
         )
-        ws_base = fmha.ws_row_base(z, head, num_head_q, max_seqlen_q)
+        ws_base = fmha.stats_ws_base(z, head, num_head_q, max_seqlen_q)
 
         valid = row < seqlen
         # An out-of-range row reads row 0 of its sequence (always in bounds) and stores nothing.

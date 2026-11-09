@@ -292,9 +292,10 @@ def test_a_vector_is_sixteen_bytes() -> None:
     assert (addr.vec_of(2), addr.vec_of(4)) == (8, 4)
 
 
-def test_the_two_packages_hold_one_helper_text() -> None:
-    """The cdna and rdna packages import nothing from each other, so each holds the helper: the texts are one."""
-    assert (CDNA / HELPER).read_bytes() == (RDNA / HELPER).read_bytes()
+def test_the_helper_has_one_copy() -> None:
+    """Both kernels run the cdna package's helper; the rdna package holds no second text of it."""
+    assert (CDNA / HELPER).is_file()
+    assert not (RDNA / HELPER).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -376,16 +377,9 @@ def test_the_kernel_builds_the_symbol_and_dtypes_the_generator_declares(
 
 
 @pytest.mark.parametrize("arch", sorted(KERNEL_FILES))
-def test_the_kernel_imports_its_own_packages_helper(arch: str) -> None:
-    package = KERNEL_FILES[arch].parent.name
+def test_the_kernel_imports_the_shared_helper(arch: str) -> None:
     text = KERNEL_FILES[arch].read_text(encoding="utf-8")
-    assert f"from kernels.{package} import fmha_bwd_tailzero_addressing as addr" in text
-    other = (
-        "attention_bwd_rdna"
-        if package == "attention_bwd_cdna"
-        else "attention_bwd_cdna"
-    )
-    assert other not in text
+    assert "from kernels.attention_bwd_cdna import fmha_bwd_tailzero_addressing as addr" in text
 
 
 def test_the_instance_rows_are_three_dtypes_per_arch_family() -> None:

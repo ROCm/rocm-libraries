@@ -5,10 +5,14 @@
 #   commit:   b5e8cfb909e554c62081f56055b11d6ba3fd6bfa
 #   path:     modules/flash/flyc/fmha_common_gfx1201.py
 #
-# Reaches this package through the SDPA backward sweep. Differs from `../attention_rdna4/fmha_common_gfx1201.py` in the package imports
-# (`attention_bwd_cdna`), in the addressing helpers (`decode_addressing` without the INDIVIDUAL-length clamp, `make_addr_pair`,
-# `tensor_origin` and `stats_ws_base`, which replace `lse_row_addressing`, `lse_row_step_per_head` and `lse_token_pitch`),
-# in carrying neither `FastMath.uncontracted` nor `bf16_round_nonan_pack_v8`, and in `_load_u64_or_zero`, which it imports from there.
+# Reaches this package through the SDPA backward sweep, and serves both backward packages: the gfx950 kernels here and the gfx11
+# kernels of `../attention_bwd_rdna/` import it. Differs from `../attention_rdna4/fmha_common_gfx1201.py` in the package imports
+# (`attention_bwd_cdna`), in the addressing helpers (`decode_addressing` without the INDIVIDUAL-length clamp, `make_addr_pair` with a
+# (batch, head, sequence) strides tuple, `tensor_origin`, `tensor_origin_gated`, `stats_ws_base` and `ptr_is_set`, which replace
+# `lse_row_addressing`, `lse_row_step_per_head` and `lse_token_pitch`), in carrying neither `FastMath.uncontracted` nor
+# `bf16_round_nonan_pack_v8`, and in `_load_u64_or_zero`, which it imports from there.
+# `tensor_origin_gated` is `tensor_origin` with the offset load gated on a non-empty sequence: the two statement orders emit different
+# IR, and each arch's shipped objects were built from its own, so each kernel family keeps its own.
 
 
 """Hardware detail for the gfx1201 (RDNA4) attention kernels.
@@ -108,6 +112,8 @@ __all__ = [
     "load_geom",
     "acc_elem_column",
     "stats_ws_base",
+    "ptr_is_set",
+    "tensor_origin_gated",
     "lds_load_v8",
     "lds_store_vx",
     "global_load_tr_v8",
@@ -1378,6 +1384,11 @@ def decode_addressing(varlen_bits, bits_shift, max_seqlen, s0, s1, z):
     return seqlen, row_off, batch
 
 
+def ptr_is_set(ptr):
+    """True when a pointer kernel argument is bound; an optional input that is off is a null pointer."""
+    return fx.Int64(fx.ptrtoint(ptr)) != fx.Int64(0)
+
+
 def tensor_origin(off, mul, z, s_batch, seqlen):
     """Element origin of sequence `z` in one tensor (or in the caller's Stats).
 
@@ -1396,10 +1407,25 @@ def tensor_origin(off, mul, z, s_batch, seqlen):
 
     The load is skipped for a null `off`, as in `cond_load`.
     """
-    ragged = fx.Int64(fx.ptrtoint(off)) != fx.Int64(0)
+    ragged = ptr_is_set(off)
     pos = cond_load(ragged, seqinfo_addr(off, z), fx.Int32(0))
     start = (seqlen > fx.Int32(0)).select(fx.Index(pos) * fx.Index(mul), fx.Index(0))
     return ragged.select(start, fx.Index(z) * fx.Index(s_batch))
+
+
+def tensor_origin_gated(off, mul, z, s_batch, seqlen):
+    """`tensor_origin` with the offset load itself skipped for an empty ragged sequence.
+
+    The load is gated on `ragged & (seqlen > 0)`, so an empty ragged sequence (whose `off[z]` may be one past
+    the end of the tensor) starts at element 0 without reading `off`; a dense tensor starts at `z * s_batch`.
+    """
+    ragged = ptr_is_set(off)
+    start = cond_load(
+        ragged & (seqlen > fx.Int32(0)), seqinfo_addr(off, z), fx.Int32(0)
+    )
+    return ragged.select(
+        fx.Index(start) * fx.Index(mul), fx.Index(z) * fx.Index(s_batch)
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1580,15 +1606,18 @@ def make_addr_pair(strides, head, origin, *, seqlen_k, seq_last, hoist, clamp):
     construction. Assuming one shared layout is not a simplification, it is
     wrong.
 
+    `origin` is `tensor_origin`'s answer for this tensor. It belongs in the
+    **64-bit base** rather than the 32-bit per-lane offset: on a ragged
+    tensor it is a whole-batch quantity and overflows 32 bits at realistic
+    token counts (sdpa-varlen-plan.md section 5).
+
     `hoist` and `clamp` are `const_expr` -- they select which code is emitted,
     not which branch runs.
     """
-    # `origin` is the tensor's own element origin for this sequence
-    # (`tensor_origin`), and it belongs in the **64-bit base** rather than
-    # the 32-bit per-lane offset: on a packed tensor it is a whole-batch
-    # quantity and overflows 32 bits at realistic token counts
-    # (sdpa-varlen-plan.md section 5). `strides` is (head, sequence).
-    s_head, s_seq = strides
+    # BHSD slot order: batch, head, sequence. See `_strides_of` in the kernel
+    # for why the order is the ABI rather than a convenience. The batch stride
+    # is consumed by `tensor_origin`.
+    _, s_head, s_seq = strides
     bh = origin + head * s_head
 
     def tbase(seq_start):

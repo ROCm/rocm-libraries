@@ -55,7 +55,7 @@ header of 64 u32 words (magic, version, kernel, block_m, block_n, n_iter, hdim_q
 from types import SimpleNamespace as _WireArgs
 
 
-from kernels.attention_bwd_rdna import fmha_common_gfx1201 as fmha
+from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 from kernels.attention_bwd_rdna.fmha_common_gfx11 import _if_then
 from kernels.attention_bwd_rdna.fmha_tuning_bwd_dq_f32_gfx11 import (
     BwdDqF32KnobsGfx11,
@@ -240,20 +240,20 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
         alive = start_q < seqlen_q
         head_k = head_q // (fx.Index(num_head_q) // fx.Index(num_head_k))
 
-        # ---- element bases: each tensor's origin (`fmha.tensor_origin`: its own offsets when ragged, its batch stride when dense) plus head, 64-bit ----
-        q_origin = fmha.tensor_origin(
+        # ---- element bases: each tensor's origin (`fmha.tensor_origin_gated`: its own offsets when ragged, its batch stride when dense) plus head, 64-bit ----
+        q_origin = fmha.tensor_origin_gated(
             a.seqinfo_q1, a.mul_Q, z_i32, a.stride_q_batch, seqlen_q
         )
-        do_origin = fmha.tensor_origin(
+        do_origin = fmha.tensor_origin_gated(
             a.off_DO, a.mul_DO, z_i32, a.stride_do_batch, seqlen_q
         )
-        dq_origin = fmha.tensor_origin(
+        dq_origin = fmha.tensor_origin_gated(
             a.off_DQ, a.mul_DQ, z_i32, a.stride_dq_batch, seqlen_q
         )
-        k_origin = fmha.tensor_origin(
+        k_origin = fmha.tensor_origin_gated(
             a.seqinfo_k1, a.mul_K, z_i32, a.stride_k_batch, seqlen_k
         )
-        v_origin = fmha.tensor_origin(
+        v_origin = fmha.tensor_origin_gated(
             a.off_V, a.mul_V, z_i32, a.stride_v_batch, seqlen_k
         )
         q_sseq, k_sseq, v_sseq = (
@@ -332,7 +332,7 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
         # LSE' and Delta of each pair's row: an out-of-range row is an empty row (LSE' = +inf, Delta = 0), so P = dS = 0
         lse2 = []
         delta = []
-        ws_base = fmha.ws_row_base(z_i32, head_q, num_head_q, max_seqlen_q)
+        ws_base = fmha.stats_ws_base(z_i32, head_q, num_head_q, max_seqlen_q)
         for i in range_constexpr(NPAIR):
             tok_row = fx.Index(
                 common_utils.smax(

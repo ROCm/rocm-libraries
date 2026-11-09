@@ -13,8 +13,7 @@ Launch: block `BLOCK_THREADS`; grid `(grid_blocks(units), planes_of(...), 1)`. A
 `mask` bit 0 / 1 / 2 selects dQ / dK / dV; an output whose bit is clear is not written (a ragged output's storage past a length
 belongs to a gap or to the next sequence).
 
-**Two copies, one text.** `attention_bwd_cdna/` and `attention_bwd_rdna/` each hold this file (the packages import nothing from each
-other); `tests/test_sdpa_bwd_tailzero.py` holds them byte-identical.
+**One copy.** The gfx950 and the gfx11 kernels both import this file.
 """
 
 BLOCK_THREADS = 256

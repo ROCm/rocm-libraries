@@ -61,7 +61,7 @@ calls. The counter offset of kv column `kv_block_start` is a 64-bit quantity for
 `block_n` (>= 16), so `kv // 4` splits exactly.
 
 Varlen and GQA (runtime paths of the one object): the Q and K sides take their lengths from `fmha.decode_addressing`; each tensor starts at its own
-origin (`fmha.tensor_origin`); LSE' and Delta come from the compact `[B, H, max_seqlen_q]` workspace (`fmha.ws_row_base`); query head `h` reads KV head
+origin (`fmha.tensor_origin_gated`); LSE' and Delta come from the compact `[B, H, max_seqlen_q]` workspace (`fmha.stats_ws_base`); query head `h` reads KV head
 `h // (num_head_q / num_head_k)` (GQA and MQA); dQ is per query head, so no group sum and no atomics.
 
 Class `bias` (no mask; the exponent is `(sm_scale * S + bias - LSE') * log2e`, the bias added before the ragged-tail mask):
@@ -87,7 +87,7 @@ extra argument, so the default objects' kernarg list is untouched.
 from types import SimpleNamespace as _WireArgs
 
 
-from kernels.attention_bwd_rdna import fmha_common_gfx1201 as fmha
+from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 from kernels.attention_bwd_rdna import rdna_layout_gfx11 as L
 from kernels.attention_bwd_rdna.fmha_common_gfx11 import (
     _guarded_batches,
@@ -444,20 +444,20 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
         )
         sm_log2e = fastmath.mul(sm_scale, fx.Float32(_LOG2E))
 
-        # Each tensor starts where its own offsets say (ragged) or at its batch stride (dense); see `fmha.tensor_origin`.
-        _q_origin = fmha.tensor_origin(
+        # Each tensor starts where its own offsets say (ragged) or at its batch stride (dense); see `fmha.tensor_origin_gated`.
+        _q_origin = fmha.tensor_origin_gated(
             seqinfo_q1, a.mul_Q, z_i32, a.stride_q_batch, seqlen_q_i32
         )
-        _do_origin = fmha.tensor_origin(
+        _do_origin = fmha.tensor_origin_gated(
             a.off_DO, a.mul_DO, z_i32, a.stride_do_batch, seqlen_q_i32
         )
-        _k_origin = fmha.tensor_origin(
+        _k_origin = fmha.tensor_origin_gated(
             seqinfo_k1, a.mul_K, z_i32, a.stride_k_batch, seqlen_k_i32
         )
-        _v_origin = fmha.tensor_origin(
+        _v_origin = fmha.tensor_origin_gated(
             a.off_V, a.mul_V, z_i32, a.stride_v_batch, seqlen_k_i32
         )
-        _dq_origin = fmha.tensor_origin(
+        _dq_origin = fmha.tensor_origin_gated(
             a.off_DQ, a.mul_DQ, z_i32, a.stride_dq_batch, seqlen_q_i32
         )
         _addr_kw = dict(seqlen_k=seqlen_k_v, seq_last=seq_last, hoist=False, clamp=True)
@@ -600,7 +600,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 common_utils.smin(q_row_i32, seqlen_q_i32 - fx.Int32(1)), fx.Int32(0)
             )
         )
-        _lse_off = fmha.ws_row_base(z_i32, head_q, num_head_q, max_seqlen_q) + _tok_row
+        _lse_off = fmha.stats_ws_base(z_i32, head_q, num_head_q, max_seqlen_q) + _tok_row
 
         def _load_row_f32(ptr):
             return _pointer_load(

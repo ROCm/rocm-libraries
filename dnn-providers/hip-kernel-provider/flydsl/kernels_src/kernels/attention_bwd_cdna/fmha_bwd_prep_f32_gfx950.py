@@ -1,7 +1,7 @@
 # Not vendored: written for this provider from the FlyDSL SDPA backward sweep (see README.md); it has no upstream.
 """FlyDSL backward prep for the fp32 split backward (gfx950): Delta and the workspace LSE'.
 
-The fp32 twin of `fmha_bwd_prep_gfx950` (same math and ABI, the same addressing arithmetic under other helper names and in another statement order, see the comment at the workspace base; no sink twin: fp32 sinks are out of scope). Per query row:
+The fp32 twin of `fmha_bwd_prep_gfx950` (same math and ABI, the same addressing arithmetic in another statement order, see the comment at the workspace base; no sink twin: fp32 sinks are out of scope). Per query row:
 
     Delta[row]  = sum_d O[row, d] * dO[row, d]        fp32 accumulate
     LSE'[row]   = LSE[row] with -inf -> +inf          (NaN and finite values unchanged)
@@ -110,8 +110,7 @@ def build_fmha_bwd_prep_f32_gfx950_module_primary(dtype_str, tile, padded):
             varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, z
         )
         # The workspace is compact `(z, head, row)`; the caller's Stats are read through their own offsets and strides.
-        # The gfx11 twin names the workspace helper `ws_row_base` (`fmha.stats_ws_base` here), tests the pointer with `ptr_is_set`, and
-        # computes the three origins before the workspace base.
+        # The gfx11 twin computes the three origins (`fmha.tensor_origin_gated`) before the workspace base.
         ws_base = fmha.stats_ws_base(z, head, num_head_q, max_seqlen_q)
         stats_base = fmha.tensor_origin(
             off_Stats, mul_Stats, z, stride_stats_batch, seqlen
