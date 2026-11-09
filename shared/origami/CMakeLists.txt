@@ -180,15 +180,24 @@ if(ORIGAMI_ENABLE_NN)
             FetchContent_Declare(
                 yaml-cpp
                 GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-                GIT_TAG 0.8.0
+                GIT_TAG yaml-cpp-0.9.0 # 56e3bb550c91fd7005566f19c079cb7a503223cf
                 GIT_SHALLOW TRUE
             )
+            # 0.8.0 requires CMake < 3.5, which CMake 4 rejects. 0.9.0 does not;
+            # this keeps an older GIT_TAG from failing configure anyway.
+            if(NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM
+                    OR CMAKE_POLICY_VERSION_MINIMUM VERSION_LESS 3.5)
+                set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+            endif()
             FetchContent_MakeAvailable(yaml-cpp)
         else()
             message(FATAL_ERROR "yaml-cpp not found (set ORIGAMI_ENABLE_FETCH=ON to auto-fetch)")
         endif()
     endif()
-    target_link_libraries(origami PRIVATE yaml-cpp::yaml-cpp)
+    # BUILD_INTERFACE only: a fetched yaml-cpp target is not in origami-targets.
+    # Static origami (hipBLASLt sets ORIGAMI_BUILD_SHARED_LIBS=OFF) would otherwise
+    # export that private link and install(EXPORT) fails at generate time.
+    target_link_libraries(origami PRIVATE $<BUILD_INTERFACE:yaml-cpp::yaml-cpp>)
 endif()
 
 target_link_libraries(origami PRIVATE hip::host)
