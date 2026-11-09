@@ -162,9 +162,21 @@ fn tied_source(inst: &MInst) -> Option<usize> {
 /// `DMA_KEYS - 1` distinct ones in program order, then all of LDS.
 struct DmaKeys {
     tags: Vec<u16>,
+    /// The kernel orders its DMA itself (`MFunc::lds_dma_explicit`): no LDS
+    /// access waits for one.
+    explicit: bool,
+    /// The kernel's `lds_waw`: an LDS op overwriting VGPRs that an LDS op
+    /// still in flight writes does not wait, LDS results landing in issue
+    /// order, while no scalar load is outstanding.
+    lds_waw: bool,
 }
 
 impl DmaKeys {
+    /// Whether `inst` waits for the DMA loads into LDS bytes it may touch.
+    fn waited_by(&self, inst: &MInst) -> bool {
+        !self.explicit && !self.tags.is_empty() && lds_dma::accesses_lds_memory(inst.op) && !lds_dma::is_dma(inst.op)
+    }
+
     fn of(f: &MFunc) -> DmaKeys {
         let mut tags = Vec::new();
         for inst in f.blocks.iter().flat_map(|b| &b.insts).filter(|i| lds_dma::is_dma(i.op)) {
@@ -176,7 +188,7 @@ impl DmaKeys {
             tags.truncate(DMA_KEYS - 1);
             tags.push(crate::rir::alias::ANY);
         }
-        DmaKeys { tags }
+        DmaKeys { tags, explicit: f.lds_dma_explicit, lds_waw: f.passes.lds_waw }
     }
 
     /// The key of a DMA load tagged `tag`.
@@ -190,6 +202,7 @@ fn step(state: &mut Running, inst: &MInst, dma: &DmaKeys) -> Option<(u8, u8)> {
     let flags = inst.op.flags();
     let vmem_load = flags & F_VMEM_LOAD != 0;
     let lds_merge = lds_merge(inst);
+    let lds_waw = dma.lds_waw && flags & F_LDS != 0 && !state.smem;
     let (mut need_vm, mut need_lgkm) = (NONE, NONE);
     let tied_use = tied_source(inst);
     for (i, o) in inst.uses.iter().chain(inst.defs.iter()).enumerate() {
@@ -197,18 +210,19 @@ fn step(state: &mut Running, inst: &MInst, dma: &DmaKeys) -> Option<(u8, u8)> {
         // destination nor a d16 load's tied source waits for an earlier load
         // of its counter.
         let tied = i >= inst.uses.len() || tied_use == Some(i);
+        let def = i >= inst.uses.len();
         for k in reg_keys(o) {
             if !(vmem_load && tied) {
                 need_vm = need_vm.min(state.vm.get(k));
             }
-            if !(lds_merge && tied) {
+            if !(lds_merge && tied) && !(lds_waw && def && k < 256) {
                 need_lgkm = need_lgkm.min(state.lgkm.get(k));
             }
         }
     }
     // An LDS access waits for the DMA loads into bytes it may touch; DMA
     // loads land in issue order, so one does not wait for another.
-    if !dma.tags.is_empty() && lds_dma::accesses_lds_memory(inst.op) && !lds_dma::is_dma(inst.op) {
+    if dma.waited_by(inst) {
         for (k, &tag) in dma.tags.iter().enumerate() {
             if lds_dma::overlaps(tag, inst.mem) {
                 need_vm = need_vm.min(state.vm.get(DMA_BASE + k));
@@ -469,6 +483,39 @@ mod tests {
     }
 
     #[test]
+    fn lds_waw_lets_an_lds_load_overwrite_one_in_flight() {
+        // ds_read_b128 v[0:3] of which nothing reads v[2:3], then a b64 read
+        // into v[2:3] while the first is in flight, then reads of both.
+        let code = || {
+            vec![
+                MInst::new(Opc::DsLoadB128, [v(0, 4)], [v(10, 1)]),
+                MInst::new(Opc::DsLoadB64, [v(2, 2)], [v(11, 1)]),
+                MInst::new(Opc::VAddF32, [v(30, 1)], [v(0, 1), v(2, 1)]),
+            ]
+        };
+        let with = |on: bool, code: Vec<MInst>| {
+            let mut f = MFunc { target: crate::target::Target::Gfx950, ..MFunc::default() };
+            f.passes.lds_waw = on;
+            f.blocks = vec![MBlock { insts: code, loop_depth: 0 }];
+            insert(&mut f);
+            f.blocks[0].insts.iter().map(|i| (i.op, i.imm)).collect::<Vec<_>>()
+        };
+        let wait = |vm, lgkm| (Opc::SWaitcnt, waitcnt_imm(vm, lgkm));
+        assert_eq!(waits(code()), [(1, waitcnt_imm(NONE, 0)), (2, waitcnt_imm(NONE, 0))]);
+        let on = with(true, code());
+        assert_eq!(on.iter().filter(|x| x.0 == Opc::SWaitcnt).collect::<Vec<_>>(), [&wait(NONE, 0)]);
+        assert_eq!(on[2], wait(NONE, 0), "{on:?}");
+        // A VALU write of the in-flight registers still waits, and so does an
+        // LDS load while a scalar load is outstanding.
+        let valu = vec![code()[0].clone(), MInst::new(Opc::VMovB32, [v(2, 1)], [Opnd::Imm(0)])];
+        assert_eq!(with(true, valu)[1], wait(NONE, 0));
+        let sload = MInst::new(Opc::SLoadB64, [s(4, 2)], [s(0, 2)]).with_imm(0);
+        let mut smem = code();
+        smem.insert(0, sload);
+        assert_eq!(with(true, smem)[2], wait(NONE, 0));
+    }
+
+    #[test]
     fn agprs_are_not_the_sgprs_of_their_number() {
         // s_load into s[4:5], then moves through a4 and a5: nothing
         // outstanding; s4 itself still waits.
@@ -519,7 +566,7 @@ mod tests {
                 }
             }
         }
-        if !dma.tags.is_empty() && lds_dma::accesses_lds_memory(inst.op) && !lds_dma::is_dma(inst.op) {
+        if dma.waited_by(inst) {
             for (k, &tag) in dma.tags.iter().enumerate() {
                 if lds_dma::overlaps(tag, inst.mem) {
                     need_vm = need_vm.min(state.vm[DMA_BASE + k]);

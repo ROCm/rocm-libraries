@@ -275,6 +275,19 @@ pub fn mfma_kind(op: Opc) -> Option<(MfmaClass, u32)> {
     })
 }
 
+/// `mfma_kind` of one instruction: an f8f6f4 MFMA runs half the passes of
+/// its row when neither A nor B is an 8-bit format (cbsz and blgp name them;
+/// 2 and 3 are fp6 and bf6, 4 is fp4).
+pub fn mfma_kind_of(inst: &MInst) -> Option<(MfmaClass, u32)> {
+    let (class, passes) = mfma_kind(inst.op)?;
+    let narrow = |format: i64| (2..=4).contains(&format);
+    let f8f6f4 = matches!(inst.op, Opc::Gfx9(t::Gfx9Op::VMfmaScale32x32x64F8f6f4 | t::Gfx9Op::VMfma16x16x128F8f6f4));
+    if f8f6f4 && narrow(inst.imm & 7) && narrow(inst.imm >> 7 & 7) {
+        return Some((class, passes / 2));
+    }
+    Some((class, passes))
+}
+
 /// Wait states an MFMA of `kind` leaves before its result is read by a VALU
 /// instruction (`memory`: a VMEM or LDS one) or overwritten (M5, M6, M4's
 /// A and B for XDL and SMFMA producers).
@@ -291,8 +304,8 @@ pub(crate) fn mfma_result_waits(kind: (MfmaClass, u32), memory: bool, overwrite:
 
 /// Wait states before a VALU instruction may read an MFMA's result (M5),
 /// which the scheduler counts as its latency.
-pub fn mfma_result_latency(op: Opc) -> Option<u32> {
-    mfma_kind(op).map(|k| mfma_result_waits(k, false, false))
+pub fn mfma_result_latency(inst: &MInst) -> Option<u32> {
+    mfma_kind_of(inst).map(|k| mfma_result_waits(k, false, false))
 }
 
 /// M3: an MFMA of `consumer` class reading as C what an MFMA of `producer`
@@ -360,7 +373,7 @@ pub fn fact(inst: &MInst) -> Fact {
     let soffset = || t::signature(op).and_then(|s| s.uses.iter().position(|o| o.role == Role::Soffset));
     let sgpr_soffset = fmt == Fmt::Mubuf && soffset().and_then(|k| inst.uses.get(k)).and_then(regs).is_some_and(|r| r.is_sgpr());
     let uses: RegList = inst.uses.iter().filter_map(regs).collect();
-    let mfma = mfma_kind(op);
+    let mfma = mfma_kind_of(inst);
     let dot = match op {
         Opc::VDot2F32F16 => 1,
         Opc::VDot2F32Bf16 => 2,
@@ -976,6 +989,13 @@ mod tests {
         assert_eq!(w(vec![valu(v(40, 1), v(1, 1), v(2, 1)), xdl4(v(0, 4), v(0, 4))]), 2);
         let acc_write = MInst::new(Opc::Gfx9(VAccvgprWriteB32), [a(1, 1)], [v(5, 1)]);
         assert_eq!(w(vec![acc_write, xdl4(a(0, 4), a(0, 4))]), 2);
+        // M2 also covers the scaled MFMA's scale operands (a VALU rotating a scale dword).
+        let scaled = || {
+            MInst::new(Opc::Gfx9(VMfmaScale32x32x64F8f6f4), [a(0, 16)], [v(16, 6), v(24, 6), a(0, 16), v(32, 1), v(33, 1)])
+        };
+        assert_eq!(w(vec![valu(v(32, 1), v(1, 1), v(2, 1)), scaled()]), 2);
+        assert_eq!(w(vec![valu(v(33, 1), v(1, 1), v(2, 1)), scaled()]), 2);
+        assert_eq!(w(vec![valu(v(34, 1), v(1, 1), v(2, 1)), scaled()]), 0);
         // M3, the same registers: an accumulation chain issues back to back,
         // but 2 after a 2-pass MFMA and 4 between f64 4x4s.
         assert_eq!(w(vec![xdl4(a(0, 4), a(0, 4)), xdl4(a(0, 4), a(0, 4))]), 0);

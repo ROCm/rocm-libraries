@@ -18,7 +18,7 @@ use std::borrow::Cow;
 
 use std::hash::Hasher;
 
-use super::ast::{Attr, Kernel, Op, OpKind, Operands, Param, Region, Results, Scalar, Text, Type, ValueDef, ValueId};
+use super::ast::{Attr, Kernel, Op, OpKind, Operands, Param, Passes, Region, Results, Scalar, Text, Type, ValueDef, ValueId};
 use super::hashcons::{key_hash, ConstTable};
 use super::scan::{self, Level, Masks};
 use super::scan_line::{canonical_with, const_key_with};
@@ -838,6 +838,9 @@ pub(super) struct Prologue<'a> {
     pub max_workgroup_size: u32,
     pub waves_per_eu: (u32, u32),
     pub agpr_limit: Option<u32>,
+    pub lds_dma_explicit: bool,
+    pub m0_early: bool,
+    pub passes: Passes,
     /// Parameter names without the `%`, their types, and whether they are
     /// `noalias` and `readonly`.
     pub params: Vec<(&'a str, Type, bool, bool)>,
@@ -876,6 +879,9 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
     let mut max_workgroup_size = 1024u32;
     let mut waves_per_eu = (0u32, 0u32);
     let mut agpr_limit = None;
+    let mut lds_dma_explicit = false;
+    let mut m0_early = false;
+    let mut passes = Passes::default();
     if let Some(attrs_line) = lines.peek().filter(|line| line.starts_with("attrs ")) {
         lines.next()?;
         let mut scanner = Scanner::new(&attrs_line["attrs ".len()..]);
@@ -887,6 +893,14 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
                 // Tells the LLVM lowering to scope LDS accesses per allocation, so that a read waits only
                 // for the LDS DMA into its own allocation; the gfx950 waitcnt pass's LDS tags always do.
                 ("lds_alias_scopes", Attr::Bool(_)) => {}
+                // The kernel orders its LDS DMA with explicit waits and barriers.
+                ("lds_dma_explicit", Attr::Bool(b)) => lds_dma_explicit = b,
+                // M0 writes move up to cover H12's wait state.
+                ("m0_early", Attr::Bool(b)) => m0_early = b,
+                // The optional passes (`ast::Passes`).
+                (name, Attr::Bool(b)) if Passes::NAMES.contains(&name) => {
+                    passes.set(name, b);
+                }
                 // An occupancy hint, `n` or `[min, max]` waves per SIMD.
                 ("waves_per_eu", Attr::Int(n)) if (0..=16).contains(&n) => waves_per_eu = (n as u32, n as u32),
                 ("waves_per_eu", Attr::List(range)) => match range[..] {
@@ -930,7 +944,7 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
         }
         params.push((pname, ty, noalias, readonly));
     }
-    Ok(Prologue { name, max_workgroup_size, waves_per_eu, agpr_limit, params })
+    Ok(Prologue { name, max_workgroup_size, waves_per_eu, agpr_limit, lds_dma_explicit, m0_early, passes, params })
 }
 
 /// One definition of a name: the value, the scope it was made in, the
@@ -1295,6 +1309,9 @@ fn parse_sequential(text: &str, hashcons: bool) -> Result<Kernel, CompileError> 
         wave: 32,
         vgpr_limit: None,
         agpr_limit: prologue.agpr_limit,
+        lds_dma_explicit: prologue.lds_dma_explicit,
+        m0_early: prologue.m0_early,
+        passes: prologue.passes,
         params,
         body,
         values: parser.names.values,
@@ -1751,6 +1768,9 @@ mod tests {
             wave: 32,
             vgpr_limit: None,
             agpr_limit: prologue.agpr_limit,
+            lds_dma_explicit: prologue.lds_dma_explicit,
+            m0_early: prologue.m0_early,
+            passes: prologue.passes,
             params,
             body,
             values: parser.names.values,

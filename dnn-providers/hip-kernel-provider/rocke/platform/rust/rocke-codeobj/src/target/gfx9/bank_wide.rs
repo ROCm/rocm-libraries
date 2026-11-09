@@ -126,7 +126,7 @@ fn issue_floor(f: &MFunc) -> u64 {
         .map(|block| {
             let (mut issue, mut pipe) = (0u64, 0u64);
             for inst in block.insts.iter().filter(|i| !(i.op.fmt() == Fmt::Pseudo && i.op.flags() & F_USE_EXEC == 0)) {
-                pipe += u64::from(sched::pipe_slots(inst.op));
+                pipe += u64::from(sched::pipe_slots(inst));
                 issue += u64::from(inst.op != Opc::VMovB32);
             }
             8u64.pow(block.loop_depth.min(4)) * issue.max(pipe)

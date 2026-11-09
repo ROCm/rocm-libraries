@@ -292,7 +292,8 @@ impl<const N: usize> std::fmt::Debug for Opnds<N> {
 }
 
 pub type Defs = Opnds<2>;
-pub type Uses = Opnds<4>;
+/// Five: gfx950's block-scaled MFMA reads A, B, C and its two scale VGPRs.
+pub type Uses = Opnds<5>;
 
 #[derive(Clone, Debug)]
 pub struct MInst {
@@ -359,6 +360,14 @@ pub struct MFunc {
     /// AGPRs the allocation may use when fewer than the target's (the
     /// kernel's `agpr_alloc`).
     pub agpr_limit: Option<u32>,
+    /// The kernel orders its LDS DMA with explicit waits and barriers (its
+    /// `lds_dma_explicit`), so LDS accesses do not wait for DMA loads.
+    pub lds_dma_explicit: bool,
+    /// M0 writes move up to cover H12's wait state (the kernel's
+    /// `m0_early`, `target::gfx9::m0_early`).
+    pub m0_early: bool,
+    /// The optional passes the kernel's attributes turn on.
+    pub passes: super::ast::Passes,
 }
 
 impl MFunc {

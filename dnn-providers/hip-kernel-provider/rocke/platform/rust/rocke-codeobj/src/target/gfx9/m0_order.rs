@@ -179,6 +179,36 @@ mod tests {
     }
 
     #[test]
+    fn pin_vmem_keeps_the_dma_loads_below_the_mfma_of_their_slot() {
+        // One MFMA slot between sched_barriers: an LDS read the MFMA waits
+        // for, the MFMA, then a DMA load and a page-table load, which no
+        // fence keeps below it.
+        let read = MInst::new(Opc::DsLoadB32, [r(60, 4)], [r(6, 1)]).with_mem(1);
+        let mfma = MInst::new(Opc::Gfx9(Gfx9Op::VMfma16x16x32F16), [r(50, 4)], [r(60, 4), r(64, 4), r(50, 4)]);
+        let bar = MInst::new(Opc::SchedBarrier, [], []);
+        let insts = vec![page(1), add(2, 9), bar.clone(), read, mfma, m0(30), dma(2), page(3), bar];
+        let order = |pin: bool| {
+            let mut f = MFunc { target: Target::Gfx950, ..MFunc::default() };
+            f.passes.pin_vmem = pin;
+            f.blocks.push(MBlock { insts: insts.clone(), loop_depth: 0 });
+            crate::rir::post::schedule_window(&mut f, 64);
+            let name = |i: &MInst| match (i.op, i.uses.first()) {
+                (Opc::SchedBarrier, _) => "bar".to_string(),
+                (Opc::GLoadB32, _) => "page".to_string(),
+                (op, _) if is_dma(op) => "dma".to_string(),
+                (op, _) if super::super::agpr::is_mfma(op) => "mfma".to_string(),
+                _ => "other".to_string(),
+            };
+            f.blocks[0].insts.iter().map(name).filter(|n| n != "other").collect::<Vec<_>>()
+        };
+        // Without it a load issues above the MFMA, in the slot before.
+        let off = order(false);
+        assert!(off[1] == "bar" && off[2] != "mfma" && off[5] == "bar", "{off:?}");
+        let on = order(true);
+        assert!(on[1] == "bar" && on[2] == "mfma" && on[5] == "bar", "{on:?}");
+    }
+
+    #[test]
     fn what_else_names_a_physical_register_stays_a_fence() {
         assert!(unfenced(&m0(30)) && unfenced(&dma(2)));
         let exec = MInst::new(Opc::SMovB32, [Opnd::P(Phys::ExecLo, 1)], [r(1, 1)]);

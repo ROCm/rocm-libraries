@@ -61,7 +61,7 @@ pub fn result_latency(inst: &MInst) -> u32 {
     if flags & F_SMEM != 0 {
         return SMEM;
     }
-    if let Some(waits) = super::hazards::mfma_result_latency(op) {
+    if let Some(waits) = super::hazards::mfma_result_latency(inst) {
         return waits;
     }
     match info.fmt {

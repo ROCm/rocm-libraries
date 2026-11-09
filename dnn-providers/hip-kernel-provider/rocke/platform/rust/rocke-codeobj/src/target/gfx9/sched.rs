@@ -28,8 +28,8 @@ const NONE: u32 = u32::MAX;
 const M2: u32 = 2;
 
 /// Slots an MFMA holds the matrix pipe for; 0 for any other instruction.
-pub fn pipe_slots(op: Opc) -> u8 {
-    hazards::mfma_kind(op).map_or(0, |(_, passes)| passes as u8)
+pub fn pipe_slots(inst: &MInst) -> u8 {
+    hazards::mfma_kind_of(inst).map_or(0, |(_, passes)| passes as u8)
 }
 
 /// A VALU instruction other than an MFMA or a DOT: M2's producers.
@@ -123,7 +123,7 @@ pub fn cost(f: &MFunc) -> Cost {
                 if inst.op == Opc::SBarrier {
                     cycle = cycle.max(lgkm_done).max(vm_done);
                 }
-                let mfma = hazards::mfma_kind(inst.op);
+                let mfma = hazards::mfma_kind_of(inst);
                 let operands = inst.uses.iter().enumerate().flat_map(|(k, o)| keys(o).map(move |key| (k, key)));
                 let operands_ready = operands.map(|(k, key)| if mfma.is_some() && k == 2 { ready_c[key] } else { ready[key] }).max().unwrap_or(0);
                 let (done, done_c) = if inst.op.fmt() == Fmt::Pseudo && flags & F_USE_EXEC == 0 {
@@ -192,8 +192,8 @@ impl MfmaEdges {
             return Some(0);
         }
         let producer = &insts[m];
-        let kind = hazards::mfma_kind(producer.op)?;
-        Some(match hazards::mfma_kind(consumer.op) {
+        let kind = hazards::mfma_kind_of(producer)?;
+        Some(match hazards::mfma_kind_of(consumer) {
             Some((class, _)) if k == 2 => {
                 let full = width(&consumer.uses[2]) == width(&producer.defs[0]);
                 (hazards::mfma_srcc_waits(kind, class, full) + 1).max(kind.1)
@@ -237,7 +237,7 @@ mod tests {
         let valu = add(2, 4);
         let insts = vec![valu, c1, m1, c2, m2, store];
         let mut edges = MfmaEdges::new(&insts).expect("the block has MFMAs");
-        let passes = u32::from(pipe_slots(insts[2].op));
+        let passes = u32::from(pipe_slots(&insts[2]));
         assert_eq!(passes, 8);
         // A VALU result read by an MFMA: M2's two wait states.
         assert_eq!(edges.raw(&insts, 0, 2, 0), Some(3));
@@ -289,5 +289,21 @@ mod tests {
         let l = cost(&g);
         assert_eq!(l.cycles(1), 8 * (11 * 180 + 1));
         assert_eq!(l.cycles(2), 8 * ((11 * 180 + 1) / 2));
+    }
+
+    #[test]
+    fn f8f6f4_mfmas_take_half_the_pipe_without_an_8bit_format() {
+        let scaled = |ctl: i64| {
+            MInst::new(Opc::Gfx9(Gfx9Op::VMfmaScale32x32x64F8f6f4), [r(10, 16)], [r(2, 8), r(3, 8), r(10, 16), r(4, 1), r(5, 1)])
+                .with_imm(ctl)
+        };
+        // fp8 x fp8, fp6 x fp8, fp6 x fp6, bf6 x fp4, fp4 x fp4 (cbsz in bits 2:0, blgp in 9:7).
+        let slots: Vec<u8> = [0, 2, 2 | 2 << 7, 3 | 4 << 7, 4 | 4 << 7].iter().map(|&ctl| pipe_slots(&scaled(ctl))).collect();
+        assert_eq!(slots, [16, 16, 8, 8, 8]);
+        let dense = |ctl: i64| MInst::new(Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4), [r(10, 4)], [r(2, 8), r(3, 8), r(10, 4)]).with_imm(ctl);
+        assert_eq!((pipe_slots(&dense(0)), pipe_slots(&dense(4 | 4 << 7))), (8, 4));
+        // A VALU reader of an fp6 result waits the 8-pass M5 (12 wait states), not the 16-pass one.
+        assert_eq!(hazards::mfma_result_latency(&scaled(2 | 2 << 7)), Some(12));
+        assert_eq!(hazards::mfma_result_latency(&scaled(0)), Some(20));
     }
 }

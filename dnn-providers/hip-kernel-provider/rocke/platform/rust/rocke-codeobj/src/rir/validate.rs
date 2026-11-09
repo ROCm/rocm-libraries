@@ -220,6 +220,17 @@ impl Checker<'_> {
         }
     }
 
+    /// An LDS DMA load's instruction offset (`offset`), added to the global
+    /// and the LDS address: 0..4095 bytes. Out of line: the checker's frame
+    /// bounds the nesting depth a small stack takes.
+    #[inline(never)]
+    fn dma_offset(&self, op: &Op) -> Result<(), CompileError> {
+        match self.int(op, "offset")? {
+            None | Some(0..=4095) => Ok(()),
+            Some(o) => Err(unsupported(format!("an LDS DMA instruction offset of {o}"))),
+        }
+    }
+
     fn str<'a>(&self, op: &'a Op, key: &str) -> Result<Option<&'a str>, CompileError> {
         match op.attr(key) {
             None => Ok(None),
@@ -578,6 +589,7 @@ impl Checker<'_> {
                     Some(aux) if aux & !(1 | 2 | 16) == 0 => {}
                     Some(aux) => return Err(unsupported(format!("LDS DMA cache policy {aux:#x}"))),
                 }
+                self.dma_offset(op)?;
             }
             // `global.load.lds` from `ptr + byte_offset` (an i8 GEP).
             GlobalLoadLds => {

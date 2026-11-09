@@ -14,7 +14,7 @@
 use crate::rir::mir::{Fmt, Opc};
 
 /// FNV-1a 64 of the description (line endings as LF) this file was generated from.
-pub const DESCRIPTION_DIGEST: u64 = 0x090e8881243aa836;
+pub const DESCRIPTION_DIGEST: u64 = 0xad11405c5a2bdc70;
 
 // ----- operand codes -----
 
@@ -1179,7 +1179,7 @@ pub enum Form {
     AccMov,
     /// VOP3P-MAI: AGPR vdst and src2 set acc_cd, an AGPR src0 or src1 its acc bit; imm holds the MFMA controls
     Mai,
-    /// VOP3PX2: v_mfma_ld_scale_b32 reading the scale pair, then the MFMA as in mai (abid refused)
+    /// VOP3PX2: v_mfma_ld_scale_b32 reading the A and B scales, then the MFMA as in mai (abid refused)
     MaiScale,
     /// load into LDS (MUBUF with the lds bit, GLOBAL's global_load_lds): no data register, M0 the LDS address; imm holds the offset and the cache policy
     Lds,
@@ -2067,7 +2067,8 @@ pub enum Role {
     Dst,
     Src,
     Vsrc,
-    Scale,
+    ScaleA,
+    ScaleB,
 }
 
 /// Operand class.
@@ -2798,7 +2799,7 @@ const SIG_106: Sig = Sig {
 };
 const SIG_107: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 16 }],
-    uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 8 }, Operand { role: Role::Src1, class: Class::Av, dwords: 8 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 16 }, Operand { role: Role::Scale, class: Class::V, dwords: 2 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 8 }, Operand { role: Role::Src1, class: Class::Av, dwords: 8 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 16 }, Operand { role: Role::ScaleA, class: Class::V, dwords: 1 }, Operand { role: Role::ScaleB, class: Class::V, dwords: 1 }],
     imm: Imm::Mai,
     mods: 0x0,
 };

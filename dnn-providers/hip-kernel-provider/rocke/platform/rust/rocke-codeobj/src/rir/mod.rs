@@ -65,6 +65,62 @@ pub(crate) fn debug_flag(name: &str) -> bool {
     std::env::var("ROCKE_DIRECT_DEBUG").is_ok_and(|v| v.split(',').any(|f| f.trim() == name))
 }
 
+/// Measurement override: `ROCKE_DIRECT_FORCE_ATTRS=dead_lanes,m0_fill,peep_waits,peep_shifts,ds_rebase`
+/// (any of `ast::Passes::NAMES`, and `m0_early`) turns those kernel attributes on in every kernel compiled,
+/// whatever its IR says, so the passes can be measured before a builder sets them. A name that is no such
+/// attribute is an error.
+fn force_attrs(kernel: &mut ast::Kernel) -> Result<(), CompileError> {
+    match std::env::var("ROCKE_DIRECT_FORCE_ATTRS") {
+        Ok(list) => force_attr_list(kernel, &list),
+        Err(_) => Ok(()),
+    }
+}
+
+/// `force_attrs` with the comma-separated attribute names `list`.
+fn force_attr_list(kernel: &mut ast::Kernel, list: &str) -> Result<(), CompileError> {
+    for name in list.split(',').map(str::trim).filter(|name| !name.is_empty()) {
+        if name == "m0_early" {
+            kernel.m0_early = true;
+        } else if !kernel.passes.set(name, true) {
+            return Err(CompileError::new("ROCKE_DIRECT_UNSUPPORTED", format!("ROCKE_DIRECT_FORCE_ATTRS: no kernel attribute {name:?}")));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod attr_tests {
+    use super::*;
+
+    #[test]
+    fn pass_attributes_parse_and_the_override_adds_to_them() {
+        let text = |attrs: &str| {
+            format!(
+                "ckdsl.ir v1\nkernel @k {{\n  attrs {{ max_workgroup_size = i:64{attrs} }}\n  params {{\n    %Y : ptr<f32,global>\n  }}\n  \
+                 region @entry {{\n    cf.return (  )\n  }}\n}}\n"
+            )
+        };
+        let parsed = |attrs: &str| parse::parse(&text(attrs)).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(parsed("").passes, ast::Passes::default());
+        let mut kernel = parsed(", m0_fill = b:true, ds_rebase = b:false");
+        assert_eq!(kernel.passes, ast::Passes { m0_fill: true, ..Default::default() });
+        force_attr_list(&mut kernel, " dead_lanes, peep_waits,,m0_early ").unwrap_or_else(|e| panic!("{e}"));
+        let ast::Passes { dead_lanes, m0_fill, peep_waits, peep_shifts, ds_rebase, .. } = kernel.passes;
+        assert_eq!((dead_lanes, m0_fill, peep_waits, peep_shifts, ds_rebase, kernel.m0_early), (true, true, true, false, false, true));
+        assert_eq!(kernel.passes, ast::Passes { dead_lanes: true, m0_fill: true, peep_waits: true, ..Default::default() });
+        // Only pass attributes are forced; a misspelt name is an error, as an unknown attribute is.
+        for bad in ["dead_lane", "lds_dma_explicit"] {
+            assert!(force_attr_list(&mut kernel, bad).is_err(), "{bad}");
+        }
+        assert!(parse::parse(&text(", dead_lane = b:true")).is_err());
+        for name in ast::Passes::NAMES {
+            let mut one = ast::Passes::default();
+            assert!(one.set(name, true) && one != ast::Passes::default(), "{name}");
+            assert_eq!(parsed(&format!(", {name} = b:true")).passes, one);
+        }
+    }
+}
+
 #[cfg(test)]
 mod thread_tests {
     use super::*;
@@ -1001,6 +1057,7 @@ fn compile_with(
         }
         parsed => parsed?,
     };
+    force_attrs(&mut kernel)?;
     kernel.wave = target.info().wave;
     if target == Target::Gfx950 {
         crate::target::gfx9::mask_splat::fold(&mut kernel);
@@ -1038,6 +1095,9 @@ fn compile_with(
     let mut sel = isel::select_for(target, &kernel, &facts, uniform, &lds, lds_size)?;
     sel.func.vgpr_limit = kernel.vgpr_limit;
     sel.func.agpr_limit = kernel.agpr_limit;
+    sel.func.lds_dma_explicit = kernel.lds_dma_explicit;
+    sel.func.m0_early = kernel.m0_early;
+    sel.func.passes = kernel.passes;
     if target == Target::Gfx950 {
         // Past the registers one workgroup's waves leave per SIMD, no workgroup fits a CU.
         let most = crate::target::gfx9::rules::workgroup_registers(target.info(), kernel.max_workgroup_size);
@@ -1139,10 +1199,13 @@ fn same_function(a: &mir::MFunc, b: &mir::MFunc) -> bool {
         let mir::MBlock { insts, loop_depth } = x;
         *loop_depth == y.loop_depth && insts.len() == y.insts.len() && insts.iter().zip(&y.insts).all(|(p, q)| inst(p, q))
     };
-    let mir::MFunc { blocks, vregs, target, vgpr_limit, agpr_limit } = a;
+    let mir::MFunc { blocks, vregs, target, vgpr_limit, agpr_limit, lds_dma_explicit, m0_early, passes } = a;
     *target == b.target
         && *vgpr_limit == b.vgpr_limit
         && *agpr_limit == b.agpr_limit
+        && *lds_dma_explicit == b.lds_dma_explicit
+        && *m0_early == b.m0_early
+        && *passes == b.passes
         && vregs.len() == b.vregs.len()
         && vregs.iter().zip(&b.vregs).all(|(x, y)| reg(x, y))
         && blocks.len() == b.blocks.len()

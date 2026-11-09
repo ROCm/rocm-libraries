@@ -174,7 +174,7 @@ form pk32 "VOP3P on two 32-bit lanes: register sources at even registers, imm ho
 form swap "VOP1 exchanging lanes of two VGPRs, both read and written: defs and uses are (vdst, vsrc)"
 form nodata "MUBUF cache control with no address or data: imm holds the cache policy"
 form mai "VOP3P-MAI: AGPR vdst and src2 set acc_cd, an AGPR src0 or src1 its acc bit; imm holds the MFMA controls"
-form mai_scale "VOP3PX2: v_mfma_ld_scale_b32 reading the scale pair, then the MFMA as in mai (abid refused)"
+form mai_scale "VOP3PX2: v_mfma_ld_scale_b32 reading the A and B scales, then the MFMA as in mai (abid refused)"
 form acc_read "VOP3P v_accvgpr_read: src0 is an AGPR, encoded by its index"
 form acc_write "VOP3P v_accvgpr_write: vdst is an AGPR, encoded by its index"
 form acc_mov "VOP1 v_accvgpr_mov: vdst is an AGPR encoded by its index, src0 an AGPR encoded as 256 + index"
@@ -592,10 +592,10 @@ inst   VMfma32x32x2F32   v_mfma_f32_32x32x2_f32    VOP3P   0x44   opc=gfx9 flags
 inst   VMfma16x16x4F64   v_mfma_f64_16x16x4_f64    VOP3P   0x6e   opc=gfx9 flags=VALU d=vdst:av8 u=src0:av2,src1:av2,src2:avi8 imm=mai imp=use:exec unit=VALU lat=mfma_dgemm16 form=mai haz=m1,m2,m3,m4,m5,m6,m7,m9
 inst   VMfma4x4x4F64     v_mfma_f64_4x4x4_4b_f64   VOP3P   0x6f   opc=gfx9 flags=VALU d=vdst:av2 u=src0:av2,src1:av2,src2:avi2 imm=mai imp=use:exec unit=VALU lat=mfma_dgemm4 form=mai haz=m1,m2,m3,m4,m5,m6,m7,m9
 # The block-scaled MFMA (VOP3PX2, four words): v_mfma_ld_scale_b32 (op 0x2c) with the A and B E8M0 scales,
-# then this MFMA. The scales are one VGPR pair, A's in the low register and B's in the high one, each read
-# from its low byte; cbsz and blgp name the A and B formats, which fix their sizes (8 dwords for fp8 and
-# bf8, 6 for fp6 and bf6, 4 for fp4).
-inst   VMfmaScale32x32x64F8f6f4 v_mfma_scale_f32_32x32x64_f8f6f4 VOP3P 0x2e opc=gfx9 flags=VALU d=vdst:av16 u=src0:av8,src1:av8,src2:avi16,scale:v2 imm=mai imp=use:exec unit=VALU lat=mfma_xdl16 form=mai_scale haz=m1,m2,m3,m4,m5,m6,m7
+# then this MFMA. The A and B scales are two VGPRs, its src0 and src1, each read from its low byte;
+# cbsz and blgp name the A and B formats, which fix their sizes (8 dwords for fp8 and bf8, 6 for fp6 and
+# bf6, 4 for fp4) and its passes (16 with an 8-bit format, 8 without).
+inst   VMfmaScale32x32x64F8f6f4 v_mfma_scale_f32_32x32x64_f8f6f4 VOP3P 0x2e opc=gfx9 flags=VALU d=vdst:av16 u=src0:av8,src1:av8,src2:avi16,scale_a:v1,scale_b:v1 imm=mai imp=use:exec unit=VALU lat=mfma_xdl16 form=mai_scale haz=m1,m2,m3,m4,m5,m6,m7
 # LDS DMA: each lane's dwords at its buffer offset go to LDS at M0 + offset + 4 * dwords * lane, counted on vmcnt.
 # M0 is implicit, so the rows are fences: no instruction is scheduled across one (it reads M0 and writes LDS).
 inst   BufLoadLdsB32     buffer_load_dword         MUBUF   0x14   opc=gfx9 flags=VMEM_LOAD|LDS|FENCE u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12cpol imp=use:exec,use:m0 unit=VMEM lat=vmem_load form=lds haz=h12

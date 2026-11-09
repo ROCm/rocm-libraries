@@ -418,17 +418,17 @@ fn result_latency(inst: &MInst) -> u32 {
 /// which bounds the change in register pressure.
 pub fn schedule_window(f: &mut MFunc, window: usize) {
     let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
-    let target = f.target;
+    let (target, pin_vmem) = (f.target, f.passes.pin_vmem);
     for block in f.blocks.iter_mut() {
         let insts = std::mem::take(&mut block.insts);
-        block.insts = schedule_block(insts, window, &units, target);
+        block.insts = schedule_block(insts, window, &units, target, pin_vmem);
     }
 }
 
 const NO_INST: u32 = u32::MAX;
 
-fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex, target: crate::target::Target) -> Vec<MInst> {
-    let order = block_dag(&insts, units, target, &mut DagScratch::default()).order(window);
+fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex, target: crate::target::Target, pin_vmem: bool) -> Vec<MInst> {
+    let order = block_dag(&insts, units, target, pin_vmem, &mut DagScratch::default()).order(window);
     order.iter().map(|&i| insts[i as usize].clone()).collect()
 }
 
@@ -459,7 +459,12 @@ pub(super) struct BlockDag {
     pipe: Vec<u8>,
 }
 
-fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, scratch: &mut DagScratch) -> BlockDag {
+/// With `pin_vmem` (the kernel's `pin_vmem`), VMEM accesses, LDS DMA loads
+/// among them, keep their program order with gfx950's MFMAs: a kernel that
+/// gives each DMA its MFMA slot (the MFMA, then the DMA, then
+/// `sched_barrier`) keeps it there, where otherwise a DMA that is no fence
+/// (`m0_order`) may issue above the MFMA of its window.
+fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, pin_vmem: bool, scratch: &mut DagScratch) -> BlockDag {
     let result_latency = |inst: &MInst| match target {
         crate::target::Target::Gfx1151 => result_latency(inst),
         crate::target::Target::Gfx950 => crate::target::gfx9::model::result_latency(inst),
@@ -496,7 +501,23 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
     // does not write.
     let mut lds = (None, Vec::new());
     let mut vmem = super::alias::GlobalOrder::default();
+    // `pin_vmem`: the last MFMA, and the VMEM accesses since it.
+    let pin = pin_vmem && target == crate::target::Target::Gfx950;
+    let (mut last_mfma, mut vmem_since) = (None, Vec::new());
     for (i, inst) in insts.iter().enumerate() {
+        if pin {
+            if crate::target::gfx9::agpr::is_mfma(inst.op) {
+                for j in std::mem::take(&mut vmem_since) {
+                    edge(j, i, 0);
+                }
+                last_mfma = Some(i);
+            } else if inst.op.flags() & (F_VMEM_LOAD | F_VMEM_STORE) != 0 {
+                if let Some(m) = last_mfma {
+                    edge(m, i, 0);
+                }
+                vmem_since.push(i);
+            }
+        }
         let unfenced = m0.is_some() && crate::target::gfx9::m0_order::unfenced(inst);
         let flags = inst.op.flags() & if unfenced { !F_FENCE } else { !0 };
         if flags & (F_BRANCH | F_END | F_DEF_EXEC | F_USE_VCC | F_SMEM | F_FENCE) != 0
@@ -631,7 +652,7 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
             .fold(own, u32::max);
     }
     let issues = insts.iter().map(|inst| inst.op.fmt() != Fmt::Pseudo || inst.op.flags() & F_USE_EXEC != 0).collect();
-    let pipe = mfma.map_or_else(Vec::new, |_| insts.iter().map(|inst| crate::target::gfx9::sched::pipe_slots(inst.op)).collect());
+    let pipe = mfma.map_or_else(Vec::new, |_| insts.iter().map(crate::target::gfx9::sched::pipe_slots).collect());
     BlockDag { succ_start, succs, preds, height, issues, pipe }
 }
 
@@ -738,7 +759,7 @@ impl Dags {
     pub(super) fn new(f: &MFunc) -> Dags {
         let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
         let mut scratch = DagScratch::default();
-        Dags(f.blocks.iter().map(|block| block_dag(&block.insts, &units, f.target, &mut scratch)).collect())
+        Dags(f.blocks.iter().map(|block| block_dag(&block.insts, &units, f.target, f.passes.pin_vmem, &mut scratch)).collect())
     }
 
     /// The order of each block's instructions in `schedule_window` with
@@ -767,7 +788,16 @@ pub(super) fn reordered(f: &MFunc, orders: &[Vec<u32>]) -> MFunc {
         .zip(orders)
         .map(|(block, order)| MBlock { insts: order.iter().map(|&i| block.insts[i as usize].clone()).collect(), loop_depth: block.loop_depth })
         .collect();
-    MFunc { blocks, vregs: f.vregs.clone(), target: f.target, vgpr_limit: f.vgpr_limit, agpr_limit: f.agpr_limit }
+    MFunc {
+        blocks,
+        vregs: f.vregs.clone(),
+        target: f.target,
+        vgpr_limit: f.vgpr_limit,
+        agpr_limit: f.agpr_limit,
+        lds_dma_explicit: f.lds_dma_explicit,
+        m0_early: f.m0_early,
+        passes: f.passes,
+    }
 }
 
 /// How long a schedule keeps a SIMD busy, for choosing between schedules
@@ -799,8 +829,8 @@ impl ScheduleCost {
 pub fn schedule_cost(f: &MFunc) -> ScheduleCost {
     let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
     // Physical registers first, then the virtual-register units.
-    let keys = |o: &Opnd| reg_keys(o).chain(units.of(o).map(|u| NREGS + u));
-    let mut ready = vec![0u64; NREGS + units.len()];
+    let keys = |o: &Opnd| cost_keys(o).chain(units.of(o).map(|u| COST_REGS + u));
+    let mut ready = vec![0u64; COST_REGS + units.len()];
     let blocks = f
         .blocks
         .iter()
@@ -1113,8 +1143,13 @@ pub(super) fn insert_delay_alu_with(f: &mut MFunc, spare: &mut Vec<MInst>) {
     }
 }
 
-/// Removes copies and implicit defs of virtual registers nothing reads.
+/// Removes copies and implicit defs of virtual registers nothing reads;
+/// with the kernel's `dead_lanes`, first their dwords nothing reads
+/// (`remove_dead_lanes`).
 pub fn remove_dead_copies(f: &mut MFunc) {
+    if f.passes.dead_lanes {
+        remove_dead_lanes(f);
+    }
     let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
     let mut used = vec![false; units.len()];
     loop {
@@ -1141,6 +1176,95 @@ pub fn remove_dead_copies(f: &mut MFunc) {
         if !changed {
             return;
         }
+    }
+}
+
+/// The destination of a copy or implicit def whose dwords `remove_dead_lanes`
+/// may drop one by one: a virtual register that is not precolored, written
+/// from a constant (repeated in every dword) or a virtual register of its
+/// width.
+fn lanes_of(f: &MFunc, inst: &MInst) -> Option<VRef> {
+    let &[Opnd::R(d)] = &inst.defs[..] else {
+        return None;
+    };
+    if f.vregs.get(d.reg as usize).is_none_or(|r| r.fixed.is_some()) {
+        return None;
+    }
+    match (inst.op, &inst.uses[..]) {
+        (Opc::ImplicitDef, []) | (Opc::Copy, [Opnd::Imm(_)]) => Some(d),
+        (Opc::Copy, [Opnd::R(s)]) if s.n == d.n => Some(d),
+        _ => None,
+    }
+}
+
+/// Drops the dwords of copies and implicit defs that nothing reads. A dword
+/// of a copy's source is read only where the same dword of its destination
+/// is, so what is read flows back through copies, those at loop latches
+/// included, and a copy read only in part keeps its runs of dwords that
+/// are: the zero padding of an FP6 MFMA operand (the MFMA reads 6 of its 8
+/// dwords) is then copied nowhere, around a loop neither, and its dwords
+/// get no register.
+fn remove_dead_lanes(f: &mut MFunc) {
+    let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
+    let mut read = vec![false; units.len()];
+    for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+        if lanes_of(f, inst).is_none() {
+            for u in inst.uses.iter().flat_map(|o| units.of(o)) {
+                read[u] = true;
+            }
+        }
+    }
+    // Backwards, a chain of copies in program order takes one sweep.
+    loop {
+        let mut changed = false;
+        for inst in f.blocks.iter().rev().flat_map(|b| b.insts.iter().rev()) {
+            let (Some(d), Some(Opnd::R(s))) = (lanes_of(f, inst), inst.uses.first()) else {
+                continue;
+            };
+            for (du, su) in units.of(&Opnd::R(d)).zip(units.of(&Opnd::R(*s))) {
+                if read[du] && !read[su] {
+                    read[su] = true;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    for b in 0..f.blocks.len() {
+        let insts = std::mem::take(&mut f.blocks[b].insts);
+        let mut out = Vec::with_capacity(insts.len());
+        for inst in insts {
+            let Some(d) = lanes_of(f, &inst) else {
+                out.push(inst);
+                continue;
+            };
+            let base = units.of(&Opnd::R(d)).start;
+            if (0..d.n).all(|k| read[base + k as usize]) {
+                out.push(inst);
+                continue;
+            }
+            let mut k = 0;
+            while k < d.n {
+                if !read[base + k as usize] {
+                    k += 1;
+                    continue;
+                }
+                let start = k;
+                while k < d.n && read[base + k as usize] {
+                    k += 1;
+                }
+                let part = |v: VRef| VRef { off: v.off + start, n: k - start, ..v };
+                let mut narrow = inst.clone();
+                narrow.defs[0] = Opnd::R(part(d));
+                if let Some(Opnd::R(s)) = narrow.uses.first_mut() {
+                    *s = part(*s);
+                }
+                out.push(narrow);
+            }
+        }
+        f.blocks[b].insts = out;
     }
 }
 
@@ -1312,6 +1436,21 @@ impl Waits {
 
 fn reg_keys(o: &Opnd) -> impl Iterator<Item = usize> {
     let (start, n) = match o {
+        Opnd::P(Phys::V(r), n) => (*r as usize, *n as usize),
+        Opnd::P(Phys::S(r), n) => (256 + *r as usize, *n as usize),
+        _ => (0, 0),
+    };
+    start..start + n
+}
+
+/// `schedule_cost`'s physical registers: VGPRs, SGPRs, then gfx950's AGPRs,
+/// which are numbered as VGPRs from `AGPR0` on.
+const COST_REGS: usize = 256 + 128 + 256;
+
+fn cost_keys(o: &Opnd) -> std::ops::Range<usize> {
+    use crate::target::gfx9::asm::AGPR0;
+    let (start, n) = match o {
+        Opnd::P(Phys::V(r), n) if *r >= AGPR0 => (384 + (*r - AGPR0) as usize, *n as usize),
         Opnd::P(Phys::V(r), n) => (*r as usize, *n as usize),
         Opnd::P(Phys::S(r), n) => (256 + *r as usize, *n as usize),
         _ => (0, 0),
@@ -1711,7 +1850,7 @@ pub(super) mod tests {
 
     fn schedule_block(insts: Vec<MInst>, window: usize) -> Vec<MInst> {
         let units = UnitIndex::new(insts.iter());
-        super::schedule_block(insts, window, &units, crate::target::Target::Gfx1151)
+        super::schedule_block(insts, window, &units, crate::target::Target::Gfx1151, false)
     }
 
     #[test]
@@ -2617,5 +2756,118 @@ pub(super) mod tests {
             }
         }
         assert!(moved > 100, "{moved} sinkings moved something");
+    }
+
+    #[test]
+    fn dead_lanes_drop_the_dwords_of_copies_nothing_reads() {
+        use crate::target::gfx9::gen_isa::Gfx9Op;
+        let v = |reg: u32, off: u8, n: u8| Opnd::R(VRef { reg, off, n });
+        let copy = |d: Opnd, s: Opnd| MInst::new(Opc::Copy, [d], [s]);
+        let lds = |d: Opnd| MInst::new(Opc::DsLoadB64, [d], [r(20)]);
+        let mut f = MFunc::default();
+        // v0 zero padding, v1 / v5 loaded, v2 / v4 the 8-dword operands, v3 the
+        // one the loop carries, v6 the accumulator, v7 read in part, v8 its source.
+        for size in [2u8, 6, 8, 8, 8, 6, 16, 3, 3] {
+            f.vregs.push(VRegInfo { class: Class::V, size, align: 1, fixed: None });
+        }
+        f.vregs.extend((9..=20).map(|_| VRegInfo { class: Class::V, size: 1, align: 1, fixed: None }));
+        let mfma = MInst::new(Opc::Gfx9(Gfx9Op::VMfmaScale32x32x64F8f6f4), [v(6, 0, 16)], [v(3, 0, 6), v(3, 0, 6), v(6, 0, 16), r(9), r(9)]);
+        let entry = vec![
+            copy(v(0, 0, 2), Opnd::Imm(0)),
+            lds(v(1, 0, 2)),
+            lds(v(1, 2, 2)),
+            lds(v(1, 4, 2)),
+            copy(v(2, 0, 6), v(1, 0, 6)),
+            copy(v(2, 6, 2), v(0, 0, 2)),
+            copy(v(3, 0, 8), v(2, 0, 8)),
+            lds(v(8, 0, 2)),
+            lds(v(8, 2, 1)),
+            copy(v(7, 0, 3), v(8, 0, 3)),
+            MInst::new(Opc::VAddNcU32, [r(10)], [v(7, 0, 1), v(7, 2, 1)]),
+        ];
+        let body = vec![
+            mfma,
+            lds(v(5, 0, 2)),
+            lds(v(5, 2, 2)),
+            lds(v(5, 4, 2)),
+            copy(v(4, 0, 6), v(5, 0, 6)),
+            copy(v(4, 6, 2), v(0, 0, 2)),
+            copy(v(3, 0, 8), v(4, 0, 8)),
+            MInst::new(Opc::SCbranchScc1, [], []).with_imm(1),
+        ];
+        f.blocks = vec![MBlock { insts: entry, loop_depth: 0 }, MBlock { insts: body, loop_depth: 1 }];
+        let mut off = f.clone();
+        remove_dead_copies(&mut off);
+        assert_eq!(format!("{:?}", off.blocks), format!("{:?}", f.blocks));
+        let mut on = f.clone();
+        on.passes.dead_lanes = true;
+        remove_dead_copies(&mut on);
+        let copies = |b: &MBlock| b.insts.iter().filter(|i| i.op == Opc::Copy).map(|i| (i.defs[0], i.uses[0])).collect::<Vec<_>>();
+        // The padding is copied nowhere, the carried operand keeps the six
+        // dwords the MFMA reads, and the copy read at dwords 0 and 2 splits.
+        assert_eq!(
+            copies(&on.blocks[0]),
+            [(v(2, 0, 6), v(1, 0, 6)), (v(3, 0, 6), v(2, 0, 6)), (v(7, 0, 1), v(8, 0, 1)), (v(7, 2, 1), v(8, 2, 1))]
+        );
+        assert_eq!(copies(&on.blocks[1]), [(v(4, 0, 6), v(5, 0, 6)), (v(3, 0, 6), v(4, 0, 6))]);
+        assert_eq!(on.blocks[1].insts.iter().filter(|i| i.op != Opc::Copy).count(), 5);
+    }
+
+    /// A K loop whose FP6 operand (six loaded dwords and two of zero
+    /// padding, as rocKE's MXFP6 GEMM builds it) is carried to the next trip.
+    fn carried_fp6(attrs: &str) -> String {
+        format!(
+            "ckdsl.ir v1\nkernel @carried {{\n  attrs {{ max_workgroup_size = i:64{attrs} }}\n  params {{\n    %X : ptr<i32,global>\n    \
+             %S : ptr<i32,global>\n    %Y : ptr<f32,global>\n    %n : i32\n  }}\n  region @entry {{\n    \
+             %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n    \
+             %c0 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:0 }}\n    \
+             %c1 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:1 }}\n    \
+             %c4 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:4 }}\n    \
+             %c8 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:8 }}\n    \
+             %pad : vec<i32x2> = arith.constant_vec (  ) {{ elem = s:\"i32\", fill = f:0.0, vec = i:2 }}\n    \
+             %o : i32 = arith.mul ( %tid, %c8 )\n    %o4 : i32 = arith.add ( %o, %c4 )\n    \
+             %x4 : vec<i32x4> = memref.global_load_vN ( %X, %o ) {{ align = i:16, elem_type = s:\"i32\", vec = i:4 }}\n    \
+             %x2 : vec<i32x2> = memref.global_load_vN ( %X, %o4 ) {{ align = i:8, elem_type = s:\"i32\", vec = i:2 }}\n    \
+             %x6 : vec<i32x6> = vector.concat ( %x4, %x2 ) {{ elem = s:\"i32\", vec = i:6 }}\n    \
+             %f0 : vec<i32x8> = vector.concat ( %x6, %pad ) {{ elem = s:\"i32\", vec = i:8 }}\n    \
+             %s : i32 = memref.global_load_typed ( %S, %tid ) {{ align = i:4, elem_type = s:\"i32\" }}\n    \
+             %z : vec<f32x16> = arith.constant_vec (  ) {{ elem = s:\"f32\", fill = f:0.0, vec = i:16 }}\n    \
+             %fr : vec<i32x8>, %r : vec<f32x16> = scf.for ( %c0, %n, %c1, %f0, %z ) {{ iter_args = l:[ {{ name = s:\"%fa\", \
+             type = s:\"vec<i32x8>\" }}, {{ name = s:\"%acc\", type = s:\"vec<f32x16>\" }} ], iv = s:\"%k\", iv_type = s:\"i32\", \
+             num_iter_args = i:2, unroll = b:false }}\n      region @body {{\n        \
+             %d : vec<f32x16> = tile.mma ( %fa, %fa, %acc, %s, %s ) {{ op_id = s:\"mfma_gfx950_f32_32x32x64_fp6_fp6_scale_e8m0_e8m0_k32\" }}\n        \
+             %ko : i32 = arith.mul ( %k, %c8 )\n        %q : i32 = arith.add ( %o, %ko )\n        %q4 : i32 = arith.add ( %q, %c4 )\n        \
+             %y4 : vec<i32x4> = memref.global_load_vN ( %X, %q ) {{ align = i:16, elem_type = s:\"i32\", vec = i:4 }}\n        \
+             %y2 : vec<i32x2> = memref.global_load_vN ( %X, %q4 ) {{ align = i:8, elem_type = s:\"i32\", vec = i:2 }}\n        \
+             %y6 : vec<i32x6> = vector.concat ( %y4, %y2 ) {{ elem = s:\"i32\", vec = i:6 }}\n        \
+             %f1 : vec<i32x8> = vector.concat ( %y6, %pad ) {{ elem = s:\"i32\", vec = i:8 }}\n        \
+             scf.yield ( %f1, %d ) {{ num = i:2 }}\n      }}\n    \
+             %e : f32 = vector.extract ( %r ) {{ index = i:15 }}\n    \
+             memref.global_store_typed ( %Y, %tid, %e ) {{ align = i:4, elem_type = s:\"f32\" }}\n    cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
+    #[test]
+    fn dead_lanes_stop_copying_the_padding_of_a_carried_fp6_operand() {
+        use crate::target::Target;
+        let compile = |attrs: &str| crate::rir::compile_any_target(&carried_fp6(attrs), Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        let (off, on) = (compile(""), compile(", dead_lanes = b:true"));
+        assert!(compile(", dead_lanes = b:false").hsaco == off.hsaco);
+        let moves = |listing: &str| listing.lines().filter(|l| l.trim_start().starts_with("v_mov_b32")).count();
+        let (listing_off, listing_on) = (off.listing(), on.listing());
+        // The padding's zeros and its copies at the latch and before the loop go.
+        assert!(moves(&listing_on) + 4 <= moves(&listing_off), "{listing_off}\n{listing_on}");
+        // The MFMA still reads six dwords of each operand.
+        let span = |o: &str| {
+            let inner = o.trim_start_matches(['v', 'a']).trim_matches(['[', ']']);
+            inner.split_once(':').map_or(1, |(a, b)| b.parse::<usize>().unwrap() - a.parse::<usize>().unwrap() + 1)
+        };
+        for listing in [&listing_off, &listing_on] {
+            let mfma = listing.lines().find(|l| l.contains("v_mfma_scale")).expect("one MFMA");
+            let text = mfma.split("//").next().unwrap().split(" imm:").next().unwrap().trim();
+            let ops: Vec<&str> = text.split_once(' ').expect("operands").1.split(',').map(str::trim).collect();
+            assert_eq!((span(ops[1]), span(ops[2])), (6, 6), "{mfma}");
+        }
+        assert!(on.stats.vgprs <= off.stats.vgprs, "{} > {}", on.stats.vgprs, off.stats.vgprs);
     }
 }
