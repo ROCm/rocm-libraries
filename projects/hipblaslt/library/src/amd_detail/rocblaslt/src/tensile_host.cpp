@@ -3610,11 +3610,13 @@ struct AdaptiveReselectionKey
     int                                 taggedSolution = -1;
     uint32_t                            queryHint      = 0;
     size_t                              rankWorkspace  = 0;
+    rocblaslt_mx_scale_need             mxScaleNeed    = rocblaslt_mx_scale_need::Any;
 
     bool operator==(const AdaptiveReselectionKey& o) const
     {
         return taggedSolution == o.taggedSolution && queryHint == o.queryHint
-               && rankWorkspace == o.rankWorkspace && launchProblem == o.launchProblem;
+               && rankWorkspace == o.rankWorkspace && mxScaleNeed == o.mxScaleNeed
+               && launchProblem == o.launchProblem;
     }
 };
 
@@ -4957,12 +4959,19 @@ namespace
         std::vector<rocblaslt_matmul_heuristic_result> ranked(cap);
         int                                            returned = 0;
         RocblasltContractionProblem                    probe    = prob;
-        const bool                                     found
-            = getBestSolutions(
-                  probe, handle, gemmData, cap, ranked.data(), &returned, prob.workspaceSize)
-              == rocblaslt_status_success;
+
+        bool       layoutRuledOut = false;
+        const bool found          = getBestSolutions(probe,
+                                                     handle,
+                                                     gemmData,
+                                                     cap,
+                                                     ranked.data(),
+                                                     &returned,
+                                                     prob.workspaceSize,
+                                                     &layoutRuledOut)
+                                    == rocblaslt_status_success;
         const bool toppedUp
-            = returned < cap
+            = returned < cap && !layoutRuledOut
               && topUpWithSizeIndependentSolutions(
                   handle, probe, gemmData, ranked.data(), &returned, cap, prob.workspaceSize);
         if(!found && !toppedUp)
@@ -5788,8 +5797,11 @@ namespace
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         // Ranked with the workspace limit the query used, which hipblasLtMatmul
         // clamps the caller's workspace to.
-        AdaptiveReselectionKey key{
-            data->problem, *(const int*)algo->data, queryHint, algo->max_workspace_bytes};
+        AdaptiveReselectionKey key{data->problem,
+                                   *(const int*)algo->data,
+                                   queryHint,
+                                   algo->max_workspace_bytes,
+                                   data->mxScaleNeed};
 
         const AdaptiveReselection* choice = data->adaptiveReselections.find(key);
         if(!choice)
@@ -5921,8 +5933,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             return known;
         };
 
-        // Before re-selection, tuning or logging act on it. Every index they can
-        // switch to comes from a search or support check that applies this rule.
+        // Before re-selection, tuning or logging act on it. The index they settle
+        // on is checked again below, before the launch state is written.
         if(data->mxScaleNeed != rocblaslt_mx_scale_need::Any)
         {
             if(auto chosen = solutionAt(*(int*)algo->data))
@@ -6276,6 +6288,16 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             launchIndex = servedIndex >= 0 ? servedIndex : tunedIndex;
         if(launchIndex >= 0)
             solutionIndex = &launchIndex;
+
+        if(data->mxScaleNeed != rocblaslt_mx_scale_need::Any)
+        {
+            if(auto chosen = solutionAt(*solutionIndex))
+            {
+                if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *chosen);
+                   st != rocblaslt_status_success)
+                    return st;
+            }
+        }
 
         data->algoIndex    = *solutionIndex;
         data->inputs       = GetTensileInputs(prob);
@@ -7430,7 +7452,8 @@ inline auto getSolutions(
     TensileLite::ContractionProblemGemm&          tensile_prob,
     bool                                          enableEpilogue,
     const int&                                    requestedAlgoCount,
-    rocblaslt_mx_scale_need                       mxScaleNeed)
+    rocblaslt_mx_scale_need                       mxScaleNeed,
+    bool*                                         layoutRuledOut = nullptr)
 {
     // Cached from TENSILE_DB at first use; off by default, so the whole
     // diagnostic costs one predictable branch per lookup.
@@ -7461,6 +7484,9 @@ inline auto getSolutions(
 
     if(solutions.empty() && layoutDropped)
         log_info(__func__, rocblaslt_mx_scale_mismatch_message(mxScaleNeed));
+    if(layoutRuledOut)
+        *layoutRuledOut = solutions.empty()
+                          && (layoutDropped || mxScaleNeed == rocblaslt_mx_scale_need::Conflict);
 
     if(reportEmpty && solutions.empty())
         reportNoSolutionFound(tensile_prob);
@@ -7655,9 +7681,12 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes)
+                                  size_t                             maxWorkSpaceBytes,
+                                  bool*                              layoutRuledOut)
 {
     *returnAlgoCount = 0;
+    if(layoutRuledOut)
+        *layoutRuledOut = false;
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
         return getRocRollerBestSolutions(handle,
@@ -7693,27 +7722,35 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
+    bool ruledOut  = false;
     auto solutions = getSolutions(prob,
                                   library,
                                   hardware,
                                   data->problem,
                                   enableEpilogue,
                                   requestedAlgoCount,
-                                  data->mxScaleNeed);
+                                  data->mxScaleNeed,
+                                  &ruledOut);
 
     // when there is no solution for xfloat32, fallback comput_type to fp32
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
     {
         log_api(__func__, "no xf32 solutions found, try to fallback fp32");
         data->problem.setF32XdlMathOp(rocisa::DataType::Float);
+        bool fallbackRuledOut = false;
+
         solutions = getSolutions(prob,
                                  library,
                                  hardware,
                                  data->problem,
                                  enableEpilogue,
                                  requestedAlgoCount,
-                                 data->mxScaleNeed);
+                                 data->mxScaleNeed,
+                                 &fallbackRuledOut);
+        ruledOut  = solutions.empty() && (ruledOut || fallbackRuledOut);
     }
+    if(layoutRuledOut)
+        *layoutRuledOut = ruledOut;
 
     auto algoCount = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
     memset(heuristicResultsArray, 0, sizeof(rocblaslt_matmul_heuristic_result) * algoCount);
@@ -8507,9 +8544,12 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   std::shared_ptr<void>  gemmData,
                                   const size_t           workspaceBytes,
                                   const int              requestedAlgoCount,
-                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
+                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
+                                  bool*                                           layoutRuledOut)
 {
     log_api(__func__, "Entering function");
+    if(layoutRuledOut)
+        *layoutRuledOut = false;
 
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;
@@ -8528,26 +8568,34 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         data->problem.setWorkspaceSize(workspaceBytes);
+        bool ruledOut  = false;
         auto solutions = getSolutions(data->inputs,
                                       library,
                                       hardware,
                                       data->problem,
                                       data->enableEpilogue,
                                       requestedAlgoCount,
-                                      data->mxScaleNeed);
+                                      data->mxScaleNeed,
+                                      &ruledOut);
 
         // when there is no solution for xfloat32, fallback comput_type to fp32
         if(solutions.size() == 0 && data->problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
         {
             data->problem.setF32XdlMathOp(rocisa::DataType::Float);
+            bool fallbackRuledOut = false;
+
             solutions = getSolutions(data->inputs,
                                      library,
                                      hardware,
                                      data->problem,
                                      data->enableEpilogue,
                                      requestedAlgoCount,
-                                     data->mxScaleNeed);
+                                     data->mxScaleNeed,
+                                     &fallbackRuledOut);
+            ruledOut  = solutions.empty() && (ruledOut || fallbackRuledOut);
         }
+        if(layoutRuledOut)
+            *layoutRuledOut = ruledOut;
 
         auto algoCount       = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
         int  returnAlgoCount = 0;
@@ -8606,6 +8654,10 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                 drop);
         if(solutions.empty() && layoutDropped)
             log_info(__func__, rocblaslt_mx_scale_mismatch_message(data->mxScaleNeed));
+        if(layoutRuledOut)
+            *layoutRuledOut
+                = solutions.empty()
+                  && (layoutDropped || data->mxScaleNeed == rocblaslt_mx_scale_need::Conflict);
 
         auto algoCount       = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
         int  returnAlgoCount = 0;

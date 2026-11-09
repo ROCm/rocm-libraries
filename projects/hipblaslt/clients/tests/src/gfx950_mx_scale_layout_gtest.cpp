@@ -20,6 +20,9 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include <Tensile/SolutionLibrary.hpp>
+
+#include "../../../library/src/amd_detail/rocblaslt/src/include/get_all_search_type_for_test.hpp"
 #include "scoped_env.hpp"
 
 #include <cstdio>
@@ -495,6 +498,49 @@ namespace
                         EXPECT_NE(hipblaslt_ext::getIndexFromAlgo(result.algo), rowIndex);
                 }
             }
+        }
+    }
+
+    // The size-independent top-up loads every shard of the operation. When the
+    // layout rule empties the ranked list, the heuristic skips it; any other short
+    // list is still topped up.
+    TEST_F(Gfx950MxScaleLayout, smoke_LayoutEmptiedHeuristicSkipsTheTopUp)
+    {
+        constexpr int kNoCall = -1;
+        constexpr int kNoRank
+            = static_cast<int>(TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING);
+        constexpr int kMany = 100000;
+
+        ScopedEnv   env("HIPBLASLT_USE_ROCROLLER", "0");
+        OwnedHandle owner;
+        ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
+        hipblasLtHandle_t handle = owner.handle;
+        {
+            Problem packed;
+            Problem preswizzled;
+            makeProblem(packed, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+            makeProblem(preswizzled, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT);
+            if(HasFatalFailure())
+                return;
+
+            for(int count : {1, kAlgoCount})
+            {
+                SCOPED_TRACE(count);
+                rocblaslt_testing_reset_last_get_all_search_type_for_test();
+                if(heuristic(packed, count).empty())
+                    EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoCall);
+
+                auto packedGemm = extGemm(packed);
+                rocblaslt_testing_reset_last_get_all_search_type_for_test();
+                if(extHeuristic(packedGemm, count).empty())
+                    EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoCall);
+            }
+
+            rocblaslt_testing_reset_last_get_all_search_type_for_test();
+            auto preResults = heuristic(preswizzled, kMany);
+            ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
+            ASSERT_LT(preResults.size(), static_cast<size_t>(kMany));
+            EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoRank);
         }
     }
 
