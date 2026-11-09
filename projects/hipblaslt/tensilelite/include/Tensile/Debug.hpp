@@ -27,7 +27,6 @@
 #pragma once
 
 #include <cstdlib>
-#include <set>
 #include <string>
 #include <tensilelitehost/export.h>
 
@@ -37,8 +36,6 @@
 
 namespace TensileLite
 {
-    using StringSet = std::set<std::string>;
-
     /**
      * @brief Common place for defining flags which enable debug behaviour.
      */
@@ -129,10 +126,6 @@ namespace TensileLite
 
         bool disableStaggerU() const;
 
-        StringSet excludedLibFromGetAll() const;
-
-        void setExcludedLibFromGetAll(StringSet& excludedSet);
-
         __attribute__((always_inline)) inline void markerStart(const char* name) const
         {
 #ifdef Tensile_ENABLE_MARKER
@@ -182,7 +175,6 @@ namespace TensileLite
         bool        m_disableStaggerU     = false;
         // -1 = unset (use API attribute); 0 = force static SK3; 1 = force dynamic SK4
         int         m_streamK5ForceMode   = -1;
-        StringSet   m_excludedFromGetAll;
 
         Debug();
     };
