@@ -607,8 +607,8 @@ Tests:
   function:
     - gemm_batched: *single_precision
   matrix_size:
-    - { M: 67108863, N: 1, K: 32, lda: 67108863, ldb: 32, ldc: 67108863 } # index signed int32 overflow
-    - { M: 16777217, N: 1, K: 32, lda: 16777217, ldb: 32, ldc: 16777217 } # byte offset overflows uint32
+    - { M: 67108864, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 67108864 } # index signed int32 overflow
+    - { M: 16777217, N: 1, K: 32, lda: 16777217, ldb: 32, ldc: 16777217 } # byte offset overflows int32
   transA: [ N ]
   transB: [ N ]
   alpha: 1
