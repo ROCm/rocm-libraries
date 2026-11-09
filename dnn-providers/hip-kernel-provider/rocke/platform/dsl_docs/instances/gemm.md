@@ -130,7 +130,7 @@ Shipped tile geometries cover `64..256 x 64..256 x 16..128` with warp grids `1x1
 
 `is_valid_spec(spec)` returns `(ok, reason)` and rejects unsupported combinations before IR build:
 
-- target architecture support (gfx942 / gfx950 CDNA wave64, gfx1151 / gfx1201 RDNA wave32; `is_valid_spec(spec, arch="gfx950")` defaults to gfx950 but is arch-aware — the WMMA RDNA path is limited to the 16x16x16 atom + `mem` pipeline + `default` epilogue);
+- target architecture support (gfx942 / gfx950 CDNA wave64, gfx1151 / gfx1201 RDNA wave32; `is_valid_spec(spec, arch="gfx950")` defaults to gfx950 but is arch-aware — the WMMA RDNA path is limited to the 16x16x16 atom, the `mem` pipeline (plus the `compv4` double buffer on gfx1201) and the `default` epilogue; the gfx1201 K-loop traits `lds_store_after_mma`, `group_m` and `k_stagger` are admitted on the WMMA path only, and the two loop traits only with the double buffer);
 - dtype combinations supported by IR lowering and the MFMA atom catalog;
 - supported layout string (`RCR` is the production family);
 - `tile_m`, `tile_n` divisible by `warp_* * warp_tile_*`;
@@ -167,6 +167,8 @@ NUM_XCDS_MI350X = 8 # CDNA4 (physical XCDs may differ)
 ```
 
 `chiplet_wgm` is the WGM super-tile group size (default 8); `chiplet_chunk_size` is the WGs-per-XCD granularity (default 64).
+
+`group_m > 0` (WMMA path, exclusive with `chiplet_swizzle`) applies the same super-tile walk without the XCD remap: `super_tile_swizzle_dynamic` groups `group_m` M-tiles and walks their N-tiles before the next group, so workgroups launched together share A and B panels in L2. The launch grid is unchanged.
 
 ## Thread / Warp Geometry
 

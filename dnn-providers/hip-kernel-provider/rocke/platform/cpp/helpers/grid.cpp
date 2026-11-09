@@ -102,12 +102,11 @@ static rocke_value_t* rocke_i_chiplet_transform_chunked_dynamic(rocke_ir_builder
  *   pid_n       = b.div(local_id, group_size_m)
  *   return SuperTileSwizzleResult(row=pid_m, col=pid_n)
  * ------------------------------------------------------------------------ */
-static rocke_super_tile_swizzle_result_t
-    rocke_i_super_tile_swizzle_dynamic(rocke_ir_builder_t* b,
-                                       rocke_value_t* wgid,
-                                       rocke_value_t* num_pid_m,
-                                       rocke_value_t* num_pid_n,
-                                       int wgm)
+rocke_super_tile_swizzle_result_t rocke_super_tile_swizzle_dynamic(rocke_ir_builder_t* b,
+                                                                   rocke_value_t* wgid,
+                                                                   rocke_value_t* num_pid_m,
+                                                                   rocke_value_t* num_pid_n,
+                                                                   int wgm)
 {
     rocke_super_tile_swizzle_result_t res;
     rocke_value_t* c_wgm;
@@ -168,7 +167,7 @@ rocke_super_tile_swizzle_result_t rocke_chiplet_aware_super_tile_dynamic(rocke_i
 
     num_wgs = rocke_b_mul(b, num_pid_m, num_pid_n);
     remapped = rocke_i_chiplet_transform_chunked_dynamic(b, wgid, num_wgs, num_xcds, chunk_size);
-    return rocke_i_super_tile_swizzle_dynamic(b, remapped, num_pid_m, num_pid_n, wgm);
+    return rocke_super_tile_swizzle_dynamic(b, remapped, num_pid_m, num_pid_n, wgm);
 }
 
 /* ------------------------------------------------------------------------

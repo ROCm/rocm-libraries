@@ -313,6 +313,11 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
             = dict_bool(tr, "tdm_alternate_issuers", spec->trait.tdm_alternate_issuers);
         spec->trait.tdm_early_refill
             = dict_bool(tr, "tdm_early_refill", spec->trait.tdm_early_refill);
+        spec->trait.lds_store_after_mma
+            = dict_bool(tr, "lds_store_after_mma", spec->trait.lds_store_after_mma);
+        spec->trait.group_m = dict_int(tr, "group_m", spec->trait.group_m);
+        spec->trait.k_stagger = dict_int(tr, "k_stagger", spec->trait.k_stagger);
+        spec->trait.k_stagger_step = dict_int(tr, "k_stagger_step", spec->trait.k_stagger_step);
         spec->trait.split_k = dict_int(tr, "split_k", spec->trait.split_k);
         /* Optional[bool]: absent or None leaves the hints arch-resolved. */
         if(tr.contains("emit_sched_hints") && !tr["emit_sched_hints"].is_none())

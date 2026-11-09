@@ -654,17 +654,31 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         break;
     case 33: /* gfx1201 compv4: double-buffered WMMA K loop, 128x128x32 2x2 waves */
     case 34: /* config 33's loop with lds_swizzle, 128x64x32 2x1 waves */
+    case 35: /* swizzled 33 with the LDS stores after the WMMAs */
+    case 36: /* swizzled 33 with the GROUP_M raster (group_m = 4) */
+    case 37: /* swizzled 34 with all K-loop traits, a K stagger 3 x 2 tiles */
     {
         /* mirrors _GFX1201_COMPV4_CONFIGS in gemm_emit.py */
-        bool swz = idx == 34;
-        int tn = swz ? 64 : 128;
-        int wn = swz ? 1 : 2;
-        spec->name = swz ? "test_gfx1201_compv4_swizzle" : "test_gfx1201_compv4";
+        static const struct
+        {
+            const char* name;
+            int tn, wn;
+            bool swz, lsam;
+            int group_m, k_stagger, k_stagger_step;
+        } cfgs[] = {
+            {"test_gfx1201_compv4", 128, 2, false, false, 0, 0, 1},
+            {"test_gfx1201_compv4_swizzle", 64, 1, true, false, 0, 0, 1},
+            {"test_gfx1201_compv4_lsam", 128, 2, true, true, 0, 0, 1},
+            {"test_gfx1201_compv4_group_m", 128, 2, true, false, 4, 0, 1},
+            {"test_gfx1201_compv4_kloop_traits", 64, 1, true, true, 8, 3, 2},
+        };
+        const int i = idx - 33;
+        spec->name = cfgs[i].name;
         spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 128,
-                                              .tile_n = tn,
+                                              .tile_n = cfgs[i].tn,
                                               .tile_k = 32,
                                               .warp_m = 2,
-                                              .warp_n = wn,
+                                              .warp_n = cfgs[i].wn,
                                               .warp_k = 1,
                                               .warp_tile_m = 16,
                                               .warp_tile_n = 16,
@@ -672,10 +686,14 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->trait.pipeline = "compv4";
         spec->trait.scheduler = "intrawave";
         spec->trait.epilogue = "default";
-        spec->trait.lds_swizzle = swz;
+        spec->trait.lds_swizzle = cfgs[i].swz;
+        spec->trait.lds_store_after_mma = cfgs[i].lsam;
+        spec->trait.group_m = cfgs[i].group_m;
+        spec->trait.k_stagger = cfgs[i].k_stagger;
+        spec->trait.k_stagger_step = cfgs[i].k_stagger_step;
         spec->data.dtype_a = "fp16";
         spec->wave_size = 32;
-        spec->block_size = 32 * 2 * wn;
+        spec->block_size = 32 * 2 * cfgs[i].wn;
         spec->batched = false;
         break;
     }
@@ -686,7 +704,7 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Configs 9, 11 and 12 exercise gfx942; configs 13-30 and 32 gfx1250; 33-34
+/* Configs 9, 11 and 12 exercise gfx942; configs 13-30 and 32 gfx1250; 33-37
  * gfx1201; the rest use the gfx950 baseline. */
 static const char* arch_for(int idx)
 {
@@ -698,7 +716,7 @@ static const char* arch_for(int idx)
     {
         return "gfx1250";
     }
-    if(idx == 33 || idx == 34)
+    if(idx >= 33 && idx <= 37)
     {
         return "gfx1201";
     }
@@ -709,7 +727,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..34>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..37>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

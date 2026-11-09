@@ -409,15 +409,43 @@ typedef struct rocke_gemm_emit_hook
     void* user;
 } rocke_gemm_emit_hook_t;
 
+/* One LDS store of the VGPR-staged load phase, captured instead of emitted
+ * (trait.lds_store_after_mma). The tile window is copied by value: its view
+ * points at ctx->a_lds_view / b_lds_view, which outlive the K loop. */
+typedef struct rocke_gemm_lds_store
+{
+    rocke_tile_window_t win;
+    rocke_value_t* idx[2];
+    rocke_value_t* val;
+    int n; /* vector width; 0 = scalar store */
+} rocke_gemm_lds_store_t;
+
+/* Per-thread A + B vectors of one K tile: each is at most
+ * 256 * 256 / (8 * 32) = 256 for every buildable tile. */
+#define ROCKE_GEMM_MAX_LDS_STORES 512
+
+/* The C form of Python emit_load_phase's ``defer_stores`` list. */
+typedef struct rocke_gemm_lds_store_queue
+{
+    rocke_gemm_lds_store_t items[ROCKE_GEMM_MAX_LDS_STORES];
+    int count;
+} rocke_gemm_lds_store_queue_t;
+
 /* emit_load_phase with before_issue: on the TDM path, emitted after each
- * descriptor is built and right before its tensor_load_to_lds. */
+ * descriptor is built and right before its tensor_load_to_lds. defer_stores
+ * (VGPR-staged path): NULL stores each tile right after its load; otherwise
+ * every LDS store is appended to the queue for rocke_gemm_flush_lds_stores. */
 void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                                    rocke_value_t* A_dst,
                                    rocke_value_t* B_dst,
                                    rocke_value_t* k_off,
                                    int parity_imm,
                                    rocke_value_t* parity_v,
-                                   rocke_gemm_emit_hook_t before_issue);
+                                   rocke_gemm_emit_hook_t before_issue,
+                                   rocke_gemm_lds_store_queue_t* defer_stores);
+
+/* Emit every queued LDS store in order and empty the queue. */
+void rocke_gemm_flush_lds_stores(rocke_gemm_build_ctx_t* ctx, rocke_gemm_lds_store_queue_t* q);
 
 /* _emit_frag_smem_load(ctx, src, mn_in_atom, k_in_atom, atom_mn_base,
  * k_tile_base, frag_len, swz_row): one frag_len-wide operand fragment from a

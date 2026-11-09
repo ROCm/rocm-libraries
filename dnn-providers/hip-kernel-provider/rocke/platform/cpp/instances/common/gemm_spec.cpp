@@ -213,6 +213,10 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.split_barrier = false;
     s.trait.tdm_alternate_issuers = false;
     s.trait.tdm_early_refill = false;
+    s.trait.lds_store_after_mma = false;
+    s.trait.group_m = 0;
+    s.trait.k_stagger = 0;
+    s.trait.k_stagger_step = 1;
 
     /* DataSpec defaults. */
     s.data.dtype_a = "fp16"; /* default "fp16" */
@@ -257,7 +261,10 @@ void rocke_gemm_universal_spec_finalize(rocke_gemm_universal_spec_t* spec)
  *                 f"spk{split_k}": split_k > 1, "noalc": cshuffle_no_alias,
  *                 f"abeb{ab_load_elem_bytes}": set, f"tdm{tdm_depth}": tdm,
  *                 "spb": split_barrier, "alti": tdm_alternate_issuers,
- *                 "erf": tdm_early_refill})
+ *                 "erf": tdm_early_refill, "lsam": lds_store_after_mma,
+ *                 f"gm{group_m}": group_m > 0,
+ *                 f"kst{k_stagger}x{k_stagger_step}": k_stagger > 0,
+ *                 f"c{dtype_c}": dtype_c != dtype_a})
  *
  *  Flag iteration order matters (CPython 3.7+ dict insertion order); we pass the
  *  same fixed order to rocke_kernel_name_join.
@@ -276,8 +283,10 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     char part_abeb[32];
     char part_tdm[32];
     char part_c[32];
-    const char* flag_names[15];
-    int flag_on[15];
+    char part_gm[32];
+    char part_kst[48];
+    const char* flag_names[18];
+    int flag_on[18];
     const rocke_gemm_tile_spec_t* t;
     const rocke_gemm_trait_spec_t* tr;
 
@@ -326,10 +335,17 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_names[11] = "spb";
     flag_names[12] = "alti";
     flag_names[13] = "erf";
+    /* The WMMA K-loop placement / raster / stagger knobs, each named only
+     * when on. */
+    flag_names[14] = "lsam";
+    snprintf(part_gm, sizeof(part_gm), "gm%d", tr->group_m);
+    flag_names[15] = part_gm;
+    snprintf(part_kst, sizeof(part_kst), "kst%dx%d", tr->k_stagger, tr->k_stagger_step);
+    flag_names[16] = part_kst;
     /* Python flag key f"c{dtype_c}": the C dtype, named only when it differs
      * from A's (the fp8/bf8 path), so every other kernel keeps its name. */
     snprintf(part_c, sizeof(part_c), "c%s", spec->data.dtype_c ? spec->data.dtype_c : "");
-    flag_names[14] = part_c;
+    flag_names[17] = part_c;
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -345,13 +361,16 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_on[11] = tr->split_barrier ? 1 : 0;
     flag_on[12] = tr->tdm_alternate_issuers ? 1 : 0;
     flag_on[13] = tr->tdm_early_refill ? 1 : 0;
-    flag_on[14] = (spec->data.dtype_c != NULL && spec->data.dtype_a != NULL
+    flag_on[14] = tr->lds_store_after_mma ? 1 : 0;
+    flag_on[15] = (tr->group_m > 0) ? 1 : 0;
+    flag_on[16] = (tr->k_stagger > 0) ? 1 : 0;
+    flag_on[17] = (spec->data.dtype_c != NULL && spec->data.dtype_a != NULL
                    && strcmp(spec->data.dtype_c, spec->data.dtype_a) != 0)
                       ? 1
                       : 0;
 
     return rocke_kernel_name_join(
-        spec->name, parts, 5, flag_names, flag_on, 15, out, out_cap, NULL);
+        spec->name, parts, 5, flag_names, flag_on, 18, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -1036,6 +1055,56 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         if(spec->trait.tdm_depth != 2)
         {
             CK_GEMM_REJECT("tdm_early_refill needs tdm_depth == 2");
+        }
+    }
+
+    /* The store placement and the K stagger reshape the compv4 double-buffered
+     * K loop; without it they would be silently inert. Both are measured on the
+     * WMMA path only, which keeps the MFMA compv4 HotLoop schedule untouched. */
+    {
+        bool knob_db = false;
+        bool is_wmma = strcmp(family, "wmma") == 0;
+
+        ck_gemm_ab_lds_plan(spec, target, NULL, &knob_db, NULL);
+        if(spec->trait.lds_store_after_mma && !(is_wmma && knob_db))
+        {
+            CK_GEMM_REJECT("lds_store_after_mma needs the WMMA compv4 double-buffered K loop");
+        }
+        if(spec->trait.k_stagger < 0 || spec->trait.k_stagger_step < 1)
+        {
+            CK_GEMM_REJECT("k_stagger must be >= 0 and k_stagger_step >= 1 (got %d, %d)",
+                           spec->trait.k_stagger,
+                           spec->trait.k_stagger_step);
+        }
+        if(spec->trait.k_stagger)
+        {
+            if(!(is_wmma && knob_db))
+            {
+                CK_GEMM_REJECT("k_stagger needs the WMMA compv4 double-buffered K loop");
+            }
+            if(spec->trait.split_k != 1)
+            {
+                CK_GEMM_REJECT("k_stagger does not support split_k");
+            }
+            if(spec->trait.pad_k)
+            {
+                CK_GEMM_REJECT("k_stagger does not support pad_k");
+            }
+        }
+        if(spec->trait.group_m < 0)
+        {
+            CK_GEMM_REJECT("group_m must be >= 0 (got %d)", spec->trait.group_m);
+        }
+        if(spec->trait.group_m)
+        {
+            if(!is_wmma)
+            {
+                CK_GEMM_REJECT("group_m is supported on the WMMA path only");
+            }
+            if(spec->trait.chiplet_swizzle)
+            {
+                CK_GEMM_REJECT("group_m and chiplet_swizzle are exclusive");
+            }
         }
     }
 

@@ -1952,6 +1952,43 @@ def cases():
                 lds_swizzle=swizzle,
             ),
         )
+    # The K-loop traits on the swizzled compv4 loop, one case each and all
+    # together: the deferred-store placement, the GROUP_M raster and the K
+    # stagger. Unpadded: the stagger walks whole K tiles and refuses pad_k.
+    for tag, knobs in (
+        ("lsam", dict(lds_store_after_mma=True)),
+        ("gm4", dict(group_m=4)),
+        ("kst8x4", dict(k_stagger=8, k_stagger_step=4)),
+        (
+            "lsam_gm4_kst8x4",
+            dict(lds_store_after_mma=True, group_m=4, k_stagger=8, k_stagger_step=4),
+        ),
+    ):
+        add(
+            "gemm",
+            f"gemm/gfx1201/t128x128x32_compv4_swz_{tag}",
+            "gfx1201",
+            build_gemm(
+                f"irhash_gemm_1201_compv4_swz_{tag}",
+                "gfx1201",
+                128,
+                128,
+                32,
+                2,
+                2,
+                16,
+                16,
+                16,
+                "compv4",
+                "default",
+                32,
+                lds_swizzle=True,
+                pad_m=False,
+                pad_n=False,
+                pad_k=False,
+                **knobs,
+            ),
+        )
     # Every other member of gfx11-generic / gfx12-generic has a row of its own
     # that points at its generic's facts; one case each, the gfx1151 / gfx1201
     # t32x32x16 configuration, shows it lowers under its own name.

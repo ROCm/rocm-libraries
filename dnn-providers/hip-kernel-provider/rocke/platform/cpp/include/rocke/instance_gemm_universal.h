@@ -148,6 +148,22 @@ typedef struct rocke_gemm_trait_spec
      * iteration with static parity. Needs split_barrier and
      * tdm_alternate_issuers. Python TraitSpec.tdm_early_refill. */
     bool tdm_early_refill; /* default false */
+    /* In the compv4 double-buffered K loop, issue the next tile's global
+     * loads, run the WMMAs, then store the tile to LDS, so the loads stay in
+     * flight across the WMMAs. WMMA path with the double buffer only.
+     * Python TraitSpec.lds_store_after_mma. */
+    bool lds_store_after_mma; /* default false */
+    /* GROUP_M raster: launch workgroups in groups of group_m M-tiles (the
+     * super-tile walk without the XCD remap). 0 keeps the row-major order.
+     * WMMA path only; exclusive with chiplet_swizzle. Python TraitSpec.group_m. */
+    int group_m; /* default 0 */
+    /* Per-workgroup K stagger in the compv4 double-buffered loop: workgroup w
+     * starts at K tile (w mod k_stagger) * k_stagger_step and wraps at K.
+     * 0 starts every workgroup at K tile 0. Needs the double buffer on the
+     * WMMA path, split_k == 1 and no pad_k. Python TraitSpec.k_stagger /
+     * k_stagger_step. */
+    int k_stagger; /* default 0 */
+    int k_stagger_step; /* default 1 */
 } rocke_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */

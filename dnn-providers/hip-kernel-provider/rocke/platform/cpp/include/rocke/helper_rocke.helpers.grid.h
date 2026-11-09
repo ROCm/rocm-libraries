@@ -6,13 +6,14 @@
  * Grid / workgroup-id remapping helpers for chiplet locality.
  *
  * Public entries:
- *   chiplet_aware_super_tile_dynamic, chiplet_aware_super_tile,
- *   chiplet_transform_chunked_runtime
+ *   super_tile_swizzle_dynamic, chiplet_aware_super_tile_dynamic,
+ *   chiplet_aware_super_tile, chiplet_transform_chunked_runtime
  *
- * The super-tile entries compose:
+ * The chiplet-aware super-tile entries compose:
  *   chiplet_transform_chunked_dynamic  (helper, ported here as a file-local
  *                                       static so the public entry is exact)
- *   super_tile_swizzle_dynamic         (likewise)
+ *   super_tile_swizzle_dynamic         (public: the GEMM group_m raster uses
+ *                                       it without the chiplet remap)
  *
  * The op sequence emitted into the IRBuilder is byte-identical to the Python.
  */
@@ -39,6 +40,21 @@ typedef struct rocke_super_tile_swizzle_result
     rocke_value_t* row; /* i32 SSA, M-tile index */
     rocke_value_t* col; /* i32 SSA, N-tile index */
 } rocke_super_tile_swizzle_result_t;
+
+/* Runtime super-tile (GROUP_M) swizzle without the chiplet remap.
+ *
+ * Python signature:
+ *   super_tile_swizzle_dynamic(b, wgid, *, num_pid_m, num_pid_n, wgm=8)
+ *
+ * wgid / num_pid_m / num_pid_n are i32 SSA Values; wgm is a compile-time
+ * int. On wgm <= 0 the builder's sticky error is set and the result fields
+ * are NULL.
+ */
+rocke_super_tile_swizzle_result_t rocke_super_tile_swizzle_dynamic(rocke_ir_builder_t* b,
+                                                                   rocke_value_t* wgid,
+                                                                   rocke_value_t* num_pid_m,
+                                                                   rocke_value_t* num_pid_n,
+                                                                   int wgm);
 
 /* Runtime composition of chiplet remap + super-tile swizzle.
  *
