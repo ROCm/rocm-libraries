@@ -162,6 +162,14 @@ using TestGpuFlydslSdpaBwdMergedLowestFiniteBiasFp16 = TestGpuFlydslSdpaBwdMerge
 using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasBfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp32 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasBfp16
+    = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasFp16
+    = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasBfp16
+    = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasFp16
+    = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 
 /// A FLOAT bias beside a 16-bit Q on the split engine, on every device that ships it.
 class TestGpuFlydslSdpaBwdSplitF32Bias : public FlydslSdpaBwdDevice
@@ -358,6 +366,47 @@ BwdCase rowBroadcastBiasCase(DataType dtype, int64_t seqKv)
     c.biasPitch = seqKv;
     c.dbias = false;
     return c;
+}
+
+/// A row-broadcast bias (one row for every query row) of one large constant @p value, over
+/// @p seqQ query rows that are no multiple of any kernel tile. The padded rows of the last tile
+/// read the same bias row beside a log-sum-exp of zero, so a kernel that forms P = exp(bias) there
+/// overflows the 16-bit P (f16 from a bias of about 11, bf16 from about 89) and turns dV NaN.
+BwdCase largeRowBroadcastBiasCase(DataType dtype, double value, int64_t seqQ)
+{
+    BwdCase c = rowBroadcastBiasCase(dtype, 64);
+    c.seqQ = seqQ;
+    c.biasFill = BwdBiasFill::CONSTANT;
+    c.biasValue = value;
+    return c;
+}
+
+/// The same bias on Q = K = 0 and V = dO = 1, head dim 16, one query row: with @p seqKv 1 the
+/// graph of AOTriton's bias symmetry test, whose 1 x 1 bias is a row broadcast.
+BwdCase zeroScoresBroadcastBiasCase(DataType dtype, double value, int64_t seqKv)
+{
+    BwdCase c = rowBroadcastBiasCase(dtype, seqKv);
+    c.batch = 1;
+    c.heads = 1;
+    c.kvHeads = 1;
+    c.seqQ = 1;
+    c.headDim = 16;
+    c.data = BwdData::ZERO_SCORES;
+    c.biasFill = BwdBiasFill::CONSTANT;
+    c.biasValue = value;
+    return c;
+}
+
+/// Every cell of the large-bias family for @p engine: the merged engine declines a key length of 1.
+void expectLargeRowBroadcastBias(std::string_view engine, DataType dtype, double value)
+{
+    for(const int64_t seqQ : {100, 1})
+    {
+        SCOPED_TRACE("Sq " + std::to_string(seqQ));
+        expectCase(engine, largeRowBroadcastBiasCase(dtype, value, seqQ));
+    }
+    SCOPED_TRACE("zero scores");
+    expectCase(engine, zeroScoresBroadcastBiasCase(dtype, value, engine == SPLIT_ENGINE ? 1 : 64));
 }
 
 /// Hq/Hk/Hv query, key and value heads: V's heads differ from K's, so the split engine runs
@@ -587,6 +636,28 @@ TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp16, MatchesTheReference)
 TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp32, MatchesTheReference)
 {
     expectCase(SPLIT_ENGINE, lowestFiniteBiasCase(DataType::FLOAT));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasFp16, GradientsAreFiniteAndMatchTheReference)
+{
+    expectLargeRowBroadcastBias(MERGED_ENGINE, DataType::HALF, 16.0);
+    expectLargeRowBroadcastBias(MERGED_ENGINE, DataType::HALF, 64.0);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasBfp16, GradientsAreFiniteAndMatchTheReference)
+{
+    expectLargeRowBroadcastBias(MERGED_ENGINE, DataType::BFLOAT16, 90.0);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasFp16, GradientsAreFiniteAndMatchTheReference)
+{
+    expectLargeRowBroadcastBias(SPLIT_ENGINE, DataType::HALF, 16.0);
+    expectLargeRowBroadcastBias(SPLIT_ENGINE, DataType::HALF, 64.0);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasBfp16, GradientsAreFiniteAndMatchTheReference)
+{
+    expectLargeRowBroadcastBias(SPLIT_ENGINE, DataType::BFLOAT16, 90.0);
 }
 
 TEST_F(TestGpuFlydslSdpaBwdMergedKeylessRowsBfp16, DqIsZeroAndGradientsMatchTheReference)

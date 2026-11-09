@@ -546,6 +546,8 @@ What differs, and why:
   is for every engine. Which rows a NaN or infinite V element at a *masked* key reaches
   depends on each kernel's tile size; PyTorch makes every row NaN. Matching that would cost
   a select per P·V element, so it is not done.
+  A NaN input to the biased dK/dV kernels is likewise outside the contract: dK and dV may
+  then come back finite where the inputs were NaN.
 - **RMSNorm** (§1, §2a): y and inv_rms differ by about 1 ulp between wave32 (RDNA) and
   wave64 (CDNA) parts, from the reduction tree's shape. dgamma is bitwise repeatable on a
   device, but its summation grouping follows the device's compute-unit count, so its last
@@ -1116,6 +1118,7 @@ PyTorch's forward serves also trains. Each has its own rows; no input is convert
 | f32 bias beside f16 or bf16 Q/K/V, f32 dBias (BI-2) | served, rows below | declines [attn_mask] |
 | 16-bit bias whose row pitch is not a multiple of 16 bytes | served by dQ rows that read the bias directly | declines [bias] (BI-8) |
 | `Hk != Hv`, `Hq` a multiple of both (SH-1), no bias, not fp32, not ragged | served by dK-only and dV-only dK/dV rows and a V-head dQ row | declines [shape] |
+| Row-broadcast bias with a `Sq` that is not a multiple of the query tile, bf16 head dim 64 with dropout | served | the one bias object that keeps its pre-clamp bytes declines it; every other merged bias object serves it |
 | dBias whose stride is not a multiple of 16 bytes (BI-9) | declines [layout] | declines [layout] |
 
 A graph the forward engines serve can still decline in the backward: one whose stats tensor declares less than 16 bytes of alignment (SS-3).

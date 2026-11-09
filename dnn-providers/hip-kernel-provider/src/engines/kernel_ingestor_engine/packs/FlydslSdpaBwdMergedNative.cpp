@@ -147,6 +147,16 @@ constexpr std::string_view SEQ_Q_TOKEN = "flydsl_sdpa_bwd_merged.seq_q";
 constexpr std::string_view SEQ_KV_TOKEN = "flydsl_sdpa_bwd_merged.seq_kv";
 /// The reduce launch's grid y extent; 0 when the graph's dBias is not broadcast.
 constexpr std::string_view REDUCE_PLANES_TOKEN = "flydsl_sdpa_bwd_merged.reduce_planes";
+/// 1 when the graph's bias is one row for every query row (row stride 0).
+constexpr std::string_view BIAS_ROW_BROADCAST_TOKEN = "flydsl_sdpa_bwd_merged.bias_row_broadcast";
+
+/// Objects that keep their bytes from before the biased dK/dV exponent clamp: a rebuild with the
+/// clamp fails the R-MIR scan, so the shipped pin stays. Without the clamp, a row-broadcast bias
+/// makes the padded query rows of a partial tile read the real bias beside an LSE of 0, and
+/// P = exp(bias) overflows the 16-bit P (dV turns NaN). These objects decline such graphs, which
+/// the split engine serves.
+constexpr std::array<std::string_view, 1> UNCLAMPED_BIAS_OBJECTS{
+    "sdpa_bwd_merged_bf16_d64_causal0_bias1_dr1_pad0_fltail_dfbk"};
 
 /// The graph classes an object is built for: `causal` serves every masked graph, `bias`
 /// every bias graph (masked graphs with a bias are declined by the matcher), `plain` the rest.
@@ -390,6 +400,8 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
     bound[std::string(SEQ_Q_TOKEN)] = problem.seqLenQ;
     bound[std::string(SEQ_KV_TOKEN)] = problem.seqLenKv;
     bound[std::string(REDUCE_PLANES_TOKEN)] = reducePlanes(problem);
+    bound[std::string(BIAS_ROW_BROADCAST_TOKEN)]
+        = int64_t{problem.biasUid != bwd::NO_UID && problem.biasStrides.seq == 0 ? 1 : 0};
     return bound;
 }
 
@@ -409,6 +421,7 @@ struct GraphFacts
     int64_t seqLenQ = 0;
     int64_t seqLenKv = 0;
     int64_t reducePlanes = 0;
+    bool biasRowBroadcast = false;
 };
 
 std::optional<GraphFacts> readFacts(const BoundTokens& bound)
@@ -430,8 +443,9 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
     const auto seqLenQ = tryGetBoundInt(bound, SEQ_Q_TOKEN);
     const auto seqLenKv = tryGetBoundInt(bound, SEQ_KV_TOKEN);
     const auto planes = tryGetBoundInt(bound, REDUCE_PLANES_TOKEN);
-    if(!graphClass || !headDimQk || !headDimV || !dropout || !dbias || !gqaPack || !batch
-       || !numHeads || !numKvHeads || !seqLenQ || !seqLenKv || !planes)
+    const auto rowBroadcast = tryGetBoundInt(bound, BIAS_ROW_BROADCAST_TOKEN);
+    if(!rowBroadcast || !graphClass || !headDimQk || !headDimV || !dropout || !dbias || !gqaPack
+       || !batch || !numHeads || !numKvHeads || !seqLenQ || !seqLenKv || !planes)
     {
         return std::nullopt;
     }
@@ -447,7 +461,8 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
                       *numKvHeads,
                       *seqLenQ,
                       *seqLenKv,
-                      *planes};
+                      *planes,
+                      *rowBroadcast != 0};
 }
 
 /**
@@ -487,6 +502,15 @@ bool flydslSdpaBwdMergedKernelMatches(const MatchContext& /*context*/,
     // covers: a row that records no tile, or one above the bound, serves nothing.
     if(row->gqaPack == 1
        && (!facts->gqaPack || row->blockQ <= 0 || row->blockQ > native::PACK_MAX_BLOCK_Q))
+    {
+        return false;
+    }
+    // An unclamped bias object reads the real bias in the padded query rows of a row-broadcast
+    // bias; it serves such a graph only when no row of the dK/dV query tile is padded.
+    const int64_t queryTile = row->blockQ > 0 ? row->blockQ : row->blockM;
+    if(facts->biasRowBroadcast && facts->seqLenQ % queryTile != 0
+       && std::find(UNCLAMPED_BIAS_OBJECTS.begin(), UNCLAMPED_BIAS_OBJECTS.end(), kernel.name)
+              != UNCLAMPED_BIAS_OBJECTS.end())
     {
         return false;
     }

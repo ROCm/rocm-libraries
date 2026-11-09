@@ -145,7 +145,19 @@ enum class BwdBiasFill
     /// Every key of every third row at -inf: a row no key reaches.
     NEG_INF_ROWS,
     /// The first `biasLeadingKeys` keys of every row at -inf.
-    NEG_INF_LEADING_KEYS
+    NEG_INF_LEADING_KEYS,
+    /// Every element at `biasValue`.
+    CONSTANT
+};
+
+/// The data of Q, K, V and dO.
+enum class BwdData
+{
+    /// Deterministic k/32 noise.
+    NOISE,
+    /// Q = K = 0 and V = dO = 1: every score is the bias, P is the same across the keys, and dQ
+    /// and dK are exactly zero.
+    ZERO_SCORES
 };
 
 /// What the elements of O's rows beyond the head dim (the row pitch's padding) hold.
@@ -202,6 +214,9 @@ struct BwdCase
     /// Elements between the bias's rows; 0 is a whole 16-byte vector of the bias's dtype.
     int64_t biasPitch = 0;
     BwdBiasFill biasFill = BwdBiasFill::VALUES;
+    /// The value of a CONSTANT bias.
+    double biasValue = 0.0;
+    BwdData data = BwdData::NOISE;
     /// What the padding of O's rows holds. The reference never reads it.
     BwdOPadFill oPadFill = BwdOPadFill::ZERO;
     /// K and/or V hold @p poisonValue at every key no query row sees (outside every row's window,
@@ -896,6 +911,10 @@ inline std::vector<double> biasValues(const BwdCase& c, double lowest)
     {
         return values;
     }
+    if(c.biasFill == BwdBiasFill::CONSTANT)
+    {
+        return std::vector<double>(values.size(), c.biasValue);
+    }
     const double infinity = std::numeric_limits<double>::infinity();
     for(int64_t b = 0; b < c.biasBatch(); ++b)
     {
@@ -1189,6 +1208,14 @@ inline void expectGradient(const char* name,
         << got[miss->index] << ", expected " << expected[miss->index] << "), against a bound of "
         << miss->bound << " (" << relativeTolerance << " of the largest element " << miss->scale
         << (rowWidth == 0 ? ")" : " of its row of " + std::to_string(rowWidth) + ")");
+}
+
+/// Every element of a gradient the reference makes exactly zero is zero, and so not NaN.
+inline void expectAllZero(const char* name, const std::vector<double>& got)
+{
+    const auto bad = std::find_if(got.begin(), got.end(), [](double v) { return v != 0.0; });
+    EXPECT_TRUE(bad == got.end()) << name << ": element " << (bad - got.begin()) << " is " << *bad
+                                  << ", expected 0";
 }
 
 /// The index of the first element of @p launch whose bits differ from @p first's, or nullopt when
@@ -1511,6 +1538,13 @@ void expectPlanMatchesReference(const BwdCase& c,
     in.k = widened(roundedTo<T>(fillValues(kCount, 2U)));
     in.v = widened(roundedTo<T>(fillValues(vCount, 3U)));
     in.dO = widened(roundedTo<T>(fillValues(oCount, 4U)));
+    if(c.data == BwdData::ZERO_SCORES)
+    {
+        std::fill(in.q.begin(), in.q.end(), 0.0);
+        std::fill(in.k.begin(), in.k.end(), 0.0);
+        std::fill(in.v.begin(), in.v.end(), 1.0);
+        std::fill(in.dO.begin(), in.dO.end(), 1.0);
+    }
     if(c.bias)
     {
         in.bias = biasInputsOf<B>(c);
@@ -1750,7 +1784,15 @@ void expectPlanMatchesReference(const BwdCase& c,
         = [&](int64_t width) { return c.perRowTolerance ? static_cast<size_t>(width) : 0; };
     const auto dqHost = device[views.dq.group]->template download<T>();
     const auto dqGot = gather(dqHost, views.dq);
-    expectGradient("dQ", dqGot, expected.dq, scopeOf(c, true, c.heads, dqk), tolerance, rowOf(dqk));
+    if(c.data == BwdData::ZERO_SCORES)
+    {
+        expectAllZero("dQ", dqGot);
+    }
+    else
+    {
+        expectGradient(
+            "dQ", dqGot, expected.dq, scopeOf(c, true, c.heads, dqk), tolerance, rowOf(dqk));
+    }
     if(c.keylessDqExactlyZero)
     {
         expectKeylessDqRowsAreZero(c, dqGot);
@@ -1760,8 +1802,15 @@ void expectPlanMatchesReference(const BwdCase& c,
         expectTailRowsAreZero("dQ", dqGot, scopeOf(c, true, c.heads, dqk));
     }
     const auto dkGot = gather(device[views.dk.group]->template download<T>(), views.dk);
-    expectGradient(
-        "dK", dkGot, expected.dk, scopeOf(c, false, c.kvHeads, dqk), tolerance, rowOf(dqk));
+    if(c.data == BwdData::ZERO_SCORES)
+    {
+        expectAllZero("dK", dkGot);
+    }
+    else
+    {
+        expectGradient(
+            "dK", dkGot, expected.dk, scopeOf(c, false, c.kvHeads, dqk), tolerance, rowOf(dqk));
+    }
     const auto dvGot = gather(device[views.dv.group]->template download<T>(), views.dv);
     expectGradient(
         "dV", dvGot, expected.dv, scopeOf(c, false, c.valueHeadCount(), dv), tolerance, rowOf(dv));

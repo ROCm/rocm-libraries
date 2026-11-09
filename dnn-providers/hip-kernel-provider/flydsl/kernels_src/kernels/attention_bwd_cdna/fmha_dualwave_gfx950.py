@@ -90,6 +90,13 @@ def _fmax(a, b, fm):
     return arith.MaxNumFOp(as_mlir_value(a), as_mlir_value(b), fastmath=fm).result
 
 
+def _fmin0(x, fm):
+    """`min(x, 0)`: a bias build's `P = exp2(...)` stays <= 1 for an LSE that covers the row."""
+    return arith.MinNumFOp(
+        as_mlir_value(x), as_mlir_value(fx.Float32(0.0)), fastmath=fm
+    ).result
+
+
 def pin_sgpr(value):
     """An opaque scalar copy of `value`, so it is computed where it is written -- the prologue -- and not sunk to its use.
 
@@ -1679,11 +1686,13 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
             # computes, which is `buffer_ops.buffer_load`'s shape, not the
             # copy-atom one the K/V DMA uses.
             #
-            # The bound is the slab, so a row past `seqlen_q` reads zero
-            # instead of faulting -- which is also the right bias for a padded
-            # row -- and so does a column that runs off the last row's end.
-            # `_bias_slab_num_records_bytes` is what makes the second half of
-            # that true when the bias row stride is wider than the row.
+            # The bound is the slab, so a row of a full bias past `seqlen_q`
+            # reads zero instead of faulting, and so does a column that runs
+            # off the last row's end. `_bias_slab_num_records_bytes` is what
+            # makes the second half of that true when the bias row stride is
+            # wider than the row. A row-broadcast bias (row stride 0) is one
+            # row, so a padded row reads the real bias; the dK/dV
+            # `probabilities` clamp keeps `P <= 1` there.
             self.bias_rsrc = buffer_ops.create_buffer_resource(
                 self.Bias,
                 max_size=False,

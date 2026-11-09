@@ -81,6 +81,12 @@ contributes `1 * dO = 0` to dV and `dS * Q = 0` to dK. Finite, exact, and no
 `scf.if` anywhere near a transpose read, which is undefined under a divergent
 EXEC.
 
+A bias read keeps that only while the padded row reads bias 0. A row-broadcast
+bias (row stride 0) is one row, so a padded row reads the real bias `b` and
+would give `P = exp(b)`, which overflows the 16-bit `P` for a large `b` and turns
+`inf * dO(0)` into a NaN in every dV element. A bias build therefore clamps the
+exponent argument at 0 (`P <= 1`, which holds for any LSE that covers the row).
+
 --- Scope ------------------------------------------------------------------
 
 Causal and windows, varlen, dropout, the bias *input* and GQA are all
@@ -132,7 +138,12 @@ from kernels.attention_bwd_cdna import fmha_bwd_dkdv_m16_gfx950 as m16
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 from kernels.attention_bwd_cdna.fmha_bwd_bias_exp_gfx950 import FM_BIAS_EXP
 from kernels.attention_bwd_cdna.fmha_common_gfx1201 import MaskedAxis
-from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import _fadd, _fmul, _fsub
+from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
+    _fadd,
+    _fmin0,
+    _fmul,
+    _fsub,
+)
 from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
     ParityGemmHelper,
     ParityKernelContext,
@@ -1710,6 +1721,9 @@ class BwdDkDvSoftmaxHelper(ParitySoftmaxHelper):
         build so a `-inf` bias, or the `+inf` LSE of an empty row, survives to
         `exp2`, which returns an exact zero for it -- and a zero `P` then kills
         every downstream term, since `dS = P*(...)` and `dV += P.dO`.
+        The exponent argument is clamped at 0 (`P <= 1` for an LSE that covers the
+        row), so a padded row that reads a broadcast bias beside LSE 0 cannot
+        overflow the 16-bit `P`.
         `BIAS_TYPE` is a build axis, so a build without bias emits the
         identical `fm_fast` chain it always did.
         """
@@ -1724,11 +1738,14 @@ class BwdDkDvSoftmaxHelper(ParitySoftmaxHelper):
                         T.f32,
                         as_mlir_value(
                             _fmul(
-                                _fsub(
-                                    fmath.fma(
-                                        values[r], sm_scale, bias2[r], fastmath=fm
+                                _fmin0(
+                                    _fsub(
+                                        fmath.fma(
+                                            values[r], sm_scale, bias2[r], fastmath=fm
+                                        ),
+                                        lse_term[r],
+                                        fm,
                                     ),
-                                    lse_term[r],
                                     fm,
                                 ),
                                 log2e,

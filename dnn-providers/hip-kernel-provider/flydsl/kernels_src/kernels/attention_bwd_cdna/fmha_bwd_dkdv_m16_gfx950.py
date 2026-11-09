@@ -84,7 +84,12 @@ It also leaves a lane's four accumulator rows **contiguous** (`8*(lane//16) +
 
 from kernels.attention_bwd_cdna.fmha_bwd_bias_exp_gfx950 import FM_BIAS_EXP
 from kernels.attention_bwd_cdna.fmha_common_gfx1201 import MaskedAxis
-from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import _fadd, _fmul, _fsub
+from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
+    _fadd,
+    _fmin0,
+    _fmul,
+    _fsub,
+)
 from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
     _ds_read_tr16_b64_imm,
     exp2_wait_state,
@@ -448,7 +453,7 @@ class M16SoftmaxHelper(dualwave.DualwaveKernelContext):
         A bias build combines in natural units and scales last (`bias2` is the natural-unit
         bias, `lse_term` is `LSE`), and its chain takes `FM_BIAS_EXP` (no `ninf`, no `reassoc`)
         so a caller's `-inf` and an empty row's `+inf` LSE reach `exp2`, which returns an exact
-        zero for them. The 32-row family's `probabilities` says why at length.
+        zero for them, and the exponent argument is clamped at 0 (`P <= 1`). The 32-row family's `probabilities` says why at length.
         """
         values = [Vec(v_s)[r] for r in range_constexpr(ACC16)]
         if const_expr(bias2 is not None):
@@ -461,11 +466,14 @@ class M16SoftmaxHelper(dualwave.DualwaveKernelContext):
                         T.f32,
                         as_mlir_value(
                             _fmul(
-                                _fsub(
-                                    fmath.fma(
-                                        values[r], sm_scale, bias2[r], fastmath=fm
+                                _fmin0(
+                                    _fsub(
+                                        fmath.fma(
+                                            values[r], sm_scale, bias2[r], fastmath=fm
+                                        ),
+                                        lse_term[r],
+                                        fm,
                                     ),
-                                    lse_term[r],
                                     fm,
                                 ),
                                 log2e,
