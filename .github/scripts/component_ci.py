@@ -64,6 +64,7 @@ COMPONENTS = {
     ],
     "hipblaslt_rocjitsu_scripts": [
         "projects/hipblaslt/clients/scripts/rocjitsu/**",
+        ".github/scripts/run_rocjitsu_hipblaslt_gemm_race_checks.sh",
         ".github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml",
     ],
 }

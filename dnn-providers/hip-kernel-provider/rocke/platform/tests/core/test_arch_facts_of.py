@@ -28,7 +28,8 @@ from rocke.core.arch.target import (
     _load_doc,
     _load_generic_targets,
     _load_specs,
-    _op_id_c_dtype,
+    _op_id_dst_dtype,
+    _mma_operand_rows,
     _op_id_family,
     _resolve_row,
     normalize_dtype,
@@ -98,11 +99,12 @@ def test_resolved_pointer_row_is_an_independent_copy(gfx, generic):
 
 def test_pointers_add_nothing_to_the_op_id_lookups():
     """The bare-op_id lookups answer exactly what the fact rows alone answer."""
-    expected_c: dict = {}
+    expected_dst: dict = {}
     expected_family: dict = {}
     for row in _load_specs().values():
         for op in row["mma"]:
-            expected_c.setdefault(op["op_id"], normalize_dtype(op["c"]))
+            _, dst = _mma_operand_rows(op)
+            expected_dst.setdefault(op["op_id"], normalize_dtype(dst["dtype"]))
             expected_family.setdefault(op["op_id"], op["family"])
     fact_rows_only = {
         op["op_id"]
@@ -110,8 +112,8 @@ def test_pointers_add_nothing_to_the_op_id_lookups():
         if gfx not in POINTERS
         for op in row["mma"]
     }
-    assert set(expected_c) == fact_rows_only
-    assert _op_id_c_dtype() == expected_c
+    assert set(expected_dst) == fact_rows_only
+    assert _op_id_dst_dtype() == expected_dst
     assert _op_id_family() == expected_family
 
 
