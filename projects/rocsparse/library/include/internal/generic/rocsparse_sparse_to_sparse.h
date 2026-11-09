@@ -57,6 +57,7 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_value if any required enumeration is invalid.
 *  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size_in_bytes
 *               pointer is invalid.
+*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle                 handle,
@@ -94,10 +95,18 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  - \ref rocsparse_format_csc, \ref rocsparse_format_ell or \ref rocsparse_format_bsr target: only
 *    from the same format.
 *
-*  Other combinations return \ref rocsparse_status_not_implemented. For the conversions above
-*  that convert the values, a matrix with no values to convert (zero nonzeros) is an exception:
-*  its sparsity pattern is converted and \ref rocsparse_status_success is returned for any pair
-*  of data types.
+*  Other combinations return \ref rocsparse_status_not_implemented. The ELL to CSR and CSR to BSR
+*  conversions (also to BSR in permissive mode) only return it in the
+*  \ref rocsparse_sparse_to_sparse_stage_compute stage, after the
+*  \ref rocsparse_sparse_to_sparse_stage_analysis stage has written the row pointer array of
+*  \p target.
+*
+*  A matrix with zero nonzeros is an exception. For the conversions above that convert the
+*  values, its sparsity pattern is converted and \ref rocsparse_status_success is returned for
+*  any pair of data types. The CSR to CSC, CSC to CSR, CSR to BSR, CSR to ELL and BSR to CSR
+*  conversions only check the data types when the value arrays of both \p source and \p target
+*  are set, so they also convert a matrix with zero nonzeros and no value arrays for any pair of
+*  data types.
 *
 *  \note
 *  This routine does not support batched computation.
