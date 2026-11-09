@@ -740,6 +740,38 @@ TEST_F(IndexedLibraryParityTest, ResolvingALegacyIndexAgainReturnsTheSameObject)
     EXPECT_EQ(master->resolveSolutionByIndex(index), solution);
 }
 
+// A local-kernel index would always fill `owner`; local kernels are compiled
+// only with TENSILELITE_ENABLE_LOCAL_KERNELS, so that case is not covered here.
+TEST_F(IndexedLibraryParityTest, SolutionForCallOwnsOnlyUnresolvedIndices)
+{
+    auto fixture = legacyFixture();
+    if(!fs::is_regular_file(fixture))
+        GTEST_SKIP() << "no legacy library fixture at " << fixture;
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(fixture.string());
+    if(!lib)
+        GTEST_SKIP() << fixture << " does not load";
+    auto* master
+        = dynamic_cast<MasterSolutionLibrary<ContractionProblemGemm, ContractionSolution>*>(
+            lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_FALSE(master->solutions.empty());
+
+    const AMDGPU device = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
+    const int  index   = master->solutions.begin()->first;
+
+    std::shared_ptr<ContractionSolution> owner;
+    auto const* first = master->getSolutionByIndexForCall(problem, device, index, owner);
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first, owner.get()) << "an unresolved index is returned through owner";
+
+    std::shared_ptr<ContractionSolution> second;
+    EXPECT_EQ(master->getSolutionByIndexForCall(problem, device, index, second), first);
+    EXPECT_EQ(second, nullptr) << "a resolved index needs no owner";
+}
+
 // ---------------------------------------------------------------------------
 // 4. A lazy master reaching an indexed shard through a placeholder
 // ---------------------------------------------------------------------------

@@ -6187,7 +6187,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // the GSU reduction area, which is far larger and stays shared. The two
         // never coincide in one kernel, so a single pointer serves both and the
         // choice is made here, where the solution is finally known.
-        auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+        std::shared_ptr<TensileLite::ContractionSolution> solutionOwner;
+        auto solution = library->getSolutionByIndexForCall(
+            data->problem, *hardware, *solutionIndex, solutionOwner);
         if(solution)
             data->inputs.Synchronizer
                 = synchronizerForSolution(*solution, prob.streamKFlags, prob.Synchronizer);

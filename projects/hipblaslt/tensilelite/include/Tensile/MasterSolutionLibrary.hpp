@@ -451,6 +451,26 @@ namespace TensileLite
             return solution;
         }
 
+        /// getSolutionByIndex for a caller that uses the solution only during
+        /// the call. A resolved index is returned without touching its
+        /// reference count: resolvedSolutions keeps it for the library's
+        /// lifetime. Any other index, including every local-kernel index, is
+        /// resolved by getSolutionByIndex and also returned in `owner`.
+        MySolution const* getSolutionByIndexForCall(MyProblem const&             problem,
+                                                    Hardware const&              hardware,
+                                                    const int                    index,
+                                                    std::shared_ptr<MySolution>& owner) const
+        {
+            auto const* resolved = resolvedSolutions.find(index);
+            if(!resolved)
+            {
+                owner = getSolutionByIndex(problem, hardware, index);
+                return owner.get();
+            }
+            (*resolved)->ensureRequiredHostWorkspaceSize(problem, hardware);
+            return resolved->get();
+        }
+
         virtual std::shared_ptr<MySolution> getSolutionByIndex(Hardware const& hardware,
                                                                const int       index) const override
         {
