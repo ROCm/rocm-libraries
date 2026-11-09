@@ -1311,6 +1311,65 @@ TYPED_TEST(PageTileForward, MatchesReferenceSink)
     }
 }
 
+// An elementwise bias can carry a materialized mask. Here it is -inf on the first key tile (keys
+// 0..127) of every row, so that tile has no finite score: the softmax must keep a finite exponent
+// base, as with a mask, instead of forming -inf - (-inf). V is 0 on those keys and 1 on the
+// others, so each output component is the softmax mass past the first tile: 1, or 0 for a row
+// that sees no key past it (every row of the last sequence).
+TYPED_TEST(PageTileForward, MaskedByBias)
+{
+    if constexpr(kBias != 1)
+        GTEST_SKIP() << "elementwise-bias instances only";
+    else
+    {
+        constexpr int kMaskedKeys = 128;
+        const Case shape{"bias_mask",
+                         4,
+                         2,
+                         {64, 1, 128, 7},
+                         {2 * kMaskedKeys + 37, kMaskedKeys + 1, 3 * kMaskedKeys, 100}};
+        auto h = MakeProblem(shape, Mapping::Permuted, TypeParam::kHeadDim, TypeParam::kCausal, 11);
+        const auto& l         = h.layout;
+        const std::size_t row = static_cast<std::size_t>(l.kv_heads) * h.head_dim;
+        for(int b = 0; b < l.batch(); ++b)
+            for(int key = 0; key < l.seqlen_k[b]; ++key)
+            {
+                const auto page =
+                    static_cast<std::size_t>(l.block_table[b * l.table_stride + key / kPage]);
+                std::fill_n(h.v.begin() + (page * kPage + key % kPage) * row,
+                            row,
+                            ck_tile::type_convert<Data>(key < kMaskedKeys ? 0.0f : 1.0f));
+            }
+        const std::size_t bias_rows = static_cast<std::size_t>(l.q_heads) * l.seqstart_q.back();
+        for(std::size_t r = 0; r < bias_rows; ++r)
+            std::fill_n(h.bias.begin() + r * h.bias_stride,
+                        kMaskedKeys,
+                        ck_tile::type_convert<Data>(-std::numeric_limits<float>::infinity()));
+        DeviceProblem d(h);
+        const auto o = Run<TypeParam>(h, d);
+        // P is rounded to the 16-bit type, and so is the output.
+        const float tolerance  = std::ldexp(2.0f, -kMantissaBits);
+        std::size_t mismatches = 0;
+        for(int b = 0; b < l.batch(); ++b)
+            for(int q = 0; q < l.q_length(b); ++q)
+            {
+                // Bottom-right causal: query q sees the keys up to q + seqlen_k - seqlen_q.
+                const int last_key =
+                    TypeParam::kCausal ? q + l.seqlen_k[b] - l.q_length(b) : l.seqlen_k[b] - 1;
+                const float expected = last_key >= kMaskedKeys ? 1.0f : 0.0f;
+                const std::size_t first =
+                    (static_cast<std::size_t>(l.seqstart_q[b]) + q) * l.q_heads * h.head_dim;
+                for(std::size_t x = first; x < first + l.q_heads * h.head_dim; ++x)
+                    mismatches +=
+                        !(std::abs(ck_tile::type_convert<float>(o[x]) - expected) <= tolerance);
+            }
+        std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim
+                  << (TypeParam::kCausal ? " causal" : " dense")
+                  << " bias mask mismatches=" << mismatches << '\n';
+        EXPECT_EQ(mismatches, 0u);
+    }
+}
+
 // The kernel must not read block-table entries past a sequence's last page. Poisoned spare
 // entries make such a read trap; a tight stride (no spare entries) makes the longest row end at
 // the end of its table row. Both change only entries the kernel must not read, so the output must

@@ -782,6 +782,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 !Problem::FmhaMask::IsMasking);
     }
 
+    // A row's scores can all be -inf within a tile: masked, or with an elementwise bias that
+    // carries a materialized mask (as in BlockFmhaPipelineQRKSVS). Such a row keeps a finite
+    // exponent base, so the online softmax does not form -inf - (-inf).
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool ValidateRowMax()
+    {
+        return Problem::FmhaMask::IsMasking ||
+               Problem::BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS;
+    }
+
     template <typename Problem, typename ScoreTensor, typename RowTensor>
     CK_TILE_DEVICE static void RunSplitSoftmaxPart01(
         ScoreTensor& score, RowTensor& row_max, float log2e_scale, float& delta_m0, float& delta_m1)
@@ -798,7 +808,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 score, old_max_m0, log2e_scale);
             const auto p0_m1 = Softmax::template RunPart0<1, ScoreTensor, kUseCompilerMax>(
                 score, old_max_m0, log2e_scale);
-            constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
+            constexpr bool kValidateMax = ValidateRowMax<Problem>();
             const auto p1_m0            = Softmax::template RunPart1<kValidateMax>(
                 p0_m0.local_max, p0_m1.local_max, p0_m0.old_max_log2e, log2e_scale);
             row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
@@ -828,7 +838,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             const auto p0_m3 = Softmax::template RunPart0<3, ScoreTensor, kUseCompilerMax>(
                 score, old_max_m1, log2e_scale);
 
-            constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
+            constexpr bool kValidateMax = ValidateRowMax<Problem>();
             const auto p1_m0            = Softmax::template RunPart1<kValidateMax>(
                 p0_m0.local_max, p0_m1.local_max, p0_m0.old_max_log2e, log2e_scale);
             const auto p1_m1 = Softmax::template RunPart1<kValidateMax>(
@@ -857,7 +867,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             using Mapping = typename Softmax::Mapping;
             static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
             static_assert(RowTensor::get_thread_buffer_size() == 1);
-            constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
+            constexpr bool kValidateMax = ValidateRowMax<Problem>();
             const float raw_max_m0      = row_max.get_thread_buffer()[number<0>{}];
             const float row_max_m0 =
                 kValidateMax && raw_max_m0 <= -numeric<float>::infinity() ? 0.0f : raw_max_m0;
@@ -881,7 +891,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
             static_assert(RowTensor::get_thread_buffer_size() == 2);
 
-            constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
+            constexpr bool kValidateMax = ValidateRowMax<Problem>();
 
             const auto validated_max = [](float value) {
                 if constexpr(kValidateMax)
