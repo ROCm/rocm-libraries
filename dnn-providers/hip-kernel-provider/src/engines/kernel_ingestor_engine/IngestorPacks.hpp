@@ -44,6 +44,9 @@ const std::vector<IngestorPack>& ingestorPacks();
 void registerPointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetPointwiseModuleCache();
 
+void registerStandalonePointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetStandalonePointwiseModuleCache();
+
 /// @see packs/ConvNative.cpp
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvFwdModuleCache();
