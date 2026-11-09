@@ -249,7 +249,7 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
             static constexpr int DGMM_DIM_Y = 32;
 
             rocblas_int blocksX = (m - 1) / (DGMM_DIM_X * 2) + 1;
-            //blocksY should be <= 2^16 (65536) to avoid overflow as grid y and z block indices support only 16-bit values on some gfx
+            // keep blocksY less than or equal to grid launch limit
             rocblas_int blocksY = std::min(c_YZ_grid_launch_limit, (n - 1) / DGMM_DIM_Y + 1);
 
             dim3 dgmm_grid(blocksX, blocksY, batches);
@@ -264,7 +264,7 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
             static constexpr int DGMM_DIM_Y = 16;
 
             rocblas_int blocksX = (m - 1) / DGMM_DIM_X + 1;
-            //blocksY should be <= 2^16 (65536) to avoid overflow as grid y and z block indices support only 16-bit values on some gfx
+            // keep blocksY less than or equal to grid launch limit
             rocblas_int blocksY = std::min(c_YZ_grid_launch_limit, (n - 1) / DGMM_DIM_Y + 1);
 
             dim3 dgmm_grid(blocksX, blocksY, batches);
