@@ -12,6 +12,9 @@
  *     .vecs_per_thread (property)     rocke_coalesced_tile_loader_vecs_per_thread()
  *     .cols_per_vec    (property)     rocke_coalesced_tile_loader_cols_per_vec()
  *     .load        (method)          rocke_coalesced_tile_loader_load()
+ *     .col_xor     (field check)     rocke_coalesced_tile_loader_set_col_xor()
+ *   lds_col_xor_params (function)   rocke_lds_col_xor_params()
+ *   swizzle_lds_col    (function)   rocke_swizzle_lds_col()
  *   AsyncTileLoader (frozen dc)     rocke_async_tile_loader_t
  *     .choose_dwords (classmethod)    rocke_async_tile_loader_choose_dwords()
  *     .from_tile     (classmethod)    rocke_async_tile_loader_from_tile()
@@ -112,7 +115,41 @@ typedef struct rocke_coalesced_tile_loader
      * reads it). has_inner_dim distinguishes None (false) from a set value. */
     bool has_inner_dim;
     int inner_dim;
+    /* Python `col_xor: Optional[Tuple[int, int, int, int]] = None`: the
+     * rocke_lds_col_xor_params tuple {row_shift, chunk_mask, chunk_log2,
+     * flip_shift}. has_col_xor false is None (unswizzled stores, the historical
+     * IR). When set, every LDS store writes logical [row, col] to
+     * [row, rocke_swizzle_lds_col(row, col)]; set it through
+     * rocke_coalesced_tile_loader_set_col_xor, which makes Python's
+     * __post_init__ checks. Every loader built field by field must clear
+     * has_col_xor. */
+    bool has_col_xor;
+    int col_xor[4];
 } rocke_coalesced_tile_loader_t;
+
+/* lds_col_xor_params(tile_cols, chunk=8): the conflict-free XOR swizzle of an
+ * unpadded [rows][tile_cols] LDS tile of 16-bit elements read in chunk-element
+ * (16-byte) runs. Writes {row_shift, chunk_mask, chunk_log2, flip_shift} to
+ * out[4] and returns ROCKE_OK, or ROCKE_ERR_VALUE (out untouched) where Python
+ * raises: chunk not a power of two, or tile_cols / chunk not a power of two in
+ * [2, 16]. Pass chunk = 8 for the Python default. */
+rocke_status_t rocke_lds_col_xor_params(int tile_cols, int chunk, int out[4]);
+
+/* swizzle_lds_col(b, row, col, col_xor):
+ *   col ^ ((((row >> row_shift) & chunk_mask) ^ ((row >> flip_shift) & 1))
+ *          << chunk_log2)
+ * emitted in the Python call order. NULL on a failed builder. */
+rocke_value_t* rocke_swizzle_lds_col(rocke_ir_builder_t* b,
+                                     rocke_value_t* row,
+                                     rocke_value_t* col,
+                                     const int col_xor[4]);
+
+/* Set `self->col_xor` (has_col_xor = true) after Python __post_init__'s
+ * checks: four non-negative ints, the swizzled chunks fit one tile row, and in
+ * "col" mode load_vec divides the chunk. Returns ROCKE_ERR_VALUE and leaves
+ * the loader unchanged when a check fails. */
+rocke_status_t rocke_coalesced_tile_loader_set_col_xor(rocke_coalesced_tile_loader_t* self,
+                                                       const int col_xor[4]);
 
 /* CoalescedTileLoader.choose_vec classmethod.
  *

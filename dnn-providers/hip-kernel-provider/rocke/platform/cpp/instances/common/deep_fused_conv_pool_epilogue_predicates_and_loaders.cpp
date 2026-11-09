@@ -303,6 +303,7 @@ void rocke_dfcp_load_conv0_a_tile_specialized(rocke_ir_builder_t* b,
     loader.vector_axis_row = false; /* vector_axis="col" default */
     loader.has_inner_dim = false;
     loader.inner_dim = 0;
+    loader.has_col_xor = false;
 
     /* loader.load(b, tid=grid.tid, smem_dst=a_dst, descriptor=descriptor,
      *             rsrc=a_rsrc). */

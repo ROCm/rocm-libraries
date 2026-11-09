@@ -3242,6 +3242,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->a_sync_loader.vector_axis_row = axis_a;
         ctx->a_sync_loader.has_inner_dim = false;
         ctx->a_sync_loader.inner_dim = 0;
+        ctx->a_sync_loader.has_col_xor = false;
 
         ctx->b_sync_loader.tile_rows = spec->lds_k_outer ? ctx->block_k : ctx->block_n;
         ctx->b_sync_loader.tile_cols = spec->lds_k_outer ? ctx->block_n : ctx->block_k;
@@ -3252,6 +3253,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->b_sync_loader.vector_axis_row = axis_b;
         ctx->b_sync_loader.has_inner_dim = false;
         ctx->b_sync_loader.inner_dim = 0;
+        ctx->b_sync_loader.has_col_xor = false;
 
         ctx->have_sync_loaders = true;
         ctx->have_async_loaders = false;
