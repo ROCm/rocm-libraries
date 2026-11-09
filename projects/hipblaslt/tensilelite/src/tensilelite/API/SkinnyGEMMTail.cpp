@@ -83,28 +83,41 @@ static void zeroChunk(IRBuilder &builder, TailPath &path, int32_t chunk) {
 
 // The first pass over chunk u: loads it (FULL, EDGE) or zeroes it (DEAD), and
 // for an EDGE chunk sets its bit in edgeChunks, an SGPR, for the second pass.
+// The first chunk has no DEAD arm and the last no FULL arm (see TailPath).
 static void emitChunkArm(IRBuilder &builder, TailPath &path,
                          RegisterRef edgeChunks, int32_t chunk) {
   TailLanes lanes = path.lanes();
+  bool canBeFull = chunk != SkinnyDims::chunks - 1;
+  bool canBeDead = chunk != 0;
   // All SALU first: s_sub writes SCC, which the branches read.
   std::optional<RegisterRange> chunkHiStorage = chunkEnd(builder, lanes, chunk);
   RegisterRef chunkHi = chunkHiStorage ? chunkHiStorage->ref() : lanes.end;
-  std::shared_ptr<rocisa::Label> edge = builder.createLabel("tail_edge");
-  std::shared_ptr<rocisa::Label> zero = builder.createLabel("tail_zero");
+  std::shared_ptr<rocisa::Label> edge;
+  if (canBeFull)
+    edge = builder.createLabel("tail_edge");
+  std::shared_ptr<rocisa::Label> zero;
+  if (canBeDead)
+    zero = builder.createLabel("tail_zero");
   std::shared_ptr<rocisa::Label> done = builder.createLabel("tail_chunk_end");
-  builder.create<rocisa::SCmpGeI32>(chunkHi.container(), lanes.laneSpan);
-  builder.create<rocisa::SCBranchSCC0>(edge->getLabelName());
-  if (path.loadsChunks())
-    path.loadChunk(chunk, std::nullopt);
-  builder.create<rocisa::SBranch>(done->getLabelName());
-  builder.insert(edge);
-  builder.create<rocisa::SCmpGtI32>(chunkHi.container(), 0);
-  builder.create<rocisa::SCBranchSCC0>(zero->getLabelName());
+  if (canBeFull) {
+    builder.create<rocisa::SCmpGeI32>(chunkHi.container(), lanes.laneSpan);
+    builder.create<rocisa::SCBranchSCC0>(edge->getLabelName());
+    if (path.loadsChunks())
+      path.loadChunk(chunk, std::nullopt);
+    builder.create<rocisa::SBranch>(done->getLabelName());
+    builder.insert(edge);
+  }
+  if (canBeDead) {
+    builder.create<rocisa::SCmpGtI32>(chunkHi.container(), 0);
+    builder.create<rocisa::SCBranchSCC0>(zero->getLabelName());
+  }
   loadEdgeChunk(builder, path, lanes, chunkHi, chunk);
   builder.ori32(edgeChunks, edgeChunks, 1 << chunk);
-  builder.create<rocisa::SBranch>(done->getLabelName());
-  builder.insert(zero);
-  zeroChunk(builder, path, chunk);
+  if (canBeDead) {
+    builder.create<rocisa::SBranch>(done->getLabelName());
+    builder.insert(zero);
+    zeroChunk(builder, path, chunk);
+  }
   builder.insert(done);
 }
 

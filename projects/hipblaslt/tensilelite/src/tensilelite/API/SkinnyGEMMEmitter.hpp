@@ -343,7 +343,9 @@ void emitRingLoop(IRBuilder &builder, RingPath &path);
 /// +16).
 struct TailLanes {
   /// An SGPR with the bytes of the iteration that the split keeps, in [1,
-  /// laneSpan + (chunks - 1) * chunkStride).
+  /// laneSpan + (chunks - 1) * chunkStride). The paths take the tail bytes
+  /// modulo the iteration bytes, which equal this span, and emitTailGuard
+  /// skips 0.
   RegisterRef end;
   /// A VGPR with the K byte offset of the lane's piece of chunk 0, a multiple
   /// of 16 in [0, laneSpan - 16].
@@ -375,6 +377,10 @@ struct TailLanes {
 /// chunks that start at or after the end, while the MFMA path holds the raw
 /// E8M0 bytes of packed per-tile dwords, whose bytes are 32-byte blocks, so it
 /// overrides the bytes of the blocks past the end to 127.
+///
+/// As end >= 1, chunk 0 is never DEAD, and as end < laneSpan + (chunks - 1) *
+/// chunkStride, the last chunk is never FULL, so neither the arm nor its
+/// compare is emitted for them.
 class TailPath {
 public:
   virtual ~TailPath() = default;
@@ -398,7 +404,8 @@ void emitTailGuard(IRBuilder &builder, RegisterRef tailBytes,
                    const std::function<void()> &body);
 
 /// Loads, zeroes or masks the chunks of the tail iteration by the three arms of
-/// TailPath, then waits for the loads.
+/// TailPath (the first chunk has two and so has the last), then waits for the
+/// loads.
 void emitTailChunks(IRBuilder &builder, TailPath &path);
 
 /// dst, a VGPR, = the bitmask whose byte u is 0xFF when the chunk u of the lane

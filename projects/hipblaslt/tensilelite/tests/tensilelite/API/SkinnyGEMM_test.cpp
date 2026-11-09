@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -691,20 +692,27 @@ TEST(SkinnyGEMM, PartialStepBodyIsEmittedOnce) {
 // The tail of both paths classifies every chunk by scalar compares into the
 // FULL (plain loads), EDGE (steered loads) and DEAD (zeroing) arms, waits once
 // for all the loads and then masks the EDGE chunks: no dword is loaded and
-// waited for one at a time.
+// waited for one at a time. The first chunk has no DEAD arm and the last no
+// FULL arm.
 static void expectThreeArmTail(const std::string &assembly) {
   constexpr int32_t chunks = 4;
   constexpr int32_t dwords = 4;
   std::vector<std::string> lines = allLines(assembly);
-  for (std::string_view label :
-       {"label_tail_edge_", "label_tail_zero_", "label_tail_chunk_end_",
-        "label_tail_mask_skip_"})
+  struct LabelCount {
+    std::string_view label;
+    int32_t count;
+  };
+  for (const LabelCount &expected :
+       {LabelCount{"label_tail_edge_", chunks - 1},
+        LabelCount{"label_tail_zero_", chunks - 1},
+        LabelCount{"label_tail_chunk_end_", chunks},
+        LabelCount{"label_tail_mask_skip_", chunks}})
     EXPECT_EQ(std::count_if(lines.begin(), lines.end(),
                             [&](const std::string &line) {
-                              return line.rfind(label, 0) == 0;
+                              return line.rfind(expected.label, 0) == 0;
                             }),
-              chunks)
-        << label;
+              expected.count)
+        << expected.label;
   int32_t begin = 0;
   int32_t firstMask = 0;
   int32_t lastArm = 0;
@@ -741,19 +749,66 @@ TEST(SkinnyGEMM, TailChunksUseThreeArmsAndOneWait) {
 
 // The EDGE arm steers the lanes that are dead in the chunk out of range with a
 // v_or_b32 of the voffset before its loads, which the FULL arm, before it, does
-// not need.
+// not need. The EDGE arm of chunk 0 has no DEAD arm after it, so it ends at the
+// label of the chunk's end instead of a branch to it.
 static void expectSteeredEdgeArm(const std::string &assembly) {
-  constexpr std::string_view armEnd = "s_branch label_tail_chunk_end_";
-  std::vector<std::string> full =
-      linesBetween(assembly, "label_tail_begin_", armEnd);
+  std::vector<std::string> full = linesBetween(
+      assembly, "label_tail_begin_", "s_branch label_tail_chunk_end_");
   std::vector<std::string> edge =
-      linesBetween(assembly, "label_tail_edge_", armEnd);
+      linesBetween(assembly, "label_tail_edge_", "label_tail_chunk_end_");
   ASSERT_FALSE(full.empty());
   ASSERT_FALSE(edge.empty());
   EXPECT_GT(countLinesContaining(joined(edge), "buffer_load_dwordx4"), 0);
   EXPECT_GT(countLinesContaining(joined(edge), "v_or_b32"), 0);
   EXPECT_EQ(countLinesContaining(joined(full), "buffer_load_dwordx4"),
             countLinesContaining(joined(edge), "buffer_load_dwordx4"));
+}
+
+// The tail arms of a path have no compare nor arm for a first chunk that is
+// DEAD or a last chunk that is FULL.
+static void expectNoImpossibleArms(const std::string &assembly) {
+  std::vector<std::string> lines = allLines(assembly);
+  int32_t begin = 0;
+  int32_t end = 0;
+  for (int32_t i = 0; i < std::ssize(lines) && end == 0; ++i) {
+    if (begin == 0 && lines[i].rfind("label_tail_begin_", 0) == 0)
+      begin = i;
+    if (begin != 0 && lines[i].rfind("s_bitcmp1_b32", 0) == 0)
+      end = i;
+  }
+  ASSERT_GT(begin, 0);
+  ASSERT_GT(end, begin);
+  int32_t compareGe = 0;
+  int32_t compareGt = 0;
+  int32_t edgeLabels = 0;
+  int32_t zeroLabels = 0;
+  int32_t doneLabels = 0;
+  for (int32_t i = begin; i < end; ++i) {
+    const std::string &line = lines[i];
+    compareGe += line.rfind("s_cmp_ge_i32", 0) == 0;
+    compareGt += line.rfind("s_cmp_gt_i32", 0) == 0;
+    if (line.rfind("label_tail_zero_", 0) == 0) {
+      // Chunk 0 has no DEAD arm.
+      EXPECT_GT(doneLabels, 0);
+      ++zeroLabels;
+    }
+    if (line.rfind("label_tail_edge_", 0) == 0) {
+      // Chunk 3 has no FULL arm.
+      EXPECT_LT(doneLabels, 3);
+      ++edgeLabels;
+    }
+    doneLabels += line.rfind("label_tail_chunk_end_", 0) == 0;
+  }
+  EXPECT_EQ(compareGe, 3);
+  EXPECT_EQ(compareGt, 3);
+  EXPECT_EQ(edgeLabels, 3);
+  EXPECT_EQ(zeroLabels, 3);
+  EXPECT_EQ(doneLabels, 4);
+}
+
+// The first chunk of the tail is never DEAD and the last never FULL.
+TEST(SkinnyGEMM, TailFirstChunkIsNeverDeadAndLastNeverFull) {
+  expectNoImpossibleArms(emitted(config(1, 4, 16, 1, 1, 0)));
 }
 
 TEST(SkinnyGEMM, TailEdgeArmSteersTheDeadLanes) {
@@ -811,9 +866,10 @@ TEST(SkinnyGEMM, UpFrontStepDoesNotWait) {
   EXPECT_EQ(waitsOf(compute), std::vector<std::string>{});
 }
 
-// The wait before a zero arm of a step: the newest prologue load of the chunk's
-// registers is followed by the later prologue slots, the rest of its own slot's
-// loads are before it, and the step's NC scale loads were issued on every path.
+// The wait before a zero arm of a step, which only the chunks 1 to 3 have as
+// chunk 0 is never dead: the newest prologue load of the chunk's registers is
+// followed by the later prologue slots, the rest of its own slot's loads are
+// before it, and the step's NC scale loads were issued on every path.
 TEST(SkinnyGEMM, ZeroedChunkWaitsForPrologueLoads) {
   constexpr int32_t columns = 2;
   constexpr int32_t scaleLoads = columns;
@@ -827,7 +883,7 @@ TEST(SkinnyGEMM, ZeroedChunkWaitsForPrologueLoads) {
       if (lines[i].rfind("label_tail_zero_", 0) == 0)
         waits.push_back(lines[i + 1]);
     std::vector<std::string> expected;
-    for (int32_t chunk = 0; chunk < 4; ++chunk) {
+    for (int32_t chunk = 1; chunk < 4; ++chunk) {
       int32_t newest = scaleLoads + chunk * columns + columns - 1;
       expected.push_back(vmcnt(loadsPerSlot - 1 - newest +
                                (prefetch - 1) * loadsPerSlot + scaleLoads));
@@ -843,7 +899,7 @@ TEST(SkinnyGEMM, ZeroedChunkWaitsForPrologueLoads) {
     ++zeroArms;
     EXPECT_EQ(lines[i + 1].rfind("v_mov_b32", 0), 0u);
   }
-  EXPECT_EQ(zeroArms, 4);
+  EXPECT_EQ(zeroArms, 3);
 }
 
 // The up-front entries are steered at k: every scale load ORs its voffset with
@@ -1894,8 +1950,19 @@ TEST(SkinnyGEMMMfma, PersistentLoopStartsWithTheBarrier) {
   });
 }
 
+// The first branch of any condition to the end of the C prefetch.
+static std::ptrdiff_t
+indexOfFirstPrefetchGuard(const std::vector<std::string> &lines) {
+  for (std::ptrdiff_t i = 0; i < std::ssize(lines); ++i)
+    if (lines[i].rfind("s_cbranch_scc", 0) == 0 &&
+        lines[i].find("label_c_prefetch_skip") != std::string::npos)
+      return i;
+  return -1;
+}
+
 // The C elements are prefetched, four per tile, only behind the guards of a
-// single split, wave 0 and a nonzero beta. The per-element loads exist in both
+// single split, wave 0 (a guard that exists only with several waves) and a
+// nonzero beta. The per-element loads exist in both
 // orientations (the skinny-contiguous one has no vector loads, the other one
 // falls back to them for a tile that is not inside the output), the vector
 // loads are one dwordx2 per run of 4 rows.
@@ -1908,8 +1975,7 @@ TEST(SkinnyGEMMMfma, BetaPrefetchesCBehindTheGuards) {
       return;
     }
     std::vector<std::string> lines = allLines(text);
-    std::ptrdiff_t first =
-        indexOfLineStartingWith(lines, "s_cbranch_scc0 label_c_prefetch_skip");
+    std::ptrdiff_t first = indexOfFirstPrefetchGuard(lines);
     std::ptrdiff_t skip =
         indexOfLineStartingWith(lines, "label_c_prefetch_skip_");
     ASSERT_GE(first, 0);
@@ -1924,11 +1990,51 @@ TEST(SkinnyGEMMMfma, BetaPrefetchesCBehindTheGuards) {
               plan.wideTiles * plan.skinnyTiles);
     EXPECT_EQ(countLinesContaining(text, "buffer_load_dwordx2"),
               plan.wideTiles * plan.skinnyTiles);
-    // The beta test, and with split-K the single-split test.
+    // The wave 0 test with several waves, and with split-K the single-split
+    // test; the beta test is the scc1 branch.
     EXPECT_EQ(countLinesContaining(text, "s_cbranch_scc0 label_c_prefetch"),
-              gemm.useSplitK ? 2 : 1);
+              (gemm.waves > 1 ? 1 : 0) + (gemm.useSplitK ? 1 : 0));
     EXPECT_EQ(countLinesContaining(text, "s_cbranch_scc1 label_c_prefetch"), 1);
   });
+}
+
+// A single wave is wave 0 by construction, so the wave test is emitted only
+// with several waves.
+TEST(SkinnyGEMMMfma, BetaPrefetchTestsTheWaveOnlyWithSeveralWaves) {
+  for (int32_t waves : {1, 2})
+    for (bool grid3d : {true, false})
+      for (bool useSplitK : {false, true}) {
+        SkinnyGEMMConfig gemm = mfmaConfig(16, 4, waves, 2, grid3d, true);
+        gemm.useSplitK = useSplitK;
+        if (!fitsTheRegisters(gemm))
+          continue;
+        SCOPED_TRACE(skinnyGEMMKernelName(gemm));
+        std::vector<std::string> lines = allLines(emitted(gemm));
+        int32_t waveTests = 0;
+        int32_t singleSplitTests = 0;
+        int32_t scc0Branches = 0;
+        int32_t scc1Branches = 0;
+        for (std::size_t i = 1; i < lines.size(); ++i) {
+          if (lines[i].rfind("s_cbranch_scc1 label_c_prefetch_skip", 0) == 0)
+            ++scc1Branches;
+          if (lines[i].rfind("s_cbranch_scc0 label_c_prefetch_skip", 0) != 0)
+            continue;
+          ++scc0Branches;
+          const std::string &test = lines[i - 1];
+          if (test.rfind("s_cmp_eq_u32 s", 0) == 0 && test.size() >= 3 &&
+              test.compare(test.size() - 3, 3, ", 0") == 0) {
+            ++waveTests;
+            // The wave test precedes every other test.
+            EXPECT_EQ(scc0Branches, 1);
+          }
+          if (test.rfind("s_cmp_le_u32", 0) == 0)
+            ++singleSplitTests;
+        }
+        EXPECT_EQ(waveTests, waves > 1 ? 1 : 0);
+        EXPECT_EQ(singleSplitTests, useSplitK ? 1 : 0);
+        EXPECT_EQ(scc0Branches, (waves > 1 ? 1 : 0) + (useSplitK ? 1 : 0));
+        EXPECT_EQ(scc1Branches, 1);
+      }
 }
 
 // The output is stored with one dwordx2 (bf16 D) or dwordx4 (f32 workspace,
@@ -2001,6 +2107,14 @@ TEST(SkinnyGEMMMfma, TailAddsTheMfmaOfTwoSteps) {
   }
 }
 
+// The first chunk of the tail is never DEAD and the last never FULL.
+TEST(SkinnyGEMMMfma, TailFirstChunkIsNeverDeadAndLastNeverFull) {
+  expectNoImpossibleArms(emitted(mfmaConfig(16, 2, 1, 2)));
+  SkinnyGEMMConfig staged = mfmaConfig(16, 1, 1, 1);
+  staged.lds = true;
+  expectNoImpossibleArms(emitted(staged));
+}
+
 TEST(SkinnyGEMMMfma, TailEdgeArmSteersTheDeadLanes) {
   expectSteeredEdgeArm(emitted(mfmaConfig(16, 2, 1, 2)));
 }
@@ -2050,6 +2164,75 @@ static SkinnyGEMMConfig ldsConfig(int32_t bm, int32_t tn, int32_t waves,
 // A kernarg load is s_load_dword sN, s[0:1], <offset>.
 static int32_t kernargLoads(const std::string &text, int32_t offset) {
   return countLinesContaining(text, "s[0:1], " + std::to_string(offset));
+}
+
+// Whether the assembly has the label name, printed as label_<name> followed by
+// numeric suffixes (none for labels made with an empty suffix) and delimited as
+// a whole token, so that units_variant does not match units_variants_end.
+static bool hasLabel(const std::string &assembly, std::string_view name) {
+  const std::string token = "label_" + std::string(name);
+  auto isIdentifierChar = [](char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+  };
+  for (std::size_t pos = assembly.find(token); pos != std::string::npos;
+       pos = assembly.find(token, pos + 1)) {
+    if (pos > 0 && isIdentifierChar(assembly[pos - 1]))
+      continue;
+    std::size_t end = pos + token.size();
+    // Skip the _<digits> groups.
+    while (end + 1 < assembly.size() && assembly[end] == '_' &&
+           std::isdigit(static_cast<unsigned char>(assembly[end + 1]))) {
+      end += 2;
+      while (end < assembly.size() &&
+             std::isdigit(static_cast<unsigned char>(assembly[end])))
+        ++end;
+    }
+    if (end == assembly.size() || !isIdentifierChar(assembly[end]))
+      return true;
+  }
+  return false;
+}
+
+// Whether the metadata declares the kernarg name; the exact match on the line
+// excludes comments and longer names.
+static bool declaresArg(const std::string &assembly, std::string_view name) {
+  const std::string key = ".name: ";
+  for (std::size_t pos = assembly.find(key); pos != std::string::npos;
+       pos = assembly.find(key, pos + 1)) {
+    std::size_t begin = pos + key.size();
+    if (assembly.compare(begin, name.size(), name) != 0)
+      continue;
+    std::size_t end = begin + name.size();
+    while (end < assembly.size() && isBlank(assembly[end]))
+      ++end;
+    if (end == assembly.size() || assembly[end] == '\n' ||
+        assembly[end] == '\r')
+      return true;
+  }
+  return false;
+}
+
+// Every path, launch form, beta and split-K, with the tn that the remainder
+// narrowing treats differently.
+static std::vector<SkinnyGEMMConfig> staticBranchConfigs() {
+  std::vector<SkinnyGEMMConfig> result;
+  for (bool grid3d : {true, false})
+    for (bool useBeta : {false, true})
+      for (bool useSplitK : {false, true}) {
+        std::vector<SkinnyGEMMConfig> paths = {config(1, 2, 16, 1, 1),
+                                               config(1, 1, 64, 4, 2, 2)};
+        for (int32_t tn : {1, 2, 3, 4}) {
+          paths.push_back(mfmaConfig(16, tn, 2, 2, grid3d, useBeta));
+          paths.push_back(ldsConfig(16, tn, 2, 2, grid3d, useBeta));
+        }
+        for (SkinnyGEMMConfig gemm : paths) {
+          gemm.grid3d = grid3d;
+          gemm.useBeta = useBeta;
+          gemm.useSplitK = useSplitK;
+          result.push_back(gemm);
+        }
+      }
+  return result;
 }
 
 // The 3-D launch is flat: its kernel decodes the tile and the split from the
@@ -2110,13 +2293,9 @@ TEST(SkinnyGEMM, WithoutSplitKTheKernelHasNoSpkAndReadsNoWs) {
     SCOPED_TRACE(skinnyGEMMKernelName(gemm));
     std::string text = emitted(gemm);
     EXPECT_EQ(kernargLoads(text, 40), 0);
-    EXPECT_EQ(text.find("label_workspace"), std::string::npos);
-    EXPECT_EQ(text.find("label_stored"), std::string::npos);
-    EXPECT_EQ(text.find("flat_split_done"), std::string::npos);
     // The f32 stores of the workspace are dwordx4 runs here.
     EXPECT_EQ(text.find("buffer_store_dwordx4"), std::string::npos);
     EXPECT_NE(text.find(".name: ws"), std::string::npos);
-    EXPECT_EQ(text.find(".name: spk"), std::string::npos);
     EXPECT_NE(text.find(kernargSegment(gemm)), std::string::npos);
   }
 }
@@ -2128,14 +2307,24 @@ TEST(SkinnyGEMM, WithSplitKTheKernelReadsSpkAndWs) {
     std::string text = emitted(gemm);
     EXPECT_EQ(kernargLoads(text, 80), 1);
     EXPECT_EQ(kernargLoads(text, 40), 1);
-    EXPECT_NE(text.find(".name: spk"), std::string::npos);
     EXPECT_NE(text.find(kernargSegment(gemm)), std::string::npos);
-    EXPECT_NE(text.find("label_workspace"), std::string::npos);
     EXPECT_NE(text.find("buffer_store_dword"), std::string::npos);
   }
-  // The decode of the flat id tests for a single split.
-  EXPECT_NE(emitted(splitK(config(1, 2, 16, 1, 1))).find("flat_split_done"),
-            std::string::npos);
+}
+
+// Split-K is decided at generation time, so without it no spk argument exists
+// to compare k with and no split branch or label is emitted.
+TEST(SkinnyGEMM, OnlySplitKKernelsHaveSplitKCode) {
+  for (const SkinnyGEMMConfig &gemm : staticBranchConfigs()) {
+    SCOPED_TRACE(skinnyGEMMKernelName(gemm));
+    std::string text = emitted(gemm);
+    EXPECT_EQ(declaresArg(text, "spk"), gemm.useSplitK);
+    EXPECT_EQ(hasLabel(text, "workspace"), gemm.useSplitK);
+    EXPECT_EQ(hasLabel(text, "stored"), gemm.useSplitK);
+    // Only the flat decode of the 3-D launch tests for a single split.
+    EXPECT_EQ(hasLabel(text, "flat_split_done"),
+              gemm.useSplitK && gemm.grid3d);
+  }
 }
 
 // Preloading the arguments must also work when ws is not loaded and spk is
@@ -2475,33 +2664,25 @@ TEST(SkinnyGEMMLds, PartialTailSlotCountsForTheLdsBudget) {
 
 // The remainder narrowing of the MFMA 3-D kernel.
 
-// Only the MFMA 3-D launch with a power of two tn declares wholeTiles (96) and
-// pieces (100) and reads them; the other kernels have neither.
-TEST(SkinnyGEMMRemainder, OnlyThePowerOfTwoMfma3dKernelDeclaresTheArguments) {
-  std::vector<SkinnyGEMMConfig> readers, others;
-  for (int32_t tn : {1, 2, 4}) {
-    readers.push_back(ldsConfig(16, tn, 2, 2, true, true));
-    readers.push_back(mfmaConfig(32, tn, 1, 2, true, false));
-    others.push_back(ldsConfig(16, tn, 2, 2, false, true));
-    others.push_back(mfmaConfig(16, tn, 2, 2, false));
-  }
-  others.push_back(ldsConfig(32, 3, 2, 2, true));
-  others.push_back(mfmaConfig(16, 3, 2, 2, true));
-  others.push_back(config(1, 1, 16, 2, 1));
-  others.push_back(config(2, 2, 64, 1, 2));
-  for (const SkinnyGEMMConfig &gemm : readers) {
+// The remainder narrowing is decided at generation time, so no other kernel
+// has its arguments, labels or branches.
+TEST(SkinnyGEMMRemainder, OnlyThePowerOfTwoMfma3dKernelHasRemainderCode) {
+  for (const SkinnyGEMMConfig &gemm : staticBranchConfigs()) {
     SCOPED_TRACE(skinnyGEMMKernelName(gemm));
     std::string text = emitted(gemm);
-    EXPECT_NE(text.find(".name: wholeTiles"), std::string::npos);
-    EXPECT_NE(text.find(".name: pieces"), std::string::npos);
-    EXPECT_EQ(kernargLoads(text, 96), 1);
-    EXPECT_EQ(kernargLoads(text, 100), 1);
-  }
-  for (const SkinnyGEMMConfig &gemm : others) {
-    SCOPED_TRACE(skinnyGEMMKernelName(gemm));
-    std::string text = emitted(gemm);
-    EXPECT_EQ(text.find(".name: wholeTiles"), std::string::npos);
-    EXPECT_EQ(text.find(".name: pieces"), std::string::npos);
+    bool remainder = declaresRemainderArgs(gemm);
+    for (std::string_view name : {"wholeTiles", "pieces"})
+      EXPECT_EQ(declaresArg(text, name), remainder) << name;
+    for (std::string_view name :
+         {"tile_known", "piece_live", "piece_window", "window_done"})
+      EXPECT_EQ(hasLabel(text, name), remainder) << name;
+    for (std::string_view name : {"units_variant", "units_variants_end"})
+      EXPECT_EQ(hasLabel(text, name), hasKLoopVariants(gemm)) << name;
+    if (!remainder)
+      continue;
+    int32_t wholeTilesOffset = gemm.useSplitK ? 100 : 96;
+    EXPECT_EQ(kernargLoads(text, wholeTilesOffset), 1);
+    EXPECT_EQ(kernargLoads(text, wholeTilesOffset + 4), 1);
   }
 }
 

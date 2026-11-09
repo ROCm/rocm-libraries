@@ -23,6 +23,7 @@
 #include "instruction/mem.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -1661,6 +1662,11 @@ void SkinnyGEMMEmitter::emitTail(KLoopState &state) {
       int32_t laneSpan =
           (dims.lanesK / subgroupLanes - 1) * 64 * subgroupLanes +
           16 * subgroupLanes;
+      // The tail arms assume that the tail bytes, taken modulo ki, are below
+      // this span plus (chunks - 1) * chunkStride.
+      assert(laneSpan + (SkinnyDims::chunks - 1) * dims.chunkStride ==
+                 dims.ki &&
+             "the tail chunks must span the iteration");
       TailLanes lanes{hi, laneBytes.ref(), dims.chunkStride, laneSpan};
       ValuTailPath path(state, lanes, iterOff.ref());
       emitTailChunks(builder, path);

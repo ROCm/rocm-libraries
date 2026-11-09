@@ -49,6 +49,10 @@ static constexpr int32_t stepBytes = 128;
 // bytes apart.
 static constexpr int32_t loadsPerStepTile = 2;
 static constexpr int32_t chunkBytes = 64;
+// The tail chunk arms assume that tailBytes, taken modulo iterationBytes, is
+// below laneSpan + (chunks - 1) * chunkStride.
+static_assert(SkinnyDims::chunks * chunkBytes == iterationBytes,
+              "the tail chunks must span the iteration");
 // VGPRs of the data of one 16-column tile and one MFMA step.
 static constexpr int32_t stepRegs = 8;
 static constexpr int32_t accRegs = 4;
@@ -1351,15 +1355,18 @@ private:
 // The tile.
 
 // Prefetches the C elements of the tile for the epilogue's beta * C, on wave 0
-// only and only when the tile stores D directly (without useSplitK, or with
-// k <= spk) and beta is not zero, as the epilogue's tests. The loads precede
-// every ring load, so any wait of the K loop covers them first. C may alias D.
+// only (tested only with several waves) and only when the tile stores D
+// directly (without useSplitK, or with k <= spk) and beta is not zero, as the
+// epilogue's tests. The loads precede every ring load, so any wait of the K
+// loop covers them first. C may alias D.
 static void emitCPrefetch(const MfmaContext &ctx, const MfmaTile &tile,
                           const TileIds &ids) {
   IRBuilder &builder = ctx.builder;
   std::shared_ptr<rocisa::Label> skip = builder.createLabel("c_prefetch_skip");
-  builder.create<rocisa::SCmpEQU32>(ctx.waveId.container(), 0);
-  builder.create<rocisa::SCBranchSCC0>(skip->getLabelName());
+  if (ctx.dims.waves > 1) {
+    builder.create<rocisa::SCmpEQU32>(ctx.waveId.container(), 0);
+    builder.create<rocisa::SCBranchSCC0>(skip->getLabelName());
+  }
   branchUnlessCIsUsed(ctx.output, skip);
   forEachOrientation(
       ctx.output, /*vectorStores=*/true, [&](bool skinnyContiguous) {
