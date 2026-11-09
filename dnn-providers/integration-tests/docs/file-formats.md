@@ -927,7 +927,7 @@ harness tests *that engine*. You do not recompile or change the bundles.
 |---|---|
 | miopen-provider | `config/MIOPEN_ENGINE.toml` |
 | hipblaslt-provider | `config/HIPBLASLT_ENGINE.toml` |
-| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml`, `config/hipkernel_flydsl_sdpa_bwd_split.toml`, `config/hipkernel_flydsl_sdpa_bwd_merged.toml` |
+| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml`, `config/hipkernel_Gfx950Attention.toml`, `config/hipkernel_Gfx942AttentionUnified3d.toml`, `config/hipkernel_Gfx942AttentionDense.toml`, `config/hipkernel_flydsl_sdpa_bwd_split.toml`, `config/hipkernel_flydsl_sdpa_bwd_merged.toml` |
 
 ```toml
 [meta]

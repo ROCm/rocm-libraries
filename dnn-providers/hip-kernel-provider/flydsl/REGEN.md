@@ -188,9 +188,9 @@ object (a dB-storing bias row; the shipped object also carries the dBias reduce)
 --from-content "$CONTENT" --arch $ARCH --reference-dir <new dir>` copies each pin's object out of the content by sha256 and verifies it. For
 the two exceptions, `tests/data/sdpa_bwd_pin_functions.csv` records the sha256 of the pin's function bytes, which the per-kernel gate and
 `tools/sdpa_bwd_compare.py` read in place of the object. The tool fails on any other pin without an object. The same S1 tool also has a
-sweep mode (`--sweep-repo`, `--selection`), which the sweep's maintainers use to compose a new catalogue from the sweep (an AMD-internal
-repository) and its selection policy; it writes the `_instances.py` tables, the reference CSVs and the digest file this tree holds, and a
-regeneration needs none of it. A gfx11 object is not gated like a gfx950 one: it must be its pin byte for byte (a row of the nondeterministic list ships its pin), with no exception rows, and the dQ generator also writes the three standalone reduce objects (`companions` of its manifest).
+sweep mode (`--sweep-repo`, `--selection`) for authoring a new catalogue. That step needs an AMD-internal sweep repository that this
+repository does not include and is not publicly reproducible; it writes the `_instances.py` tables, the reference CSVs and the digest file this tree holds.
+Regenerating the shipped pins is the public path above and needs none of it. A gfx11 object is not gated like a gfx950 one: it must be its pin byte for byte (a row of the nondeterministic list ships its pin), with no exception rows, and the dQ generator also writes the three standalone reduce objects (`companions` of its manifest).
 
 `tools/sdpa_bwd_tables_from_sweep.py` installs a pruned catalogue: a pin whose object another pin of the same arch and op also pins, with a Spec equal apart from `floor` and a served head-dim range that contains its own, is not installed (equal ranges keep the smaller hash). The tables and the reference CSV hold the pins that remain, and the tool prints the dropped rows. The tool installs no nondeterministic list.
 
