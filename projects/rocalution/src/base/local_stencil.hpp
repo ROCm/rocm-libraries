@@ -92,6 +92,10 @@ namespace rocalution
         ROCALUTION_EXPORT
         virtual void Clear();
 
+        /** \brief Nothing to analyse, the stencil keeps no state for Apply() */
+        ROCALUTION_EXPORT
+        void ApplyAnalyse(void) const;
+
         /** \brief Perform stencil-vector multiplication, out = this * in; */
         ROCALUTION_EXPORT
         virtual void Apply(const LocalVector<ValueType>& in, LocalVector<ValueType>* out) const;

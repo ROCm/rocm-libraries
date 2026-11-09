@@ -251,7 +251,7 @@ namespace rocalution
       * multiplications, see LocalMatrix::ApplyAnalyse()
       */
         ROCALUTION_EXPORT
-        virtual void ApplyAnalyse(void) const;
+        void ApplyAnalyse(void) const;
 
         /** \brief Perform matrix-vector multiplication, out = this * in; */
         ROCALUTION_EXPORT

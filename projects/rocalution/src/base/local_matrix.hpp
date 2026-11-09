@@ -995,7 +995,9 @@ namespace rocalution
       * instead of during the first call to Apply() or ApplyAdd(). The analysis remains
       * valid as long as only the values of the matrix change. It is discarded when
       * the structure of the matrix changes, the matrix is converted to another
-      * format, or it is moved to another backend.
+      * format, or it is moved to another backend. Without a prior call, the first
+      * Apply() or ApplyAdd() modifies the internal state of the matrix, so concurrent
+      * calls on the same matrix are not safe.
       * \par Example
       * \code{.cpp}
       * LocalMatrix<T> A;
@@ -1013,7 +1015,7 @@ namespace rocalution
       * \endcode
       */
         ROCALUTION_EXPORT
-        virtual void ApplyAnalyse(void) const;
+        void ApplyAnalyse(void) const;
 
         /** \brief Perform matrix-vector multiplication, out = this * in;
       * \par Example

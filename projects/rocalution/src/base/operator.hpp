@@ -89,16 +89,6 @@ namespace rocalution
         ROCALUTION_EXPORT
         virtual void Transpose(void);
 
-        /** \brief Analyse the operator for subsequent Apply() and ApplyAdd() calls
-      * \details
-      * Optional. Performs the setup work of the operator application (e.g. the
-      * sparse matrix-vector multiplication analysis) up front, instead of during the
-      * first call to Apply() or ApplyAdd(). The analysis remains valid until the
-      * structure of the operator changes.
-      */
-        ROCALUTION_EXPORT
-        virtual void ApplyAnalyse(void) const;
-
         /** \brief Apply the operator, out = Operator(in), where in and out are local
       * vectors
       */

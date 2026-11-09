@@ -119,6 +119,11 @@ namespace rocalution
     }
 
     template <typename ValueType>
+    void LocalStencil<ValueType>::ApplyAnalyse(void) const
+    {
+    }
+
+    template <typename ValueType>
     void LocalStencil<ValueType>::Apply(const LocalVector<ValueType>& in,
                                         LocalVector<ValueType>*       out) const
     {

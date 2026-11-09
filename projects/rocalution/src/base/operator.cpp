@@ -93,11 +93,6 @@ namespace rocalution
     }
 
     template <typename ValueType>
-    void Operator<ValueType>::ApplyAnalyse(void) const
-    {
-    }
-
-    template <typename ValueType>
     void Operator<ValueType>::Apply(const GlobalVector<ValueType>& in,
                                     GlobalVector<ValueType>*       out) const
     {
