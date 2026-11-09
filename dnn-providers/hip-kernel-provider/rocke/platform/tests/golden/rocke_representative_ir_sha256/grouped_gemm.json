@@ -5,10 +5,10 @@
       "cases": {
         "grouped_gemm/gfx950/m8192n1024k512e64": {
           "arch": "gfx950",
-          "bytes": 267299,
+          "bytes": 276789,
           "family": "grouped_gemm",
           "kernel_name": "irhash_grouped_gemm_950",
-          "sha256": "5234f535c1882fc42e7cf473363383f65a069383a31a590d85a0764e2bcc510b",
+          "sha256": "3d16ff2591605c833004643f9c83d1488dc8e64ecf78b1a1c70a00a38f68af5f",
           "status": "ok"
         }
       },
@@ -18,10 +18,10 @@
       "cases": {
         "grouped_gemm/gfx950/m8192n1024k512e64": {
           "arch": "gfx950",
-          "bytes": 267395,
+          "bytes": 276885,
           "family": "grouped_gemm",
           "kernel_name": "irhash_grouped_gemm_950",
-          "sha256": "89dc74a06fead91ad0c0a3ac019036dd05989c2619deb64942ed8dff047b69ab",
+          "sha256": "6d73653b8291caf99c6a3e5916bd7470b5b808022125d4953ab369e1abbbf66c",
           "status": "ok"
         }
       },
@@ -31,10 +31,10 @@
       "cases": {
         "grouped_gemm/gfx950/m8192n1024k512e64": {
           "arch": "gfx950",
-          "bytes": 267459,
+          "bytes": 276949,
           "family": "grouped_gemm",
           "kernel_name": "irhash_grouped_gemm_950",
-          "sha256": "e260ef4ca6ae29ae67e152ee7e3da958edc0a2bc3799ed310225b30fb137afe2",
+          "sha256": "b4d62136b03d9905136437b350e5f72dd63fc86b3015ee305317032d62f5d0a4",
           "status": "ok"
         }
       },
@@ -44,10 +44,10 @@
       "cases": {
         "grouped_gemm/gfx950/m8192n1024k512e64": {
           "arch": "gfx950",
-          "bytes": 267459,
+          "bytes": 276949,
           "family": "grouped_gemm",
           "kernel_name": "irhash_grouped_gemm_950",
-          "sha256": "e260ef4ca6ae29ae67e152ee7e3da958edc0a2bc3799ed310225b30fb137afe2",
+          "sha256": "b4d62136b03d9905136437b350e5f72dd63fc86b3015ee305317032d62f5d0a4",
           "status": "ok"
         }
       },

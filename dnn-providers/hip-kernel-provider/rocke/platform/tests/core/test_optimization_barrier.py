@@ -290,7 +290,7 @@ _HIP_ASM_INVALID_CONSTRAINTS = [
 
 def _asm_constraint_kernel(constraints, outputs, operands):
     b = IRBuilder("asm_constraints")
-    values = [b.param(f"value_{index}", F32) for index in range(operands)]
+    values = [b.param(f"value{index}", F32) for index in range(operands)]
     b.inline_asm("s_nop 0", "=v" if outputs else "", values, F32 if outputs else None)
     b.kernel.body.ops[-1].attrs["constraints"] = constraints
     b.ret()

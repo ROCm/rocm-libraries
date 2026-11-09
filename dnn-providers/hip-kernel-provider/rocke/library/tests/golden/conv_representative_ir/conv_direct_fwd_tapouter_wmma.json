@@ -31,18 +31,18 @@
       "cases": {
         "conv_direct_fwd_tapouter_wmma/gfx1250/bf16_dil12": {
           "arch": "gfx1250",
-          "bytes": 167573,
+          "bytes": 170712,
           "family": "conv_direct_fwd_tapouter_wmma",
           "kernel_name": "direct_fwd_tapouter_wmma_f3x3_p12_dil12x12_wk2_wp2_tk4_tp4_tw16_ck128_st2_bf16",
-          "sha256": "6b58dc1d9a991d84d07249d2f11f87aadf36167119c411ce0c46940b36f1b9cd",
+          "sha256": "866eb198628b486509165abc1fdf65f881efaca76e73a9713f0b2bef16218e07",
           "status": "ok"
         },
         "conv_direct_fwd_tapouter_wmma/gfx1250/fp16_dil36_st3_pf": {
           "arch": "gfx1250",
-          "bytes": 91905,
+          "bytes": 94203,
           "family": "conv_direct_fwd_tapouter_wmma",
           "kernel_name": "direct_fwd_tapouter_wmma_f3x3_p36_dil36x36_wk2_wp4_tk4_tp2_tw16_ck64_st3_pf",
-          "sha256": "6a57861c03b09bfabe32dcb37760dd99e705b960734aa8a21e0d9f465bce05bc",
+          "sha256": "19782e9bc8309dbf6233c29eac1552c7c9acd2bb37ffed71d72970d33c1a0f20",
           "status": "ok"
         }
       },
@@ -52,18 +52,18 @@
       "cases": {
         "conv_direct_fwd_tapouter_wmma/gfx1250/bf16_dil12": {
           "arch": "gfx1250",
-          "bytes": 167573,
+          "bytes": 170712,
           "family": "conv_direct_fwd_tapouter_wmma",
           "kernel_name": "direct_fwd_tapouter_wmma_f3x3_p12_dil12x12_wk2_wp2_tk4_tp4_tw16_ck128_st2_bf16",
-          "sha256": "6b58dc1d9a991d84d07249d2f11f87aadf36167119c411ce0c46940b36f1b9cd",
+          "sha256": "866eb198628b486509165abc1fdf65f881efaca76e73a9713f0b2bef16218e07",
           "status": "ok"
         },
         "conv_direct_fwd_tapouter_wmma/gfx1250/fp16_dil36_st3_pf": {
           "arch": "gfx1250",
-          "bytes": 91905,
+          "bytes": 94203,
           "family": "conv_direct_fwd_tapouter_wmma",
           "kernel_name": "direct_fwd_tapouter_wmma_f3x3_p36_dil36x36_wk2_wp4_tk4_tp2_tw16_ck64_st3_pf",
-          "sha256": "6a57861c03b09bfabe32dcb37760dd99e705b960734aa8a21e0d9f465bce05bc",
+          "sha256": "19782e9bc8309dbf6233c29eac1552c7c9acd2bb37ffed71d72970d33c1a0f20",
           "status": "ok"
         }
       },

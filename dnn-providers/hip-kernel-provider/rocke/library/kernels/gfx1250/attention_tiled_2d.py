@@ -266,7 +266,7 @@ def _declare_params(b: IRBuilder):
     softcap = b.param("softcap", F32)
     num_seqs = b.param("num_seqs", I32)
     block_table_stride = b.param("block_table_stride", I32)
-    qq_bias_stride_0 = b.param("qq_bias_stride_0", I32)
+    qq_bias_stride_0 = b.param("qq_bias_stride0", I32)
     return locals()
 
 

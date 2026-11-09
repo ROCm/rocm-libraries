@@ -529,24 +529,24 @@ def test_a_block_id_value_is_gpu_only():
 
 def test_arithmetic_on_an_unchecked_load_comes_too_late():
     assert _refused_text("refuse_subtraction_on_a_load") == (
-        "gpu_checked_value: %ufm3 is loaded from memory and unchecked, and sub uses it "
+        "gpu_checked_value: %ufm_3 is loaded from memory and unchecked, and sub uses it "
         "before this check (the subtraction can wrap or become poison first). Fix: check "
-        "%ufm3 with gpu_checked_value first, then subtract the Values gpu_checked_value "
+        "%ufm_3 with gpu_checked_value first, then subtract the Values gpu_checked_value "
         "returned."
     )
 
 
 def test_the_taint_walk_follows_loops_and_selects():
     assert _refused_text("refuse_loop_sum_of_loads") == (
-        "gpu_checked_value: %gl6 is loaded from memory and unchecked, and add uses it "
+        "gpu_checked_value: %gl_6 is loaded from memory and unchecked, and add uses it "
         "before this check (the addition can wrap or become poison first). Fix: check "
-        "%gl6 with gpu_checked_value first, then add the Values gpu_checked_value "
+        "%gl_6 with gpu_checked_value first, then add the Values gpu_checked_value "
         "returned."
     )
     assert _refused_text("refuse_select_of_a_load") == (
-        "gpu_checked_value: %sel6 is computed from a value loaded from memory and "
+        "gpu_checked_value: %sel_6 is computed from a value loaded from memory and "
         "unchecked, and mul uses it before this check (the multiplication can wrap or "
-        "become poison first). Fix: check %sel6 with gpu_checked_value first, then "
+        "become poison first). Fix: check %sel_6 with gpu_checked_value first, then "
         "multiply the Values gpu_checked_value returned."
     )
 
@@ -598,7 +598,7 @@ def test_a_load_that_reaches_only_a_condition_is_accepted():
         ),
         (
             "refuse_param_bound_computed",
-            "param X: ge=add1 uses add1, which is computed in the kernel -- the host can "
+            "param X: ge=add_1 uses add_1, which is computed in the kernel -- the host can "
             "only evaluate kernel parameters and ints",
         ),
         (

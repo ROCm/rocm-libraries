@@ -5,42 +5,42 @@
       "cases": {
         "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx1201",
-          "bytes": 1571,
+          "bytes": 1600,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx1201",
-          "sha256": "4d288e2719ecced978c860ae52a2f0426d6b4a6342bf24f48e8587682df3b8c8",
+          "sha256": "9e24e88eb5d5c1ff5762fb918c0740ba38ed0e2ce3567b51c7006514577f025b",
           "status": "ok"
         },
         "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
           "arch": "gfx942",
-          "bytes": 2311,
+          "bytes": 2376,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx942",
-          "sha256": "53bb172c0c1a4b92e5845ae25622a58cafc0ffc20cc253e9e36b30bfec30e5ca",
+          "sha256": "8453256e9805f10c56da3fd14ceb056038db13d0e5415bb0b5b004af886a8c3b",
           "status": "ok"
         },
         "crosslane/gfx942/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx942",
-          "bytes": 1569,
+          "bytes": 1598,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx942",
-          "sha256": "bead4c0c6804d720d9c5cdade1c9db9c585a958a102c32b380391656e872c931",
+          "sha256": "3745339fd70b147c0de3aac469a899fb4f650f1cc13bd06a7cd02812583e4e7c",
           "status": "ok"
         },
         "crosslane/gfx950/warp_shuffle_xor_dpp_masks_f32": {
           "arch": "gfx950",
-          "bytes": 2311,
+          "bytes": 2376,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx950",
-          "sha256": "2a246f1c01df84a8b72d784443527d68c87890b74e2ca1a1adbaf95a4717ee29",
+          "sha256": "eedaa7735819565a9241602e622905ac8dac40850d09e819a3103b973ec87aa0",
           "status": "ok"
         },
         "crosslane/gfx950/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx950",
-          "bytes": 1569,
+          "bytes": 1598,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx950",
-          "sha256": "310bed93f62e50b2be8d0172eadcde77648e2da4715e1c931fa3d72c84f4a65f",
+          "sha256": "89e624ede465b9df11b870680af0440c7489457b70acd0a9c31b9282e596fe59",
           "status": "ok"
         }
       },
@@ -50,42 +50,42 @@
       "cases": {
         "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx1201",
-          "bytes": 1578,
+          "bytes": 1607,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx1201",
-          "sha256": "c537f808c7b016859e77bc2a89ceb19f97bb54a8b55502c05ba3e5ffdfe8aa9f",
+          "sha256": "af55c1cd1f8bd85122daaf4e61bc582fbd0bd35801c1c9f05a6ca385f02fc676",
           "status": "ok"
         },
         "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
           "arch": "gfx942",
-          "bytes": 2318,
+          "bytes": 2383,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx942",
-          "sha256": "ad8b6246296c643f5c5db09f94da3bab7fe03da2e44862eafe37c3cf2c6303d0",
+          "sha256": "37a935afeb85c5964624bb44d8a32438b9db705a9f1523a58f6be594f77d6dfd",
           "status": "ok"
         },
         "crosslane/gfx942/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx942",
-          "bytes": 1576,
+          "bytes": 1605,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx942",
-          "sha256": "bba9fe84d9c58bef9c199c3af8c572d22ade94fa45cdccda7c5d13ba944fa032",
+          "sha256": "2f4744ffc0c06030e1763b8cbb05f7eb6c7511197b878b4ef9e2fdd5273e2cea",
           "status": "ok"
         },
         "crosslane/gfx950/warp_shuffle_xor_dpp_masks_f32": {
           "arch": "gfx950",
-          "bytes": 2318,
+          "bytes": 2383,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx950",
-          "sha256": "6e82642e4bc379043ed70fb6355cf8d25b04783637e2e0b160255ea9dc7116d7",
+          "sha256": "b94743599dae3482bc2c8dfb9c3c67fce6616df9b17c9f1b9f99f43b84e666a4",
           "status": "ok"
         },
         "crosslane/gfx950/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx950",
-          "bytes": 1576,
+          "bytes": 1605,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx950",
-          "sha256": "a06965b32f3b9670dd64e852949294b94800ba823b453dc192d4e6ab50266cac",
+          "sha256": "b77df1ba7f2ea9c0c129b9560937bcf42d9645ec267d98d4280d3c895580d191",
           "status": "ok"
         }
       },
@@ -95,42 +95,42 @@
       "cases": {
         "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx1201",
-          "bytes": 1642,
+          "bytes": 1671,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx1201",
-          "sha256": "759d8028dd3fa1e6d8726fcf6676a894ea90a8151c26814188dbd1886319ed63",
+          "sha256": "76b2387bdbb86f9c441564ec6f0c8bcabeada12495560097e8024c20d91a890a",
           "status": "ok"
         },
         "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
           "arch": "gfx942",
-          "bytes": 2382,
+          "bytes": 2447,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx942",
-          "sha256": "b5ac8c44ca66b388e1cf3f0caa231b712736d9c167efce3ad64bb0448e7050ae",
+          "sha256": "54c86290f20ff38fa8d7148d3dc4fbcc7158d3e8c65fb4be037d8aa240a19a9e",
           "status": "ok"
         },
         "crosslane/gfx942/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx942",
-          "bytes": 1640,
+          "bytes": 1669,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx942",
-          "sha256": "5fb17686bcc9cc7d2a5eb55881449ffaffe4d34104f4c2ba2fe3890430005418",
+          "sha256": "2da9e66dc54aad24f84b7460eb5fcec7c4bb26acb48710da74a61d4913733803",
           "status": "ok"
         },
         "crosslane/gfx950/warp_shuffle_xor_dpp_masks_f32": {
           "arch": "gfx950",
-          "bytes": 2382,
+          "bytes": 2447,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx950",
-          "sha256": "3dc95376d3edbea4f9b153c17c814af871b06f2642eee86e1b24f81f13809e01",
+          "sha256": "b885a3ba31e04c887bc7d8567c29ad568b8f1f1397edf8459a1c876fd552af0a",
           "status": "ok"
         },
         "crosslane/gfx950/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx950",
-          "bytes": 1640,
+          "bytes": 1669,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx950",
-          "sha256": "1876c64511c6c57254c6209e1b17fd0309a2fdc3dff7f0823cfc1c68a0909ee2",
+          "sha256": "b48a07467e2a89fb516c31e2bb1a90ff9bd8a2b2517ce6640853f3bcddc78d11",
           "status": "ok"
         }
       },
@@ -140,42 +140,42 @@
       "cases": {
         "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx1201",
-          "bytes": 1642,
+          "bytes": 1671,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx1201",
-          "sha256": "759d8028dd3fa1e6d8726fcf6676a894ea90a8151c26814188dbd1886319ed63",
+          "sha256": "76b2387bdbb86f9c441564ec6f0c8bcabeada12495560097e8024c20d91a890a",
           "status": "ok"
         },
         "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
           "arch": "gfx942",
-          "bytes": 2382,
+          "bytes": 2447,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx942",
-          "sha256": "b5ac8c44ca66b388e1cf3f0caa231b712736d9c167efce3ad64bb0448e7050ae",
+          "sha256": "54c86290f20ff38fa8d7148d3dc4fbcc7158d3e8c65fb4be037d8aa240a19a9e",
           "status": "ok"
         },
         "crosslane/gfx942/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx942",
-          "bytes": 1640,
+          "bytes": 1669,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx942",
-          "sha256": "5fb17686bcc9cc7d2a5eb55881449ffaffe4d34104f4c2ba2fe3890430005418",
+          "sha256": "2da9e66dc54aad24f84b7460eb5fcec7c4bb26acb48710da74a61d4913733803",
           "status": "ok"
         },
         "crosslane/gfx950/warp_shuffle_xor_dpp_masks_f32": {
           "arch": "gfx950",
-          "bytes": 2382,
+          "bytes": 2447,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx950",
-          "sha256": "3dc95376d3edbea4f9b153c17c814af871b06f2642eee86e1b24f81f13809e01",
+          "sha256": "b885a3ba31e04c887bc7d8567c29ad568b8f1f1397edf8459a1c876fd552af0a",
           "status": "ok"
         },
         "crosslane/gfx950/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx950",
-          "bytes": 1640,
+          "bytes": 1669,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx950",
-          "sha256": "1876c64511c6c57254c6209e1b17fd0309a2fdc3dff7f0823cfc1c68a0909ee2",
+          "sha256": "b48a07467e2a89fb516c31e2bb1a90ff9bd8a2b2517ce6640853f3bcddc78d11",
           "status": "ok"
         }
       },

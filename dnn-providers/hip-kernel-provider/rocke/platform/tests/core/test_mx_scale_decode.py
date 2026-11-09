@@ -47,24 +47,24 @@ _CODES = 256
 # The decoder's lines in the kernel built by ``_decode_kernel``. The C++
 # engine's test (test_mx_scale_decode.cpp) pins the same LLVM lines.
 _EXPECTED_LLVM = (
-    "  %zx3 = zext i8 %gl2 to i32\n"
-    "  %eq5 = icmp eq i32 %zx3, 255\n"
-    "  %sitof6 = sitofp i32 %zx3 to float\n"
-    "  %fsub8 = fsub float %sitof6, 0x405FC00000000000\n"
-    "  %exp29 = call float @llvm.exp2.f32(float %fsub8)\n"
-    "  %sel11 = select i1 %eq5, float 0x7FF8000000000000, float %exp29\n"
+    "  %zx_3 = zext i8 %gl_2 to i32\n"
+    "  %eq_5 = icmp eq i32 %zx_3, 255\n"
+    "  %sitof_6 = sitofp i32 %zx_3 to float\n"
+    "  %fsub_8 = fsub float %sitof_6, 0x405FC00000000000\n"
+    "  %exp2_9 = call float @llvm.exp2.f32(float %fsub_8)\n"
+    "  %sel_11 = select i1 %eq_5, float 0x7FF8000000000000, float %exp2_9\n"
 )
 
 _EXPECTED_HIP = (
-    " int zx3 = (int)(uint8_t)gl2;\n"
-    " int c4 = 255;\n"
-    " bool eq5 = zx3 == c4;\n"
-    " float sitof6 = (float)zx3;\n"
-    " float c7 = 127.0f;\n"
-    " float fsub8 = sitof6 - c7;\n"
-    " float exp29 = exp2f(fsub8);\n"
-    " float c10 = ((float)NAN);\n"
-    " float sel11 = eq5 ? c10 : exp29;\n"
+    " int zx_3 = (int)(uint8_t)gl_2;\n"
+    " int c_4 = 255;\n"
+    " bool eq_5 = zx_3 == c_4;\n"
+    " float sitof_6 = (float)zx_3;\n"
+    " float c_7 = 127.0f;\n"
+    " float fsub_8 = sitof_6 - c_7;\n"
+    " float exp2_9 = exp2f(fsub_8);\n"
+    " float c_10 = ((float)NAN);\n"
+    " float sel_11 = eq_5 ? c_10 : exp2_9;\n"
 )
 
 

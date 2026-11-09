@@ -130,7 +130,7 @@ TEST(TestGfx950AttentionUnified2DSignature, RefusesAnExtraTrailingArgument)
 /// so a build without them is one it must not launch.
 TEST(TestGfx950AttentionUnified2DSignature, RefusesTheFormWithoutTheTrailingStrides)
 {
-    // block_table_stride and qq_bias_stride_0 sit between num_seqs and the runtime shape
+    // block_table_stride and qq_bias_stride0 sit between num_seqs and the runtime shape
     // kernargs.
     auto signature = pythonAbi();
     signature.erase(signature.begin() + 16, signature.begin() + 18);
