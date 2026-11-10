@@ -275,16 +275,19 @@ tier; names prefixed `Comprehensive` are excluded from the quick and standard ti
 in the comprehensive and full tiers; every other case above runs in every tier.
 
 Which GPUs run which tier in CI (`.github/workflows/therock-multi-arch-ci.yml` and
-`therock-multi-arch-ci-nightly.yml`): pre-merge (standard tier) tests gfx94X and gfx950 on Linux
-and gfx110X on Windows; the nightly (comprehensive tier) tests gfx94X and gfx950 on Linux and
-gfx1151 on Windows. So a CDNA comprehensive case runs nightly on gfx942 and gfx950, the arches
-it ran on pre-merge. An RDNA comprehensive case runs nightly on gfx1151 and no longer on gfx110X;
-both are `gfx11-generic` and load the same objects (REGEN.md, "Why `gfx11-generic`"), so the
-nightly runs every moved RDNA case on the objects gfx110X ships, on another member of the
-family. No CI tier tests gfx90a or gfx12 (gfx1200, gfx1201): the CDNA objects on gfx90a, and the
-gfx12 RDNA prefill, decode and aiw objects, are covered only by device runs outside CI, in
-either tier, so the tier split changes nothing there. No feature lost its only CI arch to the
-move: every moved case is an RDNA prefill/decode or CDNA case.
+`therock-multi-arch-ci-nightly.yml`): pre-merge (standard tier) runs these tests on gfx94X on
+Linux and gfx110X on Windows; the nightly (comprehensive tier) on gfx94X on Linux and gfx1151 on
+Windows. Both workflows build gfx950, but neither runs the hip-kernel-provider or hipDNN tests
+there: the pre-merge gfx950 test jobs skip, and the nightly's gfx950 test shards run none of
+these suites. So a CDNA comprehensive case runs nightly on gfx942, the arch it ran on pre-merge,
+and gfx950's CDNA objects (the dual-wave kernel among them) are covered only by device runs
+outside CI, in either tier. An RDNA comprehensive case runs nightly on gfx1151 and no longer on
+gfx110X; both are `gfx11-generic` and load the same objects (REGEN.md, "Why `gfx11-generic`"),
+so the nightly runs every moved RDNA case on the objects gfx110X ships, on another member of
+the family. No CI tier tests gfx90a or gfx12 (gfx1200, gfx1201) either: the CDNA objects on
+gfx90a, and the gfx12 RDNA prefill, decode and aiw objects, are covered only by device runs
+outside CI, in either tier, so the tier split changes nothing there or on gfx950. No feature
+lost its only CI arch to the move: every moved case is an RDNA prefill/decode or CDNA case.
 
 The FlyDSL SDPA cases that run in the comprehensive tier and not pre-merge:
 
