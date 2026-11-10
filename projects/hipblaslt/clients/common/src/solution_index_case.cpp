@@ -550,9 +550,12 @@ std::variant<Arguments, UnsupportedSolution> solutionIndexCase(
             arg.bias_type   = *hipBias;
             arg.bias_source = hipblaslt_bias_source::d;
         }
-        if(p.useScaleAB == "Scalar")
+        // MX solutions also report scalar input scaling; their block scales
+        // set above take its place.
+        bool const mx = p.mxBlockA || p.mxBlockB;
+        if(p.useScaleAB == "Scalar" && !mx)
             arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Scalar;
-        else if(!p.useScaleAB.empty())
+        else if(!p.useScaleAB.empty() && !(mx && p.useScaleAB == "Scalar"))
             return unsupported("grouped input scaling " + p.useScaleAB);
         if(p.aType != p.bType)
         {

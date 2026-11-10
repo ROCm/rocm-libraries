@@ -138,6 +138,12 @@ TEST(HostUnitSolutionIndexCase, smoke_MXScaleLayout)
     SolutionCaseOptions gfx1250;
     gfx1250.gfx1250 = true;
     EXPECT_EQ(made(solution, gfx1250).scaleA, hipblaslt_scaling_format::Block_32_UE8M0);
+
+    // Grouped MX solutions also report scalar input scaling; the block scales stay.
+    p.mxScaleFormat = 0;
+    p.groupedGemm   = true;
+    p.useScaleAB    = "Scalar";
+    EXPECT_EQ(made(solution).scaleB, hipblaslt_scaling_format::Block_32_UE8M0);
 }
 
 // A grouped solution gets two equal members; mixed A/B storage goes through
