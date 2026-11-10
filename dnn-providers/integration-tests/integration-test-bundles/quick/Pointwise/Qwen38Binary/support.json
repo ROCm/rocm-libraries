@@ -1,0 +1,27 @@
+{
+  "claims": {
+    "hipkernel:flydsl_pointwise": [
+      {
+        "cases": [
+          "4_5120_bf16_add_residual",
+          "4_5120_bf16_mul",
+          "1_4_8_128_bf16_mul_bcast",
+          "4_8_bf16_div_bcast",
+          "4_8_bf16_div"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

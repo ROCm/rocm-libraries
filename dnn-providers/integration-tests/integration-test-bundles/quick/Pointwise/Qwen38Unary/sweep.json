@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "4_5120_bf16_swish_beta1",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "operation": "swish_fwd",
+          "swish_beta": 1.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL pointwise",
+        "seed": 1,
+        "notes": "SiLU (swish, beta 1): [T,H]",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePointwise); shapes from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "4_48_bf16_sigmoid",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              48
+            ],
+            "strides": [
+              48,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              48
+            ],
+            "strides": [
+              48,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "operation": "sigmoid_fwd",
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL pointwise",
+        "seed": 1,
+        "notes": "Sigmoid gate: [T,heads]",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePointwise); shapes from the Qwen3.8 layer graph"
+      }
+    }
+  ]
+}

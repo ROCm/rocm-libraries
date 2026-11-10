@@ -1,0 +1,24 @@
+{
+  "claims": {
+    "hipkernel:flydsl_pointwise": [
+      {
+        "cases": [
+          "4_5120_bf16_swish_beta1",
+          "4_48_bf16_sigmoid"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

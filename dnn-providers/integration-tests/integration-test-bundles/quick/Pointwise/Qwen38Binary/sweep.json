@@ -1,0 +1,318 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "4_5120_bf16_add_residual",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "operation": "add"
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL pointwise",
+        "seed": 1,
+        "notes": "Residual add: [T,H] + [T,H]",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePointwise); shapes from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "4_5120_bf16_mul",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "operation": "mul"
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL pointwise",
+        "seed": 1,
+        "notes": "Gate multiply: [T,H] * [T,H]",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePointwise); shapes from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "1_4_8_128_bf16_mul_bcast",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              4,
+              8,
+              128
+            ],
+            "strides": [
+              4096,
+              1024,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              4,
+              8,
+              128
+            ],
+            "strides": [
+              4096,
+              1024,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              4,
+              8,
+              1
+            ],
+            "strides": [
+              32,
+              8,
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "operation": "mul"
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL pointwise",
+        "seed": 1,
+        "notes": "MoE routing-weight scale: [1,T,k,H] * [1,T,k,1]",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePointwise); shapes from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "4_8_bf16_div_bcast",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8
+            ],
+            "strides": [
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8
+            ],
+            "strides": [
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "operation": "div"
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL pointwise",
+        "seed": 1,
+        "notes": "Top-k weight renormalisation: [T,k] / [T,1]; divisor drawn from [0.5, 2]",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePointwise); shapes from the Qwen3.8 layer graph",
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": 0.5,
+            "hi": 2.0,
+            "seed": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "4_8_bf16_div",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8
+            ],
+            "strides": [
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8
+            ],
+            "strides": [
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              8
+            ],
+            "strides": [
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "operation": "div"
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL pointwise",
+        "seed": 1,
+        "notes": "Elementwise divide: [T,k] / [T,k]; divisor drawn from [0.5, 2]",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePointwise); shapes from the Qwen3.8 layer graph",
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": 0.5,
+            "hi": 2.0,
+            "seed": 2
+          }
+        }
+      }
+    }
+  ]
+}

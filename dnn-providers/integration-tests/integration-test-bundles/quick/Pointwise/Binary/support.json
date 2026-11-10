@@ -1,0 +1,25 @@
+{
+  "claims": {
+    "hipkernel:flydsl_pointwise": [
+      {
+        "cases": [
+          "2_4_8_8_fp16_nchw_add",
+          "2_8_64_fp16_ncl_mul",
+          "2_4_8_8_fp32_nchw_sub_bcast"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
