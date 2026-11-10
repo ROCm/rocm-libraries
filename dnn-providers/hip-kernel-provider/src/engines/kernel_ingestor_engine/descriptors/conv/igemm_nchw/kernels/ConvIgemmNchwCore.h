@@ -592,7 +592,8 @@ template <class T,
           int VEC,
           int ST,
           int TAPS,
-          int FLAT = 0>
+          int FLAT = 0,
+          int HALOK = VEC>
 __device__ void k7DgradMma(const K7Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -607,9 +608,10 @@ __device__ void k7DgradMma(const K7Args& a)
     static_assert(FLAT > 0 || ST % WP == 0, "K7 phase groups");
     constexpr int KV = sizeof(T) == 2 ? 2 : 1;
     constexpr int LDK = BK + 16 / static_cast<int>(sizeof(T));
-    constexpr int HALO = TAPS - 1;
-    // The window: q0 - HALO .. q0 + BMQ (the phases below r reach one further), whole vectors.
-    constexpr int WQ = BMQ + VEC;
+    // The window: q0 - halo .. q0 + BMQ (the phases below r reach one further), whole vectors,
+    // halo = (TAPS - 1) dil: HALOK past the tile (the launcher checks it covers the reach).
+    constexpr int WQ = BMQ + HALOK;
+    static_assert(HALOK % VEC == 0, "K7 window in whole vectors");
     constexpr int SMAX = ST * TAPS;
     typedef K7Tiles<T, VEC, KV, BK, WQ, BN, SMAX, THREADS, (FLAT > 0)> Tiles;
     constexpr int A_LDS = Tiles::template aRow<LDK>(WQ);
@@ -618,7 +620,7 @@ __device__ void k7DgradMma(const K7Args& a)
     constexpr int OUT_LDS = BN * OLD;
     constexpr int LDS = A_LDS + B_LDS > OUT_LDS ? A_LDS + B_LDS : OUT_LDS;
     static_assert(WTQ % DIM == 0 && WTN % DIM == 0 && BK % Atom::KA == 0, "K7 wave tile");
-    static_assert(TAPS <= VEC && (BMQ * ST) % VEC == 0, "K7 window and epilogue");
+    static_assert((BMQ * ST) % VEC == 0, "K7 epilogue");
 
     __shared__ __attribute__((aligned(16))) T lds[LDS];
     T* As = lds;
@@ -639,8 +641,11 @@ __device__ void k7DgradMma(const K7Args& a)
     // The wave's phases are p0 .. p0 + PW - 1.
     const int p0 = wp * PW;
 
+    // Tap shifts: the dilation at stride 1, unit otherwise.
+    const int dil = ST == 1 ? a.dil : 1;
+    const int halo = (TAPS - 1) * dil;
     Tiles tiles;
-    tiles.init(a, b, tid, HALO);
+    tiles.init(a, b, tid, halo);
     if constexpr(FLAT > 0)
         tiles.flatten(a);
 
@@ -655,8 +660,8 @@ __device__ void k7DgradMma(const K7Args& a)
 
     const int fragRow = lane % DIM;
     const int kb = Atom::template kBase<Atom::KPL>(lane);
-    // The lane's A row at tile index i, shift d: aRow0 + i DIM + d.
-    const int aRow0 = wq * WTQ + fragRow + HALO;
+    // The lane's A row at tile index i, shift d: aRow0 + i DIM + d dil.
+    const int aRow0 = wq * WTQ + fragRow + halo;
     const T* bBase = Bs + (wn * WTN + fragRow) * LDK + kb;
 
     const int iters = tiles.start(a) * b.nD * b.nH;
@@ -692,8 +697,8 @@ __device__ void k7DgradMma(const K7Args& a)
                 typename Atom::frag af[FQ];
 #pragma unroll
                 for(int i = 0; i < FQ; ++i)
-                    af[i] = k1Frag<Atom>(As + Tiles::template aRow<LDK>(aRow0 + i * DIM + d) + kk
-                                         + kb);
+                    af[i] = k1Frag<Atom>(As + Tiles::template aRow<LDK>(aRow0 + i * DIM + d * dil)
+                                         + kk + kb);
 #pragma unroll
                 for(int p = 0; p < PW; ++p)
                 {

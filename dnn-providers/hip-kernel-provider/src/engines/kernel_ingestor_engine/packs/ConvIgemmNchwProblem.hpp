@@ -73,6 +73,9 @@ struct NchwConfig
     /// 0, or the stride phases computed over the flattened dy plane (the rest zero): the
     /// problem must be flat (NchwProblem::flat) with at most this many filter taps.
     int64_t flat = 0;
+    /// The dy window's elements past the tile, whole vectors: at least the farthest tap's reach
+    /// ((taps - 1) dilation, plus one at strides past 1). FMA: the vector.
+    int64_t halo = 0;
 };
 
 /// A backward-data convolution the kernel serves.
@@ -110,7 +113,7 @@ struct NchwLaunch
  * Everything parseConvNaiveProblem gates, plus: fp32, fp16 or bf16; one group;
  * cross-correlation; dy, dx and the filter packed channels-first (N C D H W, K C T R S); along
  * depth and height unit dilation and non-negative padding;
- * unit dilation along the width; every extent, stride and padding within 32 bits, one image of
+ * dilation along the width only at stride 1; every extent, stride and padding within 32 bits, one image of
  * dy and the whole filter within 32-bit byte offsets, images times dx rows within the grid's
  * third axis.
  */
@@ -130,8 +133,9 @@ int64_t ldsBytesOf(const NchwConfig& config, int elementBytes);
  * Reads and gates every field of @p config: the atom and its atom_id; the kind's own fields set
  * and the other kind's 0; the tile against the atom's step (matrix core) or the thread tile
  * (FMA); the vector against the element size, the tile and the filter run; the stride equal to
- * the problem's and the taps per phase covering ceil(S / stride) within one vector; the LDS
- * within 64 KiB; the grid within the launch limits. The device and dtype checks are the kernel
+ * the problem's and the taps per phase exactly ceil(S / stride); the halo covering the farthest
+ * tap's reach (FMA: one vector, unit dilation); flat against the problem; the LDS within 64 KiB;
+ * the grid within the launch limits. The device and dtype checks are the kernel
  * match's (atomRunsOn, the dtype string).
  */
 std::optional<NchwLaunch> nchwLaunchFor(const NchwProblem& problem, const NchwConfig& config);

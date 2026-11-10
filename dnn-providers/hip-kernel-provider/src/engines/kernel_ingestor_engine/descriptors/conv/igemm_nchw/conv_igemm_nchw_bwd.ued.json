@@ -20,7 +20,8 @@
     "stride",
     "taps",
     "stages",
-    "flat"
+    "flat",
+    "halo"
   ],
   "behavior_notes": [
     "runtime_compilation"

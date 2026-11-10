@@ -15,7 +15,8 @@
 /// Shapes are runtime; only the tile, the stride and the taps per phase are compile-time.
 ///
 /// With x + pad = stride * q + phase, dx[c][x] = sum over the row pairs, k and j of
-/// w[k][c][td][th][phase + stride * j] * dy[k][qd][qh][q - j]. Grid: (q tiles, channel tiles,
+/// w[k][c][td][th][phase + stride * j] * dy[k][qd][qh][q - j]; at stride 1 with dilation dil,
+/// dx[c][x] = sum of w[k][c][td][th][j] * dy[k][qd][qh][x + pad - dil j]. Grid: (q tiles, channel tiles,
 /// images * dx rows).
 struct K7Args
 {
@@ -38,6 +39,8 @@ struct K7Args
     int sd, pd, fd; ///< depth: stride, pre-padding, filter extent (T)
     int sh, ph, fh; ///< height: stride, pre-padding, filter extent (R)
     int fStride; ///< filter elements per (k, c): T * R * S
+    int dil; ///< dilation along the width (stride 1 only; else 1)
+    int padding0;
     long long dyImage; ///< dy elements per image
     long long dxImage; ///< dx elements per image
 };

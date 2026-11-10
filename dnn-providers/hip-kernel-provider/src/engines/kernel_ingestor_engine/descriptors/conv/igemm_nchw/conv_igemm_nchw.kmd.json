@@ -70,6 +70,10 @@
     {
       "name": "flat",
       "type": "int"
+    },
+    {
+      "name": "halo",
+      "type": "int"
     }
   ]
 }
