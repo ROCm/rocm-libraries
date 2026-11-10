@@ -292,8 +292,8 @@ batch when `seq_len_q/kv` are set).
   `TestSdpaFwdPlanZeroDropout` and `TestGpuSdpaFwdPlanZeroDropout`. The backward references treat the same form as no
   dropout (`isSdpaZeroProbabilityDropout` on the backward attributes, which also requires `dropout_scale_inv` absent):
   dQ, dK and dV are bit-identical to the graph without dropout fields. The decline of `dropout_probability`, seed and
-  offset in "hipDNN today" applies to a probability above 0. Pinned by `TestSdpaBwdPlanZeroDropout` and
-  `TestGpuSdpaBwdPlanZeroDropout`.
+  offset in "hipDNN today" applies to a probability above 0 and to a seed or offset named without a probability.
+  Pinned by `TestSdpaBwdPlanZeroDropout` and `TestGpuSdpaBwdPlanZeroDropout`.
 
 ## Score modifiers (extensions and conventions)
 
