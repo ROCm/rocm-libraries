@@ -10,13 +10,18 @@ driver's own build and measure functions, which the driver passes in as
 - candidates: per problem, the kernels a full run would measure with it, one
   per kernel name (with ``--pairs``: only its problems, and the listed kernels
   among those);
-- builds: ``setup_multiple_gemm_dispatchers`` on the round's missing kernels,
-  verbose like a full run's, with the search's limit per build step
-  (``build_timeout_s``; else ``SEARCH_BUILD_TIMEOUT_S`` when they are all
-  native, and the build function's own limits when one has fixed vector
-  widths); each built .so goes into the run's ``ArtifactStore`` as
-  ``<out>/artifacts/<name>.so``, and each call's limit and full build errors
-  go to ``<out>/rounds/NNNN-build.json``;
+- problems: the driver's fields of a problem (``DriverHooks.dims``): M, N, K,
+  and for the batched driver (batched_gemm_full_benchmark.py) also
+  ``batch_count``, which every host cost below scales with; a batched
+  problem's key is "BxMxNxK";
+- builds: the driver's build function (``setup_multiple_gemm_dispatchers``;
+  the batched driver's ``setup_multiple_batched_gemm_dispatchers`` shares its
+  loop) on the round's missing kernels, verbose like a full run's, with the
+  search's limit per build step (``build_timeout_s``; else
+  ``SEARCH_BUILD_TIMEOUT_S`` when they are all native, and the build
+  function's own limits when one has fixed vector widths); each built .so
+  goes into the run's ``ArtifactStore`` as ``<out>/artifacts/<name>.so``, and
+  each call's limit and full build errors go to ``<out>/rounds/NNNN-build.json``;
 - measurements: ``benchmark_on_devices`` with --verify on, one kernel per worker
   and one problem entry per request, so every row and failure record belongs to
   exactly one request; the worker also checks that the library reports the
@@ -54,7 +59,7 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 _COMMON_DIR = str(Path(__file__).resolve().parents[1] / "common")
 if _COMMON_DIR not in sys.path:
@@ -85,6 +90,14 @@ CONFLICTS = (
     ("--build-timeout", "build_timeout", "set build_timeout_s in the search settings"),
 )
 REQUIRED = (("--variant", "variant", "gemm_universal"),)  # the one searched
+# Per driver, the (CONFLICTS, REQUIRED) of check_search_options: the batched
+# driver has no --variant, --repeat-top, --failures-csv or --build-timeout.
+DRIVER_OPTIONS = {
+    "gemm": (CONFLICTS, REQUIRED),
+    "batched_gemm": ((("--list-pairs", "list_pairs"),), ()),
+}
+GEMM_DIMS = ("M", "N", "K")  # a problem's fields; the batched driver adds batch_count
+DIM_LETTERS = {"batch_count": "B"}  # how a field shows in a problem key's form
 # Driver failure kind (--failures-csv) -> outcome status. The first kind in
 # this order that a request has decides its outcome, unless its worker ran out
 # of host memory (``adaptive_search.memory_failure``): ended by SIGKILL, which
@@ -121,7 +134,8 @@ RUN_STATUS = {
 BUILD_ERROR_CHARS = 8000  # per failed kernel in rounds/NNNN-build.json
 # A search round measures once all its builds end, so a kernel that never
 # builds holds the round for its whole limit (a full run keeps the build
-# function's: 300 s per step, 1200 s to compile a fixed-vector-width kernel).
+# function's: 300 s per step, 1200 s to compile a fixed-vector-width GEMM
+# kernel; the batched build keeps 300 s for every step).
 # 180 s per step: 1.6x the slowest gfx950 fp16 native build outside the one
 # slow-compiling class (warp tile 4x64x16), see "Build timeout" in README.md.
 # It applies to a build call of native kernels only: fixed-width compile times
@@ -150,23 +164,30 @@ HOST_S_PER_INPUT = {"fp16": 75e-9, "bf16": 75e-9, "fp32": 75e-9,
 # computed; per output element the fp32 reference, C and its comparison
 # (HOST_OUTPUT_BYTES); plus HOST_FIXED_BYTES for the interpreter, numpy, one
 # block's temporaries and the GPU runtime (a measure worker on an MI350X
-# (gfx950) held about 0.9 GB besides its host data).
+# (gfx950) held about 0.9 GB besides its host data). A batched problem has
+# batch_count times the elements of its one GEMM (``_batch``).
 HOST_INPUT_BYTES = {"fp16": 2, "bf16": 2, "fp32": 4, "fp8": 1, "bf8": 1}
 HOST_OUTPUT_BYTES = 16
 HOST_FIXED_BYTES = 1 << 30
+
+
+def _batch(problem) -> int:
+    """The GEMMs of ``problem``: its batch_count, 1 for a single GEMM."""
+    return int(problem.get("batch_count", 1))
 
 
 def host_entry_bytes(problem, dtype) -> int:
     """Bytes of ``problem``'s host cache entry: A and B encoded, the fp32
     reference."""
     m, n, k = problem["M"], problem["N"], problem["K"]
-    return (m + n) * k * HOST_INPUT_BYTES.get(dtype, 4) + 4 * m * n
+    return _batch(problem) * ((m + n) * k * HOST_INPUT_BYTES.get(dtype, 4) + 4 * m * n)
 
 
 def host_read_bytes(problem) -> int:
     """Peak bytes of a call that reads ``problem``'s entry: it maps the entry
     (no copy), so C and its comparison, and the fixed part."""
-    return (HOST_OUTPUT_BYTES - 4) * problem["M"] * problem["N"] + HOST_FIXED_BYTES
+    outputs = _batch(problem) * problem["M"] * problem["N"]
+    return (HOST_OUTPUT_BYTES - 4) * outputs + HOST_FIXED_BYTES
 
 
 def host_compute_bytes(problem, dtype) -> int:
@@ -174,7 +195,8 @@ def host_compute_bytes(problem, dtype) -> int:
     preparation, or a call without an entry): the entry, the fp32 values of A
     and B while the reference is computed, and what a reading call needs."""
     m, n, k = problem["M"], problem["N"], problem["K"]
-    return host_entry_bytes(problem, dtype) + 4 * (m + n) * k + host_read_bytes(problem)
+    return (host_entry_bytes(problem, dtype) + 4 * _batch(problem) * (m + n) * k
+            + host_read_bytes(problem))
 
 
 def host_input_rate(dtype) -> float:
@@ -185,8 +207,8 @@ def host_input_rate(dtype) -> float:
 def verify_allowance_s(problem, dtype) -> int:
     """Seconds added to ``--kernel-timeout`` for a verified call on ``problem``
     with ``dtype`` inputs: its fp32 reference and its A and B."""
-    m, n, k = problem["M"], problem["N"], problem["K"]
-    return adaptive_search.host_allowance_s(2 * m * n * k, (m + n) * k,
+    m, n, k, b = problem["M"], problem["N"], problem["K"], _batch(problem)
+    return adaptive_search.host_allowance_s(2 * b * m * n * k, b * (m + n) * k,
                                             host_input_rate(dtype))
 
 
@@ -197,18 +219,22 @@ class DriverHooks:
     build: Callable  # setup_multiple_gemm_dispatchers
     measure: Callable  # benchmark_on_devices
     record: Callable  # _kernel_record: config -> its scalar fields
-    problem_key: Callable  # problem dict -> "MxNxK"
+    problem_key: Callable  # problem dict -> "MxNxK" (batched: "BxMxNxK")
     load_pairs: Callable  # load_pair_list, reads warm_start.pairs_file
     build_reason: Callable  # build_failure_summary: build error -> one line
     # The directory of build's outputs, shared by every run of a checkout
     # (ctypes_utils.get_build_dir()); None: builds are not locked.
     build_dir: Optional[Path] = None
+    # A problem's fields, in its key's order (the batched driver's start with
+    # batch_count): what the workers get and every row repeats.
+    dims: Tuple[str, ...] = GEMM_DIMS
 
 
-def check_search_options(args) -> SearchSettings:
-    """The validated ``--search-config`` of a GEMM driver run (SettingsError
-    otherwise, see ``adaptive_search.check_search_options``)."""
-    return adaptive_search.check_search_options(args, CONFLICTS, REQUIRED)
+def check_search_options(args, driver="gemm") -> SearchSettings:
+    """The validated ``--search-config`` of a run of ``driver`` (a key of
+    DRIVER_OPTIONS; SettingsError otherwise, see
+    ``adaptive_search.check_search_options``)."""
+    return adaptive_search.check_search_options(args, *DRIVER_OPTIONS[driver])
 
 
 def parse_verified(value) -> Optional[bool]:
@@ -245,7 +271,8 @@ def reconcile(req: PairRequest, problem: dict, rows: Sequence[dict],
               fails: Sequence[dict]):
     """(status, latency_ms, diag) of one request from its measured rows and
     failure records. Only a verified row of the requested kernel and problem
-    with a finite positive latency, and no failure record, is ``ok``."""
+    (every field of ``problem``) with a finite positive latency, and no
+    failure record, is ``ok``."""
     why = _memory_failure(fails)
     if why:
         return adaptive_search.HOST_MEMORY, None, why
@@ -259,8 +286,8 @@ def reconcile(req: PairRequest, problem: dict, rows: Sequence[dict],
     if len(rows) > 1:
         return "invalid_measurement", None, f"{len(rows)} rows for one request"
     row = rows[0]
-    got = tuple(str(row.get(f)) for f in ("kernel", "M", "N", "K"))
-    want = (req.kernel_name, *(str(problem[d]) for d in "MNK"))
+    got = tuple(str(row.get(f)) for f in ("kernel", *problem))
+    want = (req.kernel_name, *(str(v) for v in problem.values()))
     if got != want:
         return "run_error", None, f"row {got} is not the requested pair {want}"
     verified = parse_verified(row.get("verified"))
@@ -274,11 +301,14 @@ def reconcile(req: PairRequest, problem: dict, rows: Sequence[dict],
     return "ok", float(lat), ""
 
 
-def read_ranked_csv(path) -> Dict[str, Dict[str, float]]:
+def read_ranked_csv(path, dims=GEMM_DIMS) -> Dict[str, Dict[str, float]]:
     """The search prior from ``select_kernels.py --out_ranked``: {problem:
     {kernel: predicted latency ms}} with latency = 2*M*N*K / (predicted_tflops
-    * 1e9); rows without a finite positive prediction are skipped. Raises
-    ValueError (OSError when unreadable) for a file it cannot use."""
+    * 1e9) (a problem of ``dims``: twice their product); rows without a finite
+    positive prediction are skipped. Raises ValueError (OSError when
+    unreadable) for a file it cannot use."""
+    form = "x".join(DIM_LETTERS.get(d, d) for d in dims)
+    article = "an" if form[0] in "AEFHILMNORSX" else "a"  # "an MxNxK", "a BxMxNxK"
     out: Dict[str, Dict[str, float]] = {}
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -287,21 +317,24 @@ def read_ranked_csv(path) -> Dict[str, Dict[str, float]]:
             raise ValueError(f"{path}: expected columns {sorted(need)}")
         for i, row in enumerate(reader, 2):
             try:  # a short row holds None
-                m, n, k = (int(d) for d in row["problem"].split("x"))
+                sizes = [int(d) for d in row["problem"].split("x")]
                 tflops = float(row["predicted_tflops"])
+                if len(sizes) != len(dims):
+                    raise ValueError
             except (AttributeError, TypeError, ValueError):
                 raise ValueError(
-                    f"{path} line {i}: expected an MxNxK problem and a number, "
+                    f"{path} line {i}: expected {article} {form} problem and a number, "
                     f"got {row['problem']!r}, {row['predicted_tflops']!r}"
                 ) from None
             if math.isfinite(tflops) and tflops > 0:
                 out.setdefault(row["problem"], {})[row["kernel"]] = (
-                    2 * m * n * k / (tflops * 1e9))
+                    2 * math.prod(sizes) / (tflops * 1e9))
     return out
 
 
 class GemmSearchAdapter:
-    """``OperationAdapter`` for gemm_universal (see the module docstring).
+    """``OperationAdapter`` for gemm_universal and batched GEMM (see the
+    module docstring).
 
     ``eligible[i]`` lists the kernel names ``problems[i]`` may run, in order;
     ``worker`` is the driver's ``(worker_path, base_env)``; ``context`` adds
@@ -348,7 +381,7 @@ class GemmSearchAdapter:
             if key in self.problems:
                 self.repeated.append(key)
                 continue
-            self.problems[key] = {d: int(prob[d]) for d in "MNK"}
+            self.problems[key] = {d: int(prob[d]) for d in hooks.dims}
             self.eligible[key] = [self._cand(by_name[n]) for n in dict.fromkeys(names)]
         self.store = ArtifactStore(out_dir)
         self.calls = CallFiles(out_dir)
@@ -381,6 +414,7 @@ class GemmSearchAdapter:
         flops = adaptive_search.HOST_REFERENCE_FLOPS
         rate = host_input_rate(a.dtype)
         each = HOST_INPUT_BYTES.get(a.dtype, 4)
+        b = "batch_count*" if "batch_count" in self.hooks.dims else ""
         return {
             **self._context,
             "dtype": a.dtype,
@@ -392,14 +426,14 @@ class GemmSearchAdapter:
             "devices": self.devices,
             "measurement": {"verify": True, "verify_tol": a.verify_tol,
                             "batch_size": 1, "kernel_timeout": a.kernel_timeout,
-                            "timeout_s": f"kernel_timeout + ceil(2*M*N*K / {flops:g} "
-                                         f"+ (M+N)*K * {rate:g}) per call",
+                            "timeout_s": f"kernel_timeout + ceil(2*{b}M*N*K / {flops:g} "
+                                         f"+ {b}(M+N)*K * {rate:g}) per call",
                             "check_identity": True, "host_cache": self.host_cache,
                             "search_host_data": True,
                             "host_memory": {
-                                "computing_bytes": f"(M+N)*K*{each + 4} + "
-                                f"{HOST_OUTPUT_BYTES}*M*N + {HOST_FIXED_BYTES}",
-                                "reading_bytes": f"{HOST_OUTPUT_BYTES - 4}*M*N + "
+                                "computing_bytes": f"{b}(M+N)*K*{each + 4} + "
+                                f"{HOST_OUTPUT_BYTES}*{b}M*N + {HOST_FIXED_BYTES}",
+                                "reading_bytes": f"{HOST_OUTPUT_BYTES - 4}*{b}M*N + "
                                 f"{HOST_FIXED_BYTES}",
                                 "available": "MemAvailable (or a cgroup's room) less "
                                 f"{adaptive_search.HOST_MEMORY_MARGIN:.0%} of the total",
@@ -635,6 +669,7 @@ def run_gemm_search(args, settings: SearchSettings, hooks: DriverHooks, *,
         adapter = GemmSearchAdapter(args, hooks, problems, configs, eligible, devices,
                                     worker, args.search_output_dir, context,
                                     settings.build_timeout_s, cache)
+        prior = functools.partial(read_ranked_csv, dims=hooks.dims)
         return adaptive_search.run_search(adapter, settings, args.search_output_dir,
                                           devices, pair_loader=hooks.load_pairs,
-                                          prior_loader=read_ranked_csv)
+                                          prior_loader=prior)

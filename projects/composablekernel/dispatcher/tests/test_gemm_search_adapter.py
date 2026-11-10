@@ -87,10 +87,12 @@ class _Runner:
         if self._oom(problem):
             raise MemoryError()
         # The search's host data is in the kernel's memory order (a "c"
-        # operand transposed) and dtype; the legacy path's is logical fp32.
+        # operand transposed, per batch) and dtype; the legacy path's is
+        # logical fp32.
         la, lb, _ = self.kernel_name.split("_")[2]
-        return self.run((A_h if la == "r" else A_h.T).astype("float32"),
-                        (B_h if lb == "r" else B_h.T).astype("float32"), problem)
+        return self.run((A_h if la == "r" else A_h.swapaxes(-1, -2)).astype("float32"),
+                        (B_h if lb == "r" else B_h.swapaxes(-1, -2)).astype("float32"),
+                        problem)
 
 
 _WORKER_LOCK = threading.Lock()  # sys.stdin and stdout are the process's

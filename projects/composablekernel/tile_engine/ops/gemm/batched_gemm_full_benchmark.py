@@ -3,7 +3,13 @@
 # SPDX-License-Identifier: MIT
 """Full BATCHED GEMM benchmark sweep driven through the Dispatcher bridge.
 
-Batched counterpart of gemm_full_benchmark.py.
+Batched counterpart of gemm_full_benchmark.py, whose measurement it shares
+(``benchmark_on_devices``: device-pinned workers, failure records, interrupt
+handling) along with its pair lists and its adaptive search mode. A batched
+problem has a batch count besides M, N and K: its key in --pairs,
+--list-pairs and the search's files is "BxMxNxK" (batch_count first, as in
+the CSV), and its kernels run in the GEMM worker on ``GpuBatchedGemmRunner``
+(run_one_batched_gemm_kernel.py).
 
 Phases:
   Phase 1: Compile all batched kernels (parallel, returns .so paths -- no GPU)
@@ -15,39 +21,49 @@ Tile Engine generates NO binaries here: it expands its sweep config into shared
 codegens + compiles each into a .so. Each kernel runs in a disposable worker
 subprocess so a GPU fault takes down only one worker.
 
+``--search-config`` replaces the build and the full measurement with the
+adaptive kernel search (``gemm_search.py``, see "Batched GEMM search" in
+README.md): only the kernels it proposes are built, every measurement is
+verified, and the confirmed winners are written as a --pairs file.
+
 Examples:
     python batched_gemm_full_benchmark.py
     python batched_gemm_full_benchmark.py \
         batched_gemm/configs/default_config.json --devices 4 --csv out.csv
+    # every (problem, kernel) pair a full run measures, nothing built:
+    python batched_gemm_full_benchmark.py batched_gemm/configs/default_config.json \
+        --arch gfx950 --dtype bf16 --layout rcr --problems problems.json \
+        --list-pairs pairs.json
+    # the adaptive search over the same pairs, then a plain run of its winners:
+    python batched_gemm_full_benchmark.py batched_gemm/configs/default_config.json \
+        --arch gfx950 --dtype bf16 --layout rcr --problems problems.json \
+        --search-config batched_gemm/search/search_settings_gfx950.json \
+        --search-output-dir runs/search-001
+    python batched_gemm_full_benchmark.py batched_gemm/configs/default_config.json \
+        --arch gfx950 --dtype bf16 --layout rcr --problems problems.json \
+        --pairs runs/search-001/winners.json --verify --csv recheck.csv
 """
 
 import argparse
-import csv
 import json
-import os
-import queue
-import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
-_COMMON_DIR = _THIS_DIR.parent / "common"
-_DISPATCHER_ROOT = _THIS_DIR.parents[2] / "dispatcher"
-sys.path.insert(0, str(_DISPATCHER_ROOT / "python"))
-sys.path.insert(0, str(_DISPATCHER_ROOT / "codegen"))
-sys.path.insert(0, str(_COMMON_DIR))
 sys.path.insert(0, str(_THIS_DIR))
 
+# Sets up the dispatcher and common paths this driver's imports need too.
+import gemm_full_benchmark as gfb  # noqa: E402
+from gemm_full_benchmark import resolve_devices  # noqa: E402
 from batched_gemm_utils import (  # noqa: E402
     BATCHED_SUPPORTED_DTYPES as SUPPORTED_DTYPES,
     BATCHED_SUPPORTED_LAYOUTS as SUPPORTED_LAYOUTS,
     BATCHED_VERIFY_TOL,
+    _resolve_arch,
     setup_multiple_batched_gemm_dispatchers,
     expand_sweep,
 )
-from smi_utils import detect_gpu_ids  # noqa: E402
 from gemm_vector_fallback import VectorFallback, add_vector_fallback_arg  # noqa: E402
 
 # The batched op keeps its sweep configs in tile_engine/ops/gemm/batched_gemm/configs.
@@ -55,6 +71,9 @@ CONFIG_DIR = _THIS_DIR / "batched_gemm" / "configs"
 CI_CONFIG_NAME = "default_ci_config.json"
 DEFAULT_CONFIG_NAME = "default_config.json"
 EXAMPLE_PROBLEMS_NAME = "example_problems.json"
+# A batched problem's fields, in the order of its key ("BxMxNxK") and the CSV.
+DIMS = ("batch_count", "M", "N", "K")
+WORKER = "run_one_batched_gemm_kernel.py"
 
 # Fallback batched problem set if none is supplied.
 DEFAULT_PROBLEMS = [
@@ -63,33 +82,6 @@ DEFAULT_PROBLEMS = [
     {"batch_count": 16, "M": 512, "N": 512, "K": 512},
     {"batch_count": 2, "M": 3840, "N": 4096, "K": 2048},
 ]
-
-
-def detect_devices():
-    """Return a list of visible GPU id strings (best-effort)."""
-    return detect_gpu_ids()
-
-
-def resolve_devices(spec):
-    """Resolve --devices into a concrete list of device id strings."""
-    detected = detect_devices()
-    if spec is None:
-        return detected
-    spec = str(spec).strip()
-    if "," in spec:
-        return [s.strip() for s in spec.split(",") if s.strip() != ""]
-    if spec.isdigit():
-        n = int(spec)
-        if n <= 0:
-            return detected
-        if len(detected) >= n:
-            return detected[:n]
-        if os.environ.get("HIP_VISIBLE_DEVICES") or os.environ.get(
-            "CUDA_VISIBLE_DEVICES"
-        ):
-            return detected
-        return [str(i) for i in range(n)]
-    return [spec]
 
 
 def resolve_configs(args):
@@ -110,132 +102,6 @@ def load_problems(path):
             data = json.load(f)
         return data["problems"] if isinstance(data, dict) else data
     return DEFAULT_PROBLEMS
-
-
-def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
-    """Run one (problem, kernel-batch) unit in a device-pinned subprocess."""
-    prob_idx, prob_dict, batch = unit
-    bc, M, N, K = (
-        prob_dict["batch_count"],
-        prob_dict["M"],
-        prob_dict["N"],
-        prob_dict["K"],
-    )
-
-    items = [
-        {
-            "so_path": str(lib),
-            "problem": prob_dict,
-            "kernel_name": cfg.name,
-            "arch": cfg.gfx_arch,
-        }
-        for _, cfg, lib in batch
-    ]
-    payload = json.dumps(
-        {"items": items, "verify": args.verify, "verify_tol": args.verify_tol}
-    )
-
-    env = base_env.copy()
-    env["HIP_VISIBLE_DEVICES"] = str(device_id)
-
-    rows, lines, n_fail = [], [], 0
-    proc = None
-    try:
-        proc = subprocess.Popen(
-            [sys.executable, str(worker_path)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            env=env,
-        )
-        stdout_bytes, _ = proc.communicate(
-            input=payload.encode("utf-8"),
-            timeout=args.kernel_timeout * len(batch),
-        )
-
-        reported = set()
-        for line in stdout_bytes.decode("utf-8").strip().split("\n"):
-            if not line:
-                continue
-            try:
-                result = json.loads(line)
-            except json.JSONDecodeError:
-                lines.append(
-                    f"  [gpu{device_id}] Warning: bad result line: {line[:50]}"
-                )
-                n_fail += 1
-                continue
-            bidx = result.get("idx", 0)
-            _, cfg, _ = batch[bidx]
-            reported.add(bidx)
-            if result.get("ok", False):
-                status = "OK" if result.get("non_zero", 0) > 0 else "ZERO"
-                mismatch = False
-                if args.verify and "verified" in result:
-                    if result["verified"]:
-                        status = "VERIFY"
-                    else:
-                        status = "MISMATCH"
-                        mismatch = True
-                extra = (
-                    f" rel={result['max_rel']:.2e}" if "max_rel" in result else ""
-                )
-                lines.append(
-                    f"  [gpu{device_id}] {cfg.name:<62} {result['ms']:>10.3f} "
-                    f"{result['tflops']:>10.2f} {status:>8}{extra}"
-                )
-                rows.append(
-                    {
-                        "kernel": cfg.name,
-                        "problem_idx": prob_idx,
-                        "batch_count": bc,
-                        "M": M,
-                        "N": N,
-                        "K": K,
-                        "device": device_id,
-                        "latency_ms": result["ms"],
-                        "tflops": result["tflops"],
-                        "non_zero": result.get("non_zero", 0),
-                        "max_rel": result.get("max_rel", ""),
-                        "verified": result.get("verified", ""),
-                    }
-                )
-                if mismatch:
-                    n_fail += 1
-            else:
-                lines.append(f"  [gpu{device_id}] {cfg.name:<62} FAILED")
-                lines.append(f"    Error: {result.get('error', 'unknown')[:100]}")
-                n_fail += 1
-
-        missing = set(range(len(batch))) - reported
-        if missing or proc.returncode != 0:
-            if proc.returncode != 0:
-                lines.append(
-                    f"  [gpu{device_id}] worker exited code {proc.returncode}"
-                )
-            for idx in sorted(missing):
-                _, cfg, _ = batch[idx]
-                lines.append(f"  [gpu{device_id}] {cfg.name:<62} MISSING (crash)")
-            n_fail += len(missing)
-
-    except subprocess.TimeoutExpired:
-        lines.append(f"  [gpu{device_id}] batch timeout ({len(batch)} kernels)")
-        try:
-            proc.kill()
-            proc.communicate(timeout=5)
-        except Exception:
-            pass
-        n_fail += len(batch)
-    except Exception as e:
-        lines.append(f"  [gpu{device_id}] batch error: {e}")
-        try:
-            if proc and proc.poll() is None:
-                proc.kill()
-        except Exception:
-            pass
-        n_fail += len(batch)
-
-    return rows, lines, n_fail
 
 
 def main():
@@ -310,6 +176,7 @@ def main():
         + ")",
     )
     add_vector_fallback_arg(parser)
+    gfb.add_pair_and_search_args(parser, key="BxMxNxK")
     args = parser.parse_args()
     if args.verify_tol is None:
         args.verify_tol = BATCHED_VERIFY_TOL[args.dtype]
@@ -319,7 +186,11 @@ def main():
     # so reject non-positive values up front with a clear message.
     if args.batch_size <= 0:
         parser.error("--batch-size must be a positive integer (kernels per subprocess)")
+    search_settings = gfb.check_pair_and_search_args(
+        parser, args, [("--csv", args.csv), ("--pairs", args.pairs)], "batched_gemm"
+    )
 
+    arch = _resolve_arch(args.arch)
     config_paths = resolve_configs(args)
     devices = resolve_devices(args.devices)
 
@@ -342,7 +213,7 @@ def main():
         all_configs.extend(
             expand_sweep(
                 cfg_path,
-                args.arch,
+                arch,
                 dtype=args.dtype,
                 layout=args.layout,
                 **vfb.expand_kwargs,
@@ -354,6 +225,29 @@ def main():
     all_configs = vfb.limit_base_kernels(all_configs, args.max_kernels)
 
     print(f"  Expanded configs: {len(all_configs)}")
+    context = {"arch": arch, "layout": args.layout, "variant": "batched",
+               "configs": config_paths}
+    if args.list_pairs:
+        header = {"arch": arch, "dtype": args.dtype, **context}
+        gfb.write_pair_listing(args.list_pairs, header, problems, all_configs, vfb,
+                               DIMS)
+        return 0
+
+    wanted = paired = None
+    if args.pairs:
+        listed = gfb.read_listed_pairs(args.pairs, problems, all_configs, vfb,
+                                       search_settings is not None, DIMS)
+        if listed is None:
+            return 1
+        wanted, paired, star, needed = listed
+        all_configs = [cfg for cfg in all_configs if cfg.name in needed]
+    if search_settings is not None:
+        return gfb.run_search_mode(
+            args, search_settings, problems, all_configs, vfb,
+            None if wanted is None else (wanted, paired), devices,
+            build=setup_multiple_batched_gemm_dispatchers,
+            worker=gfb.worker_setup(WORKER), context=context, dims=DIMS,
+        )
     print(f"  Build workers: {args.workers}")
 
     t0 = time.perf_counter()
@@ -362,22 +256,8 @@ def main():
     )
     build_time = time.perf_counter() - t0
 
-    built_kernels = [
-        (cfg, lib) for cfg, lib in zip(all_configs, lib_paths) if lib is not None
-    ]
     vfb.report_builds(all_configs, lib_paths)
-
-    seen_libs = set()
-    unique_kernels = []
-    duplicate_count = 0
-    for cfg, lib in built_kernels:
-        lib_key = str(lib.resolve())
-        if lib_key not in seen_libs:
-            seen_libs.add(lib_key)
-            unique_kernels.append((cfg, lib))
-        else:
-            duplicate_count += 1
-    built_kernels = unique_kernels
+    built_kernels, duplicate_count = gfb.unique_built_kernels(all_configs, lib_paths)
 
     print(
         f"\n  Built {len(all_configs)} configs -> {len(built_kernels)} unique kernels "
@@ -395,102 +275,25 @@ def main():
     print("Phase 2: Load test problems")
     print(f"{'=' * 80}")
 
-    pairs = vfb.pairs(problems, built_kernels)
+    if wanted is None:
+        pairs = vfb.pairs(problems, built_kernels)
+    else:
+        pairs, _ = gfb.measured_listed_pairs(
+            problems, wanted, paired, star, built_kernels, vfb, DIMS
+        )
 
     # ========================================================================
     # Phase 3: Benchmark across all visible GPUs (subprocess isolation, batched)
     # ========================================================================
-    print(f"\n{'=' * 80}")
-    print("Phase 3: Benchmark (multi-GPU, subprocess isolation, batched)")
-    print(f"{'=' * 80}")
-    print(f"  Devices: {len(devices)} -> {', '.join(devices)}")
-    print(f"  Batch size: {args.batch_size} kernels per subprocess")
-    print(f"  Timeout: {args.kernel_timeout}s per kernel\n")
-
+    worker_path, base_env = gfb.worker_setup(WORKER)
     csv_path = Path(args.csv)
-    csv_fields = [
-        "kernel",
-        "problem_idx",
-        "batch_count",
-        "M",
-        "N",
-        "K",
-        "device",
-        "latency_ms",
-        "tflops",
-        "non_zero",
-        "max_rel",
-        "verified",
-    ]
-    csv_file = open(csv_path, "w", newline="")
-    writer = csv.DictWriter(csv_file, fieldnames=csv_fields)
-    writer.writeheader()
-
-    worker_path = _THIS_DIR / "run_one_batched_gemm_kernel.py"
-    base_env = os.environ.copy()
-    base_env["GEMM_PYPATH"] = os.pathsep.join(
-        [str(_DISPATCHER_ROOT / "python"), str(_THIS_DIR)]
+    # The workers' fp8/bf8 host format follows the arch the kernels were built for.
+    stats = gfb.benchmark_on_devices(
+        problems, pairs, built_kernels, devices, args, worker_path, base_env,
+        csv_path, {"arch": arch}, dims=DIMS,
     )
 
-    work_q = queue.Queue()
-    for prob_idx, (prob, idx) in enumerate(zip(problems, pairs)):
-        prob_dict = {
-            "batch_count": int(prob["batch_count"]),
-            "M": int(prob["M"]),
-            "N": int(prob["N"]),
-            "K": int(prob["K"]),
-        }
-        for start in range(0, len(idx), args.batch_size):
-            batch = [(i, *built_kernels[i]) for i in idx[start : start + args.batch_size]]
-            work_q.put((prob_idx, prob_dict, batch))
-
-    io_lock = threading.Lock()
-    stats = {"measurements": 0, "failures": 0}
-    bench_t0 = time.perf_counter()
-
-    def device_thread(device_id):
-        while True:
-            try:
-                unit = work_q.get_nowait()
-            except queue.Empty:
-                return
-            rows, lines, n_fail = _run_batch_on_device(
-                device_id, unit, args, worker_path, base_env
-            )
-            with io_lock:
-                for ln in lines:
-                    print(ln)
-                for row in rows:
-                    writer.writerow(row)
-                csv_file.flush()
-                stats["measurements"] += len(rows)
-                stats["failures"] += n_fail
-            work_q.task_done()
-
-    threads = [
-        threading.Thread(target=device_thread, args=(d,), daemon=True) for d in devices
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    bench_time = time.perf_counter() - bench_t0
-    csv_file.close()
-
-    # ========================================================================
-    # Summary
-    # ========================================================================
-    print(f"\n{'=' * 80}")
-    print("BENCHMARK COMPLETE")
-    print(f"{'=' * 80}")
-    print(f"  Build time: {build_time:.0f}s")
-    print(f"  Benchmark time: {bench_time:.0f}s")
-    print(f"  Total time: {build_time + bench_time:.0f}s")
-    print(f"  Devices used: {len(devices)}")
-    print(f"  Successful measurements: {stats['measurements']}")
-    print(f"  Failed measurements: {stats['failures']}")
-    print(f"  Output: {csv_path}")
+    gfb.print_summary(build_time, stats, devices, csv_path)
     return 1 if stats["failures"] else 0
 
 
