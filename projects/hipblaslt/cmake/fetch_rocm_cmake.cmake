@@ -10,7 +10,7 @@ if(NOT ROCmCMakeBuildTools_FOUND)
     message(STATUS "ROCmCMakeBuildTools not found. Fetching from source...")
     include(FetchContent)
     fetchcontent_declare(
-        rocm-cmake GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git GIT_TAG 965f5cacfdf0acb658df58b7665d802a7bebbc0a
+        rocm-cmake GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git GIT_TAG 512ae4dc498430277d4e827b701aa25a3530f648
         GIT_SHALLOW TRUE
     )
 
