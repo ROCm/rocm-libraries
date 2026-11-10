@@ -36,6 +36,7 @@
 #include "rocke/instance_conv_direct_grouped_dw_dgrad.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 #include "rocke/error_boundary.hpp"
 
@@ -49,12 +50,6 @@ int dgs_pymod(int a, int m)
 {
     int r = a % m;
     return r < 0 ? r + m : r;
-}
-
-void dgs_set_err(rocke_ir_builder_t* b)
-{
-    if(b->status == ROCKE_OK)
-        b->status = ROCKE_ERR_VALUE;
 }
 
 /* pad_w_reason(p): only -1 (PAD) or a value of at least 0 is a column
@@ -126,6 +121,7 @@ struct dgs_ctx
     int stride;
     int n_slots;
     bool is_bf16;
+    const char* dtype;
     rocke_value_t* c0;
     rocke_value_t* c_half;
     rocke_value_t* oob_sentinel;
@@ -235,15 +231,16 @@ rocke_kernel_def_t* dgs_build_scalar(rocke_ir_builder_t* b,
     c.stride = stride;
     c.n_slots = stride * KH;
     c.is_bf16 = rocke_direct_conv_problem_is_bf16(p);
+    c.dtype = rocke_direct_conv_problem_dtype(p);
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
-    rocke_dconv_emit_params(
-        b, &c.params, "dgrad", rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p)));
+    rocke_dconv_emit_params(b, &c.params, "dgrad", rocke_dconv_io_type(b, c.dtype));
     rocke_value_t* p_Hi = c.params.p_Hi;
 
     c.c0 = rocke_b_const_i32(b, 0);
     rocke_value_t* c_groups = c.params.p_groups;
-    c.c_half = rocke_b_const_i32(b, 2);
+    /* Element bytes (the name predates fp32 storage). */
+    c.c_half = rocke_b_const_i32(b, rocke_dconv_elem_bytes(c.dtype));
     rocke_value_t* c_wave = rocke_b_const_i32(b, WAVE);
     c.oob_sentinel = rocke_b_const_i32(b, (int32_t)(((int64_t)1 << 31) - 1));
     rocke_value_t* zero_f32 = rocke_b_const_f32(b, 0.0);
@@ -295,8 +292,7 @@ rocke_kernel_def_t* dgs_build_scalar(rocke_ir_builder_t* b,
             rocke_transforms_descriptor_offset(b, b_desc, w_names, w_vals, 4, &w_off, NULL);
             rocke_value_t* w_bytes = rocke_b_mul(b, w_off, c.c_half);
             rocke_value_t* safe_w = rocke_b_select(b, c.ch_ok, w_bytes, c.oob_sentinel);
-            rocke_value_t* w_h = c.is_bf16 ? rocke_b_buffer_load_bf16(b, c.b_rsrc, safe_w, c.c0)
-                                           : rocke_b_buffer_load_f16(b, c.b_rsrc, safe_w, c.c0);
+            rocke_value_t* w_h = rocke_dconv_scalar_load(b, c.dtype, c.b_rsrc, safe_w, c.c0);
             rocke_value_t* w_cast = rocke_b_cast_to_f32(b, w_h);
             weights_f32[(size_t)r_const].push_back(rocke_b_select(b, c.ch_ok, w_cast, zero_f32));
         }
@@ -334,8 +330,7 @@ rocke_kernel_def_t* dgs_build_scalar(rocke_ir_builder_t* b,
             rocke_value_t* rc = rocke_b_add(b, row_off, col_term);
             rocke_value_t* s_term = rocke_b_select(b, ho_ok, rc, c.oob_sentinel);
             rocke_value_t* v_off = rocke_b_add(b, c.ch_off, s_term);
-            out.push_back(c.is_bf16 ? rocke_b_buffer_load_bf16(b, c.a_rsrc, v_off, c.c0)
-                                    : rocke_b_buffer_load_f16(b, c.a_rsrc, v_off, c.c0));
+            out.push_back(rocke_dconv_scalar_load(b, c.dtype, c.a_rsrc, v_off, c.c0));
         }
     };
     /* Python: flush(y_v, jj, slots_flat). */
@@ -351,18 +346,7 @@ rocke_kernel_def_t* dgs_build_scalar(rocke_ir_builder_t* b,
                 const int flat = slot * BLOCK_W + j;
                 rocke_value_t* rc = rocke_b_add(b, row_off, c.st_terms[(size_t)j]);
                 rocke_value_t* safe_d = rocke_b_select(b, hi_ok, rc, c.oob_sentinel);
-                if(c.is_bf16)
-                    rocke_b_buffer_store_bf16(b,
-                                              c.d_rsrc,
-                                              safe_d,
-                                              c.c0,
-                                              rocke_b_trunc_f32_to_bf16(b, slots[(size_t)flat]));
-                else
-                    rocke_b_buffer_store_f16(b,
-                                             c.d_rsrc,
-                                             safe_d,
-                                             c.c0,
-                                             rocke_b_trunc_f32_to_f16(b, slots[(size_t)flat]));
+                rocke_dconv_scalar_store(b, c.dtype, c.d_rsrc, safe_d, c.c0, slots[(size_t)flat]);
                 slots[(size_t)flat] = zero_f32;
             }
         }
@@ -780,11 +764,13 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_kernel_name(
         parts[n_parts++] = cpl_buf;
     }
     {
-        const char* flag_names[1] = {"bf16"};
-        int flag_on[1];
+        /* flags=_scalar_name_flags(dtype) */
+        const char* flag_names[2] = {"bf16", "f32"};
+        int flag_on[2];
         flag_on[0] = rocke_direct_conv_problem_is_bf16(&spec->problem) ? 1 : 0;
+        flag_on[1] = rocke_dconv_scalar_f32_flag(rocke_direct_conv_problem_dtype(&spec->problem));
         return rocke_kernel_name_join(
-            spec->name, parts, n_parts, flag_names, flag_on, 1, out, out_cap, NULL);
+            spec->name, parts, n_parts, flag_names, flag_on, 2, out, out_cap, NULL);
     }
 }
 
@@ -795,19 +781,11 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_validate(
     if(spec == NULL)
         return ROCKE_ERR_VALUE;
     p = &spec->problem;
-    {
-        const char* dt = rocke_direct_conv_problem_dtype(p);
-        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
-        {
-            if(reason && reason_cap > 0)
-                snprintf(reason,
-                         reason_cap,
-                         "DirectDepthwiseDgradStreamSpec: unsupported dtype '%s'; expected fp16 "
-                         "or bf16",
-                         dt);
-            return ROCKE_ERR_VALUE;
-        }
-    }
+    if(rocke_dconv_scalar_dtype_reason("DirectDepthwiseDgradStreamSpec",
+                                       rocke_direct_conv_problem_dtype(p),
+                                       reason,
+                                       reason_cap))
+        return ROCKE_ERR_VALUE;
     if(p->cpg != 1 || p->kpg != 1)
     {
         if(reason && reason_cap > 0)
@@ -847,19 +825,11 @@ bool rocke_direct_depthwise_dgrad_stream_is_valid_spec(
         return false;
     if(dgs_stream_padding_reason(p, "", reason, reason_cap))
         return false;
-    {
-        const char* dt = rocke_direct_conv_problem_dtype(p);
-        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
-        {
-            if(reason && reason_cap > 0)
-                snprintf(reason,
-                         reason_cap,
-                         "DirectDepthwiseDgradStreamSpec: unsupported dtype '%s'; expected fp16 "
-                         "or bf16",
-                         dt);
-            return false;
-        }
-    }
+    if(rocke_dconv_scalar_dtype_reason("DirectDepthwiseDgradStreamSpec",
+                                       rocke_direct_conv_problem_dtype(p),
+                                       reason,
+                                       reason_cap))
+        return false;
     if(p->cpg != 1 || p->kpg != 1)
     {
         if(reason && reason_cap > 0)
@@ -870,6 +840,11 @@ bool rocke_direct_depthwise_dgrad_stream_is_valid_spec(
     {
         if(reason && reason_cap > 0)
             snprintf(reason, reason_cap, "cpl must be 1, 2, 4 or 8 (got %d)", spec->cpl);
+        return false;
+    }
+    if(spec->cpl > 1 && rocke_dconv_is_f32_storage(p->dtype))
+    {
+        rocke_spec_set_reason(reason, reason_cap, ROCKE_DCONV_CPL_16BIT_ONLY);
         return false;
     }
     if(p->groups % spec->cpl)
@@ -916,10 +891,15 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_streaming(
         return NULL;
     if(arch == NULL)
         arch = "gfx950";
-    if(rocke_direct_depthwise_dgrad_stream_validate(spec, reason, sizeof reason) != ROCKE_OK
-       || !rocke_direct_depthwise_dgrad_stream_is_valid_spec(spec, arch, reason, sizeof reason))
+    if(rocke_direct_depthwise_dgrad_stream_validate(spec, reason, sizeof reason) != ROCKE_OK)
     {
-        dgs_set_err(b);
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
+        return NULL;
+    }
+    if(!rocke_direct_depthwise_dgrad_stream_is_valid_spec(spec, arch, reason, sizeof reason))
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "invalid DirectDepthwiseDgradStreamSpec for %s: %s", arch, reason);
         return NULL;
     }
     if(spec->cpl > 1)

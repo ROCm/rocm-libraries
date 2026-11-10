@@ -42,6 +42,7 @@
 #include "rocke/instance_conv_direct_grouped_dw_dgrad.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 #include "rocke/error_boundary.hpp"
 
@@ -54,6 +55,8 @@ struct dwt_ctx
     rocke_ir_builder_t* b;
     const rocke_dconv_params_t* params;
     int is_bf16;
+    const char* dtype;
+    int EB; /* element bytes */
     int dgrad;
     int KH;
     int KW;
@@ -74,8 +77,7 @@ struct dwt_ctx
 /* Python: load(rsrc, off). */
 rocke_value_t* dwt_load(const dwt_ctx* c, rocke_value_t* rsrc, rocke_value_t* off)
 {
-    return c->is_bf16 ? rocke_b_buffer_load_bf16(c->b, rsrc, off, c->c0)
-                      : rocke_b_buffer_load_f16(c->b, rsrc, off, c->c0);
+    return rocke_dconv_scalar_load(c->b, c->dtype, rsrc, off, c->c0);
 }
 
 /* Python: load_w_row(r) -- raw weights of filter row r. */
@@ -88,15 +90,18 @@ void dwt_load_w_row(const dwt_ctx* c, rocke_value_t* r, rocke_value_t** out)
     {
         /* Rotated filter: row r is stored row KH-1-r, reversed. */
         r = rocke_b_sub(b, rocke_b_const_i32(b, c->KH - 1), r);
-        row_off = rocke_b_add(b, c->w_ch_off, rocke_b_mul(b, r, rocke_b_const_i32(b, c->KW * 2)));
+        row_off
+            = rocke_b_add(b, c->w_ch_off, rocke_b_mul(b, r, rocke_b_const_i32(b, c->KW * c->EB)));
         for(s = 0; s < c->KW; ++s)
-            out[s] = dwt_load(
-                c, c->b_rsrc, rocke_b_add(b, row_off, rocke_b_const_i32(b, 2 * (c->KW - 1 - s))));
+            out[s]
+                = dwt_load(c,
+                           c->b_rsrc,
+                           rocke_b_add(b, row_off, rocke_b_const_i32(b, c->EB * (c->KW - 1 - s))));
         return;
     }
-    row_off = rocke_b_add(b, c->w_ch_off, rocke_b_mul(b, r, rocke_b_const_i32(b, c->KW * 2)));
+    row_off = rocke_b_add(b, c->w_ch_off, rocke_b_mul(b, r, rocke_b_const_i32(b, c->KW * c->EB)));
     for(s = 0; s < c->KW; ++s)
-        out[s] = dwt_load(c, c->b_rsrc, rocke_b_add(b, row_off, rocke_b_const_i32(b, 2 * s)));
+        out[s] = dwt_load(c, c->b_rsrc, rocke_b_add(b, row_off, rocke_b_const_i32(b, c->EB * s)));
 }
 
 /* Python: load_row(hi) -- raw input values of row hi, one per column. */
@@ -161,8 +166,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
         arch = "gfx950";
     if(!rocke_direct_depthwise_tiled_is_valid_spec(spec, arch, reason, sizeof reason))
     {
-        if(b->status == ROCKE_OK)
-            b->status = ROCKE_ERR_VALUE;
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "invalid DirectDepthwiseTiledSpec for %s: %s", arch, reason);
         return NULL;
     }
     if(spec->cpl > 1)
@@ -190,7 +195,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
          * block already binds the dY strides to the A slot. */
         rocke_value_t* t;
         rocke_dconv_emit_params(
-            b, &params, "dgrad", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+            b, &params, "dgrad", rocke_dconv_io_type(b, rocke_direct_conv_problem_dtype(p)));
         t = params.p_Hi;
         params.p_Hi = params.p_Ho;
         params.p_Ho = t;
@@ -203,7 +208,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
     else
     {
         rocke_dconv_emit_params(
-            b, &params, "fwd", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+            b, &params, "fwd", rocke_dconv_io_type(b, rocke_direct_conv_problem_dtype(p)));
         PAD_W = PAD;
     }
 
@@ -211,6 +216,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
     c.b = b;
     c.params = &params;
     c.is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? 1 : 0;
+    c.dtype = rocke_direct_conv_problem_dtype(p);
+    c.EB = rocke_dconv_elem_bytes(c.dtype);
     c.dgrad = spec->dgrad ? 1 : 0;
     c.KH = KH;
     c.KW = KW;
@@ -221,7 +228,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
     c.c0 = rocke_b_const_i32(b, 0);
     c1 = rocke_b_const_i32(b, 1);
     c_wave = rocke_b_const_i32(b, WAVE);
-    c.c_half = rocke_b_const_i32(b, 2);
+    c.c_half = rocke_b_const_i32(b, c.EB); /* element bytes */
     c.oob_sentinel = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
     zero_f32 = rocke_b_const_f32(b, 0.0);
 
@@ -457,12 +464,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
                         b, d_desc, off_names, off_vals, 4, &d_off, &d_valid);
                 }
                 safe_d = rocke_b_select(b, ok, rocke_b_mul(b, d_off, c.c_half), c.oob_sentinel);
-                if(c.is_bf16)
-                    rocke_b_buffer_store_bf16(
-                        b, d_rsrc, safe_d, c.c0, rocke_b_trunc_f32_to_bf16(b, acc));
-                else
-                    rocke_b_buffer_store_f16(
-                        b, d_rsrc, safe_d, c.c0, rocke_b_trunc_f32_to_f16(b, acc));
+                rocke_dconv_scalar_store(b, c.dtype, d_rsrc, safe_d, c.c0, acc);
             }
         }
     }

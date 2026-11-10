@@ -228,29 +228,45 @@ def test_f64_batched_active_tile_skip_numeric(tile, pipeline, epilogue):
                     np.testing.assert_array_equal(c[z, rows], expected[z, rows])
 
 
+# Refusals that follow the target: the warp-tile message and the LDS cap differ.
+_F64_GEMM_REFUSALS = {
+    "gfx942": {
+        "warp_tile": "fp64 GEMM supports only warp_tile (16, 16, 4)",
+        "lds_k_pad": (64, "LDS budget 81920 > 65536 cap"),
+    },
+    "gfx950": {
+        "warp_tile": "unsupported fp64 warp_tile (4, 4, 4) on gfx950",
+        "lds_k_pad": (160, "LDS budget 180224 > 163840 cap"),
+    },
+}
+
+
+@pytest.mark.parametrize("arch", sorted(_F64_GEMM_REFUSALS))
 @pytest.mark.parametrize(
-    "spec, reason",
-    [
-        (
+    "case", ["warp_tile", "acc", "direct_to_lds_pad_k", "lds_k_pad"]
+)
+def test_f64_gemm_rejects_unsupported(arch, case):
+    expected = _F64_GEMM_REFUSALS[arch]
+    pad, pad_reason = expected["lds_k_pad"]
+    spec, reason = {
+        "warp_tile": (
             _spec((64, 64, 16, 2, 2), "mem", "default", warp_tile=(4, 4, 4)),
-            "fp64 GEMM supports only warp_tile (16, 16, 4)",
+            expected["warp_tile"],
         ),
-        (
+        "acc": (
             _spec((64, 64, 16, 2, 2), "mem", "default", acc="fp32"),
             "only supports fp64 accumulation for fp64",
         ),
-        (
+        "direct_to_lds_pad_k": (
             _spec((64, 64, 16, 2, 2), "compv3", "default", True, direct_to_lds=True),
             "fp64 GEMM does not support direct_to_lds with pad_k",
         ),
-        (
-            _spec((64, 64, 16, 2, 2), "compv4", "default", lds_k_pad=64),
-            "LDS budget 81920 > 65536 cap",
+        "lds_k_pad": (
+            _spec((64, 64, 16, 2, 2), "compv4", "default", lds_k_pad=pad),
+            pad_reason,
         ),
-    ],
-)
-def test_f64_gemm_rejects_unsupported(spec, reason):
-    _assert_both_engines_refuse(spec, "gfx942", reason)
+    }[case]
+    _assert_both_engines_refuse(spec, arch, reason)
 
 
 def test_f64_gemm_targets_are_the_documented_ones():
@@ -305,6 +321,10 @@ def test_f64_gemm_direct_to_lds_refused_without_dma(arch):
     )
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the single-buffer fallback sizes follow the gfx942 64 KiB LDS cap; gfx950 has 160 KiB",
+)
 @pytest.mark.parametrize(
     "lds_k_pad, smem_bytes", [(16, 32768), (32, 49152), (48, 65536)]
 )

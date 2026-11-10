@@ -91,7 +91,7 @@ def _emit_dual_period_kernel(plr=0):
     assert sol.get("Valid"), "dual-period MXFP8 solution did not validate"
     assert sol.get("_DualPeriodMXFP8"), "solution did not take the dual-period path"
 
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.create_library.run import (
         generateKernelObjectsFromSolutions, processKernelSource)
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.Common.Types import DebugConfig

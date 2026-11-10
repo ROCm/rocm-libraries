@@ -32,12 +32,14 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 from rocke.core.arch import ArchTarget
 from rocke.core.backend import BackendError, _lower_via_cpp_engine
-from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, VectorType
+from rocke.core.ir import BF16, F32, TF32, IRBuilder, KernelDef, VectorType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import (
     LLVM_FLAVORS,
@@ -75,10 +77,37 @@ def _mma_kernel(op_id: str, *, bare: bool = False) -> KernelDef:
         # as logical TF32, not an fp32 vector.
         a = builder.bitcast(a, VectorType(TF32, atom.a_frag_len))
         b = builder.bitcast(b, VectorType(TF32, atom.b_frag_len))
-    c = builder.vector_splat(builder.const_f32(0.0), atom.c_frag_len)
+    else:
+        a = builder.param("a_bf16", VectorType(BF16, atom.a_frag_len))
+        b = builder.param("b_bf16", VectorType(BF16, atom.b_frag_len))
+    c = builder.vector_splat(builder.const_f32(0.0), atom.srcs[2].frag_len)
     builder.mma(op_id if bare else atom, a, b, c)
     builder.ret()
     return builder.kernel
+
+
+@pytest.mark.parametrize("op_id", _EMULATED)
+@pytest.mark.parametrize("handwritten", [False, True])
+def test_example_initializers_use_source_and_stores_use_result(op_id, handwritten):
+    from rocke.examples.gfx950.xf32.bf16x3_parity import (
+        _emulated_kernel,
+        _handwritten_kernel,
+    )
+
+    target = ArchTarget.from_gfx(_ARCH)
+    atom = target.mma.by_op_id(_EMULATED[op_id] if handwritten else op_id)
+    # Keep the physical source width legal for TF32 validation; vary only dst.
+    atom = replace(atom, dst=replace(atom.dst, frag_len=atom.dst.frag_len + 1))
+    kernel = (
+        _handwritten_kernel(atom, (("a_big", "b_big"),))
+        if handwritten
+        else _emulated_kernel(atom)
+    )
+    mma = next(op for op in kernel.body.ops if op.name == "tile.mma")
+    assert mma.operands[2].type == VectorType(F32, atom.srcs[2].frag_len)
+    assert mma.result.type == VectorType(F32, atom.dst.frag_len)
+    stores = [op for op in kernel.body.ops if op.name == "memref.global_store_typed"]
+    assert len(stores) == atom.dst.frag_len
 
 
 def _lanes(value: int, n: int) -> str:

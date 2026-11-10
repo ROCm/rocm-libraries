@@ -1553,7 +1553,9 @@ void check(hipStream_t                   stream,
             hipblaslt_error += norm_error;
             if(arg.norm_check_assert)
             {
-                CHECK_SUCCESS(norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+                CHECK_SUCCESS(
+                    can_compare
+                    && norm_check(worst_error, To, arg.compute_type, arg.a_type, arg.b_type));
             }
             if(!can_compare)
             {
@@ -1589,21 +1591,27 @@ void check(hipStream_t                   stream,
                 }
                 if(!arg.gradient && arg.use_e)
                 {
-                    double norm_error = 0.0;
-                    norm_error        = std::abs(norm_check_general('F',
-                                                             M[gemmIdx],
-                                                             N[gemmIdx],
-                                                             lde[gemmIdx],
-                                                             stride_e[gemmIdx],
-                                                             hE_gold[gemmIdx].buf(),
-                                                             hE[gemmIdx].buf(),
-                                                             num_batches[gemmIdx],
-                                                             Taux));
-                    hipblaslt_error += norm_error;
-                    if(arg.norm_check_assert)
+                    for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                     {
-                        CHECK_SUCCESS(
-                            norm_check(norm_error, Taux, arg.compute_type, arg.a_type, arg.b_type));
+                        const auto   offset = batch * stride_e[gemmIdx] * realDataTypeSize(Taux);
+                        const double batch_error
+                            = std::abs(norm_check_general('F',
+                                                          M[gemmIdx],
+                                                          N[gemmIdx],
+                                                          lde[gemmIdx],
+                                                          0,
+                                                          hE_gold[gemmIdx].as<char>() + offset,
+                                                          hE[gemmIdx].as<char>() + offset,
+                                                          1,
+                                                          Taux));
+                        hipblaslt_error += batch_error;
+                        if(arg.norm_check_assert)
+                        {
+                            CHECK_SUCCESS(
+                                norm_check_general_supports(Taux)
+                                && norm_check(
+                                    batch_error, Taux, arg.compute_type, arg.a_type, arg.b_type));
+                        }
                     }
                 }
                 if(arg.gradient && arg.bias_vector)

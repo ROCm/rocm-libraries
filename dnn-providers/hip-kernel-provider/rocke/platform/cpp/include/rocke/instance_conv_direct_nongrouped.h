@@ -54,6 +54,14 @@
  * fragments staged as zeros). The merged group is the innermost coordinate of
  * the cell axis. grouped == false emits exactly the dense kernel.
  *
+ * fp32 storage (problem.dtype "fp32" / "tf32"): 4-byte elements, dwordx4 global
+ * and LDS pieces (the weight array split into 16-byte planes for an 8-element
+ * fragment), and each logical tile x tile atom issued on the arch's catalog
+ * atoms by rocke_dconv_mma_f32_logical (instance_conv_direct_grouped_internal.h):
+ * "tf32" feeds TF32 operands (gfx950: the emulated BF16x3 xf32 atoms; gfx942: the
+ * native xf32 atoms), "fp32" the exact fp32 atoms. The plain kernel only:
+ * grouped and split_c > 1 refuse it. fp16 / bf16 emit exactly as before.
+ *
  * Optional Python knobs (`iglp: int | None`, `waves_per_eu: int | None`) map to
  * the sentinels ROCKE_DCONV_NONGROUPED_IGLP_NONE / ROCKE_DCONV_NONGROUPED_WAVES_PER_EU_NONE.
  * Python rejects the sentinel values themselves (iglp < 0, waves_per_eu < 1) and
@@ -93,7 +101,7 @@ extern "C" {
  *      waves_n: int = 4                    # waves splitting tile_h
  *      atom: str = "32x32x16"              # 32x32x16 | 32x32x8 | 16x16x32 | 16x16x16
  *      wave_size: int = 64
- *      lds_pad: int = 8
+ *      lds_pad: int = 8                    # elements; fp32 storage wants 4
  *      chiplet_swizzle: bool = True
  *      swizzle_wgm: int = 8
  *      chiplet_chunk: int = 64
@@ -117,7 +125,8 @@ typedef struct rocke_direct_conv_nongrouped_spec
     int waves_n; /* default 4   */
     const char* atom; /* default "32x32x16" */
     int wave_size; /* default 64  */
-    int lds_pad; /* default 8   */
+    int lds_pad; /* default 8; elements (16 bytes is the conflict-free pad:
+                  * 8 halves, 4 floats) */
     bool chiplet_swizzle; /* default true  */
     int swizzle_wgm; /* default 8   */
     int chiplet_chunk; /* default 64  */
@@ -149,9 +158,11 @@ void rocke_direct_conv_nongrouped_grid(const rocke_direct_conv_nongrouped_spec_t
 long long
     rocke_direct_conv_nongrouped_workspace_bytes(const rocke_direct_conv_nongrouped_spec_t* spec);
 
-/* kernel_name(): kernel_name_join(name, problem.short(), t{h}x{w}x{k}, ck{ck},
- * w{wm}x{wn}, a{atom}, g{wgm}|gnone, [db], [iglp{n}], [we{n}], [sc{n}],
- * [grp{group_merge}], [bf16]). */
+/* kernel_name(): kernel_name_join(name, problem.short(), [d{dh}x{dw}],
+ * t{h}x{w}x{k}, ck{ck}, w{wm}x{wn}, a{atom}, g{wgm}|gnone, [db], [iglp{n}],
+ * [we{n}], [sc{n}], [grp{group_merge}], [p{lds_pad}], [dtype]): p{lds_pad} only
+ * for fp32 storage with a pad other than 4; the dtype flag is empty for fp16
+ * and the dtype itself otherwise (bf16 / fp32 / tf32). */
 rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
     const rocke_direct_conv_nongrouped_spec_t* spec, char* out, size_t out_cap);
 
@@ -162,8 +173,10 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
     const rocke_direct_conv_nongrouped_spec_t* spec, char* reason, size_t reason_cap);
 
 /* is_valid_nongrouped_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950".
- * Adds to validate(): stride in {1, 2}, the MFMA atom present on arch, wave
- * size / threads-per-block / LDS capacity within the arch limits. */
+ * Adds to validate(): stride in {1, 2}, the MFMA atom present on arch (fp32
+ * storage: an fp32 / TF32 catalog atom of the tile that issues the fragment,
+ * split or zero-padded), wave size / threads-per-block / LDS capacity within
+ * the arch limits. */
 bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongrouped_spec_t* spec,
                                                 const char* arch,
                                                 char* reason,

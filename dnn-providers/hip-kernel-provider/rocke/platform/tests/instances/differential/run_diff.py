@@ -169,7 +169,8 @@ def collect_ref_shas(results):
 
 
 MAX_CFG = 256  # default cap on config enumeration per family
-FAMILY_MAX_CFG = {"gfx1250_lowering": 512}
+# conv_direct_grouped's fp32 / tf32 configs start at index 201 and run past 256.
+FAMILY_MAX_CFG = {"gfx1250_lowering": 512, "conv_direct_grouped": 512}
 TIMEOUT = 120  # seconds per emitter invocation
 
 
