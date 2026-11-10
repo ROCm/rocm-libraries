@@ -20,9 +20,16 @@
 
 #include <SdmaQueue.hpp>
 
+#include <linux/mempolicy.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+#include <cerrno>
 #include <cstdint>
 #include <exception>
+#include <fstream>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hipblaslt_bench
@@ -119,6 +126,29 @@ namespace hipblaslt_bench
             return false;                                                         \
         }                                                                         \
     } while(0)
+
+    // Sets this thread's memory policy to MPOL_PREFERRED on `device`'s NUMA node, if it
+    // has one; warns if the kernel refuses.
+    inline bool prefer_device_numa_node(int device)
+    {
+        char busId[64] = {};
+        CHECK_HIP_RC(hipDeviceGetPCIBusId(busId, sizeof(busId), device));
+        std::ifstream numaNode(std::string("/sys/bus/pci/devices/") + busId + "/numa_node");
+        int           node = -1;
+        if(!(numaNode >> node) || node < 0)
+            return true;
+
+        std::vector<unsigned long> mask(node / 64 + 1);
+        mask[node / 64] = 1ul << (node % 64);
+        if(syscall(SYS_set_mempolicy, MPOL_PREFERRED, mask.data(), mask.size() * 64) != 0)
+        {
+            const int err = errno;
+            hipblaslt_cerr << "warning: set_mempolicy(MPOL_PREFERRED, node " << node
+                           << ") -> errno " << err
+                           << "; memory is not bound (in a container, add --cap-add SYS_NICE)\n";
+        }
+        return true;
+    }
 
     inline int64_t shard_of(const Arguments& arg)
     {

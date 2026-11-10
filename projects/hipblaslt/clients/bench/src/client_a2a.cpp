@@ -18,8 +18,9 @@ try
     Arguments arg;
     arg.init();
 
-    bool verify = false;
-    bool timing = false;
+    bool verify   = false;
+    bool timing   = false;
+    bool numaBind = false;
     // 0 marks "not given on the command line".
     int a2a_world  = 0;
     int sdmaRotate = kSdmaRotateDefault;
@@ -70,6 +71,10 @@ try
          " engines. Ignored on other architectures, which spread the remote peer queues over"
          " the recommended engines")
 
+        ("numa-bind",
+         value<bool>(&numaBind)->default_value(false),
+         "Prefer the device's NUMA node for this process's memory (MPOL_PREFERRED)")
+
         ("verify,v",
          value<bool>(&verify)->default_value(false),
          "Check every launch of a pass run before the timed one")
@@ -100,6 +105,9 @@ try
         return 1;
     }
     arg.a2a_world = uint8_t(env.world);
+
+    if(numaBind && !prefer_device_numa_node(env.local_rank))
+        return 1;
 
     hipblaslt_bench::TcpRendezvous rendezvous(env, kRendezvousTimeoutSec);
     if(!join_group(env, rendezvous, HIPBLASLT_DEVICE_COMM_MAX_WORLD))
