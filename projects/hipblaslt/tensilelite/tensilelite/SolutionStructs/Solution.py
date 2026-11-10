@@ -90,6 +90,7 @@ from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
+from ..Components.TDMStore import tdmStoreLdsBytes, tdmStoreRejectReason
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
@@ -3814,6 +3815,14 @@ class Solution(collections.abc.Mapping):
         printRejectionReason):
       return
 
+    if state["TDMStoreInst"] and not isaInfoMap[isa].asmCaps["HasTDM"]:
+      reject(state, printRejectionReason, "TDMStoreInst requires asmCaps HasTDM")
+      return
+    tdmStoreReject = tdmStoreRejectReason(state)
+    if tdmStoreReject:
+      reject(state, printRejectionReason, tdmStoreReject)
+      return
+
     tdmInst: int = state["TDMInst"]
     state["enableTDMA"] = bool(tdmInst & 0x01)
     state["enableTDMB"] = bool(tdmInst & 0x02)
@@ -7274,6 +7283,9 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "reject to reduce number of kernels")
         elif state["VectorWidthA"] > 1:
           reject(state, printRejectionReason, "reject to reduce number of kernels")
+      # tdmStoreRejectReason accepts the auto value; check the width it resolved to.
+      if state["TDMStoreInst"] and state["StoreRemapVectorWidth"]:
+        reject(state, printRejectionReason, "TDMStoreInst does not support StoreRemapVectorWidth")
 
     # GuaranteeNoPartial
     # UseSubtileImpl does its own edge masking (see Components/Subtile), so mark
@@ -7539,7 +7551,13 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetBias"] = epilogueOffset
       state["LdsOffsetBiasNonGSU"] = epilogueOffset
       state["LdsOffsetBiasGSU"] = epilogueOffset
-    ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize)
+    # The TDM block stages the D tile from a 256-byte boundary after the vectors, which every store
+    # batch reads, so the two must not overlap.
+    tdmStoreBytes = tdmStoreLdsBytes(state)
+    state["_TDMStoreLdsOffset"] = int(math.ceil((state["LdsOffsetBias"] + epilogueSize) / 256) * 256) \
+      if tdmStoreBytes and epilogueSize else 0
+    assert not (tdmStoreBytes and epilogueSize) or state["_TDMStoreLdsOffset"] >= state["LdsOffsetBias"] + epilogueSize
+    ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize, state["_TDMStoreLdsOffset"] + tdmStoreBytes)
 
     state["LdsBytesNoAmax"] = ldsNumBytes
     if state["ProblemType"]["OutputAmaxD"]:
