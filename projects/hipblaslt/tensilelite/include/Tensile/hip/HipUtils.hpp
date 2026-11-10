@@ -169,10 +169,12 @@ namespace TensileLite
             size_t expectedStride       = 1;
 
             // Optimize the number of copy operations by coalescing all the
-            // dimensions that are contiguous in memory.
+            // dimensions that are contiguous in memory. A zero-stride dimension
+            // (a bias shared by all batches) repeats the same elements, so it is
+            // not coalesced: that would copy the wrong number of elements.
             for(size_t i = 0; i < desc.dimensions(); i++)
             {
-                if(strides[i] > expectedStride)
+                if(strides[i] > expectedStride || (i > 0 && strides[i] == 0))
                     break;
 
                 contiguousDimensions = i + 1;
@@ -222,10 +224,12 @@ namespace TensileLite
             size_t expectedStride       = 1;
 
             // Optimize the number of copy operations by coalescing all the
-            // dimensions that are contiguous in memory.
+            // dimensions that are contiguous in memory. A zero-stride dimension
+            // (a bias shared by all batches) repeats the same elements, so it is
+            // not coalesced: that would copy the wrong number of elements.
             for(size_t i = 0; i < desc.dimensions(); i++)
             {
-                if(strides[i] > expectedStride)
+                if(strides[i] > expectedStride || (i > 0 && strides[i] == 0))
                     break;
 
                 contiguousDimensions = i + 1;
