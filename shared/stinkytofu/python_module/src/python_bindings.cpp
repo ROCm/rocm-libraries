@@ -964,6 +964,20 @@ NB_MODULE(_stinkytofu, m) {
         nb::arg("group3") = std::nullopt, nb::arg("comment") = "",
         "Create a TensorLoadToLds instruction");
 
+    // TensorStoreFromLds - Higher-level tensor store operation
+    m.def(
+        "TensorStoreFromLds",
+        [](const StinkyRegister& group0, const StinkyRegister& group1,
+           std::optional<StinkyRegister> group2, std::optional<StinkyRegister> group3,
+           const std::string& comment) {
+            return makeLogicalInstructionShared(
+                TensorStoreFromLds(group0, group1, group2 ? &(*group2) : nullptr,
+                                   group3 ? &(*group3) : nullptr, comment));
+        },
+        nb::arg("group0"), nb::arg("group1"), nb::arg("group2") = std::nullopt,
+        nb::arg("group3") = std::nullopt, nb::arg("comment") = "",
+        "Create a TensorStoreFromLds instruction");
+
     // Label - Control flow label
     m.def(
         "Label",
