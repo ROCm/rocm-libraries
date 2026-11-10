@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 # CMake stages the standalone generator and its private imports beside installed
@@ -67,6 +69,15 @@ class SupportComparisonTest(unittest.TestCase):
                     }
                 },
                 "canonical": {},
+                "probe_contracts": (
+                    {
+                        "a.b": G._probe_contract(
+                            G.ProbeSpec("declare i32 @llvm.test(i32)", None, None)
+                        )
+                    }
+                    if status == G.STATUS_OK
+                    else {}
+                ),
                 "processors": {arch: {"accepted": True} for arch in tc["arches"]},
             }
         )
@@ -130,22 +141,46 @@ class SupportComparisonTest(unittest.TestCase):
                     [],
                 )
 
-    def test_successful_cells_require_an_accepted_processor(self):
-        valid = json.loads(self._doc())
-        invalid = json.loads(self._doc())
-        invalid["processors"][self.ARCH] = {
-            "accepted": False,
-            "evidence": "processor diagnostic",
-        }
-        self._assert_invalid_on_either_or_both_sides(
-            valid, invalid, f"a.b/{self.ARCH}", "status 'ok'", "accepted=False"
-        )
-        # Rejection is independent of whether the other column would count it
-        # as a cell gain as well as a processor-name gain.
-        unavailable = json.loads(self._doc(G.STATUS_ARCH_ABSENT))
-        self._assert_invalid_on_either_or_both_sides(
-            unavailable, invalid, f"a.b/{self.ARCH}", "accepted=False"
-        )
+    def test_measured_arch_cells_require_an_accepted_processor(self):
+        for status in (G.STATUS_OK, G.STATUS_ARCH_ABSENT):
+            with self.subTest(status=status):
+                invalid = json.loads(self._doc(status))
+                invalid["processors"][self.ARCH] = {
+                    "accepted": False,
+                    "evidence": "processor diagnostic",
+                }
+                for other_status in (G.STATUS_OK, G.STATUS_ARCH_ABSENT):
+                    valid = json.loads(self._doc(other_status))
+                    self._assert_invalid_on_either_or_both_sides(
+                        valid,
+                        invalid,
+                        f"a.b/{self.ARCH}",
+                        f"status {status!r}",
+                        "accepted=False",
+                    )
+                    self.assertEqual(
+                        G._compare_support(
+                            json.dumps(invalid), json.dumps(valid)
+                        ).changes["gain"],
+                        [],
+                    )
+
+    def test_flavor_axis_and_no_data_can_precede_rejected_processors(self):
+        for status in (
+            G.STATUS_NAME_ABSENT,
+            G.STATUS_TARGET_UNSUPPORTED,
+            G.STATUS_TOOLCHAIN_CRASH,
+            G.STATUS_TOOLCHAIN_TIMEOUT,
+        ):
+            with self.subTest(status=status):
+                before = json.loads(self._doc(status))
+                before["processors"][self.ARCH] = {
+                    "accepted": False,
+                    "evidence": "processor diagnostic",
+                }
+                self.assertEqual(
+                    G._compare_support(json.dumps(before), self._doc()).failures, []
+                )
 
     def test_non_ok_cells_require_diagnostic_evidence(self):
         for status in sorted(_NEEDS_EVIDENCE - {G.STATUS_PROBE_ERROR}):
@@ -222,6 +257,204 @@ class SupportComparisonTest(unittest.TestCase):
                 self.assertEqual(gain.failures, [])
                 self.assertEqual(len(gain.changes["gain"]), 1)
         self.assertEqual(G._compare_support(self._doc(), self._doc()).failures, [])
+
+    def test_positive_probe_contract_changes_fail(self):
+        for old, new in (
+            (
+                G.ProbeSpec("declare i32 @llvm.test(i32)", None, None),
+                G.ProbeSpec("declare i32 @llvm.test(i32 immarg)", None, None),
+            ),
+            (
+                G.ProbeSpec("declare i32 @llvm.test(i32 immarg)", None, None),
+                G.ProbeSpec("declare i32 @llvm.test(i32)", None, None),
+            ),
+            (
+                G.ProbeSpec("declare i32 @llvm.test(i32)", 1, None),
+                G.ProbeSpec("declare i32 @llvm.test(i32)", 4, None),
+            ),
+            (
+                G.ProbeSpec("declare i32 @llvm.test(i32)", None, None),
+                G.ProbeSpec("declare i64 @llvm.test(i64)", None, None),
+            ),
+        ):
+            with self.subTest(old=old, new=new):
+                before, after = json.loads(self._doc()), json.loads(self._doc())
+                before["probe_contracts"]["a.b"] = G._probe_contract(old)
+                after["probe_contracts"]["a.b"] = G._probe_contract(new)
+                for a, b in ((before, after), (after, before)):
+                    comparison = G._compare_support(json.dumps(a), json.dumps(b))
+                    self.assertIn(
+                        f"a.b/{self.ARCH}: positive probe contract changed",
+                        "; ".join(comparison.failures),
+                    )
+                    self.assertIn("baseline=", "; ".join(comparison.failures))
+                    self.assertIn("current=", "; ".join(comparison.failures))
+
+    def test_contract_describes_the_operands_actually_rendered(self):
+        spec = G.ProbeSpec(
+            "declare void @llvm.test(i32, i1 immarg, i32 immarg, ptr, ptr addrspace(3), ptr addrspace(8), metadata)",
+            4,
+            1,
+        )
+        contract = G._probe_contract(spec)
+        self.assertEqual(
+            contract,
+            {
+                "version": G.PROBE_CONTRACT_VERSION,
+                "return_type": "void",
+                "operands": [
+                    {"type": "i32", "source": "literal", "value": "4"},
+                    {"type": "i1", "source": "immediate", "value": "true"},
+                    {"type": "i32", "source": "immediate", "value": "1"},
+                    {"type": "ptr", "source": "base_pointer"},
+                    {"type": "ptr addrspace(3)", "source": "addrspacecast"},
+                    {"type": "ptr addrspace(8)", "source": "poison"},
+                    {"type": "metadata", "source": "agent_metadata"},
+                ],
+            },
+        )
+        self.assertEqual(G._validate_probe_contract(contract, "current"), [])
+        text, why = G._probe_module(spec.decl, "", spec.literal_ints, spec.imm_int)
+        self.assertEqual(why, "")
+        self.assertIn(
+            "@llvm.test(i32 4, i1 true, i32 1, ptr %base, ptr addrspace(3) %p4, ptr addrspace(8) poison, metadata !0)",
+            text,
+        )
+        batch, why = G._batch_probe_module([spec, spec], "")
+        self.assertEqual(why, "")
+        self.assertEqual(batch.count("i32 4, i1 true, i32 1"), 2)
+
+    def test_explicit_witness_agrees_with_the_effective_contract(self):
+        valid = json.loads(self._doc())
+        valid["probe_contracts"]["a.b"] = G._probe_contract(
+            G.ProbeSpec("declare i32 @llvm.test(i32 immarg)", None, 1)
+        )
+        valid["keys"]["a.b"][self.ARCH]["probe_imm"] = 1
+        invalid = json.loads(json.dumps(valid))
+        invalid["keys"]["a.b"][self.ARCH]["probe_imm"] = 2
+        self._assert_invalid_on_either_or_both_sides(
+            valid, invalid, "probe_imm disagrees"
+        )
+
+    def test_prune_validates_columns_before_using_record_mappings(self):
+        valid = json.loads(self._doc())
+        cases = ["{oops", "[]", "null"]
+        for field in ("keys", "canonical", "toolchain", "probe_contracts"):
+            invalid = json.loads(json.dumps(valid))
+            invalid[field] = None
+            cases.append(json.dumps(invalid))
+        for text in cases:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "intrinsic_arch_domain.llvm22.json"
+                path.write_text(text)
+                with (
+                    mock.patch.object(G, "DATA_DIR", Path(directory)),
+                    mock.patch.object(G, "_decl_table") as declarations,
+                ):
+                    self.assertEqual(G._prune(), 1)
+                declarations.assert_not_called()
+                self.assertEqual(path.read_text(), text)
+
+    def test_prune_removes_contracts_with_keys_without_inventing_metadata(self):
+        for legacy in (False, True):
+            with (
+                self.subTest(legacy=legacy),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                doc = json.loads(self._doc())
+                doc["keys"]["fabs.f32"] = doc["keys"].pop("a.b")
+                doc["keys"]["stale.key"] = doc["keys"]["fabs.f32"]
+                doc["probe_contracts"]["fabs.f32"] = doc["probe_contracts"].pop("a.b")
+                doc["probe_contracts"]["stale.key"] = doc["probe_contracts"]["fabs.f32"]
+                if legacy:
+                    del doc["probe_contracts"]
+                path = Path(directory) / "intrinsic_arch_domain.llvm22.json"
+                path.write_text(json.dumps(doc))
+                with mock.patch.object(G, "DATA_DIR", Path(directory)):
+                    self.assertEqual(G._prune(), 0)
+                expected = json.loads(json.dumps(doc))
+                del expected["keys"]["stale.key"]
+                if not legacy:
+                    del expected["probe_contracts"]["stale.key"]
+                self.assertEqual(json.loads(path.read_text()), expected)
+
+    def test_effective_contract_ignores_names_and_unused_attributes(self):
+        old = G.ProbeSpec("declare i32 @llvm.old(i32)", None, None)
+        new = G.ProbeSpec("declare noundef i32 @llvm.new(i32 noundef)", None, None)
+        self.assertEqual(G._probe_contract(old), G._probe_contract(new))
+        before, after = json.loads(self._doc()), json.loads(self._doc())
+        before["probe_contracts"]["a.b"] = G._probe_contract(old)
+        after["probe_contracts"]["a.b"] = G._probe_contract(new)
+        self.assertEqual(
+            G._compare_support(json.dumps(before), json.dumps(after)).failures, []
+        )
+
+    def test_missing_historical_positive_contract_cannot_pass(self):
+        valid = json.loads(self._doc())
+        for damage in ("mapping", "entry"):
+            with self.subTest(damage=damage):
+                invalid = json.loads(self._doc())
+                if damage == "mapping":
+                    del invalid["probe_contracts"]
+                else:
+                    invalid["probe_contracts"].clear()
+                self._assert_invalid_on_either_or_both_sides(
+                    valid, invalid, "probe contract"
+                )
+
+    def test_probe_contract_records_are_validated_not_defaulted(self):
+        valid = json.loads(self._doc())
+        contract = valid["probe_contracts"]["a.b"]
+        candidates = (
+            None,
+            [],
+            {},
+            {**contract, "version": True},
+            {**contract, "version": 2},
+            {**contract, "return_type": None},
+            {**contract, "operands": None},
+            {**contract, "operands": [None]},
+            {**contract, "operands": [{"type": "i32", "source": "immediate"}]},
+            {
+                **contract,
+                "operands": [{"type": "i1", "source": "immediate", "value": "1"}],
+            },
+            {
+                **contract,
+                "operands": [{"type": "i32", "source": "argument", "value": "0"}],
+            },
+            {**contract, "operands": [{"type": "i32", "source": []}]},
+        )
+        for value in candidates:
+            with self.subTest(contract=value):
+                invalid = json.loads(self._doc())
+                invalid["probe_contracts"]["a.b"] = value
+                self._assert_invalid_on_either_or_both_sides(valid, invalid, "probe")
+        for value in (None, [], "bad"):
+            invalid = json.loads(self._doc())
+            invalid["probe_contracts"] = value
+            self._assert_invalid_on_either_or_both_sides(
+                valid, invalid, "probe_contracts"
+            )
+
+    def test_malformed_method_values_fail_on_either_side(self):
+        valid = json.loads(self._doc())
+        for field, value in (
+            ("generator", True),
+            ("generator", 0),
+            ("generator", "7"),
+            ("probe_cflags", "-O0"),
+            ("probe_cflags", [None]),
+            ("probe_timeout_s", True),
+            ("probe_timeout_s", 0),
+            ("probe_timeout_s", float("inf")),
+            ("arches", [self.ARCH, self.ARCH]),
+            ("arches", [""]),
+        ):
+            with self.subTest(field=field, value=value):
+                invalid = json.loads(self._doc())
+                invalid["toolchain"][field] = value
+                self._assert_invalid_on_either_or_both_sides(valid, invalid, field)
 
     def test_transition_matrix_covers_every_known_pair(self):
         self.assertEqual(set(G._CELL_TRANSITIONS), _STATUSES)

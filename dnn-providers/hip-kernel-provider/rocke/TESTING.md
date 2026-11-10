@@ -443,7 +443,16 @@ host's toolchain retains the recorded support. The existing
 for the host's LLVM flavor and checks a **monotonic support floor**, not exact
 snapshot equality. A formerly `ok` cell must still be `ok`; becoming unavailable,
 crashing, timing out, or losing a measurement fails. Previously accepted processor
-names must remain accepted too.
+names must remain accepted too. Both `ok` and `arch_absent` records require an
+accepted processor; flavor-axis negatives and no-data can precede rejection.
+
+Every retained positive must also use the same **effective probe contract**:
+return/operand types, operand sources, and actual immediate/literal witnesses.
+The generator derives `probe_contracts` from the same operand plan used by single
+probes, positive batches, splits, and retries. A new `immarg` cannot turn the
+baseline's variable operand into constant zero and still claim an unchanged
+question. Canonical names, stripped attributes, and IR formatting are not this
+contract; there is no IR, assembly, or HSACO hash comparison here.
 
 Support gains and unknown-to-unavailable transitions pass and are reported.
 Unavailable-to-unknown transitions are reported as degraded measurement, not
@@ -460,6 +469,16 @@ to protect them from future loss and update the runtime availability table. That
 table also controls lowering warnings/refusals, so a baseline update is a product
 policy change, not merely a way to make this test pass.
 
+The comparison-only contract metadata extends the v1 envelope without changing
+runtime `Cell` lookup or the generated C++ availability table. The legacy
+columns' contracts were reconstructed with `opt` built from their recorded LLVM
+source revisions, checking canonical names and old/new probe-rendering bytes.
+All original measurements and compiler provenance were preserved; this is not a
+new compiler qualification or a support refresh. Missing historical positive
+contracts fail comparison. Recover the original question with matching compiler
+or auditable source evidence; never infer it from a newer host or silently fill
+it with default witnesses.
+
 The gate is registered in both execution environments. A developer build runs
 the source tool against the source package data. Provider CI runs a packaged,
 test-only copy of the same implementation against the column in the relocated
@@ -470,6 +489,10 @@ configures or reaches back into a source checkout.
 The result mapping distinguishes applicability from failure: no clang, no
 committed host-flavor column, or a clang/resolved-flavor mismatch skips with a
 named reason. A partial or internally inconsistent LLVM installation fails.
+Blank or `(unknown)` live clang/opt identities fail before probing, while a
+nonblank vendor-reworded banner is not automatically a flavor mismatch. The
+complete generated column is validated before either writing or comparing it,
+so invalid produced records cannot overwrite an existing reference.
 Flavor auto-detection errors, including unavailable COMGR evidence, also remain
 failures during this migration.
 
@@ -490,7 +513,9 @@ Structure and compiler-probe units remain source-only in
 controls in `platform/tests/tools/test_arch_domain_support.py` run in both source
 pytest and the installed `rocke_pytest_*` CI parts, using the staged generator in
 installed artifacts. They check loss-fail, gain-pass, invalid records, and method/
-metadata guards for both gfx942 and gfx950 without a real compiler. Normal pytest
+metadata guards, effective-probe contracts, and processor consistency for both
+gfx942 and gfx950 without a real compiler. Source-only CLI controls additionally
+check early live-provenance and final-document admission in write/check modes. Normal pytest
 and the `ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
 CTest is categorized as standard in both build-tree and installed manifests, so
 installed-artifact CI can schedule the reproduction result without adding the

@@ -367,12 +367,26 @@ text assembler checks each instruction against the target (`arch_absent`
 otherwise). Every decl key × every wired arch — the committed columns are the count of
 record, not this sentence — ~15 s wall across cores on `llvm22`. The committed artifact supplies a monotonic support floor: the test requires
 previously working cells and accepted processor names to remain working, with
-compatible flavor, scope, and probe methodology. Compiler identity is recorded
-as provenance rather than an applicability gate. Gains and improved
+compatible flavor, scope, and probe methodology. Retained positives additionally
+require the same effective return/operand types, operand sources and constants,
+recorded in versioned `probe_contracts` from the probe renderer's operand plan.
+This prevents an added `immarg` from replacing an old variable operand with zero
+while both measurements still read `ok`. Both `ok` and `arch_absent` require an
+accepted processor. Compiler identity is recorded as provenance rather than an
+applicability gate; unusable live clang/opt identities fail before probing. Gains and improved
 classifications pass and are reported; remaining no-data and degraded negative
 measurements are not qualified. Invalid or missing records still fail. The
 probe uses matching `clang`, `opt`, and `llvm-mc` tools from a complete LLVM
-installation (§2.4).
+installation (§2.4), and validates the generated column before writing or
+comparing it.
+
+The comparison-only contracts extend the v1 envelope but leave runtime lookup
+and the generated C++ availability table unchanged. Legacy contracts were
+reconstructed using `opt` built from the recorded LLVM source revisions, with
+canonical-name and old/new probe-rendering checks. All old measurement fields
+and compiler identities remain unchanged. Missing historical positive contracts
+fail comparison; reconstruct them from matching evidence, never from a newer
+host's inferred constraints. This metadata migration does not re-bless support.
 
 Per-cell provenance landed as **one file per flavor, named after it**, rather
 than a `verified`/`unvalidated` marker inside a shared file as §3.2 suggested. A

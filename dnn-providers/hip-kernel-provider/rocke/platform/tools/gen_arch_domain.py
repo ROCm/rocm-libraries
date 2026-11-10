@@ -76,8 +76,10 @@ choose the name they pass the compiler
 A host probes its own LLVM flavor. Every column records compiler identity as
 provenance, and the generator refuses to mix tools or label results with the
 wrong flavor. `--check` compares retained support across builds within that
-flavor: gains and improved classifications are reported, while support loss or
-invalid comparison inputs fail. Remaining no-data cells are not qualified.
+flavor: retained positives must ask the same effective operand/signature
+question, and gains and improved classifications are reported. Support loss,
+invalid provenance/records, and non-comparable probe contracts fail. Remaining
+no-data cells are not qualified; writing also requires a valid generated column.
 
 Usage:
   python rocke/platform/tools/gen_arch_domain.py            # write the artifact
@@ -92,6 +94,7 @@ import argparse
 import concurrent.futures as cf
 import contextlib
 import json
+import math
 import re
 import subprocess
 import sys
@@ -179,6 +182,10 @@ STATUS_PROBE_ERROR = _domain.STATUS_PROBE_ERROR
 #        flavor's compiler accepts each target's processor name, so the
 #        compile-target rule reads a measurement instead of guessing.
 GENERATOR = 7
+
+# Comparison-only metadata; changing its representation does not change the
+# compiler question and therefore does not relabel the probe-method version.
+PROBE_CONTRACT_VERSION = 1
 
 # Hoisted out of `_probe` so the artifact records the flags that actually ran.
 # `-O0` is the one that decides correctness (see `_probe`), which is why a
@@ -354,6 +361,75 @@ def _probe_spec(key: str, decl: str) -> ProbeSpec:
     )
 
 
+class _ProbeOperand(NamedTuple):
+    ty: str
+    source: str
+    value: str | None = None
+
+
+class _ProbePlan(NamedTuple):
+    ret: str
+    name: str
+    operands: tuple[_ProbeOperand, ...]
+
+    def contract(self) -> dict:
+        """The effective question, independent of names and IR formatting."""
+        return {
+            "version": PROBE_CONTRACT_VERSION,
+            "return_type": self.ret,
+            "operands": [
+                {
+                    "type": operand.ty,
+                    "source": operand.source,
+                    **({"value": operand.value} if operand.value is not None else {}),
+                }
+                for operand in self.operands
+            ],
+        }
+
+
+def _integer_literal(ty: str, value: int) -> str:
+    return ("true" if value else "false") if ty == "i1" else str(value)
+
+
+def _probe_plan(
+    decl: str, literal_ints: int | None = None, imm_int: int | None = None
+) -> tuple[_ProbePlan | None, str]:
+    """One operand plan owns both rendered probes and their support contracts."""
+    match = _DECL_RE.match(decl.strip())
+    if not match:
+        return None, f"cannot parse declare: {decl!r}"
+    ret, name, params = match.groups()
+    operands = []
+    for param in _split_params(params):
+        ty, is_imm = _param_type(param)
+        if ty == "metadata":
+            operand = _ProbeOperand(ty, "agent_metadata")
+        elif is_imm:
+            operand = _ProbeOperand(
+                ty, "immediate", _integer_literal(ty, 0 if imm_int is None else imm_int)
+            )
+        elif ty == _FAT_PTR:
+            operand = _ProbeOperand(ty, "poison")
+        elif literal_ints is not None and re.fullmatch(r"i\d+", ty):
+            operand = _ProbeOperand(ty, "literal", _integer_literal(ty, literal_ints))
+        elif ty == "ptr":
+            operand = _ProbeOperand(ty, "base_pointer")
+        elif re.fullmatch(r"ptr addrspace\(\d+\)", ty):
+            operand = _ProbeOperand(ty, "addrspacecast")
+        else:
+            operand = _ProbeOperand(ty, "argument")
+        operands.append(operand)
+    return _ProbePlan(_return_type(ret), name, tuple(operands)), ""
+
+
+def _probe_contract(spec: ProbeSpec) -> dict:
+    plan, why = _probe_plan(spec.decl, spec.literal_ints, spec.imm_int)
+    if plan is None:
+        raise ValueError(why)
+    return plan.contract()
+
+
 def _probe_module(
     decl: str,
     datalayout: str,
@@ -416,39 +492,31 @@ def _probe_module(
     The result is stored `volatile` so the call survives -O3; without it, DCE
     would drop the reference and the link would succeed spuriously.
     """
-    m = _DECL_RE.match(decl.strip())
-    if not m:
-        return "", f"cannot parse declare: {decl!r}"
-    ret, name, params = m.groups()
-    ret = _return_type(ret)
-
+    plan, why = _probe_plan(decl, literal_ints, imm_int)
+    if plan is None:
+        return "", why
+    ret = plan.ret
     kargs: list[str] = []
     prologue: list[str] = []
     args: list[str] = []
-    for i, param in enumerate(_split_params(params)):
-        ty, is_imm = _param_type(param)
-        if ty == "metadata":
-            # Not a first-class type. rocke's only metadata operands are the
-            # av.* scope lists, which want a real scope node, not an empty one.
+    for i, operand in enumerate(plan.operands):
+        ty, source, value = operand
+        if source == "agent_metadata":
             args.append(f"metadata !{metadata_id}")
-        elif is_imm:
-            imm = 0 if imm_int is None else imm_int
-            args.append(f"{ty} {('true' if imm else 'false') if ty == 'i1' else imm}")
-        elif ty == _FAT_PTR:
+        elif source in ("immediate", "literal"):
+            args.append(f"{ty} {value}")
+        elif source == "poison":
             args.append(f"{ty} poison")
-        elif literal_ints is not None and re.fullmatch(r"i\d+", ty):
-            lit = literal_ints
-            args.append(f"{ty} {('true' if lit else 'false') if ty == 'i1' else lit}")
-        elif ty == "ptr":
+        elif source == "base_pointer":
             args.append("ptr %base")
-        elif re.fullmatch(r"ptr addrspace\(\d+\)", ty):
+        elif source == "addrspacecast":
             prologue.append(f"  %p{i} = addrspacecast ptr %base to {ty}")
             args.append(f"{ty} %p{i}")
         else:
             kargs.append(f"{ty} %a{i}")
             args.append(f"{ty} %a{i}")
 
-    call = f"call {ret} @{name}({', '.join(args)})"
+    call = f"call {ret} @{plan.name}({', '.join(args)})"
     if ret == "void":
         tail = f"  {call}\n"
     else:
@@ -1108,12 +1176,101 @@ def _is_nonblank_string(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
-def _validate_column(doc: object, label: str) -> list[str]:
+def _validate_identity(
+    identity: object, label: str, flavor: str | None = None
+) -> list[str]:
+    """Keep live-tool admission and recorded compiler provenance consistent."""
+    if not _is_nonblank_string(identity) or identity.strip() == "(unknown)":
+        return [
+            f"{label} must be a nonblank string other than '(unknown)', got {identity!r}"
+        ]
+    identity_flavor = flavor_of_clang(identity)
+    if flavor is not None and identity_flavor is not None and identity_flavor != flavor:
+        return [
+            f"{label} {identity!r} reports {identity_flavor!r}, "
+            f"expected column flavor {flavor!r}"
+        ]
+    return []
+
+
+def _validate_probe_contract(contract: object, label: str) -> list[str]:
+    """Reject malformed effective questions before comparing their contents."""
+    if not isinstance(contract, dict) or set(contract) != {
+        "version",
+        "return_type",
+        "operands",
+    }:
+        return [f"{label} probe contract requires version, return_type and operands"]
+    failures = []
+    if (
+        type(contract["version"]) is not int
+        or contract["version"] != PROBE_CONTRACT_VERSION
+    ):
+        failures.append(
+            f"{label} probe contract version must be {PROBE_CONTRACT_VERSION}, got {contract['version']!r}"
+        )
+    ret = contract["return_type"]
+    if not _is_nonblank_string(ret) or not _TYPE_OPENER_RE.match(ret):
+        failures.append(f"{label} probe contract return_type is invalid: {ret!r}")
+    operands = contract["operands"]
+    if not isinstance(operands, list):
+        return failures + [f"{label} probe contract operands must be a list"]
+    for index, operand in enumerate(operands):
+        location = f"{label} probe operand {index}"
+        if not isinstance(operand, dict):
+            failures.append(f"{location} is not a mapping")
+            continue
+        ty, source, value = (
+            operand.get("type"),
+            operand.get("source"),
+            operand.get("value"),
+        )
+        if not _is_nonblank_string(ty) or not _TYPE_OPENER_RE.match(ty) or ty == "void":
+            failures.append(f"{location} type is invalid: {ty!r}")
+            continue
+        constant = source in ("immediate", "literal")
+        expected = {"type", "source", "value"} if constant else {"type", "source"}
+        valid_source = (
+            source == "argument"
+            and ty != "metadata"
+            and not ty.startswith("ptr")
+            or source == "agent_metadata"
+            and ty == "metadata"
+            or source == "poison"
+            and ty == _FAT_PTR
+            or source == "base_pointer"
+            and ty == "ptr"
+            or source == "addrspacecast"
+            and ty != _FAT_PTR
+            and re.fullmatch(r"ptr addrspace\(\d+\)", ty) is not None
+            or constant
+            and ty not in ("metadata", "ptr", _FAT_PTR)
+        )
+        if set(operand) != expected or not valid_source:
+            failures.append(f"{location} has invalid fields or source: {operand!r}")
+        if constant and not (
+            isinstance(value, str)
+            and (
+                value in ("true", "false")
+                if ty == "i1"
+                else re.fullmatch(r"-?(?:0|[1-9]\d*)", value) is not None
+            )
+            and (source != "literal" or re.fullmatch(r"i\d+", ty) is not None)
+        ):
+            failures.append(f"{location} value is invalid: {value!r}")
+    return failures
+
+
+def _validate_column(
+    doc: object, label: str, *, require_contracts: bool = True
+) -> list[str]:
     """Validate one comparison column without inferring support from bad data.
 
     Cross-column equality and capability transitions belong to the comparer.
     Keep these record rules independent of the other column so an invalid
-    baseline cannot be mistaken for a support gain.
+    baseline cannot be mistaken for a support gain. The tool-free prune repair
+    may retain a legacy column without adding contracts; comparison and fresh
+    generation always require them.
     """
     failures: list[str] = []
     if not isinstance(doc, dict):
@@ -1127,27 +1284,67 @@ def _validate_column(doc: object, label: str) -> list[str]:
         return failures
 
     toolchain = doc["toolchain"]
-    identity = toolchain.get("clang")
-    if not _is_nonblank_string(identity) or identity.strip() == "(unknown)":
-        failures.append(
-            f"{label} toolchain clang must be a nonblank string other than '(unknown)', got {identity!r}"
+    failures.extend(
+        _validate_identity(
+            toolchain.get("clang"), f"{label} toolchain clang", toolchain.get("flavor")
         )
-    elif (identity_flavor := flavor_of_clang(identity)) is not None and (
-        identity_flavor != toolchain.get("flavor")
-    ):
-        failures.append(
-            f"{label} toolchain clang {identity!r} reports {identity_flavor!r}, "
-            f"expected column flavor {toolchain.get('flavor')!r}"
-        )
+    )
     for field in ("flavor", "arches", "generator", "probe_cflags", "probe_timeout_s"):
         if field not in toolchain:
             failures.append(f"{label} toolchain has no {field}")
-    arches = toolchain.get("arches")
-    if not isinstance(arches, list) or not all(
-        isinstance(arch, str) for arch in arches
+    if not _is_nonblank_string(toolchain.get("flavor")):
+        failures.append(f"{label} toolchain flavor must be a nonblank string")
+    generator = toolchain.get("generator")
+    if type(generator) is not int or generator < 1:
+        failures.append(
+            f"{label} toolchain generator must be a positive integer, got {generator!r}"
+        )
+    flags = toolchain.get("probe_cflags")
+    if not isinstance(flags, list) or not all(
+        _is_nonblank_string(flag) for flag in flags
     ):
-        failures.append(f"{label} toolchain arches must be a list of names")
+        failures.append(
+            f"{label} toolchain probe_cflags must be a list of nonblank strings, got {flags!r}"
+        )
+    timeout = toolchain.get("probe_timeout_s")
+    if (
+        not (type(timeout) is int or type(timeout) is float and math.isfinite(timeout))
+        or timeout <= 0
+    ):
+        failures.append(
+            f"{label} toolchain probe_timeout_s must be finite and positive, got {timeout!r}"
+        )
+    arches = toolchain.get("arches")
+    if (
+        not isinstance(arches, list)
+        or not arches
+        or not all(_is_nonblank_string(arch) for arch in arches)
+    ):
+        failures.append(
+            f"{label} toolchain arches must be a list of names, nonempty and nonblank"
+        )
         return failures
+    if len(set(arches)) != len(arches):
+        failures.append(f"{label} toolchain arches must be unique, got {arches!r}")
+
+    contracts = doc.get("probe_contracts")
+    if contracts is None and not require_contracts and "probe_contracts" not in doc:
+        contracts = {}
+    elif not isinstance(contracts, dict):
+        failures.append(
+            f"{label} probe_contracts is not a mapping; recover historical positive-probe contracts before comparing"
+        )
+        contracts = {}
+    valid_contracts = {}
+    for key, contract in sorted(contracts.items()):
+        if key not in doc["keys"]:
+            failures.append(
+                f"{label} probe contract {key!r} is outside intrinsic coverage"
+            )
+        errors = _validate_probe_contract(contract, f"{key}: {label}")
+        failures.extend(errors)
+        if not errors:
+            valid_contracts[key] = contract
 
     expected_arches = set(arches)
     processors = doc["processors"]
@@ -1187,7 +1384,7 @@ def _validate_column(doc: object, label: str) -> list[str]:
                 failures.append(f"{key}/{arch}: {label} invalid status {status!r}")
             processor = processors.get(arch)
             if (
-                status == STATUS_OK
+                status in (STATUS_OK, STATUS_ARCH_ABSENT)
                 and isinstance(processor, dict)
                 and processor.get("accepted") is False
             ):
@@ -1198,12 +1395,30 @@ def _validate_column(doc: object, label: str) -> list[str]:
                 failures.append(
                     f"{key}/{arch}: {label} evidence must be a nonblank string for a non-ok cell, got {cell.get('evidence')!r}"
                 )
+            if status == STATUS_OK and require_contracts and key not in contracts:
+                failures.append(
+                    f"{key}/{arch}: {label} missing positive probe contract; recover historical evidence, do not infer it from this host"
+                )
             if "probe_imm" in cell and (
                 status != STATUS_OK or type(cell["probe_imm"]) is not int
             ):
                 failures.append(
                     f"{key}/{arch}: {label} probe_imm must be an integer on an ok cell, got {cell['probe_imm']!r}"
                 )
+            if (
+                status == STATUS_OK
+                and type(cell.get("probe_imm")) is int
+                and key in valid_contracts
+            ):
+                if any(
+                    operand["source"] == "immediate"
+                    and operand["value"]
+                    != _integer_literal(operand["type"], cell["probe_imm"])
+                    for operand in valid_contracts[key]["operands"]
+                ):
+                    failures.append(
+                        f"{key}/{arch}: {label} probe_imm disagrees with the effective probe contract"
+                    )
             verified_on = cell.get("verified_on")
             if not isinstance(verified_on, str) or verified_on != toolchain.get(
                 "flavor"
@@ -1266,7 +1481,14 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
             "toolchain scope or probe method changed -- "
             + _describe_field_changes(a_method, b_method)
         )
-    excluded = {"keys", "canonical", "processors", "toolchain", "_comment"}
+    excluded = {
+        "keys",
+        "canonical",
+        "processors",
+        "toolchain",
+        "_comment",
+        "probe_contracts",
+    }
     a_other = {key: value for key, value in a.items() if key not in excluded}
     b_other = {key: value for key, value in b.items() if key not in excluded}
     if a_other != b_other:
@@ -1301,10 +1523,16 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
                 STATUS_TOOLCHAIN_TIMEOUT,
             ):
                 result.changes["unvalidated"].append(f"{key}/{arch}: {after}")
-            if before == after == STATUS_OK and (
-                before_cell.get("probe_imm") != after_cell.get("probe_imm")
-            ):
-                result.failures.append(f"{key}/{arch}: probe witness changed")
+            if before == after == STATUS_OK:
+                if a["probe_contracts"][key] != b["probe_contracts"][key]:
+                    result.failures.append(
+                        f"{key}/{arch}: positive probe contract changed -- "
+                        + _describe_field_changes(
+                            a["probe_contracts"][key], b["probe_contracts"][key]
+                        )
+                    )
+                if before_cell.get("probe_imm") != after_cell.get("probe_imm"):
+                    result.failures.append(f"{key}/{arch}: probe witness changed")
 
     for arch in sorted(expected_arches):
         before, after = a["processors"][arch], b["processors"][arch]
@@ -1350,15 +1578,34 @@ def _prune() -> int:
     changed = 0
     for path in sorted(DATA_DIR.glob("intrinsic_arch_domain.*.json")):
         flavor = path.name.split(".")[1]
-        doc = json.loads(path.read_text())
+        try:
+            doc = json.loads(path.read_text())
+        except json.JSONDecodeError as exc:
+            _print_support_failures(path, [f"baseline column is not valid JSON: {exc}"])
+            return 1
+        failures = _validate_column(
+            doc,
+            "baseline",
+            require_contracts=isinstance(doc, dict) and "probe_contracts" in doc,
+        )
+        if failures:
+            _print_support_failures(path, failures)
+            return 1
         expected = set(_decl_table(flavor))
-        stale = sorted(set(doc.get("keys", {})) - expected)
+        stale = sorted(set(doc["keys"]) - expected)
         if not stale:
             print(f"   {path.name}: nothing to prune")
             continue
         for key in stale:
             doc["keys"].pop(key, None)
             doc.get("canonical", {}).pop(key, None)
+            doc.get("probe_contracts", {}).pop(key, None)
+        failures = _validate_column(
+            doc, "pruned", require_contracts="probe_contracts" in doc
+        )
+        if failures:
+            _print_support_failures(path, failures)
+            return 1
         path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
         changed += 1
         print(f"   {path.name}: dropped {len(stale)} stale row(s): {', '.join(stale)}")
@@ -1702,6 +1949,10 @@ def main() -> int:
 
     identity = tool_identity(clang)
     print(f"   version: {identity}")
+    failures = _validate_identity(identity, "host clang")
+    if failures:
+        _print_support_failures(out, failures)
+        return 1
 
     # A probe result is only meaningful against the flavor it was measured on.
     # Recording llvm20 results in an artifact stamped llvm23 would be actively
@@ -1723,10 +1974,15 @@ def main() -> int:
     # mis-attribution the check above refuses, by another route. An
     # unparseable banner stays silent, per flavor_of_clang.
     opt_identity = tool_identity(opt)
+    failures = _validate_identity(opt_identity, "host opt")
+    if failures:
+        _print_support_failures(out, failures)
+        return 1
     opt_flavor = flavor_of_clang(opt_identity)
-    if opt_flavor and clang_flavor and opt_flavor != clang_flavor:
+    if opt_flavor and opt_flavor != flavor:
         print(
-            f"\nERROR: opt reports {opt_flavor} but clang reports {clang_flavor}; "
+            f"\nERROR: opt reports {opt_flavor} but rocke resolved {flavor} "
+            f"(clang reports {clang_flavor or 'an unparsed banner'}); "
             "they are different LLVM installs. Stage A would measure the flavor "
             "axis with one vintage and stage B the arch axis with another, and "
             "the result would be committed under clang's name alone.\n"
@@ -2097,6 +2353,13 @@ def main() -> int:
             "probe_timeout_s": PROBE_TIMEOUT_S,
         },
         "keys": results,
+        # Specs are immutable and shared by singles, batches, splits and retries.
+        # Only actual positives require a comparable effective question.
+        "probe_contracts": {
+            key: _probe_contract(specs[key])
+            for key in keys
+            if any(cell["status"] == STATUS_OK for cell in results[key].values())
+        },
         # Whether this flavor's compiler accepts each target's processor name.
         # The compile helpers read it to pick the name they pass the compiler:
         # the target itself, else the generic target its arch_specs.json row
@@ -2109,6 +2372,10 @@ def main() -> int:
         # the toolchain executes differ.
         "canonical": {k: v for k, v in sorted(canonical.items()) if v},
     }
+    failures = _validate_column(doc, "current")
+    if failures:
+        _print_support_failures(out, failures)
+        return 1
     text = json.dumps(doc, indent=2, sort_keys=True) + "\n"
 
     counts: dict[str, int] = {}

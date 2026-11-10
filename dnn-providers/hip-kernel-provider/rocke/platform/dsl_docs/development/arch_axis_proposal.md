@@ -252,6 +252,10 @@ outcome. Commit the result; `tests/tools/test_arch_domain_artifact.py` checks
 its structure and the `rocke_arch_domain_reproducibility` CTest checks a
 monotonic support floor with compatible flavor, scope, and probe methodology.
 Previously working cells and accepted processor names must remain working.
+Retained positives must preserve the effective signature, operand sources and
+fixed witnesses in `probe_contracts`; both `ok` and `arch_absent` require an
+accepted processor. Live clang/opt provenance is checked before probing, and the
+complete generated document is validated before persistence or comparison.
 Compiler identity is provenance, not an applicability gate. Gains and improved
 classification pass and are reported; remaining no-data and degraded negative
 measurements are not qualified. Invalid or missing comparison records fail.
@@ -263,7 +267,8 @@ capability transitions rather than requiring identical generated text.
 Shipped schema — per-cell provenance is the point, per
 [`multi_toolchain_strategy.md`](multi_toolchain_strategy.md) §3.2, since one host
 can only ever validate one flavor column. It differs from what this doc first
-proposed in three ways, each of which was a mistake worth recording:
+proposed in the ways described below. This partial illustration omits some
+method fields and is not itself an input to the generator's validator:
 
 ```json
 {
@@ -277,7 +282,14 @@ proposed in three ways, each of which was a mistake worth recording:
                   "evidence": "Cannot select: intrinsic %llvm.amdgcn.ds.read.tr16.b64"}
     }
   },
-  "canonical": {"ds.read.tr16.b64": "llvm.amdgcn.ds.read.tr16.b64.v4i16"}
+  "canonical": {"ds.read.tr16.b64": "llvm.amdgcn.ds.read.tr16.b64.v4i16"},
+  "probe_contracts": {
+    "ds.read.tr16.b64": {
+      "version": 1,
+      "return_type": "<4 x i16>",
+      "operands": [{"type": "ptr addrspace(3)", "source": "addrspacecast"}]
+    }
+  }
 }
 ```
 
@@ -293,6 +305,15 @@ proposed in three ways, each of which was a mistake worth recording:
 - **Every non-`ok` cell carries its `evidence`** — the compiler's own first
   diagnostic. A status with no diagnostic behind it cannot be acted on by whoever
   hits it, and cannot be distinguished from a bug in the probe.
+
+`probe_contracts` is comparison-only metadata, not a runtime availability or
+numerical-correctness policy. It comes from the same operand plan that renders
+each probe, including default immediates and explicit integer literals. Legacy
+contracts were reconstructed with `opt` built from the recorded LLVM source
+revisions, checking canonical names and unchanged probe-rendering bytes while
+preserving every old measurement. Missing historical positive contracts fail;
+new-host inference would not establish the old question. This adds metadata to
+the v1 envelope without changing the Python/C++ runtime tables.
 
 `canonical` records what LLVM resolved each surviving declare to. Mostly
 identical to the declared name; the interesting rows are the overloads that

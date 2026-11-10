@@ -200,6 +200,17 @@ accepted processor name must still work. Gains and improved classifications are
 reported, not failures. Remaining no-data cells and degraded negative measurements
 are reported without claiming their qualification. Both documents must carry
 complete processor answers and explicit matching per-cell `verified_on` values.
+Both `ok` and `arch_absent` require accepted processors. Every key with an `ok`
+cell carries a versioned `probe_contracts` record for the effective return and
+operand types, sources, and constants. Retained positives require matching
+contracts, including default immediate zero when `probe_imm` is absent. The
+single/batch/split/retry routes share one operand-plan owner.
+
+These comparison-only records do not change runtime v1 lookup. Legacy metadata
+was reconstructed using `opt` built from the recorded LLVM source revisions,
+with canonical-name and old/new probe-rendering checks, preserving all existing
+measurement fields. Missing historical positive contracts fail; they must not be
+inferred from the current compiler. This migration is not a support re-bless.
 
 | Condition | CTest result |
 |---|---|
@@ -208,7 +219,10 @@ complete processor answers and explicit matching per-cell `verified_on` values.
 | Support gain or unknown-to-unavailable classification improvement | Pass, report changes |
 | Negative measurement degrades to unknown, or no-data remains | Report without qualifying those cells; not support loss |
 | Previously working support or accepted processor name is lost | Fail |
-| Missing/invalid comparison records or incompatible scope/probe method | Fail |
+| Missing/invalid comparison records, historical positive contracts, or incompatible scope/probe method | Fail |
+| Retained positive uses different effective operand/signature constraints | Fail; the questions are not comparable |
+| Live clang/opt identity is blank or `(unknown)` | Fail before probing |
+| Generated column is invalid | Fail before writing or comparing |
 | No clang | Skip |
 | Clang flavor differs from rocKE's resolved flavor | Skip |
 | No committed column for the host flavor | Skip |
