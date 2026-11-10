@@ -35,7 +35,7 @@ beta == 0, _emitNonatomicAdd calls emitTDMStoreSetup for the first batch. _emitN
 the D of every batch with emitTDMStoreStaging and calls emitTDMStoreFlush after the last batch.
 generateBetaModules picks the blocks with tdmStoreBlocks; Solution checks a configuration
 with tdmStoreRejectReason and reserves the staged tile with tdmStoreLdsBytes, at _TDMStoreLdsOffset after
-the epilogue vectors.
+the epilogue vectors, over the main-loop buffers when _TDMStoreOverMainLoop.
 """
 
 from math import log2
@@ -70,13 +70,14 @@ STINKY_KEEP = "[stinky-keep]"
 def tdmStoreRejectReason(state):
   """Return why a TDMStoreInst solution is outside the configurations the TDM block is built for, or None.
 
-  The TDM block stages the converted D tile in LDS over the main-loop buffers and stores it once,
-  after the last store batch, with one tensor_store_from_lds per wave. That needs a 16-bit HPA
-  output written directly to D, by a GlobalSplitU=1 kernel or as the final store of a non-atomic
-  StreamK=3 tile, no LDS data kept from one persistent tile to the next, and MacroTile1 split
-  evenly across the waves. The block also computes the elements outside D and bounds only the C
-  loads and the D store, so besides C and D the epilogue may only read the bias and ScaleAlphaVec
-  vectors along M and the ScaleAB vectors, which the staged tile follows in LDS.
+  Solution rejects TDMStoreInst without the HasTDM assembler capability before it asks this. The TDM
+  block stages the converted D tile in LDS and stores it once, after the last store batch, with one
+  tensor_store_from_lds per wave. That needs bf16 or fp16 D converted from fp32 accumulators, written
+  directly to D, by a GlobalSplitU=1 kernel or as the final store of a non-atomic StreamK=3 tile, no
+  LDS data kept from one persistent tile to the next, and MacroTile1 split evenly across the waves.
+  The block also computes the elements outside D and bounds only the C loads and the D store, so
+  besides C and D the epilogue may only read the bias and ScaleAlphaVec vectors along M and the
+  ScaleAB vectors, which the staged tile follows in LDS.
   A GlobalSplitU=-1 kernel uses the block only when the runtime GSU is 1, and its GSU>1
   partials keep buffer_store; it is supported with MultipleBuffer and AdaptiveGemmGSUA=0.
   """
@@ -84,12 +85,9 @@ def tdmStoreRejectReason(state):
     return None
 
   pt = state["ProblemType"]
-  if tuple(state["ISA"])[:2] != (12, 5):
-    return "TDMStoreInst requires gfx1250"
-  if not (pt["DestDataType"].isBFloat16() or pt["DestDataType"].isHalf()):
-    return "TDMStoreInst supports only bf16 and fp16 DestDataType"
-  if not pt["HighPrecisionAccumulate"] or not pt["ComputeDataType"].isSingle():
-    return "TDMStoreInst requires HighPrecisionAccumulate with a single-precision ComputeDataType"
+  if not (pt["DestDataType"].isBFloat16() or pt["DestDataType"].isHalf()) or not pt["HighPrecisionAccumulate"] \
+      or not pt["ComputeDataType"].isSingle():
+    return "TDMStoreInst supports bf16 and fp16 D converted from fp32 accumulators"
   if not state["BufferStore"]:
     return "TDMStoreInst requires BufferStore"
   if isPersistent(state) and not (requiresPartialReduction(state) and hasStaticAssignment(state)):
@@ -130,6 +128,11 @@ def tdmStoreLdsBytes(state):
   return state["MacroTile0"] * state["MacroTile1"] * int(state["ProblemType"]["DestDataType"].numBytes())
 
 
+def storesFinalD(kernel, atomic):
+  """Whether a store block writes D's final elements: not atomically and not to a GSU workspace."""
+  return not atomic and kernel["_GlobalAccumulation"] in (None, "PartialsBuffer")
+
+
 def tdmStoreBlocks(kernel, edge, atomic, bpe, vectorWidths):
   """Return the vector widths of the store blocks of one beta that store through the TDM block.
 
@@ -139,11 +142,10 @@ def tdmStoreBlocks(kernel, edge, atomic, bpe, vectorWidths):
   narrowest one; without edge the one block is unmasked, NonEdge, and generateBetaModules picks the
   NonEdge path of a store with edge the same way, with edge=False. In a picked block the TDM block
   replaces the store; it is generated like the NonEdge path (widest vector width, no per-element
-  mask). Only a direct, non-atomic store to D of elements narrower than 4 bytes (bpe) uses it: not a
-  GSU or StreamK partial-tile store, and not fp32, whose staged tile would be twice the 16-bit one.
+  mask). Only a block that storesFinalD, of elements narrower than 4 bytes (bpe), uses it: not a GSU
+  or StreamK partial-tile store, and not fp32, whose staged tile would be twice the 16-bit one.
   """
-  paths = TDM_STORE_PATHS[kernel["TDMStoreInst"]] \
-    if not atomic and bpe < 4 and kernel["_GlobalAccumulation"] in (None, "PartialsBuffer") else ()
+  paths = TDM_STORE_PATHS[kernel["TDMStoreInst"]] if storesFinalD(kernel, atomic) and bpe < 4 else ()
   storeVectorWidth = max(vectorWidths)
   blocks = {"EdgeM": {w for w in vectorWidths if w < storeVectorWidth} | {min(vectorWidths)},
             "EdgeN": {storeVectorWidth}} if edge else {"NonEdge": {storeVectorWidth}}
@@ -159,17 +161,19 @@ def tdmStoreModifiers(asmCaps, kernel, tc="D"):
 
 
 def emitTDMStoreSetup(gwb) -> Module:
-  """Fence the main-loop LDS and compute this thread's byte address in the staged D tile.
+  """Fence the main-loop LDS when the staged tile lies over it, and compute this thread's byte address
+  in the staged D tile.
 
-  The tile is staged M-contiguous from LDS offset _TDMStoreLdsOffset, after the epilogue vectors and
-  over the main-loop buffers, so every wave must be done with them, including in-flight
-  tensor_load_to_lds, before the staged tile is written.
+  The tile is staged M-contiguous from LDS offset _TDMStoreLdsOffset, after the epilogue vectors. When it
+  lies over the main-loop buffers (_TDMStoreOverMainLoop), every wave must be done with them, including
+  in-flight tensor_load_to_lds, before the staged tile is written.
   """
   module = Module("TDMStoreSetup")
   kw = gwb.parentWriter
-  if gwb.kernel["enableTDMA"] or gwb.kernel["enableTDMB"]:
-    module.add(SWaitTensorcnt(tensorcnt=0, comment="drain tensor_load_to_lds before reusing its LDS"))
-  module.add(kw._syncThreads(gwb.kernel, "all waves are done with the main-loop LDS"))
+  if gwb.kernel["_TDMStoreOverMainLoop"]:
+    if gwb.kernel["enableTDMA"] or gwb.kernel["enableTDMB"]:
+      module.add(SWaitTensorcnt(tensorcnt=0, comment="drain tensor_load_to_lds before reusing its LDS"))
+    module.add(kw._syncThreads(gwb.kernel, "all waves are done with the main-loop LDS"))
   base = gwb.tdmStoreLdsBase
   mt0 = gwb.kernel["MacroTile0"]
   module.add(SMulI32(dst=sgpr(gwb.tmpS01), src0=sgpr("WorkGroup1"), src1=gwb.kernel["MacroTile1"], comment="wg1*MT1"))
