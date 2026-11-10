@@ -73,11 +73,14 @@
 #include "rocke/lower_llvm.h"
 
 /* Layout canary, as in test_mma_catalog_lookup.cpp: growing
- * rocke_direct_fwd_wmma_spec_t fails the build here until ROCKE_ABI_VERSION in
- * rocke/abi.h moves with it. 64-bit only. */
+ * rocke_direct_fwd_wmma_spec_t or rocke_dw_wgrad_fold_spec_t fails the build
+ * here until ROCKE_ABI_VERSION in rocke/abi.h moves with it. 64-bit only. */
 #if INTPTR_MAX == INT64_MAX
 static_assert(sizeof(rocke_direct_fwd_wmma_spec_t) == 152 && ROCKE_ABI_VERSION >= 8,
               "rocke_direct_fwd_wmma_spec_t changed size: bump ROCKE_ABI_VERSION in "
+              "rocke/abi.h, then update this pin");
+static_assert(sizeof(rocke_dw_wgrad_fold_spec_t) == 32 && ROCKE_ABI_VERSION >= 17,
+              "rocke_dw_wgrad_fold_spec_t changed size: bump ROCKE_ABI_VERSION in "
               "rocke/abi.h, then update this pin");
 #endif
 

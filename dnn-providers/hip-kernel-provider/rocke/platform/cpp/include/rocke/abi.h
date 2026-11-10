@@ -122,8 +122,11 @@ extern "C" {
  *     uniform_wave at its end, which changes its size.
  * 16: rocke_implicit_gemm_conv_wgrad_spec_t gained prefetch_global_regs in
  *     its old tail padding: size unchanged, but an old caller leaves that byte
- *     unset. */
-#define ROCKE_ABI_VERSION 16
+ *     unset.
+ * 17: rocke_dw_wgrad_fold_spec_t gained cols, slices and unroll at its end,
+ *     which changes its size (16 -> 32 bytes on a 64-bit host) and the
+ *     struct-return of rocke_dw_wgrad_fold_spec_default(). */
+#define ROCKE_ABI_VERSION 17
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.
