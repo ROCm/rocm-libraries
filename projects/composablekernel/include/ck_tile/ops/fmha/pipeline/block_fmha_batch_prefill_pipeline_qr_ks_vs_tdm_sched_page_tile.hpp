@@ -557,14 +557,12 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
         // zero with zero token rows, but retain the original TDM issue count.
         // Each value owns exactly this wave's fragments: one shared id for
         // P>=128, the id of the wave's page for P64, two wave-local ids for P16.
-        PageIds page_id0 = k_dram_window.prefetch_page_id(0, num_total_loop, kv_load_start);
-        PageIds page_id1 = k_dram_window.prefetch_page_id(1, num_total_loop, kv_load_start);
-        PageIds page_id2 = k_dram_window.prefetch_page_id(2, num_total_loop, kv_load_start);
         // With sink tokens the tiles are not contiguous: the sink tiles from origin 0, then the
         // window from physical_seqlen_k_start (the windows below jump the same way). The page
-        // lookups follow that order.
+        // lookups follow that order, and read no table entry of the tokens in between.
         [[maybe_unused]] const FmhaPageTileSinkTiles page_tile_order{num_sink_loop,
                                                                      physical_seqlen_k_start};
+        PageIds page_id0, page_id1, page_id2;
         if constexpr(kHasSink)
         {
             page_id0 =
@@ -573,6 +571,12 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                 k_dram_window.prefetch_page_id(1, num_total_loop, kv_load_start, page_tile_order);
             page_id2 =
                 k_dram_window.prefetch_page_id(2, num_total_loop, kv_load_start, page_tile_order);
+        }
+        else
+        {
+            page_id0 = k_dram_window.prefetch_page_id(0, num_total_loop, kv_load_start);
+            page_id1 = k_dram_window.prefetch_page_id(1, num_total_loop, kv_load_start);
+            page_id2 = k_dram_window.prefetch_page_id(2, num_total_loop, kv_load_start);
         }
         PageIds page_id3{};
         // Raw ids read before PV, validated into the queue value after PV.

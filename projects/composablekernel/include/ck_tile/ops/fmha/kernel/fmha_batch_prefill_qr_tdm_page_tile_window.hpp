@@ -378,7 +378,8 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             }
             return valid_tokens;
         }
-        // P>=128 keeps this statement form: another form changes the code of the measured kernels.
+        // P>=128: the tile's one page holds a valid row (tile_index < num_total_loop), so thread
+        // 0 publishes it without the per-lane valid-row predicate of the form above.
         if(get_thread_id() == 0)
         {
             amd_async_global_load_to_lds<int32_t, 1>(
@@ -390,8 +391,8 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         return min(index_t{128}, seqlen_k_ - static_cast<index_t>(logical_origin));
     }
 
-    // Sink-order scalar queue publication (see logical_tile_origin_of); same body as above with
-    // the tile origin taken from the sink order.
+    // Sink-order scalar queue publication (see logical_tile_origin_of): the per-lane form above for
+    // every page size, with the tile origin taken from the sink order.
     CK_TILE_DEVICE index_t prefetch_page_id_to_lds_scalar(index_t tile_index,
                                                           index_t num_total_loop,
                                                           index_t first_origin,
