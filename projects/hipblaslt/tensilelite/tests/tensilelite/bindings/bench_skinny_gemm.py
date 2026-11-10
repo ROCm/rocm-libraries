@@ -393,6 +393,7 @@ def reduceKernelFor(
 def benchProblem(
     p: Problem,
     iters: int,
+    warmup: int,
     verify: bool,
     asmDir: str | None,
     codeObjectVersion: int,
@@ -401,7 +402,7 @@ def benchProblem(
 ) -> tuple[list[int], list[int] | None]:
     """Times the GEMM (cold LLC) and, for split-K, the reduce (warm) in ns per
     iteration; with verify the results are checked against the host reference.
-    The timed launches follow POST_LOAD_LAUNCHES untimed warm launches."""
+    The timed launches follow warmup untimed warm launches."""
     inputs = support.makeInputs(p, seed=42, withReference=verify)
     dBits, ws = support.makeOutputs(p.m, p.n, p.ldD, p.splits)
     arrays = (
@@ -422,7 +423,7 @@ def benchProblem(
         flush = stack.enter_context(LlcFlush())
         args = support.gemmArgs(p, dBuf, aBuf, bBuf, sclABuf, sclBBuf, wsBuf, cBuf)
         block = support.gemmBlock(p)
-        warmLaunches(kernel, p.grid, block, args, POST_LOAD_LAUNCHES, flush)
+        warmLaunches(kernel, p.grid, block, args, warmup, flush)
         gemmTimes = timeLaunches(kernel, p.grid, block, args, iters, flush, method)
         if verify:
             dBuf.download(dBits)
@@ -436,7 +437,7 @@ def benchProblem(
             args = support.reduceArgs(
                 dBuf, wsBuf, cBuf, p.ldD, p.m, p.n, p.splits, p.ldC, p.alpha, p.beta
             )
-            warmLaunches(reducer, grid, block, args, POST_LOAD_LAUNCHES, None)
+            warmLaunches(reducer, grid, block, args, warmup, None)
             reduceTimes = timeLaunches(reducer, grid, block, args, iters, None, method)
             if verify:
                 dBuf.download(dBits)
@@ -509,6 +510,7 @@ def sweepShape(
     n: int,
     k: int,
     iters: int,
+    warmup: int,
     verify: bool,
     overrides: dict,
     asmDir,
@@ -537,7 +539,14 @@ def sweepShape(
             printAsm(p, codeObjectVersion, maxPreloadDwords)
             return
         gemmTimes, reduceTimes = benchProblem(
-            p, iters, verify, asmDir, codeObjectVersion, maxPreloadDwords, method
+            p,
+            iters,
+            warmup,
+            verify,
+            asmDir,
+            codeObjectVersion,
+            maxPreloadDwords,
+            method,
         )
     except (AssertionError, MissingAsm) as err:
         reason = str(err).splitlines()[0]
@@ -565,6 +574,12 @@ def makeParser() -> argparse.ArgumentParser:
     parser.add_argument("-n", type=int, default=8192, help="Columns of B / cols of D")
     parser.add_argument("-k", type=int, default=8192, help="Shared dimension")
     parser.add_argument("--iters", type=int, default=30, help="Timed launches")
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=15,
+        help="Untimed flush plus launch pairs before the timed launches",
+    )
     parser.add_argument(
         "--timing",
         choices=("ext", "events"),
@@ -778,6 +793,8 @@ def timingBanner(args: argparse.Namespace) -> str:
 
 def main() -> None:
     args = makeParser().parse_args()
+    if args.warmup < 0:
+        raise SystemExit("--warmup must not be negative")
     overrides = knobOverrides(args)
     banner = None if args.print_asm else timingBanner(args)
     if args.sweep is None:
@@ -788,6 +805,7 @@ def main() -> None:
             args.n,
             args.k,
             args.iters,
+            args.warmup,
             args.verify,
             overrides,
             args.asm_dir,
@@ -799,7 +817,8 @@ def main() -> None:
         )
         return
     if banner is not None:
-        header = f"# sweep={args.sweep} iters={args.iters} verify={int(args.verify)}"
+        header = f"# sweep={args.sweep} iters={args.iters} warmup={args.warmup}"
+        header += f" verify={int(args.verify)}"
         header += f" cold_llc=1 {banner}"
         for key, value in overrides.items():
             header += f" {key}={value}"
@@ -810,6 +829,7 @@ def main() -> None:
             n,
             k,
             args.iters,
+            args.warmup,
             args.verify,
             overrides,
             args.asm_dir,

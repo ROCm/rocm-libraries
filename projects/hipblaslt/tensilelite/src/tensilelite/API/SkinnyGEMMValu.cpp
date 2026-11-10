@@ -118,9 +118,6 @@ TileState::TileState(IRBuilder &builder, const SkinnyDims &dims)
       selectors(builder.allocateVgpr((16 % dims.bm == 0 ? 1 : dims.bm) +
                                      (16 % dims.tn == 0 ? 1 : dims.tn))),
       s0(builder.allocateSgpr(1)), nIterFull(builder.allocateSgpr(1)),
-      fitRot(dims.upIters != 1
-                 ? std::optional<RegisterRange>(builder.allocateSgpr(1))
-                 : std::nullopt),
       tailBytes(builder.allocateSgpr(1)),
       chunkBase{builder.allocateSgpr(4), std::vector<bool>(4, false)},
       sValid(builder.allocateSgpr(2 * dims.bm, 2)),
@@ -139,32 +136,6 @@ ScaleGather::ScaleGather(IRBuilder &builder, const SkinnyDims &dims)
       ldsStage(dims.scalesShared
                    ? std::optional<RegisterRange>(builder.allocateVgpr(1))
                    : std::nullopt) {}
-
-// rot = (key + key / 16) mod NI, or mod the literal UP_ITERS without ni. Shared
-// by the 3-D rotation, the loop invariant and the slab rotation of the
-// persistent launch.
-static void blockRotation(IRBuilder &builder, const SkinnyDims &dims,
-                          RegisterRef rot, RegisterRef key,
-                          std::optional<RegisterRef> ni) {
-  RegisterRange sum = builder.allocateSgpr(1);
-  builder.shrui32(sum.ref(), key, 4);
-  builder.addi32(sum.ref(), sum.ref(), key);
-  if (ni) {
-    RegisterRange quotient = builder.allocateSgpr(1);
-    builder.divsi32(quotient.ref(), sum.ref(), *ni, /*useIEEE=*/true);
-    builder.muli32(quotient.ref(), quotient.ref(), *ni);
-    builder.subi32(rot, sum.ref(), quotient.ref());
-    return;
-  }
-  if (isPowerOfTwo(dims.upIters)) {
-    builder.andi32(rot, sum.ref(), dims.upIters - 1);
-    return;
-  }
-  RegisterRange quotient = builder.allocateSgpr(1);
-  builder.divsi32(quotient.ref(), sum.ref(), dims.upIters, /*useIEEE=*/true);
-  builder.muli32(quotient.ref(), quotient.ref(), dims.upIters);
-  builder.subi32(rot, sum.ref(), quotient.ref());
-}
 
 // Gather addresses of the scale permutes: the ds_bpermute byte addresses of the
 // lanes that hold the scale dwords of this lane, or the LDS read address with
@@ -345,17 +316,16 @@ void SkinnyGEMMEmitter::emitValu() {
     tile.allocateOptionalVectors(builder, dims, cDwords(dims));
     SetupScalars scalars(builder, dims);
     LaneValues lane = emitSetup(scalars, gather, tile.w0.ref());
-    // tx must not alias the workgroup id, which the K rotation keys on.
-    RegisterRange tx = builder.allocateSgpr(1);
+    // The flat id is dead after the decode, so it holds tx.
+    RegisterRef flatId = kernel.workgroupIdX().ref();
     RegisterRange ty = builder.allocateSgpr(1);
     std::optional<RegisterRange> kz;
     if (dims.useSplitK)
       kz = builder.allocateSgpr(1);
-    TileIds ids{tx.ref(), ty.ref(),
+    TileIds ids{flatId, ty.ref(),
                 kz ? std::optional<RegisterRef>(kz->ref()) : std::nullopt};
-    decodeFlatTile(builder, dims, kernel.target().xcdCount(),
-                   kernel.workgroupIdX().ref(), ids, wideCols.ref(),
-                   skinnyCols.ref(), k.ref(),
+    decodeFlatTile(builder, dims, kernel.target().xcdCount(), flatId, ids,
+                   wideCols.ref(), skinnyCols.ref(), k.ref(),
                    spk ? std::optional<RegisterRef>(spk->ref()) : std::nullopt);
     emitTile(ids, scalars, /*loop=*/nullptr, lane, gather, std::move(ring),
              tile);
@@ -365,16 +335,12 @@ void SkinnyGEMMEmitter::emitValu() {
   SetupScalars scalars(builder, dims);
   ScaleGather gather(builder, dims);
   LaneValues lane = emitSetup(scalars, gather, /*w0Target=*/std::nullopt);
-  // The values that every tile shares. The rotation keys on the block id in the
-  // plain order, so it is loop invariant, and on the wide slab of the tile when
-  // reordering, which needs NI at every tile.
+  // The values that every tile shares.
   TileLoop loop{builder.allocateSgpr(1),
                 builder.allocateSgpr(1),
                 dims.useSplitK
                     ? std::optional<RegisterRange>(builder.allocateSgpr(1))
                     : std::nullopt,
-                std::nullopt,
-                std::nullopt,
                 std::nullopt,
                 std::nullopt,
                 std::nullopt,
@@ -392,23 +358,6 @@ void SkinnyGEMMEmitter::emitValu() {
       scalars.splits->release();
     } else {
       builder.muli32(loop.numTiles.ref(), loop.tilesX.ref(), tilesY.ref());
-    }
-    if (dims.reordered && dims.upIters != 1) {
-      // The wide slab rotation of the reordered tiles divides by the dynamic
-      // NI.
-      loop.ni = builder.allocateSgpr(1);
-      ceilDivByLiteral(builder, loop.ni->ref(), splitExtent(), dims.ki);
-    } else if (!dims.reordered && dims.upIters != 1) {
-      // The plain order only needs NI for the block's rotation.
-      std::optional<RegisterRange> ni;
-      if (dims.upIters == 0) {
-        ni = builder.allocateSgpr(1);
-        ceilDivByLiteral(builder, ni->ref(), splitExtent(), dims.ki);
-      }
-      loop.blockRot = builder.allocateSgpr(1);
-      blockRotation(builder, dims, loop.blockRot->ref(),
-                    kernel.workgroupIdX().ref(),
-                    ni ? std::optional<RegisterRef>(ni->ref()) : std::nullopt);
     }
     if (dims.numXcds != 1) {
       // perXcd = ceilDiv(numTiles, X) and tall = (numTiles - 1) mod X + 1, the
@@ -556,47 +505,6 @@ void SkinnyGEMMEmitter::emitTile(const TileIds &ids, SetupScalars &scalars,
     builder.shrsi32(tile.nIterFull.ref(), k.ref(), dims.log2Ki);
   }
   tile.chunkBase.ready[0] = true;
-  if (tile.fitRot) {
-    std::optional<RegisterRange> rotStorage;
-    if (!loop || !loop->blockRot) {
-      // rot = (key + key / 16) mod NI with NI = ceilDiv(spk, KI), or
-      // ceilDiv(k, KI) without split-K, or the literal UP_ITERS with up-front
-      // scales, which bounds the iterations of every split, the whole K without
-      // split-K. The ring-scale remainder uses the exact signed division
-      // instead of a signed remainder expansion. The 3-D launch keys it on the
-      // flat workgroup id; the reordered persistent tiles key it on the wide
-      // slab kz * tilesX + tx (tx without split-K), so that the tiles that
-      // share a wide column read the same K offset together.
-      rotStorage = builder.allocateSgpr(1);
-      std::optional<RegisterRange> keyStorage;
-      RegisterRef key = kernel.workgroupIdX().ref();
-      std::optional<RegisterRange> ni;
-      std::optional<RegisterRef> niRef;
-      if (loop) {
-        if (ids.kz) {
-          keyStorage = builder.allocateSgpr(1);
-          key = keyStorage->ref();
-          builder.muli32(key, *ids.kz, loop->tilesX.ref());
-          builder.addi32(key, key, ids.tx);
-        } else {
-          key = ids.tx;
-        }
-        niRef = loop->ni->ref();
-      } else if (dims.upIters == 0) {
-        ni = builder.allocateSgpr(1);
-        ceilDivByLiteral(builder, ni->ref(), splitExtent(), dims.ki);
-        niRef = ni->ref();
-      }
-      blockRotation(builder, dims, rotStorage->ref(), key, niRef);
-    }
-    RegisterRef rotation =
-        rotStorage ? rotStorage->ref() : loop->blockRot->ref();
-    // The rotation falls back to 0 when it is not below the iteration count,
-    // so the physical iteration wraps once without a division.
-    builder.create<rocisa::SCmpLtU32>(rotation.container(),
-                                      tile.nIterFull.container());
-    builder.selectb32(tile.fitRot->ref(), rotation, 0);
-  }
   builder.muli32(tile.s0.ref(), ids.ty, dims.bm);
   {
     // The tile adds its part to the lane part of the wide columns: w0 = w0Lane
@@ -1281,9 +1189,9 @@ void SkinnyGEMMEmitter::emitUpFrontScales(KLoopState &state, UpFrontStep step) {
 }
 
 // The VALU half of the ring schedule over the full iterations of the split.
-// The refill and the physical iteration of a slot are computed from the logical
-// iteration with the K rotation folded in and wrapped past NI, so that the
-// refills of the last PF iterations reload the first ones.
+// The physical iteration of a slot is its logical one: the refills of the
+// steady loop and of the arms stay below NI, and the prologue clamps the slots
+// of a split with fewer iterations than PF.
 class SkinnyGEMMEmitter::ValuRingPath final : public RingPath {
 public:
   ValuRingPath(SkinnyGEMMEmitter &emitter, KLoopState &state)
@@ -1296,15 +1204,12 @@ public:
   void fill(const RingStep &step) override;
   void afterPrologue() override;
   void beginLoop() override;
-  void endLoop() override;
+  void endLoop() override {}
   void consume(const RingStep &step) override;
   void drain() override {}
   void endArm() override;
 
 private:
-  // dst = sum >= NIfull ? sum - NIfull : sum, the physical iteration of a
-  // logical one, with the rotation added once.
-  void wrapIteration(RegisterRef dst, RegisterRef sum);
   void hoistChunkBases();
   void fillSingleStep(const RingStep &step);
   void fillPrologueSlot(int32_t slot);
@@ -1316,32 +1221,18 @@ private:
   IRBuilder &builder;
   const SkinnyDims &dims;
   TileState &tile;
-  // With several up-front entries, the slot selects its scales by the physical
+  // With several up-front entries, the slot selects its scales by its
   // iteration.
   bool vectorized;
   // The prologue's clamp of the last iteration, which only slots above 0 read.
   std::optional<RegisterRange> lastIteration;
-  // The steady loop's bases that fold the rotation: refillBase[p] = fitRot + PF
-  // + p and physBase[p] = fitRot + p. Without rotation they are the literals.
-  std::optional<RegisterRange> refillBase, physBase;
   // The PF = 0 step, which keeps its SGPRs and the selected scales from the
   // loads to the end of the compute.
-  std::optional<RegisterRange> stepPhysical, stepSoffset, stepPacked;
-  // The arm: the logical iteration of its first step with the rotation, and the
-  // refill iterations of the steps, which the vector index of the step PF later
-  // is.
-  std::optional<RegisterRange> armBase;
+  std::optional<RegisterRange> stepIteration, stepSoffset, stepPacked;
+  // The arm: the refill iterations of the steps, which the vector index of the
+  // step PF later is.
   std::vector<RegisterRange> keptRefills;
 };
-
-void SkinnyGEMMEmitter::ValuRingPath::wrapIteration(RegisterRef dst,
-                                                    RegisterRef sum) {
-  RegisterRange wrapped = builder.allocateSgpr(1);
-  builder.subi32(wrapped.ref(), sum, tile.nIterFull.ref());
-  builder.create<rocisa::SCmpGeU32>(sum.container(),
-                                    tile.nIterFull.container());
-  builder.selectb32(dst, wrapped.ref(), sum);
-}
 
 void SkinnyGEMMEmitter::ValuRingPath::hoistChunkBases() {
   for (int32_t chunk = 1; chunk < SkinnyDims::chunks; ++chunk)
@@ -1362,17 +1253,14 @@ void SkinnyGEMMEmitter::ValuRingPath::fillSingleStep(const RingStep &step) {
   // the permutes of emitCompute.
   if (state.ring.raw)
     state.ring.raw = builder.allocateVgpr(dims.columns);
-  stepPhysical = builder.allocateSgpr(1);
-  RegisterRef physical = stepPhysical->ref();
-  if (tile.fitRot) {
-    builder.addi32(physical, step.base, tile.fitRot->ref());
-    wrapIteration(physical, physical);
-  } else
-    wrapIteration(physical, step.base);
+  // A copy of the loop counter, as the refill shifts its iteration in place.
+  stepIteration = builder.allocateSgpr(1);
+  RegisterRef iteration = stepIteration->ref();
+  builder.movb32(iteration, step.base);
   if (dims.upIters > 0)
-    stepPacked = selectScales(state, physical);
+    stepPacked = selectScales(state, iteration);
   stepSoffset = builder.allocateSgpr(1);
-  SlotContext loads{0, 0, physical};
+  SlotContext loads{0, 0, iteration};
   startRefill(state, loads, stepSoffset->ref());
   for (int32_t chunk = 0; chunk < SkinnyDims::chunks; ++chunk)
     refillChunk(state, loads, chunk, stepSoffset->ref());
@@ -1389,21 +1277,10 @@ void SkinnyGEMMEmitter::ValuRingPath::fillPrologueSlot(int32_t slot) {
     builder.maxsi32(lastIteration->ref(), lastIteration->ref(), 0);
   }
   RegisterRange physical = builder.allocateSgpr(1);
-  if (slot > 0) {
+  if (slot > 0)
     builder.minui32(physical.ref(), lastIteration->ref(), slot);
-    if (tile.fitRot)
-      builder.addi32(physical.ref(), physical.ref(), tile.fitRot->ref());
-    wrapIteration(physical.ref(), physical.ref());
-  } else if (tile.fitRot)
-    wrapIteration(physical.ref(), tile.fitRot->ref());
-  else {
-    // The wrapped physical iteration of the logical iteration 0 without
-    // rotation.
-    RegisterRange wrapped = builder.allocateSgpr(1);
-    builder.subi32(wrapped.ref(), 0, tile.nIterFull.ref());
-    builder.create<rocisa::SCmpLeU32>(tile.nIterFull.container(), 0);
-    builder.selectb32(physical.ref(), wrapped.ref(), 0);
-  }
+  else
+    builder.movb32(physical.ref(), 0);
   // The chunk bases are hoisted out of the prologue from PF = 4 on.
   SlotContext context{slot, 0, physical.ref(), pf >= 4};
   context.record = &tile.prologueLoads;
@@ -1422,32 +1299,13 @@ void SkinnyGEMMEmitter::ValuRingPath::afterPrologue() {
 }
 
 void SkinnyGEMMEmitter::ValuRingPath::beginLoop() {
-  int32_t pf = dims.prefetch;
-  if (pf == 0) {
-    hoistChunkBases();
-    // Nothing of the ring is loop carried, so the raw scales live only from the
-    // loads of an iteration to its permutes.
-    if (state.ring.raw)
-      state.ring.raw->release();
-    return;
-  }
-  if (tile.fitRot) {
-    refillBase = builder.allocateSgpr(pf);
-    builder.addi32(refillBase->ref(0), tile.fitRot->ref(), pf);
-  }
   hoistChunkBases();
-  if (vectorized)
-    physBase = builder.allocateSgpr(pf);
-  for (int32_t slot = 1; tile.fitRot && slot < pf; ++slot) {
-    builder.addi32(refillBase->ref(slot), tile.fitRot->ref(), pf + slot);
-    if (vectorized)
-      builder.addi32(physBase->ref(slot), tile.fitRot->ref(), slot);
-  }
-}
-
-void SkinnyGEMMEmitter::ValuRingPath::endLoop() {
-  physBase.reset();
-  refillBase.reset();
+  if (dims.prefetch != 0)
+    return;
+  // Nothing of the ring is loop carried, so the raw scales live only from the
+  // loads of an iteration to its permutes.
+  if (state.ring.raw)
+    state.ring.raw->release();
 }
 
 void SkinnyGEMMEmitter::ValuRingPath::consume(const RingStep &step) {
@@ -1459,7 +1317,7 @@ void SkinnyGEMMEmitter::ValuRingPath::consume(const RingStep &step) {
       emitter.emitCompute(state, context);
     stepPacked.reset();
     stepSoffset.reset();
-    stepPhysical.reset();
+    stepIteration.reset();
     return;
   }
   if (step.inLoop)
@@ -1468,66 +1326,52 @@ void SkinnyGEMMEmitter::ValuRingPath::consume(const RingStep &step) {
     consumeInArm(step);
 }
 
+// The refill iteration is a scratch register, as the refill shifts it in place;
+// the vector index is only read, so the loop counter serves the slot at offset
+// 0.
 void SkinnyGEMMEmitter::ValuRingPath::consumeInLoop(const RingStep &step) {
-  int32_t pf = dims.prefetch;
   RegisterRange refill = builder.allocateSgpr(1);
-  if (refillBase)
-    builder.addi32(refill.ref(), step.base, refillBase->ref(step.offset));
-  else
-    builder.addi32(refill.ref(), step.base, pf + step.offset);
-  wrapIteration(refill.ref(), refill.ref());
+  builder.addi32(refill.ref(), step.base, dims.prefetch + step.offset);
   SlotContext context{step.slot, step.groupsAfter, refill.ref()};
-  std::optional<RegisterRange> physical;
-  if (vectorized) {
-    physical = builder.allocateSgpr(1);
-    if (step.offset == 0)
-      builder.addi32(physical->ref(), tile.fitRot->ref(), step.base);
-    else
-      builder.addi32(physical->ref(), step.base, physBase->ref(step.offset));
-    wrapIteration(physical->ref(), physical->ref());
-    context.vectorIndex = physical->ref();
+  std::optional<RegisterRange> iteration;
+  if (vectorized && step.offset == 0)
+    context.vectorIndex = step.base;
+  else if (vectorized) {
+    iteration = builder.allocateSgpr(1);
+    builder.addi32(iteration->ref(), step.base, step.offset);
+    context.vectorIndex = iteration->ref();
   }
   emitter.emitCompute(state, context);
 }
 
 // With several up-front entries the step also selects the scales of its
-// physical iteration, which is the refill iteration of the step PF earlier from
-// i = PF on.
+// iteration, which is the refill iteration of the step PF earlier from i = PF
+// on.
 void SkinnyGEMMEmitter::ValuRingPath::consumeInArm(const RingStep &step) {
   int32_t pf = dims.prefetch;
   int32_t i = step.offset;
   SlotContext context{step.slot, step.groupsAfter, std::nullopt, false};
   RegisterRange refill = builder.allocateSgpr(1);
-  // The logical iteration of a refill is fitRot + steadyEnd + i + PF.
-  if (!armBase && tile.fitRot && (vectorized || step.refill)) {
-    armBase = builder.allocateSgpr(1);
-    builder.addi32(armBase->ref(), tile.fitRot->ref(), step.base);
-  }
-  RegisterRef base = armBase ? armBase->ref() : step.base;
   if (step.refill) {
-    builder.addi32(refill.ref(), base, i + pf);
-    wrapIteration(refill.ref(), refill.ref());
+    builder.addi32(refill.ref(), step.base, i + pf);
     context.refillIteration = refill.ref();
   }
-  std::optional<RegisterRange> physical;
+  std::optional<RegisterRange> iteration;
   if (vectorized && i >= pf)
     context.vectorIndex = keptRefills[i - pf].ref();
+  else if (vectorized && i == 0)
+    context.vectorIndex = step.base;
   else if (vectorized) {
-    physical = builder.allocateSgpr(1);
-    if (i > 0)
-      builder.addi32(physical->ref(), base, i);
-    wrapIteration(physical->ref(), i > 0 ? physical->ref() : base);
-    context.vectorIndex = physical->ref();
+    iteration = builder.allocateSgpr(1);
+    builder.addi32(iteration->ref(), step.base, i);
+    context.vectorIndex = iteration->ref();
   }
   emitter.emitCompute(state, context);
   if (vectorized && step.refill)
     keptRefills.push_back(std::move(refill));
 }
 
-void SkinnyGEMMEmitter::ValuRingPath::endArm() {
-  keptRefills.clear();
-  armBase.reset();
-}
+void SkinnyGEMMEmitter::ValuRingPath::endArm() { keptRefills.clear(); }
 
 void SkinnyGEMMEmitter::emitKLoop(KLoopState &state) {
   ValuRingPath path(*this, state);

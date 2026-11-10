@@ -31,9 +31,14 @@ spawned child can safely own a GPU):
      unique kernel once, keyed by its kernel name, which encodes every
      compile-time knob including the derived UP_ITERS and USE_BETA, so kernels
      are shared across shapes and split sizes. The hsaco files are written to
-     <work-dir>/hsaco/<name>.hsaco and an existing file is reused as a cache
-     (use a fresh work dir after changing the emitter). A failure at emit or
-     assemble is recorded and never stops the sweep.
+     <work-dir>/hsaco/<fingerprint>/<name>.hsaco and an existing file is reused
+     as a cache. The fingerprint hashes the generator modules and the target,
+     code object version and preload (sweep_skinny_gemm_cache.py), so a new
+     fingerprint gets a new directory, announced at start with the count of the
+     older ones, which are never deleted. Before launching, the worker checks
+     the kernarg segment of the kernel against what the host packs and records
+     a mismatch as failed to run. A failure at emit or assemble is recorded and
+     never stops the sweep.
   3. TIMED, one long-lived worker process per GPU, started with
      HIP_VISIBLE_DEVICES set so that it sees its device as 0 (a ROCR or CUDA
      mask of the parent is dropped, as it would renumber the devices). Each
@@ -97,7 +102,7 @@ spawned child can safely own a GPU):
      <output stem>.failed.yaml, ONE YAML list with a group per case: problem
      (written once) and failures, a list of {config, status, stage, reason}.
      Stale <name>.<pid>.tmp and <kernel>.hsaco.<pid>.building files of dead
-     processes are removed at start.
+     processes are removed at start from the fingerprint directory.
 
 --resume continues a sweep: the finished cases of the existing output (-o, or
 the default path in --work-dir) are reused as they are and only the others are
@@ -165,6 +170,13 @@ import yaml
 import skinny_gemm_support as support
 from bench_skinny_gemm import FLUSH_MB
 from skinny_gemm_support import Problem
+from sweep_skinny_gemm_cache import (
+    SWEEP_CODE_OBJECT_VERSION,
+    SWEEP_PRELOAD_DWORDS,
+    generator_fingerprint,
+    kernel_cache_dir,
+    prepare_kernel_cache,
+)
 from sweep_skinny_gemm_config import (
     ConfigFailure,
     ExpandedCase,
@@ -255,7 +267,12 @@ def compile_kernel(name: str, problem: Problem | None, path: str) -> BuildResult
     # The emitter reports its errors as ValueError, but a failure of any kind
     # must only fail this kernel.
     try:
-        asm = support.reduceAsm() if problem is None else support.gemmAsm(problem)
+        if problem is None:
+            asm = support.reduceAsm(SWEEP_CODE_OBJECT_VERSION, SWEEP_PRELOAD_DWORDS)
+        else:
+            asm = support.gemmAsm(
+                problem, SWEEP_CODE_OBJECT_VERSION, SWEEP_PRELOAD_DWORDS
+            )
     except Exception as err:
         return BuildResult(name, False, "emit", first_line(err))
     try:
@@ -773,7 +790,8 @@ class Sweep:
         self.settings = settings
         self.resumed = resumed
         self.states = [make_state(i, e) for i, e in enumerate(expanded)]
-        self.hsaco_dir = os.path.join(options.work_dir, "hsaco")
+        self.fingerprint = generator_fingerprint()
+        self.hsaco_dir = kernel_cache_dir(options.work_dir, self.fingerprint)
         self.builds = None
         self.pool = None
         reused = resumed.records if resumed else {}
@@ -788,7 +806,8 @@ class Sweep:
         self.lost_cases: dict[int, list[str]] = collections.defaultdict(list)
 
     def start(self, gpus: list[int], stabilizer: GpuStabilizer) -> None:
-        os.makedirs(self.hsaco_dir, exist_ok=True)
+        _, message = prepare_kernel_cache(self.options.work_dir, self.fingerprint)
+        log(message)
         self.remove_stale_files()
         self.meta = self.make_meta(gpus, stabilizer)
         self.writer = ResultWriter(
@@ -837,6 +856,7 @@ class Sweep:
             "clockLock": {key: v for key, v in locks.items() if key != "perGpu"},
             "buildJobs": self.options.build_jobs,
             "workDir": os.path.abspath(self.options.work_dir),
+            "generatorFingerprint": self.fingerprint,
             "kernelsBuilt": 0,
             "kernelsFailed": 0,
             "resumedCases": 0,
@@ -1190,7 +1210,12 @@ def make_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="screen every configuration once, save all to top, skip refinement",
     )
-    parser.add_argument("--work-dir", default=None, help="hsaco cache directory")
+    parser.add_argument(
+        "--work-dir",
+        default=None,
+        help="work directory: hsaco/<generator fingerprint>/ kernel cache and "
+        "default output",
+    )
     parser.add_argument(
         "--gpus",
         default="auto",
@@ -1272,6 +1297,14 @@ def load_resumed(options, settings: dict, expanded: list[ExpandedCase]):
         meta_settings(settings, options),
         problems,
     )
+    previous = resumed.meta.get("generatorFingerprint")
+    current = generator_fingerprint()
+    if previous != current:
+        log(
+            f"warning: --resume: the previous results were timed with generator "
+            f"fingerprint {previous or 'unknown'}, this run uses {current}; the "
+            "reused cases keep their old times"
+        )
     log(
         f"resuming from {options.output}: reusing {len(resumed.records)} case(s), "
         f"running {resumed.rerun}, dropping {resumed.dropped} record(s) of cases "

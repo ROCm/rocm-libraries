@@ -9,16 +9,19 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <bitset>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <optional>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -600,51 +603,26 @@ TEST(SkinnyGEMM, UpFrontLdsSize) {
   EXPECT_NE(message.find("config exceeds the LDS budget: "), std::string::npos);
 }
 
-// Whether an s_and_b32 of the assembly ends in the operand mask.
-static bool masksBy(const std::string &assembly, std::string_view mask) {
-  std::istringstream stream(assembly);
-  for (std::string line; std::getline(stream, line);) {
-    line = trimmed(line);
-    if (line.rfind("s_and_b32", 0) == 0 && line.size() > mask.size() &&
-        line.compare(line.size() - mask.size(), mask.size(), mask) == 0)
-      return true;
-  }
-  return false;
-}
-
 // The number of exact divisions of the kernel, each one a reciprocal.
 static int32_t divisions(const std::string &assembly) {
   return countLinesContaining(assembly, "v_rcp_iflag_f32");
 }
 
-// The rotation of up-front scales is modulo the literal UP_ITERS, a mask for a
-// power of two, a magic division otherwise and nothing for one entry. The 3-D
-// launch divides by registers for its split count and its tile decode, so the
-// rotation shows as the divisions that the kernel with one entry lacks.
-TEST(SkinnyGEMM, UpFrontRotationModulusIsUpIters) {
-  // One entry has no rotation, and its scales are decoded before the loop.
+// The K iteration is the loop counter itself, so the ring and the up-front
+// scales add no division to the tile decode, and a single entry decodes its
+// scales before the loop. The 3-D launch divides by registers for its split
+// count and its tile decode, which the kernel with one entry shows.
+TEST(SkinnyGEMM, UpFrontScalesAddNoDivisions) {
   std::string one = emitted(config(1, 1, 64, 4, 1, 1));
   SCOPED_TRACE("assembly:\n" + one);
   int32_t decodeDivisions = divisions(one);
   EXPECT_GT(decodeDivisions, 0);
-
-  std::string ring = emitted(config(1, 1, 64, 4, 2));
-  EXPECT_EQ(divisions(ring), decodeDivisions + 1);
-
-  std::string two = emitted(config(1, 1, 64, 4, 2, 2));
-  EXPECT_EQ(divisions(two), decodeDivisions);
-  EXPECT_TRUE(masksBy(two, ", 1"));
-
-  std::string four = emitted(config(1, 1, 16, 1, 2, 4));
-  EXPECT_TRUE(masksBy(four, ", 3"));
-
-  std::string five = emitted(config(1, 1, 16, 1, 2, 5));
-  EXPECT_EQ(divisions(five), decodeDivisions);
-  EXPECT_EQ(countLinesContaining(five, "s_mul_hi_i32"), 1);
-  EXPECT_NE(five.find("1717986919"), std::string::npos);
-
+  for (const SkinnyGEMMConfig &other :
+       {config(1, 1, 64, 4, 2), config(1, 1, 64, 4, 2, 2),
+        config(1, 1, 16, 1, 2, 4), config(1, 1, 16, 1, 2, 5)})
+    EXPECT_EQ(divisions(emitted(other)), decodeDivisions);
   EXPECT_EQ(countLinesContaining(one, "s_mul_hi_i32"), 0);
-  EXPECT_FALSE(masksBy(one, ", 0"));
+
   std::vector<std::string> loop =
       linesBetween(one, "label_kloop_0:", "s_cbranch_scc1 label_kloop_0");
   ASSERT_FALSE(loop.empty());
@@ -1118,18 +1096,17 @@ TEST(SkinnyGEMM, PersistentBarrierOnlyWhenShared) {
 }
 
 // The lines of the tile loop body before its first buffer load: the barrier,
-// the remap, the decode, the rotation and the bases.
+// the remap, the decode and the bases.
 static std::string tileDecode(const SkinnyGEMMConfig &config) {
   return joined(
       linesBetween(emitted(config), "label_tile_loop_0:", "buffer_load"));
 }
 
 // Every dynamic division is one v_rcp_iflag_f32. The plain order decodes kz
-// (only with split-K) and ty (2 with split-K), keys the rotation on the block
-// id outside the loop and has no remap. The grouped decode divides for kz, the
-// band and tx; the reordered rotation divides by NI unless it is absent with
-// one up-front entry. A power of two X remaps with shifts and a mask.
-TEST(SkinnyGEMM, PersistentDecodeAndRotationShape) {
+// (only with split-K) and ty (2 with split-K) and has no remap. The grouped
+// decode divides for kz, the band and tx. A power of two X remaps with shifts
+// and a mask.
+TEST(SkinnyGEMM, PersistentDecodeShape) {
   for (bool useSplitK : {false, true}) {
     // Without split-K there is no kz to divide for.
     int32_t kz = useSplitK ? 0 : -1;
@@ -1150,28 +1127,28 @@ TEST(SkinnyGEMM, PersistentDecodeAndRotationShape) {
 
     std::string grouped = tileDecode(persistentConfig(ring, 4, 8));
     SCOPED_TRACE("body:\n" + grouped);
-    EXPECT_EQ(countLinesContaining(grouped, "v_rcp_iflag_f32"), 4 + kz);
+    EXPECT_EQ(countLinesContaining(grouped, "v_rcp_iflag_f32"), 3 + kz);
     EXPECT_EQ(countLinesContaining(grouped, ", s2, 3"), 1);
     EXPECT_EQ(countLinesContaining(grouped, ", 7, s2"), 1);
     EXPECT_EQ(countLinesContaining(tileDecode(persistentConfig(upFront, 4, 8)),
                                    "v_rcp_iflag_f32"),
-              4 + kz);
+              3 + kz);
     EXPECT_EQ(countLinesContaining(tileDecode(persistentConfig(oneEntry, 4, 8)),
                                    "v_rcp_iflag_f32"),
               3 + kz);
-    // Only reordering by the XCDs: kz, ty and the slab rotation.
+    // Only reordering by the XCDs: kz and ty.
     EXPECT_EQ(countLinesContaining(tileDecode(persistentConfig(ring, 1, 8)),
                                    "v_rcp_iflag_f32"),
-              3 + kz);
+              2 + kz);
     // Only grouping: the same, without the remap.
     std::string groupOnly = tileDecode(persistentConfig(ring, 4, 1));
-    EXPECT_EQ(countLinesContaining(groupOnly, "v_rcp_iflag_f32"), 4 + kz);
+    EXPECT_EQ(countLinesContaining(groupOnly, "v_rcp_iflag_f32"), 3 + kz);
     EXPECT_EQ(countLinesContaining(groupOnly, ", 7, s2"), 0);
 
     // A divisor that is not a power of two uses the magic division, not a
     // dynamic one.
     std::string odd = tileDecode(persistentConfig(ring, 1, 3));
-    EXPECT_EQ(countLinesContaining(odd, "v_rcp_iflag_f32"), 3 + kz);
+    EXPECT_EQ(countLinesContaining(odd, "v_rcp_iflag_f32"), 2 + kz);
     EXPECT_EQ(countLinesContaining(odd, "s_mul_hi_i32"), 1);
   }
 }
@@ -1199,9 +1176,8 @@ TEST(SkinnyGEMM, Grid3dIgnoresGroupAndXcds) {
 }
 
 // The 3-D launch groups the xcdRun = 32 / BN tiles that share scale lines on
-// one XCD, after it decoded tx from the flat id, which the K rotation still
-// reads; only a BN that is a power of two below 32 regroups, and the persistent
-// launch never does.
+// one XCD, after it decoded tx from the flat id; only a BN that is a power of
+// two below 32 regroups, and the persistent launch never does.
 TEST(SkinnyGEMM, Grid3dGroupsScaleSharingTilesPerXcd) {
   // BN = 4, so G = 8 and the span is 64.
   std::string grouped = emitted(config(1, 1, 64, 4, 2, 2));
@@ -1222,9 +1198,9 @@ TEST(SkinnyGEMM, Grid3dGroupsScaleSharingTilesPerXcd) {
       lines[tilesMask + 1].find(',') - std::string("s_cmp_lt_u32 ").size());
   EXPECT_EQ(lines[tilesMask + 2].rfind("s_cselect_b32 " + tx + ", ", 0), 0u);
   EXPECT_NE(lines[tilesMask - 2].find(", -64, " + tx), std::string::npos);
-  // The flat id (s2) is never remapped, and the rotation key reads it.
-  EXPECT_EQ(countLinesContaining(grouped, "s_cselect_b32 s2,"), 0);
-  EXPECT_EQ(countLinesContaining(grouped, ", s2, 4"), 1);
+  // The flat id register (s2) holds tx once decoded, and the regrouping
+  // overwrites it.
+  EXPECT_EQ(tx, "s2");
 
   // BN = 32 and BN = 12 keep the decoded tile, as does the persistent launch.
   for (SkinnyGEMMConfig ungrouped :
@@ -2859,4 +2835,325 @@ TEST(SkinnyGEMMRemainder, AnEmptyPieceEndsTheWorkgroupBeforeTheLdsWork) {
   EXPECT_EQ(countLinesContaining(emitted(ldsConfig(16, 2, 4, 2, false, true)),
                                  "s_endpgm"),
             1);
+}
+
+// The K offsets do not depend on the workgroup id: a conservative taint
+// analysis of the assembly. The workgroup id is the taint source, the tile ids
+// derived from it are legitimately tainted, and the K offset of every operand
+// load, which is its soffset in both paths (the tile is in the voffset), must
+// stay clean, so that every tile sums K in the same order. The analysis is a
+// forward dataflow over the control flow graph of the kernel with the union of
+// the tainted registers at a join. It does not follow values through memory (the
+// LDS and the workspace) or through branch conditions. Split-K keys the K range
+// of a tile on kz, which comes from the workgroup id, so it is excluded.
+
+namespace {
+// The register space of the analysis: SGPRs, then the VGPRs, the AGPRs, VCC and
+// SCC at fixed offsets.
+constexpr int32_t vgprBase = 256;
+constexpr int32_t agprBase = 768;
+constexpr int32_t vccRegister = 1280;
+constexpr int32_t sccRegister = 1281;
+constexpr int32_t registerSpace = 1282;
+using TaintSet = std::bitset<registerSpace>;
+
+struct AsmInstruction {
+  std::string mnemonic;
+  std::vector<std::string> operands;
+  // The index of the label that a branch targets, or -1.
+  int32_t target = -1;
+  bool fallsThrough = true;
+  std::string text;
+};
+} // namespace
+
+static bool startsWithAny(const std::string &text,
+                          std::initializer_list<std::string_view> prefixes) {
+  return std::any_of(prefixes.begin(), prefixes.end(),
+                     [&](std::string_view prefix) {
+                       return text.rfind(prefix, 0) == 0;
+                     });
+}
+
+// The registers of an operand such as s5, s[4:7], v[2:5], a[0:3] or vcc.
+static std::vector<int32_t> registersOf(const std::string &operand) {
+  static const std::regex token(
+      R"(\b([sva])\[(\d+):(\d+)\]|\b([sva])(\d+)\b|\bvcc)");
+  std::vector<int32_t> registers;
+  for (std::sregex_iterator it(operand.begin(), operand.end(), token), end;
+       it != end; ++it) {
+    const std::smatch &match = *it;
+    if (match[0].str().rfind("vcc", 0) == 0) {
+      registers.push_back(vccRegister);
+      continue;
+    }
+    bool isRange = match[1].matched;
+    char kind = (isRange ? match[1] : match[4]).str()[0];
+    int32_t first = std::stoi((isRange ? match[2] : match[5]).str());
+    int32_t last = isRange ? std::stoi(match[3].str()) : first;
+    int32_t base = kind == 's' ? 0 : kind == 'v' ? vgprBase : agprBase;
+    for (int32_t index = first; index <= last; ++index)
+      registers.push_back(base + index);
+  }
+  return registers;
+}
+
+static std::vector<std::string> splitOperands(std::string text) {
+  // The commas of the DPP quad permutation are not operand separators.
+  text = std::regex_replace(text, std::regex(R"(quad_perm:\[[^\]]*\])"), "");
+  std::vector<std::string> operands;
+  std::istringstream stream(text);
+  for (std::string operand; std::getline(stream, operand, ',');)
+    operands.push_back(trimmed(operand));
+  return operands;
+}
+
+// The instructions of the kernel body, labels included as instructions without
+// operands so that branch targets are instruction indices.
+static std::vector<AsmInstruction> parseKernel(const std::string &assembly) {
+  std::vector<AsmInstruction> instructions;
+  std::unordered_map<std::string, int32_t> labels;
+  std::istringstream stream(assembly);
+  for (std::string line; std::getline(stream, line);) {
+    line = trimmed(line);
+    if (line.rfind(".amdhsa_kernel", 0) == 0)
+      break;
+    if (line.empty() || line[0] == '.' || line[0] == '#')
+      continue;
+    AsmInstruction instruction;
+    instruction.text = line;
+    if (line.back() == ':') {
+      instruction.mnemonic = line;
+      labels[line.substr(0, line.size() - 1)] = std::ssize(instructions);
+      instructions.push_back(instruction);
+      continue;
+    }
+    std::size_t space = line.find(' ');
+    instruction.mnemonic = line.substr(0, space);
+    if (space != std::string::npos)
+      instruction.operands = splitOperands(line.substr(space + 1));
+    instructions.push_back(std::move(instruction));
+  }
+  for (AsmInstruction &instruction : instructions) {
+    const std::string &mnemonic = instruction.mnemonic;
+    if (mnemonic == "s_endpgm")
+      instruction.fallsThrough = false;
+    if (!startsWithAny(mnemonic, {"s_branch", "s_cbranch"}))
+      continue;
+    instruction.target = labels.at(instruction.operands.at(0));
+    instruction.fallsThrough = mnemonic != "s_branch";
+  }
+  return instructions;
+}
+
+// Instructions without a register result that the analysis tracks.
+static bool writesNothing(const std::string &mnemonic) {
+  return startsWithAny(mnemonic,
+                       {"s_branch", "s_cbranch", "s_endpgm", "s_waitcnt",
+                        "s_nop", "s_barrier", "s_setprio", "s_sleep",
+                        "s_dcache", "s_sendmsg", "ds_write", "buffer_store",
+                        "global_store", "buffer_wbl2", "buffer_inv"}) ||
+         mnemonic.back() == ':';
+}
+
+static bool isLdsLoad(const AsmInstruction &instruction) {
+  return instruction.mnemonic.rfind("buffer_load", 0) == 0 &&
+         instruction.operands.back().find(" lds") != std::string::npos;
+}
+
+// The leading operands that the instruction writes: a carry out is a second
+// destination.
+static int32_t destinationCount(const AsmInstruction &instruction) {
+  const std::string &mnemonic = instruction.mnemonic;
+  if (startsWithAny(mnemonic, {"s_cmp", "s_bitcmp"}) || isLdsLoad(instruction))
+    return 0;
+  bool carryOut = mnemonic.find("_co_") != std::string::npos ||
+                  startsWithAny(mnemonic, {"v_mad_u64", "v_mad_i64",
+                                           "v_div_scale"});
+  return carryOut ? 2 : 1;
+}
+
+static bool anyTainted(const TaintSet &state, const std::string &operand) {
+  std::vector<int32_t> registers = registersOf(operand);
+  return std::any_of(registers.begin(), registers.end(),
+                     [&](int32_t reg) { return state[reg]; });
+}
+
+// The taint after the instruction. A scalar destination is overwritten; a
+// vector one only gains taint, as its inactive lanes keep the old value. An SALU
+// operation may set SCC, which only gains taint for the same reason.
+static void transfer(const AsmInstruction &instruction, TaintSet &state) {
+  const std::string &mnemonic = instruction.mnemonic;
+  if (writesNothing(mnemonic))
+    return;
+  int32_t destinations = destinationCount(instruction);
+  bool tainted = false;
+  for (int32_t i = destinations; i < std::ssize(instruction.operands); ++i)
+    tainted |= anyTainted(state, instruction.operands[i]);
+  // The carry and the mask that the encoding does not spell out.
+  if (startsWithAny(mnemonic, {"s_cselect", "s_addc", "s_subb"}))
+    tainted |= state[sccRegister];
+  if (mnemonic.find("cndmask") != std::string::npos ||
+      mnemonic.find("addc") != std::string::npos ||
+      mnemonic.find("subb") != std::string::npos)
+    tainted |= state[vccRegister];
+  if (startsWithAny(mnemonic, {"s_cmp", "s_bitcmp"})) {
+    state[sccRegister] = tainted;
+    return;
+  }
+  for (int32_t i = 0; i < destinations; ++i)
+    for (int32_t reg : registersOf(instruction.operands.at(i))) {
+      if (reg >= vgprBase && reg != vccRegister && reg != sccRegister)
+        state[reg] = state[reg] | tainted;
+      else
+        state[reg] = tainted;
+    }
+  bool setsScc = mnemonic.rfind("s_", 0) == 0 &&
+                 !startsWithAny(mnemonic, {"s_mov", "s_load", "s_cselect"});
+  if (setsScc)
+    state[sccRegister] = state[sccRegister] | tainted;
+}
+
+// The first operand load whose soffset is tainted by the workgroup id, as its
+// line, or an empty string. The workgroup id is the SGPR after the user SGPRs:
+// the kernarg pointer and the preloaded kernarg dwords.
+static std::string taintedKOffsetLoad(const std::string &assembly) {
+  int32_t preloadDwords = 0;
+  std::smatch preload;
+  if (std::regex_search(
+          assembly, preload,
+          std::regex(R"(\.amdhsa_user_sgpr_kernarg_preload_length (\d+))")))
+    preloadDwords = std::stoi(preload[1].str());
+  const int32_t workgroupId = 2 + preloadDwords;
+
+  std::vector<AsmInstruction> program = parseKernel(assembly);
+  std::vector<TaintSet> in(program.size());
+  std::vector<bool> reached(program.size(), false);
+  in[0][workgroupId] = true;
+  std::vector<int32_t> worklist{0};
+  reached[0] = true;
+  auto flow = [&](int32_t to, const TaintSet &state) {
+    if (to >= std::ssize(program))
+      return;
+    TaintSet merged = in[to] | state;
+    if (reached[to] && merged == in[to])
+      return;
+    in[to] = merged;
+    reached[to] = true;
+    worklist.push_back(to);
+  };
+  while (!worklist.empty()) {
+    int32_t at = worklist.back();
+    worklist.pop_back();
+    TaintSet state = in[at];
+    transfer(program[at], state);
+    if (program[at].fallsThrough)
+      flow(at + 1, state);
+    if (program[at].target >= 0)
+      flow(program[at].target, state);
+  }
+  for (int32_t at = 0; at < std::ssize(program); ++at) {
+    const AsmInstruction &instruction = program[at];
+    if (!reached[at] || instruction.mnemonic.rfind("buffer_load", 0) != 0)
+      continue;
+    // The soffset is the last operand, before the modifiers.
+    std::string soffset = instruction.operands.back();
+    soffset = soffset.substr(0, soffset.find(' '));
+    if (anyTainted(in[at], soffset))
+      return instruction.text;
+  }
+  return "";
+}
+
+// A kernel with the body between the label and the end of the program; s2 is
+// the workgroup id and s5 a kernarg value.
+static std::string kernelWith(const std::string &body) {
+  return "kernel:\ns_load_dword s5, s[0:1], 8\n" + body +
+         "s_endpgm\n.amdhsa_kernel kernel\n";
+}
+
+// The analysis finds a K offset derived from the workgroup id through scalar
+// arithmetic, a select on a tainted compare and a loop, and leaves clean
+// offsets, the voffset and overwritten registers alone.
+TEST(SkinnyGEMM, WorkgroupIdTaintAnalysisFindsTaintedKOffsets) {
+  const std::string load = "buffer_load_dwordx4 v[2:5], v1, s[8:11], ";
+  const std::string modifiers = " offen offset:0\n";
+
+  // The voffset may depend on the id, and the offset counts up from a kernarg.
+  std::string loop = "s_lshl_b32 s6, s2, 4\nv_add_u32 v1, v1, s6\n"
+                     "s_mov_b32 s7, 0\nlabel_loop:\n" +
+                     load + "s7" + modifiers +
+                     "s_add_u32 s7, s7, 1024\ns_cmp_lt_u32 s7, s5\n"
+                     "s_cbranch_scc1 label_loop\n";
+  EXPECT_EQ(taintedKOffsetLoad(kernelWith(loop)), "");
+  EXPECT_EQ(taintedKOffsetLoad(kernelWith(load + "s5" + modifiers)), "");
+
+  std::string direct = "s_lshl_b32 s6, s2, 4\n" + load + "s6" + modifiers;
+  EXPECT_EQ(taintedKOffsetLoad(kernelWith(direct)),
+            load + "s6 offen offset:0");
+
+  // The id reaches the offset from the second trip of the loop on.
+  std::string carried = "s_lshl_b32 s6, s2, 4\ns_mov_b32 s7, 0\n"
+                        "label_loop:\n" +
+                        load + "s7" + modifiers +
+                        "s_add_u32 s7, s7, s6\ns_cmp_lt_u32 s7, s5\n"
+                        "s_cbranch_scc1 label_loop\n";
+  EXPECT_NE(taintedKOffsetLoad(kernelWith(carried)), "");
+
+  // A tainted compare steers a select, and the select feeds the offset.
+  std::string selected = "s_cmp_lt_u32 s2, 7\ns_cselect_b32 s7, 0, 16\n" +
+                         load + "s7" + modifiers;
+  EXPECT_NE(taintedKOffsetLoad(kernelWith(selected)), "");
+
+  // The id reaches the offset through a lane value that is read back.
+  std::string readBack = "v_add_u32 v1, v1, s2\nv_readfirstlane_b32 s7, v1\n" +
+                         load + "s7" + modifiers;
+  EXPECT_NE(taintedKOffsetLoad(kernelWith(readBack)), "");
+
+  // A register that the id taints and a later move overwrites is clean again.
+  std::string overwritten =
+      "s_lshl_b32 s6, s2, 4\ns_mov_b32 s6, 0\n" + load + "s6" + modifiers;
+  EXPECT_EQ(taintedKOffsetLoad(kernelWith(overwritten)), "");
+
+  // The load into the LDS has no destination; its soffset is the last operand.
+  std::string staged = "s_lshl_b32 s6, s2, 4\nbuffer_load_dwordx4 v20, "
+                       "s[8:11], s6 offen offset:0 lds\n";
+  EXPECT_NE(taintedKOffsetLoad(kernelWith(staged)), "");
+}
+
+static std::vector<SkinnyGEMMConfig> uniformOrderConfigs() {
+  std::vector<SkinnyGEMMConfig> configs;
+  for (int32_t lanesK : {4, 16, 64})
+    for (int32_t waves : {1, 4})
+      for (int32_t prefetch : {0, 1, 2, 3})
+        for (int32_t upIters : {0, 1, 2, 5}) {
+          SkinnyGEMMConfig base = config(1, 1, lanesK, waves, prefetch, upIters);
+          configs.push_back(base);
+          configs.push_back(persistentConfig(base));
+          configs.push_back(persistentConfig(base, 4, 8));
+        }
+  // Several skinny columns and wide columns per lane, and the beta variant.
+  SkinnyGEMMConfig tile = config(2, 2, 16, 1, 2, 3);
+  configs.push_back(tile);
+  configs.push_back(persistentConfig(tile, 4, 1));
+  configs.push_back(persistentConfig(tile, 1, 8));
+  tile.useBeta = true;
+  configs.push_back(tile);
+  for (bool grid3d : {true, false})
+    for (int32_t waves : {1, 2, 4}) {
+      configs.push_back(mfmaConfig(16, 1, waves, 2, grid3d));
+      configs.push_back(mfmaConfig(32, 2, waves, 3, grid3d, true));
+      configs.push_back(ldsConfig(16, 1, waves, 2, grid3d));
+      configs.push_back(ldsConfig(32, 1, waves, 2, grid3d, true));
+    }
+  // The remainder narrowing kernel.
+  configs.push_back(ldsConfig(16, 2, 4, 2, true, true));
+  return configs;
+}
+
+TEST(SkinnyGEMM, KOffsetsDoNotDependOnTheWorkgroupId) {
+  for (const SkinnyGEMMConfig &gemm : uniformOrderConfigs()) {
+    SCOPED_TRACE(skinnyGEMMKernelName(gemm));
+    EXPECT_EQ(taintedKOffsetLoad(emitted(gemm)), "");
+  }
 }

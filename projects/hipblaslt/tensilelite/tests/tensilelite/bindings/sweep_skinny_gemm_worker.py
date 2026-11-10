@@ -188,6 +188,7 @@ class ReduceStep:
             p.alpha,
             p.beta,
         )
+        support.checkKernargs(kernel, self.args)
 
 
 class CaseBuffers:
@@ -252,6 +253,7 @@ class Candidate:
         self.problem = p
         self.kernel = kernel
         self.args = buffers.gemm_args(p)
+        support.checkKernargs(kernel, self.args)
         self.reduce = buffers.reduce
 
     def prime(self, flush: FastLlcFlush) -> None:
@@ -354,8 +356,8 @@ def refine(
                 fail_configuration(outcome, failure, err)
                 heartbeat()
                 continue
-            candidate = Candidate(p, kernel, buffers)
             try:
+                candidate = Candidate(p, kernel, buffers)
                 candidate.prime(flush)
             except Exception as err:
                 del refined[index]
@@ -392,7 +394,9 @@ def check_result(
     buffers.reset_outputs()
     d_out, ws_out = buffers.d_host.copy(), buffers.ws_host.copy()
     with load_kernel(job.hsaco_dir, name) as kernel:
-        support.launchKernel(kernel, p.grid, support.gemmBlock(p), buffers.gemm_args(p))
+        args = buffers.gemm_args(p)
+        support.checkKernargs(kernel, args)
+        support.launchKernel(kernel, p.grid, support.gemmBlock(p), args)
     buffers.d.download(d_out)
     buffers.ws.download(ws_out)
     verifier.check_gemm(p, d_out, ws_out)

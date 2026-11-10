@@ -71,10 +71,10 @@ the settings of the sweep that produced the results. The sweep's refinement of
 its top candidates is intentionally not implemented.
 
 Execution is pipelined. Kernels are assembled by a pool of --jobs spawned
-processes (BuildStage of sweep_skinny_gemm.py) into <work-dir>/hsaco, which is
-also a cache across rounds and runs (use a fresh work dir after changing the
-emitter). One persistent worker process per GPU (--gpus, default every GPU below
-5 percent use) loads the hsaco files (once per worker, they stay loaded) and
+processes (BuildStage of sweep_skinny_gemm.py) into
+<work-dir>/hsaco/<generator fingerprint>, which is also a cache across rounds
+and runs of the same generator build. One persistent worker process per GPU
+(--gpus, default every GPU below 5 percent use) loads the hsaco files (once per worker, they stay loaded) and
 times the problems; this process never initializes HIP. A job is sent to a GPU
 as soon as its kernels are built, and the build submissions run a window of
 max(2 * jobs, 4 * gpus) kernels ahead of the dispatch, so everything starts at
@@ -147,6 +147,12 @@ from skinny_gemm_selection import (
 )
 from skinny_gemm_support import DeviceBuffer, Problem
 from sweep_skinny_gemm import BuildResult, BuildStage
+from sweep_skinny_gemm_cache import (
+    SWEEP_CODE_OBJECT_VERSION,
+    SWEEP_PRELOAD_DWORDS,
+    generator_fingerprint,
+    prepare_kernel_cache,
+)
 from sweep_skinny_gemm_config import SETTING_DEFAULTS
 from sweep_skinny_gemm_flush import FastLlcFlush
 from sweep_skinny_gemm_inputs import (
@@ -364,11 +370,12 @@ class DeviceCaseCache:
 
 def reduce_launch(p: Problem, device: DeviceCase) -> tuple:
     """The kernel, grid, block and arguments of the split-K reduce."""
-    reducer = support.reduceKernel(support.DEFAULT_CODE_OBJECT_VERSION, 0)
+    reducer = support.reduceKernel(SWEEP_CODE_OBJECT_VERSION, SWEEP_PRELOAD_DWORDS)
     grid, block = support.reduceLaunchDims(p.m, p.n)
     args = support.reduceArgs(
         device.d, device.ws, device.c, p.ldD, p.m, p.n, p.splits, p.ldC, p.alpha, p.beta
     )
+    support.checkKernargs(reducer, args)
     return reducer, grid, block, args
 
 
@@ -415,10 +422,11 @@ def measure_us(
     untimed launches. Mirrors bench.benchProblem, but flushes the LLC with the
     flush of the sweep and, with verify, checks the result like the sweep."""
     p, iters, warmup, warmup_ms = job.problem, job.iters, job.warmup, job.warmup_ms
-    kernel = support.gemmKernel(p, support.DEFAULT_CODE_OBJECT_VERSION, 0)
+    kernel = support.gemmKernel(p, SWEEP_CODE_OBJECT_VERSION, SWEEP_PRELOAD_DWORDS)
     args = support.gemmArgs(
         p, device.d, device.a, device.b, device.scl_a, device.scl_b, device.ws, device.c
     )
+    support.checkKernargs(kernel, args)
     block = support.gemmBlock(p)
     verifier = make_verifier(p, inputs) if job.verify else None
     if verifier:
@@ -494,8 +502,8 @@ class KernelPipeline:
     """Assembles kernels in a process pool, a bounded window ahead of use."""
 
     def __init__(self, work_dir: str, jobs: int, window: int):
-        self.hsaco_dir = os.path.join(work_dir, "hsaco")
-        os.makedirs(self.hsaco_dir, exist_ok=True)
+        self.hsaco_dir, message = prepare_kernel_cache(work_dir, generator_fingerprint())
+        print(message, flush=True)
         self.stage = BuildStage(self.hsaco_dir, jobs)
         self.window = window
         self.known: set[str] = set()
@@ -547,7 +555,7 @@ def load_job_kernels(job: Job) -> None:
     benchmark finds them and so does not assemble. They stay loaded, so a kernel
     is read from disk once per worker."""
     for name, path in job.kernels:
-        key = (name, support.DEFAULT_CODE_OBJECT_VERSION, 0)
+        key = (name, SWEEP_CODE_OBJECT_VERSION, SWEEP_PRELOAD_DWORDS)
         if key in support._kernelCache:
             continue
         with open(path, "rb") as stream:
@@ -1274,7 +1282,7 @@ def make_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--work-dir",
-        help="kernel cache, hsaco/<kernel>.hsaco (default: OUT_DIR/work)",
+        help="kernel cache, hsaco/<fingerprint>/<kernel>.hsaco (default: OUT_DIR/work)",
     )
     parser.add_argument(
         "--gpus",

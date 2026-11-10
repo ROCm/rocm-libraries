@@ -53,9 +53,6 @@ struct SkinnyDims {
   bool useBeta;
   /// USE_SPLIT_K: whether K is split at run time by spk, see SkinnyGEMMConfig.
   bool useSplitK;
-  /// Whether the persistent launch reorders the tiles (GROUP or NUM_XCDS not
-  /// 1), which changes the key of the K rotation.
-  bool reordered;
   /// UP_ITERS up-front scale entries per split, 0 for ring scales.
   int32_t upIters;
   /// NC = BM + TN columns per lane.
@@ -167,8 +164,6 @@ struct TileLoop {
   std::optional<RegisterRange> plane;
   /// Only the grouped decode needs tilesY.
   std::optional<RegisterRange> tilesY;
-  /// NI, the iterations of a split, and the rotation of the block id.
-  std::optional<RegisterRange> ni, blockRot;
   /// The remap of the XCDs: tiles per XCD and the XCDs with one more.
   std::optional<RegisterRange> perXcd, tall;
   /// GROUP * tilesX, the tiles of a band.
@@ -449,8 +444,6 @@ struct TileState {
   RegisterRange selectors;
   RegisterRange s0;
   RegisterRange nIterFull;
-  // The rotation, absent with one up-front entry, where it is the constant 0.
-  std::optional<RegisterRange> fitRot;
   // The bytes of the tail iteration that the split keeps, 0 when it has no
   // tail.
   RegisterRange tailBytes;

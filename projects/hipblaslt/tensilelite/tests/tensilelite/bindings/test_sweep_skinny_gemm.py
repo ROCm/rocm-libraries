@@ -6,11 +6,14 @@ import argparse
 import collections
 import concurrent.futures
 import contextlib
+import ctypes
+import dataclasses
 import functools
 import multiprocessing
 import os
 import random
 import signal
+import struct
 import subprocess
 import sys
 import threading
@@ -29,6 +32,7 @@ import select_skinny_gemm_kernels as kernels_tool
 import skinny_gemm_selection as selection
 import skinny_gemm_support as support
 import sweep_skinny_gemm as sweep
+import sweep_skinny_gemm_cache as cache
 import sweep_skinny_gemm_results as results_module
 import sweep_skinny_gemm_config as config
 import sweep_skinny_gemm_inputs as inputs_module
@@ -2863,7 +2867,7 @@ def dead_pid() -> int:
 
 
 def test_build_kernel_emit_failure(monkeypatch, tmp_path):
-    def fail(problem):
+    def fail(problem, *rest):
         raise ValueError("bad knobs\nsecond line")
 
     monkeypatch.setattr(support, "gemmAsm", fail)
@@ -2877,7 +2881,7 @@ def test_build_kernel_assemble_failure(monkeypatch, tmp_path):
     def fail(asm):
         raise RuntimeError("assembler failed")
 
-    monkeypatch.setattr(support, "gemmAsm", lambda problem: "asm")
+    monkeypatch.setattr(support, "gemmAsm", lambda problem, *rest: "asm")
     monkeypatch.setattr(support, "assemble", fail)
     result = sweep.build_kernel("k", object(), str(tmp_path))
     assert (result.ok, result.stage) == (False, "assemble")
@@ -2891,7 +2895,7 @@ def test_build_kernel_success_leaves_only_the_hsaco(monkeypatch, tmp_path):
         seen.extend(os.listdir(tmp_path))
         return b"hsaco"
 
-    monkeypatch.setattr(support, "reduceAsm", lambda: "asm")
+    monkeypatch.setattr(support, "reduceAsm", lambda *rest: "asm")
     monkeypatch.setattr(support, "assemble", assemble)
     result = sweep.build_kernel("k", None, str(tmp_path))
     assert (result.ok, result.message) == (True, "built")
@@ -3603,8 +3607,14 @@ def patch_timing(monkeypatch, ext):
     return log, hip
 
 
+# The layout of a kernel that takes no arguments, as the fakes below pass none.
+NO_KERNARGS = support.KernargLayout(0, 8, ())
+
+
 def gemm_kernel():
-    return types.SimpleNamespace(function=FakeHandle("gemm"))
+    return types.SimpleNamespace(
+        function=FakeHandle("gemm"), name="gemm", kernargs=NO_KERNARGS
+    )
 
 
 def launches_only(log):
@@ -3693,7 +3703,9 @@ def test_warm_launches_are_flush_launch_pairs_without_events(monkeypatch):
 
 def reduce_step():
     return types.SimpleNamespace(
-        kernel=types.SimpleNamespace(function=FakeHandle("reduce")),
+        kernel=types.SimpleNamespace(
+            function=FakeHandle("reduce"), name="reduce", kernargs=NO_KERNARGS
+        ),
         grid=(1, 1, 1),
         block=(64, 1, 1),
         args=(),
@@ -3979,6 +3991,7 @@ class RaisingHip:
 
 def test_exit_does_not_mask_the_exception_in_flight(monkeypatch):
     monkeypatch.setattr(support, "_hip", lambda: RaisingHip())
+    monkeypatch.setattr(support, "kernargLayout", lambda hsaco, name: NO_KERNARGS)
     with pytest.raises(ValueError, match="body"):
         with support.LoadedKernel(b"", "k"):
             raise ValueError("body")
@@ -4419,3 +4432,311 @@ def test_stale_temporaries_of_the_failed_file_are_removed_at_start(tmp_path):
         (tmp_path / name).write_text("")
     instance.remove_stale_files()
     assert not [n for n in os.listdir(tmp_path) if n.endswith(".tmp")]
+
+
+# The kernel cache directory and the generator fingerprint.
+
+
+def write_files(directory, contents):
+    paths = []
+    for name, data in contents.items():
+        path = directory / name
+        path.write_bytes(data)
+        paths.append(str(path))
+    return paths
+
+
+def test_fingerprint_follows_the_content_and_the_abi_not_the_path(tmp_path):
+    (tmp_path / "other").mkdir()
+    paths = write_files(tmp_path, {"a": b"codegen", "b": b"jit"})
+    base = cache.fingerprint_of(paths, "abi")
+    assert len(base) == cache.FINGERPRINT_CHARS
+    assert cache.fingerprint_of(paths, "abi") == base
+    copies = write_files(tmp_path / "other", {"a": b"codegen", "b": b"jit"})
+    assert cache.fingerprint_of(copies, "abi") == base
+    changed = write_files(tmp_path / "other", {"a": b"codegeN", "b": b"jit"})
+    assert cache.fingerprint_of(changed, "abi") != base
+    assert cache.fingerprint_of(paths, "other abi") != base
+
+
+def test_generator_fingerprint_is_computed_from_the_module_files(
+    monkeypatch, tmp_path
+):
+    paths = write_files(tmp_path, {"a": b"one", "b": b"two"})
+    by_name = dict(zip(cache.GENERATOR_MODULES, paths))
+    monkeypatch.setattr(cache, "module_path", lambda name: by_name[name])
+    cache.generator_fingerprint.cache_clear()
+    try:
+        before = cache.generator_fingerprint()
+        (tmp_path / "b").write_bytes(b"twO")
+        assert cache.generator_fingerprint() == before
+        cache.generator_fingerprint.cache_clear()
+        assert cache.generator_fingerprint() != before
+    finally:
+        monkeypatch.undo()
+        cache.generator_fingerprint.cache_clear()
+
+
+def test_module_path_rejects_a_missing_module():
+    with pytest.raises(config.SweepConfigError, match="cannot find the nope_"):
+        cache.module_path("nope_missing_module")
+
+
+def test_prepare_kernel_cache_counts_and_keeps_the_older_entries(tmp_path):
+    root = tmp_path / "hsaco"
+    (root / "old1").mkdir(parents=True)
+    (root / "old2").mkdir()
+    (root / "x.hsaco").write_bytes(b"x")
+    (root / "old1" / "k.hsaco").write_bytes(b"k")
+    path, message = cache.prepare_kernel_cache(str(tmp_path), "feedfacefeedface")
+    assert path == str(root / "feedfacefeedface")
+    assert os.path.isdir(path)
+    assert "new generator fingerprint feedfacefeedface" in message
+    assert "2 older fingerprint directories and 1 unfingerprinted .hsaco" in message
+    assert sorted(os.listdir(root)) == ["feedfacefeedface", "old1", "old2", "x.hsaco"]
+    assert (root / "old1" / "k.hsaco").exists()
+    _, again = cache.prepare_kernel_cache(str(tmp_path), "feedfacefeedface")
+    assert "new generator" not in again
+    assert "generator fingerprint feedfacefeedface)" in again
+
+
+def test_prepare_kernel_cache_is_quiet_without_older_entries(tmp_path):
+    _, message = cache.prepare_kernel_cache(str(tmp_path), "0123456789abcdef")
+    assert "out of date" not in message
+
+
+def test_sweep_uses_the_fingerprint_directory(monkeypatch, tmp_path):
+    monkeypatch.setattr(sweep, "generator_fingerprint", lambda: "0123456789abcdef")
+    instance = make_sweep(tmp_path)
+    assert instance.hsaco_dir == str(tmp_path / "hsaco" / "0123456789abcdef")
+    assert instance.meta["generatorFingerprint"] == "0123456789abcdef"
+
+
+# The kernarg check against the layout a code object declares.
+
+
+def synthetic_code_object(name, segment_size, args, align=8, note_name=b"AMDGPU"):
+    """A minimal ELF64 with one SHT_NOTE section holding the AMDGPU metadata of
+    one kernel."""
+    msgpack = pytest.importorskip("msgpack")
+    metadata = {
+        "amdhsa.kernels": [
+            {
+                ".name": name,
+                ".kernarg_segment_size": segment_size,
+                ".kernarg_segment_align": align,
+                ".args": [{".offset": o, ".size": z} for o, z in args],
+            }
+        ]
+    }
+    desc = msgpack.packb(metadata)
+    pad = lambda data: data + b"\0" * (-len(data) % 4)
+    note_name += b"\0"
+    note = struct.pack("<III", len(note_name), len(desc), support.NT_AMDGPU_METADATA)
+    note += pad(note_name) + pad(desc)
+    header = bytearray(64)
+    header[:4] = b"\x7fELF"
+    section_table = 64 + len(note)
+    struct.pack_into("<Q", header, 0x28, section_table)
+    struct.pack_into("<HH", header, 0x3A, 64, 1)
+    section = bytearray(64)
+    struct.pack_into("<I", section, 4, support.SHT_NOTE)
+    struct.pack_into("<QQ", section, 0x18, 64, len(note))
+    return bytes(header) + note + bytes(section)
+
+
+HOST_ARGS = (
+    ctypes.c_void_p(0),
+    ctypes.c_int32(1),
+    ctypes.c_int32(2),
+    ctypes.c_float(1.0),
+)
+# Pointer at 0, then three 4-byte values: 8 + 12 = 20 bytes, padded to 24.
+HOST_LAYOUT = [(0, 8), (8, 4), (12, 4), (16, 4)]
+
+
+def kernel_of(hsaco, name="k"):
+    return types.SimpleNamespace(name=name, kernargs=support.kernargLayout(hsaco, name))
+
+
+def test_kernarg_layout_is_parsed_from_the_code_object():
+    hsaco = synthetic_code_object("k", 24, HOST_LAYOUT)
+    assert support.kernargLayout(hsaco, "k") == (24, 8, tuple(HOST_LAYOUT))
+    with pytest.raises(ValueError, match="other: not in the code object"):
+        support.kernargLayout(hsaco, "other")
+
+
+def test_packed_kernargs_mirror_hip_python():
+    packed = support.packedKernargs((ctypes.c_int32(0), ctypes.c_void_p(0)))
+    assert packed == ((0, 4), (8, 8))
+    assert support.packedKernargs(HOST_ARGS) == tuple(HOST_LAYOUT)
+    assert support.packedKernargs(()) == ()
+
+
+def test_matching_kernargs_pass():
+    support.checkKernargs(kernel_of(synthetic_code_object("k", 24, HOST_LAYOUT)), HOST_ARGS)
+
+
+def test_a_stale_kernarg_segment_is_reported_by_size():
+    stale = HOST_LAYOUT + [(20, 4), (24, 4), (28, 4)]
+    kernel = kernel_of(synthetic_code_object("k", 112, stale))
+    with pytest.raises(support.KernargMismatch) as error:
+        support.checkKernargs(kernel, HOST_ARGS)
+    text = str(error.value)
+    assert "k: stale or mismatched kernarg ABI: kernel expects 112 bytes, host packs 24" in text
+    assert "the hsaco cache is out of date" in text
+
+
+def test_a_kernarg_layout_of_the_same_size_is_reported_by_offsets():
+    moved = [(0, 8), (8, 4), (16, 4), (20, 4)]
+    kernel = kernel_of(synthetic_code_object("k", 24, moved))
+    with pytest.raises(support.KernargMismatch, match="kernel arguments .offset, size"):
+        support.checkKernargs(kernel, HOST_ARGS)
+
+
+def test_a_foreign_file_has_no_kernarg_layout():
+    with pytest.raises(ValueError, match="not an ELF"):
+        support.kernargLayout(b"not an elf file", "k")
+    foreign = synthetic_code_object("k", 24, HOST_LAYOUT, note_name=b"GNU")
+    with pytest.raises(ValueError, match="no AMDGPU metadata note"):
+        support.kernargLayout(foreign, "k")
+
+
+def test_a_loaded_kernel_checks_the_layout_before_loading(monkeypatch):
+    monkeypatch.setattr(support, "_hip", lambda: pytest.fail("loaded"))
+    with pytest.raises(ValueError, match="not an ELF"):
+        support.LoadedKernel(b"junk", "k")
+
+
+# The layout the real emitter declares against what the host packs (no GPU).
+
+MFMA_KNOBS = dict(mfma=True, lds=True, bm=16, tn=1, waves=4, pf=2)
+
+
+def emitter_problem(m, n, k, **knobs):
+    return support.noKnobProblem(m, n, k, **knobs)
+
+
+EMITTER_PROBLEMS = {
+    "valu": lambda: emitter_problem(2, 300, 2048),
+    "valu_split_k": lambda: emitter_problem(2, 300, 2048, spk=1024),
+    "mfma_persistent": lambda: emitter_problem(2000, 1, 4096, blocks=5, **MFMA_KNOBS),
+    "mfma_remainder": lambda: dataclasses.replace(
+        emitter_problem(2000, 1, 4096, **MFMA_KNOBS), pieces=4, cus=6
+    ),
+}
+FAKE_BUFFER = types.SimpleNamespace(pointer=ctypes.c_void_p(0))
+
+
+def host_gemm_args(p):
+    return support.gemmArgs(p, *[FAKE_BUFFER] * 7)
+
+
+@functools.cache
+def emitted_kernel(case):
+    pytest.importorskip("tensilelite_codegen")
+    pytest.importorskip("tensilelite_jit")
+    p = EMITTER_PROBLEMS[case]()
+    name = support.gemmKernelName(p)
+    return p, kernel_of(support.assemble(support.gemmAsm(p)), name)
+
+
+@pytest.mark.parametrize("case", EMITTER_PROBLEMS)
+def test_emitted_gemm_kernargs_match_the_host_packing(case):
+    p, kernel = emitted_kernel(case)
+    support.checkKernargs(kernel, host_gemm_args(p))
+
+
+def test_emitted_reduce_kernargs_match_the_host_packing():
+    pytest.importorskip("tensilelite_codegen")
+    pytest.importorskip("tensilelite_jit")
+    kernel = kernel_of(
+        support.assemble(support.reduceAsm()), support.REDUCE_KERNEL_NAME
+    )
+    support.checkKernargs(kernel, support.reduceArgs(*[FAKE_BUFFER] * 3, 4, 4, 4, 2, 4))
+
+
+def test_a_split_k_kernel_does_not_match_the_args_of_a_plain_problem():
+    _, split_kernel = emitted_kernel("valu_split_k")
+    plain, _ = emitted_kernel("valu")
+    with pytest.raises(support.KernargMismatch, match="stale or mismatched"):
+        support.checkKernargs(split_kernel, host_gemm_args(plain))
+
+
+# The sweep worker records a kernarg mismatch as a failure to run.
+
+
+def mismatched_kernel(name):
+    stale = support.KernargLayout(112, 8, ((0, 8),))
+    return types.SimpleNamespace(name=name, kernargs=stale)
+
+
+def matching_kernel(name):
+    return types.SimpleNamespace(name=name, kernargs=NO_KERNARGS)
+
+
+class TimedCandidate:
+    def __init__(self, p, kernel, buffers):
+        support.checkKernargs(kernel, buffers.gemm_args(p))
+
+    def prime(self, flush):
+        pass
+
+    def warm(self, count, flush):
+        pass
+
+    def time(self, count, flush):
+        return worker.Timing([1000], [])
+
+
+def patch_kernarg_worker(monkeypatch):
+    kernels = {"stale": mismatched_kernel("stale"), "good": matching_kernel("good")}
+    monkeypatch.setattr(
+        worker, "load_kernel", lambda d, n: contextlib.nullcontext(kernels[n])
+    )
+    monkeypatch.setattr(worker, "Candidate", TimedCandidate)
+    monkeypatch.setattr(worker, "device_healthy", lambda: True)
+    return types.SimpleNamespace(gemm_args=lambda p: ())
+
+
+def test_screen_records_a_kernarg_mismatch_as_a_failure_to_run(monkeypatch):
+    buffers = patch_kernarg_worker(monkeypatch)
+    job = worker.Job(0, [("stale", "p"), ("good", "p")], "", {"warmup": 1, "iters": 2}, True)
+    outcome = {"failures": []}
+    timings = worker.screen(job, buffers, None, outcome)
+    assert sorted(timings) == [1]
+    (failure,) = outcome["failures"]
+    assert (failure["index"], failure["status"], failure["stage"]) == (
+        0,
+        worker.RUN_STATUS,
+        "run",
+    )
+    assert "stale or mismatched kernarg ABI" in failure["reason"]
+
+
+def test_refine_drops_a_kernel_with_a_kernarg_mismatch(monkeypatch):
+    buffers = patch_kernarg_worker(monkeypatch)
+    entries = [("stale", "p"), ("good", "p")]
+    settings = {"refine_top": 2, "refine_iters": worker.ROUND_LAUNCHES}
+    job = worker.Job(0, entries, "", settings, False)
+    screening = {i: worker.Timing([1000 * (i + 1)], []) for i in range(2)}
+    outcome = {"failures": []}
+    refined = worker.refine(job, buffers, None, screening, outcome)
+    assert sorted(refined) == [1]
+    (failure,) = outcome["failures"]
+    assert (failure["index"], failure["status"]) == (0, worker.RUN_STATUS)
+    assert "stale or mismatched kernarg ABI" in failure["reason"]
+
+
+def test_check_result_raises_before_launching_on_a_kernarg_mismatch(monkeypatch):
+    buffers = patch_kernarg_worker(monkeypatch)
+    buffers.reset_outputs = lambda: None
+    buffers.d_host = buffers.ws_host = np.zeros(1)
+    launched = []
+    monkeypatch.setattr(support, "launchKernel", lambda *a: launched.append(a))
+    monkeypatch.setattr(support, "gemmBlock", lambda p: (1, 1, 1))
+    job = worker.Job(0, [], "", {}, True)
+    p = types.SimpleNamespace(grid=(1, 1, 1))
+    with pytest.raises(support.KernargMismatch):
+        worker.check_result(job, buffers, p, "stale", None)
+    assert launched == []

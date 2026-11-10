@@ -1543,7 +1543,7 @@ static void emitMfmaTile(const MfmaContext &ctx, const TileIds &ids,
 }
 
 // The persistent launch: the values of the tile loop that do not depend on the
-// tile, as the VALU path computes them without the K rotation.
+// tile.
 static TileLoop makeTileLoop(const MfmaContext &ctx,
                              std::optional<RegisterRef> splits) {
   IRBuilder &builder = ctx.builder;
@@ -1552,8 +1552,6 @@ static TileLoop makeTileLoop(const MfmaContext &ctx,
                 builder.allocateSgpr(1),
                 splits ? std::optional<RegisterRange>(builder.allocateSgpr(1))
                        : std::nullopt,
-                std::nullopt,
-                std::nullopt,
                 std::nullopt,
                 std::nullopt,
                 std::nullopt,

@@ -11,6 +11,8 @@ kernels take them as byte strides, so the kernarg builders convert them.
 
 import ctypes
 import re
+import struct
+from collections.abc import Iterator
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import NamedTuple
@@ -440,10 +442,111 @@ class DeviceBuffer:
         closeOnExit(self, value)
 
 
+# The note type of the AMDGPU metadata of a code object.
+NT_AMDGPU_METADATA = 32
+SHT_NOTE = 7
+
+
+class KernargLayout(NamedTuple):
+    """The kernarg segment of a kernel: its size and alignment and the (offset,
+    size) of every argument."""
+
+    segmentSize: int
+    segmentAlign: int
+    args: tuple[tuple[int, int], ...]
+
+
+class KernargMismatch(RuntimeError):
+    """The host packs other kernargs than the kernel declares."""
+
+
+def elfNotes(hsaco: bytes) -> Iterator[tuple[bytes, int, bytes]]:
+    """The (name, type, desc) of every note of a little-endian ELF64 file."""
+    if hsaco[:4] != b"\x7fELF":
+        raise ValueError("not an ELF file")
+    (shoff,) = struct.unpack_from("<Q", hsaco, 0x28)
+    shentsize, shnum = struct.unpack_from("<HH", hsaco, 0x3A)
+    for index in range(shnum):
+        header = shoff + index * shentsize
+        (kind,) = struct.unpack_from("<I", hsaco, header + 4)
+        offset, size = struct.unpack_from("<QQ", hsaco, header + 0x18)
+        if kind != SHT_NOTE:
+            continue
+        position, end = offset, offset + size
+        while position + 12 <= end:
+            nameSize, descSize, noteType = struct.unpack_from("<III", hsaco, position)
+            nameStart = position + 12
+            descStart = nameStart + alignUp(nameSize, 4)
+            name = hsaco[nameStart : nameStart + nameSize].rstrip(b"\0")
+            yield name, noteType, hsaco[descStart : descStart + descSize]
+            position = descStart + alignUp(descSize, 4)
+
+
+def amdgpuMetadata(hsaco: bytes) -> dict:
+    """The AMDGPU metadata (the msgpack note) of a code object."""
+    import msgpack
+
+    for name, noteType, desc in elfNotes(hsaco):
+        if name == b"AMDGPU" and noteType == NT_AMDGPU_METADATA:
+            return msgpack.unpackb(desc, raw=False)
+    raise ValueError("no AMDGPU metadata note in the code object")
+
+
+def kernargLayout(hsaco: bytes, name: str) -> KernargLayout:
+    """The kernarg layout the code object declares for a kernel."""
+    for kernel in amdgpuMetadata(hsaco)["amdhsa.kernels"]:
+        if kernel[".name"] != name:
+            continue
+        return KernargLayout(
+            kernel[".kernarg_segment_size"],
+            kernel[".kernarg_segment_align"],
+            tuple((arg[".offset"], arg[".size"]) for arg in kernel.get(".args", [])),
+        )
+    raise ValueError(f"{name}: not in the code object metadata")
+
+
+def packedKernargs(args) -> tuple[tuple[int, int], ...]:
+    """The (offset, size) of every kernarg as hip-python packs the extra tuple:
+    a ctypes value takes its size, anything else (a pointer) 8 bytes, aligned to
+    the smaller of its size and 8, with no trailing padding."""
+    packed = []
+    offset = 0
+    for arg in args:
+        size = ctypes.sizeof(arg) if hasattr(arg, "_type_") else 8
+        offset = alignUp(offset, min(size, 8))
+        packed.append((offset, size))
+        offset += size
+    return tuple(packed)
+
+
+def checkKernargs(kernel, args) -> None:
+    """Raises KernargMismatch if the host packs the args other than the loaded
+    kernel declares, which a code object of an older emitter does and which makes
+    the kernel read wrong arguments."""
+    layout = kernel.kernargs
+    packed = packedKernargs(args)
+    end = packed[-1][0] + packed[-1][1] if packed else 0
+    hostBytes = alignUp(end, layout.segmentAlign)
+    prefix = f"{kernel.name}: stale or mismatched kernarg ABI"
+    if hostBytes != layout.segmentSize:
+        raise KernargMismatch(
+            f"{prefix}: kernel expects {layout.segmentSize} bytes, host packs "
+            f"{hostBytes}; the hsaco cache is out of date"
+        )
+    if packed != layout.args:
+        raise KernargMismatch(
+            f"{prefix}: kernel arguments (offset, size) {list(layout.args)}, host "
+            f"packs {list(packed)}; the hsaco cache is out of date"
+        )
+
+
 class LoadedKernel:
     """A kernel of a loaded code object; keeps the module alive until closed."""
 
     def __init__(self, hsaco: bytes, name: str):
+        # Parsed first, so that a foreign code object fails before it is loaded.
+        self.name = name
+        self.kernargs = kernargLayout(hsaco, name)
         hip = _hip()
         self.module = hipCheck(hip.hipModuleLoadData(hsaco))
         self.function = hipCheck(hip.hipModuleGetFunction(self.module, name.encode()))

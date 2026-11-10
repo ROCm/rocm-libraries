@@ -439,7 +439,7 @@ PARAMS = [
     (2, 2, 16, 1, 1, 4, 100, 2048, 2048),  # Path A, wide-only tail.
     (2, 2, 16, 1, 1, 64, 3, 2048, 2048),  # Path B, skinny-only tail.
     (2, 2, 16, 1, 1, 100, 4, 2048, 2048),  # Path B, wide-only tail.
-    # BN = 8, grid.x = 38, NI = 3: the bx/16 rotation term with NI >= 3, wide-only tail.
+    # BN = 8, grid.x = 38, NI = 3: several K iterations over many tiles, wide-only tail.
     (2, 2, 16, 1, 1, 2, 300, 3072, 3072),
     # Non-power-of-two BM and BN: the tile decode divides by non-power-of-two counts.
     (3, 2, 16, 1, 1, 7, 100, 2048, 2048),  # Path A, BM = 3, skinny and wide tails.
@@ -484,7 +484,7 @@ PARAMS = [
     (1, 4, 16, 1, 2, 2, 256, 8192, 4096),  # PF=2, NI = 4, split-K x2.
     (1, 2, 16, 1, 4, 1, 256, 8192, 4096),  # PF=4, NI = PF, split-K x2.
     # Steady-loop trip counts 0, 1 and 2 (NI = PF, 2*PF, 3*PF) with split-K, both paths and
-    # more than 16 tiles so the bx/16 term of the K rotation varies.
+    # more than 16 tiles with several K iterations.
     (1, 4, 16, 1, 1, 1, 256, 2048, 1024),  # PF=1, NI = PF, split-K x2.
     (2, 2, 16, 1, 1, 301, 5, 6144, 3072),  # PF=1, NI = 3*PF, path B tails, split-K x2.
     (2, 2, 16, 1, 1, 2, 300, 6144, 3072),  # PF=1, NI = 3*PF, path A, split-K x2.
@@ -1279,7 +1279,7 @@ def test_gemm_mxfp8_skinny_store_tails(
 )
 def test_vector_and_masked_stores_give_the_same_bf16(M, N, VECTOR, MASKED):
     """A tile with an even run stores D with vectors and one with an odd run with
-    ushorts; with one K iteration (no rotation) both accumulate in the same order,
+    ushorts; with one K iteration both accumulate in the same order,
     so the bf16 results of the same inputs are bit-identical."""
     problems = [
         resolve(
@@ -1480,7 +1480,7 @@ SPK_PARAMS = [
     (1, 4, 64, 1, 1, 64, 2, 4000, 1280, PAD, None, 1, 1),
     # PF=3, NIfull 4, 4 and 3 with a tail in the last split.
     (2, 1, 16, 1, 3, 3, 100, 12000, 4352, TIGHT, None, 1, 1),
-    # 38 x 1 x 2 tiles: rotation modulus 4 against NIfull 3 and 2.
+    # 38 x 1 x 2 tiles: NIfull 3 and 2.
     (2, 2, 16, 1, 1, 2, 300, 5676, 3328, TIGHT, None, 1, 1),
     # B, PF=2, same.
     (2, 2, 16, 1, 2, 300, 2, 5676, 3328, PAD, None, 1, 1),
@@ -1739,7 +1739,7 @@ UP_SPK_PARAMS = [
         5,
         1,
         1,
-    ),  # Persistent, rotation modulus 3 against NIfull 2.
+    ),  # Persistent, NIfull 2.
     # LANES_K = 64 with several waves shares the scales through LDS.
     (
         2,
@@ -2130,7 +2130,7 @@ UP_PARAMS = [
         5,
         1,
         1,
-    ),  # NI = 3, persistent, 38 tiles: K rotation varies.
+    ),  # NI = 3, persistent, 38 tiles.
     (
         2,
         3,
@@ -4455,3 +4455,327 @@ def test_bench_sweep_line_reports_the_plan():
     assert " pieces=4 workgroups=512 " in line
     off = bench.formatSweepLine(pickProblem(5120, 1), [30000], None)
     assert " pieces=1 workgroups=320 " in off
+
+
+# Uniform summation order: identical rows of the wide operand give bitwise
+# identical rows of D, whatever the tile, workgroup or split of the row. The
+# inputs make any difference in the order of K visible: the large products 448 *
+# 448 at k = 0 and -448 * 448 at k = K / 2 cancel only when the partial sums
+# around them are formed in the same order.
+
+BIG_CODE = 0x7E
+NEGATIVE_BIG_CODE = 0xFE
+# The E8M0 byte of 2^0.
+UNIT_SCALE = 127
+# The standard deviation of the other entries: the dot product stays near 10, so
+# a rounding difference of the f32 sums, which the big products make about 0.03,
+# is visible in the bf16 D.
+UNIFORM_SIGMA = 0.3
+# The absolute tolerance of the reference check, about 2^-24 * 448^2 * 100: the
+# f32 sums lose the low bits of the entries next to a big product.
+UNIFORM_ATOL = 1.0
+
+
+def drawUniformVectors(p, seed):
+    """The K vector shared by every row of the wide operand, the skinny operand
+    [k, n] and the product of the two in f64."""
+    rng = np.random.default_rng(seed=seed)
+    vector = support.encodeE4M3FN(rng.standard_normal(p.k) * UNIFORM_SIGMA)
+    vector[0] = BIG_CODE
+    vector[p.k // 2] = NEGATIVE_BIG_CODE
+    skinny = support.encodeE4M3FN(rng.standard_normal((p.k, p.n)) * UNIFORM_SIGMA)
+    skinny[0] = BIG_CODE
+    skinny[p.k // 2] = BIG_CODE
+    column = support.decodeE4M3FN(vector).astype(np.float64) @ (
+        support.decodeE4M3FN(skinny).astype(np.float64)
+    )
+    return vector, skinny, column
+
+
+def paddedOperand(codes, ld, cols):
+    """The host buffer of [k, cols] codes with NaN in the ld padding, tight at
+    the end as makeOperand's."""
+    k = codes.shape[0]
+    padded = np.full((cols, ld), support.NAN_BYTE, dtype=np.uint8)
+    padded[:, :k] = codes.T
+    return padded.ravel()[: support.operandExtent(cols, k, ld)].copy()
+
+
+def makeUniformInputs(p, seed):
+    """Inputs whose m rows of A are all the same vector, with every scale 2^0, and
+    the same C in every row of a column; the reference is the one product."""
+    vector, skinny, column = drawUniformVectors(p, seed)
+    wide = np.repeat(vector[:, None], p.m, axis=1)
+    blocks = support.ceilDiv(p.k, support.MX_BLOCK)
+    sclA = support.preSwizzleScales(
+        np.full((p.m, blocks), UNIT_SCALE, dtype=np.uint8), p.scale_pad
+    )
+    sclB = support.preSwizzleScales(
+        np.full((p.n, blocks), UNIT_SCALE, dtype=np.uint8), p.scale_pad
+    )
+    rng = np.random.default_rng(seed=seed)
+    poison = p.beta == 0 or (not p.use_beta and p.splits == 1)
+    cBits = np.full(
+        support.dElements(p.m, p.n, p.ldC) + support.D_GUARD,
+        support.D_SENTINEL,
+        dtype=np.uint16,
+    )
+    index = (np.arange(p.n)[:, None] * p.ldC + np.arange(p.m)).ravel()
+    if poison:
+        cBits[index] = support.C_POISON
+    else:
+        values = support.roundToBf16(rng.standard_normal(p.n) * 2)
+        cBits[index] = np.repeat(values, p.m)
+    expected = np.broadcast_to(column, (p.m, p.n)).astype(np.float32)
+    return support.Inputs(
+        paddedOperand(wide, p.ldA, p.m),
+        paddedOperand(skinny, p.ldB, p.n),
+        sclA,
+        sclB,
+        expected,
+        cBits,
+    )
+
+
+def rowDifferences(p, dBits):
+    """One line per column of D whose rows are not all equal: the rows that
+    differ from the most common value and the distinct values."""
+    lines = []
+    for j, column in enumerate(support.dColumns(dBits, p.m, p.n, p.ldD)):
+        values, counts = np.unique(column, return_counts=True)
+        if len(values) == 1:
+            continue
+        differing = int(column.size - counts.max())
+        shown = support.bf16ToFloat32(values[:6]).tolist()
+        lines.append(
+            f"column {j}: {differing} of {p.m} rows differ, "
+            f"{len(values)} distinct values {shown}"
+        )
+    return lines
+
+
+def verifyCancelled(p, dBits, expected):
+    """verifyD with the absolute tolerance of the cancelling products."""
+    written = np.zeros(dBits.size, dtype=bool)
+    written[(np.arange(p.n)[:, None] * p.ldD + np.arange(p.m)).ravel()] = True
+    end = support.dElements(p.m, p.n, p.ldD)
+    assert (dBits[:end][~written[:end]] == support.D_SENTINEL).all(), (
+        f"{p.label}: ld padding between columns was written"
+    )
+    assert (dBits[end:] == support.D_SENTINEL).all(), (
+        f"{p.label}: memory past D was written"
+    )
+    actual = support.bf16ToFloat32(support.dColumns(dBits, p.m, p.n, p.ldD)).T
+    np.testing.assert_allclose(
+        actual,
+        support.bf16ToFloat32(support.roundToBf16(expected)),
+        rtol=1e-2,
+        atol=UNIFORM_ATOL,
+        err_msg=f"{p.label}: D mismatch",
+    )
+
+
+def runUniform(m, n, k, *, seed=11, **knobs):
+    """Runs the problem on identical rows of A, checks D against the reference
+    and that every column of D is uniform."""
+    p = resolve(m, n, k, **knobs)
+    skipUnlessRunnable(p)
+    inputs = makeUniformInputs(p, seed)
+    try:
+        dBits = support.executeProblem(p, inputs._replace(expected=None), 1)
+    except ValueError as err:
+        if (p.use_beta or p.mfma) and isBudgetError(err):
+            pytest.skip(str(err))
+        raise
+    expected = (
+        support.expectedD(p, inputs)
+        if p.splits > 1
+        else support.singleSplitD(p, inputs)
+    )
+    verifyCancelled(p, dBits, expected)
+    differences = rowDifferences(p, dBits)
+    assert not differences, f"{p.label}: rows are not uniform\n" + "\n".join(differences)
+
+
+# n = 1 with the default knobs: several K iterations, a partial tile, a K that is
+# not a multiple of 1024, a single iteration, and a long K.
+UNIFORM_DEFAULT_SHAPES = [
+    (10240, 5120),
+    (10240, 6144),
+    (6144, 4096),
+    (8192, 8192),
+    (1000, 8292),
+    (4100, 3000),
+    (2048, 1024),
+    (4096, 16384),
+]
+
+
+@pytest.mark.parametrize("M,K", UNIFORM_DEFAULT_SHAPES)
+def test_valu_default_rows_are_uniform(M, K):
+    runUniform(M, 1, K)
+
+
+def valuKnobs(**knobs):
+    return {"mfma": False, "bm": 1, "tn": 1, "waves": 1, "pf": 2, **knobs}
+
+
+# (name, M, N, K, knobs): the explicit VALU configurations. A K of 5 iterations
+# and a tail made the K rotation of the old emitter non zero for some tile.
+def uniformValuCases():
+    cases = []
+    for lanesK, k in ((4, 1380), (8, 2660), (16, 5220), (64, 20580)):
+        for pf in range(4):
+            for up in (0, 1):
+                knobs = valuKnobs(lanes_k=lanesK, pf=pf, up_scales=up)
+                cases.append((f"lanes{lanesK}_pf{pf}_up{up}", 3000, 1, k, knobs))
+    for waves in (1, 4):
+        for tn in (1, 2, 4):
+            for bm, n in ((1, 1), (2, 2)):
+                # bm 2 with tn 4 needs more than the 256 VGPRs.
+                if bm == 2 and tn == 4:
+                    continue
+                knobs = valuKnobs(lanes_k=16, waves=waves, tn=tn, bm=bm)
+                cases.append((f"waves{waves}_tn{tn}_bm{bm}", 2500, n, 5220, knobs))
+    report = valuKnobs(
+        lanes_k=16, up_scales=0, group=1, xcds=1, use_beta=True, beta=-2.5
+    )
+    cases.append(("report_config_beta", 10240, 1, 8192, report))
+    cases.append(("report_config_partial", 1000, 1, 8292, report))
+    cases.append(("report_config_beta_zero", 4100, 1, 6144, {**report, "beta": 0.0}))
+    for bm in (2, 4):
+        cases.append((f"n{bm}_valu_bm{bm}", 2048, bm, 5120, valuKnobs(lanes_k=16, bm=bm)))
+        cases.append((f"n{bm}_valu_default", 2048, bm, 5120, {"mfma": False}))
+    return cases
+
+
+UNIFORM_VALU_CASES = uniformValuCases()
+
+
+@pytest.mark.parametrize(
+    "NAME,M,N,K,KNOBS", UNIFORM_VALU_CASES, ids=[c[0] for c in UNIFORM_VALU_CASES]
+)
+def test_valu_rows_are_uniform(NAME, M, N, K, KNOBS):
+    runUniform(M, N, K, **KNOBS)
+
+
+# The persistent launch, plain and reordered, with ring and up-front scales.
+UNIFORM_PERSISTENT_CASES = [
+    (
+        f"b{blocks}_g{group}_x{xcds}_up{up}_beta{beta}",
+        m,
+        k,
+        valuKnobs(
+            lanes_k=16,
+            blocks=blocks,
+            group=group,
+            xcds=xcds,
+            up_scales=up,
+            use_beta=bool(beta),
+            beta=-2.5 * beta,
+        ),
+    )
+    for blocks, group, xcds, m, k in (
+        (256, 1, 1, 6000, 5220),
+        (256, 4, 1, 6000, 5220),
+        (256, 1, 8, 6000, 5220),
+        (256, 4, 8, 6000, 5220),
+        (100, 1, 1, 3000, 8192),
+        (100, 4, 8, 3000, 8192),
+    )
+    for up in (0, 1)
+    for beta in (0, 1)
+]
+
+
+@pytest.mark.parametrize(
+    "NAME,M,K,KNOBS",
+    UNIFORM_PERSISTENT_CASES,
+    ids=[c[0] for c in UNIFORM_PERSISTENT_CASES],
+)
+def test_valu_persistent_rows_are_uniform(NAME, M, K, KNOBS):
+    runUniform(M, 1, K, **KNOBS)
+
+
+# The leading dimension of the wide operand is padded with NaN, which must never
+# be read: k + 64, and exactly 8192 with k = 8000.
+@pytest.mark.parametrize("PADDING,K", [((64, 64, 0), 5220), ((192, 192, 0), 8000)])
+@pytest.mark.parametrize("KNOBS", [{}, {"blocks": 128}], ids=["grid3d", "persistent"])
+def test_valu_padded_ld_rows_are_uniform(PADDING, K, KNOBS):
+    runUniform(3000, 1, K, padding=PADDING, **valuKnobs(lanes_k=16, **KNOBS))
+
+
+# Split-K: every split sums its K range in order and the reduce sums the splits
+# in split order.
+UNIFORM_SPLIT_K_CASES = [
+    ("lanes16_spk2048", 2500, 8192, valuKnobs(lanes_k=16, spk=2048)),
+    ("lanes16_spk2048_up", 2500, 8192, valuKnobs(lanes_k=16, spk=2048, up_scales=1)),
+    ("lanes4_spk1024", 2500, 4096, valuKnobs(lanes_k=4, spk=1024)),
+    ("lanes16_spk3072_tail", 2500, 8300, valuKnobs(lanes_k=16, spk=3072)),
+    (
+        "persistent_spk2048",
+        2500,
+        8192,
+        valuKnobs(lanes_k=16, spk=2048, blocks=128),
+    ),
+    (
+        "persistent_reordered_spk2048",
+        2500,
+        8192,
+        valuKnobs(lanes_k=16, spk=2048, blocks=128, group=4, xcds=8),
+    ),
+    ("beta_spk2048", 2500, 8192, valuKnobs(lanes_k=16, spk=2048, use_beta=True, beta=-2.5)),
+]
+
+
+@pytest.mark.parametrize(
+    "NAME,M,K,KNOBS", UNIFORM_SPLIT_K_CASES, ids=[c[0] for c in UNIFORM_SPLIT_K_CASES]
+)
+def test_valu_split_k_rows_are_uniform(NAME, M, K, KNOBS):
+    runUniform(M, 1, K, **KNOBS)
+
+
+def uniformMfmaCases():
+    cases = []
+    for n in (4, 16):
+        for m, k in ((5120, 8192), (8192, 4096), (1000, 8292), (10240, 8192)):
+            for lds in (False, True):
+                cases.append((f"default_n{n}_{m}x{k}_lds{int(lds)}", m, n, k, {"mfma": True, "lds": lds}))
+    for lds in (False, True):
+        for waves in (1, 2, 4):
+            for tn in (1, 2):
+                for bm in (16, 32):
+                    knobs = {"mfma": True, "lds": lds, "waves": waves, "tn": tn, "bm": bm}
+                    name = f"lds{int(lds)}_waves{waves}_tn{tn}_bm{bm}"
+                    cases.append((name, 5120, 16, 8192, knobs))
+    for pf in (2, 3, 4):
+        for lds in (False, True):
+            knobs = {"mfma": True, "lds": lds, "waves": 2, "pf": pf}
+            cases.append((f"lds{int(lds)}_pf{pf}", 5120, 4, 8192, knobs))
+    return cases
+
+
+UNIFORM_MFMA_CASES = uniformMfmaCases()
+
+
+@pytest.mark.parametrize(
+    "NAME,M,N,K,KNOBS", UNIFORM_MFMA_CASES, ids=[c[0] for c in UNIFORM_MFMA_CASES]
+)
+def test_mfma_rows_are_uniform(NAME, M, N, K, KNOBS):
+    runUniform(M, N, K, **KNOBS)
+
+
+# The remainder narrowing splits the wide columns of a remainder tile, not K: the
+# cus of 6 leave a remainder of the tiles of 2000 x 4.
+@pytest.mark.parametrize("PIECES", [2, 4, 16])
+def test_mfma_remainder_pieces_rows_are_uniform(PIECES):
+    knobs = {"mfma": True, "lds": True, "bm": 16, "tn": 1, "waves": 4, "pf": 2}
+    p = resolve(2000, 4, 8192, pieces=PIECES, cus=6, **knobs)
+    assert p.plan.pieces == PIECES and p.plan.remainder_tiles > 0
+    runUniform(2000, 4, 8192, pieces=PIECES, cus=6, **knobs)
+
+
+@pytest.mark.parametrize("LDS", [False, True])
+@pytest.mark.parametrize("SPK", [2048, 4096])
+def test_mfma_split_k_rows_are_uniform(LDS, SPK):
+    runUniform(2500, 4, 8192, mfma=True, lds=LDS, spk=SPK)

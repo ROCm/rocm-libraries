@@ -69,16 +69,6 @@ defaults:
       group: [1, 4, 8]
       numXcds: [1, 4, 8, 16]
       blocks: [256, 512]
-    - &mfma_grid3d_sweep
-      mfma: true
-      lds: [false, true]
-      bm: [16, 32]
-      tn: [1, 2, 3, 4]
-      lanesK: 64
-      waves: [1, 2, 4]
-      prefetch: [2, 3, 4, 6]
-      upScales: 0
-      grid3d: true
     - &mfma_persistent_sweep
       mfma: true
       lds: true

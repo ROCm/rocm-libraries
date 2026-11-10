@@ -124,7 +124,6 @@ SkinnyDims::SkinnyDims(const SkinnyGEMMConfig &config)
       prefetch(config.prefetch), grid3d(config.grid3d), group(config.group),
       numXcds(config.numXcds), useBeta(config.useBeta),
       useSplitK(config.useSplitK),
-      reordered(config.group != 1 || config.numXcds != 1),
       upIters(config.upIters) {
   mfma = config.mfma;
   lds = config.lds;
