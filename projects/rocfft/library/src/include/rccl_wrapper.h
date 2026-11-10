@@ -192,6 +192,9 @@ public:
 private:
     struct Impl;
 
+    // The single-process create() always calls this. With ROCFFT_MPI_ENABLE
+    // it passes MPI_COMM_NULL, which skips the MPI collectives, so an MPI
+    // build can still create a single-process multi-GPU communicator.
     static rocfft_rccl_comm_t create_from_locs(const std::set<rocfft_location_t>& locs,
                                                int                                local_comm_rank
 #ifdef ROCFFT_MPI_ENABLE

@@ -72,9 +72,9 @@ MPI and RCCL
 =============================
 
 MPI distributed transforms require ``-DROCFFT_MPI_ENABLE=ON`` and a GPU-aware MPI.
-On Cray systems also pass ``-DROCFFT_CRAY_MPI_ENABLE=ON`` and link the GTL library
-(see the Cray MPI example below). Leave ``ROCFFT_RCCL_ENABLE`` off for an MPI-only
-build; that is the default.
+On Cray systems also pass ``-DROCFFT_CRAY_MPI_ENABLE=ON``. That option links
+``mpi_gtl_hsa`` and adds the GTL library directory next to the MPI install.
+Leave ``ROCFFT_RCCL_ENABLE`` off for an MPI-only build; that is the default.
 
 The optional RCCL transpose backend was introduced in rocFFT 1.0.39 (ROCm 10.0) for
 single-process plans; multi-process support was added in rocFFT 1.0.42 (ROCm 10.3). Enable it
@@ -85,7 +85,6 @@ Example: MPI-only on a Cray node (no RCCL)::
 
    cmake -DROCFFT_MPI_ENABLE=ON -DROCFFT_CRAY_MPI_ENABLE=ON \
      -DCMAKE_PREFIX_PATH="${MPICH_DIR}" \
-     -DCMAKE_SHARED_LINKER_FLAGS="-L${MPICH_DIR}/lib -lmpi ${PE_MPICH_GTL_DIR_amd_gfx90a} ${PE_MPICH_GTL_LIBS_amd_gfx90a} ${CRAY_XPMEM_POST_LINK_OPTS} -lxpmem" \
      ..
 
 You can build the clients separately from the main library.

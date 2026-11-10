@@ -51,9 +51,10 @@ that supports transferring data to and from HIP devices.
 
 If the library is also built with ``ROCFFT_RCCL_ENABLE=ON``, RCCL
 may be used for the multi-process transpose as well (rocFFT may still
-fall back to MPI communication). Set
-``ROCFFT_RCCL_DISABLE=1`` to force the MPI path. MPI is still used
-to exchange brick metadata and to bootstrap the RCCL communicator.
+fall back to MPI communication). Set the ``ROCFFT_RCCL_DISABLE``
+environment variable to ``1`` to force the MPI path. If any rank sets
+it, every rank uses MPI. MPI is still used to exchange brick metadata
+and to bootstrap the RCCL communicator.
 
 .. warning::
 
