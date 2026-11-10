@@ -310,8 +310,11 @@ bundle patterns to `*Sdpa*`, uses `Smoke/*Sdpa*` as its only tier-prefixed C++
 pattern, and its `full` tier is `*Sdpa*`. The hip-kernel-provider gfx950
 attention lanes and gfx942 unified 3D lane (see
 [Tier YAML files](file-formats.md#tier-yaml-files--test_categoriesyaml)) select
-only `*_SdpaFwd_Default.*` bundles in every tier, `full` included. The gfx942
-dense lane also selects the BSHD stats bundles `*_SdpaFwd_bshd_*_stats_*`:
+only the `*_SdpaFwd_Default.*` and `*_SdpaFwdPlan_*` bundles in every tier,
+`full` included. The gfx942 dense lane also selects the BSHD stats bundles
+`*_SdpaFwd_bshd_*_stats_*`. The FlyDSL SDPA lanes select the `*_SdpaFwd_*` and
+`*_SdpaFwdPlan_*` bundles. The miopen, hipblaslt and HIP_MLOPS files exclude
+`*_SdpaFwdPlan_*` from every tier:
 
 | CTest label | Bundle suites | C++ tests | Other labels on the suite |
 |---|---|---|---|

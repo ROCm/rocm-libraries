@@ -19,7 +19,7 @@ The files of the plan in this repository are:
 | [`test-plans/sdpa-fwd/layers/`](../../test-plans/sdpa-fwd/layers/) | The layer files: Layer 0 (the axes), Layer 1 (the definition rules) and Layer 2 (the frontend rules). |
 | [`docs/test-plans/sdpa-fwd/axes.md`](sdpa-fwd/axes.md) | The axis catalogue: every axis, what it is for and its full values. |
 | `integration-test-bundles/<tier>/SdpaFwdPlan/<Topology>/` | The bundles: one sweep per tier and topology (section 9). |
-| [`ASM_SDPA_ENGINE.toml`](../../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml) | The skips of the cases that hit known engine defects (section 10). |
+| The TOML file of each SDPA engine's lane, for example [`ASM_SDPA_ENGINE.toml`](../../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml) | The skips of the cases that hit known defects of that engine (section 10). |
 | The `*test_categories_integration.yaml` file of each lane | Which lanes run the cases (section 9.5). |
 
 Three programs made the cases:
@@ -71,7 +71,7 @@ gives the reason.
 | §4, §15 (I1): a generator writes the bundles from the declarations | `model.yaml` and `rules.yaml` are in the repository. The case generator, the graph exporter, the bundle tools and the case list are not (sections 1 and 11). | The bundles cannot be made again from the repository. Why: the programs are a PoC still being developed. |
 | §4, §9: each case has a `purpose` and maps to a plan item | Case metadata has no `purpose` and no `plan_items`. Each case links to its case-list row by `case_key` (section 9.4). | No purpose tag, and the trace runs through a file that is not in the repository. Why: not recorded. |
 | §8.3, §13.1 step 10: claims are harvested | Every `support.json` is empty (section 11). | No claims. Why: they come in a later change, tracked in ALMIOPEN-3225. |
-| §8.4, P2: the plan never names an engine, and the same bundles run on every lane | The base case is one that `ASM_SDPA_ENGINE` accepts (section 4). Only the `ASM_SDPA_ENGINE` lane runs the cases (section 9.5), and section 10 holds its skips. | The HIP_MLOPS, MIOPEN and hipBLASLt lanes exclude the cases because they have no SDPA support. Why the other attention lanes of the hip-kernel provider do not select them, and why the base case is engine-specific: not recorded. |
+| §8.4, P2: the plan never names an engine, and the same bundles run on every lane | The base case is one that `ASM_SDPA_ENGINE` accepts (section 4). Every SDPA engine lane runs the cases (section 9.5), and each engine's TOML file holds the skips for its defects (section 10). | The HIP_MLOPS, MIOPEN and hipBLASLt lanes exclude the cases because they have no SDPA support. Why the base case is engine-specific: not recorded. |
 | §6, §8.1: each level holds `expected_rejection` bundles | No rejection cases. Requests that hipDNN must refuse belong to a separate rejection suite (sections 3 and 11). | Why: not recorded. |
 | §12: golden cases, at least the G-A anchors | No golden data. Each output is checked against the GPU and CPU SDPA references (section 9.4). | Why: not recorded. |
 | §13.2 template: pass criteria, trade-off register, exhaustive mode | No such sections. `choice` rules in `rules.yaml` record each judgement call with its reason (section 5). Fuzzer hints mark the value axes that only a fuzzer uses (section 3). | Why: not recorded. |
@@ -765,12 +765,18 @@ hipDNN GPU and CPU SDPA reference executors.
 
 ### 9.5 Lanes
 
-A **lane** is one engine's run of the suite. The `ASM_SDPA_ENGINE` lane selects
-every op folder whose name contains `Sdpa`, so it runs these cases. The
-HIP_MLOPS, MIOPEN and hipBLASLt lanes have no SDPA support. Their tier YAML
-files exclude `*_SdpaFwdPlan_*`, so they do not load these cases only to
-decline them. The other attention lanes of the hip-kernel provider select
-`*_SdpaFwd_*` names, which do not match `SdpaFwdPlan`.
+A **lane** is one engine's run of the suite. The cases are generic SDPA
+forward tests, so every SDPA engine lane runs them. The `ASM_SDPA_ENGINE` lane
+selects every op folder whose name contains `Sdpa`. The other SDPA engine lanes
+of the hip-kernel provider, the rocKE attention engines
+(`hipkernel:Gfx942AttentionDense`, `hipkernel:Gfx942AttentionUnified3d`,
+`hipkernel:Gfx950AttentionDense`, `hipkernel:Gfx950AttentionUnified2D` and
+`hipkernel:Gfx950AttentionUnified3D`) and the FlyDSL SDPA engines
+(`hipkernel:flydsl_sdpa_*`), select `<tier>_SdpaFwdPlan_*` in each tier of
+their tier YAML file, beside their own `SdpaFwd` bundles. A case that an engine
+does not accept is declined, and the suite skips it. The HIP_MLOPS, MIOPEN and
+hipBLASLt lanes have no SDPA support. Their tier YAML files exclude
+`*_SdpaFwdPlan_*`, so they do not load these cases only to decline them.
 
 ## 10. Known engine defects and their skips
 
@@ -780,15 +786,17 @@ gets a **skip**: an entry in the engine's TOML file that tells the suite not to
 run the case. The case stays in its tier. This section tells how the skips for
 these cases were made, and how to remove them.
 
-The skips are in
-[`ASM_SDPA_ENGINE.toml`](../../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml),
-after the comment line `-- SdpaFwdPlan known engine defects --`. Read that file
-for the current list. This document does not copy it.
+The skips are in the TOML file of each engine's lane (the file that the lane
+passes as `--test-config`). Only
+[`ASM_SDPA_ENGINE.toml`](../../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml)
+holds any, after the comment line `-- SdpaFwdPlan known engine defects --`.
+Read the TOML files for the current list. This document does not copy it.
 
 ### 10.1 Running the cases
 
-1. Run the `ASM_SDPA_ENGINE` lane of `hipdnn_integration_tests` (section 9.5)
-   on the `SdpaFwdPlan` cases of each tier, on a gfx942 GPU and on a gfx950 GPU.
+1. Run each SDPA engine's lane of `hipdnn_integration_tests` (section 9.5)
+   on the `SdpaFwdPlan` cases of each tier, on a GPU of each architecture that
+   the engine supports: gfx942 and gfx950 for `ASM_SDPA_ENGINE`.
 2. Run each tier two times, once with each **input fill**. The input fill is
    how the suite makes the input data. The default fill makes large inputs on
    the GPU. The host fill (`HIPDNN_TEST_HOST_INPUT_FILL=1`) makes every input on
@@ -951,7 +959,7 @@ entry when the blocking ticket is fixed, then follow section 10.4.
   bundle cannot express or compare. The other 4 have random dropout without
   `rng_dump`. They are rows of the case list, but no bundle holds them.
 - `ASM_SDPA_ENGINE` declines every graph that declares a tensor alignment
-  below 16 bytes. So the lane gets no engine result for an `element_aligned` or
+  below 16 bytes. So its lane gets no engine result for an `element_aligned` or
   `sub_element` row.
 - Requests that hipDNN must refuse, and one request stated through different
   API routes, are not bundles. They belong to a rejection suite.
