@@ -61,7 +61,7 @@ import functools
 import math
 from dataclasses import dataclass
 
-from rocke.core.arch.target import ArchTarget
+from rocke.core.arch.target import ArchTarget, base_arch_from_target_id
 from rocke.helpers.spec import ceil_div
 from rocke.helpers.split_k import TARGET_SLICE_K, SplitKDecision
 from rocke.helpers.split_k import num_cus as arch_num_cus
@@ -397,7 +397,7 @@ def select_split_k_wgrad(
     """
     # Every table below is keyed by the bare architecture, so strip a target
     # id's feature suffix (``gfx942:sramecc+``) once, before any lookup.
-    base_arch = arch.split(":", 1)[0]
+    base_arch = base_arch_from_target_id(arch)
     num_cus = arch_num_cus(base_arch)
     max_capacity = waves_per_cu * num_cus
 
@@ -534,7 +534,7 @@ def select_split_k_fwd(
     caller's (:func:`kernels.common.conv_split_k.resolve_conv_split_k`).
     """
     if num_cus is None:
-        num_cus = arch_num_cus(arch.split(":", 1)[0])
+        num_cus = arch_num_cus(base_arch_from_target_id(arch))
     target = num_cus * FWD_SPLIT_K_TARGET_CTAS_PER_CU
     base_grid = (
         ceil_div(int(M), int(tile_m)) * ceil_div(int(N), int(tile_n)) * max(1, groups)
@@ -770,7 +770,7 @@ def fwd_split_k_problem_reason(p: ConvProblem, arch: str) -> str | None:
     pipeline, epilogue) are the builder's
     (:func:`kernels.common.conv_implicit_gemm.fwd_split_k_reason`).
     """
-    if arch.split(":", 1)[0] not in FWD_SPLIT_K_ARCHS:
+    if base_arch_from_target_id(arch) not in FWD_SPLIT_K_ARCHS:
         return f"split-K forward is built for {', '.join(FWD_SPLIT_K_ARCHS)} only"
     if p.is_pointwise:
         return "split-K forward does not support the pointwise fast path"
@@ -942,7 +942,8 @@ def resolve_conv_split_k(
     Args:
         direction: ``"fwd"``, ``"wgrad"`` or ``"dgrad"``.
         problem: the convolution.
-        arch: target arch.
+        arch: target arch or target id; a feature suffix (``gfx942:sramecc+``)
+            is stripped, so a decorated id resolves as its bare arch.
         dtype: the output (dW / dX) dtype -- it decides which atomics exist.
         tile_m, tile_n, tile_k: the kernel's block tile.
         block_size: threads per workgroup.
@@ -992,7 +993,9 @@ def resolve_conv_split_k(
     return _resolve_cached(
         direction,
         problem,
-        arch=arch,
+        # Every per-arch table and the arch catalog are keyed by the bare
+        # arch; a decorated id also shares the bare arch's cache entry.
+        arch=base_arch_from_target_id(arch),
         dtype=dtype,
         tile_m=tile_m,
         tile_n=tile_n,

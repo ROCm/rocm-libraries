@@ -699,3 +699,27 @@ def test_wmma_auto_without_float_atomics_runs_unsplit(arch):
         resolve_conv_split_k("wgrad", p, allow_unsplit=False, **kw)
     free = resolve_conv_split_k("wgrad", p, **{**kw, "reduction": "auto"})
     assert (free.split_k, free.two_stage) == (1, False)
+
+
+# A deep reduction into a small output: forward splits on gfx1250, dgrad splits
+# everywhere; DENSE splits wgrad.
+DEEP_K = ConvProblem(N=1, Hi=7, Wi=7, C=2048, K=512, Y=3, X=3, pH=1, pW=1)
+
+
+@pytest.mark.parametrize("direction", ["fwd", "wgrad", "dgrad"])
+@pytest.mark.parametrize(
+    "target_id", ["gfx942:sramecc+", "gfx950:xnack-", "gfx1250:sramecc+:xnack-"]
+)
+@pytest.mark.parametrize("problem", [DENSE, DEEP_K], ids=["dense", "deep_k"])
+def test_a_decorated_target_id_resolves_as_its_bare_arch(direction, target_id, problem):
+    kw = {
+        "dtype": "bf16",
+        "tile_m": 64,
+        "tile_n": 64,
+        "tile_k": 32,
+        "block_size": 256,
+    }
+    bare = resolve_conv_split_k(
+        direction, problem, arch=target_id.split(":", 1)[0], **kw
+    )
+    assert resolve_conv_split_k(direction, problem, arch=target_id, **kw) == bare
