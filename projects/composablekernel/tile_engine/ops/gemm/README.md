@@ -34,6 +34,7 @@ Tile Engine does — it only swaps the harness.
 | `gemm_full_benchmark.py` | Driver: compile (Phase 1) → load problems (Phase 2) → benchmark across all visible GPUs (Phase 3). |
 | `run_one_gemm_kernel.py` | Disposable worker: loads one `.so` in an isolated subprocess and times it. A GPU fault kills only the worker. |
 | `gemm_search.py` | Adaptive search mode of the driver (`--search-config`), see [Adaptive kernel search](#adaptive-kernel-search---search-config). |
+| `batched_gemm_full_benchmark.py` | Batched GEMM driver: the same phases, measurement, pair lists and search mode on `batch_count, M, N, K` problems, see [Batched GEMM search](#batched-gemm-search). |
 
 To measure only the kernels a trained model picks, and to score the picks
 against a full sweep, see
@@ -287,7 +288,8 @@ that `compile_error` again without a trial.
 Option rules:
 
 - `--search-config` and `--search-output-dir` go together, for `gemm_universal`
-  only. `--list-pairs`, `--repeat-top` and `--failures-csv` are rejected; the
+  only (the batched driver: see [Batched GEMM search](#batched-gemm-search)).
+  `--list-pairs`, `--repeat-top` and `--failures-csv` are rejected; the
   search writes its own records and `--csv` is not written. `--build-timeout`
   is rejected too: the search's limit is `build_timeout_s`.
 - Every measurement is verified and runs one kernel per worker, whatever
@@ -617,6 +619,71 @@ Troubleshooting: for `no_winner` or `partial`, read `unresolved` in
 memory (see "Host verification memory"). If nearly every candidate gets
 built, the problems are choosing different kernels: lower `new_builds_per_run`
 or keep the default `shared` seed policy.
+
+### Batched GEMM search
+
+`batched_gemm_full_benchmark.py` takes the GEMM driver's search options:
+`--search-config` with `--search-output-dir`, `--pairs`, and the dry run
+`--list-pairs`, which a plain batched run takes too. Everything in
+[Adaptive kernel search](#adaptive-kernel-search---search-config) applies,
+with these differences:
+
+- A problem is `batch_count, M, N, K`. Its key in `--pairs`, `--list-pairs`,
+  `winners.json`, `run.json` and `trials.jsonl` is `BxMxNxK` (e.g.
+  `1024x192x641x32`); a `ranked_csv` prior has the same keys, and its latency is
+  `2*B*M*N*K / (predicted_tflops * 1e9)`.
+- A problem's candidates are the kernels a full batched run measures with it:
+  the same expansion of the positional configs and the same vector-width
+  pairing, one candidate per kernel name. `--list-pairs` writes exactly that
+  list, and a search's `run.json` records its size per problem and its hash
+  (`domain_sha256`).
+- Builds go through `setup_multiple_batched_gemm_dispatchers`, which shares the
+  GEMM bridge's build loop (and so takes the search's limit per build step and
+  reports each failed kernel's error). Its own limit is 300 s per codegen,
+  compile and link step for every kernel, fixed-vector-width kernels included
+  (the GEMM build's 1200 s compile limit for those does not apply), so without
+  `build_timeout_s` a round with a fixed-width kernel keeps 300 s and a round
+  of native kernels gets the search's 180 s. Measurements go through the GEMM
+  driver's `benchmark_on_devices` and worker (`run_one_batched_gemm_kernel.py`
+  is the GEMM worker; a problem with `batch_count` runs on
+  `GpuBatchedGemmRunner`): verified,
+  one kernel per worker, the library's identity checked, failure records per
+  request, and a problem's confirmation on one device.
+- The host side of verification is per batch: the inputs are `batch_count`
+  stacks of A and B and the reference is the per-batch fp32 product, so every
+  host estimate above (the call's time allowance, the host memory guard, a cache
+  entry's size) is `batch_count` times that of one `M x N x K` GEMM. A host
+  cache entry's key adds the batch count and the packed strides (per batch and
+  between batches) to the GEMM fields: problems that differ only in their batch
+  count never share an entry.
+- The batched driver has no `--variant`, `--repeat-top`, `--failures-csv` or
+  `--build-timeout`; a search rejects `--list-pairs` only. A plain batched run
+  measures as before (same worker payload, CSV columns, timeouts and exit
+  code), now through the GEMM driver's `benchmark_on_devices`.
+
+Op-local settings and search configs, under `batched_gemm/`:
+
+| File | Contents |
+|---|---|
+| `search/search_settings_gfx950.json`, `search/search_settings_gfx1250.json` | `tpe`, `shared` seed 0, 100 trials per problem, 8 per round, 1200 builds, `build_timeout_s` 300: every kernel gets the batched build's own limit, 300 s per codegen, compile and link step, so a search times a build out exactly when a full batched run does (without it, a round of native kernels would get the search's 180 s, set from gfx950 fp16 GEMM compile times, see "Build timeout"). No warm start: there is no heuristic model for batched GEMM; an earlier run's `winners.json` can serve as `warm_start.pairs_file`. |
+| `configs/search_config_gfx950.json` | Every value of `default_config.json`, plus 32-wide tiles, `tile_k` 32, the `64x4` warp tile and padding: a problem whose M, N or K no tile divides has candidates only with padding. |
+| `configs/search_config_gfx1250.json` | Every value of `default_config_gfx1250.json` (its six pipelines, `comp_tdm` and `comp_tdm_v2` included, and the `tdm` epilogue), plus 32-wide tiles and `tile_k` 32. |
+
+```bash
+RUN="batched_gemm/configs/default_config.json --arch gfx950 --dtype bf16 \
+    --layout rcr --problems problems.json"
+# problems.json: {"problems": [{"batch_count": 1024, "M": 192, "N": 641, "K": 32}]}
+python batched_gemm_full_benchmark.py $RUN --list-pairs candidates.json
+python batched_gemm_full_benchmark.py $RUN --devices 0, \
+    --search-config batched_gemm/search/search_settings_gfx950.json \
+    --search-output-dir runs/batched-search-001
+python batched_gemm_full_benchmark.py $RUN --pairs runs/batched-search-001/winners.json \
+    --verify --devices 0, --csv recheck.csv
+```
+
+On gfx1250 pass a gfx1250 config (`default_config_gfx1250.json` or
+`search_config_gfx1250.json`) and `search_settings_gfx1250.json`: the driver's
+default config is the gfx950 CI one.
 
 ### Multi-GPU parallelism
 
