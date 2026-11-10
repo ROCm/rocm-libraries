@@ -202,11 +202,17 @@ def _apply(op, a: list[int], bits: int) -> int:
 
 
 def _address(address: tt.ElementAddress, leaves: dict[int, int]) -> int:
-    """The element address one lane computes: every part run on the host and summed."""
+    """The element address one lane computes: every part run on the host and summed (each
+    ranged part checked against its reported range)."""
     memo: dict[int, int] = {}
     total = address.const
     for term in address.uniform:
         total += _run(term.value, leaves, memo)
+    if address.uniform_delta is not None:
+        delta = _run(address.uniform_delta, leaves, memo)
+        lo, hi = address.uniform_delta_range
+        assert lo <= delta < hi
+        total += delta
     if address.lane is not None:
         lane = _run(address.lane, leaves, memo)
         lo, hi = address.lane_range

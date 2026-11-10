@@ -13,6 +13,8 @@ per-wave and per-lane parts, and proving each part's range, is this module's job
   and one per-lane part, each with its ``value_facts``.
 - ``leaf_varying_within_workgroup(b, value)`` -- the first leaf that may differ between the waves
   of a workgroup, or ``None``.
+- ``wave_uniform(value)`` -- whether the value is the same in every lane of a wave (the rule
+  below; it needs no builder).
 
 The walk owns no arithmetic: every rule maps an op onto a range operation of ``ranges.py``. Its
 rule set is closed and unknown is a fact, never an abort: a leaf or op outside the set (or a rule
@@ -59,6 +61,7 @@ from .ranges import (
     AffineCoord,
     Congruence,
     Interval,
+    LoopStopWithoutMultipleOf,
     UniformPart,
     _RuntimeEnd,
 )
@@ -71,6 +74,7 @@ __all__ = [
     "leaf_varying_within_workgroup",
     "split_coordinate",
     "value_facts",
+    "wave_uniform",
 ]
 
 # The kernel attribute the walk records the workgroup size it derived thread-id ranges with.
@@ -149,6 +153,14 @@ def leaf_varying_within_workgroup(b: IRBuilder, value: Value | int) -> Value | N
     """
     _require_coordinate(value)
     return _first_varying_leaf(b, value, {})
+
+
+def wave_uniform(value: Value | int) -> bool:
+    """Whether ``value`` is the same in every lane of a wave, by the rule of this module's
+    docstring: block ids, kernel parameters, ``readfirstlane`` results, the counter of a loop with
+    uniform bounds, a range marker on a uniform value, and pure arithmetic on those (emits
+    nothing, needs no builder)."""
+    return _is_uniform(value, {})
 
 
 # --- shared checks ----------------------------------------------------------------------------
@@ -241,6 +253,7 @@ class _FactWalk:
         self._b = b
         self._root = root
         self._memo: dict[int, Facts] = {}
+        self._loop_stops: dict[int, LoopStopWithoutMultipleOf] = {}
 
     def facts(self, value: Value | int) -> Facts:
         if isinstance(value, int):
@@ -254,6 +267,14 @@ class _FactWalk:
         """The int ``value`` is known to be, or ``None``."""
         r, _ = self.facts(value)
         return r.lo if _is_exact(r) else None
+
+    def loop_stop_without_multiple_of(
+        self, value: Value | int
+    ) -> LoopStopWithoutMultipleOf | None:
+        """Why the loop counter ``value``'s range keeps its runtime stop as its end, recorded when
+        its facts were derived; ``None`` for any other value (call after :meth:`facts`).
+        """
+        return self._loop_stops.get(id(value))
 
     def runtime_end(self, marker: Op) -> _RuntimeEnd:
         """A marker's runtime end ``lt + lt_plus`` over its ``lt`` operand, whose own numbers
@@ -315,7 +336,15 @@ class _FactWalk:
         return self.facts(op.operands[0])
 
     def _loop_counter(self, value: Value) -> Facts:
-        """The induction variable of ``scf.for`` with an exact start and an exact step > 0."""
+        """The induction variable of ``scf.for`` with an exact start and an exact step > 0.
+
+        An exact stop and a runtime length plus constants give ``[start, stop)`` snapped to the
+        counter's multiple-of fact ``(step, start)``: the end of the last trip. So ``[0, K)``
+        step ``TK`` over a ``K`` stated a multiple of ``TK`` ends at ``K - TK + 1``, which proves
+        ``k + TK <= K`` exactly as the stop ``K - (TK - 1)`` does; a ``K`` with no such fact
+        keeps the end ``K``, and the walk records why (:class:`LoopStopWithoutMultipleOf`, read
+        with :meth:`loop_stop_without_multiple_of`). Any other stop gives its own upper end.
+        """
         loop = _loop_of_counter(value)
         if loop is None:
             return _UNKNOWN  # an iter_args value or a loop result
@@ -334,7 +363,15 @@ class _FactWalk:
         if (
             runtime_stop is not None
         ):  # (b) a runtime length plus constants: proven by identity
-            return Interval(lo, runtime_stop), congruence
+            counter = Interval(lo, runtime_stop).snapped(congruence)
+            if not runtime_stop.residue_known_modulo(st):
+                stated = Interval(lo, runtime_stop).snapped(
+                    congruence, upper_value_residue=0
+                )
+                self._loop_stops[id(value)] = LoopStopWithoutMultipleOf(
+                    runtime_stop.value, st, stated
+                )
+            return counter, congruence
         h = self.facts(stop)[0].hi  # (c) any other stop: its own upper end
         if h is None:
             return Interval(lo, None), congruence
@@ -517,7 +554,10 @@ class _Splitter:
                 return self.split(y) + AffineCoord.of_int(kx)
         if self.is_uniform(value):
             r, congruence = self._walk.facts(value)
-            return AffineCoord(0, (UniformPart(value, r, congruence),))
+            part = UniformPart(
+                value, r, congruence, self._walk.loop_stop_without_multiple_of(value)
+            )
+            return AffineCoord(0, (part,))
         if op is not None and op.name == "arith.add" and not op.attrs.get("wrap"):
             left, right = (self.split(v) for v in op.operands)
             if left.lane is None or right.lane is None:
@@ -536,29 +576,33 @@ class _Splitter:
 
     def is_uniform(self, value: Value | int) -> bool:
         """Wave-uniform by the leaf list or as pure arithmetic on uniform values."""
-        if isinstance(value, int):
-            return True
-        key = id(value)
-        if key not in self._uniform:
-            self._uniform[key] = self._derive_uniform(value)
-        return self._uniform[key]
+        return _is_uniform(value, self._uniform)
 
-    def _derive_uniform(self, value: Value) -> bool:
-        op = value.op
-        if op is None:
-            return value.param is not None
-        if op.name in ("arith.constant", "gpu.block_id", "tile.readfirstlane"):
-            return True
-        if op.name == "scf.for":
-            loop = _loop_of_counter(value)
-            return loop is not None and all(
-                self.is_uniform(v) for v in loop.operands[:3]
-            )
-        if op.name == ASSUME_RANGE_OP:
-            return self.is_uniform(op.operands[0])
-        if op.name in _PURE_ARITH_OPS:
-            return bool(op.operands) and all(self.is_uniform(v) for v in op.operands)
-        return False
+
+def _is_uniform(value: Value | int, memo: dict[int, bool]) -> bool:
+    """The one home of the wave-uniform rule; ``memo`` keeps each value's answer for one walk."""
+    if isinstance(value, int):
+        return True
+    key = id(value)
+    if key not in memo:
+        memo[key] = _derive_uniform(value, memo)
+    return memo[key]
+
+
+def _derive_uniform(value: Value, memo: dict[int, bool]) -> bool:
+    op = value.op
+    if op is None:
+        return value.param is not None
+    if op.name in ("arith.constant", "gpu.block_id", "tile.readfirstlane"):
+        return True
+    if op.name == "scf.for":
+        loop = _loop_of_counter(value)
+        return loop is not None and all(_is_uniform(v, memo) for v in loop.operands[:3])
+    if op.name == ASSUME_RANGE_OP:
+        return _is_uniform(op.operands[0], memo)
+    if op.name in _PURE_ARITH_OPS:
+        return bool(op.operands) and all(_is_uniform(v, memo) for v in op.operands)
+    return False
 
 
 # --- leaf_varying_within_workgroup --------------------------------------------------------------

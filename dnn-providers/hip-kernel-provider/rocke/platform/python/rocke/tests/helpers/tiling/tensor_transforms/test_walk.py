@@ -28,10 +28,11 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     AxisBound,
     Congruence,
     Interval,
+    LoopStopWithoutMultipleOf,
     UniformPart,
     _numeric_hi,
-    _required_checks,
     _RuntimeEnd,
+    required_checks_within,
 )
 from rocke.helpers.tiling.tensor_transforms.walk import (
     WORKGROUP_SIZE_RECORD,
@@ -441,6 +442,24 @@ def test_a_counter_up_to_a_runtime_length_minus_a_tile_proves_the_full_tile_by_i
         assert value_facts(b, k)[0] == Interval(0, _RuntimeEnd(ks, -7))
 
 
+def test_a_counter_up_to_a_runtime_length_stated_a_multiple_of_the_step_ends_at_its_last_trip():
+    # K stated a multiple of the step: the counter is a multiple of the step below K, so its last
+    # trip is K - step. The natural loop [0, K) step TK proves k + TK <= K by identity, the same
+    # end the stop K - (TK - 1) gives. A stop past K by a constant snaps the same way.
+    b = _builder()
+    tk = 32
+    ks = _runtime_length(b, "K", 65536, multiple_of=tk)
+    with b.scf_for(_c(b, 0), ks, _c(b, tk)) as k:
+        assert value_facts(b, k) == (
+            Interval(0, _RuntimeEnd(ks, -(tk - 1))),
+            Congruence(tk, 0),
+        )
+    with b.scf_for(_c(b, 0), b.add(ks, _c(b, 16)), _c(b, tk)) as k:
+        assert value_facts(b, k)[0] == Interval(0, _RuntimeEnd(ks, 1))
+    with b.scf_for(_c(b, 0), b.add(ks, _c(b, 1 - tk)), _c(b, tk)) as k:
+        assert value_facts(b, k)[0] == Interval(0, _RuntimeEnd(ks, -(tk - 1)))
+
+
 def test_any_other_stop_gives_its_own_upper_end_and_a_non_exact_step_is_unknown():
     b = _builder()
     p = b.param("p", I32)
@@ -452,6 +471,57 @@ def test_any_other_stop_gives_its_own_upper_end_and_a_non_exact_step_is_unknown(
         assert value_facts(b, k) == (Interval(0, None), Congruence(8, 0))
     with b.scf_for(_c(b, 0), _c(b, 64), b.param("step", I32)) as k:
         assert value_facts(b, k) == UNKNOWN
+
+
+def _loop_stop_of(b: IRBuilder, counter: Value) -> LoopStopWithoutMultipleOf | None:
+    """The loop stop the walk records on ``counter``'s split, or ``None``."""
+    (part,) = split_coordinate(b, counter).uniform
+    return part.loop_stop_without_multiple_of
+
+
+@pytest.mark.parametrize("multiple_of", [1, 8])
+def test_a_counter_that_keeps_its_runtime_stop_records_the_fact_that_would_snap_it(
+    multiple_of,
+):
+    # [0, K) step 32 over a K not stated a multiple of 32: the counter's end stays K, and the
+    # split says why -- with the range K being a multiple of 32 would give, [0, K - 31).
+    b = _builder()
+    tk = 32
+    ks = _runtime_length(b, "K", 65536, multiple_of=multiple_of)
+    with b.scf_for(_c(b, 0), ks, _c(b, tk)) as k:
+        stop = _loop_stop_of(b, k)
+        assert value_facts(b, k)[0] == Interval(0, ks)
+    assert stop == LoopStopWithoutMultipleOf(
+        ks, tk, Interval(0, _RuntimeEnd(ks, -(tk - 1)))
+    )
+
+
+def test_a_counter_whose_end_snaps_or_needs_no_snap_records_no_loop_stop():
+    b = _builder()
+    stated = _runtime_length(b, "K", 65536, multiple_of=32)
+    unstated = _runtime_length(b, "N", 65536)
+    p = b.param("p", I32)
+    loops = [
+        # the stated multiple snaps the end
+        (stated, 32),
+        # step 1: every end is already the end of the last trip
+        (unstated, 1),
+        # an exact stop snaps by its number
+        (_c(b, 100), 32),
+        # any other stop gives its own upper end: no runtime stop to record
+        (b.smin(p, _c(b, 100)), 32),
+    ]
+    for stop, step in loops:
+        with b.scf_for(_c(b, 0), stop, _c(b, step)) as k:
+            assert _loop_stop_of(b, k) is None
+
+
+def test_arithmetic_on_a_counter_records_no_loop_stop():
+    # Only the counter itself carries the record: a value derived from it gets no fix to suggest.
+    b = _builder()
+    ks = _runtime_length(b, "K", 65536)
+    with b.scf_for(_c(b, 0), ks, _c(b, 32)) as k:
+        assert _loop_stop_of(b, b.mul(k, _c(b, 2))) is None
 
 
 @pytest.mark.parametrize("kind", ["parameter", "marker"])
@@ -469,9 +539,9 @@ def test_full_tile_proof_end_to_end_needs_no_check(kind):
         k_range, _ = value_facts(b, k)
     tile = k_range.plus(Interval(0, tk))
     graph = identity_graph((ks,))
-    assert _required_checks(graph, (tile,), (AxisBound.of(0, ks),)) == ()
+    assert required_checks_within(graph, (tile,), (AxisBound.of(0, ks),)) == ()
     other = _runtime_length(b, "K_copy", 4096, multiple_of=8)
-    assert _required_checks(graph, (tile,), (AxisBound.of(0, other),)) != ()
+    assert required_checks_within(graph, (tile,), (AxisBound.of(0, other),)) != ()
 
 
 def test_a_counter_up_to_a_bare_parameter_is_bounded_by_it():

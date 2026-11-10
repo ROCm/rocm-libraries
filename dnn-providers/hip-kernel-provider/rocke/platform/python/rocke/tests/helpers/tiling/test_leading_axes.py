@@ -9,8 +9,9 @@ rank-3 window at origin ``(g, m0, n0)``. These tests check:
 - a tile of higher rank than its window is refused by ``load_fragment`` and ``store_fragment``;
 - the element index sums the tile axes first and then adds ``origin * stride`` of the leading axis;
 - the vector run is decided on the tensor's trailing axes (a stride-1 last axis of a rank-3 tensor
-  gives wide loads), a ragged trailing axis scalarizes exactly as the rank-2 tensor does, and the
-  run's width divides every other stride (so a batch offset never misaligns a wide load);
+  gives wide loads), a ragged trailing axis is checked and loaded exactly as the rank-2 tensor is,
+  and the run's width divides every other stride (so a batch offset never misaligns a wide load);
+- a negative origin checks the lower side of its axis: the elements before the tensor are masked;
 - a swizzle sees the position on every axis, so an LDS element has one address whatever the rank of
   the tile that reaches it;
 - any rank-2 tensor feeds an MMA operand tile (nothing gates an operand by axis meaning);
@@ -31,7 +32,10 @@ pytest.importorskip("rocke.core.ir", reason="rocke IR substrate required")
 from rocke.core.ir import F16, IRBuilder, PtrType
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.helpers.tiling import (
+    SideCheck,
     TileMma,
+    exit_if_tile_outside,
+    explain_bounds_checks,
     fill_fragment,
     load_fragment,
     make_fragment,
@@ -66,10 +70,12 @@ def _copy_kernel(src_td, dst_td, origin_of, *, name="leading_axes_copy"):
 
 
 def _block_origin(b):
-    """This block's tile: batch = block_id_z (runtime), (m0, n0) from block_id_y / block_id_x."""
-    m0 = b.mul(b.block_id_y(), b.const_i32(_TILE.shape[0]))
-    n0 = b.mul(b.block_id_x(), b.const_i32(_TILE.shape[1]))
-    return [(b.block_id_z(), m0, n0)]
+    """This block's tile of a (3, 32, 64) tensor: batch = block_id_z, (m0, n0) from block_id_y /
+    block_id_x, each guarded in the prologue so the whole tile is proven inside."""
+    batch = exit_if_tile_outside(b, b.block_id_z(), 3)
+    m0 = exit_if_tile_outside(b, b.mul(b.block_id_y(), b.const_i32(_TILE.shape[0])), 32)
+    n0 = exit_if_tile_outside(b, b.mul(b.block_id_x(), b.const_i32(_TILE.shape[1])), 64)
+    return [(batch, m0, n0)]
 
 
 # ---- the rank rule -----------------------------------------------------------------------------------
@@ -94,33 +100,64 @@ def test_a_tile_of_higher_rank_than_its_window_is_refused(verb: str) -> None:
     )
 
 
-@pytest.mark.parametrize("verb", ["load_fragment", "store_fragment"])
-def test_a_bound_on_a_leading_axis_is_refused(verb: str) -> None:
-    # The batch axis has tile extent 1: a tile is wholly inside or outside a bound on it, so the clip
-    # has nothing to mask there. A bound is refused rather than silently ignored.
-    b = IRBuilder("leading_bound")
-    ptr = b.param("P", PtrType(F16, "global"))
-    tid = b.thread_id_x()
+def test_the_tensor_lengths_are_the_only_clip() -> None:
+    # A tile inside the tensor needs no compare; a narrower region is a narrower tensor, whose
+    # ragged tile axis is checked.
     td = make_tensor_desc((3, 32, 64), (32 * 64, 64, 1), F16)
-    window = make_window(td, (2, 0, 0), bounds=(2, None, None))
-    with pytest.raises(ValueError, match="window bounds axis 0, a leading axis"):
-        if verb == "load_fragment":
-            load_fragment(b, ptr, window, _TILE, tid)
-        else:
-            store_fragment(b, ptr, window, make_fragment(_TILE, F16), tid)
-
-
-def test_bounds_on_the_tile_axes_are_still_honoured() -> None:
-    # Only leading-axis entries are refused: a ragged bound on a tile axis still masks.
-    td = make_tensor_desc((3, 32, 64), (32 * 64, 64, 1), F16)
-    kernel = _copy_kernel(td, td, lambda b: [(1, 0, 0)], name="tile_axis_bound")
+    kernel = _copy_kernel(td, td, lambda b: [(1, 0, 0)], name="tile_axis_length")
     assert "icmp" not in lower_kernel_to_llvm(kernel, arch="gfx90a")
-    b = IRBuilder("tile_axis_bound_ragged")
+    narrow = make_tensor_desc((3, 30, 64), (32 * 64, 64, 1), F16)
+    b = IRBuilder("tile_axis_length_ragged")
     ptr = b.param("P", PtrType(F16, "global"))
-    window = make_window(td, (1, 0, 0), bounds=(None, 30, None))
+    window = make_window(narrow, (1, 16, 0))
+    plan = explain_bounds_checks(b, ptr, window, _TILE)
+    assert [(a.lower, a.upper) for a in plan.axes][1] == (
+        SideCheck.NOT_NEEDED,
+        SideCheck.PER_LANE_CHECK,
+    )
     load_fragment(b, ptr, window, _TILE, b.thread_id_x())
     b.ret()
-    assert "icmp slt" in lower_kernel_to_llvm(b.kernel, arch="gfx90a")
+    assert "icmp" in lower_kernel_to_llvm(b.kernel, arch="gfx90a")
+
+
+def _negative_origin_kernel(origin):
+    b = IRBuilder("negative_origin")
+    b.kernel.attrs["max_workgroup_size"] = _WAVE
+    ptr = b.param("P", PtrType(F16, "global"))
+    td = make_tensor_desc((3, 32, 64), (32 * 64, 64, 1), F16)
+    window = make_window(td, origin)
+    plan = explain_bounds_checks(b, ptr, window, _TILE)
+    load_fragment(b, ptr, window, _TILE, b.thread_id_x())
+    b.ret()
+    return b.kernel, plan
+
+
+def _loads_outside_a_branch(kernel) -> list:
+    """The global loads of the kernel's top level (not under any validity branch)."""
+    return [op for op in kernel.body.ops if op.name.startswith("memref.global_load")]
+
+
+def test_a_negative_tile_axis_origin_masks_the_elements_before_the_tensor() -> None:
+    # A tile-aligned negative origin is inside the far end, so only the lower side is checked; every
+    # load sits under its validity branch, never an unmasked wide read before the tensor start.
+    kernel, plan = _negative_origin_kernel((1, -16, 0))
+    assert [(a.lower, a.upper) for a in plan.axes][1] == (
+        SideCheck.PER_LANE_CHECK,
+        SideCheck.NOT_NEEDED,
+    )
+    assert _loads_outside_a_branch(kernel) == []
+    assert "icmp" in lower_kernel_to_llvm(kernel, arch="gfx90a")
+
+
+def test_a_negative_leading_axis_origin_masks_the_whole_tile() -> None:
+    # A leading axis is read at its origin alone: a negative one puts every element before the
+    # tensor. Its lower side is one compare, the same for every lane, and every load is masked.
+    kernel, plan = _negative_origin_kernel((-1, 0, 0))
+    assert (plan.axes[0].lower, plan.axes[0].upper) == (
+        SideCheck.SCALAR_CHECK,
+        SideCheck.NOT_NEEDED,
+    )
+    assert _loads_outside_a_branch(kernel) == []
 
 
 # ---- the address fold order --------------------------------------------------------------------------
@@ -131,10 +168,16 @@ def test_leading_axis_term_is_added_after_the_tile_terms() -> None:
     td = make_tensor_desc((3, 32, 64), (2048, 64, 1), F16)
     kernel = _copy_kernel(td, td, _block_origin)
     by_result = {r.name: op for op in kernel.body.ops for r in op.results}
-    batch = next(
+    block_z = next(
         op.results[0].name
         for op in kernel.body.ops
         if op.name == "gpu.block_id" and op.attrs["axis"] == "z"
+    )
+    # The batch index is the guarded block id: the guard's range marker over block_id_z.
+    batch = next(
+        op.results[0].name
+        for op in kernel.body.ops
+        if op.name == "arith.assume_range" and op.operands[0].name == block_z
     )
     loads = [op for op in kernel.body.ops if op.name.startswith("memref.global_load")]
     assert loads
@@ -167,14 +210,21 @@ def test_vector_run_on_the_last_axis_of_a_rank_3_tensor_is_wide() -> None:
     assert _load_forms(_copy_kernel(td, td, _block_origin)) == {"<8 x half>": 1}
 
 
-def test_a_ragged_last_axis_scalarizes_as_the_rank_2_tensor_does() -> None:
-    # K = 60 is not a multiple of the tile's 32: the rank-3 tensor loads exactly as the rank-2
-    # tensor with that K does (scalar, masked), whatever the leading axis.
+def test_a_ragged_last_axis_is_checked_as_the_rank_2_tensor_is() -> None:
+    # K = 60 is not a multiple of the tile's 32: the rank-3 tensor is checked and loaded exactly as
+    # the rank-2 tensor with that K is (the same tile-axis sides, the same load forms), whatever
+    # the leading axis.
     rank_3 = make_tensor_desc((3, 32, 60), (32 * 60, 60, 1), F16)
     rank_2 = make_tensor_desc((32, 60), (60, 1), F16)
     forms_3 = _load_forms(_copy_kernel(rank_3, rank_3, lambda b: [(2, 0, 32)]))
     forms_2 = _load_forms(_copy_kernel(rank_2, rank_2, lambda b: [(0, 32)]))
-    assert forms_3 == forms_2 == {"half": _TILE.register_count}
+    assert forms_3 == forms_2
+    b = IRBuilder("ragged_rank_3")
+    ptr = b.param("P", PtrType(F16, "global"))
+    plan_3 = explain_bounds_checks(b, ptr, make_window(rank_3, (2, 0, 32)), _TILE)
+    plan_2 = explain_bounds_checks(b, ptr, make_window(rank_2, (0, 32)), _TILE)
+    assert plan_3.axes[1:] == plan_2.axes
+    assert plan_2.axes[1].upper is SideCheck.PER_LANE_CHECK
 
 
 @pytest.mark.parametrize(
@@ -349,3 +399,44 @@ def test_rank_3_load_then_store_is_bit_exact(batch_origin: str) -> None:
         whole[~written] == _DST_INIT
     ), "a write landed outside the output tensor"
     assert not np.any(dst == _SRC_GUARD), "a read came from outside the input tensor"
+
+
+@_needs_gfx90a
+def test_a_negative_origin_reads_zeros_and_writes_nothing_before_the_tensor() -> None:
+    # A halo read: the (16, 32) tile of each batch is loaded at row -8 and stored at row 0, so DST
+    # rows 0..7 hold the 0 read before the tensor and rows 8..15 hold SRC rows 0..7. The same
+    # fragment stored at row -16 (wholly before the tensor) and a tile at batch -1 (loaded and
+    # stored) touch nothing. Every guard stays intact and no read reaches the SRC guard.
+    g_len, m_len, n_len = 2, 32, 64
+    td = make_tensor_desc((g_len, m_len, n_len), (m_len * n_len, n_len, 1), F16)
+    b = IRBuilder("negative_origin_copy")
+    b.kernel.attrs["max_workgroup_size"] = _WAVE
+    src = b.param("SRC", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
+    dst = b.param("DST", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    tid = b.thread_id_x()
+    n0 = b.mul(b.block_id_x(), b.const_i32(_TILE.shape[1]))
+    for g in range(g_len):
+        window = make_window(td, (g, -8, n0))
+        fragment = load_fragment(b, src, window, _TILE, tid)
+        store_fragment(b, dst, window.with_origin(1, 0), fragment, tid)
+        store_fragment(b, dst, window.with_origin(1, -16), fragment, tid)
+    outside = make_window(td, (-1, 0, n0))
+    store_fragment(b, dst, outside, load_fragment(b, src, outside, _TILE, tid), tid)
+    b.ret()
+
+    rng = np.random.default_rng(1)
+    source = rng.integers(1, 1000, size=(g_len, m_len, n_len)).astype(np.float16)
+    whole = _run_guarded(
+        b.kernel, source, td.element_span, (n_len // _TILE.shape[1], 1, 1)
+    )
+    out = whole[_GUARD : _GUARD + td.element_span].reshape(g_len, m_len, n_len)
+    for g in range(g_len):
+        np.testing.assert_array_equal(out[g, :8], 0, err_msg=f"batch {g}: halo rows")
+        np.testing.assert_array_equal(out[g, 8:16], source[g, :8], err_msg=f"batch {g}")
+        assert np.all(
+            out[g, 16:] == _DST_INIT
+        ), f"batch {g}: a write landed past the tile"
+    assert np.all(
+        whole[:_GUARD] == _DST_INIT
+    ), "a write landed before the output tensor"
+    assert np.all(whole[_GUARD + td.element_span :] == _DST_INIT)

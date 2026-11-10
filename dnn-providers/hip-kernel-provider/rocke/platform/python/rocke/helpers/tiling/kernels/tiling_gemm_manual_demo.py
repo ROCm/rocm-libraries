@@ -48,6 +48,7 @@ import numpy as np
 from .. import (
     TileMma,
     check_gemm_shapes,
+    exit_if_tile_outside,
     fill_fragment,
     load_fragment,
     make_fragment,
@@ -87,13 +88,21 @@ def build_manual_gemm(
     a_ptr = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     b_ptr = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     c_ptr = b.param("C", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
-    b.param("M", I32)
-    b.param("N", I32)
-    b.param("K", I32)
+    # The sizes are baked into the kernel; stating them eq= lets KernelLauncher.from_artifact
+    # refuse a launch whose size arguments differ.
+    b.param("M", I32, eq=M_LEN)
+    b.param("N", I32, eq=N_LEN)
+    b.param("K", I32, eq=K_LEN)
 
     lane_id = b.thread_id_x()
-    m_tile_base = b.mul(b.block_id_y(), b.const_i32(TILE_M))
-    n_tile_base = b.mul(b.block_id_x(), b.const_i32(TILE_N))
+    # Block origins, guarded in the prologue: a workgroup whose tile starts outside C ends here,
+    # and the returned values carry 0 <= origin < length for every window placed at them.
+    m_tile_base = exit_if_tile_outside(
+        b, b.mul(b.block_id_y(), b.const_i32(TILE_M)), M_LEN
+    )
+    n_tile_base = exit_if_tile_outside(
+        b, b.mul(b.block_id_x(), b.const_i32(TILE_N)), N_LEN
+    )
 
     lda = (
         lda if lda is not None else K_LEN
@@ -208,7 +217,6 @@ def run_and_verify_manual(
     """Compile, launch, and verify the MANUAL GEMM is bit-exact vs a NUMPY golden reference
     (integer inputs). torch-free: numpy host arrays + `DeviceMem` device buffers."""
     from rocke.helpers.compile import compile_kernel
-    from rocke.helpers.spec import SignatureBuilder
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.host_buffers import as_u8_buffer
     from rocke.runtime.launcher import (
@@ -220,20 +228,9 @@ def run_and_verify_manual(
 
     kernel, mma = build_manual_gemm(M_LEN, N_LEN, K_LEN, arch=arch)
     TILE_M = TILE_N = 16
-    artifact = compile_kernel(kernel, arch=arch)
-    signature = (
-        SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("B", "f16")
-        .ptr("C", "f16")
-        .scalar("M", "i32")
-        .scalar("N", "i32")
-        .scalar("K", "i32")
-        .build()
-    )
-    launcher = KernelLauncher(
-        hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=signature
-    )
+    # KernelLauncher.from_artifact checks the kernel's parameter facts before each launch and reads
+    # the argument signature from the kernel.
+    launcher = KernelLauncher.from_artifact(compile_kernel(kernel, arch=arch))
     # Host buffers, each laid out to match its descriptor exactly:
     #   A (M, K) K-contiguous -> a_buf[m, k] = A[m, k]
     #   B (N, K) K-contiguous -> b_buf[n, k] = B[n, k]

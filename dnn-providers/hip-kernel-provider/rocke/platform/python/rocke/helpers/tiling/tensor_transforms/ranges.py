@@ -32,10 +32,10 @@ The internal sibling surface is the arithmetic itself: ``Interval`` and ``Congru
 value's range and residue, and their methods are the one home of every range-combining rule
 (``plus``, ``scaled``, ``floor_div``, ``minimum``, ``intersect``, ``snapped``, ...). Everything that
 needs a range -- these checks, the address split, the IR range walk -- composes them rather than
-restating a rule. ``_value_ranges`` and ``_required_checks`` are the same rules on ``Interval`` s
-with explicit ``AxisBound`` s. ``AffineCoord`` (with ``UniformPart``) is one coordinate split into a
-constant, wave-uniform parts and a per-lane part, each with its range and residue: the IR range
-walk produces it, the emitters consume it.
+restating a rule. ``_value_ranges`` and ``required_checks_within`` are the same rules on
+``Interval`` s with explicit ``AxisBound`` s. ``AffineCoord`` (with ``UniformPart``) is one
+coordinate split into a constant, wave-uniform parts and a per-lane part, each with its range and
+residue: the IR range walk produces it, the emitters consume it.
 
 Runtime ends prove relations to a runtime length by IDENTITY: an upper side bounded by a runtime
 length is proven only by a computed end over the same IR value object (``length`` itself, or
@@ -49,7 +49,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import gcd, prod
+from math import gcd, inf, prod
 from typing import TYPE_CHECKING
 
 from rocke.core.facts import stated_facts_of
@@ -70,11 +70,13 @@ __all__ = [
     "Congruence",
     "End",
     "Interval",
+    "LoopStopWithoutMultipleOf",
     "Side",
     "UniformPart",
     "VectorRun",
     "graph_injective",
     "required_checks",
+    "required_checks_within",
     "value_ranges",
 ]
 
@@ -200,6 +202,11 @@ class _RuntimeEnd:
         facts = stated_facts_of(self.value)
         return Congruence(facts.multiple_of, facts.residue)
 
+    def residue_known_modulo(self, modulus: int) -> bool:
+        """Whether ``value``'s stated facts fix its residue modulo ``modulus``: its stated
+        multiple-of fact is a multiple of ``modulus``."""
+        return self.congruence.modulus % modulus == 0
+
 
 # A range end at the package door: an int, a Value (an end at a runtime integer) or None.
 End = int | Value | None
@@ -300,6 +307,22 @@ class Interval:
             return Interval(_mul(lo, k), _shift_end(_mul(last, k), 1))
         return Interval(_mul(last, k), _shift_end(_mul(lo, k), 1))
 
+    def times(self, other: Interval) -> Interval:
+        """Range of ``x * y`` for ``x`` in this range and ``y`` in ``other``, any signs.
+
+        Bounded by the products of the two ranges' extreme values; an unbounded side stays
+        unbounded unless the other operand is exactly 0.
+        """
+        corners = [
+            _extended_product(x, y)
+            for x in _extended_ends(self)
+            for y in _extended_ends(other)
+        ]
+        least, last = min(corners), max(corners)
+        return Interval(
+            None if least == -inf else least, None if last == inf else last + 1
+        )
+
     def floor_div(self, k: int) -> Interval:
         """Range of ``x // k``, ``k >= 1`` (floor semantics for every sign)."""
         _require_divisor("Interval", "floor_div", k)
@@ -365,25 +388,33 @@ class Interval:
             _intersect_end(self.hi, other.hi, "hi"),
         )
 
-    def snapped(self, congruence: Congruence) -> Interval:
+    def snapped(
+        self, congruence: Congruence, *, upper_value_residue: int | None = None
+    ) -> Interval:
         """The tightest range holding the same members of the residue class ``congruence``.
 
         An int ``lo`` is raised and the last value lowered onto the class. A runtime end moves
         only when its value's stated modulus is a multiple of ``congruence.modulus`` (its residue
         is then known) and stays over the same value; otherwise it is kept as it is.
+
+        ``upper_value_residue`` supposes a runtime upper end's value has that residue modulo
+        ``congruence.modulus`` instead of reading it from the stated facts: the range a fact
+        not stated yet would give (the IR range walk's record of a loop stop).
         """
         m, r = congruence.modulus, congruence.residue
         lo, hi = self.lo, self.hi
         if isinstance(lo, int):
             new_lo = lo + (r - lo) % m
-        elif isinstance(lo, _RuntimeEnd) and lo.congruence.modulus % m == 0:
+        elif isinstance(lo, _RuntimeEnd) and lo.residue_known_modulo(m):
             rho = lo.congruence.residue % m
             new_lo = lo.shifted((r - rho - lo.plus) % m)
         else:
             new_lo = lo
         if isinstance(hi, int):
             new_hi = hi - (hi - 1 - r) % m
-        elif isinstance(hi, _RuntimeEnd) and hi.congruence.modulus % m == 0:
+        elif isinstance(hi, _RuntimeEnd) and upper_value_residue is not None:
+            new_hi = hi.shifted(-((upper_value_residue + hi.plus - 1 - r) % m))
+        elif isinstance(hi, _RuntimeEnd) and hi.residue_known_modulo(m):
             rho = hi.congruence.residue % m
             new_hi = hi.shifted(-((rho + hi.plus - 1 - r) % m))
         else:
@@ -394,6 +425,11 @@ class Interval:
                 "range and congruence contradict each other"
             )
         return Interval(new_lo, new_hi)
+
+    def numeric_ends(self) -> tuple[int | None, int | None]:
+        """The least and the last value of the range as numbers (a runtime end counts with its
+        stated extreme value); ``None`` for a side with no number."""
+        return _numeric_lo(self.lo), _numeric_last(self.hi)
 
     def within(self, lo: int | None, hi: int | None) -> bool:
         """Every value of the range lies in ``[lo, hi)`` (``None``: no bound on that side).
@@ -445,13 +481,37 @@ class AxisBound:
         return cls(lo, hi)
 
 
+@dataclass(frozen=True)
+class LoopStopWithoutMultipleOf:
+    """Why a loop counter's range runs up to its loop's runtime stop instead of ending a whole
+    step before it.
+
+    The loop ``for k in [start, length + c) step s`` stops at a runtime ``length`` (``s`` is
+    ``step``) whose stated facts do not make it a multiple of ``s``, so the IR range walk cannot
+    tell that the last trip starts a whole step before the stop, and the counter keeps the stop
+    as its end. ``range_if_stated`` is the counter's range were ``length`` a multiple of ``s``:
+    what stating that fact would prove.
+    """
+
+    length: Value
+    step: int
+    range_if_stated: Interval
+
+
 @dataclass(frozen=True, eq=False)
 class UniformPart:
-    """One wave-uniform summand of a coordinate, with its range and residue."""
+    """One wave-uniform summand of a coordinate, with its range and residue.
+
+    ``loop_stop_without_multiple_of`` is set by the IR range walk when the part is a loop counter
+    whose range keeps its loop's runtime stop as its end (see :class:`LoopStopWithoutMultipleOf`),
+    else ``None``. It describes ``range`` as the walk derived it for ``value``: a part built with
+    another range carries ``None``.
+    """
 
     value: Value
     range: Interval
     congruence: Congruence
+    loop_stop_without_multiple_of: LoopStopWithoutMultipleOf | None = None
 
 
 @dataclass(frozen=True, eq=False)
@@ -625,6 +685,19 @@ def _shift_end(end: _End, k: int) -> _End:
 
 def _mul(end: int | None, k: int) -> int | None:
     return None if end is None else end * k
+
+
+def _extended_ends(r: Interval) -> tuple[float, float]:
+    """The least and the last value of ``r``, an unbounded side as a float infinity."""
+    lo, last = r.numeric_ends()
+    return (-inf if lo is None else lo, inf if last is None else last)
+
+
+def _extended_product(x: float, y: float) -> float:
+    """``x * y`` of two extended values; 0 times an infinity is 0 (the operand is exactly 0)."""
+    if x == 0 or y == 0:
+        return 0
+    return x * y
 
 
 def _add_ends(a: _End, b: _End, side: str) -> _End:
@@ -921,11 +994,13 @@ def _value_ranges(
     return found
 
 
-def _required_checks(
+def required_checks_within(
     graph: TransformGraph, ranges: tuple[Interval, ...], bounds: tuple[AxisBound, ...]
 ) -> tuple[BoundCheck, ...]:
-    """The checks a graph needs for ``ranges`` (one per input) against ``bounds`` (one per
-    output, in tensor-axis order); one ``BoundCheck`` per coordinate that can fail."""
+    """The checks a graph needs for ``ranges`` (one ``Interval`` per input) against ``bounds`` (one
+    ``AxisBound`` per output, in tensor-axis order); one ``BoundCheck`` per coordinate that can
+    fail. :func:`required_checks` is this rule over a tensor's own lengths and public pairs.
+    """
     _check_input_count(graph, len(ranges))
     if len(bounds) != len(graph.outputs):
         raise ValueError(
@@ -980,7 +1055,7 @@ def required_checks(
     """
     _require_outputs_match_rank(graph, len(tensor.lengths))
     bounds = tuple(AxisBound.of(0, length) for length in tensor.lengths)
-    return _required_checks(graph, _intervals(graph, input_ranges), bounds)
+    return required_checks_within(graph, _intervals(graph, input_ranges), bounds)
 
 
 def graph_injective(

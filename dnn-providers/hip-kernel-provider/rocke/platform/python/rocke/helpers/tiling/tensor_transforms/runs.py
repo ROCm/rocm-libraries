@@ -15,6 +15,9 @@ coordinates (split by the IR range walk; read only, no IR):
   run, so the first and the last element decide every check, and the valid elements form one
   contiguous span.
 
+``end_residue(end, width)`` gives an int's or a runtime length's residue modulo ``width``, the
+fact the queries read a length's alignment from.
+
 Each coordinate carries ``(step along the run, start residue)``. The vector's input moves by 1,
 every other input by 0; each step of the graph maps them on, by kind:
 
@@ -53,6 +56,7 @@ if TYPE_CHECKING:
 __all__ = [
     "address_contiguous_run",
     "checks_monotone_over_run",
+    "end_residue",
     "validity_uniform_over_run",
 ]
 
@@ -192,7 +196,7 @@ def _check_uniform(check: BoundCheck, step: _RunStep, width: int) -> bool:
     for end in (check.lo, check.hi):
         if end is None:
             continue
-        residue = _end_residue(end, width)
+        residue = end_residue(end, width)
         if residue is None or (step.congruence.residue - residue) % width:
             return False
     return True
@@ -222,9 +226,9 @@ def _aligned(congruence: Congruence, width: int) -> bool:
     return congruence.modulus % width == 0 and congruence.residue % width == 0
 
 
-def _end_residue(end: int | Value, width: int) -> int | None:
+def end_residue(end: int | Value, width: int) -> int | None:
     """``end mod width``, from the int itself or from a runtime length's stated multiple-of
-    fact."""
+    fact; ``None`` when that fact does not fix the residue."""
     if isinstance(end, int):
         return end % width
     facts = stated_facts_of(end)
