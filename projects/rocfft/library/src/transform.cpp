@@ -414,15 +414,16 @@ void rocfft_plan_t::Execute(void*                                 in_buffer[],
     if(LOG_PLAN_ENABLED())
     {
         auto& os         = *LogSingleton::GetInstance().GetPlanOS();
-        auto  inPtrCount = desc.count_pointers(desc.inFields, desc.inArrayType, local_comm_rank);
+        auto  inPtrCount = desc.count_pointers(
+            desc.inFields, desc.input_layout.get_array_type(), local_comm_rank);
         for(size_t i = 0; i < inPtrCount; ++i)
         {
             os << "user input " << i << ": " << in_buffer[i] << std::endl;
         }
         if(placement == rocfft_placement_notinplace)
         {
-            auto outPtrCount
-                = desc.count_pointers(desc.outFields, desc.outArrayType, local_comm_rank);
+            auto outPtrCount = desc.count_pointers(
+                desc.outFields, desc.output_layout.get_array_type(), local_comm_rank);
             for(size_t i = 0; i < outPtrCount; ++i)
             {
                 os << "user output " << i << ": " << out_buffer[i] << std::endl;
@@ -558,10 +559,11 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                     plan,
     if(mgpuPlan)
     {
         auto local_comm_rank = plan->desc.get_local_comm_rank();
-        std::copy_n(
-            in_buffer,
-            plan->desc.count_pointers(plan->desc.inFields, plan->desc.inArrayType, local_comm_rank),
-            std::back_inserter(in_buffer_copy));
+        std::copy_n(in_buffer,
+                    plan->desc.count_pointers(plan->desc.inFields,
+                                              plan->desc.input_layout.get_array_type(),
+                                              local_comm_rank),
+                    std::back_inserter(in_buffer_copy));
 
         // if input/output are overridden, override now
         if(inputPtr)
@@ -570,8 +572,9 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                     plan,
         if(rootPlan->placement == rocfft_placement_notinplace)
         {
             std::copy_n(out_buffer,
-                        plan->desc.count_pointers(
-                            plan->desc.outFields, plan->desc.outArrayType, local_comm_rank),
+                        plan->desc.count_pointers(plan->desc.outFields,
+                                                  plan->desc.output_layout.get_array_type(),
+                                                  local_comm_rank),
                         std::back_inserter(out_buffer_copy));
             if(outputPtr)
                 out_buffer_copy[0]
