@@ -38,14 +38,14 @@ import json
 from contextlib import contextmanager
 import os.path
 
-from tensilelite.Common.Utilities import _global_ti
-from tensilelite.Common.Architectures import detectGlobalCurrentArch, gfxToIsa
-from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from tensilelite.Common.DataType import DataType
-from tensilelite.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
-from tensilelite.Common.RegisterPool import allocTmpGpr
-from tensilelite.Common.Types import IsaVersion
-from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
+from ..Common.Utilities import _global_ti
+from ..Common.Architectures import detectGlobalCurrentArch, gfxToIsa
+from ..Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from ..Common.DataType import DataType
+from ..Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
+from ..Common.RegisterPool import allocTmpGpr
+from ..Common.Types import IsaVersion
+from ..Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def record_num_calls(f):
     @wraps(f)

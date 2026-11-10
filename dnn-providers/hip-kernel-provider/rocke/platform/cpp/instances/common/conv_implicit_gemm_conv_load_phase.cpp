@@ -34,6 +34,7 @@
 #include <stddef.h>
 #include <string.h> /* strcmp */
 
+#include "rocke/helper_rocke.helpers.io.h" /* rocke_b_smem_load_fragment */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_choose_load_vec */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
@@ -113,27 +114,141 @@ int rocke_conv_default_load_vec_b(const rocke_implicit_gemm_conv_spec_t* spec)
 }
 
 /* ===================================================================== *
- *  _emit_smem_load -- one fp16 LDS read (v4 fast path else vN).
+ *  _ir_dtype / _smem_dtype_for -- storage dtype -> IR element type.
  *
- *  Python span: conv_implicit_gemm.py lines 641-644:
- *      def _emit_smem_load(b, smem, row, col, n):
+ *  Python (_conv_implicit_gemm_common.py):
+ *      _DTYPE_TO_IR = {"fp16": F16, "bf16": BF16, "fp32": F32}
+ *      def _ir_dtype(dtype):
+ *          t = _DTYPE_TO_IR.get(dtype)
+ *          if t is None:
+ *              if _is_tf32_spelling(dtype): raise ValueError("... compute mode ...")
+ *              raise ValueError(f"unsupported conv dtype {dtype!r}; ...")
+ *          return t
+ *      def _smem_dtype_for(dtype):
+ *          return BF16 if dtype == "bf16" else F32 if dtype == "fp32" else None
+ * ===================================================================== */
+const rocke_type_t* rocke_conv_ir_dtype_lookup(const char* dtype)
+{
+    const char* d = dtype ? dtype : "fp16";
+    if(strcmp(d, "fp16") == 0)
+        return rocke_f16();
+    if(strcmp(d, "bf16") == 0)
+        return rocke_bf16();
+    if(strcmp(d, "fp32") == 0)
+        return rocke_f32();
+    return NULL;
+}
+
+const rocke_type_t* rocke_conv_ir_dtype(rocke_ir_builder_t* b, const char* dtype)
+{
+    const char* d = dtype ? dtype : "fp16";
+    const rocke_type_t* t = rocke_conv_ir_dtype_lookup(d);
+    if(t != NULL)
+        return t;
+    if(rocke_conv_is_tf32_spelling(d))
+        return (const rocke_type_t*)rocke_i_set_err(b,
+                                                    ROCKE_ERR_VALUE,
+                                                    "'%s' is a compute mode, not a storage dtype: "
+                                                    "use dtype_a='fp32', dtype_b='fp32' with "
+                                                    "mma_dtype='tf32'",
+                                                    d);
+    return (const rocke_type_t*)rocke_i_set_err(
+        b, ROCKE_ERR_VALUE, "unsupported conv dtype '%s'; choose fp16, bf16, or fp32", d);
+}
+
+const rocke_type_t* rocke_conv_smem_dtype_for(const char* dtype)
+{
+    if(dtype != NULL && strcmp(dtype, "bf16") == 0)
+        return rocke_bf16();
+    if(dtype != NULL && strcmp(dtype, "fp32") == 0)
+        return rocke_f32();
+    return NULL;
+}
+
+/* ===================================================================== *
+ *  _emit_smem_load -- one LDS operand read.
+ *
+ *  Python (_conv_implicit_gemm_common.py):
+ *      def _emit_smem_load(b, smem, row, col, n, *, smem_dtype=None):
+ *          if smem_dtype is not None and smem_dtype is not F16:
+ *              vec = b.smem_load_vN(smem, row, col, dtype=smem_dtype, n=n)
+ *              return b.vec_extract(vec, 0) if (smem_dtype is F32 and n == 1) else vec
  *          if n == 4:
  *              return b.smem_load_v4_f16(smem, row, col)
  *          return b.smem_load_vN_f16(smem, row, col, n=n)
  *
- *  The C smem_load_vN_f16 takes an explicit (row, col) index pair as an indices
+ *  The C smem_load_vN takes an explicit (row, col) index pair as an indices
  *  array of length 2, matching the Python (smem, row, col) call.
  * ===================================================================== */
-rocke_value_t* rocke_conv_emit_smem_load(
-    rocke_ir_builder_t* b, rocke_value_t* smem, rocke_value_t* row, rocke_value_t* col, int n)
+rocke_value_t* rocke_conv_emit_smem_load(rocke_ir_builder_t* b,
+                                         rocke_value_t* smem,
+                                         rocke_value_t* row,
+                                         rocke_value_t* col,
+                                         int n,
+                                         const rocke_type_t* smem_dtype)
 {
+    rocke_value_t* idx[2];
+    idx[0] = row;
+    idx[1] = col;
+    if(smem_dtype != NULL && smem_dtype != rocke_f16())
+    {
+        rocke_value_t* vec = rocke_b_smem_load_vN(b, smem, idx, 2, smem_dtype, n);
+        return (smem_dtype == rocke_f32() && n == 1) ? rocke_b_vec_extract(b, vec, 0) : vec;
+    }
     if(n == 4)
         return rocke_b_smem_load_v4_f16(b, smem, row, col);
+    return rocke_b_smem_load_vN_f16(b, smem, idx, 2, n);
+}
+
+/* ===================================================================== *
+ *  _to_mma_operand / _load_mma_operand / _mfma_issues_per_mma -- the TF32
+ *  operand fetch (_conv_implicit_gemm_common.py).
+ *
+ *      def _to_mma_operand(b, frag, data):
+ *          if not data.is_tf32: return frag
+ *          return b.bitcast(frag, VectorType(TF32, frag.type.count))
+ *
+ *      def _load_mma_operand(b, smem, row, col, n, *, smem_dtype, data):
+ *          if not data.is_tf32:
+ *              return _emit_smem_load(b, smem, row, col, n, smem_dtype=smem_dtype)
+ *          frag = smem_load_fragment(b, smem, row, col, dtype=F32, n=n,
+ *                                    max_elems=_TF32_LDS_LOAD_MAX)
+ *          return _to_mma_operand(b, frag, data)
+ * ===================================================================== */
+rocke_value_t* rocke_conv_to_mma_operand(rocke_ir_builder_t* b, rocke_value_t* frag, bool is_tf32)
+{
+    if(!is_tf32 || frag == NULL)
+        return frag;
+    return rocke_b_bitcast(b, frag, rocke_vector_type(b, rocke_tf32(), frag->type->count));
+}
+
+rocke_value_t* rocke_conv_load_mma_operand(rocke_ir_builder_t* b,
+                                           rocke_value_t* smem,
+                                           rocke_value_t* row,
+                                           rocke_value_t* col,
+                                           int n,
+                                           const rocke_type_t* smem_dtype,
+                                           bool is_tf32)
+{
+    if(!is_tf32)
+        return rocke_conv_emit_smem_load(b, smem, row, col, n, smem_dtype);
+    rocke_value_t* frag = rocke_b_smem_load_fragment(
+        b, smem, row, col, rocke_f32(), n, ROCKE_CONV_TF32_LDS_LOAD_MAX, 0);
+    return rocke_conv_to_mma_operand(b, frag, true);
+}
+
+int rocke_conv_mfma_issues_per_mma(const rocke_mmaop_t* op)
+{
+    /* _EMULATION_MFMAS = {"bf16x3": 3}
+     * return _EMULATION_MFMAS[op.emulation.recipe.value] if op.emulation else 1 */
+    if(op == NULL || rocke_arch_mma_op_is_native(op))
+        return 1;
+    switch(op->emulation_recipe)
     {
-        rocke_value_t* idx[2];
-        idx[0] = row;
-        idx[1] = col;
-        return rocke_b_smem_load_vN_f16(b, smem, idx, 2, n);
+    case ROCKE_MMA_EMULATION_BF16X3:
+        return 3;
+    default:
+        return 1;
     }
 }
 
