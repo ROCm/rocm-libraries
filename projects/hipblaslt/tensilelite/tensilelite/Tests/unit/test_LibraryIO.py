@@ -236,14 +236,18 @@ def test_parse_library_logic_data_normalizes_top_level_gridbased(
 
 
 @pytest.mark.parametrize("architecture", ["gfx950", "gfx1250"])
+@pytest.mark.parametrize("version", [2, 3])
 @patch.object(LibraryIO, "getCUCount", return_value=304)
 def test_create_library_logic_returns_dict_format(
     _mock_cu: Any,
     architecture: str,
+    version: int,
     pool_env: types.SimpleNamespace,
 ) -> None:
-    """``createLibraryLogic`` always returns dict-format YAML-ready data."""
+    """Library creation keeps explicit argument versions in dict-format output."""
     pdata, solutions = _parse_pool(pool_env)
+    for solution in solutions:
+        solution["InternalSupportParams"]["KernArgsVersion"] = version
     logic_tuple = _logic_tuple_from_parsed_pool(pdata, solutions)
     schedule = pdata["ScheduleName"]
     devices = pdata["DeviceNames"]
@@ -262,6 +266,8 @@ def test_create_library_logic_returns_dict_format(
     assert isinstance(out["Solutions"], list)
     assert len(out["Solutions"]) == len(solutions)
     assert out["IndexOrder"] == pdata["IndexOrder"]
+    for solution in out["Solutions"]:
+        assert solution["InternalSupportParams"]["KernArgsVersion"] == version
 
 
 def test_reorder_solutions_params_puts_naming_keys_first() -> None:
@@ -412,10 +418,42 @@ def test_reorder_solution_dict_for_dict_merge_sorts_internal_support_params() ->
     """``reorderSolutionDictForDictMerge`` sorts nested ``InternalSupportParams``."""
     state = {
         "WorkGroup": [16, 16, 1],
-        "InternalSupportParams": {"b": 2, "a": 1},
+        "InternalSupportParams": {"b": 2, "KernArgsVersion": 2, "a": 1},
     }
     out = LibraryIO.reorderSolutionDictForDictMerge(state)
-    assert list(out["InternalSupportParams"].keys()) == ["a", "b"]
+    assert out == state
+    assert list(out["InternalSupportParams"]) == ["KernArgsVersion", "a", "b"]
+    assert state["InternalSupportParams"]["KernArgsVersion"] == 2
+
+
+@pytest.mark.parametrize("version", [None, 0, 1, 2, 3])
+@pytest.mark.parametrize("with_uid", [False, True])
+def test_reorder_solution_dict_preserves_values(version, with_uid) -> None:
+    """Ordering preserves explicit argument versions and does not fill missing ones."""
+    state = {
+        "tailLoopOptB": 1,
+        "SolutionNameMin": "solution",
+        "InternalSupportParams": {"UseUniversalArgs": True, "PersistentLoopArgsVersion": 0},
+        "KernelNameMin": "kernel",
+        "SolutionIndex": 0,
+        "ActivationFuncCall": False,
+    }
+    if version is not None:
+        state["InternalSupportParams"]["KernArgsVersion"] = version
+    if with_uid:
+        state["SolutionUID"] = "uid"
+    before = copy.deepcopy(state)
+
+    out = LibraryIO.reorderSolutionDictForDictMerge(state)
+
+    assert out == before
+    assert state == before
+    assert list(state) == list(before)
+    assert list(state["InternalSupportParams"]) == list(before["InternalSupportParams"])
+    lead = ["SolutionIndex"] + (["SolutionUID"] if with_uid else [])
+    lead += ["KernelNameMin", "SolutionNameMin"]
+    assert list(out) == lead + sorted(set(out) - set(lead))
+    assert list(out["InternalSupportParams"]) == sorted(before["InternalSupportParams"])
 
 
 def test_use_kd_tree_round_trips_through_list_format() -> None:
