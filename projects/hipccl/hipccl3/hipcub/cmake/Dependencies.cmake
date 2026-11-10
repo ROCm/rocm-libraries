@@ -512,7 +512,7 @@ else()
   # libhipcxx (only for ROCm platform) - hard dependency, see require_libhipcxx.cmake
   list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
   include(require_libhipcxx)
-  hipccl_require_libhipcxx(3.4)
+  hipccl_require_libhipcxx(${MIN_LIBHIPCXX_PACKAGE_VERSION})
 endif()
 
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)

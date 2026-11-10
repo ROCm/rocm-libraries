@@ -50,4 +50,8 @@ function(hipccl_require_libhipcxx MINIMUM_VERSION)
     else()
         message(STATUS "Found libhipcxx ${libhipcxx_VERSION} (required: >= ${MINIMUM_VERSION})")
     endif()
+
+    # hipccl libraries need to check on libhipcxx_FOUND, but that is not in the scope when the find_package(...) is invoked
+    # from the shared function
+    set(libhipcxx_FOUND ${libhipcxx_FOUND} PARENT_SCOPE)
 endfunction()
