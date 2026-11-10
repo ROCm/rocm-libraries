@@ -852,7 +852,7 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
             o.align_set = true;
             ctx->lse = rocke_b_param(b, "lse_ptr", ptr_f32, &o);
         }
-        /* runtime_layout: the 17 appended arguments (_RTL_PARAMS). */
+        /* runtime_layout: the 16 appended arguments (_RTL_PARAMS). */
         if(spec->runtime_layout)
         {
             ctx->RTL = true;

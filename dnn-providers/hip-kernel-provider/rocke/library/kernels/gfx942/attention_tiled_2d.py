@@ -1239,13 +1239,16 @@ def runtime_layout_geometry(
     divides ``block_size`` and fits the arch LDS budget. ``tile_size`` is
     None when the tile is one whole cache block. None when nothing fits.
     """
+    from rocke.core.arch import ArchTarget
+
     from ..common.attention_arch import attention_lds_capacity_bytes
 
     cap = attention_lds_capacity_bytes(arch)
+    wave_size = ArchTarget.from_gfx(arch).wave_size
     for nw in (4, 2, 1):
         t = block_size
         while t >= 16:
-            if (t * head_size) % (nw * 64 * 2) == 0 and runtime_layout_lds_bytes(
+            if (t * head_size) % (nw * wave_size * 2) == 0 and runtime_layout_lds_bytes(
                 head_size=head_size, tile_size=t, num_warps=nw
             ) <= cap:
                 return nw, (None if t == block_size else t)
@@ -1883,6 +1886,9 @@ def build_unified_attention_2d_tiled(
         else None
     )
     RTL = spec.runtime_layout
+    # The window code paths are compiled whenever a window may be active: a
+    # compile-time window, or always in runtime-layout mode (window kernarg).
+    SW_ACTIVE = SLIDING_WINDOW > 0 or RTL
     if RTL:
         # Appended runtime-layout kernargs (ABI order: RUNTIME_LAYOUT_EXTRA_ARGS).
         rtl_p = {}
@@ -2677,7 +2683,7 @@ def build_unified_attention_2d_tiled(
             b.cmp_lt(qb_start_pos, cur_batch_q_len), num_tiles, b.const_i32(0)
         )
 
-    if SLIDING_WINDOW > 0 or RTL:
+    if SW_ACTIVE:
         qpos_hi_raw = b.add(qb_start_pos, b.const_i32(bm1_div_nqk))
         cur_q_minus1 = b.sub(cur_batch_q_len, b.const_i32(1))
         qpos_hi = b.select(
@@ -5373,7 +5379,7 @@ def build_unified_attention_2d_tiled(
                     causal_ok = b.cmp_le(col_abs, causal_lim)
                     in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
                     m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
-                    if SLIDING_WINDOW > 0 or RTL:
+                    if SW_ACTIVE:
                         dist = b.sub(causal_lim, col_abs)
                         m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
                     s_raw = b.vec_extract(S_n[atom][n], in_atom)

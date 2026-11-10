@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/arch_target.h"
 #include "rocke/error.hpp"
 #include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h"
 #include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
@@ -325,7 +326,14 @@ bool rocke_gfx950_attention_tiled_2d_runtime_layout_reject_reason(
                             s->num_warps);
         return true;
     }
-    const int threads = s->num_warps * 64;
+    /* Python: ArchTarget.from_gfx("gfx950").wave_size. */
+    const rocke_arch_target_t* gfx950 = rocke_arch_target_from_gfx("gfx950");
+    if(gfx950 == NULL)
+    {
+        rocke_attn2d_reason(reason, reason_cap, "runtime_layout: no gfx950 arch target");
+        return true;
+    }
+    const int threads = s->num_warps * gfx950->wave_size;
     if((s->block_size * s->head_size) % (threads * 8) != 0)
     {
         rocke_attn2d_reason(reason,

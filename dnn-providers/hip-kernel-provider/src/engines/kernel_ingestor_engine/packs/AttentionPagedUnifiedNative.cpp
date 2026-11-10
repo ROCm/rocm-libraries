@@ -90,6 +90,11 @@
  * K and V block sizes, packed page tables and a declared alignment below what the kernels
  * load (16 bytes for Q/K/V/O and the sink, 4 for the INT32 operands) are valid graphs that
  * this engine declines with a logged cause.
+ *
+ * The device-read inputs (page ids, lengths, ragged offsets) are the caller's to keep in
+ * range: page ids in `[0, num_blocks)`, `seq_len_kv[b] <= M * block_size`. The kernels
+ * bound reads within a page, not the page, and execute cannot check them without a
+ * device-to-host copy (README, "Device-read inputs are trusted").
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {

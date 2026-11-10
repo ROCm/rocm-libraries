@@ -5,7 +5,7 @@
 ``runtime_layout=True`` makes one compiled object serve any head count, sliding
 window, DENSE or RAGGED query layout, Q/O strides and paged-KV layout (vLLM's
 interleaved ``[nb, Hkv, bs, 2D]`` view, NHD, HND): the head counts and window
-are the body's runtime shape kernargs, the rest 15 appended kernargs.
+are the body's runtime shape kernargs, the rest 16 appended kernargs.
 
 The CPU tests check that every catalog spec passes ``supports_tiled_2d_spec``
 and emits, and that the Python and native (C) checks reject incompatible specs.

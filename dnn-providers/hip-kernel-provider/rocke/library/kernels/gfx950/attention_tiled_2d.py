@@ -1065,6 +1065,13 @@ _RTL_PARAMS = (
 )
 
 
+def _runtime_layout_wave_size() -> int:
+    """Lanes per wave of the runtime-layout target, from the exact arch."""
+    from rocke.core.arch import ArchTarget
+
+    return ArchTarget.from_gfx("gfx950").wave_size
+
+
 def _runtime_layout_reject_reason(spec: "UnifiedAttention2DTiledSpec") -> Optional[str]:
     """Why ``spec`` cannot use ``runtime_layout`` (``None`` when it can).
 
@@ -1138,7 +1145,7 @@ def _runtime_layout_reject_reason(spec: "UnifiedAttention2DTiledSpec") -> Option
             "runtime_layout requires num_warps in {1, 2, 4, 8} "
             f"(got {spec.num_warps})"
         )
-    threads = spec.num_warps * 64
+    threads = spec.num_warps * _runtime_layout_wave_size()
     if (spec.block_size * spec.head_size) % (threads * 8) != 0:
         return (
             f"runtime_layout: block_size*head_size={spec.block_size * spec.head_size} "
@@ -1155,7 +1162,7 @@ def runtime_layout_num_warps(head_size: int, block_size: int) -> int:
     calls; the single smaller tile (head_size=64, block_size=16) uses two.
     """
     for nw in (4, 2, 1):
-        if (head_size * block_size) % (nw * 64 * 8) == 0:
+        if (head_size * block_size) % (nw * _runtime_layout_wave_size() * 8) == 0:
             return nw
     raise ValueError(
         f"no runtime_layout geometry for head_size={head_size}, block_size={block_size}"

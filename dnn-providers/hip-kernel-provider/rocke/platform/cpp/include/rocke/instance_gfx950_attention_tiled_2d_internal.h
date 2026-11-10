@@ -184,7 +184,7 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* num_kv_p;
     rocke_value_t* sliding_window_p;
     rocke_value_t* lse; /* lse_ptr (spec->emit_lse only, else NULL) */
-    /* runtime_layout (spec->runtime_layout): the 17 appended kernel arguments,
+    /* runtime_layout (spec->runtime_layout): the 16 appended kernel arguments,
      * indexed by ROCKE_ATTN2D_RTL_* (Python _RTL_PARAMS); all NULL when off. */
     bool RTL;
     rocke_value_t* rtl_p[ROCKE_ATTN2D_RTL_NUM_PARAMS];

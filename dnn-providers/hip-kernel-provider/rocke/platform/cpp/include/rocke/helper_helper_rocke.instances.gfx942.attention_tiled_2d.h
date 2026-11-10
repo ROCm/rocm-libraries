@@ -184,7 +184,7 @@ typedef struct rocke_attention_tiled_2d_spec
      * no new IR; on appends the "lse" kernel-name token. */
     bool emit_lse; /* False (Python kw_only) */
     /* Runtime-layout mode (hipDNN paged/ragged SDPA): the Q/O/KV strides and a
-     * dense-or-ragged Q become 15 appended kernel arguments (after the runtime
+     * dense-or-ragged Q become 16 appended kernel arguments (after the runtime
      * head counts and window),
      * the page tables and lengths are read on the device and the q-block grid
      * is walked with a grid-stride loop. Off emits no new IR; on appends the

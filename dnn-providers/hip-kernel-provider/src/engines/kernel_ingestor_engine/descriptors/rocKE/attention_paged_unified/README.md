@@ -126,6 +126,22 @@ the cache's K and V halves as two containers over one allocation, its `block_tab
 page tables (one tensor, `[B, 1, max_blocks, 1]`), `seq_lens` as `seq_len_kv`, the query lengths as
 `seq_len_q`, and `query_start_loc` as the ragged offset of Q and O.
 
+### Device-read inputs are trusted
+
+Because these values are read only on the device, the engine cannot validate them at
+execute without a device-to-host copy, which would break HIP graph capture. The caller
+guarantees, as with cuDNN and vLLM's own kernels:
+
+- every K and V page id the lengths reach is in `[0, num_blocks)` of the K/V containers (a
+  page id outside that range addresses memory outside the cache: the kernel bounds reads
+  within a page, not the page);
+- `seq_len_kv[b] <= max_blocks * block_size`, `seq_len_q[b] >= 0`, and ragged offsets as
+  described in the Graphs served list of `AttentionPagedUnifiedNative.cpp`.
+
+What a graph's descriptors fix (ranks, dtypes, strides, extents, alignment, table widths) is
+checked when the engine matches. A serving stack that cannot vouch for its page tables
+checks them on the host before launch.
+
 ## Saved plans
 
 The engine reports `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`: a built plan saves with

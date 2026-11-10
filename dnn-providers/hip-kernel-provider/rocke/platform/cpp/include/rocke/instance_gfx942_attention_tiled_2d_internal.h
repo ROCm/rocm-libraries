@@ -185,7 +185,7 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* sliding_window_p;
     /* Trailing lse_ptr (F32*), declared only when spec->emit_lse; else NULL. */
     rocke_value_t* lse;
-    /* runtime_layout (spec->runtime_layout): the 17 appended kernel arguments,
+    /* runtime_layout (spec->runtime_layout): the 16 appended kernel arguments,
      * indexed by ROCKE_ATTN2D_RTL_*; all NULL when off. */
     bool RTL;
     rocke_value_t* rtl_p[ROCKE_ATTN2D_RTL_NUM_PARAMS];
