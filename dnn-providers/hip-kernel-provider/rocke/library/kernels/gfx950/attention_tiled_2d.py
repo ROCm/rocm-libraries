@@ -2188,17 +2188,17 @@ def build_unified_attention_2d_tiled(
         page_base_in_soffset=True,
     )
     # The bf16/fp16 loaders address a K/V copy by its page (_attention_paged_kv_copies)
-    # when a wave's part of each copy lies in one page; otherwise the paged-KV
-    # descriptor addresses each lane's own row.
+    # when every wave's part of each copy lies in the same page; otherwise the
+    # paged-KV descriptor addresses each lane's own row. Copies that span pages
+    # stay on the descriptor: with the page taken from the wave they spilled more
+    # (D192 with 16-token pages, the copies ending mid-row).
     PAGE_COPIES = (
-        not FAST_PAGED_KV_DESC and not KV_FP8 and page_copies.wave_part_in_page
+        not FAST_PAGED_KV_DESC
+        and not KV_FP8
+        and page_copies.wave_part_in_page
+        and page_copies.uniform_blocks
     )
-    # Copies that span pages take their page from the wave and keep the base in
-    # ``voffset`` with their ids read in place: the carried ids are per block.
-    page_copies.page_base_in_soffset = page_copies.uniform_blocks
-    PAGE_PREFETCH = (
-        PAGE_COPIES and page_copies.uniform_blocks and not RING3 and not GROUPED_KV2
-    )
+    PAGE_PREFETCH = PAGE_COPIES and not RING3 and not GROUPED_KV2
     # Page ids already read for a tile, by the tile index value.
     tile_pages = {}
     if FAST_PAGED_KV_DESC:

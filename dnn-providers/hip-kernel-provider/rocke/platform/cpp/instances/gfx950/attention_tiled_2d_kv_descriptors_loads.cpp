@@ -189,13 +189,20 @@ static rocke_value_t* rocke__wave_lds_offset_i64(rocke_gfx950_attn2d_build_ctx_t
 }
 
 /* Python PAGE_COPIES: the bf16/fp16 loaders address a K/V copy by its page
- * (_attention_paged_kv_copies) when a wave's part of each copy lies in one page;
- * otherwise the paged-KV descriptor addresses each lane's own row. A pure
- * function of the geometry, so the loop drivers can ask before emit_preloop. */
+ * (_attention_paged_kv_copies) when every wave's part of each copy lies in the
+ * same page (the helper's uniform_blocks); otherwise the paged-KV descriptor
+ * addresses each lane's own row. A pure function of the geometry, so the loop
+ * drivers can ask before emit_preloop. */
 static bool rocke__page_copies(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
-    const int wave_halves = rocke__kv_halves_per_call(ctx) / ctx->NUM_WARPS;
-    return !ctx->FAST_PAGED_KV_DESC && !ctx->KV_FP8 && (ctx->BS * ctx->HD) % wave_halves == 0;
+    const int halves_per_call = rocke__kv_halves_per_call(ctx);
+    const int wave_halves = halves_per_call / ctx->NUM_WARPS;
+    const int page_halves = ctx->BS * ctx->HD;
+    const bool uniform_blocks
+        = ctx->N_BLOCKS_PER_TILE == 1
+          || (halves_per_call <= page_halves && page_halves % halves_per_call == 0);
+    return !ctx->FAST_PAGED_KV_DESC && !ctx->KV_FP8 && page_halves % wave_halves == 0
+           && uniform_blocks;
 }
 
 /* The paged-KV descriptor's indirect lookup for page `blk` of a tile: one guarded
@@ -219,7 +226,7 @@ static rocke_value_t*
  * (kv_ring_depth != 2 is refused). */
 bool rocke_gfx950_attn2d_page_prefetch(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
-    return rocke__page_copies(ctx) && ctx->page_copies.uniform_blocks && !ctx->GROUPED_KV2;
+    return rocke__page_copies(ctx) && !ctx->GROUPED_KV2;
 }
 
 void rocke_gfx950_attn2d_tile_page_ids(rocke_gfx950_attn2d_build_ctx_t* ctx,
@@ -337,9 +344,6 @@ void rocke_gfx950_attn2d_emit_preloop(rocke_gfx950_attn2d_build_ctx_t* ctx)
         pc->page_base_in_soffset = true;
         rocke_kv_page_copies_init(pc);
         ctx->PAGE_COPIES = rocke__page_copies(ctx);
-        /* Copies that span pages take their page from the wave and keep the base
-         * in voffset with their ids read in place: the carried ids are per block. */
-        pc->page_base_in_soffset = pc->uniform_blocks;
     }
 
     (void)rocke__bytes_per_buf;
