@@ -108,6 +108,15 @@ class ProblemType:
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
                  'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A', 'stochasticRounding']
+
+    def state(self):
+        # The generic StateKeys walk, plus triggeredGateEpilogue only when set, so
+        # libraries without gate-epilogue kernels serialize exactly as before.
+        rv = {key: state(getattr(self, key)) for key in self.StateKeys}
+        if getattr(self, 'triggeredGateEpilogue', False):
+            rv['triggeredGateEpilogue'] = True
+        return rv
+
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -346,6 +355,7 @@ class ProblemType:
         rv.swizzleTensorB = d.get('SwizzleTensorB', False)
 
         rv.fusedGemmA2A = d.get('FusedGemmA2A', False)
+        rv.triggeredGateEpilogue = d.get('TriggeredGateEpilogue', False)
 
         rv.mxBlockA = d.get('MXBlockA', 0)
         rv.mxBlockB = d.get('MXBlockB', 0)
@@ -496,6 +506,8 @@ class ProblemType:
             predicates.append(ProblemPredicate("FusedGemmA2A", value=self.fusedGemmA2A))
             if self.fusedGemmA2A and self.batched:
                 predicates.append(ProblemPredicate("BatchSizeEqual", index=0, value=1))
+            if getattr(self, 'triggeredGateEpilogue', False):
+                predicates.append(ProblemPredicate("TriggeredGateEpilogue", value=True))
             predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
             if self.mxBlockA:
                 predicates.append(ProblemPredicate("DataTypeMXSA", value=self.mxTypeA))

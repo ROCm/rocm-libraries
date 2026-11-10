@@ -6,6 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* `TriggeredGateEpilogue` TensileLite problem-type parameter (default off): each work-group of a GEMM adds 1 to a 64-bit counter for its band of output rows after storing its tile, so a consumer such as a copy engine can start on a band before the GEMM finishes. The kernels take the counters' table through the `GateView` and `GateTileBase` kernel arguments and are built with `--build-only`; currently limited to gfx94x/gfx95x and bf16.
 * `HIPBLASLT_CHECK_SYNCHRONIZER` environment variable: opt-in post-launch
   dirty-buffer check for the handle's inter-workgroup flag buffers, which their
   kernels must leave at zero (`1`, `on` or `true` to enable; anything else

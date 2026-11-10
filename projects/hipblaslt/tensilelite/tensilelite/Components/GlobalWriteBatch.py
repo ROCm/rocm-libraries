@@ -178,6 +178,64 @@ def emitFusedA2ACounterPtrLatch(module, kw, sgprName, tokenTilesName):
                              comment=f">> log2(MT1={mt1})"))
   module.add(SWaitCnt(kmcnt=0, comment="wait counter_ptr"))
 
+def emitTriggeredGateLatch(module, kw, sgprName):
+  """Resolve this work-group's ready-gate address once, in the prologue.
+
+  GateView points to a gate table (gate-epilogue ABI, version 2):
+    header: +0 abi_version, +4 struct_size, +8 tile_record_size, +12 tile_count,
+            +20 reserved, +32 heap_base, +40 tiles.
+    record: +0 tile_id, +8 role_flags (bit 0 = PUBLISH), +16 ready_offset.
+  tile = GateTileBase + WorkGroup1. Traps (s_trap 2) on abi_version != 2,
+  reserved != 0, tile >= tile_count, record.tile_id != tile, or PUBLISH clear.
+  Leaves heap_base + ready_offset in the SGPR pair sgprName.
+  """
+  from rocisa.instruction import SLoadB32, SLoadB64, SLoadB128, SAddU32, SAddCU32, \
+    SMulI32, SMulHIU32, SCmpEQU32, SCmpLtU32, SBitcmp1B32, SCBranchSCC0, SBranch
+  base = kw.states.gateKernArgBase
+  view = kw.sgprPool.checkOutAligned(2, 2, tag="trigGate_view", preventOverflow=False)
+  tile = kw.sgprPool.checkOut(1, tag="trigGate_tile", preventOverflow=False)
+  hdr  = kw.sgprPool.checkOutAligned(4, 4, tag="trigGate_hdr", preventOverflow=False)
+  rsv  = kw.sgprPool.checkOut(1, tag="trigGate_rsv", preventOverflow=False)
+  ptrs = kw.sgprPool.checkOutAligned(4, 4, tag="trigGate_ptrs", preventOverflow=False)
+  rec  = kw.sgprPool.checkOutAligned(2, 2, tag="trigGate_rec", preventOverflow=False)
+  trapLabel  = Label(kw.labels.getNameInc("trigGate_trap"), "triggered gate: bad view -> trap")
+  afterLabel = Label(kw.labels.getNameInc("trigGate_latched"), "triggered gate: address latched")
+
+  module.addComment1("triggered gate: resolve this work-group's ready-gate address")
+  module.add(kw.argLoader.loadKernArg(view, "KernArgAddress", sgprOffset=hex(base), dword=2))
+  module.add(kw.argLoader.loadKernArg(tile, "KernArgAddress", sgprOffset=hex(base + 8), dword=1))
+  module.add(SWaitCnt(kmcnt=0, comment="wait GateView/GateTileBase"))
+  module.add(SLoadB128(dst=sgpr(hdr, 4), base=sgpr(view, 2), soffset=0, comment="abi_version, struct_size, tile_record_size, tile_count"))
+  module.add(SLoadB32(dst=sgpr(rsv), base=sgpr(view, 2), soffset=20, comment="reserved"))
+  module.add(SLoadB128(dst=sgpr(ptrs, 4), base=sgpr(view, 2), soffset=32, comment="heap_base, tiles"))
+  module.add(SAddU32(dst=sgpr(tile), src0=sgpr(tile), src1=sgpr("WorkGroup1"), comment="tile = GateTileBase + WorkGroup1"))
+  module.add(SWaitCnt(kmcnt=0, comment="wait view header"))
+  module.add(SCmpEQU32(src0=sgpr(hdr), src1=2, comment="abi_version == 2?"))
+  module.add(SCBranchSCC0(labelName=trapLabel.getLabelName()))
+  module.add(SCmpEQU32(src0=sgpr(rsv), src1=0, comment="reserved == 0?"))
+  module.add(SCBranchSCC0(labelName=trapLabel.getLabelName()))
+  module.add(SCmpLtU32(src0=sgpr(tile), src1=sgpr(hdr + 3), comment="tile < tile_count?"))
+  module.add(SCBranchSCC0(labelName=trapLabel.getLabelName()))
+  module.add(SMulI32(dst=sgpr(rec), src0=sgpr(tile), src1=sgpr(hdr + 2), comment="tile * tile_record_size (lo)"))
+  module.add(SMulHIU32(dst=sgpr(rec + 1), src0=sgpr(tile), src1=sgpr(hdr + 2), comment="tile * tile_record_size (hi)"))
+  module.add(SAddU32(dst=sgpr(rec), src0=sgpr(rec), src1=sgpr(ptrs + 2), comment="record = tiles + ..."))
+  module.add(SAddCU32(dst=sgpr(rec + 1), src0=sgpr(rec + 1), src1=sgpr(ptrs + 3)))
+  module.add(SLoadB128(dst=sgpr(hdr, 4), base=sgpr(rec, 2), soffset=0, comment="record: tile_id, channel_id, role_flags, publisher_count"))
+  module.add(SLoadB64(dst=sgpr(rec, 2), base=sgpr(rec, 2), soffset=16, comment="record: ready_offset"))
+  module.add(SWaitCnt(kmcnt=0, comment="wait tile record"))
+  module.add(SCmpEQU32(src0=sgpr(hdr), src1=sgpr(tile), comment="record.tile_id == tile?"))
+  module.add(SCBranchSCC0(labelName=trapLabel.getLabelName()))
+  module.add(SBitcmp1B32(src0=sgpr(hdr + 2), src1=0, comment="PUBLISH role?"))
+  module.add(SCBranchSCC0(labelName=trapLabel.getLabelName()))
+  module.add(SAddU32(dst=sgpr(sgprName), src0=sgpr(ptrs), src1=sgpr(rec), comment="ready gate = heap_base + ready_offset"))
+  module.add(SAddCU32(dst=sgpr(sgprName + "+1"), src0=sgpr(ptrs + 1), src1=sgpr(rec + 1)))
+  module.add(SBranch(labelName=afterLabel.getLabelName()))
+  module.add(trapLabel)
+  module.add(TextBlock("s_trap 2\n"))
+  module.add(afterLabel)
+  for r in (view, tile, hdr, rsv, ptrs, rec):
+    kw.sgprPool.checkIn(r)
+
 class GlobalWriteBatchComponent(GlobalWriteComponents):
   kernel = {"ProblemType": {"OperationType": "GEMM" }}
   def __call__(self, kernel: Solution, tPA, tPB, activation: ActivationModule, ss: StoreState, \
@@ -611,6 +669,8 @@ class GlobalWriteBatchWriter:
     # the tile is done and every PUSH store of this WG has been issued.
     if self.kernel["ProblemType"]["FusedGemmA2A"] and self.batchIdx == self.numBatches - 1:
       self._emitFusedA2AHandshake(module)
+    if self.kernel["ProblemType"].get("TriggeredGateEpilogue", False) and self.batchIdx == self.numBatches - 1:
+      self._emitTriggeredGateTrip(module)
     # CompactLoopStore CLS countdown tail: emit countdown + branch + s_endpgm at
     # END of the CLS-loop body (= last batch of batchesPerCLSBody). Gated by
     # CompactLoopStore so non-CLS .s matches baseline (no CLS tail emit).
@@ -1955,6 +2015,9 @@ class GlobalWriteBatchWriter:
     # reads from HBM -- an L2-resident tile would be copied stale.
     fusedA2APushPass = bool(self.kernel["ProblemType"]["FusedGemmA2A"]) and \
                        self.parentWriter.states.fusedA2ADispatchMode == "PUSH"
+    # Once the gate opens, D may be read from outside this GPU's L2 (a copy engine or
+    # a peer), so every D store takes sc1.
+    fusedA2APushPass = fusedA2APushPass or bool(self.kernel["ProblemType"].get("TriggeredGateEpilogue", False))
 
     if is16bitSubtile:
       assert self.kernel["BufferStore"], \
@@ -3358,6 +3421,31 @@ class GlobalWriteBatchWriter:
                             comment="non-wave-0 -> skip (single writer per WG)"))
     module.add(self.getEdgeMovInstType()(EXEC(), 1,
                "fused-A2A: isolate lane 0 so the atomic fires once per WG"))
+
+  def _emitTriggeredGateTrip(self, module: Module):
+    """After the last D store batch, wave 0 lane 0 adds 1 to the ready gate as a system-scope
+    release: buffer_wbl2 sc0 sc1; s_waitcnt; global_atomic_add_x2 sc1. rocisa has neither
+    instruction, so both are emitted as text."""
+    kw = self.parentWriter
+    module.addComment2("triggered gate: one release add of 1 per work-group")
+    afterLabel = Label(kw.labels.getNameInc("trigGate_after"), "triggered gate: after the add")
+    module.add(self.getEdgeMovInstType()(EXEC(), -1, "triggered gate: full exec before wave-0 election"))
+    module.add(SWaitCnt(vscnt=0, comment="triggered gate: this wave's D stores retired"))
+    module.add(SBarrier(comment="triggered gate: every wave's D stores retired"))
+    self._emitFusedA2AWave0Election(module, afterLabel.getLabelName())
+    vOff  = kw.vgprPool.checkOut(1, "trigGate_off")
+    vData = kw.vgprPool.checkOutAligned(2, 2, "trigGate_one")
+    module.add(VMovB32(dst=vgpr(vOff), src=0, comment="triggered gate: offset 0"))
+    module.add(VMovB32(dst=vgpr(vData), src=1, comment="triggered gate: +1 (lo)"))
+    module.add(VMovB32(dst=vgpr(vData + 1), src=0, comment="triggered gate: +1 (hi)"))
+    module.add(TextBlock("buffer_wbl2 sc0 sc1 // triggered gate: release (system scope)\n"))
+    module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="triggered gate: write-back done"))
+    module.add(TextBlock("global_atomic_add_x2 %s, %s, %s sc1 // triggered gate: ready += 1\n" %
+                         (vgpr(vOff), vgpr(vData, 2), sgpr("TrigGateReadyAddr", 2))))
+    kw.vgprPool.checkIn(vData)
+    kw.vgprPool.checkIn(vOff)
+    module.add(afterLabel)
+    module.add(self.getEdgeMovInstType()(EXEC(), -1, "triggered gate: restore exec"))
 
   def _emitFusedA2AHandshake(self, module: Module):
     """Emit the once-per-WG cross-card handshake for PUSH work-groups: wait for

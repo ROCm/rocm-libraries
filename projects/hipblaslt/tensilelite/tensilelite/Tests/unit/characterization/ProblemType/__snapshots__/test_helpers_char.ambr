@@ -58,6 +58,7 @@
     'TileAwareSelection',
     'TransposeA',
     'TransposeB',
+    'TriggeredGateEpilogue',
     'UseBeta',
     'UseBias',
     'UseE',
@@ -241,6 +242,9 @@
       'bool',
     ]),
     'TransposeB': list([
+      'bool',
+    ]),
+    'TriggeredGateEpilogue': list([
       'bool',
     ]),
     'UseBeta': list([

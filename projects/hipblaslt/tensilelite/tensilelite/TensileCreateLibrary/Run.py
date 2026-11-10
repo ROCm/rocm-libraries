@@ -1370,6 +1370,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     # raiseIfTypeMismatches() can format the existing fatal aggregate error.
     typeMismatchAggregate: dict = {}
     skippedGemmA2AFusion = 0
+    skippedTriggeredGate = 0
     # Every library pulled out of the generator below is retained for the rest
     # of the run, which makes the cyclic collector the dominant cost of this
     # phase (5x) if left running. See deferCyclicGC.
@@ -1384,6 +1385,9 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             ):
                 skippedGemmA2AFusion += 1
                 continue
+            if not _includeTriggeredGateProblemType(problemType):
+                skippedTriggeredGate += 1
+                continue
             mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
 
             if architectureName == "":
@@ -1397,6 +1401,8 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
 
     if skippedGemmA2AFusion:
         print1(f"# GEMM+A2A fusion: disabled; filtered {skippedGemmA2AFusion} logic files")
+    if skippedTriggeredGate:
+        print1(f"# Triggered gate epilogue: never library-built; filtered {skippedTriggeredGate} logic files")
 
     # After all YAML files have been parsed and Solution objects created,
     # fail on any type mismatches that were collected.
@@ -1486,6 +1492,12 @@ def _includeGemmA2AFusionProblemType(problemType, enabled: bool) -> bool:
     quietly than building the solutions the gate meant to skip.
     """
     return enabled or (problemType or {}).get("FusedGemmA2A", False) is not True
+
+
+def _includeTriggeredGateProblemType(problemType) -> bool:
+    """Gate-epilogue kernels are built with --build-only and launched by a caller
+    that supplies the gate table; no library build admits them."""
+    return (problemType or {}).get("TriggeredGateEpilogue", False) is not True
 
 
 ################################################################################

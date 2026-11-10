@@ -4392,6 +4392,10 @@ class KernelWriterAssembly(KernelWriter):
       emitFusedA2ACounterPtrLatch(module, self, "FusedCounterPtr", "FusedTokenTiles")
       emitFusedA2ANShardLatch(module, self, "FusedNShard")
 
+    if kernel["ProblemType"].get("TriggeredGateEpilogue", False):
+      from .Components.GlobalWriteBatch import emitTriggeredGateLatch
+      emitTriggeredGateLatch(module, self, "TrigGateReadyAddr")
+
     return module
 
 
