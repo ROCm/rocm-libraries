@@ -21,7 +21,7 @@
 /// (dgrad) AOT-instance engine: the instances its catalog describes, the problem it
 /// matches, and the launch plan of one instance on one problem -- the served predicate,
 /// the kernels it launches with their grids and arguments, the workspace and the dX
-/// zero-fill. It ports gfx950_conv_dgrad_aot_plan of the rocKE adapter
+/// zero-fill. It ports conv_dgrad_aot_plan of the rocKE adapter
 /// rocke/library/builders/common/convolution_backward_data.py, which is rocKE's own offer
 /// (identity_supports_problem, direct_spec_for_problem) plus the launch bounds; the unit
 /// tests compare the two plan for plan by digest (serializePlan / planDigest) over the
@@ -180,7 +180,7 @@ inline bool bufferRangesDoNotOverlap(const std::array<uintptr_t, 3>& addresses,
 // The problem
 // ---------------------------------------------------------------------------------------
 
-/// One backward-data problem as the engine matches it (Gfx950ConvDgradProblem). Hi and
+/// One backward-data problem as the engine matches it (ConvDgradAotProblem). Hi and
 /// Wi are the dX extents, which the graph states: several input extents give one output
 /// extent under a stride. C and K are totals across all groups. dY is [N, Ho, Wo, K]
 /// NHWK, W is [K, Y, X, C / groups] KYXC and dX is [N, Hi, Wi, C] NHWC.
@@ -563,7 +563,7 @@ inline int64_t widthFold(const Problem& p)
     return std::gcd(std::gcd(p.x, p.strideW), std::gcd(p.wi, p.padW));
 }
 
-/// gfx950_conv_dgrad_aot_launch_problem: the problem the implicit-GEMM kernels run @p p
+/// conv_dgrad_aot_launch_problem: the problem the implicit-GEMM kernels run @p p
 /// as -- its width folded into the channels when it folds (fold_width: f adjacent W
 /// positions become f * C channels, X / f taps, stride sW / f, padding pW / f, width
 /// Wi / f; the same bytes in all three tensors).
@@ -592,7 +592,7 @@ inline int64_t& batchChunkByteLimitForTesting()
     return s_limit;
 }
 
-/// gfx950_conv_dgrad_aot_batch_chunks: the (n0, n) batch slices one implicit-GEMM launch
+/// conv_dgrad_aot_batch_chunks: the (n0, n) batch slices one implicit-GEMM launch
 /// each covers, one slice when dY and dX fit the 32-bit kernel ABI whole. std::nullopt
 /// when one image does not.
 inline std::optional<std::vector<std::pair<int64_t, int64_t>>> batchChunks(const Problem& p,
@@ -986,7 +986,7 @@ struct AotInstance
     std::optional<DirectInstance> direct;
 };
 
-/// The instance a kernel's metadata describes (supports_gfx950_conv_dgrad_aot), when it is
+/// The instance a kernel's metadata describes (supports_conv_dgrad_aot), when it is
 /// a complete instance of one family with a reviewed launch contract. @p metadata answers
 /// intField(name) -> std::optional<int64_t> and stringField(name) -> const std::string*.
 /// kernel_family is read first, so no family's checks run on another's placeholders; a
@@ -1210,7 +1210,7 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
 }
 
 // ---------------------------------------------------------------------------------------
-// The launch plan (gfx950_conv_dgrad_aot_plan)
+// The launch plan (conv_dgrad_aot_plan)
 // ---------------------------------------------------------------------------------------
 
 /// The kernel a step launches: the instance itself or a helper of its pack
@@ -1258,7 +1258,7 @@ struct View
     int64_t bytes;
 };
 
-/// One launch of a plan (Gfx950ConvDgradStep). values are the by-value i32 arguments
+/// One launch of a plan (ConvDgradAotStep). values are the by-value i32 arguments
 /// after the operands and their byte sizes, in ABI order (for implicit GEMM the 36
 /// problem values then num_sub_gemms). An implicit-GEMM step's sub_gemm_buf is its table,
 /// uploaded at tableOffset bytes into the SUB_GEMM region.
@@ -1300,7 +1300,7 @@ struct Workspace
     int64_t bytes;
 };
 
-/// Everything the engine does to run one instance on one problem (Gfx950ConvDgradPlan):
+/// Everything the engine does to run one instance on one problem (ConvDgradAotPlan):
 /// zero dX when zeroDx, upload every step's table, then launch the steps. launched is the
 /// problem the kernels see (the width-folded one for implicit GEMM).
 struct Plan
@@ -1334,7 +1334,7 @@ struct Plan
     }
 };
 
-/// Gfx950ConvDgradPlan.serialize: the plan as one integer sequence.
+/// ConvDgradAotPlan.serialize: the plan as one integer sequence.
 inline std::vector<int64_t> serializePlan(const Plan& plan)
 {
     std::vector<int64_t> out{
@@ -1371,7 +1371,7 @@ inline std::vector<int64_t> serializePlan(const Plan& plan)
     return out;
 }
 
-/// Gfx950ConvDgradPlan.digest: FNV-1a 64 over serializePlan, each value as 8
+/// ConvDgradAotPlan.digest: FNV-1a 64 over serializePlan, each value as 8
 /// little-endian bytes.
 inline uint64_t planDigest(const Plan& plan)
 {
@@ -2127,7 +2127,7 @@ inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstan
     }
 }
 
-/// gfx950_conv_dgrad_aot_plan: the launch of @p instance on @p problem, or std::nullopt
+/// conv_dgrad_aot_plan: the launch of @p instance on @p problem, or std::nullopt
 /// when it does not compute it.
 inline std::optional<Plan> instancePlan(const Problem& problem, const AotInstance& instance)
 {

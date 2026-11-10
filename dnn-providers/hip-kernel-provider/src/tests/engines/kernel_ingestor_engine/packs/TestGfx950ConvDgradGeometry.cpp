@@ -73,7 +73,7 @@ TEST(TestGfx950ConvDgradGeometry, EveryCatalogInstanceParses)
 
 TEST(TestGfx950ConvDgradGeometry, PlansMatchTheAdapterOverTheCatalog)
 {
-    // gfx950_conv_dgrad_aot_plan over every catalog instance of the problem's dtype: the same
+    // conv_dgrad_aot_plan over every catalog instance of the problem's dtype: the same
     // instances serve, and their plans fold to the adapter's digest. On a digest mismatch,
     // make_conv_dgrad_aot_test_vectors.py's render() names each serving plan's digest.
     std::map<std::string, size_t> servedByVariant;

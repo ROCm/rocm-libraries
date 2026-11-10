@@ -357,10 +357,10 @@ def instance_specs(identities: list, jobs: int = 1) -> list:
 
 def _checked(spec):
     from builders.common.convolution_backward_data import (
-        supports_gfx950_conv_dgrad_aot,
+        supports_conv_dgrad_aot,
     )
 
-    ok, reason = supports_gfx950_conv_dgrad_aot(spec)
+    ok, reason = supports_conv_dgrad_aot(spec)
     return (spec, "") if ok else (None, reason)
 
 

@@ -168,7 +168,7 @@ struct DgradProblem
 };
 
 /// One graph and how many catalog instances of each direct_variant (VARIANTS order) serve
-/// it in each dtype, as gfx950_conv_dgrad_aot_plan in
+/// it in each dtype, as conv_dgrad_aot_plan in
 /// rocke/library/builders/common/convolution_backward_data.py counts them over
 /// gfx950_conv_dgrad_aot_{fp16,bf16}.instances.json. The native kernel matcher is checked
 /// against these counts.

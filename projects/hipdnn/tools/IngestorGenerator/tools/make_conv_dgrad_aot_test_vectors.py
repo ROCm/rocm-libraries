@@ -5,14 +5,14 @@
 
 The native pack (``packs/Gfx950ConvDgradGeometry.hpp``) ports the launch plan of the
 rocKE adapter (``builders/common/convolution_backward_data.py``,
-``gfx950_conv_dgrad_aot_plan``). This tool runs the adapter over the shipped catalog
+``conv_dgrad_aot_plan``). This tool runs the adapter over the shipped catalog
 (``configs/gfx950_conv_dgrad_aot_<dtype>.instances.json``) and a seeded set of
 synthetic problems, and writes, for the C++ tests:
 
 * every catalog instance's KMD metadata, as the descriptor states it;
 * the problems, and per problem the instances of its dtype that serve it with one
-  digest folding the digest (``Gfx950ConvDgradPlan.digest``) of each one's plan;
-* a few plans in full (``Gfx950ConvDgradPlan.serialize``), one of each kind, so a
+  digest folding the digest (``ConvDgradAotPlan.digest``) of each one's plan;
+* a few plans in full (``ConvDgradAotPlan.serialize``), one of each kind, so a
   mismatch can be read rather than only detected.
 
 Regenerate after a catalog or adapter change::
@@ -48,9 +48,9 @@ _STRING_FIELDS = (
 
 
 def _problem(**kw):
-    from builders.common.convolution_backward_data import Gfx950ConvDgradProblem
+    from builders.common.convolution_backward_data import ConvDgradAotProblem
 
-    return Gfx950ConvDgradProblem(**kw)
+    return ConvDgradAotProblem(**kw)
 
 
 def _shape(
@@ -243,7 +243,7 @@ def _fold(digests) -> int:
 
 
 def render(specs, problems) -> str:
-    from builders.common.convolution_backward_data import gfx950_conv_dgrad_aot_plan
+    from builders.common.convolution_backward_data import conv_dgrad_aot_plan
 
     by_dtype = {
         dtype: [s for s in specs if s.dtype == dtype] for dtype in ("fp16", "bf16")
@@ -254,7 +254,7 @@ def render(specs, problems) -> str:
         served = []
         digests = []
         for spec in by_dtype[problem.dtype]:
-            plan, _ = gfx950_conv_dgrad_aot_plan(spec, problem)
+            plan, _ = conv_dgrad_aot_plan(spec, problem)
             served.append("1" if plan is not None else "0")
             if plan is None:
                 continue
@@ -285,7 +285,7 @@ def render(specs, problems) -> str:
         "// GENERATED test data, do not edit: projects/hipdnn/tools/IngestorGenerator/tools/",
         "// make_conv_dgrad_aot_test_vectors.py. The shipped catalog's KMD metadata, and the",
         "// launch plans of the rocKE adapter rocke/library/builders/common/",
-        "// convolution_backward_data.py (gfx950_conv_dgrad_aot_plan) on synthetic problems.",
+        "// convolution_backward_data.py (conv_dgrad_aot_plan) on synthetic problems.",
         "",
         "#include <array>",
         "#include <cstdint>",
@@ -354,7 +354,7 @@ def render(specs, problems) -> str:
         "    return s_rows;",
         "}",
         "",
-        "/// A plan in full (Gfx950ConvDgradPlan.serialize): servedMatrix()[row] with the",
+        "/// A plan in full (ConvDgradAotPlan.serialize): servedMatrix()[row] with the",
         "/// instance-th catalog instance of the row's dtype.",
         "struct FullPlan",
         "{",

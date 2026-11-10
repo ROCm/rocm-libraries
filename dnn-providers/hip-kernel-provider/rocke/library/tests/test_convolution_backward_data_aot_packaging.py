@@ -1,17 +1,18 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU tests for the shape-generic AOT backward-data instances (hipkernel:Gfx950ConvDgradAot).
+"""CPU tests for the shape-generic AOT backward-data instances (hipkernel:Gfx950ConvDgradAot
+and hipkernel:Gfx1250ConvDgradAot).
 
 An instance is packaged from a rocKE dgrad ``KernelIdentity``; these tests hold the
 adapter (``builders/common/convolution_backward_data.py``) to the sweeps it comes from,
-over the shipped catalog (the dispatcher's registered gfx950 dgrad instances --
-``dispatch/grouped_convolution_instances/gfx950_dgrad.json`` -- and the weight-transform
-helpers its MFMA rows pull in):
+over each engine's shipped catalog (the dispatcher's registered dgrad instances of its
+architecture -- ``dispatch/grouped_convolution_instances/<arch>_dgrad.json`` -- and the
+weight-transform helpers gfx950's MFMA rows pull in):
 
 * the packaged IR is the sweep kernel's, byte for byte up to the symbol, for one
   instance of every pipeline and implicit-GEMM form;
-* the launch plan (``gfx950_conv_dgrad_aot_plan``) serves exactly rocKE's offer --
+* the launch plan (``conv_dgrad_aot_plan``) serves exactly rocKE's offer --
   ``identity_supports_problem`` on the problem the implicit-GEMM sweep launches (folded,
   batch-split), ``plan_for``'s re-validation for the direct pipelines -- except that an
   MFMA instance using the reorganize helper refuses ``groups > 1``, which rocKE offers
@@ -48,26 +49,28 @@ from builders.common.convolution_backward_data import (
     BUFFER_W,
     KERNEL_FAMILY_DGRAD_HELPER,
     KERNEL_SELF,
-    PACKAGED_LLVM_FLAVOR,
-    Gfx950ConvDgradAotSpec,
-    Gfx950ConvDgradProblem,
+    SPEC_CLASSES,
+    TARGETS,
+    ConvDgradAotProblem,
+    ConvDgradAotSpec,
     aot_dgrad_direct_instance_fields,
     build_gfx950_conv_dgrad_aot,
+    build_gfx1250_conv_dgrad_aot,
+    conv_dgrad_aot_launch_problem,
+    conv_dgrad_aot_plan,
+    conv_dgrad_aot_problem_for_request,
+    conv_dgrad_aot_step_signature,
     gfx950_conv_dgrad_aot_helper_fields,
-    gfx950_conv_dgrad_aot_launch_problem,
-    gfx950_conv_dgrad_aot_plan,
-    gfx950_conv_dgrad_aot_problem_for_request,
-    gfx950_conv_dgrad_aot_step_signature,
-    supports_gfx950_conv_dgrad_aot,
-    supports_gfx950_conv_dgrad_aot_problem,
+    supports_conv_dgrad_aot,
+    supports_conv_dgrad_aot_problem,
 )
 from dispatch.grouped_convolution import (
     ConvGroupedRequest,
     registered_conv_grouped_instances,
 )
-from kernels.conv import direct_aot_jobs
+from kernels.conv import aot_jobs, direct_aot_jobs
 from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
-from kernels.conv.direct_variants import make_direct_spec
+from kernels.conv.direct_variants import direct_spec_takes_target_wave, make_direct_spec
 from kernels.conv.kernel_identity import (
     KernelIdentity,
     dgrad_sub_gemms,
@@ -75,17 +78,22 @@ from kernels.conv.kernel_identity import (
 )
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
-_ARCH = "gfx950"
+#: Each engine's typed build entry point.
+_BUILDERS = {
+    "gfx950": build_gfx950_conv_dgrad_aot,
+    "gfx1250": build_gfx1250_conv_dgrad_aot,
+}
 
 # ---------------------------------------------------------------------------
 # The catalog
 # ---------------------------------------------------------------------------
 
 
-def _spec(identity: KernelIdentity) -> Gfx950ConvDgradAotSpec:
+def _spec(identity: KernelIdentity) -> ConvDgradAotSpec:
     """The packaged instance of a dgrad sweep identity (what the IG converter makes)."""
+    spec_class = SPEC_CLASSES[identity.arch]
     if identity.is_direct:
-        return Gfx950ConvDgradAotSpec(
+        return spec_class(
             dtype=identity.dtype_a,
             tile_m=0,
             tile_n=0,
@@ -135,7 +143,7 @@ def _spec(identity: KernelIdentity) -> Gfx950ConvDgradAotSpec:
         "dilation_w",
     )
     flags = ("lds_k_outer", "grouped", "patch", "tap_outer_k", "uniform_k_decode")
-    return Gfx950ConvDgradAotSpec(
+    return spec_class(
         dtype=identity.dtype_a,
         instance_id=identity.stable_hash(),
         **{name: getattr(identity, name) for name in carried},
@@ -169,16 +177,31 @@ def _with_helpers(identities):
     return list(out.values())
 
 
+@pytest.fixture(scope="module", params=sorted(TARGETS))
+def arch(request) -> str:
+    """The engine under test, by architecture."""
+    return request.param
+
+
 @pytest.fixture(scope="module")
-def catalog():
-    """``[(identity, spec)]`` of the shipped catalog, helpers included."""
+def catalog(arch):
+    """``[(identity, spec)]`` of ``arch``'s shipped catalog, helpers included."""
     identities = _with_helpers(
         [
             spec.identity
-            for spec in registered_conv_grouped_instances("gfx950", direction="dgrad")
+            for spec in registered_conv_grouped_instances(arch, direction="dgrad")
         ]
     )
     return [(ident, _spec(ident)) for ident in identities]
+
+
+def _served_variants(arch: str) -> set:
+    """The ``direct_variant`` values of ``arch``'s selectable instances."""
+    return {
+        AOT_DGRAD_DIRECT_ALGORITHMS[algorithm][1]
+        for algorithm in TARGETS[arch].direct_algorithms
+        if AOT_DGRAD_DIRECT_ALGORITHMS[algorithm][0] != KERNEL_FAMILY_DGRAD_HELPER
+    }
 
 
 def _form(identity: KernelIdentity) -> tuple:
@@ -198,13 +221,18 @@ def _form(identity: KernelIdentity) -> tuple:
     )
 
 
-def test_the_catalog_converts_and_reproduces_its_identities(catalog):
-    # 406 selectable instances plus their weight-transform helpers: 414 total.
-    assert len(catalog) > 400
+def test_the_catalog_converts_and_reproduces_its_identities(arch, catalog):
+    # Every selectable instance plus (gfx950) their weight-transform helpers.
+    registered = registered_conv_grouped_instances(arch, direction="dgrad")
+    helpers = sum(1 for _, spec in catalog if spec.is_helper)
+    assert len(catalog) == len(registered) + helpers
+    assert len(catalog) > {"gfx950": 400, "gfx1250": 200}[arch]
+    assert (helpers > 0) == (arch == "gfx950")
     algorithms = set()
     for ident, spec in catalog:
-        assert supports_gfx950_conv_dgrad_aot(spec) == (True, "ok"), ident.label()
-        assert ident.llvm_flavor == PACKAGED_LLVM_FLAVOR, ident.label()
+        assert spec.ARCH == arch
+        assert supports_conv_dgrad_aot(spec) == (True, "ok"), ident.label()
+        assert ident.llvm_flavor == TARGETS[arch].llvm_flavor, ident.label()
         identity = spec.to_identity()
         if spec.is_direct:
             # The knobs JSON may spell a knob at its default or leave it out; every field
@@ -220,10 +248,10 @@ def test_the_catalog_converts_and_reproduces_its_identities(catalog):
         else:
             assert identity.stable_hash() == spec.instance_id, ident.label()
         algorithms.add(ident.algorithm)
-    assert algorithms >= set(AOT_DGRAD_DIRECT_ALGORITHMS) | {"implicit_gemm"}
+    assert algorithms == set(TARGETS[arch].direct_algorithms) | {"implicit_gemm"}
 
 
-def test_every_form_is_packageable_with_the_sweeps_ir(catalog):
+def test_every_form_is_packageable_with_the_sweeps_ir(arch, catalog):
     """One instance of each emission form, built by the adapter and by the sweep's
     ``--compile-all`` job, lowers to the same IR up to the symbol."""
     seen = set()
@@ -232,25 +260,28 @@ def test_every_form_is_packageable_with_the_sweeps_ir(catalog):
         if form in seen:
             continue
         seen.add(form)
-        ours = build_gfx950_conv_dgrad_aot(spec)
+        ours = _BUILDERS[arch](spec)
         if ident.is_direct:
             job = direct_aot_jobs.direct_job_for_identity(ident)
-            theirs = direct_aot_jobs.direct_kernel_for_job(job, _ARCH, ident.dtype_a)
+            theirs = direct_aot_jobs.direct_kernel_for_job(job, arch, ident.dtype_a)
         else:
             job = job_for_identity(ident)
-            theirs = kernel_for_job(job, _ARCH, ident.dtype_a)
+            theirs = kernel_for_job(job, arch, ident.dtype_a)
         theirs = theirs[0] if isinstance(theirs, tuple) else theirs
-        ours_ir = _lower_kernel_to_llvm_python(ours, arch=_ARCH, llvm_flavor="llvm22")
-        theirs_ir = _lower_kernel_to_llvm_python(
-            theirs, arch=_ARCH, llvm_flavor="llvm22"
-        )
+        flavor = TARGETS[arch].llvm_flavor
+        ours_ir = _lower_kernel_to_llvm_python(ours, arch=arch, llvm_flavor=flavor)
+        theirs_ir = _lower_kernel_to_llvm_python(theirs, arch=arch, llvm_flavor=flavor)
         assert ours_ir.replace(ours.name, "@K") == theirs_ir.replace(
             theirs.name, "@K"
         ), ident.label()
-    assert len(seen) > 20
+    # Every direct algorithm and implicit-GEMM form of the catalog (gfx950 has 35,
+    # gfx1250 16).
+    assert len(seen) > {"gfx950": 30, "gfx1250": 15}[arch]
 
 
-def test_an_mfma_instance_names_the_helpers_its_pipeline_pulls_in(catalog):
+def test_an_mfma_instance_names_the_helpers_its_pipeline_pulls_in(arch, catalog):
+    # Only gfx950 has an MFMA pipeline.
+    assert any(s.is_mfma for _, s in catalog) == (arch == "gfx950")
     helpers = {
         (s.dtype, s.direct_variant, s.filter_h, s.cpg, s.kpg, s.fold_k32): s
         for _, s in catalog
@@ -275,11 +306,37 @@ def test_an_mfma_instance_names_the_helpers_its_pipeline_pulls_in(catalog):
             assert helper.kernel_family == KERNEL_FAMILY_DGRAD_HELPER
 
 
-def test_packaging_refuses_an_older_flavor(catalog, monkeypatch):
+def test_packaging_refuses_an_older_flavor(arch, catalog, monkeypatch):
     _, spec = next((i, s) for i, s in catalog if not s.is_direct)
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm20")
     with pytest.raises(ValueError, match="older COMGR"):
-        build_gfx950_conv_dgrad_aot(spec)
+        _BUILDERS[arch](spec)
+
+
+def test_each_builder_has_the_support_predicate_hkp_pack_resolves(arch, catalog):
+    """hkp_pack validates a spec with ``supports_`` + its builder's name, whose
+    first parameter takes the builder's spec class (rocke_compile)."""
+    import typing
+
+    from builders.common import convolution_backward_data as adapter
+
+    builder = _BUILDERS[arch].__name__
+    predicate = getattr(adapter, "supports_" + builder.removeprefix("build_"))
+    spec_class = SPEC_CLASSES[arch]
+    hints = typing.get_type_hints(predicate)
+    assert hints["spec"] is spec_class
+    assert typing.get_type_hints(_BUILDERS[arch])["spec"] is spec_class
+    for _, spec in catalog[:20]:
+        assert predicate(spec, arch=arch) == (True, "ok")
+
+
+def test_an_engine_builds_only_its_own_architectures_specs(catalog):
+    _, spec = next((i, s) for i, s in catalog if not s.is_direct)
+    other = next(a for a in TARGETS if a != spec.ARCH)
+    ok, why = supports_conv_dgrad_aot(spec, arch=other)
+    assert not ok and f"requires arch={spec.ARCH}" in why
+    with pytest.raises(ValueError, match=f"requires arch={spec.ARCH}"):
+        _BUILDERS[spec.ARCH](spec, arch=other)
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +345,7 @@ def test_packaging_refuses_an_older_flavor(catalog, monkeypatch):
 
 
 def _p(N, Hi, Wi, C, K, Y, X, s=(1, 1), p=(0, 0), d=(1, 1), groups=1, dtype="fp16"):
-    return Gfx950ConvDgradProblem(
+    return ConvDgradAotProblem(
         N=N,
         Hi=Hi,
         Wi=Wi,
@@ -343,7 +400,7 @@ _PROBLEMS = [
 _PROBLEMS += [replace(p, dtype="bf16") for p in _PROBLEMS[:-1:2]]
 
 
-def _rocke_offer(identity: KernelIdentity, problem: Gfx950ConvDgradProblem) -> bool:
+def _rocke_offer(identity: KernelIdentity, problem: ConvDgradAotProblem) -> bool:
     """rocKE's own offer: the implicit-GEMM sweep's (``identity_supports_problem`` on
     each batch slice of the problem it launches), or ``direct_plans``' (the capability
     match, then ``plan_for``'s re-validation)."""
@@ -369,9 +426,24 @@ def _rocke_offer(identity: KernelIdentity, problem: Gfx950ConvDgradProblem) -> b
     )[0]:
         return False
     plan, _ = dks.plan_for(
-        _HelperCache(), identity, Path("x.hsaco"), {"kernel_name": "k"}, direct, _ARCH
+        _HelperCache(),
+        identity,
+        Path("x.hsaco"),
+        _entry_meta(identity),
+        direct,
+        identity.arch,
     )
     return plan is not None
+
+
+def _entry_meta(identity: KernelIdentity) -> dict:
+    """The meta a fresh ``--compile-all`` entry of ``identity`` carries: a
+    wave-parametric build records the wave size it was built at, the identity's."""
+    meta = {"kernel_name": "k"}
+    knobs = json.loads(identity.knobs) if identity.knobs else {}
+    if direct_spec_takes_target_wave(identity.algorithm, knobs):
+        meta["spec_wave_size"] = identity.wave_size
+    return meta
 
 
 class _HelperCache:
@@ -387,7 +459,7 @@ class _HelperCache:
         return Path("x.hsaco")
 
 
-def test_the_plan_serves_rockes_offer(catalog):
+def test_the_plan_serves_rockes_offer(arch, catalog):
     """rocKE's offer: a helper serves nothing, every other instance matches it exactly.
 
     The coalesced-weights MFMA instances (waves_k > 1 or runtime_k_loop) used to be
@@ -400,7 +472,7 @@ def test_the_plan_serves_rockes_offer(catalog):
     served = {}
     for ident, spec in catalog:
         for problem in _PROBLEMS:
-            plan, why = gfx950_conv_dgrad_aot_plan(spec, problem)
+            plan, why = conv_dgrad_aot_plan(spec, problem)
             if spec.is_helper:
                 assert plan is None
                 continue
@@ -408,11 +480,7 @@ def test_the_plan_serves_rockes_offer(catalog):
             assert (plan is not None) == expected, (ident.label(), problem, why)
             if plan is not None:
                 served[spec.direct_variant] = served.get(spec.direct_variant, 0) + 1
-    assert set(served) == {"none"} | {
-        variant
-        for family, variant in AOT_DGRAD_DIRECT_ALGORITHMS.values()
-        if family != KERNEL_FAMILY_DGRAD_HELPER
-    }, served
+    assert set(served) == {"none"} | _served_variants(arch), served
 
 
 # ---------------------------------------------------------------------------
@@ -448,13 +516,16 @@ def test_the_implicit_plan_is_the_benchmarks_launch(catalog):
     for ident, spec in catalog:
         if spec.is_direct:
             continue
+        block = aot_jobs.spec_launch_block_size(
+            aot_jobs.spec_for_job(job_for_identity(ident), ident.dtype_a)
+        )
         for problem in _PROBLEMS:
-            plan, _ = gfx950_conv_dgrad_aot_plan(spec, problem)
+            plan, _ = conv_dgrad_aot_plan(spec, problem)
             if plan is None:
                 continue
             launched = _launch_problem("dgrad", problem.to_problem())
             assert plan.launched.to_problem() == launched
-            assert gfx950_conv_dgrad_aot_launch_problem(problem) == plan.launched
+            assert conv_dgrad_aot_launch_problem(problem) == plan.launched
             chunks = _batch_chunks("dgrad", launched, problem.dtype)
             assert len(plan.steps) == len(chunks)
             dy_image, _, dx_image = plan.launched.tensor_bytes(1)
@@ -468,7 +539,7 @@ def test_the_implicit_plan_is_the_benchmarks_launch(catalog):
                 assert step.kernel == KERNEL_SELF and step.abi == ABI_IMPLICIT
                 assert step.buffers == (BUFFER_DY, BUFFER_W, BUFFER_DX)
                 assert step.grid == grid
-                assert step.block == ident.warp_m * ident.warp_n * 64
+                assert step.block == block
                 assert _i32(step.table) == rt.copied[extras["sub_gemm_buf"]]
                 assert step.table_offset == table_offset
                 table_offset += 4 * len(step.table)
@@ -478,9 +549,7 @@ def test_the_implicit_plan_is_the_benchmarks_launch(catalog):
                 )
                 names = [
                     a["name"]
-                    for a in gfx950_conv_dgrad_aot_step_signature(
-                        ABI_IMPLICIT, spec.dtype
-                    )
+                    for a in conv_dgrad_aot_step_signature(ABI_IMPLICIT, spec.dtype)
                 ]
                 assert names[6:] == [n for n, _ in step.values[:-1]] + [
                     "sub_gemm_buf",
@@ -502,26 +571,30 @@ def test_the_implicit_plan_is_the_benchmarks_launch(catalog):
             if plan.launched != problem:
                 checked.add("folded")
             checked.add("patch" if spec.patch else "halo" if spec.dy_halo else "tilde")
-    assert checked == {"batch", "folded", "patch", "halo", "tilde"}
+    # The forms the catalog ships: gfx1250's has no patch or dY-halo kernel.
+    forms = {
+        "patch" if s.patch else "halo" if s.dy_halo else "tilde" for _, s in catalog
+    }
+    assert checked == {"batch", "folded"} | forms
 
 
-def test_the_direct_plan_is_plan_fors(catalog):
+def test_the_direct_plan_is_plan_fors(arch, catalog):
     ptrs = {"dy": 0x100000, "w": 0x200000, "dx": 0x300000}
     checked = set()
     for ident, spec in catalog:
         if not spec.is_direct or spec.is_helper:
             continue
         for problem in _PROBLEMS:
-            ours, _ = gfx950_conv_dgrad_aot_plan(spec, problem)
+            ours, _ = conv_dgrad_aot_plan(spec, problem)
             if ours is None:
                 continue
             theirs, why = dks.plan_for(
                 _HelperCache(),
                 ident,
                 Path("x.hsaco"),
-                {"kernel_name": "k"},
+                _entry_meta(ident),
                 problem.to_direct_problem(),
-                _ARCH,
+                arch,
             )
             assert theirs is not None, why
             assert not ours.zero_dx
@@ -539,7 +612,7 @@ def test_the_direct_plan_is_plan_fors(catalog):
                 assert mine.grid == step.grid
                 assert (mine.block, 1, 1) == step.block
                 assert mine.buffers == step.buffers
-                signature = gfx950_conv_dgrad_aot_step_signature(mine.abi, spec.dtype)
+                signature = conv_dgrad_aot_step_signature(mine.abi, spec.dtype)
                 assert signature == step.signature
                 values = dks.launch_values(step, all_ptrs, all_sizes)
                 first = 4 if mine.buffers[1] is None else 6
@@ -553,14 +626,10 @@ def test_the_direct_plan_is_plan_fors(catalog):
                 assert len(ours.steps) == 1
                 assert ours.steps[0].abi in (ABI_DIRECT_DGRAD, ABI_DIRECT_FWD)
             checked.add(spec.direct_variant)
-    assert checked == {
-        variant
-        for family, variant in AOT_DGRAD_DIRECT_ALGORITHMS.values()
-        if family != KERNEL_FAMILY_DGRAD_HELPER
-    }
+    assert checked == _served_variants(arch)
 
 
-def _written(problem: Gfx950ConvDgradProblem, sub_gemms, patch: bool) -> set:
+def _written(problem: ConvDgradAotProblem, sub_gemms, patch: bool) -> set:
     """Every dX pixel some record stores, pixel by pixel."""
     p = problem.to_problem()
     out = set()
@@ -593,18 +662,21 @@ def _written(problem: Gfx950ConvDgradProblem, sub_gemms, patch: bool) -> set:
 def test_dx_is_zero_filled_exactly_where_the_records_leave_it_unwritten(
     problem, catalog
 ):
-    _, spec = next(
-        (i, s)
-        for i, s in catalog
-        if not s.is_direct
-        and not s.patch
-        and not s.dy_halo
-        and not s.tap_outer_k
-        and s.filter_h == 0
-        and s.tile_m <= 64
-        and s.dtype == problem.dtype
+    # A runtime-geometry tilde kernel, the narrowest so it serves every problem here.
+    spec = min(
+        (
+            s
+            for _, s in catalog
+            if not s.is_direct
+            and not s.patch
+            and not s.dy_halo
+            and not s.tap_outer_k
+            and s.filter_h == 0
+            and s.dtype == problem.dtype
+        ),
+        key=lambda s: (s.tile_m, s.tile_n, s.instance_id),
     )
-    plan, why = gfx950_conv_dgrad_aot_plan(spec, problem)
+    plan, why = conv_dgrad_aot_plan(spec, problem)
     assert plan is not None, why
     p = plan.launched.to_problem()
     written = _written(plan.launched, dgrad_sub_gemms(spec.to_identity(), p), False)
@@ -612,8 +684,12 @@ def test_dx_is_zero_filled_exactly_where_the_records_leave_it_unwritten(
     assert plan.zero_dx == (not full)
 
 
-def test_a_patch_plan_zero_fills_only_between_patches(catalog):
+def test_a_patch_plan_zero_fills_only_between_patches(arch, catalog):
     patches = [s for _, s in catalog if s.patch and s.dtype == "fp16"]
+    # gfx1250 serves patch embeddings with its direct WMMA patch kernel instead.
+    assert bool(patches) == (arch == "gfx950")
+    if not patches:
+        return
     for problem, gaps in (
         (_p(2, 64, 64, 3, 64, 4, 4, s=(4, 4)), False),
         (_p(2, 30, 30, 64, 64, 4, 4, s=(5, 5)), True),
@@ -622,7 +698,7 @@ def test_a_patch_plan_zero_fills_only_between_patches(catalog):
         spec, plan = next(
             (spec, plan)
             for spec in patches
-            for plan in [gfx950_conv_dgrad_aot_plan(spec, problem)[0]]
+            for plan in [conv_dgrad_aot_plan(spec, problem)[0]]
             if plan is not None
         )
         p = plan.launched.to_problem()
@@ -637,7 +713,7 @@ def test_the_digest_is_fnv1a_over_the_serialized_plan(catalog):
         plan
         for _, spec in catalog
         if not spec.is_direct
-        for plan in [gfx950_conv_dgrad_aot_plan(spec, _PROBLEMS[0])[0]]
+        for plan in [conv_dgrad_aot_plan(spec, _PROBLEMS[0])[0]]
         if plan is not None
     )
     values = plan.serialize()
@@ -649,7 +725,7 @@ def test_the_digest_is_fnv1a_over_the_serialized_plan(catalog):
     assert values[:3] == [int(plan.zero_dx), plan.workspace_bytes, 1]
 
 
-def test_problem_for_request_is_the_dgrad_graph_contract():
+def test_problem_for_request_is_the_dgrad_graph_contract(arch):
     request = ConvGroupedRequest(
         N=2,
         C=64,
@@ -658,7 +734,7 @@ def test_problem_for_request_is_the_dgrad_graph_contract():
         Wi=15,
         Y=3,
         X=3,
-        arch=_ARCH,
+        arch=arch,
         G=2,
         stride_h=2,
         stride_w=2,
@@ -666,17 +742,21 @@ def test_problem_for_request_is_the_dgrad_graph_contract():
         pad_w=1,
         direction="dgrad",
     )
-    problem = gfx950_conv_dgrad_aot_problem_for_request(request)
+    problem = conv_dgrad_aot_problem_for_request(request)
     assert (problem.Hi, problem.Ho, problem.cpg, problem.kpg) == (15, 8, 32, 16)
-    assert supports_gfx950_conv_dgrad_aot_problem(problem) == (True, "ok")
+    assert supports_conv_dgrad_aot_problem(problem, arch=arch) == (True, "ok")
     with pytest.raises(ValueError, match="backward-data"):
-        gfx950_conv_dgrad_aot_problem_for_request(replace(request, direction="fwd"))
-    assert not supports_gfx950_conv_dgrad_aot_problem(replace(problem, groups=3))[0]
-    assert not supports_gfx950_conv_dgrad_aot_problem(replace(problem, dtype="fp32"))[0]
+        conv_dgrad_aot_problem_for_request(replace(request, direction="fwd"))
+    assert not supports_conv_dgrad_aot_problem(replace(problem, groups=3), arch=arch)[0]
+    assert not supports_conv_dgrad_aot_problem(
+        replace(problem, dtype="fp32"), arch=arch
+    )[0]
     # A batch past the 32-bit ABI is in the contract (it runs as slices); one image
     # past it is not.
     big = _p(16, 768, 768, 256, 256, 3, 3, p=(1, 1))
-    assert supports_gfx950_conv_dgrad_aot_problem(big) == (True, "ok")
-    assert not supports_gfx950_conv_dgrad_aot_problem(
-        _p(1, 8192, 8192, 32, 32, 3, 3, p=(1, 1))
+    assert supports_conv_dgrad_aot_problem(big, arch=arch) == (True, "ok")
+    assert not supports_conv_dgrad_aot_problem(
+        _p(1, 8192, 8192, 32, 32, 3, 3, p=(1, 1)), arch=arch
     )[0]
+    with pytest.raises(ValueError, match="no packaged dgrad engine"):
+        conv_dgrad_aot_problem_for_request(replace(request, arch="gfx942"))
