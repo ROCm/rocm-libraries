@@ -17,6 +17,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified2DGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp"
 
 /**
  * @file TestGfx942AttentionUnified2DGeometry.cpp
@@ -363,17 +364,18 @@ TEST(TestGfx942AttentionUnified2DGeometry, NoImageExistsWhereNoLayoutDoes)
 
 /// The split-KV gfx942 engine ships GQA ratios 1, 2, 4, 8 and 16; decode at those is its, and
 /// any other group (or a non-dividing pair, which has none) stays with this engine's matcher.
+/// Both engines read gfx942Unified3dServesGqaGroup, so this pins the one shared rule.
 TEST(TestGfx942AttentionUnified2DGeometry, TheSplitKvEngineServesDecodeAtTheRatiosItShips)
 {
     for(const auto& [hq, hkv] : std::vector<std::pair<int64_t, int64_t>>{
             {8, 8}, {16, 8}, {32, 8}, {64, 8}, {128, 8}, {24, 6}, {16, 1}})
     {
-        EXPECT_TRUE(gfx942Unified3dServesDecodeRatio(hq, hkv)) << "Hq " << hq << " Hkv " << hkv;
+        EXPECT_TRUE(gfx942Unified3dServesGqaGroup(hq, hkv)) << "Hq " << hq << " Hkv " << hkv;
     }
     for(const auto& [hq, hkv] :
         std::vector<std::pair<int64_t, int64_t>>{{24, 8}, {40, 8}, {12, 1}, {9, 2}, {8, 0}})
     {
-        EXPECT_FALSE(gfx942Unified3dServesDecodeRatio(hq, hkv)) << "Hq " << hq << " Hkv " << hkv;
+        EXPECT_FALSE(gfx942Unified3dServesGqaGroup(hq, hkv)) << "Hq " << hq << " Hkv " << hkv;
     }
 }
 

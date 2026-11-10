@@ -105,7 +105,7 @@ inline std::vector<int64_t>
     }
 }
 
-/// An SDPA graph, defaulting to one both engines' tests start from: bf16, D128, B2, Hq 8
+/// An SDPA graph, defaulting to one every engine's tests start from: bf16, D128, B2, Hq 8
 /// over Hkv 2, Sq @p DefaultSeqLenQ over Skv 256, top-left causal. Fields perturb one rule
 /// at a time. Each engine's header names its own default (prefill or decode) as GraphSpec.
 template <int64_t DefaultSeqLenQ>

@@ -42,6 +42,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified2DGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/UnifiedAttentionGraphMatch.hpp"
 
 /**
@@ -215,7 +216,7 @@ std::optional<BoundTokens> gfx942AttentionUnified2DGraphMatches(const MatchConte
     // per sequence while the 3D kernel splits the keys across CTAs. No select_path crossover
     // is replayed: the boundary is this static rule.
     if(problem.seqLenQ == 1
-       && gfx942Unified3dServesDecodeRatio(problem.numQueryHeads, problem.numKvHeads))
+       && gfx942Unified3dServesGqaGroup(problem.numQueryHeads, problem.numKvHeads))
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"decode"} << "decode (seqlen_q 1) with a GQA group of "
                                                   << problem.numQueryHeads / problem.numKvHeads
@@ -234,7 +235,8 @@ std::optional<BoundTokens> gfx942AttentionUnified2DGraphMatches(const MatchConte
 
     // The gfx942 tiled 2D body computes only the bottom-right causal band, so the catalog
     // carries only that mask. A graph asking for another is declined by name here rather
-    // than left to empty the catalog at kernel_match.
+    // than left to empty the catalog at kernel_match. Top-left at Sq == Skv is the same
+    // computation; declining it too is a scope choice, not a kernel limit.
     if(matched->mask != MaskType::BOTTOM_RIGHT_CAUSAL)
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
@@ -446,8 +448,8 @@ bool isDefaultGeometry(const AttentionUnified2DCandidate& candidate)
  * A stable fallback order for cold selection, not a performance model:
  *
  *  1. The head size's default geometry (the catalog cell's default, which a correctness-
- *     checked MI300X sweep measured best over the most prefill shapes) above every
- *     alternative.
+ *     checked gfx942 sweep through rocKE's own launcher chose for the most prefill shapes)
+ *     above every alternative.
  *  2. The alternatives in ascending lexicographic (tile_size, num_warps, block_m_per_warp,
  *     use_mfma_32x32x8, use_transposed_qk_32x32) order.
  *

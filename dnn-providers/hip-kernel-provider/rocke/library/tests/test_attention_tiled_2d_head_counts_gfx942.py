@@ -8,8 +8,8 @@ The kernel reads ``num_query_heads`` and ``num_kv_heads`` as kernargs and derive
 those fields are one binary. The ingestor catalog relies on it: the engine manifest
 declares them ``neutral_fields`` and keys its cells by
 :meth:`UnifiedAttention2DTiledSpec.resolved_num_queries_per_kv`, one kernel per ratio.
-The specs here are the tuning candidates' picks, the specs the catalog ships, one
-geometry per codepath.
+The specs here are one tuning candidate per codepath (narrow, transposed x8, wide 32x8), built
+through the dispatcher's ``select_spec``; the property is per codepath, not per shipped geometry.
 """
 
 from __future__ import annotations

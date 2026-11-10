@@ -286,9 +286,9 @@ TEST(TestGfx942AttentionUnified2DMatchers, DeclinesASeqLenKvThatSixteenDoesNotDi
 // graph_match declines: the mask
 // =============================================================================
 
-/// The gfx942 kernel computes the bottom-right causal band only. No mask and top-left causal
-/// are other computations, top-left included where Sq == Skv: no shipped kernel is built for
-/// either, so graph_match declines them by name.
+/// The gfx942 kernel computes the bottom-right causal band only, so no shipped kernel is
+/// built for no mask or top-left causal and graph_match declines both by name. Top-left at
+/// Sq == Skv is the same computation as bottom-right; declining it is a scope choice.
 TEST(TestGfx942AttentionUnified2DMatchers, DeclinesEveryMaskButBottomRightCausal)
 {
     std::vector<DeclineCase> cases;
@@ -373,6 +373,26 @@ TEST(TestGfx942AttentionUnified2DMatchers, DeclinesACacheBeyondThirtyTwoBitAddre
     over.seqLenKv = 1048560; // 2147450880 bytes
     EXPECT_FALSE(graphMatches(over));
     over.seqLenKv = 1048576; // 2^31 bytes
+    EXPECT_FALSE(graphMatches(over));
+}
+
+/// Q and O are held to the same 0x7FFF0000-byte bound, and at GQA ratio 16 Q binds first: K/V
+/// here are 16x smaller. 65520 query rows of 128 heads x 128 x 2 bytes is 2146959360 bytes,
+/// served; 65536 rows is 2^31 bytes, declined, while K/V stay about 134 MB.
+TEST(TestGfx942AttentionUnified2DMatchers, DeclinesAQueryBeyondThirtyTwoBitAddressing)
+{
+    GraphSpec atCap;
+    atCap.batch = 1;
+    atCap.numQueryHeads = 128;
+    atCap.numKvHeads = 8;
+    atCap.headSize = 128;
+    atCap.seqLenQ = 65520; // Q 2146959360 bytes
+    atCap.seqLenKv = 65520; // K/V 134184960 bytes
+    EXPECT_TRUE(graphMatches(atCap));
+
+    GraphSpec over = atCap;
+    over.seqLenQ = 65536; // Q 2^31 bytes
+    over.seqLenKv = 65536; // K/V 134217728 bytes
     EXPECT_FALSE(graphMatches(over));
 }
 

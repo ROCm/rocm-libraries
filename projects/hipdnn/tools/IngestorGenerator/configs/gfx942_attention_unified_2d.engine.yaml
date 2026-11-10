@@ -25,15 +25,15 @@
 #
 # Mask: the gfx942 tiled 2D body computes the bottom-right causal band only, so every
 # kernel is bottom-right causal. hipDNN's top-left causal mask is the same computation
-# when every sequence has seqlen_q == seqlen_kv; the native matcher decides that, not
-# this catalog. No-mask and top-left kernels join the cells when the gfx942 body gains
-# those bands.
+# when every sequence has seqlen_q == seqlen_kv, but this engine declines every top-left
+# graph: serving that case is a scope choice left to a follow-up, not a kernel limit.
+# No-mask and top-left kernels join the cells when the gfx942 body gains those bands.
 #
 # Geometry: ten tuning geometries, five per head size, chosen by a correctness-checked
-# MI300X sweep of every LDS-legal geometry over 80 prefill shapes (D64/D128, bf16/fp16,
-# GQA ratios 1..16, seqlen 256..4096 and a 512 -> 4096 cross-length): each head size's
-# five match the per-shape best within 0.6%. A geometry that does not fit the 64 KiB LDS
-# at a head size lists only the other head size's cells.
+# gfx942 sweep, through rocKE's own launcher, of every LDS-legal geometry over 80 prefill
+# shapes (D64/D128, bf16/fp16, GQA ratios 1..16, seqlen 256..4096 and a 512 -> 4096
+# cross-length). A geometry that does not fit the 64 KiB LDS at a head size lists only the
+# other head size's cells. The shipped selection is variant_reduce's cut of this space.
 #
 # The generated packs/Gfx942AttentionUnified2DNative.cpp and its matcher test are stubs;
 # the provider's copies are hand-maintained and must not be overwritten.

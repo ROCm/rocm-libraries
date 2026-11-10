@@ -36,12 +36,6 @@ inline constexpr const UnifiedAttentionArchTraits& GFX950_UNIFIED_2D_TRAITS
 /// (`AttentionTuningSpec.launch_block`).
 inline constexpr int64_t GFX950_UNIFIED_2D_WAVE_LANES = GFX950_UNIFIED_ATTENTION_TRAITS.waveLanes;
 
-/// The kernel indexes K/V with a 32-bit byte offset when `use_i64_kv_addr` is off, and
-/// bounds its buffer loads at this size (`_I32_KV_BUFFER_BYTES`); past it loads return
-/// zeros. Every shipped kernel is built i32.
-inline constexpr int64_t GFX950_UNIFIED_2D_KV_BUFFER_BYTES
-    = GFX950_UNIFIED_ATTENTION_TRAITS.kvBufferBytes;
-
 /// `block_size` values the tiled 2D kernel is built for (`supports_tiled_2d`).
 inline constexpr int64_t GFX950_UNIFIED_2D_BLOCK_SIZE_SMALL
     = GFX950_UNIFIED_ATTENTION_TRAITS.blockSizes[0];

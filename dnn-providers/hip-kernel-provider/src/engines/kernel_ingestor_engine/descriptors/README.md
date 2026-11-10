@@ -4,12 +4,13 @@ This root holds the descriptors the provider **ships**. Its sibling `test_descri
 stages into the build tree for the unit and integration binaries and is installed only
 under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two producers' bundles:
 
-- Six rocKE bundles: `rocKE/gfx950_attention_dense/`, `rocKE/gfx950_attention_unified_2d/`
+- Seven rocKE bundles: `rocKE/gfx950_attention_dense/`, `rocKE/gfx950_attention_unified_2d/`
   and `rocKE/gfx950_attention_unified_3d/`, whose KDPs are stored in DVC (see
   [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below) and declare gfx950
   only; `rocKE/gfx942_attention_unified_3d/` and `rocKE/gfx942_attention_unified_2d/`, whose
-  KDPs are also in DVC and declare gfx942 only; and `rocKE/gfx1151_wmma_attention/`, whose KDP
-  is in git and declares the gfx11 and gfx12 RDNA targets. They pack for a build that has
+  KDPs are also in DVC and declare gfx942 only; and `rocKE/gfx1151_wmma_attention/` and
+  `rocKE/gfx1151_wmma_attention_decode/`, whose KDPs are in git and declare the gfx11 and gfx12
+  RDNA targets. They pack for a build that has
   rocKE enabled
   (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk) and whose
   GPU targets include an arch one of those KDPs declares; for gfx950 and gfx942 the DVC KDPs

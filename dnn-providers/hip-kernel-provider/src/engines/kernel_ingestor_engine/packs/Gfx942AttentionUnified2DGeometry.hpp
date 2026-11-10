@@ -36,12 +36,6 @@ inline constexpr const UnifiedAttentionArchTraits& GFX942_UNIFIED_2D_TRAITS
 /// (`AttentionTuningSpec.launch_block`).
 inline constexpr int64_t GFX942_UNIFIED_2D_WAVE_LANES = GFX942_UNIFIED_ATTENTION_TRAITS.waveLanes;
 
-/// The kernel indexes K/V with a 32-bit byte offset when `use_i64_kv_addr` is off, and
-/// bounds its buffer loads at this size (`_I32_KV_BUFFER_BYTES`); past it loads return
-/// zeros. Every shipped kernel is built i32.
-inline constexpr int64_t GFX942_UNIFIED_2D_KV_BUFFER_BYTES
-    = GFX942_UNIFIED_ATTENTION_TRAITS.kvBufferBytes;
-
 /// `1 <= num_queries_per_kv <= 16` (`supports_tiled_2d`).
 inline constexpr int64_t GFX942_UNIFIED_2D_MAX_QUERIES_PER_KV
     = GFX942_UNIFIED_ATTENTION_TRAITS.maxQueriesPerKv;
@@ -170,18 +164,6 @@ inline std::optional<std::vector<unsigned char>> gfx942Unified2DWorkspaceImage(i
                                                                                int64_t blockSize)
 {
     return unifiedAttentionWorkspaceImage(batch, seqLenQ, seqLenKv, blockSize);
-}
-
-/// Decode (seqlen_q 1) at a GQA ratio hipkernel:Gfx942AttentionUnified3d's split-KV
-/// catalog ships (1, 2, 4, 8, 16): that engine serves it, so this one declines it.
-inline bool gfx942Unified3dServesDecodeRatio(int64_t numQueryHeads, int64_t numKvHeads)
-{
-    if(numKvHeads <= 0 || numQueryHeads % numKvHeads != 0)
-    {
-        return false;
-    }
-    const int64_t ratio = numQueryHeads / numKvHeads;
-    return ratio == 1 || ratio == 2 || ratio == 4 || ratio == 8 || ratio == 16;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

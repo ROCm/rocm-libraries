@@ -55,10 +55,11 @@ using namespace hip_kernel_provider::test_utilities;
  *
  * The knobs are the geometry (tile_size, num_warps, block_m_per_warp and the MFMA codepath
  * flags). Each expected kernel id is resolved at run time from the production descriptors
- * (kernelIdsFor), so a reduced catalog is checked against the kernels it actually ships; the
- * coverage case holds the tables to exactly the catalog's kernel classes. The kernels read
- * the head counts at run time and bake only their ratio, so the forced cases run head pairs
- * the manifest's cells never list. Every case runs with a workspace filled with NaN bytes
+ * (kernelIdsFor), and the coverage case holds the tables to exactly the catalog's kernel
+ * classes. Each forced case pins a head pair whose GQA ratio its class ships, so a catalog
+ * change that drops that ratio fails the case and its table row is moved with it. The kernels
+ * read the head counts at run time and bake only their ratio, so the forced cases run head
+ * pairs the manifest's cells never list. Every case runs with a workspace filled with NaN bytes
  * first: hipDNN does not zero it, and the kernel must not read anything it did not write.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration

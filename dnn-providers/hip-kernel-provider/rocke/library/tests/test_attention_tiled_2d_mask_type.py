@@ -131,38 +131,16 @@ def test_gfx942_mask_type_names_the_band(window, expected):
     assert type(mask) is int and mask == expected
 
 
-@pytest.mark.parametrize(
-    "band",
-    [
-        {"right_bound": -1},
-        {"right_bound": -1, "causal_top_left": True},
-        {"right_bound": 0, "causal_top_left": True},
-        {"right_bound": 0},
-        {"right_bound": 3},
-        {"right_bound": 0, "sliding_window": 128},
-        {"right_bound": -1, "sliding_window": 128},
-    ],
-)
-def test_gfx942_mask_type_reads_every_band_field_the_spec_has(band):
-    """Each band field the gfx942 spec declares must reach ``mask_type()``.
-
-    Today the spec has none of ``right_bound`` / ``causal_top_left``, so only the
-    window varies. A spec that gains them while ``mask_type()`` still assumes the
-    bottom-right causal band would ship top-left and no-mask kernels under the
-    bottom-right key; this table then fails.
+def test_gfx942_spec_has_no_band_field_mask_type_ignores():
+    """``mask_type()`` hard-codes the bottom-right causal band (right bound 0, bottom-right
+    alignment) and reads only ``sliding_window``. That is right only while the spec has no
+    ``right_bound`` / ``causal_top_left`` field: a spec that gains one while ``mask_type()``
+    still assumes bottom-right would ship top-left and no-mask kernels under the
+    bottom-right key. This fails the moment either field appears, so ``mask_type()`` is
+    revisited with it. A band field under any other name goes unseen here.
     """
     declared = {f.name for f in dataclasses.fields(Gfx942Spec)}
-    kept = {k: v for k, v in band.items() if k in declared or k == "sliding_window"}
-    try:
-        spec = _gfx942_spec(**dict(kept))
-    except ValueError:
-        pytest.skip(f"the gfx942 spec refuses {kept}")
-    expected = attention_mask_type.band_mask_type(
-        sliding_window=kept.get("sliding_window", 0),
-        right_bound=kept.get("right_bound", 0),
-        causal_top_left=kept.get("causal_top_left", False),
-    )
-    assert spec.mask_type() == expected
+    assert not {"right_bound", "causal_top_left"} & declared
 
 
 def test_gfx942_mask_type_matches_what_the_dispatcher_builds():

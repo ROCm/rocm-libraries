@@ -367,4 +367,20 @@ inline bool
            && fits({batch, hq, headSize}); // Q, O
 }
 
+/// The GQA ratios hipkernel:Gfx942AttentionUnified3d ships. rocKE's strided decode admits
+/// every ratio from 1 to 16 (it masks the unused rows of the 16-row query tile); v1 builds
+/// kernels for these five. hipkernel:Gfx942AttentionUnified2D declines decode at exactly
+/// these ratios, so both engines read this one rule.
+inline bool gfx942Unified3dServesGqaRatio(int64_t ratio)
+{
+    return ratio == 1 || ratio == 2 || ratio == 4 || ratio == 8 || ratio == 16;
+}
+
+/// gfx942Unified3dServesGqaRatio for a head pair; a non-dividing pair has no ratio.
+inline bool gfx942Unified3dServesGqaGroup(int64_t numQueryHeads, int64_t numKvHeads)
+{
+    return numKvHeads > 0 && numQueryHeads % numKvHeads == 0
+           && gfx942Unified3dServesGqaRatio(numQueryHeads / numKvHeads);
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine
