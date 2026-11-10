@@ -202,7 +202,26 @@ def _plan_ext_before_build(graph):
     return graph.create_execution_plan_ext(0)
 
 
+def _build_operation_graph_with_null_handle(graph):
+    _add_float_pointwise(graph, [2, 3], [2, 3])
+    graph.validate()
+    return graph.build_operation_graph(NullHandle())
+
+
+def _check_support_before_plans(graph):
+    return graph.check_support()
+
+
+def _from_malformed_json(graph):
+    return graph.from_json("{")
+
+
+def _from_malformed_binary(graph):
+    return graph.from_binary(b"\x00")
+
+
 _INVALID_VALUE = hipdnn.ErrorCode.INVALID_VALUE
+_BACKEND_ERROR = hipdnn.ErrorCode.HIPDNN_BACKEND_ERROR
 
 # (call, code Graph returns, exception pygraph raises). GRAPH_NOT_SUPPORTED needs a
 # handle and an engine set that matches no graph; see test_graph_not_supported_raises.
@@ -219,6 +238,10 @@ _FAILURE_CASES = [
     (_engine_sweep_before_build, _INVALID_VALUE, RuntimeError),
     (_all_engines_before_build, _INVALID_VALUE, RuntimeError),
     (_plan_ext_before_build, _INVALID_VALUE, RuntimeError),
+    (_build_operation_graph_with_null_handle, _BACKEND_ERROR, RuntimeError),
+    (_check_support_before_plans, _BACKEND_ERROR, RuntimeError),
+    (_from_malformed_json, _BACKEND_ERROR, RuntimeError),
+    (_from_malformed_binary, _BACKEND_ERROR, RuntimeError),
 ]
 
 
@@ -249,6 +272,20 @@ class TestRaisingLifecycle:
         assert p.checkNoDuplicateTensorIds() is None
         assert p.topologicallySortGraph() is None
         assert p.set_ranking_metric("time") is None
+
+    def test_handle_form_of_build_raises_what_build_operation_graph_returns(self):
+        error = _build_operation_graph_with_null_handle(create_float_graph())
+        assert error.is_bad()
+
+        p = _float_pygraph()
+        _add_float_pointwise(p, [2, 3], [2, 3])
+        with pytest.raises(RuntimeError) as excinfo:
+            p.build(NullHandle(), [hipdnn.HeuristicMode.FALLBACK])
+        assert str(excinfo.value) == error.get_message()
+
+    def test_handle_form_of_build_rejects_none(self):
+        with pytest.raises(TypeError):
+            _float_pygraph().build(None)
 
     def test_get_workspace_size_raises_without_a_plan(self):
         p = hipdnn.pygraph()
@@ -465,6 +502,17 @@ class TestCudnnStyleExecution:
         hipdnn.destroy_handle(handle)
         with pytest.raises(RuntimeError, match="Handle has been destroyed"):
             g.execute(buffers, workspace)
+
+    def test_build_with_a_handle(self):
+        handle = hipdnn.create_handle()
+        g = _float_pygraph()
+        a, b, out = _add_float_pointwise(g, [1, 1, 2, 2], [1, 1, 2, 2])
+        assert g.build(handle, policy=hipdnn.BuildPlanPolicy.ALL) is None
+        assert g.get_execution_plan_count() >= 1
+
+        buffers = _device_buffers([a, b, out])
+        workspace = _workspace(g.get_workspace_size())
+        assert g.execute(buffers, workspace, handle) is None
 
     def test_execute_plan_at_index_without_a_handle(self):
         g = _float_pygraph()

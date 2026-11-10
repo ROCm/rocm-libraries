@@ -65,13 +65,19 @@ def _adopt_outputs(tensors, outputs, names, kind):
         tensors.adopt(output, name, output=True)
 
 
+# Compute type of the graph _graph(None) builds; the default-compute parity test
+# also runs with FLOAT. See _graph.
+_graph_compute_without_op_compute = OP_COMPUTE
+
+
 def _graph(compute):
-    """compute None builds both forms without a compute type on a graph computing
-    in OP_COMPUTE, so a keyword default other than NOT_SET (which validate() fills
-    with the graph's) changes the serialized node."""
+    """compute None builds both forms without a compute type, which validate() fills
+    with the graph's. The graph computes in OP_COMPUTE, so a keyword default other
+    than NOT_SET changes the serialized node, except a default of OP_COMPUTE itself,
+    which the FLOAT-graph run of the same test catches."""
     graph = create_float_graph()
     if compute is None:
-        graph.set_compute_data_type(OP_COMPUTE)
+        graph.set_compute_data_type(_graph_compute_without_op_compute)
     return graph, _Tensors()
 
 
@@ -886,8 +892,14 @@ def test_keyword_overload_serializes_like_attributes_overload(build):
     _assert_parity(build, OP_COMPUTE)
 
 
+@pytest.mark.parametrize(
+    "graph_compute", [OP_COMPUTE, FLOAT], ids=["op_compute_graph", "float_graph"]
+)
 @pytest.mark.parametrize("build", _PARITY_CASES)
-def test_keyword_overload_default_compute_type_matches_attributes_overload(build):
+def test_keyword_overload_default_compute_type_matches_attributes_overload(
+    build, graph_compute, monkeypatch
+):
+    monkeypatch.setitem(globals(), "_graph_compute_without_op_compute", graph_compute)
     _assert_parity(build, None)
 
 

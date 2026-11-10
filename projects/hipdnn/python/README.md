@@ -235,15 +235,18 @@ On `hipdnn.Graph`:
   `compute_data_type` and `handle`. Without a handle, the graph creates one the
   first time a call needs it.
 - `build()` runs `validate` and `build_operation_graph`; `build(heur_modes)`
-  also creates, checks and builds the execution plans.
+  also creates, checks and builds the execution plans. The hipDNN form
+  `build(handle, modes=[FALLBACK], policy=HEURISTICS_CHOICE)` does the same
+  with the given handle, modes and build-plan policy.
 - `execute(tensor_to_device_buffer, workspace, handle=None)` and
   `execute_plan_at_index(tensor_to_device_buffer, workspace, index,
   handle=None)` take cuDNN's argument order. The hipDNN forms remain available.
 - `serialize()` and `deserialize([handle_,] pyobj)`.
-- Failures raise instead of returning an `Error`: `ValueError` for invalid
-  attributes, shapes, tensor names or variant packs;
+- Failures raise instead of returning an `Error`: `ValueError` for unset
+  attributes, shape deduction failures, bad tensor names or variant packs;
   `hipdnn.GraphNotSupportedError` (a `RuntimeError`) when no engine supports
-  the graph; `RuntimeError` otherwise.
+  the graph or no execution plan can be created; `RuntimeError` otherwise,
+  including invalid attribute values.
 - `autotune`, `autotune_exhaustive_sweep`, `execute_timed_ext`,
   `get_plan_name`, `get_plan_name_at_index` and `get_engine_configs` are
   inherited unchanged from `hipdnn.Graph` and do not use the graph's handle.
@@ -305,8 +308,15 @@ Remaining differences from `cudnn.pygraph`:
   is hipDNN's own graph).
 - The keyword forms of `layernorm`, `layernorm_backward`, `rmsnorm`,
   `rmsnorm_backward`, `block_scale_quantize`, `sdpa` and `sdpa_backward`
-  return a tuple where cuDNN returns a list.
+  return a tuple where cuDNN returns a list, as their attributes forms do.
 - The `pygraph` constructor's `name` defaults to `""`, not `"test_graph"`.
+- Without `handle=`, `pygraph` creates its handle the first time a call needs
+  one, not in the constructor.
+- `GraphNotSupportedError` (`cudnnGraphNotSupportedError`) derives from
+  `RuntimeError`, so `except RuntimeError` also catches it.
+- `create_execution_plans()` defaults `modes` to `[heur_mode.FALLBACK]`.
+- `deselect_engines()` and `deselect_workspace_greater_than()` return the
+  graph, so calls can be chained.
 - Enum values differ where the libraries differ: `data_type` has no
   `FAST_FLOAT_FOR_FP8`, `INT8x4`, `UINT8x4` or `INT8x32`, `heur_mode` has no
   `OPENSOURCE`, and `behavior_note` values are vendor-specific.

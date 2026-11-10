@@ -335,6 +335,21 @@ void pygraphBindings(nb::module_& m)
             },
             "validate() and build_operation_graph(), using the graph's handle.")
         .def(
+            "build",
+            [](PyGraph& g,
+               const nb::object& handle,
+               const std::vector<HeuristicMode>& modes,
+               BuildPlanPolicy policy) {
+                throwIfBad(g.validate());
+                throwIfBad(g.build(g.resolveHandle(handle), modes, policy));
+            },
+            nb::arg("handle"),
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
+            "hipdnn.Graph.build(handle, modes, policy), raising instead of returning a bad "
+            "Error: validate(), build_operation_graph(handle), create_execution_plans(modes), "
+            "check_support() and build_plans(policy).")
+        .def(
             "get_workspace_size",
             [](const PyGraph& g) {
                 int64_t size = 0;
