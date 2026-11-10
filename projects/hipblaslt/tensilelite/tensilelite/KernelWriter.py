@@ -110,6 +110,18 @@ def clusterBarrierSplitWaveLoop(kernel):
               and kernel.get("InitCIterWmma", 0) != 1)
 
 
+def duplicateLabels(module):
+  """Names of the labels module defines more than once, in first-seen order."""
+  seen, duplicates = set(), []
+  for item in module.flatitems():
+    if isinstance(item, Label):
+      name = item.getLabelName()
+      if name in seen and name not in duplicates:
+        duplicates.append(name)
+      seen.add(name)
+  return duplicates
+
+
 # Make const values immutable
 @dataclass(frozen=True)
 class ConstValues():
@@ -4712,9 +4724,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.codes.gl2PrefetchIncrement = Module()
       self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], \
         comment="counterL<=PGR+GL2"))
-      self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncA"), 0))
+      # gl2PrefetchTpList leaves A and its scales out of the RAP reuse copy, so
+      # nothing there reads their increments.
+      prefetchA = not self.states.rapDropAResidentLoads
+      if prefetchA:
+        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncA"), 0))
       self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncB"), 0))
-      if kernel["ProblemType"]["MXBlockA"]:
+      if kernel["ProblemType"]["MXBlockA"] and prefetchA:
         self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSA"), 0))
       if kernel["ProblemType"]["MXBlockB"]:
         self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSB"), 0))
@@ -7582,6 +7598,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       stinky_module_options.update(kernel.get("_StinkyTofuParameters") or {})
       print2(f"StinkyTofu module options: {stinky_module_options}")
+      # The CFG builder aborts the whole process on a label defined twice, taking
+      # every other kernel of the run, or a test session, down with it. Fail only
+      # this kernel: getSourceFileString reports a RuntimeError and moves on.
+      duplicates = duplicateLabels(moduleKernelBody.body)
+      if duplicates:
+        raise RuntimeError("Kernel defines a label more than once: %s" % ", ".join(duplicates))
       # Convert rocisa module to stinkytofu with signature
       # Returns a KernelBody wrapper that includes signature and instruction module
       # - runOptimizationPipeline() optimizes the instruction body

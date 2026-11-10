@@ -74,6 +74,7 @@ test_categories:
       - "rocke_streamk_iter_partition"
       - "rocke_wgrad_streamk_host"
       - "rocke_conv_direct_dw_dgrad_host"
+      - "rocke_conv_direct_wgrad_refusals_host"
       - "rocke_wmma_fmha_decode_host"
       - "rocke_future_intrinsic_lowering"
       - "rocke_flavor_decl_chain"
@@ -108,6 +109,10 @@ test_categories:
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
       - "rocke_library_conv_pytest"
+      - "rocke_library_conv_tf32_pytest"
+      # Not registered on Windows (see rocke/platform/CMakeLists.txt); the
+      # parser ignores a listed name that has no registered test.
+      - "rocke_library_conv_tf32_lowering_pytest"
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
@@ -150,6 +155,7 @@ test_categories:
       - "rocke_streamk_iter_partition"
       - "rocke_wgrad_streamk_host"
       - "rocke_conv_direct_dw_dgrad_host"
+      - "rocke_conv_direct_wgrad_refusals_host"
       - "rocke_wmma_fmha_decode_host"
       - "rocke_future_intrinsic_lowering"
       - "rocke_flavor_decl_chain"
@@ -184,6 +190,10 @@ test_categories:
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
       - "rocke_library_conv_pytest"
+      - "rocke_library_conv_tf32_pytest"
+      # Not registered on Windows (see rocke/platform/CMakeLists.txt); the
+      # parser ignores a listed name that has no registered test.
+      - "rocke_library_conv_tf32_lowering_pytest"
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
