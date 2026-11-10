@@ -677,6 +677,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.conv_winograd.dispatch",
         "hipkernel.conv_direct.dispatch",
         "hipkernel.conv_smallc.dispatch",
+        "hipkernel.conv_group.dispatch",
 #endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
