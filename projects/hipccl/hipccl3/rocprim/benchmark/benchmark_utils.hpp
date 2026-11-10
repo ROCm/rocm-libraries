@@ -540,6 +540,7 @@ PRIMBENCH_REGISTER_TYPE(double, "f64")
 PRIMBENCH_REGISTER_TYPE(float2, "float2")
 PRIMBENCH_REGISTER_TYPE(float4, "float4")
 PRIMBENCH_REGISTER_TYPE(double2, "double2")
+PRIMBENCH_REGISTER_TYPE(int4, "int4")
 
 PRIMBENCH_REGISTER_TYPE(rocprim::half, "half")
 PRIMBENCH_REGISTER_TYPE(rocprim::empty_type, "empty")
