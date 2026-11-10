@@ -92,10 +92,12 @@ namespace rocalution
                              BaseVector<ValueType>*       out) const;
 
         virtual void LAnalyse(bool diag_unit = false);
+        virtual bool LAnalyseDiagUnit(void) const;
         virtual void LAnalyseClear(void);
         virtual bool LSolve(const BaseVector<ValueType>& in, BaseVector<ValueType>* out) const;
 
         virtual void UAnalyse(bool diag_unit = false);
+        virtual bool UAnalyseDiagUnit(void) const;
         virtual void UAnalyseClear(void);
         virtual bool USolve(const BaseVector<ValueType>& in, BaseVector<ValueType>* out) const;
 
@@ -114,6 +116,9 @@ namespace rocalution
 
         rocsparse_mat_descr L_mat_descr_;
         rocsparse_mat_descr U_mat_descr_;
+
+        bool L_diag_unit_;
+        bool U_diag_unit_;
 
         rocsparse_spmat_descr spmat_descr_;
 

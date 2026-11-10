@@ -179,6 +179,13 @@ namespace
         return format == CSR || (solve == "LU" && format == MCSR);
     }
 
+    // The formats whose LAnalyse and UAnalyse take diag_unit. A 64-bit build keeps no
+    // BCSR analysis on the accelerator, but its host fallback solves with diag_unit.
+    bool takes_diag_unit(Backend b, unsigned int format)
+    {
+        return has_analysis(b, format, "L") || (b == Backend::Accelerator && format == BCSR);
+    }
+
     // Nonsymmetric and diagonally dominant, with lower bandwidth 1, so that ILU(0)
     // is the exact LU factorization. DIA stores zeros and ELL pads every other row.
     template <typename T = double>
@@ -1566,7 +1573,7 @@ TEST_P(local_matrix_formats, triangular_solves_use_the_triangular_parts)
 
         const Csr<T>         ref      = banded<T>();
         const std::vector<T> b        = rhs<T>(ref.n);
-        const bool           analysed = has_analysis(backend(), format().id, "L");
+        const bool           analysed = takes_diag_unit(backend(), format().id);
 
         // Only the analysis sets a unit diagonal
         for(bool unit : {false, true})

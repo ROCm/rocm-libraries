@@ -66,6 +66,9 @@ namespace rocalution
         this->L_mat_descr_ = 0;
         this->U_mat_descr_ = 0;
 
+        this->L_diag_unit_ = false;
+        this->U_diag_unit_ = false;
+
         this->mat_info_ = 0;
 
         this->spmat_descr_ = 0;
@@ -1303,6 +1306,8 @@ namespace rocalution
     template <typename ValueType>
     void HIPAcceleratorMatrixBCSR<ValueType>::LAnalyse(bool diag_unit)
     {
+        this->L_diag_unit_ = diag_unit;
+
 #ifdef ROCALUTION_PTRTYPE_64
         // rocsparse_bsrsv only supports 32-bit row offsets
         return;
@@ -1385,6 +1390,8 @@ namespace rocalution
     template <typename ValueType>
     void HIPAcceleratorMatrixBCSR<ValueType>::UAnalyse(bool diag_unit)
     {
+        this->U_diag_unit_ = diag_unit;
+
 #ifdef ROCALUTION_PTRTYPE_64
         // rocsparse_bsrsv only supports 32-bit row offsets
         return;
@@ -1494,6 +1501,13 @@ namespace rocalution
         }
 
         this->L_mat_descr_ = 0;
+        this->L_diag_unit_ = false;
+    }
+
+    template <typename ValueType>
+    bool HIPAcceleratorMatrixBCSR<ValueType>::LAnalyseDiagUnit(void) const
+    {
+        return this->L_diag_unit_;
     }
 
     template <typename ValueType>
@@ -1526,6 +1540,13 @@ namespace rocalution
         }
 
         this->U_mat_descr_ = 0;
+        this->U_diag_unit_ = false;
+    }
+
+    template <typename ValueType>
+    bool HIPAcceleratorMatrixBCSR<ValueType>::UAnalyseDiagUnit(void) const
+    {
+        return this->U_diag_unit_;
     }
 
     template <typename ValueType>
