@@ -424,10 +424,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Owned by the library, one object per arch, so this reference is stable too.
     const HWModel& hw_;
 
-    // Active queue depth for the region. It starts at the develop-compatible regular depth and
-    // switches to the scale depth only when the reset-time queue-fill policy is enabled.
-    int regionWmmaQueueDepth_ = hw_.matrix.wmmaQueueDepth;
-    int regionQueueFillDepth_ = hw_.matrix.wmmaQueueDepth;
+    // Active queue depth for the region, read from its matrix instructions'
+    // HwInstDesc::matrixQueueDepth metadata.
+    int regionWmmaQueueDepth_ = 1;
+    int regionQueueFillDepth_ = 1;
     bool queueFillPolicyEnabled_ = false;
     // Fallback for direct queue use without the function-wide ScheduleAnalysisCache.
     std::optional<bool> localQueueFillPolicy_;
@@ -494,8 +494,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
         return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;
     }
-    // WMMA issue queue: the region's HWModel::Matrix depth (regionWmmaQueueDepth_). Depth 1 is
-    // the single-window model: a WMMA waits for the previous one to finish.
+    // WMMA issue queue: the region's per-instruction metadata depth
+    // (regionWmmaQueueDepth_). Depth 1 is the single-window model: a WMMA waits for the
+    // previous one to finish.
     // The queue model runs only with a cover (wmmaQueueCoverCycles) other than 0; otherwise the
     // depth is 1.
     int wmmaQueueDepth() const {
@@ -3013,16 +3014,15 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                    IRList::iterator blockBegin, const RegionDependencies& deps) {
     regionDag_ = &deps.dag;
     carryQueuedWar();
-    regionWmmaQueueDepth_ = hw_.matrix.wmmaQueueDepth;
-    regionQueueFillDepth_ = hw_.matrix.wmmaQueueDepth;
+    regionQueueFillDepth_ = INT_MAX;
     queueFillPolicyEnabled_ = queueFillPolicy().value_or(false);
     for (const auto& n : deps.dag.nodes) {
-        if (isMatrixInstruction(*n.inst) && hasMatrixScalePair(*n.inst)) {
-            regionQueueFillDepth_ = hw_.matrix.scaleWmmaQueueDepth;
-            break;
-        }
+        if (!isMatrixInstruction(*n.inst)) continue;
+        const int depth = n.inst->getHwInstDesc()->matrixQueueDepth;
+        if (depth > 0) regionQueueFillDepth_ = std::min(regionQueueFillDepth_, depth);
     }
-    if (queueFillPolicyEnabled_) regionWmmaQueueDepth_ = regionQueueFillDepth_;
+    if (regionQueueFillDepth_ == INT_MAX) regionQueueFillDepth_ = 1;
+    regionWmmaQueueDepth_ = regionQueueFillDepth_;
     wmmaIssuedCountThisRegion_ = 0;
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
@@ -4083,7 +4083,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             wmmaQueueFillPending_ = false;
             queueFillPolicyEnabled_ = false;
             setQueueFillPolicy(false);
-            regionWmmaQueueDepth_ = hw_.matrix.wmmaQueueDepth;
+            regionWmmaQueueDepth_ = regionQueueFillDepth_;
             barrierWmmaThresholds_ = unplannedBarrierThresholds;
             planDsSpread();
         }
