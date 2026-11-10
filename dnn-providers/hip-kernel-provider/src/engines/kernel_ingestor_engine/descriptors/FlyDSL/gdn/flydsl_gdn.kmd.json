@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "id": "946a0910-8511-569a-8df9-d40932fd482a",
+  "name": "flydsl gdn variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_dim",
+      "type": "int"
+    },
+    {
+      "name": "head_dim_v",
+      "type": "int"
+    },
+    {
+      "name": "state_strided",
+      "type": "int"
+    },
+    {
+      "name": "dv_split",
+      "type": "int"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    }
+  ]
+}

@@ -1353,6 +1353,83 @@ census `TestFlydslMoeRoutingPacks`.
 
 ---
 
+## Gated DeltaNet — `hipkernel:flydsl_gdn`
+
+36 objects per arch, built for **gfx90a, gfx942 and gfx950**: the kernel is buffer loads and
+stores, f32 arithmetic and wave64 shuffles, nothing gfx94x-only. RDNA is not built (its K
+reductions assume wave64). Kernel:
+[`kernels_src/kernels/gdn/gdn_recurrent_kernel.py`](kernels_src/kernels/gdn/gdn_recurrent_kernel.py),
+AITER's recurrent decode kernel `gdr_decode.py` (`create_vk_gdr_decode_kernel`, commit
+`8253efc40595`, the pinned AITER commit) ported to flydsl 0.3.4 (the header lists the
+modifications); native half:
+[`FlydslGdnNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslGdnNative.cpp).
+
+It computes the schema's GDN forward (`gdn_attributes.fbs`, `CpuFpReferenceGdn`) with an f32
+state: per sequence, output head and token, `S = alpha S + beta (v - alpha S k) k^T`,
+`o = scale S q`. One 256-thread workgroup per (sequence, output head, 32-row slice of V)
+holds its slice of the state in registers and walks the sequence's tokens
+`[cu[n], cu[n+1])` in a runtime loop, so **one object serves decode and prefill alike**:
+prefill is token-recurrent, not AITER's chunked prefill (whose output stage is Triton, not
+FlyDSL). Output head h reads q head `h / (HO / H)`, k head `h / (HO / HK)` and v head
+`h / (HO / HV)` (Qwen3.8: H = HK = 16, HV = HO = 48).
+
+**Baked:** the q/k/v/o dtype (`bf16`, `f16`), K and V (`head_dim`, `head_dim_v`, each 64, 128
+or 256), and the state addressing: `state_strided` 0 (priority 100) moves the state in
+128-bit vectors along a unit-stride K -- hipDNN's packed `[N, HO, V, K]` -- and `state_strided`
+1 (priority 10) takes any state strides one element at a time, a K-major (`[N, HO, K, V]`
+in memory) state among them. `dv_split` (V / 32) is the workgroups per (sequence, head).
+**Runtime:** T, N, the head counts and their replication, every stride of every operand
+(q/k/v sliced from one projection row run without a copy), the scale (absent: 1/sqrt(K)),
+and every flag: q/k L2 norm (`x * rsqrt(sum(x^2) + 1e-6)`), the gate -- `exp(g)` (LOG),
+`max(g, 1e-10)` (LINEAR), or the safe gate `exp(-exp(a_log) softplus(g + dt_bias))`
+(softplus linear above 20; absent a_log is unit amplitude, absent dt_bias zero) --, beta as
+given, `sigmoid(beta)` or `2 sigmoid(beta)` (allow_neg_eigval), initial state (absent:
+zero), final state, state_indices into a state pool, and the dtype of each of g, beta, a_log
+and dt_bias (f32, f16 or bf16, independently). A state tile gets its own 64-bit base, so a
+pool may exceed 4 GiB.
+
+**Served as asked:** `batch_invariant` (each sequence is computed alone, in a fixed order)
+and `overwrite_initial_state` (each workgroup reads its state slice before writing that same
+slice, and no two workgroups share one, so final_state may share initial_state's buffer). An
+empty sequence writes its initial state as its final one.
+
+**Out of contract, not detectable from the graph:** cu_seqlens that do not run monotonically
+from 0 to T, a state_indices row outside the pool, and two sequences writing one pool row
+(the CPU reference throws on each). The kernel neither checks nor reports them.
+
+| Graph-scoped (`flydslGdnGraphMatches`) | Accepted | Declined |
+|---|---|---|
+| Nodes | exactly one `GdnAttributes` node | anything else; override-shape graphs |
+| Attributes | any gate domain / safe gate, beta form, L2 norm, finite scale, batch_invariant, overwrite_initial_state, state_indices, the rules of `gdn_attributes.fbs` holding | `checkpoint_every_n_tokens > 0` or `state_checkpoints`; `output_final_state` disagreeing with final_state; LINEAR with safe_gate; a_log / dt_bias without safe_gate; allow_neg_eigval without sigmoid; state_indices without initial_state; overwrite without both states; a non-finite scale |
+| Operands | real device tensors | virtual, pass-by-value or ragged |
+| Dtypes | q, k, v, o one of bf16 / f16; initial and final state FLOAT; g, beta, a_log, dt_bias each FLOAT / HALF / BFLOAT16; cu_seqlens and state_indices INT32; compute type UNSET, FLOAT, HALF or BFLOAT16 (computed in f32) | f32 q/k/v; o converting; an f16/bf16 state; INT64 offsets or indices; DOUBLE compute |
+| Shapes | q `[T, H, K]`, k `[T, HK, K]` (HK = H or HV), v `[T, HV, V]`, g and beta `[T, HO]`, o `[T, HO, V]`, cu_seqlens `[N + 1]` (N >= 1), states `[N, HO, V, K]` (or `[P, HO, V, K]` with state_indices `[N]`), a_log and dt_bias `[HO]`, HO = max(H, HV) a multiple of H and HV | anything else; a zero extent |
+| q, k | unit-stride K, token and head strides multiples of 4, 8-byte aligned base | otherwise |
+| v, o | unit-stride V; o non-overlapping | otherwise |
+| Other strides | any non-negative strides (final state non-overlapping) | a negative stride |
+| Extents | each operand's furthest element within 2^31 - 16 bytes (a state's (row, head) tile only); strides and extents <= 2^31 - 1; HO <= 65535 (grid y); N x V / 32 <= 2^31 - 1 | larger |
+
+| Kernel-scoped (`flydslGdnKernelMatches`) | |
+|---|---|
+| `dtype`, `head_dim`, `head_dim_v` | equal q's dtype, K and V |
+| `state_strided` 0 | every state present has unit-stride K, the other strides multiples of 4, and a 16-byte aligned base |
+| `state_strided` 1 | any state |
+
+**Performance (gfx90a, MI210, Qwen3.8 shapes, bf16, launch to synchronize).** Decode is the
+kernel AITER ships, one pass over the state, memory-bound: 0.035 ms for one sequence, 0.52 ms
+for 64 (about 0.8 TB/s of state read and written). Prefill walks the tokens one by one per
+(sequence, head, V slice), so it is latency-bound: one 4096-token prompt (192 workgroups)
+takes 9.4 ms, eight 512-token prompts 6.8 ms. A chunked prefill (AITER's `gdr_prefill`, once
+its output stage exists in FlyDSL) is the follow-up that would raise it.
+
+**Checked by:** `TestFlydslGdnEngine` (every row of both tables, binding, score;
+host-only), `TestGpuFlydslGdnObjects` (every staged object through graph_match,
+kernel_match, prepare and launch against `CpuFpReferenceGdn`: a varlen prefill with an empty
+sequence, a decode step, and carried-state equivalence -- a prefill, then a decode from its
+final state, matching one reference run over the whole sequences -- with K-major states for
+the strided objects; the K = V = 128 vector objects also at Qwen3.8's head counts and every
+flag and layout variant), and the census `TestFlydslGdnPacks`.
+
 ## Softmax — `hipkernel:flydsl_softmax`
 
 63 objects per arch, built for **gfx90a, gfx942 and gfx950**: buffer loads and stores, f32

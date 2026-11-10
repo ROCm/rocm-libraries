@@ -45,6 +45,7 @@ const std::vector<IngestorPack>& ingestorPacks()
          &registerFlydslPagedCacheStoreSymbols,
          &resetFlydslPagedCacheStoreModuleCache},
         {"hipkernel:flydsl_rope", &registerFlydslRopeSymbols, &resetFlydslRopeModuleCache},
+        {"hipkernel:flydsl_gdn", &registerFlydslGdnSymbols, &resetFlydslGdnModuleCache},
         {"hipkernel:flydsl_softmax", &registerFlydslSoftmaxSymbols, &resetFlydslSoftmaxModuleCache},
         {"hipkernel:flydsl_topk", &registerFlydslTopkSymbols, &resetFlydslTopkModuleCache},
         {"hipkernel:flydsl_moe_routing",

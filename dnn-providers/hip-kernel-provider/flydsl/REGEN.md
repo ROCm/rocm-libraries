@@ -115,9 +115,9 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 |---|---|---|
 | `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode` | 309 (90 + 63 + 84 + 72) |
 | `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 381 (90 + 63 + 84 + 72 + 72) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode gather rope paged_cache_store topk moe_routing softmax causal_conv1d` | 389 (90 + 63 + 56 + 20 + 24 + 12 + 3 + 9 + 12 + 1 + 63 + 36) |
-| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode gather rope paged_cache_store topk moe_routing softmax causal_conv1d` | 391 (90 + 63 + 78 + 24 + 12 + 3 + 9 + 12 + 1 + 63 + 36) |
-| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode gather rope paged_cache_store topk moe_routing softmax causal_conv1d` | 385 (90 + 63 + 78 + 24 + 12 + 3 + 3 + 12 + 1 + 63 + 36) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode gather rope paged_cache_store topk moe_routing gdn softmax causal_conv1d` | 425 (90 + 63 + 56 + 20 + 24 + 12 + 3 + 9 + 12 + 1 + 36 + 63 + 36) |
+| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode gather rope paged_cache_store topk moe_routing gdn softmax causal_conv1d` | 427 (90 + 63 + 78 + 24 + 12 + 3 + 9 + 12 + 1 + 36 + 63 + 36) |
+| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode gather rope paged_cache_store topk moe_routing gdn softmax causal_conv1d` | 421 (90 + 63 + 78 + 24 + 12 + 3 + 3 + 12 + 1 + 36 + 63 + 36) |
 
 ```bash
 ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode"
@@ -214,10 +214,11 @@ done
 # scalar global loads and stores) for these three only; paged_cache_store for these three,
 # its FP8 objects for gfx942 (FNUZ) and gfx950 (OCP) only; topk (per-row top-k, buffer loads
 # and stores, wave64 shuffles and ballots) for these three only; moe_routing (a three-kernel
-# counting sort, buffer loads and stores, 64-bit ballots) for these three only; softmax
-# (buffer loads and stores, warp and block reductions that assume a 64-lane wave) for these
-# three only; causal_conv1d (global loads and stores, scalar buffer loads, no wave-size
-# assumption) for these three only.
+# counting sort, buffer loads and stores, 64-bit ballots) for these three only; gdn (the
+# token-recurrent Gated DeltaNet, buffer loads and stores, wave64 shuffles) for these three
+# only; softmax (buffer loads and stores, warp and block reductions that assume a 64-lane
+# wave) for these three only; causal_conv1d (global loads and stores, scalar buffer loads,
+# no wave-size assumption) for these three only.
 for ARCH in gfx950 gfx942 gfx90a; do
   $PY -m generators.gen_rmsnorm --arch $ARCH
   $PY -m generators.gen_rmsnorm_bwd --arch $ARCH
@@ -229,6 +230,7 @@ for ARCH in gfx950 gfx942 gfx90a; do
   $PY -m generators.gen_paged_cache_store --arch $ARCH
   $PY -m generators.gen_topk --arch $ARCH
   $PY -m generators.gen_moe_routing --arch $ARCH
+  $PY -m generators.gen_gdn --arch $ARCH
   $PY -m generators.gen_softmax --arch $ARCH
   $PY -m generators.gen_causal_conv1d --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH

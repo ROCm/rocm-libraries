@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "2d3aba44-2a29-59ac-a09f-49f0d4d9127b",
+  "name": "flydsl gdn engine estimate",
+  "provenance": "Default slot for the engine estimate: a trained model installed under heuristics/ for an arch takes precedence there. No scorer is registered under this symbol, so on any other arch the loader disables the estimate and keeps the engine.",
+  "adapter": "native",
+  "objective": "max",
+  "score": {
+    "metric": "tflops"
+  },
+  "native": {
+    "symbol": "hipkernel.flydsl_gdn.engine_estimate"
+  }
+}

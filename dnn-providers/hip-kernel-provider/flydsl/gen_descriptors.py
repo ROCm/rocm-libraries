@@ -156,6 +156,8 @@ GRAPH_DETERMINED_FIELDS = {
     # Softmax (`out_dtype` above is s's dtype): the width an object's copies need N
     # to be a multiple of.
     "n_align",
+    # GDN: whether the object takes any state strides (1) or needs a unit-stride K (0).
+    "state_strided",
     # Top-k: the largest k an object serves (1 for the k = 1 reduction body).
     "k_max",
     # MoE routing: the largest num_experts an object serves, and the prefix and scatter

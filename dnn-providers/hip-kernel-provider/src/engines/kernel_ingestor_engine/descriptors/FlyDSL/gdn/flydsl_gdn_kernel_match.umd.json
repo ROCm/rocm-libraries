@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "0edc428b-2160-5a31-908f-e31cfac5dc86",
+  "name": "flydsl gdn: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_gdn.kernel_match"
+}

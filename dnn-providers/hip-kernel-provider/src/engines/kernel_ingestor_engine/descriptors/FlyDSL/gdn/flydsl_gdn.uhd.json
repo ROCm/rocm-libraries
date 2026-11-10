@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "b1be8045-e02c-5099-82b6-92c633ae6621",
+  "name": "flydsl gdn selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_gdn.score"
+  }
+}

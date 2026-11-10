@@ -1,0 +1,6 @@
+outs:
+- md5: 3b9032d62da849a82780bcb595b145ae.dir
+  size: 549334
+  nfiles: 38
+  hash: md5
+  path: gfx90a

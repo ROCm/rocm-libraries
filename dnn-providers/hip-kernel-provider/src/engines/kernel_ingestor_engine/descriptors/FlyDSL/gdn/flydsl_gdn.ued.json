@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "id": "8d2635a7-41d9-5669-a0fc-7b6092d1f6e4",
+  "name": "hipkernel:flydsl_gdn",
+  "graph_match": {
+    "native": "hipkernel.flydsl_gdn.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "b1be8045-e02c-5099-82b6-92c633ae6621"
+  },
+  "predict_engine": {
+    "default": "2d3aba44-2a29-59ac-a09f-49f0d4d9127b"
+  },
+  "metadata": "946a0910-8511-569a-8df9-d40932fd482a",
+  "knobs": [
+    "dv_split",
+    "block_threads"
+  ]
+}

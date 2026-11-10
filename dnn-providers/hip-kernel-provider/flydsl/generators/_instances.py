@@ -120,6 +120,7 @@ _ABBREV = {
     "vec_bytes": "vec",
     "cache_dtype": "cache",
     "out_dtype": "out",
+    "state_strided": "sstr",
     "n_align": "align",
     "threads_per_row": "tpr",
     "unroll": "u",
@@ -167,6 +168,8 @@ _NAME_OMITTED_WHEN = {
     # MoE routing: symbols, not choices -- every object carries the same three kernels.
     "prefix_symbol": lambda knobs: True,
     "scatter_symbol": lambda knobs: True,
+    # GDN: the K-contiguous state objects are the default form.
+    "state_strided": lambda knobs: knobs["state_strided"] == 0,
 }
 
 
@@ -1591,6 +1594,49 @@ def paged_cache_store_instances(arch: str) -> list[Instance]:
     return instances
 
 
+# --- Gated DeltaNet ------------------------------------------------------------
+
+# kernels_src/kernels/gdn/gdn_recurrent_kernel.py: one workgroup per (sequence, output
+# head, V slice) walks its sequence's tokens with the f32 state slice in registers, so
+# one object serves decode and prefill alike. The token count, sequence count, head
+# counts and their replication, every stride, the scale and every flag (q/k L2 norm,
+# gate domain and safe gate, beta sigmoid and its doubling, initial and final state,
+# state_indices) are runtime arguments, as are the dtypes of g, beta, a_log and
+# dt_bias. Baked: the q/k/v/o dtype (its load width), K and V (the register tile), and
+# how the state is addressed -- `state_strided` 0 objects move it in 128-bit vectors
+# along a unit-stride K and rank first; the 1 objects take any state strides (a K-major
+# state among them), one element at a time. `dv_split` is the V / 32 workgroups that
+# share a (sequence, head), one 32-row slice of V each.
+GDN_DTYPES = ("bf16", "f16")
+GDN_HEAD_DIMS = (64, 128, 256)
+GDN_V_TILE = 32
+GDN_BLOCK_THREADS = 256
+
+
+def gdn_instances() -> list[Instance]:
+    """The GDN table: every io dtype x K x V x state addressing."""
+    instances = [
+        Instance(
+            op="gdn",
+            dtype=dtype,
+            priority=PRIORITY_GENERIC if state_strided else PRIORITY_SPECIALIZED,
+            knobs={
+                "head_dim": head_k,
+                "head_dim_v": head_v,
+                "state_strided": state_strided,
+                "dv_split": head_v // GDN_V_TILE,
+                "block_threads": GDN_BLOCK_THREADS,
+            },
+        )
+        for dtype in GDN_DTYPES
+        for head_k in GDN_HEAD_DIMS
+        for head_v in GDN_HEAD_DIMS
+        for state_strided in (0, 1)
+    ]
+    _assert_unique(instances)
+    return instances
+
+
 # --- Softmax ------------------------------------------------------------------
 
 # kernels_src/kernels/softmax/softmax_kernel.py (FlyDSL v0.5.0's softmax, ported to
@@ -1821,6 +1867,7 @@ OPS = {
     "gather": gather_instances,
     "rope": rope_instances,
     "paged_cache_store": paged_cache_store_instances,
+    "gdn": gdn_instances,
     "softmax": softmax_instances,
     "topk": topk_instances,
     "causal_conv1d": causal_conv1d_instances,

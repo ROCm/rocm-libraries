@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "7f05dcbd-cdba-535d-a06f-63272d88fdbd",
+  "name": "flydsl gdn dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_gdn.dispatch"
+}

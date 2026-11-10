@@ -98,6 +98,10 @@ void resetFlydslPagedCacheStoreModuleCache();
 void registerFlydslRopeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslRopeModuleCache();
 
+/// @see packs/FlydslGdnNative.cpp
+void registerFlydslGdnSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslGdnModuleCache();
+
 /// @see packs/FlydslSoftmaxNative.cpp
 void registerFlydslSoftmaxSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslSoftmaxModuleCache();
