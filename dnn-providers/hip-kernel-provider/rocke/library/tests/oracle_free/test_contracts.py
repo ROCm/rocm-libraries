@@ -6,44 +6,54 @@
 from __future__ import annotations
 
 import ast
-import dataclasses
 import json
 import subprocess
 import sys
+from collections.abc import Callable, Sequence
 from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 
 import numpy as np
 import pytest
 
 from ._analytical import (
-    UNIFORM_BASIS_OFFSETS,
-    UNIFORM_CALIBRATION,
-    UNIFORM_CAUSAL_FP16,
+    _FORMAT,
+    UNIFORM_CAUSAL_BF16,
+    UNIFORM_FOCUSED_ROWS,
     UNIFORM_QUICK_CASES,
-    UNIFORM_WINDOW_BF16,
-    CalibrationEntry,
+    UNIFORM_WINDOW_FP16,
     UniformCase,
     UniformMutation,
     UniformObservation,
-    UniformSpecFingerprint,
+    UniformResult,
+    _basis_offset,
+    _freeze_groups,
+    _legal_bounds,
+    _MutableNqStats,
+    _ordered_array,
+    _proven_limit,
     analyze_uniform_policy,
     broadcast_query_head,
     correct_uniform_observation,
     decode_bits,
     encode_bits,
     format_uniform_result,
+    legal_interval,
     legal_keys,
-    require_calibration,
+    max_legal_count,
+    require_proven_scope,
     residue_count,
     target_bits,
     ulp_distance,
+    uniform_basis_offsets,
     uniform_expected_bits,
     uniform_inputs,
     uniform_inputs_folded,
 )
-from ._gfx942_subject import (
+from ._dense_subject import (
+    DENSE_SUBJECTS,
+    QUICK_SUBJECT_CASES,
     _resolve_tuning_spec,
     _validate_device_buffers,
     _validate_host_bits,
@@ -51,7 +61,7 @@ from ._gfx942_subject import (
     _verify_resolved_spec,
     resolve_dense_subject,
 )
-from .test_analytical_gfx942 import _not_rejected
+from .test_analytical_dense import _not_rejected
 
 
 def _small_case(mask: str, *, window: int = 0, seqlen_k: int = 8) -> UniformCase:
@@ -113,6 +123,57 @@ def test_legal_key_sets_pin_causal_window_and_mutation_semantics() -> None:
     assert legal_keys(window, 4, UniformMutation.EXCLUDE_OLDEST_WINDOW_KEY) == (2, 3, 4)
 
 
+def _mutations_for(case: UniformCase) -> tuple[UniformMutation | None, ...]:
+    if case.mask == "causal":
+        return (
+            None,
+            UniformMutation.INCLUDE_FUTURE_KEY,
+            UniformMutation.EXCLUDE_LAST_KEY,
+            UniformMutation.DENOMINATOR_PLUS_ONE,
+        )
+    return (
+        None,
+        UniformMutation.INCLUDE_OLD_WINDOW_KEY,
+        UniformMutation.EXCLUDE_OLDEST_WINDOW_KEY,
+        UniformMutation.DENOMINATOR_PLUS_ONE,
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        *UNIFORM_QUICK_CASES,
+        _small_case("causal"),
+        _small_case("causal", seqlen_k=5),
+        _small_case("window", window=1),
+        _small_case("window", window=3),
+        UniformCase(1, 12, 6, 2, 2, 4, "fp16", "window", 4),
+    ],
+    ids=lambda case: case.case_id,
+)
+def test_vectorized_legal_bounds_match_the_scalar_rule(case: UniformCase) -> None:
+    for mutation in _mutations_for(case):
+        first, last = _legal_bounds(case, mutation)
+        scalar = [
+            legal_interval(case, query, mutation) for query in range(case.seqlen_q)
+        ]
+        assert list(zip(first.tolist(), last.tolist())) == scalar
+
+
+def test_proven_scope_admits_the_quick_cases_and_refuses_beyond_the_theorem() -> None:
+    for case in UNIFORM_QUICK_CASES:
+        require_proven_scope(case)
+        assert max_legal_count(case) < _proven_limit(case.dtype, "folded")
+    assert max_legal_count(UNIFORM_WINDOW_FP16) == 64
+    assert max_legal_count(UNIFORM_CAUSAL_BF16) == 256
+    # FP16 folded limit: 2**11 * 2 // 3 = 1365 legal keys.
+    require_proven_scope(UniformCase(1, 1364, 1364, 1, 1, 64, "fp16", "causal"))
+    with pytest.raises(ValueError, match="outside the proven zero-ULP range"):
+        require_proven_scope(UniformCase(1, 1365, 1365, 1, 1, 64, "fp16", "causal"))
+    # A window bounds N_q, so a long sequence stays inside the range.
+    require_proven_scope(UniformCase(1, 4096, 4096, 1, 1, 64, "fp16", "window", 64))
+
+
 @pytest.mark.parametrize(
     "dtype,numerator,denominator,expected",
     [
@@ -154,9 +215,11 @@ def test_ulp_distance_coalesces_signed_zero() -> None:
 
 
 def test_uniform_generators_cover_basis_and_folded_profiles() -> None:
+    case = UNIFORM_CAUSAL_BF16
+    assert uniform_basis_offsets(case) == (0, 64, 128, 192)
     exposed: list[int] = []
-    for offset in UNIFORM_BASIS_OFFSETS:
-        q, k, v = uniform_inputs(UNIFORM_CAUSAL_FP16, offset)
+    for offset in uniform_basis_offsets(case):
+        q, k, v = uniform_inputs(case, offset)
         assert not np.any(q)
         assert np.isfinite(k).all()
         assert np.unique(k).size > 1
@@ -165,43 +228,70 @@ def test_uniform_generators_cover_basis_and_folded_profiles() -> None:
         assert all(key == offset + dim for key, dim in locations)
     assert exposed == list(range(256))
 
-    q, k, folded = uniform_inputs_folded(UNIFORM_CAUSAL_FP16)
+    q, k, folded = uniform_inputs_folded(case)
     assert not np.any(q)
     assert np.isfinite(k).all()
     locations = np.argwhere(folded[0, :, 0, :] == 1.0)
-    assert len(locations) == UNIFORM_CAUSAL_FP16.seqlen_k
-    assert all(dim == key % UNIFORM_CAUSAL_FP16.head_dim for key, dim in locations)
+    assert len(locations) == case.seqlen_k
+    assert all(dim == key % case.head_dim for key, dim in locations)
 
 
 @pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
 def test_v_profiles_scale_each_kv_head_by_a_distinct_power_of_two(
     case: UniformCase,
 ) -> None:
-    profiles = [uniform_inputs(case, offset)[2] for offset in UNIFORM_BASIS_OFFSETS]
+    profiles = [
+        uniform_inputs(case, offset)[2] for offset in uniform_basis_offsets(case)
+    ]
     profiles.append(uniform_inputs_folded(case)[2])
     for v in profiles:
         head_zero = v[:, :, 0, :]
         for head in range(case.nhead_k):
             np.testing.assert_array_equal(v[:, :, head, :], head_zero * 2.0**head)
-    assert case.head_scale_exponents == tuple(range(case.nhead_q))
+    # Hq=8 over Hkv=2: query heads 0-3 read KV head 0, heads 4-7 KV head 1.
+    assert case.head_scale_exponents == (0, 0, 0, 0, 1, 1, 1, 1)
 
 
-_HEAD_MIXUPS = {
-    "head-0-broadcast": lambda bits: np.repeat(bits[:, :, :1, :], bits.shape[2], 2),
-    "last-head-broadcast": lambda bits: np.repeat(bits[:, :, -1:, :], bits.shape[2], 2),
-    "heads-reversed": lambda bits: bits[:, :, ::-1, :].copy(),
-    "heads-0-1-swapped": lambda bits: bits[:, :, [1, 0, *range(2, bits.shape[2])], :],
+def _swap_first_and_last(bits: np.ndarray, case: UniformCase) -> np.ndarray:
+    order = [case.nhead_q - 1, *range(1, case.nhead_q - 1), 0]
+    return bits[:, :, order, :]
+
+
+def _interleaved_groups(bits: np.ndarray, case: UniformCase) -> np.ndarray:
+    # A GQA mapping bug: h_kv = h_q mod Hkv instead of h_q // (Hq / Hkv). Query
+    # head h_q then carries the output of a head that reads KV head h_q mod Hkv.
+    group = case.nhead_q // case.nhead_k
+    order = [(head % case.nhead_k) * group for head in range(case.nhead_q)]
+    return bits[:, :, order, :]
+
+
+_HEAD_MIXUPS: dict[str, Callable[[np.ndarray, UniformCase], np.ndarray]] = {
+    "head-0-broadcast": lambda bits, case: np.repeat(
+        bits[:, :, :1, :], bits.shape[2], 2
+    ),
+    "last-head-broadcast": lambda bits, case: np.repeat(
+        bits[:, :, -1:, :], bits.shape[2], 2
+    ),
+    "heads-reversed": lambda bits, case: bits[:, :, ::-1, :].copy(),
+    # Heads 0 and Hq-1 sit in different KV groups. A swap inside one group is
+    # invisible by design: those heads share a V scale.
+    "first-last-heads-swapped": _swap_first_and_last,
+    "gqa-groups-interleaved": _interleaved_groups,
 }
 
 
 @pytest.mark.parametrize("mixup", sorted(_HEAD_MIXUPS))
 @pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
 def test_head_indexing_mixups_are_rejected(case: UniformCase, mixup: str) -> None:
-    """A wrong V head, a wrong head stride, or one output head written everywhere
-    must not pass: per-head V scales move every legal coordinate of a wrong head."""
+    """A wrong V head, a wrong head stride, a wrong GQA mapping, or one output head
+    written everywhere must not pass: per-head V scales move every legal
+    coordinate of a head that reads the wrong KV head."""
     correct = correct_uniform_observation(case)
     mixed = UniformObservation(
-        tuple((name, _HEAD_MIXUPS[mixup](values)) for name, values in correct.exposures)
+        tuple(
+            (name, _HEAD_MIXUPS[mixup](values, case))
+            for name, values in correct.exposures
+        )
     )
     result = analyze_uniform_policy(case, mixed, budget=0)
     assert any(item.startswith("target_ulp=") for item in result.violations)
@@ -209,11 +299,13 @@ def test_head_indexing_mixups_are_rejected(case: UniformCase, mixup: str) -> Non
 
 
 def test_broadcast_query_head_matches_the_head_zero_mixup() -> None:
-    case = UNIFORM_CAUSAL_FP16
+    case = UNIFORM_WINDOW_FP16
     correct = correct_uniform_observation(case)
     broadcast = broadcast_query_head(correct, 0)
     for (_, actual), (_, source) in zip(broadcast.exposures, correct.exposures):
-        np.testing.assert_array_equal(actual, _HEAD_MIXUPS["head-0-broadcast"](source))
+        np.testing.assert_array_equal(
+            actual, _HEAD_MIXUPS["head-0-broadcast"](source, case)
+        )
     assert analyze_uniform_policy(case, broadcast, budget=0).violations
     with pytest.raises(IndexError):
         broadcast_query_head(correct, case.nhead_q)
@@ -237,8 +329,8 @@ def test_kv_head_count_is_capped_for_distinct_scales() -> None:
 @pytest.mark.parametrize(
     "case",
     [
-        UNIFORM_CAUSAL_FP16,
-        UNIFORM_WINDOW_BF16,
+        UNIFORM_WINDOW_FP16,
+        UNIFORM_CAUSAL_BF16,
         _small_case("causal"),
         _small_case("window", window=1),
         _small_case("window", window=3),
@@ -261,29 +353,29 @@ def test_correctly_rounded_synthetic_observations_pass(case: UniformCase) -> Non
 @pytest.mark.parametrize(
     "case,mutation,required",
     [
-        (UNIFORM_CAUSAL_FP16, UniformMutation.INCLUDE_FUTURE_KEY, ("target_ulp=",)),
+        (UNIFORM_CAUSAL_BF16, UniformMutation.INCLUDE_FUTURE_KEY, ("target_ulp=",)),
         (
-            UNIFORM_CAUSAL_FP16,
+            UNIFORM_CAUSAL_BF16,
             UniformMutation.EXCLUDE_LAST_KEY,
             ("masked_max=", "masked_mass="),
         ),
         (
-            UNIFORM_CAUSAL_FP16,
+            UNIFORM_CAUSAL_BF16,
             UniformMutation.DENOMINATOR_PLUS_ONE,
             ("target_ulp=",),
         ),
         (
-            UNIFORM_WINDOW_BF16,
+            UNIFORM_WINDOW_FP16,
             UniformMutation.INCLUDE_OLD_WINDOW_KEY,
             ("target_ulp=",),
         ),
         (
-            UNIFORM_WINDOW_BF16,
+            UNIFORM_WINDOW_FP16,
             UniformMutation.EXCLUDE_OLDEST_WINDOW_KEY,
             ("masked_max=", "masked_mass="),
         ),
         (
-            UNIFORM_WINDOW_BF16,
+            UNIFORM_WINDOW_FP16,
             UniformMutation.DENOMINATOR_PLUS_ONE,
             ("target_ulp=",),
         ),
@@ -304,7 +396,7 @@ def test_mutations_are_detected_on_the_shipped_matrix(
 
 def test_one_bf16_ulp_passes_old_ceiling_but_fails_exact_policy() -> None:
     # 4e-3 is the superseded BF16 elementwise absolute ceiling.
-    case = UNIFORM_WINDOW_BF16
+    case = UNIFORM_CAUSAL_BF16
     observation = correct_uniform_observation(case)
     name = "basis@192"
     coordinate = (0, 255, 0, 0)
@@ -325,7 +417,7 @@ def test_basis_and_folded_blind_spots_are_explicit() -> None:
     assert [residue_count(4, 11, d, 4) for d in range(4)] == [2, 2, 2, 2]
 
 
-def test_nonzero_budget_is_rejected_until_calibrated() -> None:
+def test_nonzero_budget_is_rejected() -> None:
     with pytest.raises(ValueError, match="only budget=0"):
         analyze_uniform_policy(
             _small_case("causal"),
@@ -393,163 +485,361 @@ def test_nonzero_trailing_coordinate_is_rejected() -> None:
     assert any(item.startswith("trailing_max=") for item in result.violations)
 
 
-def _fingerprint(block_m: int = 128) -> UniformSpecFingerprint:
-    return UniformSpecFingerprint(
-        path="dense",
-        persistent=False,
-        runtime_shape=True,
-        head_dim=64,
-        block_m=block_m,
-        block_n=64,
-        use_exp2_fast=True,
-        use_sinks=False,
-        emit_lse=False,
+# The scalar analyzer the vectorized one replaced, kept as an executable
+# specification: one query, one dimension, one rule at a time. The contracts
+# below require the two to agree on every field of the result.
+
+
+def _scalar_representation(
+    case: UniformCase, exposure: str, dim: int, first: int, last: int
+) -> tuple[bool, int]:
+    if exposure == "folded":
+        has_key = dim < case.seqlen_k
+        represented = residue_count(first, last, dim, case.head_dim) if has_key else 0
+        return has_key, represented
+    key = _basis_offset(exposure) + dim
+    has_key = key < case.seqlen_k
+    return has_key, int(has_key and first <= key <= last)
+
+
+def _scalar_head_targets(
+    case: UniformCase, represented: int, denominator: int
+) -> np.ndarray:
+    return np.array(
+        [
+            target_bits(represented << exponent, denominator, case.dtype)
+            for exponent in case.head_scale_exponents
+        ],
+        dtype=np.uint16,
     )
 
 
-def test_calibration_entries_are_zero_budget_ratified_and_scoped() -> None:
-    fp16_fp = _fingerprint(block_m=128)
-    bf16_fp = _fingerprint(block_m=64)
-    entry = CalibrationEntry(
-        ulp_budget=0,
-        case_ids=(UNIFORM_CAUSAL_FP16.case_id,),
-        spec=fp16_fp,
-    )
-    assert entry.covers(UNIFORM_CAUSAL_FP16, fp16_fp)
-    assert not entry.covers(UNIFORM_WINDOW_BF16, fp16_fp)
-    with pytest.raises(ValueError, match="ulp_budget=0"):
-        CalibrationEntry(1, (UNIFORM_CAUSAL_FP16.case_id,), fp16_fp)
-    with pytest.raises(ValueError, match="case_ids"):
-        CalibrationEntry(0, (), fp16_fp)
-    assert set(UNIFORM_CALIBRATION) == {
-        ("gfx942", "attention_gfx942_dense", "fp16"),
-        ("gfx942", "attention_gfx942_dense", "bf16"),
-    }
-    for key, installed in UNIFORM_CALIBRATION.items():
-        assert len(key) == 3
-        assert installed.ulp_budget == 0
-    assert UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", "fp16")].covers(
-        UNIFORM_CAUSAL_FP16, fp16_fp
-    )
-    assert UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", "bf16")].covers(
-        UNIFORM_WINDOW_BF16, bf16_fp
-    )
-
-
-_CALIBRATED_FP16_KEY = ("gfx942", "attention_gfx942_dense", "fp16")
-
-
-def test_calibration_mismatch_names_the_case_and_every_differing_field() -> None:
-    entry = CalibrationEntry(
-        ulp_budget=0,
-        case_ids=(UNIFORM_CAUSAL_FP16.case_id,),
-        spec=_fingerprint(block_m=128),
-    )
-    assert entry.mismatch(UNIFORM_CAUSAL_FP16, _fingerprint(block_m=128)) == ()
-
-    case_problem, field_problem = entry.mismatch(
-        UNIFORM_WINDOW_BF16, _fingerprint(block_m=64)
-    )
-    assert UNIFORM_WINDOW_BF16.case_id in case_problem
-    assert "not in calibrated" in case_problem
-    assert field_problem == "block_m: calibrated 128, resolved 64"
-
-    drifted = dataclasses.replace(
-        _fingerprint(block_m=128), persistent=True, use_sinks=True
-    )
-    assert entry.mismatch(UNIFORM_CAUSAL_FP16, drifted) == (
-        "persistent: calibrated False, resolved True",
-        "use_sinks: calibrated False, resolved True",
-    )
-    assert not entry.covers(UNIFORM_CAUSAL_FP16, drifted)
-
-
-def test_require_calibration_returns_the_covering_entry() -> None:
-    entry = require_calibration(
-        "gfx942",
-        "attention_gfx942_dense",
-        UNIFORM_CAUSAL_FP16,
-        _fingerprint(block_m=128),
-    )
-    assert entry is UNIFORM_CALIBRATION[_CALIBRATED_FP16_KEY]
-
-
-@pytest.mark.parametrize(
-    "arch,table,case,fingerprint,match",
-    [
-        pytest.param(
-            "gfx942",
-            {},
-            UNIFORM_CAUSAL_FP16,
-            _fingerprint(block_m=128),
-            "no uniform-probability calibration",
-            id="empty-table",
-        ),
-        pytest.param(
-            "gfx950",
-            UNIFORM_CALIBRATION,
-            UNIFORM_CAUSAL_FP16,
-            _fingerprint(block_m=128),
-            "no uniform-probability calibration",
-            id="other-arch",
-        ),
-        pytest.param(
-            "gfx942",
-            UNIFORM_CALIBRATION,
-            UNIFORM_CAUSAL_FP16,
-            _fingerprint(block_m=256),
-            "block_m: calibrated 128, resolved 256",
-            id="fingerprint-mismatch",
-        ),
-        pytest.param(
-            "gfx942",
-            UNIFORM_CALIBRATION,
-            UniformCase(1, 256, 256, 4, 4, 64, "fp16", "window", 64),
-            _fingerprint(block_m=128),
-            "not in calibrated",
-            id="case-not-listed",
-        ),
-    ],
-)
-def test_require_calibration_fails_closed_with_the_remedy(
-    arch: str,
-    table,
-    case: UniformCase,
-    fingerprint: UniformSpecFingerprint,
-    match: str,
-) -> None:
-    with pytest.raises(AssertionError) as raised:
-        require_calibration(
-            arch,
-            "attention_gfx942_dense",
-            case,
-            fingerprint,
-            table=table,
-            detail="control=ok",
+def _scalar_expected_bits(
+    case: UniformCase, exposure: str, mutation: UniformMutation | None
+) -> np.ndarray:
+    output = np.zeros(case.output_shape, dtype=np.uint16)
+    for query in range(case.seqlen_q):
+        first, last = legal_interval(case, query, mutation)
+        legal_count = max(0, last - first + 1)
+        if legal_count == 0:
+            continue
+        denominator = legal_count + int(
+            mutation == UniformMutation.DENOMINATOR_PLUS_ONE
         )
-    message = str(raised.value)
-    assert match in message
-    assert case.case_id in message
-    assert "ROCKE_ORACLE_FREE_CALIBRATION_OUT" in message
-    assert message.endswith("; control=ok")
+        for dim in range(case.head_dim):
+            _, represented = _scalar_representation(case, exposure, dim, first, last)
+            if represented:
+                output[:, query, :, dim] = _scalar_head_targets(
+                    case, represented, denominator
+                )
+    return output
 
 
-def test_gpu_lane_cases_are_exactly_the_calibrated_cases() -> None:
-    calibrated = [
-        case_id
-        for (arch, _, _), entry in UNIFORM_CALIBRATION.items()
-        if arch == "gfx942"
-        for case_id in entry.case_ids
-    ]
-    executed = [case.case_id for case in UNIFORM_QUICK_CASES]
-    assert len(set(executed)) == len(executed)
-    assert set(calibrated) == set(executed)
+def _scalar_analyze(
+    case: UniformCase,
+    observation: UniformObservation,
+    mutation: UniformMutation | None,
+    focused_rows: Sequence[int] = UNIFORM_FOCUSED_ROWS,
+) -> UniformResult:
+    row_shape = (case.batch, case.seqlen_q, case.nhead_q)
+    masked_row_mass = np.zeros(row_shape, dtype=np.float64)
+    basis_actual = np.zeros(row_shape, dtype=np.float64)
+    basis_target = np.zeros(row_shape, dtype=np.float64)
+    basis_valid = np.ones(row_shape, dtype=bool)
+    basis_represented = np.zeros(case.seqlen_q, dtype=np.int64)
+    basis_present = False
+
+    invalid_count = 0
+    max_negative = 0.0
+    max_masked_abs = 0.0
+    total_masked_mass = 0.0
+    max_trailing_abs = 0.0
+    max_ulp = 0
+    worst_ulp_nq = 0
+    worst_coordinate = None
+    worst_exposure = None
+    compared_count = 0
+    exact_count = 0
+    max_stored_sum_residual = 0.0
+    real_row_sum_error = 0.0
+    legacy_abs_residual = 0.0
+    max_ulp_within_proven = 0
+    max_ulp_beyond_proven = 0
+    focus = {query: 0.0 for query in focused_rows if 0 <= query < case.seqlen_q}
+    groups: dict[str, dict[int, _MutableNqStats]] = {}
+
+    head_scales = np.ldexp(1.0, np.array(case.head_scale_exponents))
+    for exposure, raw in observation.exposures:
+        decoded = decode_bits(raw, case.dtype) / head_scales[None, None, :, None]
+        fraction_bits, exponent_bits, _ = _FORMAT[case.dtype]
+        exponent_mask = ((1 << exponent_bits) - 1) << fraction_bits
+        finite = (raw & np.uint16(exponent_mask)) != np.uint16(exponent_mask)
+        invalid_count += int(np.count_nonzero(~finite))
+        negative = (
+            finite & ((raw & np.uint16(0x8000)) != 0) & ((raw & np.uint16(0x7FFF)) != 0)
+        )
+        if np.any(negative):
+            max_negative = max(max_negative, float(np.max(np.abs(decoded[negative]))))
+
+        exposure_groups = groups.setdefault(exposure, {})
+        folded_actual = np.zeros(row_shape, dtype=np.float64)
+        folded_target = np.zeros(row_shape, dtype=np.float64)
+        folded_valid = np.ones(row_shape, dtype=bool)
+        folded_represented = np.zeros(case.seqlen_q, dtype=np.int64)
+
+        for query in range(case.seqlen_q):
+            first, last = legal_interval(case, query, mutation)
+            legal_count = max(0, last - first + 1)
+            if legal_count == 0:
+                invalid_count += case.batch * case.nhead_q
+            denominator = legal_count + int(
+                mutation == UniformMutation.DENOMINATOR_PLUS_ONE
+            )
+            group = exposure_groups.setdefault(legal_count, _MutableNqStats())
+            group.rows += case.batch * case.nhead_q
+
+            for dim in range(case.head_dim):
+                has_key, represented = _scalar_representation(
+                    case, exposure, dim, first, last
+                )
+                values = decoded[:, query, :, dim]
+                value_bits = raw[:, query, :, dim]
+                valid = finite[:, query, :, dim]
+                coordinate_magnitudes = np.where(valid, np.abs(values), 0.0)
+
+                if not has_key:
+                    local = float(np.max(coordinate_magnitudes))
+                    max_trailing_abs = max(max_trailing_abs, local)
+                    continue
+                if represented == 0:
+                    local = float(np.max(coordinate_magnitudes))
+                    max_masked_abs = max(max_masked_abs, local)
+                    total_masked_mass += float(np.sum(coordinate_magnitudes))
+                    masked_row_mass[:, query, :] += coordinate_magnitudes
+                    continue
+
+                targets = _scalar_head_targets(case, represented, denominator)
+                target_value = decode_bits(targets, case.dtype) / head_scales
+                distances = np.abs(
+                    _ordered_array(value_bits).astype(np.int64)
+                    - _ordered_array(targets).astype(np.int64)[None, :]
+                )
+                valid_distances = distances[valid]
+                compared = int(valid_distances.size)
+                exact = int(np.count_nonzero(valid_distances == 0))
+                compared_count += compared
+                exact_count += exact
+                group.compared += compared
+                group.exact += exact
+                local_ulp = int(np.max(valid_distances)) if compared else 0
+                group.max_ulp = max(group.max_ulp, local_ulp)
+                if legal_count < _proven_limit(case.dtype, exposure):
+                    max_ulp_within_proven = max(max_ulp_within_proven, local_ulp)
+                else:
+                    max_ulp_beyond_proven = max(max_ulp_beyond_proven, local_ulp)
+                if local_ulp > max_ulp:
+                    max_ulp = local_ulp
+                    worst_ulp_nq = legal_count
+                    worst_exposure = exposure
+                    masked_distances = np.where(valid, distances, -1)
+                    batch, head = np.unravel_index(
+                        int(np.argmax(masked_distances)), masked_distances.shape
+                    )
+                    worst_coordinate = (int(batch), query, int(head), dim)
+
+                real_expected = represented / denominator
+                if np.any(valid):
+                    errors = np.abs(values[valid] - real_expected)
+                    local_error = float(np.max(errors))
+                    legacy_abs_residual = max(legacy_abs_residual, local_error)
+                    if query in focus:
+                        focus[query] = max(focus[query], local_error)
+
+                if exposure == "folded":
+                    folded_actual[:, query, :] += np.where(valid, values, 0.0)
+                    folded_target[:, query, :] += target_value
+                    folded_valid[:, query, :] &= valid
+                    folded_represented[query] += represented
+                else:
+                    basis_present = True
+                    basis_actual[:, query, :] += np.where(valid, values, 0.0)
+                    basis_target[:, query, :] += target_value
+                    basis_valid[:, query, :] &= valid
+                    basis_represented[query] += represented
+
+            if exposure == "folded" and folded_represented[query] == legal_count:
+                valid_rows = folded_valid[:, query, :]
+                if np.any(valid_rows):
+                    residuals = np.abs(
+                        folded_actual[:, query, :] - folded_target[:, query, :]
+                    )
+                    local = float(np.max(residuals[valid_rows]))
+                    max_stored_sum_residual = max(max_stored_sum_residual, local)
+                    group.max_stored_sum_residual = max(
+                        group.max_stored_sum_residual, local
+                    )
+                    real_errors = np.abs(folded_actual[:, query, :] - 1.0)
+                    real_row_sum_error = max(
+                        real_row_sum_error, float(np.max(real_errors[valid_rows]))
+                    )
+
+    if basis_present:
+        basis_groups = groups.setdefault("basis_union", {})
+        for query in range(case.seqlen_q):
+            first, last = legal_interval(case, query, mutation)
+            legal_count = max(0, last - first + 1)
+            group = basis_groups.setdefault(legal_count, _MutableNqStats())
+            group.rows += case.batch * case.nhead_q
+            if basis_represented[query] != legal_count:
+                continue
+            valid_rows = basis_valid[:, query, :]
+            if not np.any(valid_rows):
+                continue
+            residuals = np.abs(basis_actual[:, query, :] - basis_target[:, query, :])
+            local = float(np.max(residuals[valid_rows]))
+            max_stored_sum_residual = max(max_stored_sum_residual, local)
+            group.max_stored_sum_residual = max(group.max_stored_sum_residual, local)
+            real_errors = np.abs(basis_actual[:, query, :] - 1.0)
+            real_row_sum_error = max(
+                real_row_sum_error, float(np.max(real_errors[valid_rows]))
+            )
+
+    violations: list[str] = []
+    if invalid_count:
+        violations.append(f"invalid={invalid_count}")
+    if max_negative != 0.0:
+        violations.append(f"negative_max={max_negative:.9g}")
+    if max_masked_abs != 0.0:
+        violations.append(f"masked_max={max_masked_abs:.9g}")
+    if total_masked_mass != 0.0:
+        violations.append(f"masked_mass={total_masked_mass:.9g}")
+    if max_trailing_abs != 0.0:
+        violations.append(f"trailing_max={max_trailing_abs:.9g}")
+    if max_ulp > 0:
+        violations.append(f"target_ulp={max_ulp}>0 at N_q={worst_ulp_nq}")
+    if max_stored_sum_residual != 0.0:
+        violations.append(f"stored_row_sum={max_stored_sum_residual:.9g}")
+    if compared_count == 0:
+        violations.append("no_legal_coordinate_observed")
+
+    return UniformResult(
+        violations=tuple(violations),
+        invalid_count=invalid_count,
+        max_negative=max_negative,
+        max_masked_abs=max_masked_abs,
+        total_masked_mass=total_masked_mass,
+        max_row_masked_mass=float(np.max(masked_row_mass)),
+        max_trailing_abs=max_trailing_abs,
+        max_ulp=max_ulp,
+        worst_ulp_nq=worst_ulp_nq,
+        worst_coordinate=worst_coordinate,
+        worst_exposure=worst_exposure,
+        compared_count=compared_count,
+        exact_count=exact_count,
+        max_stored_sum_residual=max_stored_sum_residual,
+        real_row_sum_error=real_row_sum_error,
+        legacy_abs_residual=legacy_abs_residual,
+        focused_row_errors=MappingProxyType(focus),
+        max_ulp_within_proven=max_ulp_within_proven,
+        max_ulp_beyond_proven=max_ulp_beyond_proven,
+        per_nq=_freeze_groups(groups),
+    )
+
+
+# Small shapes, so the scalar reference stays fast: batch 2 and GQA 4/2 for the
+# indexing, a key length that is not a multiple of D for trailing lanes, windows
+# narrower than, equal to and wider than D, and a one-key window whose
+# exclude-oldest mutation empties every row.
+_EQUIVALENCE_CASES = (
+    UniformCase(2, 12, 12, 4, 2, 4, "fp16", "causal"),
+    UniformCase(2, 12, 10, 4, 2, 4, "bf16", "causal"),
+    UniformCase(1, 12, 12, 4, 2, 4, "bf16", "window", 3),
+    UniformCase(2, 12, 10, 4, 2, 4, "fp16", "window", 4),
+    UniformCase(1, 16, 16, 2, 1, 4, "fp16", "window", 6),
+    UniformCase(1, 8, 8, 2, 1, 4, "bf16", "window", 1),
+)
+
+
+def _equivalence_observations(
+    case: UniformCase,
+) -> list[tuple[str, UniformObservation]]:
+    """Correct, mutated-kernel, head-mixed and single-coordinate-damaged outputs."""
+    correct = correct_uniform_observation(case)
+    exposures = [name for name, _ in correct.exposures]
+    observations = [("correct", correct)]
+    for mutation in _mutations_for(case)[1:]:
+        observations.append(
+            (
+                f"kernel-{mutation.value}",
+                UniformObservation(
+                    tuple(
+                        (name, uniform_expected_bits(case, name, mutation))
+                        for name in exposures
+                    )
+                ),
+            )
+        )
+    observations.append(("broadcast", broadcast_query_head(correct, 0)))
+    last = case.seqlen_q - 1
+    folded_bits = int(correct.by_name["folded"][0, last, 0, 0])
+    infinity = 0x7C00 if case.dtype == "fp16" else 0x7F80
+    damage = {
+        "one-ulp": ("basis@0", (0, last, case.nhead_q - 1, 0), None),
+        "two-ulp-folded": ("folded", (0, last, 0, 0), folded_bits + 2),
+        "nan": ("basis@0", (case.batch - 1, last, 1, 0), 0x7E00),
+        "infinity": ("folded", (0, last, 0, 1), infinity),
+        "negative": ("basis@0", (0, last, 0, 0), 0xBC00),
+        "masked-leak": (f"basis@{case.head_dim}", (0, 0, 0, 0), 0x0001),
+    }
+    for label, (name, coordinate, bits) in damage.items():
+        if bits is None:
+            bits = int(correct.by_name[name][coordinate]) + 1
+        observations.append((label, _replace_bits(correct, name, coordinate, bits)))
+    return observations
+
+
+@pytest.mark.parametrize("case", _EQUIVALENCE_CASES, ids=lambda case: case.case_id)
+def test_vectorized_expected_bits_match_the_scalar_construction(
+    case: UniformCase,
+) -> None:
+    names = [f"basis@{offset}" for offset in uniform_basis_offsets(case)]
+    names += ["basis@64", "folded"]
+    for mutation in _mutations_for(case):
+        for name in names:
+            np.testing.assert_array_equal(
+                uniform_expected_bits(case, name, mutation),
+                _scalar_expected_bits(case, name, mutation),
+                err_msg=f"{name} {mutation}",
+            )
+
+
+@pytest.mark.parametrize("case", _EQUIVALENCE_CASES, ids=lambda case: case.case_id)
+def test_vectorized_analyzer_matches_the_scalar_reference(case: UniformCase) -> None:
+    focused = range(case.seqlen_q)
+    for label, observation in _equivalence_observations(case):
+        for mutation in _mutations_for(case):
+            vectorized = analyze_uniform_policy(
+                case, observation, budget=0, mutation=mutation, focused_rows=focused
+            )
+            scalar = _scalar_analyze(case, observation, mutation, focused)
+            assert vectorized == scalar, f"{label} under {mutation}"
+
+
+def test_vectorized_analyzer_matches_on_a_quick_case_spot_check() -> None:
+    """One full-size quick case, so the shipped shape is covered too."""
+    case = UNIFORM_WINDOW_FP16
+    observation = _replace_bits(
+        correct_uniform_observation(case), "basis@128", (0, 200, 5, 10), 0x0001
+    )
+    vectorized = analyze_uniform_policy(case, observation, budget=0)
+    assert vectorized == _scalar_analyze(case, observation, None)
+    assert vectorized.violations
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
 def test_uniform_inputs_encode_without_rounding(case: UniformCase, dtype: str) -> None:
-    profiles = [uniform_inputs(case, offset) for offset in UNIFORM_BASIS_OFFSETS]
+    profiles = [uniform_inputs(case, offset) for offset in uniform_basis_offsets(case)]
     profiles.append(uniform_inputs_folded(case))
     for arrays in profiles:
         for values in arrays:
@@ -609,7 +899,7 @@ def _host_bits(case: UniformCase) -> dict[str, np.ndarray]:
 
 
 def test_subject_host_validation_accepts_raw_bit_inputs() -> None:
-    _validate_host_bits(UNIFORM_CAUSAL_FP16, **_host_bits(UNIFORM_CAUSAL_FP16))
+    _validate_host_bits(UNIFORM_WINDOW_FP16, **_host_bits(UNIFORM_WINDOW_FP16))
 
 
 @pytest.mark.parametrize(
@@ -622,10 +912,10 @@ def test_subject_host_validation_accepts_raw_bit_inputs() -> None:
     ],
 )
 def test_subject_host_validation_rejects_bad_abi(name, replace, error, match) -> None:
-    arrays = _host_bits(UNIFORM_CAUSAL_FP16)
+    arrays = _host_bits(UNIFORM_WINDOW_FP16)
     arrays[name] = replace(arrays[name])
     with pytest.raises(error, match=match):
-        _validate_host_bits(UNIFORM_CAUSAL_FP16, **arrays)
+        _validate_host_bits(UNIFORM_WINDOW_FP16, **arrays)
 
 
 class _FakeDeviceBuffer:
@@ -658,7 +948,7 @@ def _fake_device_buffers(
 
 
 def test_subject_device_validation_accepts_separate_aligned_buffers() -> None:
-    _validate_device_buffers(*_fake_device_buffers(UNIFORM_CAUSAL_FP16))
+    _validate_device_buffers(*_fake_device_buffers(UNIFORM_WINDOW_FP16))
 
 
 @pytest.mark.parametrize(
@@ -674,31 +964,36 @@ def test_subject_device_validation_accepts_separate_aligned_buffers() -> None:
     ],
 )
 def test_subject_device_validation_rejects_bad_buffers(mutation, match: str) -> None:
-    buffers, sizes = _fake_device_buffers(UNIFORM_CAUSAL_FP16)
+    buffers, sizes = _fake_device_buffers(UNIFORM_WINDOW_FP16)
     mutation(buffers)
     with pytest.raises(ValueError, match=match):
         _validate_device_buffers(buffers, sizes)
 
 
-def test_subject_accepts_only_the_shipped_uniform_cases() -> None:
-    _validate_supported_case(UNIFORM_CAUSAL_FP16)
-    _validate_supported_case(UNIFORM_WINDOW_BF16)
-    with pytest.raises(ValueError, match="D64"):
-        _validate_supported_case(UniformCase(1, 256, 256, 4, 4, 128, "fp16", "causal"))
+def test_subject_requires_a_known_arch_and_the_proven_scope() -> None:
+    for arch in DENSE_SUBJECTS:
+        for case in UNIFORM_QUICK_CASES:
+            _validate_supported_case(arch, case)
+    with pytest.raises(ValueError, match="no dense uniform-probability subject"):
+        _validate_supported_case("gfx90a", UNIFORM_WINDOW_FP16)
+    with pytest.raises(ValueError, match="outside the proven zero-ULP range"):
+        _validate_supported_case(
+            "gfx942", UniformCase(1, 2048, 2048, 8, 2, 64, "fp16", "causal")
+        )
 
 
 def _fake_tuning_spec(**overrides) -> SimpleNamespace:
-    """A dispatch result shaped like the calibrated fp16 causal quick case."""
+    """A dispatch result shaped like the FP16 GQA window quick case."""
     kernel_spec = SimpleNamespace(
         batch=1,
         seqlen_q=256,
         seqlen_kv=256,
-        num_query_heads=4,
-        num_kv_heads=4,
+        num_query_heads=8,
+        num_kv_heads=2,
         head_size=64,
         dtype="fp16",
         causal=True,
-        sliding_window=0,
+        sliding_window=64,
         persistent=False,
         runtime_shape=True,
         block_m=128,
@@ -708,7 +1003,8 @@ def _fake_tuning_spec(**overrides) -> SimpleNamespace:
         kv_segments=1,
         ragged=False,
         causal_bottom_right=False,
-        resolved_use_exp2_fast=lambda: True,
+        paged=False,
+        varlen=False,
     )
     for name, value in overrides.items():
         setattr(kernel_spec, name, value)
@@ -720,66 +1016,93 @@ def _fake_tuning_spec(**overrides) -> SimpleNamespace:
     )
 
 
-def test_subject_requires_the_proof_pinned_resolved_spec() -> None:
-    tuning_spec = _fake_tuning_spec()
-    kernel_spec = tuning_spec.kernel_spec
-    expected = _fingerprint(block_m=128)
-    assert _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec) == expected
-    # Launch preconditions: scope the fingerprint does not record, and buffers
-    # the adapter does not supply. These fail before any launch.
-    for name, value, match in (
+@pytest.mark.parametrize(
+    "name,value,match",
+    [
         ("kv_segments", 2, "single-pass"),
         ("ragged", True, "ragged"),
         ("causal_bottom_right", True, "top-left"),
         ("use_sinks", True, "sinks"),
         ("emit_lse", True, "LSE"),
-    ):
-        original = getattr(kernel_spec, name)
-        setattr(kernel_spec, name, value)
-        with pytest.raises(AssertionError, match=match):
-            _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec)
-        setattr(kernel_spec, name, original)
-    assert _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec) == expected
+        ("paged", True, "non-paged"),
+        ("varlen", True, "non-varlen"),
+        ("num_kv_heads", 8, "num_kv_heads=8"),
+        ("sliding_window", 0, "sliding_window=0"),
+    ],
+)
+def test_subject_refuses_resolved_specs_outside_the_proof(
+    name: str, value, match: str
+) -> None:
+    _verify_resolved_spec("gfx942", UNIFORM_WINDOW_FP16, _fake_tuning_spec())
+    with pytest.raises(AssertionError, match=match):
+        _verify_resolved_spec(
+            "gfx942", UNIFORM_WINDOW_FP16, _fake_tuning_spec(**{name: value})
+        )
+
+
+def test_subject_refuses_another_arch_or_candidate() -> None:
+    with pytest.raises(AssertionError, match="arch='gfx942'"):
+        _verify_resolved_spec("gfx950", UNIFORM_WINDOW_FP16, _fake_tuning_spec())
+    other = _fake_tuning_spec()
+    other.candidate_name = "attention_gfx942_dense_qbminor"
+    with pytest.raises(AssertionError, match="candidate="):
+        _verify_resolved_spec("gfx942", UNIFORM_WINDOW_FP16, other)
+    other = _fake_tuning_spec()
+    other.path = "2d"
+    with pytest.raises(AssertionError, match="path="):
+        _verify_resolved_spec("gfx942", UNIFORM_WINDOW_FP16, other)
 
 
 @pytest.mark.parametrize(
-    "name,value,match",
+    "name,value",
     [
-        ("persistent", True, "persistent: calibrated False, resolved True"),
-        ("runtime_shape", False, "runtime_shape: calibrated True, resolved False"),
-        ("block_m", 64, "block_m: calibrated 128, resolved 64"),
-        ("block_n", 32, "block_n: calibrated 64, resolved 32"),
-        (
-            "resolved_use_exp2_fast",
-            lambda: False,
-            "use_exp2_fast: calibrated True, resolved False",
-        ),
+        ("persistent", True),
+        ("runtime_shape", False),
+        ("block_m", 64),
+        ("block_n", 32),
+        ("use_exp2_fast", False),
+        ("waves_per_eu", 1),
     ],
 )
-def test_fingerprint_drift_resolves_and_fails_at_the_calibration_gate(
-    name: str, value, match: str
+def test_tuning_knobs_inside_the_proof_stay_free(name: str, value) -> None:
+    """The proof covers every single-pass dense variant, so a retune that keeps
+    the scope keeps running instead of failing a re-ratification gate."""
+    _verify_resolved_spec(
+        "gfx942", UNIFORM_WINDOW_FP16, _fake_tuning_spec(**{name: value})
+    )
+
+
+@pytest.mark.parametrize(
+    "subject_case",
+    QUICK_SUBJECT_CASES,
+    ids=lambda item: f"{item[0]}-{item[1].case_id}",
+)
+def test_subject_resolves_real_shipped_spec_without_torch(
+    subject_case: tuple[str, UniformCase],
 ) -> None:
-    """A fingerprint-only drift is not a launch precondition: it resolves (so the
-    case launches and writes calibration records) and then fails in
-    ``require_calibration`` with the differing field and the remedy."""
-    tuning_spec = _fake_tuning_spec(**{name: value})
-    drifted = _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec)
-    with pytest.raises(AssertionError, match=match) as raised:
-        require_calibration(
-            "gfx942", "attention_gfx942_dense", UNIFORM_CAUSAL_FP16, drifted
-        )
-    assert "ROCKE_ORACLE_FREE_CALIBRATION_OUT" in str(raised.value)
-
-
-@pytest.mark.parametrize("case", [UNIFORM_CAUSAL_FP16, UNIFORM_WINDOW_BF16])
-def test_subject_resolves_real_shipped_spec_without_torch(case: UniformCase) -> None:
-    tuning_spec = _resolve_tuning_spec(case)
+    arch, case = subject_case
+    tuning_spec = _resolve_tuning_spec(arch, case)
     assert tuning_spec.path == "dense"
-    assert tuning_spec.arch == "gfx942"
-    assert tuning_spec.candidate_name == "attention_gfx942_dense"
-    subject = resolve_dense_subject(case)
-    assert subject.case_id == case.case_id
-    assert subject.fingerprint == _verify_resolved_spec(case, tuning_spec)
+    assert tuning_spec.arch == arch
+    assert tuning_spec.candidate_name == DENSE_SUBJECTS[arch].candidate_name
+    subject = resolve_dense_subject(arch, case)
+    assert (subject.arch, subject.case_id) == (arch, case.case_id)
+    assert subject.candidate_name == DENSE_SUBJECTS[arch].candidate_name
+
+
+@pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
+def test_gfx950_subject_entry_resolves_without_torch(case: UniformCase) -> None:
+    """gfx950 has no cases in the GPU lane yet; its table entry must still name a
+    candidate that dispatch resolves inside the proof's scope."""
+    subject = resolve_dense_subject("gfx950", case)
+    assert subject.candidate_name == DENSE_SUBJECTS["gfx950"].candidate_name
+
+
+def test_quick_matrix_runs_every_quick_case_on_a_known_subject() -> None:
+    assert len(set(QUICK_SUBJECT_CASES)) == len(QUICK_SUBJECT_CASES)
+    assert {arch for arch, _ in QUICK_SUBJECT_CASES} <= set(DENSE_SUBJECTS)
+    on_gfx942 = [case for arch, case in QUICK_SUBJECT_CASES if arch == "gfx942"]
+    assert on_gfx942 == list(UNIFORM_QUICK_CASES)
 
 
 def _dotted_name(node: ast.AST) -> str:
@@ -836,7 +1159,7 @@ def test_oracle_free_sources_have_no_complete_attention_dependency() -> None:
 
 
 # TheRock's provider test environment has NumPy and ml_dtypes but no torch, so a
-# torch dependency anywhere in this suite would turn the gfx942 gate into a skip.
+# torch dependency anywhere in this suite would turn the GPU gate into a skip.
 # The module name is held in one constant and compared by equality, so the
 # checker below does not flag its own source.
 _TORCH = "torch"
@@ -919,11 +1242,11 @@ _SKIP_CALLS = frozenset({"skip", "skipif", "importorskip", "xfail"})
 
 
 def _gpu_lane_tree() -> ast.Module:
-    path = Path(__file__).with_name("test_analytical_gfx942.py")
+    path = Path(__file__).with_name("test_analytical_dense.py")
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def test_gpu_lane_parametrizes_over_the_calibrated_case_list() -> None:
+def test_gpu_lane_parametrizes_over_the_quick_subject_matrix() -> None:
     argvalues: list[ast.AST] = []
     for node in ast.walk(_gpu_lane_tree()):
         if not isinstance(node, ast.Call):
@@ -935,12 +1258,12 @@ def test_gpu_lane_parametrizes_over_the_calibrated_case_list() -> None:
     assert argvalues, "the GPU lane has no parametrized test"
     for value in argvalues:
         assert isinstance(value, ast.Name), ast.dump(value)
-        assert value.id == "UNIFORM_QUICK_CASES"
+        assert value.id == "QUICK_SUBJECT_CASES"
 
 
 def test_gpu_lane_never_skips_after_the_architecture_gate() -> None:
-    """The shared gfx942 gate is the only permitted skip; on gfx942 a missing or
-    mismatched calibration must fail, never skip."""
+    """The shared architecture gate is the only permitted skip; on the case's
+    architecture an out-of-scope dispatch outcome must fail, never skip."""
     escapes = [
         f"line {node.lineno}: {_dotted_name(node.func)}"
         for node in ast.walk(_gpu_lane_tree())
@@ -951,9 +1274,9 @@ def test_gpu_lane_never_skips_after_the_architecture_gate() -> None:
 
 
 def test_gpu_lane_gates_through_the_require_aware_arch_helper() -> None:
-    """The architecture gate is ``current_device_arch_in(("gfx942",), ...)``, so
-    ``ROCKE_REQUIRE_GFX942=1`` fails a lane that lost its gfx942 GPU instead of
-    letting it pass with the GPU cases skipped."""
+    """The architecture gate is ``current_device_arch_in((arch,), ...)`` on the
+    case's own architecture, so ``ROCKE_REQUIRE_<ARCH>=1`` fails a lane that lost
+    its GPU instead of letting it pass with the GPU cases skipped."""
     gates = [
         node
         for node in ast.walk(_gpu_lane_tree())
@@ -961,27 +1284,29 @@ def test_gpu_lane_gates_through_the_require_aware_arch_helper() -> None:
         and _dotted_name(node.func) == "current_device_arch_in"
     ]
     assert len(gates) == 1, [ast.dump(gate) for gate in gates]
-    assert ast.literal_eval(gates[0].args[0]) == ("gfx942",)
+    arches = gates[0].args[0]
+    assert isinstance(arches, ast.Tuple), ast.dump(arches)
+    assert [_dotted_name(item) for item in arches.elts] == ["arch"]
 
 
 def test_unrejected_mutation_blames_a_failing_control() -> None:
     """A kernel with a mask bug can write exactly what that mutation predicts, so
     the mutation is not rejected. The message must then point at the control's
     violations rather than at the checker."""
-    case = UNIFORM_CAUSAL_FP16
+    case = UNIFORM_CAUSAL_BF16
     mutation = UniformMutation.INCLUDE_FUTURE_KEY
-    exposures = [f"basis@{offset}" for offset in UNIFORM_BASIS_OFFSETS] + ["folded"]
+    exposures = [f"basis@{offset}" for offset in uniform_basis_offsets(case)]
     buggy = UniformObservation(
         tuple(
             (exposure, uniform_expected_bits(case, exposure, mutation))
-            for exposure in exposures
+            for exposure in [*exposures, "folded"]
         )
     )
     control = analyze_uniform_policy(case, buggy, budget=0)
     mutated = analyze_uniform_policy(case, buggy, budget=0, mutation=mutation)
     assert control.violations
 
-    blamed = _not_rejected(case, mutation.value, mutated, control)
+    blamed = _not_rejected("label", mutation.value, mutated, control)
     assert "checker failed" not in blamed
     assert "kernel output itself fails" in blamed
     assert format_uniform_result(control) in blamed
@@ -989,7 +1314,7 @@ def test_unrejected_mutation_blames_a_failing_control() -> None:
     clean = analyze_uniform_policy(case, correct_uniform_observation(case), budget=0)
     assert not clean.violations
     assert "checker failed to reject" in _not_rejected(
-        case, mutation.value, mutated, clean
+        "label", mutation.value, mutated, clean
     )
 
 
@@ -1013,11 +1338,12 @@ sys.meta_path.insert(0, _RefuseTorch())
 config = json.loads(sys.argv[1])
 sys.path[:0] = config["path"]
 package = config["package"]
-analytical = importlib.import_module(package + "._analytical")
-subject = importlib.import_module(package + "._gfx942_subject")
-importlib.import_module(package + ".test_analytical_gfx942")
-for case in analytical.UNIFORM_QUICK_CASES:
-    subject.resolve_dense_subject(case)
+importlib.import_module(package + "._analytical")
+subject = importlib.import_module(package + "._dense_subject")
+importlib.import_module(package + ".test_analytical_dense")
+for arch, case in subject.QUICK_SUBJECT_CASES:
+    subject.resolve_dense_subject(arch, case)
+    importlib.import_module(subject.DENSE_SUBJECTS[arch].runner_module)
 loaded = sorted(name for name in sys.modules if name.split(".")[0] == "torch")
 assert not loaded, loaded
 print("torch-free import and resolution ok")

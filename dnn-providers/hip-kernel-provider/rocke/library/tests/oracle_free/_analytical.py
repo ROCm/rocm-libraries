@@ -11,7 +11,7 @@ legal-key membership and exact rational rounding into the subject dtype.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from enum import Enum
 from functools import cache
 from types import MappingProxyType
@@ -25,7 +25,6 @@ _FORMAT = {
     "fp16": (10, 5, 15),
     "bf16": (7, 8, 127),
 }
-UNIFORM_BASIS_OFFSETS = (0, 64, 128, 192)
 UNIFORM_FOCUSED_ROWS = (0, 62, 63, 64, 127, 128, 255)
 # KV head h scales its V profile by 2**h, so heads are distinguishable: a kernel
 # that reads the wrong V head, uses a wrong head stride, or writes one output head
@@ -108,7 +107,7 @@ class UniformCase:
 
     @property
     def case_id(self) -> str:
-        """Return a stable identifier used to close calibration scope."""
+        """Return a stable identifier for test ids and resolved-subject checks."""
         mask = f"window{self.window}" if self.mask == "window" else self.mask
         return (
             f"{self.dtype}-{mask}-b{self.batch}-sq{self.seqlen_q}-"
@@ -116,157 +115,14 @@ class UniformCase:
         )
 
 
-UNIFORM_CAUSAL_FP16 = UniformCase(1, 256, 256, 4, 4, 64, "fp16", "causal")
-UNIFORM_WINDOW_BF16 = UniformCase(1, 256, 256, 4, 4, 64, "bf16", "window", 64)
-# The GPU lane's parameter list. A CPU contract pins it to the calibrated case set,
-# so a calibrated case cannot silently stop executing.
-UNIFORM_QUICK_CASES = (UNIFORM_CAUSAL_FP16, UNIFORM_WINDOW_BF16)
-
-
-@dataclass(frozen=True)
-class UniformSpecFingerprint:
-    """Proof-relevant fields of the dispatch-resolved dense subject."""
-
-    path: str
-    persistent: bool
-    runtime_shape: bool
-    head_dim: int
-    block_m: int
-    block_n: int
-    use_exp2_fast: bool
-    use_sinks: bool
-    emit_lse: bool
-
-
-@dataclass(frozen=True)
-class CalibrationEntry:
-    """One ratified, closed-scope zero-ULP policy entry.
-
-    Installing an entry in ``UNIFORM_CALIBRATION`` is the ratification; the
-    develop revision and gfx942 evidence behind it belong in the commit that
-    edits the table, not in a field nothing reads."""
-
-    ulp_budget: int
-    case_ids: tuple[str, ...]
-    spec: UniformSpecFingerprint
-
-    def __post_init__(self) -> None:
-        if self.ulp_budget != 0:
-            raise ValueError(
-                "the uniform-probability check currently supports only ulp_budget=0"
-            )
-        if not self.case_ids or len(set(self.case_ids)) != len(self.case_ids):
-            raise ValueError("case_ids must be nonempty and unique")
-
-    def mismatch(
-        self, case: UniformCase, spec: UniformSpecFingerprint
-    ) -> tuple[str, ...]:
-        """Name every reason this entry does not authorize ``case`` and ``spec``."""
-        problems: list[str] = []
-        if case.case_id not in self.case_ids:
-            problems.append(f"case {case.case_id} not in calibrated {self.case_ids}")
-        for item in fields(UniformSpecFingerprint):
-            calibrated = getattr(self.spec, item.name)
-            resolved = getattr(spec, item.name)
-            if calibrated != resolved:
-                problems.append(
-                    f"{item.name}: calibrated {calibrated!r}, resolved {resolved!r}"
-                )
-        return tuple(problems)
-
-    def covers(self, case: UniformCase, spec: UniformSpecFingerprint) -> bool:
-        """Return whether this entry authorizes ``case`` and resolved ``spec``."""
-        return not self.mismatch(case, spec)
-
-
-_DENSE_QUICK_SPEC_FP16 = UniformSpecFingerprint(
-    path="dense",
-    persistent=False,
-    runtime_shape=True,
-    head_dim=64,
-    block_m=128,
-    block_n=64,
-    use_exp2_fast=True,
-    use_sinks=False,
-    emit_lse=False,
-)
-
-_DENSE_QUICK_SPEC_BF16 = UniformSpecFingerprint(
-    path="dense",
-    persistent=False,
-    runtime_shape=True,
-    head_dim=64,
-    block_m=64,
-    block_n=64,
-    use_exp2_fast=True,
-    use_sinks=False,
-    emit_lse=False,
-)
-
-
-# Ratified on gfx942 against the exact quick cases below. A future shape or
-# resolved-spec change is uncalibrated even when candidate name and dtype match.
-UNIFORM_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingProxyType(
-    {
-        (
-            "gfx942",
-            "attention_gfx942_dense",
-            "fp16",
-        ): CalibrationEntry(
-            ulp_budget=0,
-            case_ids=(UNIFORM_CAUSAL_FP16.case_id,),
-            spec=_DENSE_QUICK_SPEC_FP16,
-        ),
-        (
-            "gfx942",
-            "attention_gfx942_dense",
-            "bf16",
-        ): CalibrationEntry(
-            ulp_budget=0,
-            case_ids=(UNIFORM_WINDOW_BF16.case_id,),
-            spec=_DENSE_QUICK_SPEC_BF16,
-        ),
-    }
-)
-
-
-_RECALIBRATION_REMEDY = (
-    "re-run the case on gfx942 with ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir>, "
-    "review the records, and update UNIFORM_CALIBRATION (spec, case_ids) "
-    "deliberately"
-)
-
-
-def require_calibration(
-    arch: str,
-    candidate_name: str,
-    case: UniformCase,
-    spec: UniformSpecFingerprint,
-    *,
-    table: Mapping[tuple[str, str, str], CalibrationEntry] = UNIFORM_CALIBRATION,
-    detail: str = "",
-) -> CalibrationEntry:
-    """Return the entry that authorizes this resolved case, or fail closed.
-
-    A missing entry or any scope mismatch is a failure rather than a skip: a
-    dispatch change that picks another variant must be re-verified on the
-    hardware, not silently dropped from the gate."""
-    key = (arch, candidate_name, case.dtype)
-    suffix = f"; {detail}" if detail else ""
-    entry = table.get(key)
-    if entry is None:
-        raise AssertionError(
-            f"no uniform-probability calibration for {key}, case={case.case_id}; "
-            f"{_RECALIBRATION_REMEDY}{suffix}"
-        )
-    problems = entry.mismatch(case, spec)
-    if problems:
-        raise AssertionError(
-            f"uniform-probability calibration {key} does not cover "
-            f"case={case.case_id}: {'; '.join(problems)}; "
-            f"{_RECALIBRATION_REMEDY}{suffix}"
-        )
-    return entry
+# GQA (four query heads per KV head), so a kernel that drops the group divisor
+# reads the wrong V scale and fails. The dtype/mask pairing complements the
+# pinned SDPA cohort, which already runs FP16 causal on gfx942.
+UNIFORM_WINDOW_FP16 = UniformCase(1, 256, 256, 8, 2, 64, "fp16", "window", 64)
+UNIFORM_CAUSAL_BF16 = UniformCase(1, 256, 256, 8, 2, 64, "bf16", "causal")
+# The GPU lane's cases. A CPU contract pins the lane's parametrization to them, so
+# a case cannot silently stop executing.
+UNIFORM_QUICK_CASES = (UNIFORM_WINDOW_FP16, UNIFORM_CAUSAL_BF16)
 
 
 def _coerce_mutation(mutation: UniformMutation | str | None) -> UniformMutation | None:
@@ -313,23 +169,56 @@ def legal_interval(
         raise IndexError(query)
     selected = _coerce_mutation(mutation)
     _validate_mutation(case, selected)
+    upper_shift, window = _interval_rule(case, selected)
+    upper = min(query + upper_shift, case.seqlen_k - 1)
+    lower = max(0, query - window + 1) if case.mask == "window" else 0
+    return (lower, upper) if lower <= upper else (0, -1)
 
+
+def _interval_rule(
+    case: UniformCase, selected: UniformMutation | None
+) -> tuple[int, int]:
+    """Return the (possibly mutated) rule's upper-bound shift and window."""
     upper_shift = 0
     if selected == UniformMutation.INCLUDE_FUTURE_KEY:
         upper_shift = 1
     elif selected == UniformMutation.EXCLUDE_LAST_KEY:
         upper_shift = -1
-    upper = min(query + upper_shift, case.seqlen_k - 1)
+    window = case.window
+    if selected == UniformMutation.INCLUDE_OLD_WINDOW_KEY:
+        window += 1
+    elif selected == UniformMutation.EXCLUDE_OLDEST_WINDOW_KEY:
+        window -= 1
+    return upper_shift, window
 
-    lower = 0
+
+def _legal_bounds(
+    case: UniformCase, selected: UniformMutation | None
+) -> tuple[np.ndarray, np.ndarray]:
+    """:func:`legal_interval` for every query at once, as int64 ``first``/``last``."""
+    upper_shift, window = _interval_rule(case, selected)
+    query = np.arange(case.seqlen_q, dtype=np.int64)
+    upper = np.minimum(query + upper_shift, case.seqlen_k - 1)
     if case.mask == "window":
-        window = case.window
-        if selected == UniformMutation.INCLUDE_OLD_WINDOW_KEY:
-            window += 1
-        elif selected == UniformMutation.EXCLUDE_OLDEST_WINDOW_KEY:
-            window -= 1
-        lower = max(0, query - window + 1)
-    return (lower, upper) if lower <= upper else (0, -1)
+        lower = np.maximum(query - window + 1, 0)
+    else:
+        lower = np.zeros_like(query)
+    empty = lower > upper
+    return np.where(empty, 0, lower), np.where(empty, -1, upper)
+
+
+def _legal_counts(
+    case: UniformCase, selected: UniformMutation | None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return per-query ``first``, ``last`` and ``N_q``.
+
+    The correct rule never leaves a row without a legal key; a mutated one may."""
+    first, last = _legal_bounds(case, selected)
+    legal_count = np.maximum(last - first + 1, 0)
+    if selected is None and np.any(legal_count == 0):
+        query = int(np.argmax(legal_count == 0))
+        raise ValueError(f"correct legal-key rule has an empty row at q={query}")
+    return first, last, legal_count
 
 
 def legal_keys(
@@ -340,6 +229,32 @@ def legal_keys(
     """Enumerate the independently derived legal keys for one query."""
     lower, upper = legal_interval(case, query, mutation)
     return tuple(range(lower, upper + 1))
+
+
+def max_legal_count(case: UniformCase) -> int:
+    """Return the largest ``N_q = |A(q)|`` of the correct legal-key rule."""
+    _, _, legal_count = _legal_counts(case, None)
+    return int(np.max(legal_count))
+
+
+def require_proven_scope(case: UniformCase) -> None:
+    """Refuse a case whose legal counts leave the zero-ULP theorem's range.
+
+    The theorem holds for every single-pass dense variant, whatever its tile,
+    grid, scheduling or exp2 lowering: with zero Q, ``exp2(0) = 1`` exactly, the
+    running-max rescale is 0 or 1, ``l = N_q`` and the PV sums are exact in FP32,
+    and the stored ``acc * rcp(l)`` rounds (RNE) to the correctly rounded target
+    for ``N_q < 2**(21-p)``, ``p`` the dtype's fraction bits (two thirds of that
+    for the folded exposure, whose outputs sum several probabilities). Beyond the
+    range the expected bits are still exact, but zero ULP is no longer proven, so
+    a mismatch would not show a kernel defect."""
+    limit = _proven_limit(case.dtype, "folded")
+    largest = max_legal_count(case)
+    if largest >= limit:
+        raise ValueError(
+            f"case {case.case_id} reaches N_q={largest}, outside the proven "
+            f"zero-ULP range N_q < {limit} ({case.dtype}, folded exposure)"
+        )
 
 
 def residue_count(first: int, last: int, residue: int, period: int) -> int:
@@ -493,6 +408,11 @@ def _kv_head_scales(case: UniformCase) -> np.ndarray:
     return np.ldexp(np.float32(1.0), np.arange(case.nhead_k)).astype(np.float32)
 
 
+def uniform_basis_offsets(case: UniformCase) -> tuple[int, ...]:
+    """Return the basis offsets ``0, D, 2D, ...`` that expose every key exactly once."""
+    return tuple(range(0, case.seqlen_k, case.head_dim))
+
+
 def uniform_inputs(
     case: UniformCase, basis_offset: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -606,20 +526,49 @@ def _validate_observation(
         raise ValueError("basis exposures must expose every key exactly once")
 
 
-def _coordinate_representation(
-    case: UniformCase,
-    exposure: str,
-    dim: int,
-    first: int,
-    last: int,
-) -> tuple[bool, int]:
+def _exposure_representation(
+    case: UniformCase, exposure: str, first: np.ndarray, last: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``has_key[D]`` and ``represented[Sq, D]`` for one exposure.
+
+    ``has_key[d]`` says whether any key carries V in dimension ``d``;
+    ``represented[q, d]`` counts the legal keys of query ``q`` that do (0 or 1
+    for a basis exposure, up to ``ceil(Sk / D)`` for the folded one)."""
+    dim = np.arange(case.head_dim, dtype=np.int64)
     if exposure == "folded":
         has_key = dim < case.seqlen_k
-        represented = residue_count(first, last, dim, case.head_dim) if has_key else 0
-        return has_key, represented
-    key = _basis_offset(exposure) + dim
-    has_key = key < case.seqlen_k
-    return has_key, int(has_key and first <= key <= last)
+        # residue_count over [first, last] for every (query, residue) pair; an
+        # empty row (first=0, last=-1) counts zero.
+        represented = (last[:, None] - dim[None, :]) // case.head_dim - (
+            first[:, None] - 1 - dim[None, :]
+        ) // case.head_dim
+    else:
+        key = _basis_offset(exposure) + dim
+        has_key = key < case.seqlen_k
+        represented = (
+            (first[:, None] <= key[None, :]) & (key[None, :] <= last[:, None])
+        ).astype(np.int64)
+    return has_key, np.where(has_key[None, :], represented, 0)
+
+
+def _target_table(
+    case: UniformCase, represented: np.ndarray, denominator: np.ndarray
+) -> np.ndarray:
+    """Correctly rounded ``represented * 2**h_kv / N_q`` bits as ``[Sq, Hq, D]``.
+
+    Zero wherever nothing is represented. Each distinct ``(represented, N)``
+    pair is rounded once, through the exact integer :func:`target_bits`."""
+    table = np.zeros((case.seqlen_q, case.nhead_q, case.head_dim), dtype=np.uint16)
+    rows, dims = np.nonzero(represented)
+    if rows.size == 0:
+        return table
+    pairs = np.stack((represented[rows, dims], denominator[rows]), axis=1)
+    unique, inverse = np.unique(pairs, axis=0, return_inverse=True)
+    bits = np.stack(
+        [_head_target_bits(case, int(count), int(total)) for count, total in unique]
+    )
+    table[rows, :, dims] = bits[inverse.reshape(-1)]
+    return table
 
 
 def uniform_expected_bits(
@@ -630,28 +579,11 @@ def uniform_expected_bits(
     """Construct correctly rounded synthetic output bits for one expectation."""
     selected = _coerce_mutation(mutation)
     _validate_mutation(case, selected)
-    output = np.zeros(case.output_shape, dtype=np.uint16)
-    for query in range(case.seqlen_q):
-        first, last = legal_interval(case, query, selected)
-        legal_count = max(0, last - first + 1)
-        if legal_count == 0:
-            if selected is None:
-                raise ValueError(
-                    f"correct legal-key rule has an empty row at q={query}"
-                )
-            continue
-        denominator = legal_count + int(
-            selected == UniformMutation.DENOMINATOR_PLUS_ONE
-        )
-        for dim in range(case.head_dim):
-            _, represented = _coordinate_representation(
-                case, exposure, dim, first, last
-            )
-            if represented:
-                output[:, query, :, dim] = _head_target_bits(
-                    case, represented, denominator
-                )
-    return output
+    first, last, legal_count = _legal_counts(case, selected)
+    denominator = legal_count + int(selected == UniformMutation.DENOMINATOR_PLUS_ONE)
+    _, represented = _exposure_representation(case, exposure, first, last)
+    table = _target_table(case, represented, denominator)
+    return np.broadcast_to(table, case.output_shape).copy()
 
 
 def _head_target_bits(
@@ -674,9 +606,7 @@ def correct_uniform_observation(
 ) -> UniformObservation:
     """Build a complete correctly rounded synthetic observation."""
     offsets = (
-        tuple(range(0, case.seqlen_k, case.head_dim))
-        if basis_offsets is None
-        else tuple(basis_offsets)
+        uniform_basis_offsets(case) if basis_offsets is None else tuple(basis_offsets)
     )
     exposures = [
         (f"basis@{offset}", uniform_expected_bits(case, f"basis@{offset}"))
@@ -725,7 +655,7 @@ class _MutableNqStats:
 
 @dataclass(frozen=True)
 class UniformResult:
-    """Decomposed uniform-probability verdict plus calibration diagnostics."""
+    """Decomposed uniform-probability verdict plus per-``N_q`` diagnostics."""
 
     violations: tuple[str, ...]
     invalid_count: int
@@ -780,6 +710,55 @@ def _freeze_groups(
     return MappingProxyType(frozen)
 
 
+def _update_groups(
+    groups: dict[int, _MutableNqStats],
+    legal_count: np.ndarray,
+    *,
+    rows: int = 0,
+    compared: np.ndarray | None = None,
+    exact: np.ndarray | None = None,
+    max_ulp: np.ndarray | None = None,
+    max_residual: np.ndarray | None = None,
+) -> None:
+    """Fold per-query evidence into one exposure's per-``N_q`` groups.
+
+    ``rows`` is the output-row count each query adds (``B * Hq``); the arrays are
+    indexed by query."""
+    for count in np.unique(legal_count):
+        members = legal_count == count
+        group = groups.setdefault(int(count), _MutableNqStats())
+        group.rows += rows * int(np.count_nonzero(members))
+        if compared is not None:
+            group.compared += int(compared[members].sum())
+        if exact is not None:
+            group.exact += int(exact[members].sum())
+        if max_ulp is not None:
+            group.max_ulp = max(group.max_ulp, int(max_ulp[members].max()))
+        if max_residual is not None:
+            group.max_stored_sum_residual = max(
+                group.max_stored_sum_residual, float(max_residual[members].max())
+            )
+
+
+def _row_sum_errors(
+    actual: np.ndarray,
+    target: np.ndarray,
+    valid: np.ndarray,
+    represented: np.ndarray,
+    legal_count: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per query, the largest stored row-sum residual and real row-sum error.
+
+    Only rows whose exposure covers the whole legal set (``represented ==
+    N_q``) and whose summed outputs are all finite take part; every other row
+    contributes 0. ``actual``/``valid`` are ``[B, Sq, Hq]``, ``target`` broadcasts
+    to them, and ``represented``/``legal_count`` are per query."""
+    complete = (represented == legal_count)[None, :, None] & valid
+    residual = np.where(complete, np.abs(actual - target), 0.0).max(axis=(0, 2))
+    real = np.where(complete, np.abs(actual - 1.0), 0.0).max(axis=(0, 2))
+    return residual, real
+
+
 def analyze_uniform_policy(
     case: UniformCase,
     observation: UniformObservation,
@@ -825,149 +804,134 @@ def analyze_uniform_policy(
     focus = {query: 0.0 for query in focused_rows if 0 <= query < case.seqlen_q}
     groups: dict[str, dict[int, _MutableNqStats]] = {}
 
+    # Everything below is evaluated on whole [B, Sq, Hq, D] arrays; the per-query
+    # results are reduced over (B, Hq, D) and folded into per-N_q groups.
+    first, last, legal_count = _legal_counts(case, selected)
+    denominator = legal_count + int(selected == UniformMutation.DENOMINATOR_PLUS_ONE)
+    heads = case.batch * case.nhead_q
+    # A mutated rule can leave a row with no legal key: every output of such a
+    # row is counted invalid, once per exposure.
+    empty_row_outputs = int(np.count_nonzero(legal_count == 0)) * heads
+    fraction_bits, exponent_bits, _ = _FORMAT[case.dtype]
+    exponent_mask = np.uint16(((1 << exponent_bits) - 1) << fraction_bits)
+
     # Magnitude diagnostics are in probability units: each head's values are
     # divided by its exact power-of-two V scale. Target-bit ULP checks use the
     # raw bits against the scaled targets, so they stay head-aware.
     head_scales = np.ldexp(1.0, np.array(case.head_scale_exponents))
     for exposure, raw in observation.exposures:
         decoded = decode_bits(raw, case.dtype) / head_scales[None, None, :, None]
-        fraction_bits, exponent_bits, _ = _FORMAT[case.dtype]
-        exponent_mask = ((1 << exponent_bits) - 1) << fraction_bits
-        finite = (raw & np.uint16(exponent_mask)) != np.uint16(exponent_mask)
-        invalid_count += int(np.count_nonzero(~finite))
+        finite = (raw & exponent_mask) != exponent_mask
+        invalid_count += int(np.count_nonzero(~finite)) + empty_row_outputs
         negative = (
             finite & ((raw & np.uint16(0x8000)) != 0) & ((raw & np.uint16(0x7FFF)) != 0)
         )
         if np.any(negative):
             max_negative = max(max_negative, float(np.max(np.abs(decoded[negative]))))
 
+        has_key, represented = _exposure_representation(case, exposure, first, last)
+        targets = _target_table(case, represented, denominator)
+        target_values = decode_bits(targets, case.dtype) / head_scales[None, :, None]
+        legal = (represented > 0)[None, :, None, :]
+        considered = legal & finite
+        magnitudes = np.where(finite, np.abs(decoded), 0.0)
+
+        trailing = ~has_key[None, None, None, :]
+        max_trailing_abs = max(
+            max_trailing_abs, float(np.max(np.where(trailing, magnitudes, 0.0)))
+        )
+        masked = (has_key[None, :] & (represented == 0))[None, :, None, :]
+        masked_magnitudes = np.where(masked, magnitudes, 0.0)
+        max_masked_abs = max(max_masked_abs, float(np.max(masked_magnitudes)))
+        total_masked_mass += float(np.sum(masked_magnitudes))
+        masked_row_mass += masked_magnitudes.sum(axis=3)
+
+        distances = np.abs(
+            _ordered_array(raw).astype(np.int64)
+            - _ordered_array(targets).astype(np.int64)[None]
+        )
+        ulps = np.where(considered, distances, 0)
+        compared_rows = np.count_nonzero(considered, axis=(0, 2, 3))
+        exact_rows = np.count_nonzero(considered & (distances == 0), axis=(0, 2, 3))
+        ulp_rows = ulps.max(axis=(0, 2, 3))
+        compared_count += int(compared_rows.sum())
+        exact_count += int(exact_rows.sum())
         exposure_groups = groups.setdefault(exposure, {})
-        folded_actual = np.zeros(row_shape, dtype=np.float64)
-        folded_target = np.zeros(row_shape, dtype=np.float64)
-        folded_valid = np.ones(row_shape, dtype=bool)
-        folded_represented = np.zeros(case.seqlen_q, dtype=np.int64)
-
-        for query in range(case.seqlen_q):
-            first, last = legal_interval(case, query, selected)
-            legal_count = max(0, last - first + 1)
-            if legal_count == 0:
-                if selected is None:
-                    raise ValueError(
-                        f"correct legal-key rule has an empty row at q={query}"
-                    )
-                invalid_count += case.batch * case.nhead_q
-            denominator = legal_count + int(
-                selected == UniformMutation.DENOMINATOR_PLUS_ONE
+        _update_groups(
+            exposure_groups,
+            legal_count,
+            rows=heads,
+            compared=compared_rows,
+            exact=exact_rows,
+            max_ulp=ulp_rows,
+        )
+        within = legal_count < _proven_limit(case.dtype, exposure)
+        if np.any(within):
+            max_ulp_within_proven = max(
+                max_ulp_within_proven, int(ulp_rows[within].max())
             )
-            group = exposure_groups.setdefault(legal_count, _MutableNqStats())
-            group.rows += case.batch * case.nhead_q
+        if not np.all(within):
+            max_ulp_beyond_proven = max(
+                max_ulp_beyond_proven, int(ulp_rows[~within].max())
+            )
 
-            for dim in range(case.head_dim):
-                has_key, represented = _coordinate_representation(
-                    case, exposure, dim, first, last
-                )
-                values = decoded[:, query, :, dim]
-                value_bits = raw[:, query, :, dim]
-                valid = finite[:, query, :, dim]
-                coordinate_magnitudes = np.where(valid, np.abs(values), 0.0)
+        # The worst coordinate is the first (query, dim) reaching this exposure's
+        # maximum, then the first (batch, head) within it.
+        ulp_cells = ulps.max(axis=(0, 2))
+        exposure_max = int(ulp_cells.max())
+        if exposure_max > max_ulp:
+            query, dim = np.unravel_index(
+                int(np.argmax(ulp_cells == exposure_max)), ulp_cells.shape
+            )
+            cell = np.where(finite[:, query, :, dim], distances[:, query, :, dim], -1)
+            batch, head = np.unravel_index(int(np.argmax(cell)), cell.shape)
+            max_ulp = exposure_max
+            worst_ulp_nq = int(legal_count[query])
+            worst_exposure = exposure
+            worst_coordinate = (int(batch), int(query), int(head), int(dim))
 
-                if not has_key:
-                    local = float(np.max(coordinate_magnitudes))
-                    max_trailing_abs = max(max_trailing_abs, local)
-                    continue
-                if represented == 0:
-                    local = float(np.max(coordinate_magnitudes))
-                    max_masked_abs = max(max_masked_abs, local)
-                    total_masked_mass += float(np.sum(coordinate_magnitudes))
-                    masked_row_mass[:, query, :] += coordinate_magnitudes
-                    continue
+        real_expected = np.divide(
+            represented,
+            denominator[:, None],
+            out=np.zeros(represented.shape, dtype=np.float64),
+            where=represented > 0,
+        )
+        errors = np.where(
+            considered, np.abs(decoded - real_expected[None, :, None, :]), 0.0
+        )
+        error_rows = errors.max(axis=(0, 2, 3))
+        legacy_abs_residual = max(legacy_abs_residual, float(error_rows.max()))
+        for query in focus:
+            focus[query] = max(focus[query], float(error_rows[query]))
 
-                targets = _head_target_bits(case, represented, denominator)
-                target_value = decode_bits(targets, case.dtype) / head_scales
-                distances = np.abs(
-                    _ordered_array(value_bits).astype(np.int64)
-                    - _ordered_array(targets).astype(np.int64)[None, :]
-                )
-                valid_distances = distances[valid]
-                compared = int(valid_distances.size)
-                exact = int(np.count_nonzero(valid_distances == 0))
-                compared_count += compared
-                exact_count += exact
-                group.compared += compared
-                group.exact += exact
-                local_ulp = int(np.max(valid_distances)) if compared else 0
-                group.max_ulp = max(group.max_ulp, local_ulp)
-                limit = _proven_limit(case.dtype, exposure)
-                if legal_count < limit:
-                    max_ulp_within_proven = max(max_ulp_within_proven, local_ulp)
-                else:
-                    max_ulp_beyond_proven = max(max_ulp_beyond_proven, local_ulp)
-                if local_ulp > max_ulp:
-                    max_ulp = local_ulp
-                    worst_ulp_nq = legal_count
-                    worst_exposure = exposure
-                    masked_distances = np.where(valid, distances, -1)
-                    batch, head = np.unravel_index(
-                        int(np.argmax(masked_distances)), masked_distances.shape
-                    )
-                    worst_coordinate = (int(batch), query, int(head), dim)
-
-                real_expected = represented / denominator
-                if np.any(valid):
-                    errors = np.abs(values[valid] - real_expected)
-                    local_error = float(np.max(errors))
-                    legacy_abs_residual = max(legacy_abs_residual, local_error)
-                    if query in focus:
-                        focus[query] = max(focus[query], local_error)
-
-                if exposure == "folded":
-                    folded_actual[:, query, :] += np.where(valid, values, 0.0)
-                    folded_target[:, query, :] += target_value
-                    folded_valid[:, query, :] &= valid
-                    folded_represented[query] += represented
-                else:
-                    basis_present = True
-                    basis_actual[:, query, :] += np.where(valid, values, 0.0)
-                    basis_target[:, query, :] += target_value
-                    basis_valid[:, query, :] &= valid
-                    basis_represented[query] += represented
-
-            if exposure == "folded" and folded_represented[query] == legal_count:
-                valid_rows = folded_valid[:, query, :]
-                if np.any(valid_rows):
-                    residuals = np.abs(
-                        folded_actual[:, query, :] - folded_target[:, query, :]
-                    )
-                    local = float(np.max(residuals[valid_rows]))
-                    max_stored_sum_residual = max(max_stored_sum_residual, local)
-                    group.max_stored_sum_residual = max(
-                        group.max_stored_sum_residual, local
-                    )
-                    real_errors = np.abs(folded_actual[:, query, :] - 1.0)
-                    real_row_sum_error = max(
-                        real_row_sum_error, float(np.max(real_errors[valid_rows]))
-                    )
+        row_actual = np.where(considered, decoded, 0.0).sum(axis=3)
+        row_target = np.where(legal[0], target_values, 0.0).sum(axis=2)[None]
+        row_valid = np.all(np.where(legal, finite, True), axis=3)
+        row_represented = represented.sum(axis=1)
+        if exposure == "folded":
+            residual, real = _row_sum_errors(
+                row_actual, row_target, row_valid, row_represented, legal_count
+            )
+            max_stored_sum_residual = max(
+                max_stored_sum_residual, float(residual.max())
+            )
+            real_row_sum_error = max(real_row_sum_error, float(real.max()))
+            _update_groups(exposure_groups, legal_count, max_residual=residual)
+        else:
+            basis_present = basis_present or bool(np.any(represented))
+            basis_actual += row_actual
+            basis_target += row_target
+            basis_valid &= row_valid
+            basis_represented += row_represented
 
     if basis_present:
         basis_groups = groups.setdefault("basis_union", {})
-        for query in range(case.seqlen_q):
-            first, last = legal_interval(case, query, selected)
-            legal_count = max(0, last - first + 1)
-            group = basis_groups.setdefault(legal_count, _MutableNqStats())
-            group.rows += case.batch * case.nhead_q
-            if basis_represented[query] != legal_count:
-                continue
-            valid_rows = basis_valid[:, query, :]
-            if not np.any(valid_rows):
-                continue
-            residuals = np.abs(basis_actual[:, query, :] - basis_target[:, query, :])
-            local = float(np.max(residuals[valid_rows]))
-            max_stored_sum_residual = max(max_stored_sum_residual, local)
-            group.max_stored_sum_residual = max(group.max_stored_sum_residual, local)
-            real_errors = np.abs(basis_actual[:, query, :] - 1.0)
-            real_row_sum_error = max(
-                real_row_sum_error, float(np.max(real_errors[valid_rows]))
-            )
+        residual, real = _row_sum_errors(
+            basis_actual, basis_target, basis_valid, basis_represented, legal_count
+        )
+        max_stored_sum_residual = max(max_stored_sum_residual, float(residual.max()))
+        real_row_sum_error = max(real_row_sum_error, float(real.max()))
+        _update_groups(basis_groups, legal_count, rows=heads, max_residual=residual)
 
     max_row_masked_mass = float(np.max(masked_row_mass))
     violations: list[str] = []
