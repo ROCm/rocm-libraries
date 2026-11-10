@@ -163,10 +163,12 @@ const char* ReadProblem(BnProblem& problem,
     return nullptr;
 }
 
-// MIOpen's per-activation training and backward solvers never read the
-// activation, so MIOpen runs those calls as if it were PASTHRU, whatever its
-// mode, and so does the forwarded call. Its inference solver applies the
-// activation in both modes, so inference keeps it.
+// MIOpen's per-activation kernels never apply the activation, so MIOpen runs
+// per-activation inference, training and backward as if it were PASTHRU, and so
+// does the forwarded call. This copies a MIOpen bug,
+// https://github.com/ROCm/rocm-libraries/issues/15445; drop it when MIOpen fixes
+// that. Call it after CheckProblem where MIOpen's solver still limits the
+// activation.
 void DropPerActivationActivation(BnProblem& problem)
 {
     if(problem.bnMode != miopenBNPerActivation)
@@ -863,6 +865,9 @@ miopenStatus_t ForwardInference(miopenHandle_t handle,
         return status;
     if(const miopenStatus_t status = CheckProblem(problem); status != miopenStatusSuccess)
         return status;
+    // After CheckProblem: MIOpen's inference solver rejects other activations
+    // in both modes, and only then skips the ones it accepts.
+    DropPerActivationActivation(problem);
 
     if(const std::string reason = CheckSupported(problem); !reason.empty())
         return RecordFailure(miopenStatusUnsupportedOp, reason);

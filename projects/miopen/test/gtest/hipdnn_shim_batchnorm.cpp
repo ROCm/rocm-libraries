@@ -235,6 +235,29 @@ miopenStatus_t InferV1(miopen::Handle& handle, Data& d, bool with_estimates)
                                                     d.epsilon);
 }
 
+miopenStatus_t
+InferActivation(miopen::Handle& handle, InferData& d, miopenActivationDescriptor_t activ)
+{
+    return miopenBatchNormForwardInferenceActivation(&handle,
+                                                     d.bn_mode,
+                                                     &d.alpha,
+                                                     &d.beta,
+                                                     &d.input.desc,
+                                                     d.in_dev.get(),
+                                                     &d.output.desc,
+                                                     d.out_dev.get(),
+                                                     &d.scale.desc,
+                                                     &d.shift.desc,
+                                                     &d.estMean.desc,
+                                                     &d.estVariance.desc,
+                                                     d.scale_dev.get(),
+                                                     d.shift_dev.get(),
+                                                     d.estMean_dev.get(),
+                                                     d.estVariance_dev.get(),
+                                                     d.epsilon,
+                                                     activ);
+}
+
 template <typename Data>
 miopenStatus_t BwdV1(miopen::Handle& handle, Data& d, bool with_saved_stats)
 {
@@ -1002,9 +1025,11 @@ TEST(GPU_HipdnnShimBNPerActivation3D_FP32, MatchesCpuReference)
     }
 }
 
-// MIOpen's per-activation training and backward solvers ignore the activation, so
-// the call is served and its results are those without it. TANH is one the provider
-// has no mapping for, and is served all the same.
+// MIOpen's per-activation kernels ignore the activation, so the call is served and
+// its results are those without it
+// (https://github.com/ROCm/rocm-libraries/issues/15445). TANH is one the provider
+// has no mapping for. Training and backward serve it all the same; inference has
+// no solver for it in either mode, so it fails with NotImplemented on both paths.
 TEST(GPU_HipdnnShimBNPerActivation_FP32, IgnoresActivation)
 {
     auto&& handle = get_handle();
@@ -1026,6 +1051,20 @@ TEST(GPU_HipdnnShimBNPerActivation_FP32, IgnoresActivation)
                 hs::CaptureCall([&] { return TrainActivation(handle, d, activ.handle); });
             if(ExpectServed("per_activation_" + name + "_train", result))
                 CheckTrain(handle, d, true, true);
+        }
+        {
+            SCOPED_TRACE("infer");
+            InferData d;
+            SetUpInfer(d, miopenBNPerActivation);
+            const auto result =
+                hs::CaptureCall([&] { return InferActivation(handle, d, activ.handle); });
+            if(mode == miopenActivationTANH)
+                hs::ExpectStatusParity("per_activation_tanh_infer",
+                                       result,
+                                       miopenStatusNotImplemented,
+                                       "no batchnorm solver");
+            else if(ExpectServed("per_activation_" + name + "_infer", result))
+                CheckInfer(handle, d);
         }
         {
             SCOPED_TRACE("bwd");

@@ -46,8 +46,10 @@ namespace hipdnn {
 // Some problems take a different route through hipDNN than through MIOpen:
 // - Per-activation mode runs as spatial batchnorm on x viewed as {N, C*H*W, 1,
 //   1}, which normalizes each element over the batch exactly as MIOpen does.
-//   Training and backward then ignore the activation, whatever its mode,
-//   because MIOpen's per-activation solvers never read it. Inference applies it.
+//   Inference, training and backward then ignore the activation, because
+//   MIOpen's per-activation kernels never apply it (a MIOpen bug,
+//   https://github.com/ROCm/rocm-libraries/issues/15445). Inference still
+//   rejects the activations its solver does not accept.
 // - CLIPPEDRELU and CLAMP run as ReLU with an upper clip, and with a lower and
 //   an upper clip.
 // - Backward without the saved statistics, at an epsilon other than 1e-5 or
@@ -61,8 +63,8 @@ namespace hipdnn {
 // thus tell that forwarding did not happen. miopenGetErrorString adds a
 // "[hipDNN-forwarded]" prefix. The reason goes to stderr unless MIOPEN_LOG_LEVEL
 // hides errors. The wrapper declines these problems:
-// - Any activation other than PASTHRU, RELU, CLIPPEDRELU or CLAMP, where the
-//   call applies it (not per-activation training or backward). A null
+// - Any activation other than PASTHRU, RELU, CLIPPEDRELU or CLAMP on spatial
+//   backward, the only call that both accepts and applies one. A null
 //   activation descriptor means no activation, as it does in MIOpen.
 // - Tensors that are not packed, data tensors of different types or shapes, or
 //   scale, bias or statistics not shaped {1, C, 1, ...} ({1, C, H, W, ...} in
@@ -77,8 +79,9 @@ namespace hipdnn {
 // To take one entry point off the hipDNN path, use MIOPEN_DISABLE_HIPDNN_FOR.
 //
 // The wrapper also returns miopenStatusBadParm for a null alpha or beta, a null
-// dscale or dbias, and a null bias on backward with an activation. MIOpen would
-// dereference these and crash, so there is no MIOpen behavior to match.
+// dscale or dbias, and a null bias on spatial backward with an activation.
+// MIOpen would dereference these and crash, so there is no MIOpen behavior to
+// match.
 //
 // Some entry points have no separate previous and next running statistics.
 // They update the statistics in place, so the wrapper binds the same buffer to
