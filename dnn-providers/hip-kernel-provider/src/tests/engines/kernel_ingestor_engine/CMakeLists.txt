@@ -140,6 +140,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvDirect.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvSmallcProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvSmallc.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvGroup.cpp
     )
 endif()
 

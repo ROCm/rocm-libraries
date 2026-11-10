@@ -251,6 +251,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWinogradNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDirectNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvSmallcNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupNative.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_CONV=1)
     include("${PROJECT_SOURCE_DIR}/src/cmake/KernelEmbedding.cmake")
@@ -266,6 +267,9 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_rows/kernels/ConvDepthwiseRowsCores.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_mfma/kernels/ConvDepthwiseMfma.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_mfma/kernels/ConvDepthwiseMfmaArgs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/group/kernels/ConvGroup.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/group/kernels/ConvGroupArgs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/group/kernels/ConvGroupCore.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmCore.h"
@@ -308,6 +312,9 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvDepthwiseRowsCores.h
         kernels/ConvDepthwiseMfma.cpp
         ConvDepthwiseMfmaArgs.h
+        kernels/ConvGroup.cpp
+        ConvGroupArgs.h
+        ConvGroupCore.h
         kernels/ConvIgemm.cpp
         ConvIgemmArgs.h
         ConvIgemmCore.h
