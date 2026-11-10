@@ -216,7 +216,17 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         return p_tile;
     }
 
-    // Single V, double K LDS buffer path.
+    // Single V, double K LDS buffer path, copied from
+    // BlockFmhaPipelineQRKSVSTdm::run_single_v_double_k_lds_buffer plus the
+    // split-kv additions (page navigator, split bounds, sink folding, LSE-acc
+    // output). Keep these identical to the source so a fix reaches both:
+    // - TDM issue order: K(cur) one iteration ahead, then V, then K(next), with
+    //   s_wait_tensorcnt_barrier<2> before gemm0, <1> before gemm1 and <0>
+    //   after the loop.
+    // - K-buffer parity: the loop runs unrolled by two so kCurBuf/kNextBuf are
+    //   compile-time, and iteration 0 consumes buffer 0.
+    // - Progressive-reload shape: ReloadProgressiveKFragment (sched mask and
+    //   access range) and its trigger (last mIter, kIter 0, odd nIter).
     //
     // K and V arrive as window lengths plus a page block navigator rather than
     // ready-made windows: the navigator is what resolves a global seqlen_k
