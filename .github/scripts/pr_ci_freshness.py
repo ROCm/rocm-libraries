@@ -36,8 +36,18 @@ stood then, so it contains ``cutoff`` exactly when it was created after
 refreshing a PR's merge commit, which is immaterial against a threshold
 measured in days.
 
+A run is also stale when the PR was retargeted to ``develop`` after the run
+was created. A retarget starts no CI run, so that run merged some other
+branch; this is the normal path for a stacked PR whose parent has merged.
+The run cannot reveal it (its ``pull_requests[].base`` already reads
+``develop``), so the PR timeline is asked instead.
+
 A head with no CI run yet is fresh, since whatever run it gets will merge the
 current tip.
+
+The CI-run trigger fires for stacked PRs into feature branches as well. Those
+get no status: they are judged against a different branch, if at all, and the
+sweep never revisits them.
 
 Only TheRock Multi-Arch CI is judged. Component CI and the Jenkins Math CI
 build a merge too, each with its own base, and are not covered here.
@@ -250,7 +260,15 @@ class GitHub:
             self._in_flight = max(0, self._in_flight - cost)
 
     def _note_rate_limit(self, headers: Any) -> None:
-        """Records the allowance the server just reported, error or not."""
+        """Records the allowance the server just reported, error or not.
+
+        Only the core REST allowance is tracked. GraphQL is metered from a
+        separate pool and reports it in the same headers, so letting it in
+        would point the reserve at the wrong budget.
+        """
+        resource = headers.get("x-ratelimit-resource") if headers else None
+        if resource not in (None, "core"):
+            return
         with self._lock:
             self.rate_limit_limit = _header_int(headers, "x-ratelimit-limit")
             self.rate_limit_remaining = _header_int(headers, "x-ratelimit-remaining")
@@ -261,10 +279,11 @@ class GitHub:
         path: str,
         params: Optional[dict] = None,
         payload: Optional[dict] = None,
+        url: Optional[str] = None,
     ) -> Any:
         with self._lock:
             self.request_count += 1
-        url = f"{API_ROOT}/repos/{self.repo}/{path}"
+        url = url or f"{API_ROOT}/repos/{self.repo}/{path}"
         if params:
             url = f"{url}?{urllib.parse.urlencode(params)}"
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
@@ -305,6 +324,23 @@ class GitHub:
 
     def post(self, path: str, payload: dict) -> Any:
         return self._request("POST", path, payload=payload)
+
+    def graphql(self, query: str, variables: dict) -> Any:
+        """Runs a GraphQL query, raising if it produced no data at all.
+
+        A partial answer (some fields resolved, some errored) is returned as
+        is; the caller decides what a missing field means.
+        """
+        body = self._request(
+            "POST",
+            "graphql",
+            payload={"query": query, "variables": variables},
+            url=f"{API_ROOT}/graphql",
+        )
+        if not isinstance(body, dict) or not body.get("data"):
+            errors = body.get("errors") if isinstance(body, dict) else body
+            raise GitHubError(f"POST graphql -> no data: {str(errors)[:200]}")
+        return body["data"]
 
 
 def _header_int(headers: Any, name: str) -> Optional[int]:
@@ -353,6 +389,9 @@ class PullRequest:
     number: Optional[int]
     head_sha: str
     draft: bool
+    # When the PR was last pointed at a different base branch. A retarget
+    # starts no CI run, so a run from before it merged some other branch.
+    retargeted_at: Optional[datetime] = None
 
     @property
     def label(self) -> str:
@@ -379,6 +418,9 @@ class CIRun:
     # re-run cannot make stale CI fresh. Also what lets the status
     # description stay byte-identical between sweeps and dedupe cleanly.
     created_at: datetime
+    # Base branches of the PRs the run lists, as they stand now rather than
+    # when the run was made. Empty for a fork PR, whose runs list no PR.
+    base_refs: tuple[str, ...] = ()
 
 
 @dataclass
@@ -388,7 +430,11 @@ class Verdict:
     fresh: bool
     # None when the head has no CI run yet, or could not be evaluated.
     ci_run: Optional[CIRun] = None
+    # Stale because the PR was retargeted after its CI run merged a base.
+    retargeted: bool = False
     error: Optional[str] = None
+    # Why this head gets no status at all, when it is not ours to report on.
+    ignored: Optional[str] = None
     # Set when the rate-limit reserve stopped us before this PR was looked at.
     # A skipped PR gets no status at all, since posting one would itself cost
     # the request we just declined to spend.
@@ -400,7 +446,8 @@ class Assessment:
     """A verdict plus whatever status the PR already carries for our context."""
 
     verdict: Verdict
-    published: Optional[tuple[str, str]] = None
+    # (state, description, target_url), the same shape ``publication`` builds.
+    published: Optional[tuple[str, str, Optional[str]]] = None
     # Whether this assessment is still holding the request it claimed for its
     # status write. That write happens in the serial phase after the whole
     # pool has finished, so the claim outlives the assessment and the writer
@@ -455,10 +502,13 @@ def find_ci_run(gh: GitHub, head_sha: str, workflow: str) -> Optional[CIRun]:
         url=run["html_url"],
         attempt=run.get("run_attempt") or 1,
         created_at=parse_timestamp(run["created_at"]),
+        base_refs=tuple(p["base"]["ref"] for p in run.get("pull_requests") or ()),
     )
 
 
-def evaluate(gh: GitHub, pr: PullRequest, workflow: str, cutoff: Cutoff) -> Verdict:
+def evaluate(
+    gh: GitHub, pr: PullRequest, workflow: str, base_branch: str, cutoff: Cutoff
+) -> Verdict:
     """Decides whether the CI run ``pr`` shows merged the cutoff commit.
 
     Assumes the caller has already claimed the budget for this PR; see
@@ -474,15 +524,79 @@ def evaluate(gh: GitHub, pr: PullRequest, workflow: str, cutoff: Cutoff) -> Verd
         return Verdict(fresh=True, error=str(e))
     if ci_run is None:
         return Verdict(fresh=True)
-    # The run merged the base branch as it stood when the run was created,
-    # so that merge contains the cutoff exactly when the cutoff landed first.
-    return Verdict(fresh=ci_run.created_at >= cutoff.landed_at, ci_run=ci_run)
+    if pr.number is None:
+        # Scoped by head alone, which is the CI-run trigger. That fires for
+        # every PR the CI workflow runs on, stacked PRs into feature branches
+        # included, and those are judged against some other branch's cutoff
+        # if at all. A re-run merges nothing new and its head carries no
+        # retarget history here, so the sweep, which has both, owns it.
+        if ci_run.base_refs and base_branch not in ci_run.base_refs:
+            bases = ", ".join(ci_run.base_refs)
+            return Verdict(
+                fresh=True, ci_run=ci_run, ignored=f"CI for a PR into {bases}"
+            )
+        if ci_run.attempt > 1:
+            return Verdict(fresh=True, ci_run=ci_run, ignored="a re-run of earlier CI")
+    # The run merged the base it was given as it stood when it was created,
+    # so it contains the cutoff exactly when the cutoff landed first, and it
+    # merged this base at all only if the PR already targeted it.
+    retargeted = pr.retargeted_at is not None and ci_run.created_at < pr.retargeted_at
+    return Verdict(
+        fresh=ci_run.created_at >= cutoff.landed_at and not retargeted,
+        ci_run=ci_run,
+        retargeted=retargeted,
+    )
+
+
+RETARGET_BATCH = 50
+
+
+def find_retargets(gh: GitHub, numbers: list[int]) -> dict[int, datetime]:
+    """Returns when each PR in ``numbers`` last changed its base branch.
+
+    PRs that never did are absent. This is the one thing the run records
+    cannot say: a run's ``pull_requests[].base`` is the PR's base now, so a
+    stacked PR retargeted onto develop when its parent merged looks, from its
+    run, as if CI had merged develop all along.
+
+    GraphQL, because REST has no way to ask for one event type, and batched,
+    because a timeline lookup per PR would double the cost of a sweep. A
+    batch of this size costs one point from the separate GraphQL allowance.
+    Raises ``GitHubError`` when a batch returns nothing usable; a partial
+    answer is kept.
+    """
+    owner, name = gh.repo.split("/", 1)
+    found: dict[int, datetime] = {}
+    for start in range(0, len(numbers), RETARGET_BATCH):
+        batch = numbers[start : start + RETARGET_BATCH]
+        fields = " ".join(
+            f"pr{n}: pullRequest(number: {int(n)}) {{ timelineItems("
+            f"itemTypes: [BASE_REF_CHANGED_EVENT], last: 1) "
+            f"{{ nodes {{ ... on BaseRefChangedEvent {{ createdAt }} }} }} }}"
+            for n in batch
+        )
+        query = (
+            "query($owner: String!, $name: String!) "
+            f"{{ repository(owner: $owner, name: $name) {{ {fields} }} }}"
+        )
+        data = gh.graphql(query, {"owner": owner, "name": name})
+        try:
+            repository = data["repository"]
+            for n in batch:
+                nodes = (
+                    (repository.get(f"pr{n}") or {}).get("timelineItems") or {}
+                ).get("nodes") or []
+                if nodes and nodes[-1].get("createdAt"):
+                    found[n] = parse_timestamp(nodes[-1]["createdAt"])
+        except (KeyError, TypeError, AttributeError, ValueError) as e:
+            raise GitHubError(f"malformed retarget answer: {e}") from e
+    return found
 
 
 def current_status(
     gh: GitHub, head_sha: str, context: str
-) -> Optional[tuple[str, str]]:
-    """Returns the ``(state, description)`` already published for ``context``.
+) -> Optional[tuple[str, str, Optional[str]]]:
+    """Returns the ``(state, description, target_url)`` published for ``context``.
 
     Never raises, for the same reason ``evaluate`` does not. Anything it
     cannot read is reported as nothing published, which costs a redundant
@@ -492,8 +606,12 @@ def current_status(
         combined = gh.get(f"commits/{head_sha}/status", per_page=100)
         for status in combined["statuses"]:
             if status.get("context") == context:
-                return status.get("state", ""), status.get("description") or ""
-    except (GitHubError, KeyError, TypeError):
+                return (
+                    status.get("state", ""),
+                    status.get("description") or "",
+                    status.get("target_url") or None,
+                )
+    except (GitHubError, KeyError, TypeError, AttributeError):
         return None
     return None
 
@@ -502,6 +620,7 @@ def assess(
     gh: GitHub,
     pr: PullRequest,
     workflow: str,
+    base_branch: str,
     cutoff: Cutoff,
     context: str,
 ) -> Assessment:
@@ -518,7 +637,7 @@ def assess(
     """
     if not gh.claim_budget(REQUESTS_PER_PR):
         return Assessment(Verdict(fresh=True, skipped=True))
-    verdict = evaluate(gh, pr, workflow, cutoff)
+    verdict = evaluate(gh, pr, workflow, base_branch, cutoff)
     published = current_status(gh, pr.head_sha, context)
     gh.release_budget(REQUESTS_PER_PR - REQUESTS_PER_WRITE)
     return Assessment(verdict, published, holds_write_claim=True)
@@ -546,11 +665,15 @@ def describe(
     elif verdict.fresh:
         text = f"CI merged {base_branch} within the last {max_age_days} days"
     else:
-        since = verdict.ci_run.created_at.date().isoformat()
-        text = (
-            f"CI tested against {base_branch} from {since}. Push or merge "
-            f"{base_branch} for a new run; re-running jobs reuses that base"
+        advice = (
+            f"Push or merge {base_branch} for a new run; re-running jobs "
+            f"reuses that base"
         )
+        if verdict.retargeted:
+            text = f"CI ran before this PR was retargeted to {base_branch}. {advice}"
+        else:
+            since = verdict.ci_run.created_at.date().isoformat()
+            text = f"CI tested against {base_branch} from {since}. {advice}"
         if not enforcing:
             text = f"WOULD FAIL: {text}"
     return text[:MAX_DESCRIPTION_LENGTH]
@@ -574,10 +697,34 @@ def status_state(verdict: Verdict, enforcing: bool) -> str:
 def status_target_url(verdict: Verdict, this_run_url: Optional[str]) -> Optional[str]:
     """Where the status links: the CI run being judged, when there is one.
 
-    That run's date is what the verdict rests on. Without one, the link goes
-    to this job, whose summary at least says why.
+    That run's date is what the verdict rests on. An error links to this job,
+    whose log says what went wrong. A head with no run yet links nowhere:
+    this job's URL changes every sweep, and a link that changes is a write.
     """
-    return verdict.ci_run.url if verdict.ci_run else this_run_url
+    if verdict.ci_run:
+        return verdict.ci_run.url
+    return this_run_url if verdict.error else None
+
+
+def publication(
+    verdict: Verdict,
+    base_branch: str,
+    max_age_days: int,
+    enforcing: bool,
+    this_run_url: Optional[str],
+) -> tuple[str, str, Optional[str]]:
+    """The ``(state, description, target_url)`` a verdict should be shown as.
+
+    The same shape ``current_status`` reads back, so an unchanged status can
+    be skipped by comparing the two. The link is part of it: a new CI run on
+    the same head leaves a fresh PR's description untouched, and comparing
+    the text alone would keep linking the run it replaced.
+    """
+    return (
+        status_state(verdict, enforcing),
+        describe(verdict, base_branch, max_age_days, enforcing),
+        status_target_url(verdict, this_run_url),
+    )
 
 
 def publish_status(
@@ -636,9 +783,9 @@ def list_open_prs(
 
     Ordering matters when the reserve cuts a sweep short. The CI-run trigger
     already posts a status whenever a PR gets a new CI run, so a PR touched
-    minutes ago has an accurate one. The PRs whose statuses are most likely to be wrong are
-    the ones nothing has touched in days, so they go first and the freshly
-    evaluated ones are what gets dropped.
+    minutes ago has an accurate one. The PRs whose statuses are most likely
+    to be wrong are the ones nothing has touched in days, so they go first
+    and the freshly evaluated ones are what gets dropped.
 
     Paging deliberately runs one PR past ``limit`` so that hitting the cap can
     be reported rather than guessed at: a list that stops exactly on the cap
@@ -672,8 +819,11 @@ def list_open_prs(
     return Listing(prs[:limit], truncated_at_limit=len(prs) > limit)
 
 
-def fetch_pr(gh: GitHub, number: int) -> PullRequest:
+def fetch_pr(gh: GitHub, number: int, base_branch: str) -> Optional[PullRequest]:
+    """Fetches one PR, or None if it targets some other base branch."""
     item = gh.get(f"pulls/{number}")
+    if item["base"]["ref"] != base_branch:
+        return None
     return PullRequest(item["number"], item["head"]["sha"], item["draft"])
 
 
@@ -784,7 +934,13 @@ def main() -> int:
         # present if the PR is marked ready and merged before the next
         # scheduled run.
         if args.pr:
-            listing = Listing([fetch_pr(gh, args.pr)])
+            pr = fetch_pr(gh, args.pr, args.base_branch)
+            if pr is None:
+                print(
+                    f"PR #{args.pr} does not target {args.base_branch}; nothing to do"
+                )
+                return 0
+            listing = Listing([pr])
         elif args.head_sha:
             listing = Listing([PullRequest(None, args.head_sha, draft=False)])
         else:
@@ -811,6 +967,18 @@ def main() -> int:
             "requests; this sweep is working from a partial list"
         )
 
+    numbered = [pr.number for pr in prs if pr.number]
+    if numbered:
+        try:
+            retargets = find_retargets(gh, numbered)
+        except GitHubError as e:
+            # Fail open on this signal alone: the age check still stands, it
+            # just cannot see a retarget this run.
+            print(f"::warning::could not read PR retargets; judging on age only: {e}")
+            retargets = {}
+        for pr in prs:
+            pr.retargeted_at = retargets.get(pr.number)
+
     this_run_url = None
     server, run_id = os.environ.get("GITHUB_SERVER_URL"), os.environ.get(
         "GITHUB_RUN_ID"
@@ -821,7 +989,9 @@ def main() -> int:
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         assessments = list(
             pool.map(
-                lambda pr: assess(gh, pr, args.ci_workflow, cutoff, args.context),
+                lambda pr: assess(
+                    gh, pr, args.ci_workflow, args.base_branch, cutoff, args.context
+                ),
                 prs,
             )
         )
@@ -838,15 +1008,20 @@ def main() -> int:
         if verdict.skipped:
             skipped.append(pr)
             continue
-        state = status_state(verdict, enforcing)
-        description = describe(verdict, args.base_branch, args.max_age_days, enforcing)
-        print(f"PR {pr.label}: {state} - {description}")
-        if not verdict.fresh and not verdict.error:
-            stale.append((pr, verdict))
         try:
+            if verdict.ignored:
+                print(f"PR {pr.label}: no status - {verdict.ignored}")
+                continue
+            published = publication(
+                verdict, args.base_branch, args.max_age_days, enforcing, this_run_url
+            )
+            state, description, target_url = published
+            print(f"PR {pr.label}: {state} - {description}")
+            if not verdict.fresh and not verdict.error:
+                stale.append((pr, verdict))
             if args.dry_run:
                 continue
-            if assessment.published == (state, description):
+            if assessment.published == published:
                 # Re-posting an identical status would change nothing on the
                 # PR and spend from the much tighter write budget. In steady
                 # state this is most of the queue, since a fresh PR's
@@ -858,7 +1033,6 @@ def main() -> int:
                 "context": args.context,
                 "description": description,
             }
-            target_url = status_target_url(verdict, this_run_url)
             if target_url:
                 payload["target_url"] = target_url
             error = publish_status(gh, pacer, retries, pr.head_sha, payload)
@@ -901,7 +1075,9 @@ def main() -> int:
         f"Cutoff commit (`{args.base_branch}` tip {args.max_age_days} days ago): "
         f"`{cutoff.sha[:12]}`, landed {cutoff.landed_at.isoformat()}. A PR's "
         f"CI is stale when its newest `{args.ci_workflow}` run was created "
-        f"before that, so it merged a `{args.base_branch}` without it.",
+        f"before that, so it merged a `{args.base_branch}` without it, or "
+        f"before the PR was retargeted to `{args.base_branch}`, so it merged "
+        f"some other branch.",
         "",
         f"{len(stale)} of {evaluated} evaluated PRs have stale CI."
         + (f" {len(skipped)} skipped for rate-limit reserve." if skipped else ""),
@@ -925,14 +1101,15 @@ def main() -> int:
         # table is rebuilt every run anyway, so a drifting number costs
         # nothing.
         summary += [
-            "| PR | CI run | Attempt | CI age (days) |",
-            "| --- | --- | --- | --- |",
+            "| PR | CI run | Attempt | CI age (days) | Why |",
+            "| --- | --- | --- | --- | --- |",
         ]
         for pr, verdict in sorted(stale, key=lambda s: -ci_age_days(s[1], now)):
             run = verdict.ci_run
+            why = "retargeted after the run" if verdict.retargeted else "age"
             summary.append(
                 f"| {pr.label} | [{run.id}]({run.url}) | {run.attempt} | "
-                f"{ci_age_days(verdict, now):.1f} |"
+                f"{ci_age_days(verdict, now):.1f} | {why} |"
             )
         summary.append("")
     if unpublished:

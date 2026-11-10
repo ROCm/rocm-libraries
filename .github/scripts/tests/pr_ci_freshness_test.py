@@ -5,6 +5,7 @@ import argparse
 import email
 import io
 import os
+import re
 import sys
 import threading
 import time
@@ -32,8 +33,17 @@ def iso(days_ago: float) -> str:
     return (NOW - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def runs(created_days_ago: float, attempt: int = 1, run_id: int = 7) -> dict:
-    """A workflow-runs response holding one run, newest first as GitHub sends."""
+def runs(
+    created_days_ago: float,
+    attempt: int = 1,
+    run_id: int = 7,
+    bases: tuple[str, ...] = ("develop",),
+) -> dict:
+    """A workflow-runs response holding one run, newest first as GitHub sends.
+
+    ``bases`` are the base branches of the PRs the run lists; empty is how a
+    fork PR's run looks.
+    """
     return {
         "workflow_runs": [
             {
@@ -44,6 +54,9 @@ def runs(created_days_ago: float, attempt: int = 1, run_id: int = 7) -> dict:
                 # A re-run moves this and not created_at, and it is the
                 # wrong one to read: the merge was fixed at creation.
                 "run_started_at": iso(0),
+                "pull_requests": [
+                    {"number": 42, "base": {"ref": base}} for base in bases
+                ],
             }
         ]
     }
@@ -115,9 +128,58 @@ class FindCutoffTest(unittest.TestCase):
 
 
 class EvaluateTest(unittest.TestCase):
-    def evaluate(self, body, cutoff=CUTOFF):
+    def evaluate(self, body, cutoff=CUTOFF, pr=PR):
         gh = FakeGitHub({RUNS: body})
-        return gh, pcf.evaluate(gh, PR, WORKFLOW, cutoff)
+        return gh, pcf.evaluate(gh, pr, WORKFLOW, "develop", cutoff)
+
+    def test_a_run_from_before_a_retarget_is_stale_however_recent(self):
+        # A stacked PR retargeted onto develop when its parent merged: the
+        # run is a day old, but it merged the parent branch, not develop.
+        retargeted = PullRequest(
+            42, "deadbeef", False, retargeted_at=NOW - timedelta(hours=6)
+        )
+        _, verdict = self.evaluate(runs(created_days_ago=1), pr=retargeted)
+        self.assertFalse(verdict.fresh)
+        self.assertTrue(verdict.retargeted)
+
+    def test_a_run_made_after_a_retarget_is_judged_on_age_alone(self):
+        retargeted = PullRequest(
+            42, "deadbeef", False, retargeted_at=NOW - timedelta(days=2)
+        )
+        _, verdict = self.evaluate(runs(created_days_ago=1), pr=retargeted)
+        self.assertTrue(verdict.fresh)
+        self.assertFalse(verdict.retargeted)
+
+    def test_head_only_mode_ignores_ci_for_prs_into_other_branches(self):
+        # The CI-run trigger sees stacked PRs too; posting on them would
+        # judge a feature branch's PR by develop's cutoff.
+        head_only = PullRequest(None, "deadbeef", False)
+        _, verdict = self.evaluate(
+            runs(created_days_ago=5, bases=("users/x/parent",)), pr=head_only
+        )
+        self.assertIn("users/x/parent", verdict.ignored)
+
+    def test_head_only_mode_still_judges_fork_runs(self):
+        # A fork PR's run lists no PR, so there is no base to rule it out.
+        head_only = PullRequest(None, "deadbeef", False)
+        _, verdict = self.evaluate(runs(created_days_ago=5, bases=()), pr=head_only)
+        self.assertIsNone(verdict.ignored)
+        self.assertFalse(verdict.fresh)
+
+    def test_head_only_mode_leaves_re_runs_to_the_sweep(self):
+        # Nothing new was merged, and without the PR's retarget history this
+        # mode could only overwrite a better verdict with a worse one.
+        head_only = PullRequest(None, "deadbeef", False)
+        _, verdict = self.evaluate(runs(created_days_ago=1, attempt=2), pr=head_only)
+        self.assertIsNotNone(verdict.ignored)
+
+    def test_a_run_into_develop_is_judged_in_head_only_mode(self):
+        head_only = PullRequest(None, "deadbeef", False)
+        _, verdict = self.evaluate(
+            runs(created_days_ago=5, bases=("users/x/parent", "develop")), pr=head_only
+        )
+        self.assertIsNone(verdict.ignored)
+        self.assertFalse(verdict.fresh)
 
     def test_run_created_after_the_cutoff_landed_is_fresh(self):
         gh, verdict = self.evaluate(runs(created_days_ago=1))
@@ -169,7 +231,7 @@ class EvaluateTest(unittest.TestCase):
 
     def test_api_failure_fails_open(self):
         gh = FakeGitHub({}, failures=(RUNS,))
-        verdict = pcf.evaluate(gh, PR, WORKFLOW, CUTOFF)
+        verdict = pcf.evaluate(gh, PR, WORKFLOW, "develop", CUTOFF)
         self.assertTrue(verdict.fresh)
         self.assertIsNotNone(verdict.error)
 
@@ -194,7 +256,7 @@ class EvaluateTest(unittest.TestCase):
 class BudgetTest(unittest.TestCase):
     def test_pr_is_not_started_without_budget_to_publish_it(self):
         gh = FakeGitHub({RUNS: runs(created_days_ago=1)}, budget=1)
-        assessment = pcf.assess(gh, PR, WORKFLOW, CUTOFF, CONTEXT)
+        assessment = pcf.assess(gh, PR, WORKFLOW, "develop", CUTOFF, CONTEXT)
         self.assertTrue(assessment.verdict.skipped)
         self.assertFalse(assessment.holds_write_claim)
         self.assertEqual(gh.paths, [])
@@ -205,7 +267,7 @@ class BudgetTest(unittest.TestCase):
             {RUNS: runs(created_days_ago=5), "commits/": {"statuses": []}},
             budget=pcf.REQUESTS_PER_PR,
         )
-        assessment = pcf.assess(gh, PR, WORKFLOW, CUTOFF, CONTEXT)
+        assessment = pcf.assess(gh, PR, WORKFLOW, "develop", CUTOFF, CONTEXT)
         self.assertFalse(assessment.verdict.skipped)
         self.assertFalse(assessment.verdict.fresh)
         self.assertEqual(len(gh.paths), pcf.REQUESTS_PER_PR - pcf.REQUESTS_PER_WRITE)
@@ -218,7 +280,7 @@ class BudgetTest(unittest.TestCase):
             {RUNS: runs(created_days_ago=1), "commits/": {"statuses": []}},
             budget=100,
         )
-        assessment = pcf.assess(gh, PR, WORKFLOW, CUTOFF, CONTEXT)
+        assessment = pcf.assess(gh, PR, WORKFLOW, "develop", CUTOFF, CONTEXT)
         self.assertTrue(assessment.holds_write_claim)
         self.assertEqual(gh.outstanding, pcf.REQUESTS_PER_WRITE)
         gh.release_budget(pcf.REQUESTS_PER_WRITE)
@@ -231,7 +293,7 @@ class BudgetTest(unittest.TestCase):
             {RUNS: runs(created_days_ago=1)},
             budget=pcf.REQUESTS_PER_PR - 1,
         )
-        assessment = pcf.assess(gh, PR, WORKFLOW, CUTOFF, CONTEXT)
+        assessment = pcf.assess(gh, PR, WORKFLOW, "develop", CUTOFF, CONTEXT)
         self.assertTrue(assessment.verdict.skipped)
         self.assertEqual(gh.paths, [])
 
@@ -311,6 +373,78 @@ class BudgetTest(unittest.TestCase):
         # An error response still reports the allowance, so it must be read.
         self.assertEqual(gh.rate_limit_remaining, 12)
 
+    def test_graphql_answers_do_not_move_the_core_reserve(self):
+        # GraphQL is a separate pool reported in the same headers. Reading it
+        # as the core allowance would aim the reserve at the wrong budget.
+        gh = pcf.GitHub("o/r", "t")
+        gh.rate_limit_remaining = 3000
+        gh._note_rate_limit(
+            {
+                "x-ratelimit-resource": "graphql",
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-remaining": "4999",
+            }
+        )
+        self.assertEqual(gh.rate_limit_remaining, 3000)
+        gh._note_rate_limit(
+            {"x-ratelimit-resource": "core", "x-ratelimit-remaining": "2999"}
+        )
+        self.assertEqual(gh.rate_limit_remaining, 2999)
+
+    def test_graphql_without_data_is_an_error(self):
+        gh = pcf.GitHub("o/r", "t")
+        for body in ({"errors": [{"message": "bad"}]}, {"data": None}, None):
+            with mock.patch.object(gh, "_request", return_value=body):
+                with self.assertRaises(pcf.GitHubError):
+                    gh.graphql("query { x }", {})
+
+
+class FakeGraphQL:
+    """Answers retarget queries from ``createdAt`` values keyed by PR number."""
+
+    def __init__(self, retargets: dict, missing: tuple = ()):
+        self.repo = "o/r"
+        self._retargets = retargets
+        self._missing = missing
+        self.queries: list[str] = []
+
+    def graphql(self, query: str, variables: dict):
+        self.queries.append(query)
+        numbers = [int(n) for n in re.findall(r"pullRequest\(number: (\d+)\)", query)]
+        repository = {}
+        for n in numbers:
+            if n in self._missing:
+                repository[f"pr{n}"] = None
+                continue
+            nodes = (
+                [{"createdAt": iso(self._retargets[n])}] if n in self._retargets else []
+            )
+            repository[f"pr{n}"] = {"timelineItems": {"nodes": nodes}}
+        return {"repository": repository}
+
+
+class RetargetTest(unittest.TestCase):
+    def test_reports_only_prs_that_changed_base(self):
+        gh = FakeGraphQL({7: 0.25})
+        self.assertEqual(
+            pcf.find_retargets(gh, [7, 8]), {7: NOW - timedelta(days=0.25)}
+        )
+
+    def test_a_pr_graphql_cannot_resolve_is_left_out_not_fatal(self):
+        gh = FakeGraphQL({7: 1.0}, missing=(8,))
+        self.assertEqual(list(pcf.find_retargets(gh, [7, 8])), [7])
+
+    def test_a_sweep_is_batched_rather_than_one_query_per_pr(self):
+        gh = FakeGraphQL({})
+        pcf.find_retargets(gh, list(range(1, 2 * pcf.RETARGET_BATCH + 2)))
+        self.assertEqual(len(gh.queries), 3)
+
+    def test_a_malformed_answer_is_an_error(self):
+        gh = FakeGraphQL({})
+        gh.graphql = lambda query, variables: {"repository": "nope"}
+        with self.assertRaises(pcf.GitHubError):
+            pcf.find_retargets(gh, [7])
+
 
 class PublishedStatusTest(unittest.TestCase):
     def test_reads_back_our_own_context(self):
@@ -323,6 +457,7 @@ class PublishedStatusTest(unittest.TestCase):
                             "context": CONTEXT,
                             "state": "success",
                             "description": "CI merged develop within the last 3 days",
+                            "target_url": None,
                         },
                     ]
                 }
@@ -330,7 +465,48 @@ class PublishedStatusTest(unittest.TestCase):
         )
         self.assertEqual(
             pcf.current_status(gh, "deadbeef", CONTEXT),
-            ("success", "CI merged develop within the last 3 days"),
+            ("success", "CI merged develop within the last 3 days", None),
+        )
+
+    def test_a_status_posted_from_a_publication_reads_back_as_unchanged(self):
+        # The dedupe compares the two shapes directly, so they must agree.
+        verdict = Verdict(fresh=True, ci_run=ci_run(days_ago=1))
+        state, description, url = pcf.publication(verdict, "develop", 3, False, None)
+        gh = FakeGitHub(
+            {
+                "commits/": {
+                    "statuses": [
+                        {
+                            "context": CONTEXT,
+                            "state": state,
+                            "description": description,
+                            "target_url": url,
+                        }
+                    ]
+                }
+            }
+        )
+        self.assertEqual(
+            pcf.current_status(gh, "deadbeef", CONTEXT),
+            pcf.publication(verdict, "develop", 3, False, None),
+        )
+
+    def test_a_new_run_on_the_same_head_is_republished(self):
+        # A fresh PR's description never changes, so without the link in the
+        # comparison its status would keep pointing at the run it replaced.
+        old = Verdict(fresh=True, ci_run=ci_run(days_ago=2, run_id=7))
+        new = Verdict(fresh=True, ci_run=ci_run(days_ago=0.1, run_id=8))
+        self.assertNotEqual(
+            pcf.publication(old, "develop", 3, False, None),
+            pcf.publication(new, "develop", 3, False, None),
+        )
+
+    def test_a_head_without_a_run_is_stable_from_sweep_to_sweep(self):
+        # Linking this job would change the status every sweep.
+        no_run = Verdict(fresh=True)
+        self.assertEqual(
+            pcf.publication(no_run, "develop", 3, False, "https://x/runs/1"),
+            pcf.publication(no_run, "develop", 3, False, "https://x/runs/2"),
         )
 
     def test_absent_context_reads_as_nothing_published(self):
@@ -349,7 +525,7 @@ class PublishedStatusTest(unittest.TestCase):
 
     def test_skipped_pr_is_not_read_back(self):
         gh = FakeGitHub({}, budget=0)
-        assessment = pcf.assess(gh, PR, WORKFLOW, CUTOFF, CONTEXT)
+        assessment = pcf.assess(gh, PR, WORKFLOW, "develop", CUTOFF, CONTEXT)
         self.assertTrue(assessment.verdict.skipped)
         self.assertIsNone(assessment.published)
         self.assertEqual(gh.paths, [])
@@ -555,17 +731,40 @@ class DayCountTest(unittest.TestCase):
                 pcf.day_count(value)
 
 
-def ci_run(days_ago: float = 6.0, attempt: int = 1) -> CIRun:
+def ci_run(days_ago: float = 6.0, attempt: int = 1, run_id: int = 7) -> CIRun:
     return CIRun(
-        id=7,
-        url="https://github.com/o/r/actions/runs/7",
+        id=run_id,
+        url=f"https://github.com/o/r/actions/runs/{run_id}",
         attempt=attempt,
         created_at=NOW - timedelta(days=days_ago),
     )
 
 
-def stale_verdict(days_ago: float = 6.0, attempt: int = 1) -> Verdict:
-    return Verdict(fresh=False, ci_run=ci_run(days_ago, attempt))
+def stale_verdict(
+    days_ago: float = 6.0, attempt: int = 1, retargeted: bool = False
+) -> Verdict:
+    return Verdict(fresh=False, ci_run=ci_run(days_ago, attempt), retargeted=retargeted)
+
+
+class FetchPRTest(unittest.TestCase):
+    def pull(self, base: str):
+        return FakeGitHub(
+            {
+                "pulls/": {
+                    "number": 9,
+                    "head": {"sha": "abc"},
+                    "draft": False,
+                    "base": {"ref": base},
+                }
+            }
+        )
+
+    def test_a_pr_into_develop_is_fetched(self):
+        pr = pcf.fetch_pr(self.pull("develop"), 9, "develop")
+        self.assertEqual((pr.number, pr.head_sha), (9, "abc"))
+
+    def test_a_pr_into_another_branch_is_not_ours(self):
+        self.assertIsNone(pcf.fetch_pr(self.pull("users/x/parent"), 9, "develop"))
 
 
 class ReportingTest(unittest.TestCase):
@@ -592,20 +791,31 @@ class ReportingTest(unittest.TestCase):
         self.assertIn("re-running jobs reuses that base", text)
 
     def test_description_fits_githubs_limit(self):
-        for branch in ("develop", "a-very-long-base-branch-name" * 6):
-            text = pcf.describe(stale_verdict(), branch, 3, enforcing=False)
-            self.assertLessEqual(len(text), pcf.MAX_DESCRIPTION_LENGTH)
-        # The real branch must not need truncating, or the advice gets cut.
-        self.assertTrue(
-            pcf.describe(stale_verdict(), "develop", 3, enforcing=False).endswith(
-                "reuses that base"
+        for retargeted in (False, True):
+            stale = stale_verdict(retargeted=retargeted)
+            for branch in ("develop", "a-very-long-base-branch-name" * 6):
+                text = pcf.describe(stale, branch, 3, enforcing=False)
+                self.assertLessEqual(len(text), pcf.MAX_DESCRIPTION_LENGTH)
+            # The real branch must not need truncating, or the advice gets cut.
+            self.assertTrue(
+                pcf.describe(stale, "develop", 3, enforcing=False).endswith(
+                    "reuses that base"
+                )
             )
-        )
+
+    def test_a_retargeted_pr_is_told_why_rather_than_given_a_date(self):
+        text = pcf.describe(stale_verdict(retargeted=True), "develop", 3, True)
+        self.assertIn("retargeted to develop", text)
+        self.assertNotIn("2026-", text)
 
     def test_status_links_to_the_ci_run_it_judged(self):
         this_run = "https://github.com/o/r/actions/runs/99"
         self.assertEqual(pcf.status_target_url(stale_verdict(), this_run), ci_run().url)
-        self.assertEqual(pcf.status_target_url(Verdict(fresh=True), this_run), this_run)
+        # An error is worth a link to this job's log; "no run yet" is not.
+        self.assertEqual(
+            pcf.status_target_url(Verdict(fresh=True, error="boom"), this_run), this_run
+        )
+        self.assertIsNone(pcf.status_target_url(Verdict(fresh=True), this_run))
 
     def test_a_head_only_pr_is_labelled_by_its_sha(self):
         self.assertEqual(PR.label, "#42")
