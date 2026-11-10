@@ -699,8 +699,9 @@ What differs, and why:
   rows that see it. Matching that would cost a select per P·V element; such a V is outside
   the contract, as a NaN anywhere in the inputs is. Paged caches are not served yet; paging
   must keep reading no key no row sees.
-  A NaN input to the biased dK/dV kernels is likewise outside the contract: dK and dV may
-  then come back finite where the inputs were NaN.
+  The biased dK/dV kernels on gfx950 propagate a NaN in the bias, K or LSE as dQ does: their
+  exponent clamp keeps a NaN, so dK and dV are non-finite wherever dQ is (the `*NanBias*`
+  device cases). A NaN input is still outside the contract.
 - **P in 16 bits.** Each family rounds P to the input dtype before the P·V product, as
   AOTriton does, and every family rounds bf16 P to nearest. gfx950's CDNA objects use
   `v_cvt_pk_bf16_f32` (ties to even). gfx942's and gfx90a's CDNA generic and decode objects
