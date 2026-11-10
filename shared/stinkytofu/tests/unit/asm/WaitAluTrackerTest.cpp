@@ -7,9 +7,11 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
@@ -211,6 +213,69 @@ TEST_F(WaitAluTrackerTest, UntilFreeUsesFormWmma) {
     EXPECT_EQ(t.untilFree(*insts[2], WaitAluHideOp::Wmma, insts[1]), -1);
     EXPECT_GT(t.untilFree(*insts[2], WaitAluHideOp::Wmma, insts[0]), 0);
     EXPECT_EQ(t.requiredGap(*insts[1], *insts[2], WaitAluHideOp::Wmma, insts[1]), -1);
+}
+
+// The loop's first ds_load refills v[200:203], which the loop's WMMAs read. Only a tracker seeded
+// with the loop block's entry sees the last read of the previous iteration, and it predicts the
+// s_wait_alu the pass puts in front of the ds_load.
+TEST_F(WaitAluTrackerTest, SeededTrackerSeesTheBackEdge) {
+    const std::string text =
+        "st.func @t() {\n"
+        "^entry:\n"
+        "  v300 = \"st.v_mov_b32\"(v301) { issueCycles = 1, latencyCycles = 1 }\n"
+        "  Successors: ^loop\n"
+        "^loop:\n"
+        "  v[200:203] = \"st.ds_load_b128\"(v300) " +
+        std::string(kDsAttrs) + "\n" + wmmas(3) +
+        "  SCC0 = \"st.s_cmp_eq_u32\"(s0, s1) { issueCycles = 1, latencyCycles = 1 }\n"
+        "  \"st.s_cbranch_scc1\"(\"loop\", SCC0) { issueCycles = 1, latencyCycles = 1 }\n"
+        "  Successors: ^loop, ^exit\n"
+        "^exit:\n"
+        "  \"st.s_endpgm\"() { issueCycles = 1, latencyCycles = 1 }\n"
+        "^dead:\n"
+        "  v400 = \"st.v_mov_b32\"(v401) { issueCycles = 1, latencyCycles = 1 }\n"
+        "}\n";
+    Function* func = converter.convertToFunction(text);
+    ASSERT_NE(func, nullptr);
+    auto blockNamed = [&](const std::string& label) -> BasicBlock* {
+        for (BasicBlock& bb : *func)
+            if (bb.getLabel() == label) return &bb;
+        return nullptr;
+    };
+    BasicBlock* loop = blockNamed("loop");
+    BasicBlock* dead = blockNamed("dead");
+    ASSERT_NE(loop, nullptr);
+    ASSERT_NE(dead, nullptr);
+    auto* ds = dyn_cast<StinkyInstruction>(&*loop->begin());
+    ASSERT_NE(ds, nullptr);
+
+    const InsertWaitAluOptions opts = gfx1250InsertWaitAluOptions(true);
+    WaitAluEntryStates states(*func, passCtx, opts);
+    EXPECT_TRUE(states.has(*loop));
+    EXPECT_FALSE(states.has(*dead));
+
+    WaitAluTracker empty = makeTracker();
+    EXPECT_EQ(empty.untilFree(*ds, WaitAluHideOp::Wmma), 0);
+    EXPECT_LT(empty.query(*ds).vaVdst, 0);
+
+    WaitAluTracker seeded(states, *loop);
+    const int predicted = seeded.query(*ds).vaVdst;
+    EXPECT_GE(predicted, 0);
+    EXPECT_GT(seeded.untilFree(*ds, WaitAluHideOp::Wmma), 0);
+
+    AnalysisManager am;
+    registerAllAnalyses(am);
+    createInsertWaitAluPass(opts)->run(*func, passCtx, am);
+    auto prevIt = IRList::iterator(ds);
+    ASSERT_NE(prevIt, loop->begin());
+    --prevIt;
+    auto* wait = dyn_cast<StinkyInstruction>(prevIt.getNodePtr());
+    ASSERT_NE(wait, nullptr);
+    ASSERT_EQ(wait->getUnifiedOpcode(), GFX::s_wait_alu);
+    const auto* data = wait->getModifier<SWaitAluData>();
+    ASSERT_NE(data, nullptr);
+    ASSERT_TRUE(data->hasField(SWaitAluData::VA_VDST));
+    EXPECT_EQ(static_cast<int>(data->getField(SWaitAluData::VA_VDST)), predicted);
 }
 
 }  // namespace

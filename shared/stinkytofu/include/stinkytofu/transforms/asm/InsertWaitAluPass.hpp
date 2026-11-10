@@ -27,6 +27,8 @@
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
+class BasicBlock;
+class Function;
 class Pass;
 class ModulePass;
 class PassContext;
@@ -70,13 +72,35 @@ struct WaitAluNeed {
 /// or TEX FIFO hides a vm_vsrc (a flat_* is in both).
 enum class WaitAluHideOp { Wmma, Lds, Tex, Flat };
 
+/// The entry state of every block of a Function, from the pass's own fixed point: each block's
+/// exit merged into its successors' entries, back edges included. A snapshot of the instructions
+/// at construction; rebuild it after a block changes.
+class STINKYTOFU_EXPORT WaitAluEntryStates {
+   public:
+    WaitAluEntryStates(Function& func, const PassContext& passCtx, InsertWaitAluOptions opts);
+    ~WaitAluEntryStates();
+    WaitAluEntryStates(const WaitAluEntryStates&) = delete;
+    WaitAluEntryStates& operator=(const WaitAluEntryStates&) = delete;
+
+    /// False for a block the function's entry does not reach; the pass never walks those.
+    bool has(const BasicBlock& bb) const;
+
+   private:
+    friend class WaitAluTracker;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
 /// InsertWaitAlu's scoreboard stepped one instruction at a time, so a scheduler can ask
 /// what s_wait_alu a candidate would need at the current point of its schedule. Uses the
-/// pass's own walk; it starts from an empty state, where the pass seeds a BB from its
-/// predecessors.
+/// pass's own walk. The first constructor starts from an empty state; the second from a
+/// block's entry state, as the pass seeds it from the block's predecessors.
 class STINKYTOFU_EXPORT WaitAluTracker {
    public:
     WaitAluTracker(const PassContext& passCtx, InsertWaitAluOptions opts);
+    /// Starts at `bb`'s entry in `states`, with their options; a block they do not reach
+    /// starts empty.
+    WaitAluTracker(const WaitAluEntryStates& states, const BasicBlock& bb);
     ~WaitAluTracker();
     WaitAluTracker(const WaitAluTracker&) = delete;
     WaitAluTracker& operator=(const WaitAluTracker&) = delete;

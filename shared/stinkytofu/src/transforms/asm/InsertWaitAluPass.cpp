@@ -379,6 +379,13 @@ class WaitcntBrackets {
    public:
     explicit WaitcntBrackets(const WaitAluContext& ctx) : ctx(&ctx) {}
 
+    // Take `o`'s whole state but keep this bracket's context, which may be a different owner's.
+    void assignState(const WaitcntBrackets& o) {
+        const WaitAluContext* own = ctx;
+        *this = o;
+        ctx = own;
+    }
+
     // Aggregate views.
     unsigned getScoreLB(CounterType c) const {
         return c == CT_VA_VDST ? vaPipeSum(vaPipeLB) : vmLB;
@@ -1226,13 +1233,58 @@ Step stepInstruction(WaitcntBrackets& sb, const StinkyInstruction& inst,
     return step;
 }
 
+// Advance `sb` over `bb` without emitting anything.
+void analyzeBlock(WaitcntBrackets& sb, BasicBlock& bb, const VGPRHalfKeyer& keyer) {
+    PASS_DEBUG(std::cerr << "[InsertWaitAlu] analyze bb=\"" << bb.getLabel()
+                         << "\" entry sz=" << sb.scoresSize() << " va:" << sb.vaStateStr(nullptr)
+                         << " vm:" << sb.vmStateStr(nullptr) << "\n");
+    for (IRBase& node : bb)
+        if (auto* inst = dyn_cast<StinkyInstruction>(&node))
+            (void)stepInstruction(sb, *inst, keyer);
+    PASS_DEBUG(std::cerr << "[InsertWaitAlu] end-of-bb \"" << bb.getLabel()
+                         << "\" sz=" << sb.scoresSize() << " va:" << sb.vaStateStr(nullptr)
+                         << " vm:" << sb.vmStateStr(nullptr) << "\n");
+}
+
+using EntryStates = std::unordered_map<const BasicBlock*, WaitcntBrackets>;
+
+// Each block's exit merged into its successors' entries until no entry widens. The merge only
+// widens, so this converges. A block `rpo` does not reach gets no entry.
+EntryStates solveEntryStates(const std::vector<BasicBlock*>& rpo, const WaitAluContext& ctx,
+                             const VGPRHalfKeyer& keyer) {
+    EntryStates entry;
+    auto entryOf = [&](const BasicBlock* bb) -> WaitcntBrackets& {
+        return entry.try_emplace(bb, ctx).first->second;
+    };
+    std::vector<BasicBlock*> worklist(rpo.rbegin(), rpo.rend());
+    std::unordered_set<const BasicBlock*> inWL(rpo.begin(), rpo.end());
+    unsigned visits = 0;
+    while (!worklist.empty()) {
+        BasicBlock* bb = worklist.back();
+        worklist.pop_back();
+        inWL.erase(bb);
+        ++visits;
+        WaitcntBrackets exitState = entryOf(bb);
+        analyzeBlock(exitState, *bb, keyer);
+        for (BasicBlock* succ : bb->getSuccessors()) {
+            if (entryOf(succ).merge(exitState)) {
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]   entry widened for bb=\""
+                                     << succ->getLabel() << "\" — queueing\n");
+                if (inWL.insert(succ).second) worklist.push_back(succ);
+            }
+        }
+    }
+    PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 1 converged after " << visits << " BB visits\n");
+    return entry;
+}
+
 // ---------------------------------------------------------------------------
 // The pass
 // ---------------------------------------------------------------------------
 
 class InsertWaitAluPassImpl : public Pass {
     WaitAluContext ctx_;
-    std::unordered_map<BasicBlock*, WaitcntBrackets> blockEntryState;
+    EntryStates blockEntryState;
     GfxArchID archId = GfxArchID{};
     VGPRHalfKeyer keyer{};
 
@@ -1284,15 +1336,13 @@ class InsertWaitAluPassImpl : public Pass {
         return hold_cnt;
     }
 
-    // Process one BB starting from its accumulated entry state.
-    // emit=false → run scoreboard, return exit state for Phase 1 propagation.
-    // emit=true → re-run with the converged entry state and insert s_wait_alu.
-    WaitcntBrackets runOnBasicBlock(BasicBlock& bb, bool emit) {
+    // Walk one BB from its converged entry state and insert its s_wait_alu.
+    void emitBasicBlock(BasicBlock& bb) {
         WaitcntBrackets sb = entryState(&bb);
 
-        PASS_DEBUG(std::cerr << "[InsertWaitAlu] " << (emit ? "emit" : "analyze") << " bb=\""
-                             << bb.getLabel() << "\" entry sz=" << sb.scoresSize() << " va:"
-                             << sb.vaStateStr(nullptr) << " vm:" << sb.vmStateStr(nullptr) << "\n");
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu] emit bb=\"" << bb.getLabel() << "\" entry sz="
+                             << sb.scoresSize() << " va:" << sb.vaStateStr(nullptr)
+                             << " vm:" << sb.vmStateStr(nullptr) << "\n");
 
         for (auto it = bb.begin(); it != bb.end();) {
             auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -1309,20 +1359,18 @@ class InsertWaitAluPassImpl : public Pass {
                 // instead of re-visiting it.
                 auto nextIt = it;
                 ++nextIt;
-                if (emit) {
-                    Wait drain;
-                    addWait(drain, CT_VA_VDST, 0);
-                    addWait(drain, CT_VM_VSRC, 0);
-                    // Insert before the node after the call (append at BB end if
-                    // the call is the last node) so the drain lands in the
-                    // caller's own BB, bound to the return path.
-                    IRBase* insertBefore = (nextIt == bb.end()) ? nullptr : nextIt.getNodePtr();
-                    emitWaitAlu(bb, insertBefore, drain);
-                }
+                Wait drain;
+                addWait(drain, CT_VA_VDST, 0);
+                addWait(drain, CT_VM_VSRC, 0);
+                // Insert before the node after the call (append at BB end if
+                // the call is the last node) so the drain lands in the
+                // caller's own BB, bound to the return path.
+                IRBase* insertBefore = (nextIt == bb.end()) ? nullptr : nextIt.getNodePtr();
+                emitWaitAlu(bb, insertBefore, drain);
                 it = nextIt;
                 continue;
             }
-            if (step.kind == StepKind::Normal && step.wait.hasAny() && emit) {
+            if (step.kind == StepKind::Normal && step.wait.hasAny()) {
                 // If the immediately-preceding instruction is a hold_cnt-only
                 // s_wait_alu survivor, fold its hold_cnt into our new wait
                 // so the constraint isn't lost and we don't emit two
@@ -1342,7 +1390,6 @@ class InsertWaitAluPassImpl : public Pass {
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] end-of-bb \"" << bb.getLabel()
                              << "\" sz=" << sb.scoresSize() << " va:" << sb.vaStateStr(nullptr)
                              << " vm:" << sb.vmStateStr(nullptr) << "\n");
-        return sb;
     }
 
     // Build "s_setreg_imm32_b32 hwreg(SCHED_MODE, DEP_MODE), value"
@@ -1475,39 +1522,12 @@ class InsertWaitAluPassImpl : public Pass {
                              << " BBs in RPO)\n");
 
         // Phase 1: fixed-point analysis using entry-state propagation.
-        // Each BB starts from its accumulated entry state. After processing,
-        // the exit state is merged into each successor's entry state. The
-        // merge is monotonically widening, guaranteeing convergence.
-        {
-            std::vector<BasicBlock*> worklist;
-            std::unordered_set<BasicBlock*> inWL;
-            for (auto it = rpo.rbegin(); it != rpo.rend(); ++it) {
-                worklist.push_back(*it);
-                inWL.insert(*it);
-            }
-            unsigned visits = 0;
-            while (!worklist.empty()) {
-                BasicBlock* bb = worklist.back();
-                worklist.pop_back();
-                inWL.erase(bb);
-                ++visits;
-                WaitcntBrackets exitState = runOnBasicBlock(*bb, /*emit=*/false);
-                for (auto* succ : bb->getSuccessors()) {
-                    if (entryState(succ).merge(exitState)) {
-                        PASS_DEBUG(std::cerr << "[InsertWaitAlu]   entry widened for bb=\""
-                                             << succ->getLabel() << "\" — queueing\n");
-                        if (inWL.insert(succ).second) worklist.push_back(succ);
-                    }
-                }
-            }
-            PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 1 converged after " << visits
-                                 << " BB visits\n");
-        }
+        blockEntryState = solveEntryStates(rpo, ctx_, keyer);
 
         // Phase 2: emit s_wait_alu using converged state. Caller->callee bracket
-        // drains are emitted here, in the isCall branch of runOnBasicBlock.
+        // drains are emitted here, in the isCall branch of emitBasicBlock.
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 2: emit s_wait_alu instructions\n");
-        for (auto* bb : rpo) runOnBasicBlock(*bb, /*emit=*/true);
+        for (auto* bb : rpo) emitBasicBlock(*bb);
 
         // Phase 3: enable mode2 at entry label (never disabled thereafter).
         // Entry-only: mode2 is kernel-global, callees must not re-enable it.
@@ -1576,6 +1596,28 @@ class InsertWaitAluModulePass : public ModulePass {
 }  // namespace
 
 namespace stinkytofu {
+struct WaitAluEntryStates::Impl {
+    WaitAluContext ctx;
+    VGPRHalfKeyer keyer;
+    EntryStates entry;
+};
+
+WaitAluEntryStates::WaitAluEntryStates(Function& func, const PassContext& passCtx,
+                                       InsertWaitAluOptions opts)
+    : impl_(std::make_unique<Impl>()) {
+    impl_->ctx.opts = opts;
+    setupWaitAluContext(impl_->ctx, impl_->keyer, passCtx);
+    std::vector<BasicBlock*> rpo;
+    traverseCFGInRPO(func, [&](BasicBlock* bb) { rpo.push_back(bb); });
+    impl_->entry = solveEntryStates(rpo, impl_->ctx, impl_->keyer);
+}
+
+WaitAluEntryStates::~WaitAluEntryStates() = default;
+
+bool WaitAluEntryStates::has(const BasicBlock& bb) const {
+    return impl_->entry.count(&bb) != 0;
+}
+
 struct WaitAluTracker::Impl {
     WaitAluContext ctx;
     VGPRHalfKeyer keyer;
@@ -1584,10 +1626,17 @@ struct WaitAluTracker::Impl {
         ctx.opts = opts;
         setupWaitAluContext(ctx, keyer, passCtx);
     }
+    Impl(const WaitAluEntryStates::Impl& states, const BasicBlock& bb)
+        : ctx(states.ctx), keyer(states.keyer), sb(ctx) {
+        if (auto it = states.entry.find(&bb); it != states.entry.end()) sb.assignState(it->second);
+    }
 };
 
 WaitAluTracker::WaitAluTracker(const PassContext& passCtx, InsertWaitAluOptions opts)
     : impl_(std::make_unique<Impl>(passCtx, opts)) {}
+
+WaitAluTracker::WaitAluTracker(const WaitAluEntryStates& states, const BasicBlock& bb)
+    : impl_(std::make_unique<Impl>(*states.impl_, bb)) {}
 
 WaitAluTracker::~WaitAluTracker() = default;
 
