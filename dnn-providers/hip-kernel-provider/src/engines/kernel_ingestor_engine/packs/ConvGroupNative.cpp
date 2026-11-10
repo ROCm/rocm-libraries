@@ -78,22 +78,22 @@ long long divUp(long long a, long long b)
 
 } // namespace
 
-long long groupLdsBytes(int elementBytes, int r, int s, int stride, int th, int wp, int cb)
+long long groupLdsBytes(int elementBytes, int r, int s, int stride, int th, int tw, int cb)
 {
     const long long vec = 16 / elementBytes;
     const long long rows = static_cast<long long>(th - 1) * stride + r;
-    const long long cols = static_cast<long long>(16 * wp - 1) * stride + s;
+    const long long cols = static_cast<long long>(tw - 1) * stride + s;
     return rows * cols * (16LL * cb + vec) * elementBytes;
 }
 
-std::optional<unsigned int> phaseBlocks(const K4Args& a, int th, int wp, int cb)
+std::optional<unsigned int> phaseBlocks(const K4Args& a, int th, int tw, int cb)
 {
-    if(th < 1 || wp < 1 || cb < 1 || a.c % (16 * cb) != 0)
+    if(th < 1 || tw < 1 || cb < 1 || a.c % (16 * cb) != 0)
     {
         return std::nullopt;
     }
     const long long blocks = static_cast<long long>(a.n) * a.dout * divUp(a.ho, th)
-                             * divUp(a.wo, 16LL * wp) * (a.c / (16 * cb));
+                             * divUp(a.wo, tw) * (a.c / (16 * cb));
     if(blocks < 1 || blocks > MAX_GRID)
     {
         return std::nullopt;
@@ -302,7 +302,7 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
     for(const auto& phase : problem.phases)
     {
         // The smallest tile's grid within the launch limits.
-        if(!phaseBlocks(phase.args, 1, 1, 1).has_value())
+        if(!phaseBlocks(phase.args, 1, 16, 1).has_value())
         {
             return std::nullopt;
         }
@@ -400,24 +400,32 @@ std::optional<BoundTokens> bwdGraphMatches(const MatchContext& context)
     return graphMatches(context, ConvDirection::BACKWARD_DATA);
 }
 
-/// A config's compile-time choices, read from its metadata.
+/// A config's compile-time choices, read from its metadata. Matrix-core configs: wp 16-column
+/// fragments a row (cg, oc, px 0). FMA configs (atom "fma"): the graph's channels a group cg, oc
+/// output channels and px columns a thread (wp 0).
 struct Tile
 {
     std::string atom;
     conv_igemm::AtomInfo info;
     int64_t t = 0, r = 0, s = 0, stride = 0, th = 0, wp = 0, cb = 0, cf = 0;
+    int64_t cg = 0, oc = 0, px = 0;
+    bool fma = false;
+    int64_t tw = 0; ///< output columns a workgroup
 };
+
+constexpr int64_t FMA_THREADS = 256;
 
 std::optional<Tile> tileOf(const KernelDefinition& kernel)
 {
     Tile tile;
     tile.atom = kernel.getStringMetadata("atom");
     const auto info = conv_igemm::atomNamed(tile.atom);
-    if(!info.has_value() || info->wave == 0)
+    if(!info.has_value())
     {
         return std::nullopt;
     }
     tile.info = *info;
+    tile.fma = tile.atom == "fma";
     tile.t = kernel.getIntMetadata("t");
     tile.r = kernel.getIntMetadata("r");
     tile.s = kernel.getIntMetadata("s");
@@ -426,11 +434,38 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.wp = kernel.getIntMetadata("wp");
     tile.cb = kernel.getIntMetadata("cb");
     tile.cf = kernel.getIntMetadata("cf");
-    if(tile.t < 1 || tile.r < 1 || tile.s < 1 || tile.stride < 1 || tile.th < 1 || tile.wp < 1
-       || tile.cb < 1 || (tile.cf != 0 && tile.cf != 1))
+    tile.cg = kernel.getIntMetadata("cg");
+    tile.oc = kernel.getIntMetadata("oc");
+    tile.px = kernel.getIntMetadata("px");
+    if(tile.t < 1 || tile.r < 1 || tile.s < 1 || tile.stride < 1 || tile.th < 1 || tile.cb < 1
+       || tile.cb > 16 || (tile.cf != 0 && tile.cf != 1))
     {
         return std::nullopt;
     }
+    if(!tile.fma)
+    {
+        // A 16x16 atom: 4 waves of fragments.
+        if(info->wave == 0 || tile.wp < 1 || tile.cg != 0 || tile.oc != 0 || tile.px != 0)
+        {
+            return std::nullopt;
+        }
+        tile.tw = 16 * tile.wp;
+        return tile;
+    }
+    // FMA: oc output channels of whole groups (or whole groups of them), a chunk's pixels a
+    // whole number of waves (64 lanes) and of rows.
+    const auto divides16 = [](int64_t v) { return v >= 1 && v <= 16 && 16 % v == 0; };
+    if(tile.wp != 0 || !divides16(tile.cg) || tile.cg < 2 || !divides16(tile.oc)
+       || (tile.cg % tile.oc != 0 && tile.oc % tile.cg != 0) || tile.px < 1)
+    {
+        return std::nullopt;
+    }
+    const int64_t pixels = FMA_THREADS * tile.oc / (16 * tile.cb);
+    if(pixels < 64 || pixels % 64 != 0 || pixels % tile.th != 0)
+    {
+        return std::nullopt;
+    }
+    tile.tw = pixels / tile.th * tile.px;
     return tile;
 }
 
@@ -466,9 +501,15 @@ bool kernelMatches(const MatchContext& context,
        || kernel.getStringMetadata("dtype")
               != data_objects::EnumNameDataType(problem->igemm.base.dataType)
        || !conv_igemm::atomRunsOn(tile->atom, context.deviceProperties.gcnArchName)
-       || conv_igemm::atomElement(tile->atom)
-              != conv_igemm::dataElement(problem->igemm.base.dataType)
+       || (!tile->fma
+           && conv_igemm::atomElement(tile->atom)
+                  != conv_igemm::dataElement(problem->igemm.base.dataType))
        || tile->info.tf32)
+    {
+        return false;
+    }
+    // An FMA config is compiled for the graph's channels a group.
+    if(tile->fma && tile->cg != problem->phases.front().args.cg)
     {
         return false;
     }
@@ -484,7 +525,7 @@ bool kernelMatches(const MatchContext& context,
                                  problem->kernelS,
                                  problem->kernelStride,
                                  static_cast<int>(tile->th),
-                                 static_cast<int>(tile->wp),
+                                 static_cast<int>(tile->tw),
                                  static_cast<int>(tile->cb))
        > LDS_LIMIT)
     {
@@ -493,7 +534,7 @@ bool kernelMatches(const MatchContext& context,
     return std::all_of(problem->phases.begin(), problem->phases.end(), [&](const auto& phase) {
         return conv_group::phaseBlocks(phase.args,
                                        static_cast<int>(tile->th),
-                                       static_cast<int>(tile->wp),
+                                       static_cast<int>(tile->tw),
                                        static_cast<int>(tile->cb))
             .has_value();
     });
@@ -631,7 +672,7 @@ public:
         {
             const auto phaseGrid = conv_group::phaseBlocks(phase.args,
                                                            static_cast<int>(tile->th),
-                                                           static_cast<int>(tile->wp),
+                                                           static_cast<int>(tile->tw),
                                                            static_cast<int>(tile->cb));
             if(!phaseGrid.has_value())
             {
@@ -644,19 +685,30 @@ public:
 
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         options.add("CONV_GROUP_T", elementTypeFor(problem->igemm.base.dataType));
-        options.add("CONV_GROUP_ATOM", std::string(tile->info.kernelType));
+        if(tile->fma)
+        {
+            options.add("CONV_GROUP_FMA", std::string("1"));
+            options.add("CONV_GROUP_CG", std::to_string(tile->cg));
+            options.add("CONV_GROUP_OC", std::to_string(tile->oc));
+            options.add("CONV_GROUP_PX", std::to_string(tile->px));
+        }
+        else
+        {
+            options.add("CONV_GROUP_ATOM", std::string(tile->info.kernelType));
+            options.add("CONV_GROUP_WP", std::to_string(tile->wp));
+        }
         options.add("CONV_GROUP_FT", std::to_string(problem->kernelT));
         options.add("CONV_GROUP_R", std::to_string(problem->kernelR));
         options.add("CONV_GROUP_S", std::to_string(problem->kernelS));
         options.add("CONV_GROUP_ST", std::to_string(problem->kernelStride));
         options.add("CONV_GROUP_TH", std::to_string(tile->th));
-        options.add("CONV_GROUP_WP", std::to_string(tile->wp));
         options.add("CONV_GROUP_CB", std::to_string(tile->cb));
         options.add("CONV_GROUP_CF", std::to_string(tile->cf));
 
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4Args>());
-        conv.setBlockSize(static_cast<unsigned int>(4 * tile->info.wave), 1, 1);
+        conv.setBlockSize(
+            static_cast<unsigned int>(tile->fma ? FMA_THREADS : 4 * tile->info.wave), 1, 1);
         conv.setGridSize(blocks.front(), 1, 1);
 
         KernelDefinition expandKernel = kernel;

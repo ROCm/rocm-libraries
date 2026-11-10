@@ -336,11 +336,7 @@ bool served(const ConvShape& shape, ConvDirection direction)
     {
         return false;
     }
-    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName);
-    if(shape.dataType == DataType::FLOAT)
-    {
-        return conv_igemm::atomRunsOn("mfma16_f32", arch);
-    }
+    // fp32 runs everywhere (the FMA configs where no fp32 16x16 atom exists).
     return true;
 }
 
@@ -450,7 +446,7 @@ void runCase(ConvShape shape, ConvDirection direction)
         });
         EXPECT_EQ(mismatches, 0);
     }
-    // fp32 runs only where an fp32 16x16 atom exists (CDNA); strided backward data is not served.
+    // Backward data past stride 2 is not served.
     if(served(shape, direction))
     {
         EXPECT_GE(ran, 1) << "no catalog config serves this case";
@@ -718,10 +714,56 @@ TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
     }
 }
 
+TEST(TestConvGroupCatalog, FmaKernelGatesGroupWidthChunkAndTile)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        auto shape = resnext(); // 4 channels a group
+        shape.dataType = DataType::FLOAT;
+        auto properties = testDeviceProperties();
+        properties.gcnArchName = "gfx1201";
+        const GraphFixture fixture(buildGraph(specFor(shape, direction)), properties);
+        const auto pack = packFor(direction);
+        const auto bound = matchesGraph(pack, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        const auto& kernels = catalog(direction);
+        const auto base = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+            return kernel.getStringMetadata("atom") == "fma" && kernel.getIntMetadata("cg") == 4
+                   && kernel.getIntMetadata("t") == 1 && kernel.getIntMetadata("stride") == 1
+                   && kernel.getIntMetadata("cf") == 0 && kernel.getIntMetadata("th") == 4
+                   && kernel.getIntMetadata("px") == 2;
+        });
+        ASSERT_NE(base, kernels.end());
+        EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));
+        const auto declines = [&](const char* field, const auto& value) {
+            auto kernel = *base;
+            kernel.metadata[field] = value;
+            return !matchesKernel(pack, fixture.context(), kernel, *bound);
+        };
+        EXPECT_TRUE(declines("cg", int64_t{8})); // compiled for another group width
+        EXPECT_TRUE(declines("cg", int64_t{3}));
+        EXPECT_TRUE(declines("oc", int64_t{3}));
+        EXPECT_TRUE(declines("oc", int64_t{2})); // a chunk's pixels not whole waves
+        EXPECT_TRUE(declines("px", int64_t{0}));
+        EXPECT_TRUE(declines("th", int64_t{3})); // not whole rows of the chunk's pixels
+        EXPECT_TRUE(declines("wp", int64_t{1}));
+        EXPECT_TRUE(declines("px", int64_t{64})); // a halo past 64 KB
+        EXPECT_TRUE(declines("dtype", std::string("HALF")));
+        // A matrix-core config carries no FMA knobs.
+        const auto mma = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+            return kernel.getStringMetadata("atom") == "mfma16_f32";
+        });
+        ASSERT_NE(mma, kernels.end());
+        auto withCg = *mma;
+        withCg.metadata["cg"] = int64_t{4};
+        EXPECT_FALSE(matchesKernel(pack, fixture.context(), withCg, *bound));
+    }
+}
+
 TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
 {
-    static constexpr std::array<const char*, 9> KNOBS{
-        "atom", "t", "r", "s", "stride", "th", "wp", "cb", "cf"};
+    static constexpr std::array<const char*, 12> KNOBS{
+        "atom", "t", "r", "s", "stride", "th", "wp", "cb", "cf", "cg", "oc", "px"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -736,14 +778,26 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                 const int extent = static_cast<int>(kernel.getIntMetadata(field));
                 return forward ? extent : (extent + stride - 1) / stride;
             };
-            EXPECT_LE(conv_group::groupLdsBytes(bytes,
-                                                taps("r"),
-                                                taps("s"),
-                                                forward ? stride : 1,
-                                                static_cast<int>(kernel.getIntMetadata("th")),
-                                                static_cast<int>(kernel.getIntMetadata("wp")),
-                                                static_cast<int>(kernel.getIntMetadata("cb"))),
+            // Output columns a workgroup: 16 wp (matrix core), or the FMA kernel's 256 threads
+            // in chunks of oc channels, th rows of px-column threads.
+            const int th = static_cast<int>(kernel.getIntMetadata("th"));
+            const int cb = static_cast<int>(kernel.getIntMetadata("cb"));
+            const bool fma = kernel.getStringMetadata("atom") == "fma";
+            const int tw = fma ? static_cast<int>(256 * kernel.getIntMetadata("oc") / (16 * cb) / th
+                                                  * kernel.getIntMetadata("px"))
+                               : static_cast<int>(16 * kernel.getIntMetadata("wp"));
+            EXPECT_LE(conv_group::groupLdsBytes(
+                          bytes, taps("r"), taps("s"), forward ? stride : 1, th, tw, cb),
                       64 * 1024);
+            if(fma)
+            {
+                EXPECT_EQ(kernel.getStringMetadata("dtype"), "FLOAT");
+                EXPECT_EQ(kernel.getIntMetadata("wp"), 0);
+            }
+            else
+            {
+                EXPECT_EQ(kernel.getIntMetadata("cg"), 0);
+            }
             EXPECT_LE(kernel.getIntMetadata("stride"), 2);
             std::string tuple = kernel.getStringMetadata("dtype");
             for(const char* knob : KNOBS)

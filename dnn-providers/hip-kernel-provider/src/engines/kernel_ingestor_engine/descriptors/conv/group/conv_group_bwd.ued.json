@@ -15,7 +15,10 @@
     "th",
     "wp",
     "cb",
-    "cf"
+    "cf",
+    "cg",
+    "oc",
+    "px"
   ],
   "behavior_notes": [
     "runtime_compilation"
