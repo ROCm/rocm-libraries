@@ -6,7 +6,7 @@
 #include "hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
-#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -60,41 +60,19 @@ void HipMlopsEngine::getDetails(Handle& handle,
                                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                                 hipdnnPluginConstData_t& detailsOut) const
 {
-    flatbuffers::FlatBufferBuilder builder;
-
-    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobsVector;
-
-    // Collect custom knobs from plan builders
+    // Only one plan builder should be applicable for a given graph and return custom knobs.
+    // Take the first one's to avoid duplicates.
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> knobs;
     for(const auto& planBuilder : _planBuilders)
     {
-        auto customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
-
-        if(customKnobs.empty())
+        knobs = planBuilder->getCustomKnobs(handle, opGraph);
+        if(!knobs.empty())
         {
-            continue;
+            break;
         }
-
-        for(const auto& knobT : customKnobs)
-        {
-            auto knobOffset = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobT);
-            knobsVector.push_back(knobOffset);
-        }
-
-        // Only one plan builder should be applicable for a given graph and return custom knobs.
-        // Stop after finding the first one to avoid duplicates.
-        break;
     }
 
-    auto knobs = builder.CreateVector(knobsVector);
-
-    auto engineDetails
-        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
-    builder.Finish(engineDetails);
-    auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
-    detailsOut.ptr = detachedBuffer->data();
-    detailsOut.size = detachedBuffer->size();
-
-    handle.storeEngineDetailsDetachedBuffer(detailsOut.ptr, std::move(detachedBuffer));
+    core::utils::storeEngineDetails(handle, _id, knobs, detailsOut);
 }
 
 size_t HipMlopsEngine::getMaxWorkspaceSize(

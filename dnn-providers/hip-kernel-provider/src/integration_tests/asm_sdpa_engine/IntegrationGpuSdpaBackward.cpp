@@ -7,6 +7,8 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -17,6 +19,10 @@
 #include "../IntegrationGraphVerificationHarness.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -95,6 +101,15 @@ struct SdpaBwdTestCase
         return *this;
     }
 
+    // Grade this case at this absolute tolerance instead of its path's. Needed where the
+    // reference values stay so far below the path's absolute tolerance that an all-zero
+    // output would pass.
+    SdpaBwdTestCase& withAbsoluteTolerance(float absoluteToleranceIn)
+    {
+        absoluteTolerance = absoluteToleranceIn;
+        return *this;
+    }
+
     // O and dO: Q's batch, heads and sequence with V's head dim.
     std::vector<int64_t> oDims() const
     {
@@ -121,6 +136,9 @@ struct SdpaBwdTestCase
     std::vector<std::string> archs;
 
     bool a16 = false;
+
+    // Empty: the path's absolute tolerance.
+    std::optional<float> absoluteTolerance;
 };
 
 // gfx942 serves 64 <= D <= 192 with D_qk == D_v; gfx950 serves 64 < D <= 128
@@ -146,7 +164,9 @@ std::vector<SdpaBwdTestCase> getSdpaBwdSmokeTestCases()
         // Bottom-right sliding window: mask=3 on gfx942, mask=4 on gfx950.
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, 64, 64, false),
         // S_q = 1: the gfx950 hd128 kernels carry a seqlen_q == 1 buffer-range fix.
-        SdpaBwdTestCase({1, 1, 1, 128}, {1, 1, 256, 128}),
+        // With one query row the reference |dQ| and |dK| stay near 0.01, so the case
+        // tightens atol to keep an all-zero dQ or dK failing.
+        SdpaBwdTestCase({1, 1, 1, 128}, {1, 1, 256, 128}).withAbsoluteTolerance(2e-3f),
         // The a16 accumulator: the gfx942 A16 rows without sequence padding
         // (S_q == S_kv, S_kv % 64 == 0, packed strides) and the gfx950 A16
         // psskddv rows with the dq_shuffle post kernel.
@@ -183,8 +203,10 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         // One-sided bottom-right window: the right bound is unbounded (-1).
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, 64, -1, false),
         // Small S_q (1 and 16). AITER's Python layer sends these to CK for speed,
-        // so the ASM kernels see them less often.
-        SdpaBwdTestCase({1, 1, 1, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, false),
+        // so the ASM kernels see them less often. S_q = 1 tightens atol as the
+        // Smoke case does.
+        SdpaBwdTestCase({1, 1, 1, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, false)
+            .withAbsoluteTolerance(2e-3f),
         SdpaBwdTestCase({1, 1, 16, 128}, {1, 1, 256, 128}),
         SdpaBwdTestCase({1, 1, 16, 128}, {1, 1, 16, 128}, std::nullopt, -1, 0, true),
         // B=2 and H=2, so every batch and head stride, and the packed LSE/D
@@ -264,6 +286,24 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
             .withNonPackedLayouts()
             .withA16()
             .onlyOn(K_GFX950_ONLY),
+        // Top-left causal with S_q != S_kv, where the top-left and the bottom-right
+        // kernels differ.
+        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 128}, std::nullopt, -1, 0, true)
+            .onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 128}, std::nullopt, -1, 0, true)
+            .withA16()
+            .onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 256, 64}, std::nullopt, -1, 0, true)
+            .onlyOn(K_GFX942_ONLY),
+        // gfx942 A16 causal at hd64; its A16 rows need S_q == S_kv, a multiple of 64.
+        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 128, 64}, std::nullopt, -1, 0, true)
+            .withA16()
+            .onlyOn(K_GFX942_ONLY),
+        // A padded head dim on the gfx942 A16 no-mask rows (pddv = 1).
+        SdpaBwdTestCase({1, 1, 128, 72}, {1, 1, 128, 72}).withA16().onlyOn(K_GFX942_ONLY),
+        // gfx942 hd192 bottom-right causal with S_q != S_kv.
+        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 192}, std::nullopt, -1, 0, false)
+            .onlyOn(K_GFX942_ONLY),
         // ALMIOPEN-2079: Re-enable when GQA support is implemented
         // // GQA: 4 Q heads, 1 KV head — no mask
         // SdpaBwdTestCase({1, 4, 256, 128}, {1, 1, 256, 128}),
@@ -271,6 +311,73 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         // SdpaBwdTestCase({1, 4, 256, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, true),
     };
 }
+
+// The tolerances an output is graded at: an element passes when
+// |gpu - ref| <= absolute + relative * |ref|.
+struct SdpaBwdTolerance
+{
+    float absolute;
+    float relative;
+};
+
+// Grades one output as the default validator does, and prints one line that records
+// how far inside its tolerance the output lands:
+//   SDPA_BWD_ERROR <test> <arch> <a32|a16> <output> max_abs=.. ref_at_max=.. max_ref=..
+//   worst_ratio=.. atol=.. rtol=..
+// max_abs is the largest |gpu - ref|, ref_at_max the |ref| at that element, max_ref the
+// largest |ref|, and worst_ratio the largest |gpu - ref| / (atol + rtol * |ref|); the
+// output passes while worst_ratio stays at or below 1.
+template <typename DataType>
+class RecordingSdpaBwdValidator : public IReferenceValidation
+{
+public:
+    RecordingSdpaBwdValidator(std::string label, SdpaBwdTolerance tolerance)
+        : _label(std::move(label))
+        , _tolerance(tolerance)
+        , _validator(tolerance.absolute, tolerance.relative)
+    {
+    }
+
+    bool allClose(ITensor& reference, ITensor& implementation) const override
+    {
+        if(reference.dims() == implementation.dims())
+        {
+            TensorView<DataType> refView(reference);
+            TensorView<DataType> implView(implementation);
+            const auto atol = static_cast<double>(_tolerance.absolute);
+            const auto rtol = static_cast<double>(_tolerance.relative);
+            double maxAbs = 0.0;
+            double refAtMax = 0.0;
+            double maxRef = 0.0;
+            double worstRatio = 0.0;
+            iterateAlongDimensions(reference.dims(), [&](const std::vector<int64_t>& indices) {
+                const auto want
+                    = static_cast<double>(static_cast<float>(refView.getHostValue(indices)));
+                const auto got
+                    = static_cast<double>(static_cast<float>(implView.getHostValue(indices)));
+                const double error = std::fabs(got - want);
+                const double wantMagnitude = std::fabs(want);
+                if(error > maxAbs)
+                {
+                    maxAbs = error;
+                    refAtMax = wantMagnitude;
+                }
+                maxRef = std::max(maxRef, wantMagnitude);
+                worstRatio = std::max(worstRatio, error / (atol + rtol * wantMagnitude));
+            });
+            std::cout << "SDPA_BWD_ERROR " << _label << " max_abs=" << maxAbs
+                      << " ref_at_max=" << refAtMax << " max_ref=" << maxRef
+                      << " worst_ratio=" << worstRatio << " atol=" << atol << " rtol=" << rtol
+                      << '\n';
+        }
+        return _validator.allClose(reference, implementation);
+    }
+
+private:
+    std::string _label;
+    SdpaBwdTolerance _tolerance;
+    CpuFpReferenceValidation<DataType> _validator;
+};
 
 template <typename DataType>
 class SdpaBackward : public IntegrationGraphVerificationHarness<DataType, SdpaBwdTestCase>
@@ -280,10 +387,17 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        // Step 1: Randomize Q, K, V, dO with identical seeds for both bundles
+        // Step 1: Randomize Q, K, V and dO, each from its own seed (seed + UID). One seed
+        // for every tensor would make same-shaped tensors equal (Q == K == V == dO when
+        // S_q == S_kv and D_qk == D_v), which collapses the softmax to the identity and
+        // leaves dQ and dK near zero. UIDs match between the GPU and CPU bundles, so both
+        // still hold identical inputs.
         for(auto& tensorPair : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+            bundle.randomizeTensor(tensorPair.first,
+                                   _minVal,
+                                   _maxVal,
+                                   seed + static_cast<unsigned int>(tensorPair.first));
         }
 
         // Step 2: Compute valid O and stats from Q, K, V using CPU forward reference.
@@ -328,7 +442,9 @@ protected:
         statsTensor.markHostModified();
     }
 
-    void runGraphTest(float tolerance)
+    // Grades dQ, dK and dV at a32Tolerance or, for a case that sets withA16(), at
+    // a16Tolerance; a case's withAbsoluteTolerance() overrides the absolute part.
+    void runGraphTest(SdpaBwdTolerance a32Tolerance, SdpaBwdTolerance a16Tolerance)
     {
         const auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
         if(deviceString != "gfx942" && deviceString != "gfx950")
@@ -439,25 +555,37 @@ protected:
         _rightBound = testCase.rightBound;
         _topLeftAlignment = testCase.topLeftAlignment;
 
+        SdpaBwdTolerance tolerance = testCase.a16 ? a16Tolerance : a32Tolerance;
+        if(testCase.absoluteTolerance.has_value())
+        {
+            tolerance.absolute = testCase.absoluteTolerance.value();
+        }
+        const auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
+        const std::string caseLabel = std::string(testInfo->test_suite_name()) + "."
+                                      + testInfo->name() + " " + deviceString
+                                      + (testCase.a16 ? " a16" : " a32");
+
         GraphVerificationContext context(graph);
-        this->registerValidator(context, dq, tolerance);
-        this->registerValidator(context, dk, tolerance);
-        this->registerValidator(context, dv, tolerance);
+        const auto registerOutput
+            = [&](const std::shared_ptr<TensorAttributes>& output, const char* outputName) {
+                  this->registerValidator(context,
+                                          output,
+                                          std::make_unique<RecordingSdpaBwdValidator<DataType>>(
+                                              caseLabel + " " + outputName, tolerance));
+              };
+        ASSERT_NO_FATAL_FAILURE(registerOutput(dq, "dQ"));
+        ASSERT_NO_FATAL_FAILURE(registerOutput(dk, "dK"));
+        ASSERT_NO_FATAL_FAILURE(registerOutput(dv, "dV"));
         if(!testCase.a16)
         {
             this->verifyGraph(context, 0);
             return;
         }
 
-        auto result = graph.build_operation_graph(this->_handle);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        result = graph.create_execution_plan_ext(
-            ASM_SDPA_ENGINE_ID, {KnobSetting("sdpa.bwd.accumulator_type", std::string("a16"))});
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        result = graph.check_support();
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        result = graph.build_plans();
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_NO_FATAL_FAILURE(this->buildPlansForEngine(
+            graph,
+            ASM_SDPA_ENGINE_ID,
+            {KnobSetting("hipkernel.sdpa.bwd.accumulator_type", std::string("a16"))}));
         this->verifyBuiltGraph(context, 0);
     }
 
@@ -484,26 +612,26 @@ using IntegrationGpuSdpaBwdFp16 = SdpaBackward<hipdnn_data_sdk::types::half>;
 
 TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
 {
-    // BF16 backward error comes from two sources:
-    // 1. Softmax recomputation divergence: GPU ASM kernel and CPU FP32 reference
-    //    compute exp(score - lse) with different rounding (BF16 hw vs FP32 scalar).
-    //    At positions where softmax probability is near-zero, small probability
-    //    differences produce large absolute gradient errors.
-    // 2. Inherent BF16 precision: 7-bit mantissa causes rounding at each
-    //    arithmetic step. The backward pass compounds this through softmax
-    //    recomputation, dS = P*(dP-D) catastrophic cancellation, and gradient
-    //    matmuls.
+    // dQ, dK and dV reach BF16 through these paths:
+    // - A32 (gfx942 and gfx950): DQDKDV accumulates dQ in FP32 and dq_convert rounds it
+    //   to BF16 once.
+    // - A16 on gfx942: DQDKDV writes dQ directly.
+    // - A16 on gfx950: DQDKDV accumulates into a 16-bit dq_acc and dq_shuffle writes dQ.
+    // The CPU reference accumulates in FP32 and rounds to BF16 once. The kernels also
+    // recompute the softmax with their own rounding, so near-zero probabilities differ
+    // from the reference's, and the dS = P * (dP - D) subtraction amplifies the
+    // difference.
     //
-    // The CPU reference accumulates dQ/dK/dV in FP32 and converts to BF16 once
-    // at the end, matching the GPU kernel's A32 accumulator + dq_convert path.
-    //
-    // Measured error floor (worst seed across 8 seeds): between 0.3 and 0.5.
-    // Use 5e-1 — same as FP16 backward, with ~2x margin over the measured floor
-    // of 0.3. Verified stable across seeds {0,42,123,456,789,1024,2048,31415}.
+    // PROVISIONAL, pending the gfx942 and gfx950 measurement: atol = rtol = 0.1 on both
+    // paths. The values come from a CPU emulation, at scale 1.0 on this suite's
+    // seed + UID fill, of a kernel that rounds to 16 bits: its error uses at most 16% of
+    // the bound, and an all-zero or halved dQ, dK or dV fails every case. Replace them
+    // with values measured from the SDPA_BWD_ERROR lines of a run on both architectures
+    // over several seeds, keeping worst_ratio at or below 0.5.
+    const SdpaBwdTolerance a32{0.1f, 0.1f};
+    const SdpaBwdTolerance a16{0.1f, 0.1f};
 
-    auto tolerance = 5e-1f;
-
-    runGraphTest(tolerance);
+    runGraphTest(a32, a16);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -516,13 +644,16 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 
 TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
 {
-    // FP16 backward has the same error sources as BF16 but the 10-bit mantissa
-    // (vs BF16's 7) yields tighter results. Worst-case element lands under 0.25.
-    // Use 5e-1 — ~2x margin over that measured floor.
+    // FP16 takes the paths the BF16 test lists; its 10-bit mantissa (BF16 has 7) leaves
+    // less rounding error on each.
+    //
+    // PROVISIONAL, pending the gfx942 and gfx950 measurement: atol = rtol = 0.1 on both
+    // paths, from the same CPU emulation as BF16 (its error uses at most 16% of the
+    // bound). Replace them with measured values as the BF16 test describes.
+    const SdpaBwdTolerance a32{0.1f, 0.1f};
+    const SdpaBwdTolerance a16{0.1f, 0.1f};
 
-    auto tolerance = 5e-1f;
-
-    runGraphTest(tolerance);
+    runGraphTest(a32, a16);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,

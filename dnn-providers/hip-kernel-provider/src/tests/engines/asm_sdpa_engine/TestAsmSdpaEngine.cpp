@@ -23,6 +23,7 @@
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "mocks/MockPlanBuilder.hpp"
+#include "tests/engines/asm_sdpa_engine/AsmSdpaTestSupport.hpp"
 
 #include <optional>
 #include <string>
@@ -39,7 +40,7 @@ using hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
 
-constexpr const char* K_ACC_KNOB = "sdpa.bwd.accumulator_type";
+constexpr const char* K_ACC_KNOB = "hipkernel.sdpa.bwd.accumulator_type";
 
 // An engine config for this engine carrying one accumulator knob setting.
 flatbuffers::FlatBufferBuilder createAccumulatorKnobConfig(const std::string& value)
@@ -78,37 +79,15 @@ EngineConfigWrapper wrapConfig(const flatbuffers::FlatBufferBuilder& builder)
     return EngineConfigWrapper(builder.GetBufferPointer(), builder.GetSize());
 }
 
+// The packed [4, 8, 256, 128] bf16 graphs both builders serve.
 flatbuffers::FlatBufferBuilder createSdpaBwdGraph()
 {
-    const std::vector<int64_t> dims{4, 8, 256, 128};
-    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
-        dims,
-        strides,
-        dims,
-        strides,
-        dims,
-        strides,
-        dims,
-        strides,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    return createPackedSdpaBwdGraph({4, 8, 256, 128}, {4, 8, 256, 128});
 }
 
 flatbuffers::FlatBufferBuilder createSdpaFwdGraph()
 {
-    const std::vector<int64_t> dims{4, 8, 256, 128};
-    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        dims,
-        strides,
-        dims,
-        strides,
-        dims,
-        strides,
-        dims,
-        strides,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    return createPackedSdpaFwdGraph({4, 8, 256, 128}, {4, 8, 256, 128});
 }
 
 hipdnn_flatbuffers_sdk::data_objects::KnobT makeStringKnob(const std::string& id)

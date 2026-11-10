@@ -4,10 +4,12 @@
 #pragma once
 
 #include "SdpaBwdParams.hpp"
+#include "SdpaPlanUtils.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <optional>
@@ -91,6 +93,30 @@ constexpr SdpaBwdDqAccLayout sdpaBwdDqAccLayout(
             rows * stride,
             batch == 1 ? 0 : perBatch,
             batch * perBatch * elementBytes};
+}
+
+/// True when every dq_acc offset the DQDKDV kernels form in 32 bits within one
+/// batch fits: the row and head strides and the per-batch span of `headsQ`
+/// heads, in bytes. The span is checked for B == 1 as well, where the layout's
+/// batch stride is 0. Offsets across batches are bounded per row by the dqdkdv
+/// lookup (bwd_dispatch::psskOffOffsetsFitU32 for the pssk = 0 rows). Logs
+/// each offending field.
+inline bool sdpaBwdDqAccFitsU32(const SdpaBwdDqAccLayout& layout, size_t headsQ)
+{
+    const auto elementBytes = static_cast<int64_t>(layout.elementBytes);
+    const auto nheadStride = static_cast<int64_t>(layout.nheadStride);
+    bool ok = plan_utils::byteStrideFitsU32(
+        "stride_dq_acc", static_cast<int64_t>(layout.stride), elementBytes);
+    ok &= plan_utils::byteStrideFitsU32("nhead_stride_dq_acc", nheadStride, elementBytes);
+    // The per-batch element count saturates instead of overflowing; any
+    // saturated count is far past the bound.
+    int64_t perBatch = 0;
+    if(__builtin_mul_overflow(static_cast<int64_t>(headsQ), nheadStride, &perBatch))
+    {
+        perBatch = INT64_MAX;
+    }
+    ok &= plan_utils::byteStrideFitsU32("dq_acc per-batch span", perBatch, elementBytes);
+    return ok;
 }
 
 /// Total backward workspace size. Layout: D buffer | dq_acc, where dq_acc is

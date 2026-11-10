@@ -20,6 +20,7 @@
 #include "engines/asm_sdpa_engine/plans/SdpaKernelUtils.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
+#include "tests/engines/asm_sdpa_engine/AsmSdpaTestSupport.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaAttnScaleCases.hpp"
 
@@ -717,6 +718,9 @@ bwd_dispatch::KernelRequest makeRequest(const std::string& dtype,
     request.mode = MODE_BATCH;
     request.bf16Cvt = dtype == "fp16" ? BF16_CVT_FP16_SENTINEL : bf16Cvt;
     request.psskOffStridesOk = true;
+    request.batch = 1;
+    request.nheadQ = 1;
+    request.qBatchStrideMatchesDqAcc = true;
     return request;
 }
 
@@ -1110,6 +1114,98 @@ TEST(TestSdpaBwdRegistryLookup, Gfx942A16ResolvesOnlyWhereThePssk0RowsApply)
     }
 }
 
+// The pssk = 0 dqdkdv kernels add (batch, head) offsets to their bases in 32
+// bits. A32 rows qualify only while dq_acc, dK and dV span at most UINT32_MAX
+// bytes and Q's batch stride is one they derive the dq_acc batch offset from;
+// otherwise the lookup falls back to the psskddv row, whose bases are 64-bit.
+// bf16/fp16 hd128, H_q = 32, S = 12288 (a multiple of the 192-row tile): B = 21
+// is 4,227,858,432 dq_acc bytes and B = 22 is 4,429,185,024.
+TEST(TestSdpaBwdRegistryLookup, Gfx942Pssk0RowsNeedEveryOffsetToFit32Bits)
+{
+    constexpr int64_t K_U32_MAX = UINT32_MAX;
+    for(const char* dtype : {"bf16", "fp16"})
+    {
+        for(const int mask : {MASK_NONE, MASK_TOP_LEFT_CAUSAL})
+        {
+            SCOPED_TRACE(std::string(dtype) + " mask=" + std::to_string(mask));
+            auto request = withSeqLens(makeRequest(dtype, 128, 128, mask), 12288, 12288);
+            request.nheadQ = 32;
+            request.batch = 21;
+            EXPECT_EQ(resolvedPsskPddv("gfx942", request), K_UNPADDED);
+            request.batch = 22;
+            EXPECT_EQ(resolvedPsskPddv("gfx942", request), K_PSSK_PDDV);
+
+            auto grads = withSeqLens(makeRequest(dtype, 128, 128, mask), 384, 384);
+            grads.gradKvSpanBytes = K_U32_MAX;
+            EXPECT_EQ(resolvedPsskPddv("gfx942", grads), K_UNPADDED);
+            grads.gradKvSpanBytes = K_U32_MAX + 1;
+            EXPECT_EQ(resolvedPsskPddv("gfx942", grads), K_PSSK_PDDV);
+
+            // The A32 kernels read Q, K, V and dO through 64-bit bases.
+            auto inputs = withSeqLens(makeRequest(dtype, 128, 128, mask), 384, 384);
+            inputs.inputSpanBytes = K_U32_MAX + 1;
+            EXPECT_EQ(resolvedPsskPddv("gfx942", inputs), K_UNPADDED);
+
+            auto qBatch = withSeqLens(makeRequest(dtype, 128, 128, mask), 384, 384);
+            qBatch.qBatchStrideMatchesDqAcc = false;
+            EXPECT_EQ(resolvedPsskPddv("gfx942", qBatch), K_PSSK_PDDV);
+        }
+    }
+
+    // gfx942 A16 has only pssk = 0 rows, which form every tensor's offset in 32
+    // bits: a tensor past UINT32_MAX bytes leaves no row. They have no dq_acc,
+    // so Q's batch stride does not matter.
+    auto a16 = makeA16Request("bf16", 128, 128, MASK_NONE, 256, 256);
+    a16.qBatchStrideMatchesDqAcc = false;
+    a16.inputSpanBytes = K_U32_MAX;
+    a16.gradKvSpanBytes = K_U32_MAX;
+    EXPECT_EQ(resolvedPsskPddv("gfx942", a16), K_UNPADDED);
+    auto bigInput = a16;
+    bigInput.inputSpanBytes = K_U32_MAX + 1;
+    EXPECT_FALSE(resolvedPsskPddv("gfx942", bigInput).has_value());
+    auto bigGrad = a16;
+    bigGrad.gradKvSpanBytes = K_U32_MAX + 1;
+    EXPECT_FALSE(resolvedPsskPddv("gfx942", bigGrad).has_value());
+}
+
+// Bytes from the first element to one past the last; (n - 1) * stride on each
+// axis plus one row of D elements.
+TEST(TestSdpaBwdSpanBytes, CountsToOnePastTheLastElement)
+{
+    using bwd_dispatch::bhsdSpanBytes;
+    // Packed [2, 1, 2^23, 128] bf16 is exactly 2^32 bytes.
+    EXPECT_EQ(bhsdSpanBytes({int64_t{1} << 30, int64_t{1} << 30, 128}, 2, 1, 8388608, 128, 2),
+              int64_t{1} << 32);
+    // BSHD [B = 1, H = 4, S = 8, D = 128]: strides {batch 4096, head 128, seq 512}.
+    EXPECT_EQ(bhsdSpanBytes({4096, 128, 512}, 1, 4, 8, 128, 2), 4096 * 2);
+    // Rows padded to 136 elements: the last row ends after D, not after 136.
+    EXPECT_EQ(bhsdSpanBytes({int64_t{2} * 136, 136, 0}, 1, 2, 1, 128, 2), (136 + 128) * 2);
+    EXPECT_EQ(bhsdSpanBytes({INT64_MAX / 2, 1, 1}, 4, 1, 1, 1, 2), INT64_MAX);
+    EXPECT_EQ(bhsdSpanBytes({4096, 128, 512}, 0, 4, 8, 128, 2), 0);
+}
+
+// The A32 pssk = 0 kernels form the dq_acc batch offset from Q's batch stride;
+// it is the packed FP32 [B, H_q, S_q, D_qk] offset for packed BHSD and BSHD
+// (H_q * S_q * D_qk) and for SBHD (H_q * D_qk, below the sequence stride).
+TEST(TestSdpaBwdQBatchStride, MatchesDqAccOnlyForBatchPackedQ)
+{
+    using bwd_dispatch::qBatchStrideMatchesDqAcc;
+    constexpr int64_t K_B = 2;
+    constexpr int64_t K_H = 4;
+    constexpr int64_t K_S = 384;
+    constexpr int64_t K_D = 128;
+    EXPECT_TRUE(qBatchStrideMatchesDqAcc({K_H * K_S * K_D, K_S * K_D, K_D}, K_B, K_H, K_S, K_D));
+    EXPECT_TRUE(qBatchStrideMatchesDqAcc({K_S * K_H * K_D, K_D, K_H * K_D}, K_B, K_H, K_S, K_D));
+    EXPECT_TRUE(qBatchStrideMatchesDqAcc({K_H * K_D, K_D, K_B * K_H * K_D}, K_B, K_H, K_S, K_D));
+    // Batch-padded Q, and H_q * D_qk at or above the sequence stride.
+    EXPECT_FALSE(
+        qBatchStrideMatchesDqAcc({(K_H * K_S + 1) * K_D, K_S * K_D, K_D}, K_B, K_H, K_S, K_D));
+    EXPECT_FALSE(qBatchStrideMatchesDqAcc({K_H * K_D, K_D, K_H * K_D}, K_B, K_H, K_S, K_D));
+    // B == 1 has no batch offset.
+    EXPECT_TRUE(
+        qBatchStrideMatchesDqAcc({(K_H * K_S + 1) * K_D, K_S * K_D, K_D}, 1, K_H, K_S, K_D));
+}
+
 // mha_bwd.cu fmha_v3_bwd() (:374-377): gfx942 A16 asks for the top-left
 // causal kernel for a bottom-right causal mask when S_q == S_kv, where the two
 // agree, and so serves it from the A16 causal rows.
@@ -1398,24 +1494,6 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFp8)
 
 namespace
 {
-// A packed bf16 backward graph with D_qk on Q, K, dQ, dK and D_v on V, O, dO,
-// dV.
-flatbuffers::FlatBufferBuilder createSdpaBwdGraphForHeadDims(int64_t headDimQk, int64_t headDimV)
-{
-    const std::vector<int64_t> qkDims = {2, 4, 256, headDimQk};
-    const std::vector<int64_t> voDims = {2, 4, 256, headDimV};
-    return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
-        qkDims,
-        hipdnn_data_sdk::utilities::generateStrides(qkDims),
-        qkDims,
-        hipdnn_data_sdk::utilities::generateStrides(qkDims),
-        voDims,
-        hipdnn_data_sdk::utilities::generateStrides(voDims),
-        voDims,
-        hipdnn_data_sdk::utilities::generateStrides(voDims),
-        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
-}
-
 struct HeadDimCase
 {
     int64_t headDimQk;
@@ -1468,7 +1546,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableServesTheHeadDimsAiterSendsToAsm)
     for(const auto& c : K_HEAD_DIM_CASES)
     {
         SCOPED_TRACE(std::to_string(c.headDimQk) + "x" + std::to_string(c.headDimV));
-        auto builder = createSdpaBwdGraphForHeadDims(c.headDimQk, c.headDimV);
+        auto builder = createPackedSdpaBwdGraph({2, 4, 256, c.headDimQk}, {2, 4, 256, c.headDimV});
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
             builder.GetBufferPointer(), builder.GetSize());
         EXPECT_EQ(_planBuilder.isApplicable(_handle, graphWrapper),
@@ -2936,6 +3014,23 @@ TEST(TestSdpaBwdDqAccLayout, SingleBatchHasNoBatchStride)
     }
 }
 
+// B == 1 has no batch stride, but the DQDKDV kernels still form the offset of
+// the last head in 32 bits, so the per-batch span must stay below 2^32 bytes.
+TEST(TestSdpaBwdDqAccLayout, FitsU32BoundsThePerBatchSpanAtBatchOne)
+{
+    // A32: 64 * S * 128 * 4 bytes; S = 131071 is 4,294,934,528, S = 131072 is 2^32.
+    EXPECT_TRUE(
+        sdpaBwdDqAccFitsU32(sdpaBwdDqAccLayout(1, 64, 131071, 128, AccumulatorType::A32), 64));
+    EXPECT_FALSE(
+        sdpaBwdDqAccFitsU32(sdpaBwdDqAccLayout(1, 64, 131072, 128, AccumulatorType::A32), 64));
+    // A16 counts ceil16(S_q) rows of 128: S = 262128 is 4,294,705,152 bytes,
+    // S = 262129 pads to 262144 rows, 2^32 bytes.
+    EXPECT_TRUE(
+        sdpaBwdDqAccFitsU32(sdpaBwdDqAccLayout(1, 64, 262128, 128, AccumulatorType::A16), 64));
+    EXPECT_FALSE(
+        sdpaBwdDqAccFitsU32(sdpaBwdDqAccLayout(1, 64, 262129, 128, AccumulatorType::A16), 64));
+}
+
 TEST(TestSdpaBwdWorkspaceSize, A32IsTheDBufferAndAnFp32DqAcc)
 {
     // D buffer 2*8*512*4 = 32768; dq_acc 2*8*512*128*4 = 4194304
@@ -3055,7 +3150,7 @@ TEST_F(TestSdpaBwdPlanBuilder, GetCustomKnobsReturnsAccumulatorKnob)
 
     const auto knobs = _planBuilder.getCustomKnobs(_handle, graphWrapper);
     ASSERT_EQ(knobs.size(), 1u);
-    EXPECT_EQ(knobs[0].knob_id, "sdpa.bwd.accumulator_type");
+    EXPECT_EQ(knobs[0].knob_id, "hipkernel.sdpa.bwd.accumulator_type");
 
     // Default value is "a32"
     const auto* defaultVal = knobs[0].default_value.AsStringValue();

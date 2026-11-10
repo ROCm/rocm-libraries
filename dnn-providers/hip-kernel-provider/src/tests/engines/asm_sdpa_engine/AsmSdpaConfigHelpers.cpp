@@ -2,7 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include "AsmSdpaConfigHelpers.hpp"
+#include "../../../engines/asm_sdpa_engine/asm/AsmKernelPath.hpp"
 #include "../../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
+#include "AsmSdpaTestSupport.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
@@ -271,6 +273,33 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
     }
 
     return {graph, testCase.withStats ? stats : nullptr};
+}
+
+std::vector<AsmKernelTocEntry> getFwdKernelTocEntries(const std::string& arch)
+{
+    std::vector<AsmKernelTocEntry> entries;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(config.arch != arch)
+        {
+            continue;
+        }
+        if(arch != "gfx942")
+        {
+            entries.push_back({asm_kernels::getAsmKernelTocKey(config.co_name), config.knl_name});
+            continue;
+        }
+        // gfx942 ships each forward object once per MI300 and MI308 variant, in a directory
+        // between the module and the file name (SdpaFwdPlanBuilder getKernelTocKey).
+        const auto pos = config.co_name.rfind('/');
+        for(const char* variant : {"MI300/", "MI308/"})
+        {
+            const auto coName
+                = config.co_name.substr(0, pos + 1) + variant + config.co_name.substr(pos + 1);
+            entries.push_back({asm_kernels::getAsmKernelTocKey(coName), config.knl_name});
+        }
+    }
+    return entries;
 }
 
 } // namespace asm_sdpa_engine

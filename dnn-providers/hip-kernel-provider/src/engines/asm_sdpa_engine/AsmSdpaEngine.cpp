@@ -2,9 +2,11 @@
 // SPDX-License-Identifier:  MIT
 
 #include "AsmSdpaEngine.hpp"
+#include "core/Utils.hpp"
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <vector>
 
 namespace asm_sdpa_engine
 {
@@ -49,30 +51,14 @@ void AsmSdpaEngine::getDetails(Handle& handle,
                                const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                                hipdnnPluginConstData_t& detailsOut) const
 {
-    flatbuffers::FlatBufferBuilder builder;
-
     // Knobs come from the builder that serves the graph, so a forward graph never
     // advertises the backward builder's knobs.
-    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobsVector;
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> knobs;
     if(const auto* pb = findApplicablePlanBuilder(handle, opGraph))
     {
-        for(const auto& knobT : pb->getCustomKnobs(handle, opGraph))
-        {
-            knobsVector.push_back(
-                hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobT));
-        }
+        knobs = pb->getCustomKnobs(handle, opGraph);
     }
-    auto knobs = builder.CreateVector(knobsVector);
-
-    auto engineDetails
-        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, id(), knobs);
-    builder.Finish(engineDetails);
-    auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
-    detailsOut.ptr = detachedBuffer->data();
-    detailsOut.size = detachedBuffer->size();
-
-    auto* dataPtr = detachedBuffer->data();
-    handle.storeEngineDetailsDetachedBuffer(dataPtr, std::move(detachedBuffer));
+    hip_kernel_provider::core::utils::storeEngineDetails(handle, id(), knobs, detailsOut);
 }
 
 size_t AsmSdpaEngine::getMaxWorkspaceSize(

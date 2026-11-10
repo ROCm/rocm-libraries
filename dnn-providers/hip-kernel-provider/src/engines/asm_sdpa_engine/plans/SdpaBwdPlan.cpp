@@ -12,7 +12,6 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <limits>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -366,33 +365,17 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     a.nhead_stride_lsed = p.statsStrideHead;
     a.batch_stride_lsed = p.statsStrideBatch;
 
-    // dq_acc layout, AITER mha_bwd.cu:577-596.
+    // dq_acc layout, AITER mha_bwd.cu:577-596. The DQDKDV kernels address
+    // dq_acc with 32-bit offsets within a batch, and the pssk = 0 kernels across
+    // batches too, although the post kernel strides are 64-bit. The builder
+    // declines graphs whose offsets would wrap: sdpaBwdDqAccFitsU32 (isApplicable
+    // for A32, buildPlan for A16) and the dqdkdv lookup's pssk = 0 guard.
     const auto dqAcc = asm_sdpa_engine::sdpaBwdDqAccLayout(
         p.batchSize, p.numHeadsQ, p.seqLenQ, p.headDimQk, p.accumulatorType);
     a.dq_acc_element_size = dqAcc.elementBytes;
     a.stride_dq_acc = static_cast<unsigned int>(dqAcc.stride);
     a.nhead_stride_dq_acc = static_cast<int64_t>(dqAcc.nheadStride);
     a.batch_stride_dq_acc = static_cast<int64_t>(dqAcc.batchStride);
-
-    // The non-window DQDKDV kernels address dq_acc with 32-bit byte offsets
-    // (only the gfx950 window kernels use 64 bits, although the post kernel
-    // strides are 64-bit), so a head or batch stride past UINT32_MAX bytes
-    // would read and write the wrong memory. isApplicable (A32) and buildPlan
-    // (A16) decline such graphs; this logs if one reaches execute.
-    if(a.need_post_processing)
-    {
-        constexpr auto K_U32_MAX = static_cast<int64_t>(std::numeric_limits<uint32_t>::max());
-        const auto elementSize = static_cast<int64_t>(a.dq_acc_element_size);
-        if(a.nhead_stride_dq_acc * elementSize > K_U32_MAX
-           || a.batch_stride_dq_acc * elementSize > K_U32_MAX)
-        {
-            HIPDNN_PLUGIN_LOG_ERROR("dq_acc byte strides overflow uint32_t "
-                                    "(nhead_stride="
-                                    << a.nhead_stride_dq_acc * elementSize
-                                    << ", batch_stride=" << a.batch_stride_dq_acc * elementSize
-                                    << ", max=" << K_U32_MAX << ")");
-        }
-    }
 
     return a;
 }

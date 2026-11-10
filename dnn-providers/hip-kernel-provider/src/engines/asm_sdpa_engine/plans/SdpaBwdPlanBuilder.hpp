@@ -145,6 +145,24 @@ bool psskOffStridesMatch(const BhsStrides& q,
                          int64_t nheadQ,
                          int64_t nheadK);
 
+// Bytes from the first element of a [B, H, S, D] tensor with unit head-dim
+// stride and non-negative strides to one past its last, saturating at
+// INT64_MAX instead of overflowing. 0 for a tensor with no elements.
+int64_t bhsdSpanBytes(const BhsStrides& strides,
+                      int64_t batch,
+                      int64_t heads,
+                      int64_t seqLen,
+                      int64_t headDim,
+                      int64_t elementBytes);
+
+// True when Q's batch stride is one the A32 dqdkdv kernels without sequence
+// padding (pssk = 0) derive the dq_acc batch offset from correctly: B == 1, or
+// H_q * S_q * D_qk elements when it is at least Q's sequence stride, or
+// H_q * D_qk elements when it is below it (from the .co disassembly; dq_acc is
+// FP32 [B, H_q, S_q, D_qk]).
+bool qBatchStrideMatchesDqAcc(
+    const BhsStrides& q, int64_t batch, int64_t heads, int64_t seqLen, int64_t headDim);
+
 // The dqdkdv CSV `mask` ordinal for a classified mask on archId. Mirrors AITER
 // mha_bwd.cu asm_mask_type(): on gfx950 a sliding window with bottom-right
 // alignment selects the BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW kernels; every
@@ -171,7 +189,29 @@ struct KernelRequest
     int bf16Cvt;
     // psskOffStridesMatch() for the graph. False excludes every pssk = 0 row.
     bool psskOffStridesOk;
+    // Graph facts the pssk = 0 offset guard (psskOffOffsetsFitU32) reads.
+    // Zero spans fit.
+    int64_t batch; // B
+    int64_t nheadQ; // H_q
+    // Largest bhsdSpanBytes() of dK and dV, and of Q, K, V and dO (dQ shares
+    // Q's strides on every row without a post stage).
+    int64_t gradKvSpanBytes;
+    int64_t inputSpanBytes;
+    // qBatchStrideMatchesDqAcc() for the graph.
+    bool qBatchStrideMatchesDqAcc;
 };
+
+// True when every (batch, head) offset the dqdkdv kernels without sequence
+// padding (pssk = 0) form in 32 bits fits request's graph. Those kernels add
+// the offset to the tensor base in 32 bits, where the pssk = 1 kernels add it
+// in 64 bits (from the .co disassembly): A32 rows for dq_acc (FP32
+// [B, H_q, S_q, D_qk], whose batch offset they derive from Q's batch stride),
+// dK and dV; A16 rows for Q, K, V, dO, dQ, dK and dV as well. Each such tensor
+// must span at most UINT32_MAX bytes, and on A32 rows Q's batch stride must be
+// one the kernels read correctly (request.qBatchStrideMatchesDqAcc). False
+// excludes every pssk = 0 row; the rule is applied to every pssk = 0 row,
+// including the few whose disassembly shows 64-bit bases.
+bool psskOffOffsetsFitU32(const KernelRequest& request);
 
 // Resolves the registry row AITER v0.1.29 get_heuristic_kernel() picks for
 // `stage`, and returns its composite key (arch + knl_name), or an empty string
@@ -184,7 +224,7 @@ struct KernelRequest
 //   (pssk, pddv) row wins; otherwise the smallest (pssk, pddv) above the
 //   requested one in both fields, in (pssk, pddv) order (AITER takes whichever
 //   such row its unordered_map yields last). pssk = 0 rows also need
-//   request.psskOffStridesOk.
+//   request.psskOffStridesOk and psskOffOffsetsFitU32(request).
 // - DQ_CONVERT and DQ_SHUFFLE: padded hdim_q, mode and bf16_cvt, plus dtype
 //   when atomic32 = 1 (an A16 fp16 request takes the bf16 dq_shuffle rows).
 // Exposed for unit testing of the dispatch logic.
