@@ -36,7 +36,8 @@ extern "C" {
 *  \brief Dense matrix to sparse matrix conversion.
 *
 *  \details
-*  \p rocsparse_dense_to_sparse performs the conversion of a dense matrix to a sparse matrix in CSR, CSC, or COO format.
+*  \p rocsparse_dense_to_sparse performs the conversion of a dense matrix to a sparse matrix in CSR, CSC, COO, or
+*  Blocked ELL format.
 *
 *  \p rocsparse_dense_to_sparse requires multiple steps to complete. First, call \p rocsparse_dense_to_sparse
 *  with \p nullptr passed into \p temp_buffer:
@@ -65,7 +66,10 @@ extern "C" {
 *  This will determine the number of non-zeros that will exist in the sparse matrix, which can be queried using the
 *  \ref rocsparse_spmat_get_size routine. With this, allocate the sparse matrix device arrays and
 *  set them on the sparse matrix descriptor using \ref rocsparse_csr_set_pointers (CSR format),
-*  \ref rocsparse_csc_set_pointers (for CSC format), or \ref rocsparse_coo_set_pointers (for COO format). Finally, the
+*  \ref rocsparse_csc_set_pointers (for CSC format), or \ref rocsparse_coo_set_pointers (for COO format). For the
+*  Blocked ELL format, the analysis instead determines \p ell_cols, which can be queried using \ref rocsparse_bell_get,
+*  and the arrays are set using \ref rocsparse_bell_set_pointers. In that case, \p ell_block_dim must be set when
+*  creating the sparse matrix descriptor with \ref rocsparse_create_bell_descr. Finally, the
 *  conversion is completed by calling \p rocsparse_dense_to_sparse with both the \p buffer_size and \p temp_buffer :
 *  \code{.c}
 *   // Call dense_to_sparse to complete conversion
@@ -81,7 +85,7 @@ extern "C" {
 *
 *  \p rocsparse_dense_to_sparse supports \ref rocsparse_datatype_f16_r, \ref rocsparse_datatype_bf16_r, \ref rocsparse_datatype_f32_r,
 *  \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c for values arrays in the sparse matrix
-*  (stored in CSR, CSC, or COO format) and the dense matrix. For the row/column offset and row/column index arrays of the sparse matrix,
+*  (stored in CSR, CSC, COO, or Blocked ELL format) and the dense matrix. For the row/column offset and row/column index arrays of the sparse matrix,
 *  \p rocsparse_dense_to_sparse supports the precisions \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64.
 *
 *  \par Uniform Precisions:
