@@ -19,7 +19,8 @@
     "vec",
     "stride",
     "taps",
-    "stages"
+    "stages",
+    "flat"
   ],
   "behavior_notes": [
     "runtime_compilation"

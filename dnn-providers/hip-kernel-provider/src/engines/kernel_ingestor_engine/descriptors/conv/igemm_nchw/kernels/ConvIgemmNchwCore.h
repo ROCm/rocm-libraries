@@ -5,9 +5,10 @@
 // K C S filter and writing dx in place (no staging copies, no workspace).
 // HIPRTC-compatible: no standard headers.
 //
-// The convolution runs along the width; the depth and height positions are rows the
-// convolution maps one to one. With x + pad = stride * q + phase,
-//   dx[c][x] = sum over k, j of w[k][c][phase + stride * j] * dy[k][q - j].
+// The convolution runs along the width. Along depth and height each filter extent is at most its
+// stride, so a dx row takes at most one dy row and one filter row (td, th), and a dx row with
+// none is zero (K7Args). With x + pad = stride * q + phase,
+//   dx[c][x] = sum over k, j of w[k][c][td][th][phase + stride * j] * dy[k][row'][q - j].
 // MIOpen's GEMM path computes col[c][s][q] = sum_k w[k][c][s] dy[k][q] (one GEMM: rows (c, s),
 // contiguous in the K C S filter) and then scatters col into dx (col2im). Here a block owns BN
 // channels, BMQ consecutive q and all stride phases, so every product lands in its own
@@ -52,6 +53,115 @@ __device__ inline typename K1Raw<VEC * sizeof(T)>::type
     return v;
 }
 
+/// The block's coordinates: image and dx row (grid z), first channel c0, and its dx positions
+/// x0 .. x0 + BMQ * ST - 1 (x0 a multiple of the tile, so no tile is mostly empty). With
+/// pad = ST * pq + r, x0 + pad = ST * q0 + r: phases from r take q0 + i at tile index i, phases
+/// below r take q0 + 1 + i, and both land at x0 + i * ST + ((phase - r) mod ST). The dx row's dy
+/// row is rowY and its filter row starts at element toff of each (k, c) filter; a row with no dy
+/// row (live false) is zero.
+struct K7Block
+{
+    int img, row, c0, x0, q0, r, rowY, toff;
+    bool live;
+};
+
+template <int ST>
+__device__ inline K7Block k7Block(const K7Args& a, int bmq, int bn)
+{
+    K7Block b;
+    b.img = static_cast<int>(blockIdx.z) / a.rows;
+    b.row = static_cast<int>(blockIdx.z) - b.img * a.rows;
+    b.c0 = static_cast<int>(blockIdx.y) * bn;
+    b.x0 = static_cast<int>(blockIdx.x) * bmq * ST;
+    b.q0 = static_cast<int>(blockIdx.x) * bmq + a.pad / ST;
+    b.r = a.pad % ST;
+    // d + pd = sd qd + td, h + ph = sh qh + th.
+    const int d = b.row / a.hx;
+    const int h = b.row - d * a.hx;
+    const int nd = d + a.pd, nh = h + a.ph;
+    const int qd = nd / a.sd, qh = nh / a.sh;
+    const int td = nd - qd * a.sd, th = nh - qh * a.sh;
+    b.live = td < a.fd && th < a.fh && qd < a.dyDepth && qh < a.hy;
+    b.rowY = qd * a.hy + qh;
+    b.toff = (td * a.fh + th) * a.fs;
+    return b;
+}
+
+/// FLAT: the dy plane flattened. When no axis pads and dx is exactly the strides times dy on
+/// every axis (Dx = sd Dy, Hx = sh Hy, Wx = ST Wy) and the width has one tap per phase, each dy
+/// position (qd, qh, q) owns the dx block (sd qd + td, sh qh + th, ST q + p) for every class
+/// (td, th) and phase p, so per class backward data is one GEMM over the dy positions of every
+/// image (P = rowsY Wy per image, contiguous per k), N P in all. Grid z is the classes (sd sh); a
+/// class past the filter (td >= T or th >= R) is zero. A block owns BMQ consecutive positions g
+/// from q0 over all images (image g / P), and its outputs f = ST g + p from x0 = ST q0.
+template <int ST>
+__device__ inline K7Block k7BlockFlat(const K7Args& a, int bmq, int bn)
+{
+    K7Block b;
+    b.img = 0;
+    const int cls = static_cast<int>(blockIdx.z);
+    const int td = cls / a.sh, th = cls - td * a.sh;
+    // row carries the class: dx row offsets of class (td, th) are td hx + th from the block's.
+    b.row = td * a.hx + th;
+    b.c0 = static_cast<int>(blockIdx.y) * bn;
+    b.q0 = static_cast<int>(blockIdx.x) * bmq;
+    b.x0 = b.q0 * ST;
+    b.r = 0;
+    b.live = td < a.fd && th < a.fh;
+    b.rowY = 0;
+    b.toff = (td * a.fh + th) * a.fs;
+    return b;
+}
+
+/// The dx element offset of flattened output f (over all images) of channel 0 (FLAT); channel c
+/// adds c rows Wx.
+__device__ inline long long k7FlatPosition(const K7Args& a, const K7Block& b, int f)
+{
+    const int plane = a.rowsY * a.wx; // outputs per image and channel: ST P
+    const int img = f / plane;
+    f -= img * plane;
+    const int qrow = f / a.wx;
+    const int x = f - qrow * a.wx;
+    const int qd = qrow / a.hy;
+    const int qh = qrow - qd * a.hy;
+    const int dxRow = qd * a.sd * a.hx + qh * a.sh + b.row;
+    return img * a.dxImage + static_cast<long long>(dxRow) * a.wx + x;
+}
+
+/// The dx element offset of flattened output f (over all images) of channel c (FLAT).
+__device__ inline long long k7FlatOffset(const K7Args& a, const K7Block& b, int c, int f, int st)
+{
+    return k7FlatPosition(a, b, f) + static_cast<long long>(c) * a.rows * a.wx;
+}
+
+/// VEC consecutive elements of a filter run whose channels lie fStride elements apart in memory
+/// (T R > 1): the run position's channel c (valid below cEnd) and tap s, at element offset phys
+/// of the buffer. Loaded SUB elements at a time, SUB dividing S, so no load straddles channels.
+template <class T, int VEC, int SUB>
+__device__ inline typename K1Raw<VEC * sizeof(T)>::type k7LoadStrided(
+    __amdgpu_buffer_rsrc_t rsrc, int phys, int c, int s, int cEnd, int fs, int fStride, bool ok)
+{
+    typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
+    typedef typename K1Raw<SUB * sizeof(T)>::type Sub;
+    Raw v;
+    Sub* part = reinterpret_cast<Sub*>(&v);
+#pragma unroll
+    for(int i = 0; i < VEC / SUB; ++i)
+    {
+        part[i] = k1BufferLoad<Sub>(
+            rsrc, ok && c < cEnd ? static_cast<unsigned>(phys) * sizeof(T) : K1_OUT_OF_RANGE);
+        s += SUB;
+        phys += SUB;
+        if(s >= fs)
+        {
+            s -= fs;
+            ++c;
+            phys += fStride - fs;
+        }
+    }
+    return v;
+}
+
 /// The block's global loads and their LDS stores. A: the dy window, WQ positions of BK
 /// k rows from q0w. B: the filter run of BN channels by S taps (run = BN * S positions from
 /// bStart = c0 * S) of BK k rows. A unit is KV consecutive k rows by VEC positions; positions
@@ -60,7 +170,15 @@ __device__ inline typename K1Raw<VEC * sizeof(T)>::type
 /// The matrix-core A tile is row-major in k: position r's row starts at r * LDK plus a 16-byte
 /// skew per VEC rows (aRow), so the transposing stores of a wave, whose positions sit VEC rows
 /// apart, spread over the banks.
-template <class T, int VEC, int KV, int BK, int WQ, int BN, int SMAX, int THREADS>
+template <class T,
+          int VEC,
+          int KV,
+          int BK,
+          int WQ,
+          int BN,
+          int SMAX,
+          int THREADS,
+          bool FLAT = false>
 struct K7Tiles
 {
     typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
@@ -75,6 +193,9 @@ struct K7Tiles
 
     __amdgpu_buffer_rsrc_t aRsrc, bRsrc;
     int tid, rows, row, wy, k, cs, bStart, q0w, taps;
+    // The filter: elements per k row and per (k, c), the filter row's offset, the first channel
+    // and, for T R > 1, the largest power of two (at most VEC) dividing S.
+    int kStride, fStride, toff, c0, cEnd, sub;
     // B units: k pair (KP when the pass is idle), position in the run, its channel and tap.
     int bK[B_PASSES], bPos[B_PASSES], bC[B_PASSES], bS[B_PASSES];
     Raw ra[A_PASSES * KV], rb[B_PASSES * KV];
@@ -106,20 +227,28 @@ struct K7Tiles
         return bK[p] < KP;
     }
 
-    __device__ void init(const K7Args& a, int img, int rw, int q0, int c0, int t, int halo)
+    __device__ void init(const K7Args& a, const K7Block& b, int t, int halo)
     {
         tid = t;
-        rows = a.rows;
-        row = rw;
+        rows = a.rowsY;
+        row = b.rowY;
         wy = a.wy;
         k = a.k;
         taps = a.fs;
         cs = a.c * a.fs;
-        bStart = c0 * a.fs;
-        q0w = q0 - halo;
-        const T* dy = static_cast<const T*>(a.dy) + static_cast<long long>(img) * a.dyImage;
-        aRsrc = k1Rsrc(dy, static_cast<long long>(a.n - img) * a.dyImage * sizeof(T));
-        bRsrc = k1Rsrc(a.w, static_cast<long long>(a.k) * cs * sizeof(T));
+        bStart = b.c0 * a.fs;
+        q0w = b.q0 - halo;
+        fStride = a.fStride;
+        kStride = a.c * a.fStride;
+        toff = b.toff;
+        c0 = b.c0;
+        cEnd = a.c;
+        sub = VEC;
+        while(sub > 1 && a.fs % sub != 0)
+            sub /= 2;
+        const T* dy = static_cast<const T*>(a.dy) + static_cast<long long>(b.img) * a.dyImage;
+        aRsrc = k1Rsrc(dy, static_cast<long long>(a.n - b.img) * a.dyImage * sizeof(T));
+        bRsrc = k1Rsrc(a.w, static_cast<long long>(a.k) * kStride * sizeof(T));
         // The run's vectors per k row at this filter (BN * S is a multiple of 16).
         const int nvb = BN * a.fs / VEC;
 #pragma unroll
@@ -131,6 +260,63 @@ struct K7Tiles
             bC[p] = bPos[p] / taps;
             bS[p] = bPos[p] - bC[p] * taps;
         }
+    }
+
+    /// FLAT: dy read as P = rowsY Wy positions per k row and image, positions g over all
+    /// images. The launcher checks VEC divides P, so a unit's VEC positions lie in one image
+    /// (g / P) and the tensor's end falls between units; a unit past it reads zeros.
+    int aOff[A_PASSES];
+    __device__ void flatten(const K7Args& a)
+    {
+        const int plane = a.rowsY * a.wy;
+        rows = 1;
+        row = 0;
+        wy = plane;
+        const int total = a.n * plane;
+#pragma unroll
+        for(int p = 0; p < A_PASSES; ++p)
+        {
+            const int g = q0w + aV(p, tid) * VEC;
+            const int img = g / plane;
+            aOff[p] = g < total ? static_cast<int>(img * a.dyImage) + g - img * plane : -1;
+        }
+    }
+
+    /// FLAT: the unit of pass p at k row kk (valid when ok).
+    __device__ Raw loadFlat(int p, int kk, bool ok) const
+    {
+        return k1BufferLoad<Raw>(aRsrc,
+                                 ok && aOff[p] >= 0
+                                     ? static_cast<unsigned>(aOff[p] + kk * wy) * sizeof(T)
+                                     : K1_OUT_OF_RANGE);
+    }
+
+    /// The unit of pass p's k row kk from a filter whose channels are not adjacent (T R > 1).
+    __device__ Raw loadStrided(int p, int kk, bool ok) const
+    {
+        const int c = c0 + bC[p];
+        const int phys = kk * kStride + c * fStride + toff + bS[p];
+        switch(sub)
+        {
+        case 8:
+            if constexpr(VEC >= 8)
+                return k7LoadStrided<T, VEC, (VEC >= 8 ? 8 : 1)>(
+                    bRsrc, phys, c, bS[p], cEnd, taps, fStride, ok);
+            break;
+        case 4:
+            if constexpr(VEC >= 4)
+                return k7LoadStrided<T, VEC, (VEC >= 4 ? 4 : 1)>(
+                    bRsrc, phys, c, bS[p], cEnd, taps, fStride, ok);
+            break;
+        case 2:
+            if constexpr(VEC >= 2)
+                return k7LoadStrided<T, VEC, (VEC >= 2 ? 2 : 1)>(
+                    bRsrc, phys, c, bS[p], cEnd, taps, fStride, ok);
+            break;
+        default:
+            break;
+        }
+        return k7LoadStrided<T, VEC, 1>(bRsrc, phys, c, bS[p], cEnd, taps, fStride, ok);
     }
 
     /// Registers for the k rows from k0.
@@ -147,8 +333,15 @@ struct K7Tiles
             {
                 const int kk = k0 + aK(p, tid) * KV + j;
                 const bool ok = kk < k;
-                const int off = ok ? (kk * rows + row) * wy + q : 0;
-                ra[p * KV + j] = k7LoadRun<T, VEC>(aRsrc, off, q, wy, ok);
+                if constexpr(FLAT)
+                {
+                    ra[p * KV + j] = loadFlat(p, ok ? kk : 0, ok);
+                }
+                else
+                {
+                    const int off = ok ? (kk * rows + row) * wy + q : 0;
+                    ra[p * KV + j] = k7LoadRun<T, VEC>(aRsrc, off, q, wy, ok);
+                }
             }
         }
 #pragma unroll
@@ -162,7 +355,9 @@ struct K7Tiles
             {
                 const int kk = k0 + bK[p] * KV + j;
                 const bool ok = kk < k;
-                rb[p * KV + j] = k7LoadRun<T, VEC>(bRsrc, ok ? kk * cs + pos : 0, pos, cs, ok);
+                rb[p * KV + j] = fStride == taps
+                                     ? k7LoadRun<T, VEC>(bRsrc, ok ? kk * cs + pos : 0, pos, cs, ok)
+                                     : loadStrided(p, ok ? kk : 0, ok);
             }
         }
     }
@@ -251,28 +446,6 @@ struct K7Tiles
     }
 };
 
-/// The block's coordinates: image and row (grid z), first channel c0, and its dx positions
-/// x0 .. x0 + BMQ * ST - 1 (x0 a multiple of the tile, so no tile is mostly empty). With
-/// pad = ST * pq + r, x0 + pad = ST * q0 + r: phases from r take q0 + i at tile index i, phases
-/// below r take q0 + 1 + i, and both land at x0 + i * ST + ((phase - r) mod ST).
-struct K7Block
-{
-    int img, row, c0, x0, q0, r;
-};
-
-template <int ST>
-__device__ inline K7Block k7Block(const K7Args& a, int bmq, int bn)
-{
-    K7Block b;
-    b.img = static_cast<int>(blockIdx.z) / a.rows;
-    b.row = static_cast<int>(blockIdx.z) - b.img * a.rows;
-    b.c0 = static_cast<int>(blockIdx.y) * bn;
-    b.x0 = static_cast<int>(blockIdx.x) * bmq * ST;
-    b.q0 = static_cast<int>(blockIdx.x) * bmq + a.pad / ST;
-    b.r = a.pad % ST;
-    return b;
-}
-
 /// Stores RUN consecutive dx elements of channel c from @p src (dx positions x .. x + RUN - 1),
 /// those outside [0, wx) and channels past the last skipped: whole vectors where the row holds
 /// all VEC of them.
@@ -295,6 +468,56 @@ __device__ inline void k7StoreRun(const K7Args& a, const K7Block& b, int c, int 
             dst[e] = src[e];
 }
 
+/// A dx row no dy row reaches: the block's BN channels by BMQ * ST positions, zeros.
+/// Stores VEC flattened outputs f .. f + VEC - 1 of channel c (FLAT): those past the plane
+/// (f >= ST * dy positions) and channels past the last skipped. A dx row holds Wx = ST Wy outputs,
+/// so a vector whose start is a multiple of VEC stays in one row when VEC divides Wx.
+template <class T, int VEC, int ST>
+__device__ inline void k7StoreFlat(const K7Args& a, const K7Block& b, int c, int f, const T* src)
+{
+    typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
+    if(c >= a.c)
+        return;
+    const int end = a.n * a.rowsY * a.wx;
+    T* dst = static_cast<T*>(a.dx);
+    if(a.wx % VEC == 0 && f + VEC <= end)
+    {
+        *reinterpret_cast<Raw*>(dst + k7FlatOffset(a, b, c, f, ST))
+            = *reinterpret_cast<const Raw*>(src);
+        return;
+    }
+#pragma unroll
+    for(int e = 0; e < VEC; ++e)
+        if(f + e < end)
+            dst[k7FlatOffset(a, b, c, f + e, ST)] = src[e];
+}
+
+template <class T, int VEC, int ST, int FLAT>
+__device__ inline void k7Store(const K7Args& a, const K7Block& b, int c, int x, const T* src)
+{
+    if constexpr(FLAT > 0)
+        k7StoreFlat<T, VEC, ST>(a, b, c, x, src);
+    else
+        k7StoreRun<T, VEC>(a, b, c, x, src);
+}
+
+template <class T, int VEC, int BN, int SPAN, int THREADS, int ST, int FLAT>
+__device__ inline void k7ZeroTile(const K7Args& a, const K7Block& b)
+{
+    typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
+    Raw zero;
+    T* z = reinterpret_cast<T*>(&zero);
+#pragma unroll
+    for(int e = 0; e < VEC; ++e)
+        z[e] = T{};
+    constexpr int XV = SPAN / VEC;
+    for(int v = static_cast<int>(threadIdx.x); v < BN * XV; v += THREADS)
+    {
+        const int c = v / XV;
+        k7Store<T, VEC, ST, FLAT>(a, b, b.c0 + c, b.x0 + (v - c * XV) * VEC, z);
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Matrix-core kernel. Block: WM x WN x WP waves (phase indices x channels x phase groups); tile
 // BMQ phase indices (all ST phases) x BN channels; k-step BK. Each wave holds FQ x FN fragments
@@ -312,7 +535,8 @@ template <class T,
           int WP,
           int VEC,
           int ST,
-          int TAPS>
+          int TAPS,
+          int FLAT = 0>
 __device__ void k7DgradMma(const K7Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -320,15 +544,18 @@ __device__ void k7DgradMma(const K7Args& a)
     constexpr int DIM = Atom::DIM;
     constexpr int WTQ = BMQ / WM, WTN = BN / WN;
     constexpr int FQ = WTQ / DIM, FN = WTN / DIM;
-    constexpr int PW = ST / WP;
-    static_assert(ST % WP == 0, "K7 phase groups");
+    // Phases computed: all ST, or (FLAT) the first FLAT, the rest zero.
+    constexpr int NP = FLAT > 0 ? FLAT : ST;
+    constexpr int PW = NP / WP;
+    static_assert(NP % WP == 0 && NP <= ST, "K7 computed phases");
+    static_assert(FLAT > 0 || ST % WP == 0, "K7 phase groups");
     constexpr int KV = sizeof(T) == 2 ? 2 : 1;
     constexpr int LDK = BK + 16 / static_cast<int>(sizeof(T));
     constexpr int HALO = TAPS - 1;
     // The window: q0 - HALO .. q0 + BMQ (the phases below r reach one further), whole vectors.
     constexpr int WQ = BMQ + VEC;
     constexpr int SMAX = ST * TAPS;
-    typedef K7Tiles<T, VEC, KV, BK, WQ, BN, SMAX, THREADS> Tiles;
+    typedef K7Tiles<T, VEC, KV, BK, WQ, BN, SMAX, THREADS, (FLAT > 0)> Tiles;
     constexpr int A_LDS = Tiles::template aRow<LDK>(WQ);
     constexpr int B_LDS = SMAX * BN * LDK;
     constexpr int OLD = BMQ * ST + 16 / static_cast<int>(sizeof(T));
@@ -341,7 +568,13 @@ __device__ void k7DgradMma(const K7Args& a)
     T* As = lds;
     T* Bs = lds + A_LDS;
 
-    const K7Block b = k7Block<ST>(a, BMQ, BN);
+    static_assert(FLAT == 0 || TAPS == 1, "K7 flat: one tap per phase");
+    const K7Block b = FLAT > 0 ? k7BlockFlat<ST>(a, BMQ, BN) : k7Block<ST>(a, BMQ, BN);
+    if(!b.live)
+    {
+        k7ZeroTile<T, VEC, BN, BMQ * ST, THREADS, ST, FLAT>(a, b);
+        return;
+    }
     const int tid = threadIdx.x;
     const int lane = tid % WAVE;
     const int wave = tid / WAVE;
@@ -351,7 +584,9 @@ __device__ void k7DgradMma(const K7Args& a)
     const int p0 = wp * PW;
 
     Tiles tiles;
-    tiles.init(a, b.img, b.row, b.q0, b.c0, tid, HALO);
+    tiles.init(a, b, tid, HALO);
+    if constexpr(FLAT > 0)
+        tiles.flatten(a);
 
     typename Atom::acc acc[PW][FQ][FN];
 #pragma unroll
@@ -447,13 +682,24 @@ __device__ void k7DgradMma(const K7Args& a)
                     Os[c * OLD + q * ST + px] = K1Elem<T>::store(acc[p][i][n][e]);
                 }
     }
+    if constexpr(NP < ST)
+    {
+        // Phases past the computed ones (FLAT, r = 0): zero.
+        for(int v = tid; v < BN * BMQ * (ST - NP); v += THREADS)
+        {
+            const int c = v / (BMQ * (ST - NP));
+            const int rest = v - c * (BMQ * (ST - NP));
+            const int q = rest / (ST - NP);
+            Os[c * OLD + q * ST + NP + rest - q * (ST - NP)] = T{};
+        }
+    }
     __syncthreads();
     constexpr int XV = BMQ * ST / VEC;
     for(int v = tid; v < BN * XV; v += THREADS)
     {
         const int c = v / XV;
         const int xv = (v - c * XV) * VEC;
-        k7StoreRun<T, VEC>(a, b, b.c0 + c, b.x0 + xv, Os + c * OLD + xv);
+        k7Store<T, VEC, ST, FLAT>(a, b, b.c0 + c, b.x0 + xv, Os + c * OLD + xv);
     }
 }
 
@@ -492,10 +738,11 @@ template <class T,
           int STAGES,
           int R,
           bool FULL,
+          int NP,
           class Tiles>
 // Inlined at all 2 ST call sites: out of line, acc (passed by reference) would live in scratch.
 __device__ __attribute__((always_inline)) inline void
-    k7FmaSteps(const K7Args& a, Tiles& tiles, T* lds, float (&acc)[TC][TQ][ST])
+    k7FmaSteps(const K7Args& a, Tiles& tiles, T* lds, float (&acc)[TC][TQ][NP])
 {
     constexpr int TX = BN / TC;
     constexpr int HALO = TAPS - 1;
@@ -528,7 +775,7 @@ __device__ __attribute__((always_inline)) inline void
                 for(int s = 0; s < SMAX; ++s)
                     bv[s] = K1Elem<T>::load(Bs[kk * LDB + (tx + c * TX) * CP + s]);
 #pragma unroll
-                for(int p = 0; p < ST; ++p)
+                for(int p = 0; p < NP; ++p)
                 {
                     const int below = p < R ? 1 : 0;
 #pragma unroll
@@ -588,7 +835,17 @@ __device__ __attribute__((always_inline)) inline void
     }
 }
 
-template <class T, int BMQ, int BN, int BK, int TQ, int TC, int VEC, int ST, int TAPS, int STAGES>
+template <class T,
+          int BMQ,
+          int BN,
+          int BK,
+          int TQ,
+          int TC,
+          int VEC,
+          int ST,
+          int TAPS,
+          int STAGES,
+          int FLAT = 0>
 __device__ void k7DgradFma(const K7Args& a)
 {
     constexpr int TX = BN / TC, TY = BMQ / TQ;
@@ -605,20 +862,31 @@ __device__ void k7DgradFma(const K7Args& a)
 
     __shared__ __attribute__((aligned(16))) T lds[STAGES * BK * (LDA + LDB)];
 
-    const K7Block b = k7Block<ST>(a, BMQ, BN);
+    static_assert(FLAT == 0 || TAPS == 1, "K7 flat: one tap per phase");
+    const K7Block b = FLAT > 0 ? k7BlockFlat<ST>(a, BMQ, BN) : k7Block<ST>(a, BMQ, BN);
+    if(!b.live)
+    {
+        k7ZeroTile<T, VEC, BN, BMQ * ST, THREADS, ST, FLAT>(a, b);
+        return;
+    }
     const int tid = threadIdx.x;
     const int tx = tid % TX, ty = tid / TX;
 
-    K7Tiles<T, VEC, 1, BK, WQ, BN, SMAX, THREADS> tiles;
-    tiles.init(a, b.img, b.row, b.q0, b.c0, tid, HALO);
+    K7Tiles<T, VEC, 1, BK, WQ, BN, SMAX, THREADS, (FLAT > 0)> tiles;
+    tiles.init(a, b, tid, HALO);
+    if constexpr(FLAT > 0)
+        tiles.flatten(a);
 
-    float acc[TC][TQ][ST];
+    // Phases computed: all ST, or (FLAT) the first FLAT, the rest zero.
+    constexpr int NP = FLAT > 0 ? FLAT : ST;
+    static_assert(NP <= ST, "K7 computed phases");
+    float acc[TC][TQ][NP];
 #pragma unroll
     for(int c = 0; c < TC; ++c)
 #pragma unroll
         for(int i = 0; i < TQ; ++i)
 #pragma unroll
-            for(int p = 0; p < ST; ++p)
+            for(int p = 0; p < NP; ++p)
                 acc[c][i][p] = 0.0f;
 
     // r = pad mod ST and whether the filter fills its last tap row are the same for every block:
@@ -626,17 +894,17 @@ __device__ void k7DgradFma(const K7Args& a)
     const bool full = a.fs == ST * TAPS;
     switch(b.r)
     {
-#define K7_FMA_R(R)                                                                  \
-    case R:                                                                          \
-        if constexpr(R < ST)                                                         \
-        {                                                                            \
-            if(full)                                                                 \
-                k7FmaSteps<T, BMQ, BN, BK, TQ, TC, VEC, ST, TAPS, STAGES, R, true>(  \
-                    a, tiles, lds, acc);                                             \
-            else                                                                     \
-                k7FmaSteps<T, BMQ, BN, BK, TQ, TC, VEC, ST, TAPS, STAGES, R, false>( \
-                    a, tiles, lds, acc);                                             \
-        }                                                                            \
+#define K7_FMA_R(R)                                                                      \
+    case R:                                                                              \
+        if constexpr(R < ST)                                                             \
+        {                                                                                \
+            if(full)                                                                     \
+                k7FmaSteps<T, BMQ, BN, BK, TQ, TC, VEC, ST, TAPS, STAGES, R, true, NP>(  \
+                    a, tiles, lds, acc);                                                 \
+            else                                                                         \
+                k7FmaSteps<T, BMQ, BN, BK, TQ, TC, VEC, ST, TAPS, STAGES, R, false, NP>( \
+                    a, tiles, lds, acc);                                                 \
+        }                                                                                \
         break;
         K7_FMA_R(0)
         K7_FMA_R(1)
@@ -651,6 +919,34 @@ __device__ void k7DgradFma(const K7Args& a)
         break;
     }
 
+    if constexpr(FLAT > 0)
+    {
+        // Flattened outputs: phase p of position q0 + i is f = x0 + i ST + p; the ST phases of a
+        // position are adjacent in its dx row (Wx = ST Wy). One position offset serves every
+        // channel of the thread.
+        const long long channelStride = static_cast<long long>(a.rows) * a.wx;
+        const int end = a.n * a.rowsY * a.wx;
+#pragma unroll
+        for(int i = 0; i < TQ; ++i)
+        {
+            const int f0 = b.x0 + (ty * TQ + i) * ST;
+            if(f0 >= end)
+                continue;
+            T* pos = static_cast<T*>(a.dx) + k7FlatPosition(a, b, f0);
+#pragma unroll
+            for(int c = 0; c < TC; ++c)
+            {
+                const int ch = b.c0 + tx + c * TX;
+                if(ch >= a.c)
+                    continue;
+                T* dst = pos + ch * channelStride;
+#pragma unroll
+                for(int p = 0; p < ST; ++p)
+                    dst[p] = p < NP ? K1Elem<T>::store(acc[c][i][p < NP ? p : 0]) : T{};
+            }
+        }
+        return;
+    }
     // Phase p at tile index i is dx position x0 + i ST + ((p - r) mod ST).
 #pragma unroll
     for(int c = 0; c < TC; ++c)
@@ -658,18 +954,25 @@ __device__ void k7DgradFma(const K7Args& a)
         const int ch = b.c0 + tx + c * TX;
         if(ch >= a.c)
             continue;
-        T* dst = static_cast<T*>(a.dx) + static_cast<long long>(b.img) * a.dxImage
-                 + (static_cast<long long>(ch) * a.rows + b.row) * a.wx;
-#pragma unroll
-        for(int p = 0; p < ST; ++p)
+        if constexpr(FLAT > 0)
         {
-            const int px = p < b.r ? ST + p - b.r : p - b.r;
+            continue; // stored above, position by position
+        }
+        else
+        {
+            T* dst = static_cast<T*>(a.dx) + static_cast<long long>(b.img) * a.dxImage
+                     + (static_cast<long long>(ch) * a.rows + b.row) * a.wx;
 #pragma unroll
-            for(int i = 0; i < TQ; ++i)
+            for(int p = 0; p < ST; ++p)
             {
-                const int x = b.x0 + (ty * TQ + i) * ST + px;
-                if(x < a.wx)
-                    dst[x] = K1Elem<T>::store(acc[c][i][p]);
+                const int px = p < b.r ? ST + p - b.r : p - b.r;
+#pragma unroll
+                for(int i = 0; i < TQ; ++i)
+                {
+                    const int x = b.x0 + (ty * TQ + i) * ST + px;
+                    if(x < a.wx)
+                        dst[x] = K1Elem<T>::store(acc[c][i][p]);
+                }
             }
         }
     }

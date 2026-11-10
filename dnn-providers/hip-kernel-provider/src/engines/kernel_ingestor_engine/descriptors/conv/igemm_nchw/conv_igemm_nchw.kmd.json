@@ -66,6 +66,10 @@
     {
       "name": "stages",
       "type": "int"
+    },
+    {
+      "name": "flat",
+      "type": "int"
     }
   ]
 }
