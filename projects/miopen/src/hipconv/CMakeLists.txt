@@ -121,14 +121,16 @@ if(NOT HIPCONV_OFFLOAD_LTO)
     set(HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
 endif()
 
-# ASAN's stack-use-after-return instrumentation on hipconv's many explicit template
-# instantiations can grow a R_X86_64_PC32 relocation past its +/-2GB range, failing
-# libMIOpen.so's link. hipconv contributes object files/a static archive to that one
-# link, not a link of its own, so only the compile step needs this override.
-set(MIOPEN_HIPCONV_SANITIZER "" CACHE STRING
-    "Override the sanitizer for hipconv only; set to OFF to strip instrumentation here while the rest of MIOpen keeps full ASAN/TSAN coverage")
+# ASAN's stack instrumentation and the resulting image-layout growth on hipconv's many
+# explicit template instantiations can grow a R_X86_64_PC32 relocation past its +/-2GB
+# range, failing libMIOpen.so's link. hipconv contributes object files/a static archive
+# to that one link, not a link of its own, so only the compile step needs this override.
+# hipconv v0.5.0 (see HIPCONV_VERSION) defines this option natively; this is a stopgap
+# until that sync lands, matching its name/semantics so the sync is a no-op here.
+option(HIPCONV_DISABLE_ASAN
+    "Disable ASAN instrumentation for hipconv only, while the rest of MIOpen keeps full ASAN/TSAN coverage" OFF)
 set(HIPCONV_SANITIZER_COMPILE_OPTIONS "")
-if(MIOPEN_HIPCONV_SANITIZER STREQUAL "OFF")
+if(HIPCONV_DISABLE_ASAN)
     set(HIPCONV_SANITIZER_COMPILE_OPTIONS -fno-sanitize=address)
 endif()
 
