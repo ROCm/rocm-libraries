@@ -31,6 +31,8 @@ environ_vars["GTEST_SHARD_INDEX"] = str(int(SHARD_INDEX) - 1)
 environ_vars["GTEST_TOTAL_SHARDS"] = str(TOTAL_SHARDS)
 
 if is_asan():
+    # Disable OpenMP parallelism: it provides limited speedups and introduces
+    # high overhead in ASAN builds.
     environ_vars["OMP_NUM_THREADS"] = "1"
 
 # If quick tests are enabled, we run quick tests only.
