@@ -8,7 +8,9 @@ compiler whose LLVM major the table records as refusing the option
 (``CompilerOptionNotAccepted``), or one the table has no answer for (a plain
 ``ValueError``). These tests pin that a refusal skips, that it fails when
 ``ROCKE_REQUIRE_COMPILER_TOOLS=1`` requires the tools, and that no other error
-is turned into a skip.
+is turned into a skip. They also pin that ``compile_or_skip``, the compile
+helper of the attention backward tests, applies the same policy to a real
+``compile_kernel`` call.
 """
 
 from __future__ import annotations
@@ -16,9 +18,13 @@ from __future__ import annotations
 import unittest
 
 import pytest
+from rocke.core.ir import KernelDef, Region
+from rocke.runtime import comgr
 from rocke.runtime.comgr import CompilerInfo
 from rocke.runtime.compiler_options import measured_answers, require_accepted
 
+from . import _attention_bwd_resources
+from ._attention_bwd_resources import compile_or_skip
 from ._compiler_test_utils import (
     REQUIRE_COMPILER_TOOLS_ENV,
     skip_where_compiler_refuses_option,
@@ -97,3 +103,47 @@ def test_other_errors_propagate(monkeypatch, required):
     ):
         _compile_on(_unmeasured_major())
     assert type(caught.value) is ValueError
+
+
+def _vgpr_form_kernel() -> KernelDef:
+    """An empty kernel that asks for VGPR-form MFMAs, so it needs ``OPTION``."""
+    kernel = KernelDef("probe", [], Region("entry"))
+    kernel.attrs["mfma_vgpr_form"] = True
+    return kernel
+
+
+@pytest.mark.parametrize(
+    "toolchain_gap",
+    [None, "flavor llvm20"],
+    ids=["gate-toolchain", "other-toolchain"],
+)
+@pytest.mark.parametrize(
+    ("required", "outcome", "reason"),
+    [
+        ("0", unittest.SkipTest, f"^{SKIP_REASON}"),
+        ("1", AssertionError, f"^{REQUIRE_COMPILER_TOOLS_ENV}=1 but {SKIP_REASON}"),
+    ],
+    ids=["skips", "fails-where-tools-are-required"],
+)
+def test_compile_or_skip_applies_the_policy(
+    monkeypatch, toolchain_gap, required, outcome, reason
+):
+    # The loaded compiler's identity, as the option check sees it, is replaced
+    # by one the table records as refusing OPTION, so compile_kernel refuses
+    # before COMGR on any host. compile_or_skip's own rule depends on whether
+    # the host is the resource gate's toolchain, so both answers are pinned.
+    refusing = _compiler(_refusing_major())
+    monkeypatch.setattr(comgr, "loaded_compiler_info", lambda: refusing)
+    monkeypatch.setattr(
+        _attention_bwd_resources, "gate_toolchain_gap", lambda arch: toolchain_gap
+    )
+    monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, required)
+    try:
+        with pytest.raises(outcome, match=reason):
+            # The Python backend: a helper that lost the refusal must fail here
+            # without needing the C++ engine.
+            compile_or_skip(_vgpr_form_kernel(), arch="gfx942", backend="python")
+    except pytest.skip.Exception as skipped:
+        # Its own toolchain-gap skip would hide the refusal here, and pytest
+        # would report this test as skipped rather than failed.
+        pytest.fail(f"compile_or_skip skipped outside the shared policy: {skipped}")
