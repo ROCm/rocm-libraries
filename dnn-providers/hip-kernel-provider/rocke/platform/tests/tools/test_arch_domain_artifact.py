@@ -133,6 +133,38 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
 
                 self.assertEqual(sorted(tc.get("arches", [])), sorted(wired_arches()))
 
+    def test_every_positive_key_has_a_contract(self):
+        for flavor, path in _columns():
+            doc = json.loads(path.read_text())
+            positive = {
+                key
+                for key, row in doc["keys"].items()
+                if any(cell["status"] == G.STATUS_OK for cell in row.values())
+            }
+            with self.subTest(flavor=flavor):
+                self.assertFalse(
+                    positive - set(doc["probe_contracts"]),
+                    "new positive keys must carry their historical contracts",
+                )
+
+    def test_committed_contract_records_are_canonical_and_single_line(self):
+        for flavor, path in _columns():
+            text = path.read_text()
+            doc = json.loads(text)
+            with self.subTest(flavor=flavor):
+                self.assertEqual(G._serialize_column(doc), text)
+                lines = text.splitlines()
+                start = lines.index('  "probe_contracts": {')
+                end = lines.index("  },", start)
+                records = lines[start + 1 : end]
+                self.assertEqual(len(records), len(doc["probe_contracts"]))
+                parsed = {}
+                for line in records:
+                    self.assertTrue(line.startswith('    "'))
+                    parsed.update(json.loads("{" + line.strip().rstrip(",") + "}"))
+                self.assertEqual(parsed, doc["probe_contracts"])
+                self.assertEqual(list(parsed), sorted(parsed))
+
     def test_llvm24_changes_only_the_named_barrier_declarations(self):
         llvm23 = G._decl_table("llvm23")
         llvm24 = G._decl_table("llvm24")
@@ -1313,6 +1345,26 @@ for line in open(src):
         doc["toolchain"]["clang"] = "AMD clang version 22.0.0git (blessed-build)"
         out.write_text(json.dumps(doc))
         return out, tools
+
+    def test_cli_writes_compact_columns_and_check_preserves_expanded_input(self):
+        out, tools = self._baseline_from_other_compiler()
+        with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}):
+            self.assertEqual(self._run(tools, out, "--only", "fabs.f32"), 0)
+        canonical = out.read_text()
+        doc = json.loads(canonical)
+        self.assertEqual(canonical, G._serialize_column(doc))
+        self.assertIn('    "fabs.f32": {"operands":', canonical)
+        expanded = json.dumps(doc, indent=4) + "\n"
+        out.write_text(expanded)
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+            mock.patch.object(
+                G, "_compare_support", wraps=G._compare_support
+            ) as compare,
+        ):
+            self.assertEqual(self._run(tools, out, "--only", "fabs.f32", "--check"), 0)
+        self.assertEqual(compare.call_args.args, (expanded, canonical))
+        self.assertEqual(out.read_text(), expanded, "check reformatted its reference")
 
     def test_ctest_compares_a_different_compiler_build_and_passes(self):
         out, tools = self._baseline_from_other_compiler()

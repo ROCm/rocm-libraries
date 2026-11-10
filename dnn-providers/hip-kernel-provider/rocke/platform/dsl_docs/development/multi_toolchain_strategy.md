@@ -387,6 +387,10 @@ canonical-name and old/new probe-rendering checks. All old measurement fields
 and compiler identities remain unchanged. Missing historical positive contracts
 fail comparison; reconstruct them from matching evidence, never from a newer
 host's inferred constraints. This metadata migration does not re-bless support.
+The canonical column serializer keeps one named contract per line, and both
+generation and pruning use it. Every newly introduced positive key requires a
+contract backed by its recorded source evidence; adding measurement rows alone
+leaves an incomplete comparison column.
 
 Per-cell provenance landed as **one file per flavor, named after it**, rather
 than a `verified`/`unvalidated` marker inside a shared file as §3.2 suggested. A

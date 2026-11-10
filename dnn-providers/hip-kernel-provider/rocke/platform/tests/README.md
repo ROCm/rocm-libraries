@@ -204,7 +204,12 @@ Both `ok` and `arch_absent` require accepted processors. Every key with an `ok`
 cell carries a versioned `probe_contracts` record for the effective return and
 operand types, sources, and constants. Retained positives require matching
 contracts, including default immediate zero when `probe_imm` is absent. The
-single/batch/split/retry routes share one operand-plan owner.
+single/batch/split/retry routes share one operand-plan owner. Generation and
+pruning also share the canonical column serializer: one named contract per line,
+with ordinary measurements left pretty-printed. Host-only controls cover format
+round-trips, ordering, legacy/empty records, and persistence through both writers.
+Independent column assertions and appended-positive controls require contracts
+for newly introduced keys as well as the existing set.
 
 These comparison-only records do not change runtime v1 lookup. Legacy metadata
 was reconstructed using `opt` built from the recorded LLVM source revisions,

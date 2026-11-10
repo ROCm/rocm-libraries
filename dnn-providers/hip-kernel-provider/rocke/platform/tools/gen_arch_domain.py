@@ -1429,6 +1429,29 @@ def _validate_column(
     return failures
 
 
+def _serialize_column(doc: dict) -> str:
+    """Canonical JSON for a validated column, with one contract per line.
+
+    Keep ordinary sections readable and unchanged. Only the top-level contract
+    map uses compact entries, so nested metadata and diagnostic strings retain
+    their normal JSON representation. Generation and pruning share this owner.
+    """
+    if not doc:
+        return "{}\n"
+    fields = []
+    for name, value in sorted(doc.items()):
+        if name == "probe_contracts" and value:
+            entries = [
+                f"  {json.dumps(key)}: {json.dumps(contract, sort_keys=True)}"
+                for key, contract in sorted(value.items())
+            ]
+            text = "{\n" + ",\n".join(entries) + "\n}"
+        else:
+            text = json.dumps(value, indent=2, sort_keys=True)
+        fields.append(f"  {json.dumps(name)}: " + text.replace("\n", "\n  "))
+    return "{\n" + ",\n".join(fields) + "\n}\n"
+
+
 def _describe_field_changes(before: dict, after: dict) -> str:
     """Name changed fields, distinguishing an absent field from a JSON null."""
     changes = []
@@ -1606,7 +1629,7 @@ def _prune() -> int:
         if failures:
             _print_support_failures(path, failures)
             return 1
-        path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+        path.write_text(_serialize_column(doc))
         changed += 1
         print(f"   {path.name}: dropped {len(stale)} stale row(s): {', '.join(stale)}")
 
@@ -2376,7 +2399,7 @@ def main() -> int:
     if failures:
         _print_support_failures(out, failures)
         return 1
-    text = json.dumps(doc, indent=2, sort_keys=True) + "\n"
+    text = _serialize_column(doc)
 
     counts: dict[str, int] = {}
     for key in keys:

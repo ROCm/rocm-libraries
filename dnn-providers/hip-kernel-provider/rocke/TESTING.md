@@ -454,6 +454,12 @@ baseline's variable operand into constant zero and still claim an unchanged
 question. Canonical names, stripped attributes, and IR formatting are not this
 contract; there is no IR, assembly, or HSACO hash comparison here.
 
+A shared canonical column serializer keeps one named contract per line while
+leaving ordinary measurement sections pretty-printed. Both generation and
+pruning use it; a later tool run must not expand the metadata again. Every new
+positive key requires its own evidence-backed contract before comparison, not
+just keys present when the metadata was first introduced.
+
 Support gains and unknown-to-unavailable transitions pass and are reported.
 Unavailable-to-unknown transitions are reported as degraded measurement, not
 support loss; remaining no-data cells are explicitly not qualified. Diagnostic

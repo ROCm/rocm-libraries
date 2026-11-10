@@ -258,6 +258,67 @@ class SupportComparisonTest(unittest.TestCase):
                 self.assertEqual(len(gain.changes["gain"]), 1)
         self.assertEqual(G._compare_support(self._doc(), self._doc()).failures, [])
 
+    def test_column_serialization_keeps_contract_entries_on_single_lines(self):
+        doc = json.loads(self._doc())
+        doc["policy_metadata"] = {
+            "probe_contracts": {"nested": {"detail": 'quoted "value"\n\u03bb'}},
+            "enabled": True,
+        }
+        text = G._serialize_column(doc)
+        self.assertEqual(json.loads(text), doc)
+        self.assertIn(
+            '  "probe_contracts": {\n'
+            '    "a.b": {"operands": [{"source": "argument", "type": "i32"}], "return_type": "i32", "version": 1}\n'
+            "  },\n",
+            text,
+        )
+        # A nested similarly named field must keep ordinary pretty printing.
+        ordinary = json.dumps(doc["policy_metadata"], indent=2, sort_keys=True)
+        self.assertIn('  "policy_metadata": ' + ordinary.replace("\n", "\n  "), text)
+        self.assertTrue(text.endswith("\n"))
+        self.assertFalse(text.endswith("\n\n"))
+        self.assertEqual(G._serialize_column(json.loads(text)), text)
+        self.assertEqual(
+            G._compare_support(json.dumps(doc, indent=2), text).failures, []
+        )
+
+    def test_column_serialization_is_independent_of_mapping_insertion_order(self):
+        def reversed_mappings(value):
+            if isinstance(value, dict):
+                return {key: reversed_mappings(value[key]) for key in reversed(value)}
+            if isinstance(value, list):
+                return [reversed_mappings(item) for item in value]
+            return value
+
+        doc = json.loads(self._doc())
+        doc["keys"]["new.key"] = doc["keys"]["a.b"]
+        doc["probe_contracts"]["new.key"] = doc["probe_contracts"]["a.b"]
+        self.assertEqual(
+            G._serialize_column(doc), G._serialize_column(reversed_mappings(doc))
+        )
+
+    def test_empty_and_legacy_contract_sections_do_not_invent_records(self):
+        doc = json.loads(self._doc(G.STATUS_NAME_ABSENT))
+        text = G._serialize_column(doc)
+        self.assertIn('  "probe_contracts": {},\n', text)
+        self.assertEqual(json.loads(text), doc)
+        del doc["probe_contracts"]
+        self.assertEqual(
+            G._serialize_column(doc), json.dumps(doc, indent=2, sort_keys=True) + "\n"
+        )
+        self.assertEqual(G._serialize_column({}), "{}\n")
+
+    def test_newly_added_positive_key_requires_its_own_contract(self):
+        invalid = json.loads(self._doc())
+        invalid["keys"]["new.key"] = invalid["keys"]["a.b"]
+        valid = json.loads(json.dumps(invalid))
+        valid["probe_contracts"]["new.key"] = valid["probe_contracts"]["a.b"]
+        self._assert_invalid_on_either_or_both_sides(
+            valid, invalid, f"new.key/{self.ARCH}", "missing positive probe contract"
+        )
+        for text in (json.dumps(valid, indent=2), G._serialize_column(valid)):
+            self.assertEqual(G._compare_support(text, text).failures, [])
+
     def test_positive_probe_contract_changes_fail(self):
         for old, new in (
             (
@@ -376,7 +437,25 @@ class SupportComparisonTest(unittest.TestCase):
                 del expected["keys"]["stale.key"]
                 if not legacy:
                     del expected["probe_contracts"]["stale.key"]
-                self.assertEqual(json.loads(path.read_text()), expected)
+                text = path.read_text()
+                self.assertEqual(json.loads(text), expected)
+                self.assertEqual(text, G._serialize_column(expected))
+                if not legacy:
+                    self.assertEqual(
+                        len(
+                            [
+                                line
+                                for line in text.splitlines()
+                                if line.startswith('    "fabs.f32": {"operands":')
+                            ]
+                        ),
+                        1,
+                    )
+                with mock.patch.object(G, "DATA_DIR", Path(directory)):
+                    self.assertEqual(G._prune(), 0)
+                self.assertEqual(
+                    path.read_text(), text, "a no-op prune changed canonical bytes"
+                )
 
     def test_effective_contract_ignores_names_and_unused_attributes(self):
         old = G.ProbeSpec("declare i32 @llvm.old(i32)", None, None)

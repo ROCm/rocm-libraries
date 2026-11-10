@@ -284,11 +284,7 @@ method fields and is not itself an input to the generator's validator:
   },
   "canonical": {"ds.read.tr16.b64": "llvm.amdgcn.ds.read.tr16.b64.v4i16"},
   "probe_contracts": {
-    "ds.read.tr16.b64": {
-      "version": 1,
-      "return_type": "<4 x i16>",
-      "operands": [{"type": "ptr addrspace(3)", "source": "addrspacecast"}]
-    }
+    "ds.read.tr16.b64": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(3)"}], "return_type": "<4 x i16>", "version": 1}
   }
 }
 ```
@@ -313,7 +309,10 @@ contracts were reconstructed with `opt` built from the recorded LLVM source
 revisions, checking canonical names and unchanged probe-rendering bytes while
 preserving every old measurement. Missing historical positive contracts fail;
 new-host inference would not establish the old question. This adds metadata to
-the v1 envelope without changing the Python/C++ runtime tables.
+the v1 envelope without changing the Python/C++ runtime tables. The shared
+column serializer keeps each named contract on one line in both generation and
+pruning. Newly measured positive keys require the same historical evidence and
+must not be merged without their contract records.
 
 `canonical` records what LLVM resolved each surviving declare to. Mostly
 identical to the declared name; the interesting rows are the overloads that
