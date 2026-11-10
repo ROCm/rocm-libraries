@@ -34,10 +34,14 @@ def _host_helpers() -> dict:
 
         return {name: getattr(abi, name) for name in HELPERS}
     tree = ast.parse(ABI.read_text(encoding="utf-8"))
-    defs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in HELPERS]
+    defs = [
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in HELPERS
+    ]
     assert {d.name for d in defs} == set(HELPERS)
     namespace = {"struct": struct}
-    exec(compile(ast.Module(body=defs, type_ignores=[]), str(ABI), "exec"), namespace)  # noqa: S102
+    exec(
+        compile(ast.Module(body=defs, type_ignores=[]), str(ABI), "exec"), namespace
+    )  # noqa: S102
     return namespace
 
 

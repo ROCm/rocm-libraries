@@ -314,9 +314,9 @@ def test_both_arches_kernels_take_their_addressing_from_the_one_helper() -> None
     for arch, names in used.items():
         assert names, arch
         assert names <= helper, (arch, sorted(names - helper))
-    assert {a: n & functions for a, n in used.items()}[
-        "gfx950"
-    ] == {a: n & functions for a, n in used.items()}["gfx11-generic"]
+    assert {a: n & functions for a, n in used.items()}["gfx950"] == {
+        a: n & functions for a, n in used.items()
+    }["gfx11-generic"]
     for arch, path in KERNEL_FILES.items():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         own = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
