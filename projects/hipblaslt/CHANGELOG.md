@@ -2,7 +2,7 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
-## hipBLASLt 1.5.0 for ROCm 10.1.0
+## hipBLASLt 1.5.0 for ROCm 10.3.0
 
 ### Added
 
@@ -12,6 +12,11 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   `hipblaslt-bench --device_scalar_alpha`. Alpha points to one FP32 value in
   device memory and beta remains on the host. The descriptor mode requires
   `scaleType = HIP_R_32F`; algorithm selection requires a scalar-alpha-capable kernel.
+
+## hipBLASLt 1.5.0 for ROCm 10.1.0
+
+### Added
+
 * `HIPBLASLT_CHECK_SYNCHRONIZER` environment variable: opt-in post-launch
   dirty-buffer check for the handle's inter-workgroup flag buffers, which their
   kernels must leave at zero (`1`, `on` or `true` to enable; anything else
