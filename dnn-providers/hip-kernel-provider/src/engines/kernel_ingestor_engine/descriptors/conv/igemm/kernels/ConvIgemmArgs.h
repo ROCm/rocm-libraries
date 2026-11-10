@@ -62,6 +62,25 @@ struct ConvIgemmCopyArgs
     int elementBytes;
 };
 
+/// Group fusion: the filter of f consecutive groups expanded into one block-diagonal group of
+/// f * cg input channels (zeros where an output channel's own group does not reach), written
+/// packed K T R S (f cg). Source element (k, c, tap) at k * srcK + c * srcC + tap * srcTap.
+struct ConvIgemmExpandArgs
+{
+    const void* src;
+    void* dst;
+    long long k;
+    long long taps;
+    long long cg;
+    long long kg;
+    long long f;
+    long long srcK;
+    long long srcC;
+    long long srcTap;
+    int elementBytes;
+    int padding0;
+};
+
 /// The transpose's square tile: one 256-thread block per tile of each batch.
 #define CONV_IGEMM_TRANSPOSE_TILE 64
 

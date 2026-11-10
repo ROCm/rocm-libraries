@@ -89,6 +89,12 @@ extern "C" __global__ void __launch_bounds__(256) ConvIgemmCopy(ConvIgemmCopyArg
     k1StridedCopy(a);
 }
 
+/// Group fusion: expands f groups' filters into one block-diagonal group.
+extern "C" __global__ void __launch_bounds__(256) ConvIgemmExpand(ConvIgemmExpandArgs a)
+{
+    k1ExpandGroups(a);
+}
+
 /// Stages packed channels-first activations to channels-last and back.
 extern "C" __global__ void __launch_bounds__(256) ConvIgemmTranspose(ConvIgemmTransposeArgs a)
 {

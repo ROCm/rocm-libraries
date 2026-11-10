@@ -78,6 +78,10 @@
     {
       "name": "dma",
       "type": "int"
+    },
+    {
+      "name": "fuse",
+      "type": "int"
     }
   ]
 }

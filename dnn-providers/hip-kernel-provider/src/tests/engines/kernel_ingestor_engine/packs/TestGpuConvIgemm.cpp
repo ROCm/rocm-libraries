@@ -272,6 +272,10 @@ std::vector<DeviceCase> deviceCases()
     std::vector<DeviceCase> cases;
     cases.push_back({"Nhwc3x3", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, true)});
     cases.push_back({"Nchw3x3", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, false)});
+    // Small groups (4 channels each), channels-first: the group-fusion configs.
+    auto smallGroups = dense(32, 32, {9, 10}, {3, 3}, {1, 1}, false);
+    smallGroups.groups = 8;
+    cases.push_back({"NchwSmallGroups", smallGroups});
     // Channels-first images of whole vectors: the channels-first-output configs' vector stores.
     cases.push_back({"Nchw3x3WholeVectors", dense(24, 40, {8, 12}, {3, 3}, {1, 1}, false)});
     auto groupedFirst = dense(32, 48, {12, 13}, {3, 3}, {1, 1}, false);
@@ -527,7 +531,7 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its knob tuple: within one direction and
     // dtype (what one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 17> KNOBS{"atom",
+    static constexpr std::array<const char*, 18> KNOBS{"atom",
                                                        "math",
                                                        "bm",
                                                        "bn",
@@ -543,7 +547,8 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
                                                        "pack",
                                                        "cf",
                                                        "swz",
-                                                       "dma"};
+                                                       "dma",
+                                                       "fuse"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -614,10 +619,11 @@ TEST(TestConvIgemmCatalog, DirectFilterConfigsAreBackwardDataOnlyAndPackingIsNot
 }
 
 hipdnn_plugin_sdk::ingestor::DeviceProperties deviceOf(const std::string& arch, int units);
+conv_igemm::IgemmProblem parsedProblem(ConvShape shape, ConvDirection direction);
 
 TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOutputTwin)
 {
-    static constexpr std::array<const char*, 16> SHAPE{"atom",
+    static constexpr std::array<const char*, 17> SHAPE{"atom",
                                                        "math",
                                                        "bm",
                                                        "bn",
@@ -632,7 +638,8 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
                                                        "wdirect",
                                                        "pack",
                                                        "swz",
-                                                       "dma"};
+                                                       "dma",
+                                                       "fuse"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         const auto& kernels = catalog(direction);
@@ -697,6 +704,7 @@ TEST(TestConvIgemmCatalog, EveryPlainNativeConfigHasAFlatReductionTwin)
             const bool plain
                 = kernel.getIntMetadata("halo") == 0 && kernel.getIntMetadata("wdirect") == 0
                   && kernel.getIntMetadata("swz") == 0 && kernel.getIntMetadata("cf") == 0
+                  && kernel.getIntMetadata("fuse") == 0
                   && kernel.getStringMetadata("math") == "native";
             if(kernel.getIntMetadata("pack") == 2)
             {
@@ -889,6 +897,89 @@ TEST(TestConvIgemmCatalog, DmaConfigsAreSwizzledAndServeOnlyGfx950)
     EXPECT_GT(dma, 0);
 }
 
+TEST(TestConvIgemmCatalog, FusedGroupsExpandTheFilterIntoBlockDiagonalGroups)
+{
+    auto shape = dense(32, 64, {12, 13}, {3, 3}, {1, 1}, true);
+    shape.groups = 8; // 4 input and 8 output channels a group
+    const auto problem = parsedProblem(shape, ConvDirection::FORWARD);
+    ASSERT_TRUE(problem.filterExpandable);
+    const auto fused = conv_igemm::withFusedGroups(problem, 4);
+    ASSERT_TRUE(fused.has_value());
+    EXPECT_EQ(fused->args.groups, 2);
+    EXPECT_TRUE(fused->w.needed && fused->w.expand);
+    EXPECT_EQ(fused->w.expandArgs.cg, 4);
+    EXPECT_EQ(fused->w.expandArgs.kg, 8);
+    EXPECT_EQ(fused->w.expandArgs.f, 4);
+    EXPECT_EQ(fused->w.expandArgs.taps, 9);
+    EXPECT_EQ(fused->w.bytes, static_cast<size_t>(64 * 9 * 16 * 2));
+    EXPECT_TRUE(fused->filterKtrsc);
+    // Groups the fusion does not divide, and no fusion at all.
+    EXPECT_FALSE(conv_igemm::withFusedGroups(problem, 16).has_value());
+    EXPECT_FALSE(conv_igemm::withFusedGroups(problem, 1).has_value());
+    // A reflected filter (true convolution) is not expanded.
+    shape.mode = ConvMode::CONVOLUTION;
+    const auto reflected = parsedProblem(shape, ConvDirection::FORWARD);
+    EXPECT_FALSE(reflected.filterExpandable);
+    EXPECT_FALSE(conv_igemm::withFusedGroups(reflected, 4).has_value());
+}
+
+TEST(TestConvIgemmCatalog, GroupFusionServesOnlySmallGroupsThroughTheFilterItExpands)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        SCOPED_TRACE(direction == ConvDirection::FORWARD ? "forward" : "backward data");
+        const bool forward = direction == ConvDirection::FORWARD;
+        const auto pack = packFor(direction);
+        const auto& kernels = catalog(direction);
+        const auto fused = std::find_if(kernels.begin(), kernels.end(), [&](const auto& kernel) {
+            return kernel.getIntMetadata("fuse") == 4 && kernel.getStringMetadata("dtype") == "HALF"
+                   && kernel.getStringMetadata("atom") == "mfma32_f16"
+                   && kernel.getIntMetadata("cf") == 0;
+        });
+        ASSERT_NE(fused, kernels.end());
+        EXPECT_EQ(fused->getIntMetadata("wdirect"), forward ? 0 : 1);
+        const auto matches = [&](ConvShape shape, const auto& kernel) {
+            shape.dataType = DataType::HALF;
+            const GraphFixture fixture(buildGraph(specFor(shape, direction)),
+                                       deviceOf("gfx942:sramecc+:xnack-", 304));
+            const auto bound = matchesGraph(pack, fixture.context());
+            return bound.has_value() && matchesKernel(pack, fixture.context(), kernel, *bound);
+        };
+        // 8 groups of 8 channels: fused by 4, 32 channels each way.
+        auto small = dense(64, 64, {12, 13}, {3, 3}, {1, 1}, true);
+        small.groups = 8;
+        EXPECT_TRUE(matches(small, *fused));
+        // 8 groups of 32 channels: 4 fused would be 128.
+        auto wide = dense(256, 256, {12, 13}, {3, 3}, {1, 1}, true);
+        wide.groups = 8;
+        EXPECT_FALSE(matches(wide, *fused));
+        // 6 groups: 4 does not divide them.
+        auto six = dense(48, 48, {12, 13}, {3, 3}, {1, 1}, true);
+        six.groups = 6;
+        EXPECT_FALSE(matches(six, *fused));
+        // A reflected filter.
+        auto reflected = small;
+        reflected.mode = ConvMode::CONVOLUTION;
+        EXPECT_FALSE(matches(reflected, *fused));
+        // Backward data through the transposed (not direct) filter.
+        if(!forward)
+        {
+            auto transposed = *fused;
+            transposed.metadata["wdirect"] = int64_t{0};
+            EXPECT_FALSE(matches(small, transposed));
+        }
+        // Fusion with the halo loop or tap packing, and fusion factors outside 2, 4, 8, 16.
+        const std::vector<std::pair<std::string, int64_t>> bad{
+            {"halo", 1}, {"pack", 1}, {"pack", 2}, {"fuse", 3}, {"fuse", 32}};
+        for(const auto& [field, value] : bad)
+        {
+            auto kernel = *fused;
+            kernel.metadata[field] = value;
+            EXPECT_FALSE(matches(small, kernel)) << field << " " << value;
+        }
+    }
+}
+
 TEST(TestConvIgemmCatalog, ChannelsFirstOutputIsTheTransposedOutputOfTheDirection)
 {
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
@@ -959,7 +1050,8 @@ TEST(TestConvIgemmCatalog, ChannelsFirstOutputConfigsServeOnlyChannelsFirstOutpu
                 if(kernel.getStringMetadata("dtype") != "HALF"
                    || kernel.getStringMetadata("atom") != "mfma32_f16"
                    || kernel.getIntMetadata("xcd") != 0 || kernel.getIntMetadata("halo") != 0
-                   || kernel.getIntMetadata("wdirect") != 0 || kernel.getIntMetadata("pack") != 0)
+                   || kernel.getIntMetadata("wdirect") != 0 || kernel.getIntMetadata("pack") != 0
+                   || kernel.getIntMetadata("fuse") != 0)
                 {
                     continue;
                 }

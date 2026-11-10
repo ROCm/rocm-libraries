@@ -2369,6 +2369,31 @@ __device__ inline void k1StridedCopy(const ConvIgemmCopyArgs& a)
     }
 }
 
+// Group fusion's filter expansion (ConvIgemmExpandArgs): every element of the block-diagonal
+// filter, one per thread, grid-strided.
+__device__ inline void k1ExpandGroups(const ConvIgemmExpandArgs& a)
+{
+    const long long cf = a.f * a.cg;
+    const long long total = a.k * a.taps * cf;
+    const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
+    for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
+        i += step)
+    {
+        const long long c = i % cf;
+        const long long t = i / cf;
+        const long long tap = t % a.taps;
+        const long long kk = t / a.taps;
+        const bool own = c / a.cg == (kk / a.kg) % a.f;
+        const long long src = kk * a.srcK + (c % a.cg) * a.srcC + tap * a.srcTap;
+        if(a.elementBytes == 4)
+            static_cast<unsigned*>(a.dst)[i] = own ? static_cast<const unsigned*>(a.src)[src] : 0u;
+        else
+            static_cast<unsigned short*>(a.dst)[i]
+                = own ? static_cast<const unsigned short*>(a.src)[src]
+                      : static_cast<unsigned short>(0);
+    }
+}
+
 // Batched 2-D transpose through a TT x TT LDS tile (CONV_IGEMM_TRANSPOSE_TILE): a 1-D grid of
 // (column tile, row tile, batch), column tiles fastest; 256 threads. Reads are 16-byte vectors
 // along the source rows when the columns are whole vectors and the source 16-byte aligned, and
