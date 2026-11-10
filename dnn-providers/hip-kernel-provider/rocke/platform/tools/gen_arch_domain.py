@@ -1128,9 +1128,16 @@ def _validate_column(doc: object, label: str) -> list[str]:
 
     toolchain = doc["toolchain"]
     identity = toolchain.get("clang")
-    if not _is_nonblank_string(identity):
+    if not _is_nonblank_string(identity) or identity.strip() == "(unknown)":
         failures.append(
-            f"{label} toolchain clang must be a nonblank string, got {identity!r}"
+            f"{label} toolchain clang must be a nonblank string other than '(unknown)', got {identity!r}"
+        )
+    elif (identity_flavor := flavor_of_clang(identity)) is not None and (
+        identity_flavor != toolchain.get("flavor")
+    ):
+        failures.append(
+            f"{label} toolchain clang {identity!r} reports {identity_flavor!r}, "
+            f"expected column flavor {toolchain.get('flavor')!r}"
         )
     for field in ("flavor", "arches", "generator", "probe_cflags", "probe_timeout_s"):
         if field not in toolchain:
@@ -1178,6 +1185,15 @@ def _validate_column(doc: object, label: str) -> list[str]:
                 or status == STATUS_PROBE_ERROR
             ):
                 failures.append(f"{key}/{arch}: {label} invalid status {status!r}")
+            processor = processors.get(arch)
+            if (
+                status == STATUS_OK
+                and isinstance(processor, dict)
+                and processor.get("accepted") is False
+            ):
+                failures.append(
+                    f"{key}/{arch}: {label} status {status!r} requires an accepted processor, got accepted=False"
+                )
             if status != STATUS_OK and not _is_nonblank_string(cell.get("evidence")):
                 failures.append(
                     f"{key}/{arch}: {label} evidence must be a nonblank string for a non-ok cell, got {cell.get('evidence')!r}"
@@ -1297,6 +1313,18 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
         elif after["accepted"] and not before["accepted"]:
             result.changes["gain"].append(f"processor {arch}: unsupported -> accepted")
     return result
+
+
+def _print_support_failures(out: Path, failures: list[str]) -> None:
+    """Keep early record rejection and final support-loss diagnostics consistent."""
+    summary = "; ".join(failures[:5])
+    if len(failures) > 5:
+        summary += f" (+{len(failures) - 5} more)"
+    print(
+        f"\nFAIL: {out} lost support or could not be compared safely.\n"
+        f"      failures: {len(failures)} -- {summary}\n"
+        "      Investigate losses and validation errors; do not re-bless a regression."
+    )
 
 
 def _prune() -> int:
@@ -1562,7 +1590,11 @@ def main() -> int:
         help="drop rows whose decl key is gone, on every column; needs no toolchain",
     )
     ap.add_argument("--jobs", type=_nonnegative_jobs, default=0)
-    ap.add_argument("--verbose", action="store_true")
+    ap.add_argument(
+        "--verbose",
+        action="store_true",
+        help="show probe details and all comparison observations",
+    )
     ap.add_argument(
         "--unvalidated-exit-code",
         type=int,
@@ -1717,13 +1749,20 @@ def main() -> int:
     # Keep compiler provenance visible, but do not let a different build skip
     # the comparison: changes in its intrinsic availability are what this gate
     # must detect. The flavor and toolchain-consistency checks above still apply.
+    committed_text: str | None = None
+    committed_doc: dict = {}
     if args.check and out.is_file():
+        committed_text = out.read_text()
         try:
-            committed_doc = json.loads(out.read_text())
-        except json.JSONDecodeError:
-            # The final drift check owns the actionable malformed-JSON error.
-            committed_doc = {}
-        blessed_identity = committed_doc.get("toolchain", {}).get("clang")
+            committed_doc = json.loads(committed_text)
+        except json.JSONDecodeError as exc:
+            _print_support_failures(out, [f"baseline column is not valid JSON: {exc}"])
+            return 1
+        failures = _validate_column(committed_doc, "baseline")
+        if failures:
+            _print_support_failures(out, failures)
+            return 1
+        blessed_identity = committed_doc["toolchain"]["clang"]
         if blessed_identity and blessed_identity != identity:
             print(
                 f"\nNOTE: {out.name} was measured with a different "
@@ -1738,14 +1777,7 @@ def main() -> int:
     print(f"   arches : {', '.join(arches)}")
     print(f"   keys   : {len(keys)}")
 
-    expected_cells: dict[str, dict[str, dict[str, str]]] = {}
-    if args.check and out.is_file():
-        try:
-            expected_cells = json.loads(out.read_text()).get("keys", {})
-        except json.JSONDecodeError:
-            # The final drift check owns the actionable malformed-JSON error.
-            # Until then, schedule conservatively as though no baseline exists.
-            pass
+    expected_cells: dict[str, dict[str, dict[str, str]]] = committed_doc.get("keys", {})
 
     tmp = tempfile.TemporaryDirectory(prefix="rocke_arch_domain_")
     ir_dir = args.keep_ir if args.keep_ir else Path(tmp.name)
@@ -2087,7 +2119,7 @@ def main() -> int:
     print("\n   " + "  ".join(f"{s}={n}" for s, n in sorted(counts.items())))
 
     if args.check:
-        if not out.is_file():
+        if committed_text is None:
             # A custom --out path still validates toolchain consistency before
             # reporting that there is no baseline to compare.
             print(
@@ -2095,7 +2127,7 @@ def main() -> int:
                 f"({out.name}); nothing to check. Run without --check to add one."
             )
             return _unvalidated_exit(args.unvalidated_exit_code, 0)
-        comparison = _compare_support(out.read_text(), text)
+        comparison = _compare_support(committed_text, text)
         for kind, label in (
             ("gain", "SUPPORT GAIN"),
             ("improved", "MEASUREMENT IMPROVED"),
@@ -2106,19 +2138,14 @@ def main() -> int:
         ):
             changes = comparison.changes[kind]
             if changes:
-                print(f"\n{label}: {len(changes)} -- " + "; ".join(changes[:5]))
+                summary = "; ".join(changes if args.verbose else changes[:5])
+                if not args.verbose and len(changes) > 5:
+                    summary += f" (+{len(changes) - 5} more)"
+                print(f"\n{label}: {len(changes)} -- {summary}")
         if not comparison.failures:
             print(f"\nSUPPORT OK: {out.name} retains the baseline support floor.")
             return 0
-        failure_count = len(comparison.failures)
-        summary = "; ".join(comparison.failures[:5])
-        if failure_count > 5:
-            summary += f" (+{failure_count - 5} more)"
-        print(
-            f"\nFAIL: {out} lost support or could not be compared safely.\n"
-            f"      failures: {failure_count} -- {summary}\n"
-            "      Investigate losses and validation errors; do not re-bless a regression."
-        )
+        _print_support_failures(out, comparison.failures)
         return 1
 
     out.parent.mkdir(parents=True, exist_ok=True)

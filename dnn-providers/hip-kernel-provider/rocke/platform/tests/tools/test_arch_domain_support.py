@@ -104,6 +104,49 @@ class SupportComparisonTest(unittest.TestCase):
                     f"got {identity.get('clang')!r}",
                 )
 
+    def test_unknown_or_misattributed_compiler_identity_fails(self):
+        valid = json.loads(self._doc())
+        for identity in (
+            "(unknown)",
+            " \t(unknown) \n",
+            "AMD clang version 20.0.0git (another-build)",
+            "AMD LLVM version 23.0.0git",
+        ):
+            with self.subTest(identity=identity):
+                invalid = json.loads(self._doc(clang=identity))
+                self._assert_invalid_on_either_or_both_sides(
+                    valid, invalid, "toolchain clang", repr(identity)
+                )
+
+    def test_same_flavor_builds_and_reworded_compiler_banners_pass(self):
+        for identity in (
+            "AMD clang version 22.0.1 (another-build)",
+            "AMD LLVM version 22.0.0git",
+            "a vendor reworded the banner",
+        ):
+            with self.subTest(identity=identity):
+                self.assertEqual(
+                    G._compare_support(self._doc(), self._doc(clang=identity)).failures,
+                    [],
+                )
+
+    def test_successful_cells_require_an_accepted_processor(self):
+        valid = json.loads(self._doc())
+        invalid = json.loads(self._doc())
+        invalid["processors"][self.ARCH] = {
+            "accepted": False,
+            "evidence": "processor diagnostic",
+        }
+        self._assert_invalid_on_either_or_both_sides(
+            valid, invalid, f"a.b/{self.ARCH}", "status 'ok'", "accepted=False"
+        )
+        # Rejection is independent of whether the other column would count it
+        # as a cell gain as well as a processor-name gain.
+        unavailable = json.loads(self._doc(G.STATUS_ARCH_ABSENT))
+        self._assert_invalid_on_either_or_both_sides(
+            unavailable, invalid, f"a.b/{self.ARCH}", "accepted=False"
+        )
+
     def test_non_ok_cells_require_diagnostic_evidence(self):
         for status in sorted(_NEEDS_EVIDENCE - {G.STATUS_PROBE_ERROR}):
             for evidence in (
@@ -399,7 +442,12 @@ class SupportComparisonTest(unittest.TestCase):
             for side in ("baseline", "current", "both"):
                 for damage in ("mapping", "entry"):
                     with self.subTest(accepted=accepted, side=side, damage=damage):
-                        before, after = json.loads(self._doc()), json.loads(self._doc())
+                        status = (
+                            G.STATUS_OK if accepted else G.STATUS_TARGET_UNSUPPORTED
+                        )
+                        before, after = json.loads(self._doc(status)), json.loads(
+                            self._doc(status)
+                        )
                         for doc in (before, after):
                             doc["processors"][self.ARCH] = {
                                 "accepted": accepted,
@@ -469,7 +517,9 @@ class SupportComparisonTest(unittest.TestCase):
         )
 
     def test_processor_acceptance_is_monotonic(self):
-        before, after = json.loads(self._doc()), json.loads(self._doc())
+        before, after = json.loads(self._doc(G.STATUS_TARGET_UNSUPPORTED)), json.loads(
+            self._doc(G.STATUS_TARGET_UNSUPPORTED)
+        )
         before["processors"] = {
             self.ARCH: {"accepted": False, "evidence": "old wording"}
         }
@@ -479,10 +529,16 @@ class SupportComparisonTest(unittest.TestCase):
         self.assertEqual(
             G._compare_support(json.dumps(before), json.dumps(after)).failures, []
         )
-        after["processors"] = {self.ARCH: {"accepted": True}}
+        after = json.loads(self._doc())
         comparison = G._compare_support(json.dumps(before), json.dumps(after))
         self.assertEqual(comparison.failures, [])
-        self.assertEqual(len(comparison.changes["gain"]), 1)
+        self.assertEqual(
+            comparison.changes["gain"],
+            [
+                f"a.b/{self.ARCH}: target_unsupported -> ok",
+                f"processor {self.ARCH}: unsupported -> accepted",
+            ],
+        )
         self.assertIn(
             "accepted -> unsupported",
             "; ".join(

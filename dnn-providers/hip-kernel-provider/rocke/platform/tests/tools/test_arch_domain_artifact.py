@@ -1516,6 +1516,142 @@ sys.exit(0)
                     out.read_text(), before, "--check rewrote the baseline"
                 )
 
+    def test_cli_validates_baseline_before_provenance_and_scheduling(self):
+        out, tools = self._baseline_from_other_compiler()
+        valid = json.loads(out.read_text())
+        missing = object()
+        for name, path, value, diagnostic in (
+            ("invalid JSON", (), "{oops", "baseline column is not valid JSON"),
+            ("non-object", (), [], "baseline column is not a JSON object"),
+            (
+                "null toolchain",
+                ("toolchain",),
+                None,
+                "baseline toolchain is not a mapping",
+            ),
+            ("null keys", ("keys",), None, "baseline keys is not a mapping"),
+            (
+                "null row",
+                ("keys", "fabs.f32"),
+                None,
+                "baseline architecture row is not a mapping",
+            ),
+            (
+                "null cell",
+                ("keys", "fabs.f32", self.ARCH),
+                None,
+                "baseline cell is not a mapping",
+            ),
+            (
+                "missing status",
+                ("keys", "fabs.f32", self.ARCH, "status"),
+                missing,
+                "baseline invalid status None",
+            ),
+            (
+                "unknown compiler",
+                ("toolchain", "clang"),
+                "(unknown)",
+                "got '(unknown)'",
+            ),
+            (
+                "mismatched compiler",
+                ("toolchain", "clang"),
+                "AMD clang version 20.0.0git",
+                "expected column flavor 'llvm22'",
+            ),
+            (
+                "contradictory processor",
+                ("processors", self.ARCH),
+                {"accepted": False, "evidence": "processor diagnostic"},
+                "status 'ok' requires an accepted processor",
+            ),
+        ):
+            with self.subTest(damage=name):
+                doc = json.loads(json.dumps(valid))
+                if path:
+                    parent = doc
+                    for field in path[:-1]:
+                        parent = parent[field]
+                    if value is missing:
+                        del parent[path[-1]]
+                    else:
+                        parent[path[-1]] = value
+                else:
+                    doc = value
+                text = value if name == "invalid JSON" else json.dumps(doc)
+                out.write_text(text)
+                stdout = io.StringIO()
+                with (
+                    mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                    mock.patch("sys.stdout", stdout),
+                    mock.patch.object(
+                        G, "_target_preflight", wraps=G._target_preflight
+                    ) as preflight,
+                    mock.patch.object(
+                        G, "_schedule_probes", wraps=G._schedule_probes
+                    ) as schedule,
+                ):
+                    rc = self._run(
+                        tools,
+                        out,
+                        "--only",
+                        "fabs.f32",
+                        "--check",
+                        "--unvalidated-exit-code",
+                        "77",
+                    )
+                self.assertEqual(rc, 1, "invalid input must fail, not skip")
+                self.assertIn(diagnostic, stdout.getvalue())
+                self.assertIn("failures:", stdout.getvalue())
+                self.assertNotIn("SUPPORT OK", stdout.getvalue())
+                preflight.assert_not_called()
+                schedule.assert_not_called()
+                self.assertEqual(out.read_text(), text, "--check rewrote the baseline")
+
+    def test_observation_summary_is_bounded_unless_verbose(self):
+        out, tools = self._baseline_from_other_compiler()
+        before = out.read_text()
+        for count in (0, 5, 8):
+            changes = {
+                kind: [f"{kind}-case-{i}" for i in range(count)]
+                for kind in G._compare_support(before, before).changes
+            }
+            for verbose in (False, True):
+                with self.subTest(count=count, verbose=verbose):
+                    stdout = io.StringIO()
+                    with (
+                        mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                        mock.patch("sys.stdout", stdout),
+                        mock.patch.object(
+                            G,
+                            "_compare_support",
+                            return_value=G._SupportComparison([], changes),
+                        ),
+                    ):
+                        rc = self._run(
+                            tools,
+                            out,
+                            "--only",
+                            "fabs.f32",
+                            "--check",
+                            *(("--verbose",) if verbose else ()),
+                        )
+                    text = stdout.getvalue()
+                    self.assertEqual(rc, 0)
+                    self.assertIn("SUPPORT OK", text)
+                    for kind in changes:
+                        for index in range(count):
+                            if verbose or index < 5:
+                                self.assertIn(f"{kind}-case-{index}", text)
+                            else:
+                                self.assertNotIn(f"{kind}-case-{index}", text)
+                    self.assertEqual(
+                        text.count(f"(+{count - 5} more)"),
+                        len(changes) if count > 5 and not verbose else 0,
+                    )
+                    self.assertEqual(out.read_text(), before)
+
     def test_failure_summary_reports_total_and_omitted_count(self):
         out, tools = self._baseline_from_other_compiler()
         before = out.read_text()
