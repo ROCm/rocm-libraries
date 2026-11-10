@@ -181,6 +181,11 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
   - Frontend API, schema & backend descriptors landed ✅
   - Initial provider kernel dispatch ⏳
 
+### LLM operations ([Qwen3.8](Qwen38Support.md))
+- Graph API, backend descriptors and CPU reference for `rope`, `softmax`, `topk`, `gather`, `paged_cache_store`, `causal_conv1d`, `moe_routing` and `gdn` ✅
+- Explicit `[G+1]` expert boundaries in `moe_grouped_matmul` ✅
+- GPU engines (FlyDSL first; see the coverage map) and paged/varlen SDPA engines ⏳
+
 ### Support matrix
 - Matrix published as a regular CI artifact ⏳
 
