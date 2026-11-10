@@ -1,10 +1,16 @@
 # Oracle-free attention tests
 
-This suite launches the shipped gfx942 dense attention kernel and checks masked
-uniform probabilities without a complete attention oracle. Zero Q makes
-every legal score equal, so the softmax row for query `q` is uniform over its
-legal key set `A(q)`. Each expected output follows from legal-key arithmetic
-alone, rounded correctly into the subject dtype.
+This suite launches the shipped gfx942 dense attention kernel and checks it
+without a complete attention oracle, in two lanes:
+
+- **Uniform probabilities** (this section through "Calibration and scope").
+  Zero Q makes every legal score equal, so the softmax row for query `q` is
+  uniform over its legal key set `A(q)`. Each expected output follows from
+  legal-key arithmetic alone, rounded correctly into the subject dtype.
+- **Structured logits (P4)**, below. Structured Q and K give every row two
+  logit classes, so the softmax, the online rescale and the per-head Q/K reads
+  all matter. Each output is predicted as the set of values the kernel's
+  pinned floating-point path can store.
 
 ## Exposures
 
@@ -31,8 +37,9 @@ the zero-ULP argument is unchanged. `nhead_k` is capped at 8 to keep the scales
 distinct and the outputs in range.
 
 Not covered by design: with Q zero, the logits do not depend on Q or K, so a
-wrong Q or K head index is invisible. Query heads that share one KV head (GQA)
-also share a scale, so swapping heads within one group is invisible.
+wrong Q or K head index is invisible here; the P4 lane gives each head its own
+logit and covers it. Query heads that share one KV head (GQA) also share a
+scale, so swapping heads within one group is invisible.
 
 ## Device path
 
@@ -184,6 +191,156 @@ mismatch:
    (`spec`, `case_ids`). Name the develop revision under test and the gfx942
    run in that commit's message.
 
+## Structured logits (P4)
+
+The P4 lane (`_p4_analytical.py`, `test_p4_analytical_gfx942.py`) runs the two
+calibrated quick shapes above with structured Q and K. Every row then has two
+logit classes: the distinguished keys, with logit `c`, and the background keys,
+with logit 0. For a row with `n_c` legal distinguished and `n_0` legal
+background keys, an exposed coordinate that selects `m_c` and `m_0` of them has
+the exact value
+
+`y* = 2^h (m_c e^c + m_0) / (n_c e^c + n_0)`.
+
+The V exposures and the `2^h` KV-head scales are the uniform lane's.
+
+### Fixtures
+
+All inputs are zero or signed powers of two, so `encode_bits` accepts them
+exactly. `D = 64` is also the period `P`; key `k` is distinguished for row `q`
+when `k + r = q (mod 64)`.
+
+| Fixture | Q[q,h,:] | K[k,h,:] | `r` | Logit `c` |
+|---|---|---|---:|---|
+| `identity` | `a_h` one-hot at `q mod 64` | `b_h` one-hot at `k mod 64` | 0 | `a_h b_h / 8` |
+| `cyclic` | as `identity` | one-hot at `(k + 37) mod 64` | 37 | `a_h b_h / 8` |
+| `walsh` | `a_h` times Walsh row `q mod 64` | `b_h (-1)^k` times Walsh row `(k + 1) mod 64` | 1 | `8 a_h b_h`, signed by row parity |
+| `late_max` | as `identity` | as `identity`, rows `k < 64` zeroed | 0 | as `identity`, keys `k >= 64` only |
+
+The head scales `(a_h, b_h)` give each head its own logit (periodic fixtures
+`8, -8, 2, -1/2`; Walsh magnitudes `8, 2, 1/2, 4`). They were chosen by a
+maximin search so that every wrong Q-head or K-head read changes some stored
+value; a CPU contract recomputes the committed margin. Causal rows contain
+masked distinguished keys (`k = q + 64j`), so any mask leak is visible.
+Window-64 rows straddle two KV tiles, and `late_max` moves the row maximum
+into a later tile; both exercise the online rescale.
+
+### Prediction: Tier B
+
+For each coordinate the analyzer computes **Tier B**, the set of FP16/BF16
+values the kernel's pinned floating-point path can store. Closed intervals of
+FP32 values are propagated, with exact rational arithmetic, through the score
+scale, `v_exp_f32`, the FP32 denominator sum in any order, the single P cast,
+the PV MFMA, the IEEE reciprocal and the output cast. Rounding, `+`, `*` and
+the casts are monotone on nonnegative arguments, so the endpoint images
+enclose every reachable state.
+
+The path itself is pinned twice on the CPU. An IR contract lowers both quick
+specs and classifies every floating-point instruction; an ISA contract
+disassembles the compiled code objects. Any instruction outside the model fails
+with "re-derive the path model": Tier B is re-derived for the new path, never
+widened to absorb it.
+
+Tier B rests on three named assumptions, each versioned in the calibration
+entry:
+
+| Assumption | Statement |
+|---|---|
+| A-E v1 | `v_exp_f32` returns an FP32 value within `ulp32(2^x)` (the spacing above `2^x`) of `2^x` |
+| A-MFMA v1 | a folded MFMA addition of two nonzero values rounds down or up (basis exposures add only exact zeros) |
+| A-F v1 | each FP16 output store is `q(RN32(o R))` or `q(o R)`; every other operation, BF16 stores included, follows the IR |
+
+A-F covers an AMDGPU backend behaviour: affected compilers select some
+unflagged `fptrunc(fmul float)` FP16 stores as `v_fma_mix{lo,hi}_f16`, which
+rounds the exact product once. LLVM PR
+[#236759](https://github.com/llvm/llvm-project/pull/236759) makes that fold
+require `contract`. The ISA contract accepts both affected and fixed compilers
+and checks that the denominator combine is never fused.
+
+**Tier A**, the certified correctly rounded target `q(y*)` with a small ULP
+radius, is diagnostic: it names the failure class, never the verdict.
+
+### Policy and failure labels
+
+`analyze_p4_policy` compares raw output bits. A coordinate passes if and only
+if its bits lie in Tier B. Structural coordinates (masked keys, basis
+coordinates past the last key, rows without a legal key) have Tier B `{+0}`
+and must store exactly `+0`; unlike the uniform lane, `-0` fails. Each failing
+coordinate carries the strongest contract it still satisfies:
+
+| Label | Meaning |
+|---|---|
+| `invalid` | NaN (including the unwritten prefill) or Inf |
+| `negative` | sign bit set, `-0` included |
+| `structural` | a required `+0` coordinate stores another value |
+| `E2: denorm/rounding mode` | an FP16-subnormal target, stored near it or flushed to `+0` |
+| `assumption A-MFMA` | a folded addition near the target, with the basis exposures clean |
+| `assumption A-E` | explained only by a looser (2-ULP) `v_exp_f32` |
+| `path model` | outside Tier B, inside Tier A: re-pin the path, never widen |
+| `numerical` | outside Tier A |
+
+### Mutation self-checks
+
+On every run the analyzer is re-applied to the same real output under wrong
+semantics, on block, tile and window edge rows. Each mutation must be
+rejected:
+
+| Applies to | Mutations |
+|---|---|
+| every fixture | `omit_sqrt_d`, `exp_encoding`, `k_row_plus_one`, `k_row_minus_one`, `q_head_rotate`, `k_head_rotate`, `omit_rescale`, `denominator_plus_one` |
+| `cyclic` | `inverse_shift` |
+| `walsh` | `omit_walsh_block_{0,1,3}`, `walsh_sign` |
+| causal / window | the one-key mask-boundary mutations of the uniform lane |
+
+A CPU contract proves, for every applicable pair, that the correct and mutated
+Tier B are disjoint at some coordinate and records the gap. The exception is
+`omit_rescale` on the causal `identity`, `cyclic` and `walsh` cases: their row
+maximum is always in the first visited tile, so the omitted rescale lies inside
+the correct Tier B. `late_max` separates it on the same kernel.
+
+The kernel is also launched once with scale `1` instead of `1/sqrt(D)` on the
+`identity` fixture (`basis@0`); that output must fail Tier B.
+
+### Calibration
+
+`P4_CALIBRATION` has one entry per dtype, keyed like the uniform table. A
+`P4CalibrationEntry` names the policy (`tier_b`), the assumption versions, the
+literal case IDs and the uniform lane's dispatch fingerprint. It has no width,
+ULP or tolerance field, so no measurement can enlarge Tier B. A CPU contract
+requires the calibrated case set to equal `P4_QUICK_CASES`, split by dtype.
+Changing a fixture, a head scale or a quick shape changes the case IDs, and the
+gate fails closed with the re-ratification remedy. Skip and failure semantics
+are the uniform lane's.
+
+Each case runs the five exposures twice, and the two runs must be
+bit-identical. With `ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir>` set, each case
+writes `<case_id>.jsonl` with three record types:
+
+- `rocke_p4_group`: per mutation, exposure, legal count and head, the label
+  counts, exact hits on the target and two-value Tier B outcomes;
+- `rocke_p4_summary`: per mutation, whether it was rejected and the CPU gap;
+- `rocke_p4_diagnostics`: determinism, assumptions, the compiler and HSACO
+  digest, agreement with the IR-exact emulation and with the named
+  affected-compiler artifact, folded MFMA realizations and the Tier B width
+  histogram. None of these enters the verdict.
+
+It also writes `<case_id>.npz`, the raw output bits of every exposure. The
+replayable audit `_p4_capture_audit.py` explains every saved coordinate by the
+exact union of the IR-exact and the single-rounded epilogue, checks the named
+artifact's per-site rule and Tier B membership, and compares further captures
+bit for bit. Unexplained coordinates are reported, never absorbed:
+
+```bash
+# From rocke/library.
+PYTHONPATH=.:../platform/python python -m tests.oracle_free._p4_capture_audit \
+  --artifact rocm-7.13.0 <capture dir> [<capture dir> ...]
+```
+
+To re-ratify, run the complete suite on gfx942 with records enabled, confirm
+zero coordinates outside Tier B, every mutation rejected and determinism, run
+the audit on the captures, then update `P4_CALIBRATION` (`spec`, `case_ids`)
+in one reviewed change that names the develop revision and the gfx942 run.
+
 ## Oracle prohibition
 
 Verdicts may use only deterministic profile construction, independent legal-key
@@ -191,6 +348,12 @@ arithmetic, exact rational rounding, and diagnostic reductions. They must not
 call Torch SDPA, rocKE numeric references, SDPA reference helpers, or a
 pinned-reference bundle. A CPU source contract checks the suite for those
 dependencies.
+
+The P4 predictor is within these rules. Its inputs are closed-form scalars, the
+logit of each key class and the legal counts of each row, and it propagates
+FP32 intervals through the pinned per-row arithmetic. It never forms `Q K^T`
+from input tensors or evaluates a softmax over data; general attention stays
+banned.
 
 The whole suite is Torch-free, and CPU contracts enforce it in two ways:
 
@@ -211,9 +374,14 @@ From the `rocke` directory (NumPy and pytest only; Torch is not needed):
 # fail-closed gating, adapter ABI, Torch-free and oracle-free source policy.
 python -m pytest library/tests/oracle_free/test_contracts.py -vv
 
-# Uniform-probability production launches on a visible gfx942 device.
+# P4 CPU contracts: reachable-set primitives, fixtures, Tier B soundness,
+# mutation separation, IR and ISA path contracts, policy and calibration.
+python -m pytest library/tests/oracle_free/test_p4_contracts.py -vv
+
+# Uniform-probability and P4 production launches on a visible gfx942 device.
 HIP_VISIBLE_DEVICES=0 python -m pytest \
-  library/tests/oracle_free/test_analytical_gfx942.py -vv -rs
+  library/tests/oracle_free/test_analytical_gfx942.py \
+  library/tests/oracle_free/test_p4_analytical_gfx942.py -vv -rs
 
 # Complete suite, capturing calibration records.
 ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir> HIP_VISIBLE_DEVICES=0 \
