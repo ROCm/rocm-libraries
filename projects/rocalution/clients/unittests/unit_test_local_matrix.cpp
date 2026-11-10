@@ -3206,6 +3206,48 @@ TYPED_TEST(local_matrix, set_data_ptr_csr_without_entries_keeps_the_sizes)
     expect_vector(*x, std::vector<T>(n, 0.0), this->backend(), 0);
 }
 
+// Clear drops the ELL width with the arrays, so that the empty matrix copies and
+// moves like one that was never allocated, and takes a new matrix afterwards
+TYPED_TEST(local_matrix, a_cleared_ell_matrix_copies_moves_and_is_refilled)
+{
+    using T = typename TypeParam::value_type;
+
+    const Csr<T> ref = banded<T>();
+    const Format ell = {ELL, 1};
+
+    auto expect_empty = [&](const LocalMatrix<T>& M, Backend b) {
+        EXPECT_EQ(M.GetNnz(), 0);
+        EXPECT_EQ(rocalution::_matrix_format_names[M.GetFormat()], format_name(ell));
+        EXPECT_EQ(backend_of(M), backend_name(b));
+    };
+
+    auto A = make_local_matrix(this->backend(), ref, ell);
+    A->Clear();
+    expect_empty(*A, this->backend());
+
+    for(Backend b : {this->backend(), this->other()})
+    {
+        SCOPED_TRACE(std::string("copy to the ") + backend_name(b));
+        auto B = empty_local_matrix<T>(b);
+        B->ConvertTo(ELL);
+        B->CopyFrom(*A);
+        expect_empty(*B, b);
+    }
+
+    if(this->other() == Backend::Accelerator)
+    {
+        A->MoveToAccelerator();
+    }
+    else
+    {
+        A->MoveToHost();
+    }
+    expect_empty(*A, this->other());
+
+    A->CopyFrom(*make_local_matrix(this->other(), ref, ell));
+    expect_matrix(*A, ref, ell, this->other());
+}
+
 // The value array of DIA holds num_diag columns of max(nrow, ncol) values, (row, d) at d * nrow + row
 TYPED_TEST(local_matrix, set_data_ptr_dia_of_a_wide_matrix)
 {

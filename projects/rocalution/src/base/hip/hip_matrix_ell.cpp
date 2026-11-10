@@ -154,6 +154,8 @@ namespace rocalution
         free_hip(&this->mat_.val);
         free_hip(&this->mat_.col);
 
+        this->mat_.max_row = 0;
+
         this->nrow_ = 0;
         this->ncol_ = 0;
         this->nnz_  = 0;
