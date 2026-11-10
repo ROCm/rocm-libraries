@@ -7488,13 +7488,11 @@ class TestHalfDisjointClumping:
             if self._kinds(gap).startswith("V"):
                 assert IS._issueExcess([gap]) == 0, (i, self._kinds(gap))
 
-    @pytest.mark.xfail(strict=True, reason="stage 3: address updates follow the previous load")
     def test_no_salu_shares_a_load_gap_while_the_half_has_an_empty_gap(self):
         gaps = self._gaps(self._body())
         assert not self._clumped(gaps, lambda k: "S" in k and "L" in k), [
             self._kinds(g) for g in gaps]
 
-    @pytest.mark.xfail(strict=True, reason="stage 3: scale address updates pack behind the last load")
     def test_no_gap_takes_three_salu_while_the_half_has_an_empty_gap(self):
         gaps = self._gaps(self._body())
         assert not self._clumped(

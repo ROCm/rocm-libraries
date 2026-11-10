@@ -3463,6 +3463,39 @@ def _attachComments(placer, anchors):
         placer.leftovers.extend(comments)
 
 
+_MXFP8_SALU_PER_GAP = 3
+
+
+def _requestUnits(requests):
+    """A request stream as m0/load pairs and scalar ALU units, or None.
+
+    Each entry is (isPair, items) in stream order. An SCC reader joins the
+    unit of the writer right ahead of it, so a unit issues as one run and
+    no other SCC writer lands inside it. None when the stream holds
+    anything else, which keeps the stream chained.
+    """
+    units = []
+    index = 0
+    while index < len(requests):
+        inst = requests[index][1]
+        if _isM0Update(inst):
+            if index + 1 == len(requests) or not _isDtlLoad(requests[index + 1][1]):
+                return None
+            units.append((True, requests[index:index + 2]))
+            index += 2
+            continue
+        if not _isScalarAlu(inst) or not _operandsVisible(inst):
+            return None
+        if _readsScc(inst):
+            if not units or units[-1][0] or not _writesScc(units[-1][1][-1][1]):
+                return None
+            units[-1][1].append(requests[index])
+        else:
+            units.append((False, [requests[index]]))
+        index += 1
+    return units
+
+
 def _requestBundles(requests):
     """Split a request stream after each load: (bundles, trailing items)."""
     bundles, pending = [], []
@@ -4022,7 +4055,9 @@ def _scheduleHalfDisjointHalf(
     paced evenly over the gaps the reads leave (_halfMemoryPlan). A half
     with more memory ops than gaps keeps each cell's reads where the
     cell scheduler puts them, and places the loads over the whole half
-    by the cell scheduler's rules.
+    by the cell scheduler's rules. The scalar address updates between the
+    loads then leave the load gaps for the least loaded gaps their own
+    register dependences allow (_requestUnits).
 
     With crossCellReads a later cell's reads may also take the gaps of
     earlier cells in the half, from their floors (_crossCellReadFloors)
@@ -4252,7 +4287,104 @@ def _scheduleHalfDisjointHalf(
     def evenly(gaps, count):
         return [gaps[index * len(gaps) // count] for index in range(count)]
 
+    # Scalar ALU leave the stream's chain only when no other path of the
+    # half shares a register with them; waits and barriers stay ahead of
+    # opened or in the seams, which units never take.
+    units = _requestUnits(requests)
+    if units is not None and any(
+            not _mayReorder(a, b, scc=False)
+            for isPair, items in units if not isPair
+            for _, a in items
+            for c in range(len(cells))
+            for path in (split[c][0], split[c][1], readPaths[c], split[c][4])
+            for _, b in path
+            if not (isinstance(b, TextBlock) or _isWaitCnt(b) or _isBarrier(b))):
+        units = None
+    if units is not None:
+        conflict = [[any(not _mayReorder(a, b, scc=False)
+                         for _, a in first for _, b in second)
+                     for _, second in units] for _, first in units]
+    saluEnd = max(firstInterval, intervals - math.ceil(
+        tailScaleReads / _MXFP8_DATA_DS_READS))
+
+    def saluCount(insts):
+        return sum(_isScalarAlu(x) or _isM0Update(x) for x in insts)
+
+    def moveScalarUnits():
+        """Move every scalar ALU unit of the chained stream to where its
+        register dependences on the stream allow.
+
+        The loads keep their chained gaps. In stream order, a unit takes
+        the least loaded gap between the stream entries it depends on,
+        under _MXFP8_SALU_PER_GAP scalar ALU and away from loads and
+        waits. Returns False when a unit finds no run of free slots.
+        """
+        lifted = {id(inst) for isPair, items in units if not isPair for _, inst in items}
+        for slot in placer._placed:
+            slot[:] = [item for item in slot if id(item[1]) not in lifted]
+        where = {}
+        for p, slot in enumerate(placer._placed):
+            for item in slot:
+                where[id(item[1])] = p
+        for u, (isPair, items) in enumerate(units):
+            if isPair:
+                continue
+            low, latest = opened, placer.totalSlots - 1
+            for k, (_, others) in enumerate(units):
+                spots = [where[id(inst)] for _, inst in others if id(inst) in where]
+                if k == u or not spots or not conflict[u][k]:
+                    continue
+                if k < u:
+                    low = max(low, max(spots) + 1)
+                else:
+                    latest = min(latest, min(spots) - 1)
+            high = latest
+            if saluEnd * spi - 1 >= low + len(items) - 1:
+                high = min(latest, saluEnd * spi - 1)
+            best = None
+            for gap in range(max(low // spi, firstInterval), high // spi + 1):
+                if gap in seams:
+                    continue
+                insts = intervalInsts(gap)
+                for p in range(max(low, gap * spi),
+                               min(high, gap * spi + spi - 1) - len(items) + 2):
+                    if all(not placer._placed[p + t] and placer._canPlace(p + t, inst)
+                           for t, (_, inst) in enumerate(items)):
+                        salu = saluCount(insts) + len(items)
+                        key = (salu > _MXFP8_SALU_PER_GAP,
+                               any(_isDtlLoad(x) or _isM0Update(x) for x in insts),
+                               any(_isWaitCnt(x) or _isBarrier(x) for x in insts),
+                               len(insts), salu, gap)
+                        if best is None or key < best[0]:
+                            best = (key, p)
+                        break
+            if best is None:
+                return False
+            for t, item in enumerate(items):
+                placer._placed[best[1] + t].append(item)
+                where[id(item[1])] = best[1] + t
+        placer._firstPos = [None] * len(placer._firstPos)
+        placer._lastPos = [None] * len(placer._lastPos)
+        for p, slot in enumerate(placer._placed):
+            for mid, _inst in slot:
+                if placer._firstPos[mid] is None:
+                    placer._firstPos[mid] = p
+                placer._lastPos[mid] = p
+        return True
+
     def placeRequestsAndOthers(targets):
+        placeChained(targets)
+        if units is not None:
+            chained = ([list(slot) for slot in placer._placed], list(placer._firstPos),
+                       list(placer._lastPos))
+            if not moveScalarUnits():
+                placer._placed = chained[0]
+                placer._firstPos, placer._lastPos = chained[1], chained[2]
+        for c in range(len(cells)):
+            if split[c][4]:
+                placer.placePath(split[c][4], startLimit=cellOpen[c])
+
+    def placeChained(targets):
         limit = opened
         for bundle, target in zip(bundles, targets):
             start = max(limit, target * spi)
@@ -4267,9 +4399,6 @@ def _scheduleHalfDisjointHalf(
             limit = max(placer._lastPos[mid] for mid, _ in bundle) + 1
         if pending:
             placer.placePath(pending, startLimit=limit)
-        for c in range(len(cells)):
-            if split[c][4]:
-                placer.placePath(split[c][4], startLimit=cellOpen[c])
 
     def overfullIntervals():
         count = 0
