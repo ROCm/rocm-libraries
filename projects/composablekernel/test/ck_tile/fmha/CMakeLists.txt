@@ -252,23 +252,36 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     # one a single-instance build produces: with several of these kernels in one translation
     # unit the compiler emitted different code for some of them, and the P16 residency limit
     # these tests guard is an empirical property of the generated code.
+    # add_page_tile_gtest(<name> [definitions...]) adds the binary
+    # test_ck_tile_fmha_batch_prefill_page_tile_<name>. <name> starts with
+    # p<page>_d<head dim>_<dense|causal>, which select the instance together with the further
+    # CK_TILE_FMHA_PAGE_TILE_TEST_* definitions.
+    function(add_page_tile_gtest name)
+        string(REGEX MATCH "^p([0-9]+)_d([0-9]+)_(dense|causal)(_|$)" fields "${name}")
+        set(page ${CMAKE_MATCH_1})
+        set(head_dim ${CMAKE_MATCH_2})
+        string(COMPARE EQUAL "${CMAKE_MATCH_3}" causal causal)
+        if(NOT fields)
+            message(FATAL_ERROR
+                "add_page_tile_gtest: ${name} does not start with p<page>_d<head dim>_<dense|causal>")
+        endif()
+        set(target test_ck_tile_fmha_batch_prefill_page_tile_${name})
+        add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
+        target_compile_definitions(${target} PRIVATE
+            CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
+            CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
+            CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
+            ${ARGN})
+        # fmha_reference.hpp compares floats exactly by design.
+        target_compile_options(${target} PRIVATE -Wno-float-equal
+            -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+        set(FMHA_QR_TDM_SCHED_TEST_TARGETS ${FMHA_QR_TDM_SCHED_TEST_TARGETS} PARENT_SCOPE)
+    endfunction()
+
     foreach(page IN ITEMS 16 64 128 256 1024)
         foreach(head_dim IN ITEMS 64 128)
             foreach(mask IN ITEMS dense causal)
-                set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_${mask})
-                add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
-                if(mask STREQUAL "causal")
-                    set(causal 1)
-                else()
-                    set(causal 0)
-                endif()
-                target_compile_definitions(${target} PRIVATE
-                    CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
-                    CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
-                    CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal})
-                # fmha_reference.hpp compares floats exactly by design.
-                target_compile_options(${target} PRIVATE -Wno-float-equal
-                    -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+                add_page_tile_gtest(p${page}_d${head_dim}_${mask})
             endforeach()
         endforeach()
     endforeach()
@@ -277,20 +290,8 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     foreach(page IN ITEMS 16 64 128)
         foreach(head_dim IN ITEMS 64 128)
             foreach(mask IN ITEMS dense causal)
-                set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_${mask}_fp16)
-                add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
-                if(mask STREQUAL "causal")
-                    set(causal 1)
-                else()
-                    set(causal 0)
-                endif()
-                target_compile_definitions(${target} PRIVATE
-                    CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
-                    CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
-                    CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
+                add_page_tile_gtest(p${page}_d${head_dim}_${mask}_fp16
                     CK_TILE_FMHA_PAGE_TILE_TEST_FP16=1)
-                target_compile_options(${target} PRIVATE -Wno-float-equal
-                    -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
             endforeach()
         endforeach()
     endforeach()
@@ -299,20 +300,7 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     # page size).
     foreach(head_dim IN ITEMS 64 128)
         foreach(mask IN ITEMS dense causal)
-            set(target test_ck_tile_fmha_batch_prefill_page_tile_p128_d${head_dim}_${mask}_lse)
-            add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
-            if(mask STREQUAL "causal")
-                set(causal 1)
-            else()
-                set(causal 0)
-            endif()
-            target_compile_definitions(${target} PRIVATE
-                CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=128
-                CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
-                CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
-                CK_TILE_FMHA_PAGE_TILE_TEST_LSE=1)
-            target_compile_options(${target} PRIVATE -Wno-float-equal
-                -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+            add_page_tile_gtest(p128_d${head_dim}_${mask}_lse CK_TILE_FMHA_PAGE_TILE_TEST_LSE=1)
         endforeach()
     endforeach()
 
@@ -320,38 +308,15 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     # the sink tiles to the window, so every page writer path is covered at both head dimensions.
     foreach(page IN ITEMS 16 64 128 1024)
         foreach(head_dim IN ITEMS 64 128)
-            set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_causal_sink)
-            add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
-            target_compile_definitions(${target} PRIVATE
-                CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
-                CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
-                CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=1
+            add_page_tile_gtest(p${page}_d${head_dim}_causal_sink
                 CK_TILE_FMHA_PAGE_TILE_TEST_SINK=1)
-            target_compile_options(${target} PRIVATE -Wno-float-equal
-                -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
         endforeach()
     endforeach()
 
     # Tanh logits soft cap: every page-id lookup at both head dimensions (causal), and P128 dense.
     foreach(variant IN ITEMS p16_d64_causal p16_d128_causal p64_d64_causal p64_d128_causal
                              p128_d64_causal p128_d128_causal p128_d64_dense p128_d128_dense)
-        string(REGEX MATCH "^p([0-9]+)_d([0-9]+)_([a-z]+)$" _ ${variant})
-        set(page ${CMAKE_MATCH_1})
-        set(head_dim ${CMAKE_MATCH_2})
-        if(CMAKE_MATCH_3 STREQUAL "causal")
-            set(causal 1)
-        else()
-            set(causal 0)
-        endif()
-        set(target test_ck_tile_fmha_batch_prefill_page_tile_${variant}_softcap)
-        add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
-        target_compile_definitions(${target} PRIVATE
-            CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
-            CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
-            CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
-            CK_TILE_FMHA_PAGE_TILE_TEST_SOFTCAP=1)
-        target_compile_options(${target} PRIVATE -Wno-float-equal
-            -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+        add_page_tile_gtest(${variant}_softcap CK_TILE_FMHA_PAGE_TILE_TEST_SOFTCAP=1)
     endforeach()
 
     # Elementwise bias (1) and ALiBi (2): both head dimensions on every page-id lookup, P128 dense,
@@ -364,29 +329,14 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         endif()
         foreach(variant IN ITEMS p16_d64_causal p16_d128_causal p64_d128_causal p128_d64_causal
                                  p128_d128_causal p128_d128_dense p128_d128_causal_sink)
-            string(REGEX MATCH "^p([0-9]+)_d([0-9]+)_([a-z]+)(_sink)?$" _ ${variant})
-            set(page ${CMAKE_MATCH_1})
-            set(head_dim ${CMAKE_MATCH_2})
-            if(CMAKE_MATCH_3 STREQUAL "causal")
-                set(causal 1)
-            else()
-                set(causal 0)
-            endif()
-            if(CMAKE_MATCH_4)
+            if(variant MATCHES "_sink$")
                 set(sink 1)
             else()
                 set(sink 0)
             endif()
-            set(target test_ck_tile_fmha_batch_prefill_page_tile_${variant}_${bias_name})
-            add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
-            target_compile_definitions(${target} PRIVATE
-                CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
-                CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
-                CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
+            add_page_tile_gtest(${variant}_${bias_name}
                 CK_TILE_FMHA_PAGE_TILE_TEST_SINK=${sink}
                 CK_TILE_FMHA_PAGE_TILE_TEST_BIAS=${bias_kind})
-            target_compile_options(${target} PRIVATE -Wno-float-equal
-                -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
         endforeach()
     endforeach()
 
@@ -394,20 +344,8 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     foreach(page IN ITEMS 16 64 128 256 1024)
         foreach(head_dim IN ITEMS 64 128)
             foreach(mask IN ITEMS dense causal)
-                set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_${mask}_vec)
-                add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
-                if(mask STREQUAL "causal")
-                    set(causal 1)
-                else()
-                    set(causal 0)
-                endif()
-                target_compile_definitions(${target} PRIVATE
-                    CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
-                    CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
-                    CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
+                add_page_tile_gtest(p${page}_d${head_dim}_${mask}_vec
                     CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED=1)
-                target_compile_options(${target} PRIVATE -Wno-float-equal
-                    -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
             endforeach()
         endforeach()
     endforeach()
@@ -424,22 +362,7 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         string(REPLACE ":" ";" parts "${variant}")
         list(GET parts 0 name)
         list(GET parts 1 extra)
-        string(REGEX MATCH "^p([0-9]+)_d([0-9]+)_([a-z]+)_" fields "${name}")
-        set(target test_ck_tile_fmha_batch_prefill_page_tile_${name})
-        add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
-        if(CMAKE_MATCH_3 STREQUAL "causal")
-            set(causal 1)
-        else()
-            set(causal 0)
-        endif()
-        target_compile_definitions(${target} PRIVATE
-            CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${CMAKE_MATCH_1}
-            CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${CMAKE_MATCH_2}
-            CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
-            CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED=1
-            ${extra})
-        target_compile_options(${target} PRIVATE -Wno-float-equal
-            -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+        add_page_tile_gtest(${name} CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED=1 ${extra})
     endforeach()
 
     # M64 small-grid tiles (vectorized KV, P64/P128; D64 with K64 PV stages): the configurations the
@@ -447,21 +370,9 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     foreach(page IN ITEMS 64 128)
         foreach(head_dim IN ITEMS 64 128)
             foreach(mask IN ITEMS dense causal)
-                set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_${mask}_vec_m64)
-                add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
-                if(mask STREQUAL "causal")
-                    set(causal 1)
-                else()
-                    set(causal 0)
-                endif()
-                target_compile_definitions(${target} PRIVATE
-                    CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
-                    CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
-                    CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
+                add_page_tile_gtest(p${page}_d${head_dim}_${mask}_vec_m64
                     CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED=1
                     CK_TILE_FMHA_PAGE_TILE_TEST_M64=1)
-                target_compile_options(${target} PRIVATE -Wno-float-equal
-                    -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
             endforeach()
         endforeach()
     endforeach()
@@ -477,17 +388,6 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
             p64_d64_dense_vec_split p64_d64_causal_vec_split
             p64_d128_dense_vec_split p64_d128_causal_vec_split
             p64_d128_dense_vec_split_tail p64_d128_causal_vec_split_tail)
-        string(REGEX MATCH "^p([0-9]+)_d([0-9]+)_([a-z]+)_" fields "${variant}")
-        set(page ${CMAKE_MATCH_1})
-        set(head_dim ${CMAKE_MATCH_2})
-        set(mask ${CMAKE_MATCH_3})
-        set(target test_ck_tile_fmha_batch_prefill_page_tile_${variant})
-        add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
-        if(mask STREQUAL "causal")
-            set(causal 1)
-        else()
-            set(causal 0)
-        endif()
         if(variant MATCHES "_(m64|tail)$")
             set(m64 1)
         else()
@@ -498,16 +398,11 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         else()
             set(tail 0)
         endif()
-        target_compile_definitions(${target} PRIVATE
-            CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
-            CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
-            CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
+        add_page_tile_gtest(${variant}
             CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED=1
             CK_TILE_FMHA_PAGE_TILE_TEST_M64=${m64}
             CK_TILE_FMHA_PAGE_TILE_TEST_KV_SPLITS=2
             CK_TILE_FMHA_PAGE_TILE_TEST_QUERY_TAIL=${tail})
-        target_compile_options(${target} PRIVATE -Wno-float-equal
-            -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
     endforeach()
 
     # SGLang 1D page list: the three page-id lookups (P16 fragments, two ids per tile for P64,
@@ -515,15 +410,8 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     # mask).
     foreach(page IN ITEMS 16 64 128)
         foreach(head_dim IN ITEMS 64 128)
-            set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_causal_sglang)
-            add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
-            target_compile_definitions(${target} PRIVATE
-                CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
-                CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
-                CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=1
+            add_page_tile_gtest(p${page}_d${head_dim}_causal_sglang
                 CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG=1)
-            target_compile_options(${target} PRIVATE -Wno-float-equal
-                -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
         endforeach()
     endforeach()
 endif()
