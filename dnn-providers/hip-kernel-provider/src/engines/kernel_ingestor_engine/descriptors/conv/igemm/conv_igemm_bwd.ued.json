@@ -22,7 +22,8 @@
     "wdirect",
     "pack",
     "cf",
-    "swz"
+    "swz",
+    "dma"
   ],
   "behavior_notes": [
     "runtime_compilation"

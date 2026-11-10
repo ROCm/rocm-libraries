@@ -789,12 +789,23 @@ struct Tile
     int64_t pack = 0; ///< 1 k-steps of whole taps, 2 the flat reduction
     int64_t cf = 0; ///< the output written packed channels-first from the epilogue
     int64_t swz = 0; ///< XOR-swizzled LDS tiles read in 16-byte chunks
+    int64_t dma = 0; ///< gfx950: buffer loads straight into this many swizzled LDS stages
 
     int64_t blockThreads() const
     {
         return info.wave == 0 ? threads : wm * wn * info.wave;
     }
 };
+
+/// Whether the kernels address @p problem with 32-bit buffer offsets (K1_BUFFER): a block's rows
+/// and the filter stay under 2^31 bytes.
+bool bufferLoads(const IgemmProblem& problem)
+{
+    const auto& a = problem.args;
+    const long long filterBytes = static_cast<long long>(a.k) * a.ft * a.fr * a.fs
+                                  * (a.c / a.groups) * problem.elementBytes;
+    return problem.blockSpanBytes < BUFFER_LIMIT && filterBytes < BUFFER_LIMIT;
+}
 
 std::optional<Tile> tileOf(const KernelDefinition& kernel)
 {
@@ -822,6 +833,7 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.pack = kernel.getIntMetadata("pack");
     tile.cf = kernel.getIntMetadata("cf");
     tile.swz = kernel.getIntMetadata("swz");
+    tile.dma = kernel.getIntMetadata("dma");
     if(tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1
        || (tile.xcd != 0 && tile.xcd != 1) || (tile.halo != 0 && tile.halo != 1)
        || (tile.halo != 0 && (tile.info.wave == 0 || tile.stages != 1))
@@ -833,7 +845,8 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
            && (tile.info.wave == 0 || tile.split || tile.halo != 0 || tile.wdirect != 0
                || tile.pack != 0 || tile.vec != 8
                || (tile.bk != 16 && tile.bk != 32 && tile.bk != 64) || tile.info.swizzleK == 0
-               || tile.bk % tile.info.swizzleK != 0)))
+               || tile.bk % tile.info.swizzleK != 0))
+       || (tile.dma != 0 && (tile.dma < 2 || tile.dma > 4 || tile.swz == 0)))
     {
         return std::nullopt;
     }
@@ -852,7 +865,8 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
 /// serves outputs (forward y, backward data dx) that are packed channels-first. A swizzled-tile
 /// config (16-bit atoms with 8-, 16- or 32-byte fragments and a k-step the chunked reads divide,
 /// vector 8, no halo, direct filter or tap packing; checked in tileOf) serves whatever its plain
-/// twin serves.
+/// twin serves. A DMA config (swizzled tiles loaded straight into LDS) serves gfx950 only, and only
+/// problems the 32-bit buffer offsets address.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -917,6 +931,12 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
     if(tile->cf != 0 && !conv_igemm::outputChannelsFirst(*problem))
+    {
+        return false;
+    }
+    if(tile->dma != 0
+       && (hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) != "gfx950"
+           || !bufferLoads(*problem)))
     {
         return false;
     }
@@ -1131,14 +1151,10 @@ public:
         options.add("CONV_IGEMM_PACK", std::to_string(tile->pack));
         options.add("CONV_IGEMM_CF", std::to_string(tile->cf));
         options.add("CONV_IGEMM_SWZ", std::to_string(tile->swz));
+        options.add("CONV_IGEMM_DMA", std::to_string(tile->dma));
         options.add("CONV_IGEMM_DIR",
                     std::string(*direction == ConvDirection::FORWARD ? "0" : "1"));
-        // 32-bit buffer loads while a block's rows and the filter stay under 2^31 bytes.
-        const long long filterBytes
-            = static_cast<long long>(problem->args.k) * problem->args.ft * problem->args.fr
-              * problem->args.fs * (problem->args.c / problem->args.groups) * problem->elementBytes;
-        const bool buffer = problem->blockSpanBytes < BUFFER_LIMIT && filterBytes < BUFFER_LIMIT;
-        options.add("K1_BUFFER", std::string(buffer ? "1" : "0"));
+        options.add("K1_BUFFER", std::string(bufferLoads(*problem) ? "1" : "0"));
 
         const auto plan = conv_igemm::splitPlanFor(
             *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack);

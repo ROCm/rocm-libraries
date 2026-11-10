@@ -15,6 +15,8 @@
 //                       flat reduction (taps x channels in k-steps of BK)
 //   CONV_IGEMM_CF       1: the output is written packed channels-first (matrix-core kernel only)
 //   CONV_IGEMM_SWZ      1: XOR-swizzled LDS tiles read in whole 16-byte chunks (16-bit, VEC 8)
+//   CONV_IGEMM_DMA      2 to 4: gfx950 buffer loads straight into a ring of that many swizzled
+//                       LDS stages (SWZ 1, K1_BUFFER 1)
 //   K1_BUFFER           0 when a block's rows could span 2^31 bytes (64-bit global loads)
 
 #include "ConvIgemmCore.h"
@@ -36,6 +38,9 @@
 #endif
 #ifndef CONV_IGEMM_SWZ
 #define CONV_IGEMM_SWZ 0
+#endif
+#ifndef CONV_IGEMM_DMA
+#define CONV_IGEMM_DMA 0
 #endif
 
 #if CONV_IGEMM_FMA
@@ -73,7 +78,8 @@ extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) ConvIgemm(K1Args 
               CONV_IGEMM_WD,
               CONV_IGEMM_PACK,
               CONV_IGEMM_CF,
-              CONV_IGEMM_SWZ>(a);
+              CONV_IGEMM_SWZ,
+              CONV_IGEMM_DMA>(a);
 #endif
 }
 

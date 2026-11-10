@@ -527,7 +527,7 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its knob tuple: within one direction and
     // dtype (what one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 16> KNOBS{"atom",
+    static constexpr std::array<const char*, 17> KNOBS{"atom",
                                                        "math",
                                                        "bm",
                                                        "bn",
@@ -542,7 +542,8 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
                                                        "wdirect",
                                                        "pack",
                                                        "cf",
-                                                       "swz"};
+                                                       "swz",
+                                                       "dma"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -616,7 +617,7 @@ hipdnn_plugin_sdk::ingestor::DeviceProperties deviceOf(const std::string& arch, 
 
 TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOutputTwin)
 {
-    static constexpr std::array<const char*, 15> SHAPE{"atom",
+    static constexpr std::array<const char*, 16> SHAPE{"atom",
                                                        "math",
                                                        "bm",
                                                        "bn",
@@ -630,7 +631,8 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
                                                        "halo",
                                                        "wdirect",
                                                        "pack",
-                                                       "swz"};
+                                                       "swz",
+                                                       "dma"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         const auto& kernels = catalog(direction);
@@ -838,6 +840,53 @@ TEST(TestConvIgemmCatalog, SwizzledTileKnobDeclinesEveryUnsupportedCombination)
     auto swizzled908 = *plain908;
     swizzled908.metadata["swz"] = int64_t{1};
     EXPECT_FALSE(matchesKernel(pack, gfx908.context(), swizzled908, *bound908));
+}
+
+TEST(TestConvIgemmCatalog, DmaConfigsAreSwizzledAndServeOnlyGfx950)
+{
+    auto shape = dense(32, 48, {12, 13}, {3, 3}, {1, 1}, true);
+    shape.dataType = DataType::HALF;
+    int dma = 0;
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const auto pack = packFor(direction);
+        const GraphFixture gfx950(buildGraph(specFor(shape, direction)), deviceOf("gfx950", 256));
+        const GraphFixture gfx942(buildGraph(specFor(shape, direction)),
+                                  deviceOf("gfx942:sramecc+:xnack-", 304));
+        const auto bound950 = matchesGraph(pack, gfx950.context());
+        const auto bound942 = matchesGraph(pack, gfx942.context());
+        ASSERT_TRUE(bound950.has_value() && bound942.has_value());
+        for(const auto& kernel : catalog(direction))
+        {
+            if(kernel.getIntMetadata("dma") == 0)
+            {
+                continue;
+            }
+            SCOPED_TRACE(kernel.name);
+            ++dma;
+            EXPECT_EQ(kernel.getIntMetadata("swz"), 1);
+            EXPECT_GE(kernel.getIntMetadata("dma"), 2);
+            EXPECT_LE(kernel.getIntMetadata("dma"), 4);
+            if(kernel.getStringMetadata("dtype") != "HALF" || kernel.getIntMetadata("cf") != 0
+               || kernel.getIntMetadata("bk") != 32)
+            {
+                continue;
+            }
+            // c 32 / k 48 take the 8-wide vector; a 32 k-step serves both directions.
+            EXPECT_TRUE(matchesKernel(pack, gfx950.context(), kernel, *bound950));
+            EXPECT_FALSE(matchesKernel(pack, gfx942.context(), kernel, *bound942));
+            auto unswizzled = kernel;
+            unswizzled.metadata["swz"] = int64_t{0};
+            EXPECT_FALSE(matchesKernel(pack, gfx950.context(), unswizzled, *bound950));
+            auto oneStage = kernel;
+            oneStage.metadata["dma"] = int64_t{1};
+            EXPECT_FALSE(matchesKernel(pack, gfx950.context(), oneStage, *bound950));
+            auto fiveStages = kernel;
+            fiveStages.metadata["dma"] = int64_t{5};
+            EXPECT_FALSE(matchesKernel(pack, gfx950.context(), fiveStages, *bound950));
+        }
+    }
+    EXPECT_GT(dma, 0);
 }
 
 TEST(TestConvIgemmCatalog, ChannelsFirstOutputIsTheTransposedOutputOfTheDirection)

@@ -1199,6 +1199,93 @@ struct K1Tiles
         loadBTap(qt, qr, qs, c0, c, cOk, it < endIt);
     }
 
+#if K1_BUFFER && defined(__gfx950__)
+    /// DMA (gfx950): the cursor's iteration straight into the swizzled LDS tiles (K1Swz) by
+    /// buffer_load ... lds, 16 bytes a lane. A wave's 64 lanes fill 1 KB of consecutive rows, so
+    /// the lane in slot kv / VEC of its row loads the global chunk slot ^ key(row) instead of the
+    /// LDS address moving. Out-of-range rows, taps and channels land as zeros.
+    __device__ void loadLds(T* As, T* Bs, int wave)
+    {
+        typedef K1Swz<BK> Swz;
+        static_assert(VEC * sizeof(T) == 16 && !DIRECT && PACK == 0, "DMA tiles");
+        static_assert(BM % ROWS_PER_PASS == 0 && BN % ROWS_PER_PASS == 0, "DMA: whole passes");
+        constexpr int RPW = 64 / ROW_THREADS; // rows a wave fills per pass
+        const int it = curIt;
+        const int c0 = curC * BK;
+        const int qs = curQs, qr = curQr, qt = curQt;
+        ++curIt;
+        if(++curC == cChunks)
+        {
+            curC = 0;
+            if(++curQs == gather.taps[2])
+            {
+                curQs = 0;
+                if(++curQr == gather.taps[1])
+                {
+                    curQr = 0;
+                    ++curQt;
+                }
+            }
+        }
+        const int td = qt * gather.step[0], th = qr * gather.step[1], tw = qs * gather.step[2];
+        const long long delta
+            = ((static_cast<long long>(td) * gather.in[1] + th) * gather.in[2] + tw) * gather.chans;
+        const int slot = kv / VEC;
+        const bool itOk = it < endIt;
+#pragma unroll
+        for(int p = 0; p < A_PASSES; ++p)
+        {
+            const int r = row + p * ROWS_PER_PASS;
+            const int c = c0 + ((slot ^ Swz::key(r)) * VEC);
+            const int id = aD[p] + td, ih = aH[p] + th, iw = aW[p] + tw;
+            const bool ok = itOk && c < gather.cgroup
+                            && static_cast<unsigned>(id) < static_cast<unsigned>(gather.in[0])
+                            && static_cast<unsigned>(ih) < static_cast<unsigned>(gather.in[1])
+                            && static_cast<unsigned>(iw) < static_cast<unsigned>(gather.in[2]);
+            const unsigned offset
+                = ok ? static_cast<unsigned>(
+                           aOff[p]
+                           + static_cast<int>((delta + c) * static_cast<long long>(sizeof(T))))
+                     : K1_OUT_OF_RANGE;
+            __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                aRsrc,
+                (__attribute__((address_space(3))) void*)(As
+                                                          + (p * ROWS_PER_PASS + wave * RPW) * BK),
+                16,
+                offset,
+                0,
+                0,
+                0);
+        }
+        const long long tap = (static_cast<long long>(map.first[0] + qt * map.step[0]) * map.fr
+                               + map.first[1] + qr * map.step[1])
+                                  * map.fs
+                              + map.first[2] + qs * map.step[2];
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+        {
+            const int r = row + p * ROWS_PER_PASS;
+            const int c = c0 + ((slot ^ Swz::key(r)) * VEC);
+            const bool ok = itOk && bOk[p] && c < gather.cgroup;
+            const unsigned offset
+                = ok ? static_cast<unsigned>(
+                           bOff[p]
+                           + static_cast<int>((tap * tapStride + c)
+                                              * static_cast<long long>(sizeof(T))))
+                     : K1_OUT_OF_RANGE;
+            __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                bRsrc,
+                (__attribute__((address_space(3))) void*)(Bs
+                                                          + (p * ROWS_PER_PASS + wave * RPW) * BK),
+                16,
+                offset,
+                0,
+                0,
+                0);
+        }
+    }
+#endif
+
     /// B for tap (qt, qr, qs): the filter rows at reduction channel @p c (this thread's, valid when
     /// @p cOk), or with the direct filter KV output channels of the chunk from @p c0 (while
     /// @p itOk).
@@ -1566,6 +1653,14 @@ __device__ inline void k1XcdOrder(unsigned& bx, unsigned& by, unsigned& bz)
 }
 
 // ---------------------------------------------------------------------------------------------
+// DMA k-step barrier: this wave's loads older than the last N have landed in LDS and its LDS
+// reads are done, then the workgroup barrier (no full vmcnt drain, which __syncthreads forces).
+template <int N>
+__device__ inline void k1DmaBarrier()
+{
+    asm volatile("s_waitcnt vmcnt(%0) lgkmcnt(0)\n\ts_barrier" ::"n"(N) : "memory");
+}
+
 // Matrix-core kernel. Block: WM x WN waves, tile BM x BN, k-step BK, STAGES LDS buffers (2: the
 // next tile is stored while the current one is multiplied, one barrier per k-step). Grid: (m
 // tiles, n tiles, groups [x phases for backward data] [x splits]). XCD 1: XCD-contiguous block
@@ -1594,7 +1689,8 @@ template <class T,
           int WD = 0,
           int PACK = 0,
           int CF = 0,
-          int SWZ = 0>
+          int SWZ = 0,
+          int DMA = 0>
 __device__ void k1ConvMma(const K1Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -1625,7 +1721,7 @@ __device__ void k1ConvMma(const K1Args& a)
     constexpr int HSTAGE
         = (HSTAGE_S * static_cast<int>(sizeof(S)) + static_cast<int>(sizeof(T)) - 1)
           / static_cast<int>(sizeof(T));
-    constexpr int MAIN = HALO ? HSTAGE : STAGES * STAGE;
+    constexpr int MAIN = HALO ? HSTAGE : (DMA != 0 ? DMA : STAGES) * STAGE;
     constexpr int LDS = MAIN > OUT ? MAIN : OUT;
     static_assert(WTM % DIM == 0 && WTN % DIM == 0 && BK % Atom::KA == 0, "tile");
     static_assert(HALO == 0 || STAGES == 1, "halo is single-stage");
@@ -1636,6 +1732,8 @@ __device__ void k1ConvMma(const K1Args& a)
     static_assert(
         SWZ == 0 || (!SPLIT && HALO == 0 && WD == 0 && PACK == 0 && sizeof(T) == 2 && VEC == 8),
         "swizzled tiles: 16-bit native, no halo, direct filter or tap packing");
+    static_assert(DMA == 0 || (SWZ != 0 && STAGES == 1 && DMA >= 2 && DMA <= 4),
+                  "DMA: swizzled tiles, 2 to 4 LDS stages");
 
     __shared__ __attribute__((aligned(16))) T lds[LDS];
 
@@ -1947,11 +2045,35 @@ __device__ void k1ConvMma(const K1Args& a)
         };
         // Iterations past the split's end load zeros, so the prefetch needs no branch.
         tiles.cursorInit(first, first + iters);
-        if(iters > 0)
+        if(DMA == 0 && iters > 0)
         {
             tiles.load();
         }
-        if constexpr(STAGES == 2)
+        if constexpr(DMA != 0)
+        {
+#if K1_BUFFER && defined(__gfx950__)
+            // DMA stages in a ring: tile it + DMA - 1 loads while tile it multiplies; one barrier
+            // per k-step. Loads past the split's end write zeros to a free stage.
+            typedef K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> Tiles;
+            constexpr int LOADS = Tiles::A_PASSES + Tiles::B_PASSES;
+#pragma unroll
+            for(int st = 0; st < DMA - 1; ++st)
+            {
+                tiles.loadLds(tile + st * STAGE_S, tile + st * STAGE_S + BM * LD, wave);
+            }
+            for(int it = 0; it < iters; ++it)
+            {
+                k1DmaBarrier<LOADS*(DMA - 2)>();
+                const int next = (it + DMA - 1) % DMA;
+                tiles.loadLds(tile + next * STAGE_S, tile + next * STAGE_S + BM * LD, wave);
+                const S* cur = tile + (it % DMA) * STAGE_S;
+                multiply(cur, cur + BM * LD);
+            }
+#else
+            __builtin_trap();
+#endif
+        }
+        else if constexpr(STAGES == 2)
         {
             if(iters > 0)
             {
