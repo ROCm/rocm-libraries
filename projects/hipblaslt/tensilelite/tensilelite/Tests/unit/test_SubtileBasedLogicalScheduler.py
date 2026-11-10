@@ -36,7 +36,7 @@ from tensilelite.Components.Subtile.LogicalScheduler import (
     fmt_mt,
 )
 from unittest.mock import MagicMock
-from rocisa.code import Module
+from rocisa.code import Module, TextBlock
 
 
 def makeTileInfo(tc, kernel):
@@ -7288,3 +7288,249 @@ class TestIssueSaluFirst:
         gaps = self._run(TestKeepValuBehindLeader._body(
             [self._add("S"), valu, m0, load]))
         assert gaps[0] == ["S", "V", "m0", "L"]
+
+
+class TestHalfDisjointClumping:
+    """Clumping properties of a two-half half-disjoint body.
+
+    The first half has two cells with A/B address updates ahead of their
+    first loads and the scale address updates behind the last one; the
+    second half opens behind the pre-barrier drain with a read-pointer
+    swap. The halves are scheduled and post-processed as the main loop is.
+    """
+
+    _GAP_BUDGET = 28
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _comment(text):
+        marker = Module()
+        marker.addComment0(text)
+        return marker.items()[0]
+
+    @classmethod
+    def _grInc(cls, tensor, comments):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SAddCU32, SAddU32, SXorB32
+        from tensilelite.Components.Subtile.LogicalScheduler import GRIncOp
+        insts = [
+            SAddU32(dst=sgpr(f"Srd{tensor}"), src0=sgpr(f"Srd{tensor}"),
+                    src1=128, comment=f"{tensor} srd"),
+            SAddCU32(dst=sgpr(f"Srd{tensor}+1"), src0=sgpr(f"Srd{tensor}+1"),
+                     src1=0, comment=f"{tensor} carry"),
+            cls._comment(f"swap {tensor} GR m0 offsets"),
+            SXorB32(dst=sgpr(f"LocalWriteBaseAddr{tensor}"),
+                    src0=sgpr(f"LocalWriteBaseAddr{tensor}"),
+                    src1=sgpr(f"Swap{tensor}"), comment=f"{tensor} lw swap"),
+        ]
+        return (GRIncOp(tensor=tensor), insts if comments else [
+            inst for inst in insts if not isinstance(inst, TextBlock)])
+
+    @classmethod
+    def _scaleInc(cls, tensor, comments):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SSubU32
+        source, insts = cls._grInc(tensor, comments)
+        shrink = SSubU32(dst=sgpr(f"Srd{tensor}+2"), src0=sgpr(f"Srd{tensor}+2"),
+                         src1=256, comment=f"{tensor} shrink")
+        head = [cls._comment(f"scale SRD update {tensor}")] if comments else []
+        return (source, head + insts[:2] + [shrink] + insts[2:])
+
+    @staticmethod
+    def _dtl(tensor, tile):
+        from rocisa.container import MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SAddU32
+        source = GRPlacement(
+            tensor=tensor, mtIteration=2, tiles=MFMATileRange(0, 1, tile, tile + 1),
+            subIterK_slot=0)
+        return (source, [
+            SAddU32(dst=mgpr(0), src0=sgpr(f"LocalWriteBaseAddr{tensor}"),
+                    src1=2048 * tile, comment=f"m0 {tensor}{tile}"),
+            BufferLoadB128(
+                dst=None, vaddr=vgpr(1), saddr=sgpr(f"Srd{tensor}", 4), soffset=0,
+                mubuf=MUBUFModifiers(offen=True, lds=True),
+                comment=f"{tensor} MT=n+2 tile={tile}"),
+        ])
+
+    @staticmethod
+    def _swap(register):
+        from rocisa.container import vgpr
+        from rocisa.instruction import VXorB32
+        from tensilelite.Components.Subtile.LogicalScheduler import LRIncOp
+        return (LRIncOp(tensor="B"), [VXorB32(
+            dst=vgpr(register), src0=vgpr(register), src1=vgpr(register + 1),
+            comment=f"swap v{register}")])
+
+    @staticmethod
+    def _opener(name):
+        """The drain ahead of the half's first MFMA, and its VMEM wait and barrier."""
+        from rocisa.instruction import SBarrier, SWaitCnt
+        return ([(WaitLROp(), [SWaitCnt(dscnt=0, comment=f"{name} drain")])],
+                [(WaitGROp(), [SWaitCnt(vlcnt=2, comment="vmcnt")]),
+                 (SyncOp(), [SBarrier(comment="barrier")])])
+
+    def _firstHalf(self, comments=True):
+        half = TestHalfDisjointHalf
+        drain, opener = self._opener("head")
+        first = half._cell(
+            [opener + [half._data_read(t) for t in range(3)],
+             [self._grInc("A", comments), self._dtl("A", 0), self._dtl("A", 1),
+              self._grInc("B", comments), self._dtl("B", 0)]],
+            half._mfmas(12), preMfma=[drain])
+        second = half._cell(
+            [[half._data_read(8 + t) for t in range(3)],
+             [self._dtl("B", 1), self._scaleInc("MXSA", comments),
+              self._scaleInc("MXSB", comments)]],
+            half._mfmas(12), preMfma=[half._fence("fence 1")])
+        return [first, second]
+
+    def _secondHalf(self):
+        cell = TestHalfDisjointCell
+        drain, opener = self._opener("pre-barrier")
+        path = opener + [self._swap(7)] + [cell._data_read(4 + t) for t in range(4)]
+        return cell._schedule([path], cell._mfmas(12), preMfma=[drain])
+
+    def _scheduledFirstHalf(self, comments=True):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _scheduleHalfDisjointHalf)
+        return _scheduleHalfDisjointHalf(
+            self._firstHalf(comments), 4, {}, 0, 0,
+            [TestHalfDisjointHalf._marker("cell 1")], True)
+
+    def _body(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            issueSaluFirst, keepValuBehindLeader)
+        first = self._scheduledFirstHalf()
+        assert first is not None
+        body = Module()
+        body.add(first)
+        body.add(self._secondHalf())
+        issueSaluFirst(body)
+        keepValuBehindLeader(body)
+        return body
+
+    @staticmethod
+    def _gaps(module):
+        """Each MFMA gap's instructions, comments left out."""
+        from rocisa.instruction import MXMFMAInstruction
+        gaps = []
+        for inst in module.flatitems():
+            if isinstance(inst, MXMFMAInstruction):
+                gaps.append([])
+            elif gaps and not isinstance(inst, TextBlock):
+                gaps[-1].append(inst)
+        return gaps
+
+    @staticmethod
+    def _kinds(gap):
+        from tensilelite.Components.Subtile import InstructionScheduler as IS
+        out = []
+        for inst in gap:
+            if IS._isBarrier(inst):
+                out.append("B")
+            elif IS._isWaitCnt(inst):
+                out.append("W")
+            elif IS._isBufferLoad(inst):
+                out.append("L")
+            elif IS._isM0Update(inst):
+                out.append("m")
+            elif IS._isDsRead(inst):
+                out.append("R")
+            elif IS._isVALU(inst):
+                out.append("V")
+            elif IS._isScalarAlu(inst):
+                out.append("S")
+            else:
+                out.append("?")
+        return "".join(out)
+
+    def _halves(self, gaps):
+        """(gap indices of each half after its barrier gap)."""
+        barriers = [i for i, g in enumerate(gaps) if "B" in self._kinds(g)]
+        edges = barriers + [len(gaps)]
+        return [range(a + 1, b) for a, b in zip(edges, edges[1:])]
+
+    def _clumped(self, gaps, clump):
+        """Gaps clump() accepts in a half that still has an empty gap."""
+        return [i for half in self._halves(gaps)
+                if any(not gaps[j] for j in half)
+                for i in half if clump(self._kinds(gaps[i]))]
+
+    @pytest.mark.xfail(strict=True, reason="stage 4: VALU placed behind the pre-barrier drain")
+    def test_no_valu_issues_behind_a_wait_or_barrier(self):
+        for i, gap in enumerate(self._gaps(self._body())):
+            kinds = self._kinds(gap)
+            for j, k in enumerate(kinds):
+                assert k != "V" or not any(x in "WB" for x in kinds[:j]), (i, kinds)
+
+    @pytest.mark.xfail(strict=True, reason="stage 4: VALU placed behind the pre-barrier drain")
+    def test_every_valu_issues_inside_its_mfma_interval(self):
+        from tensilelite.Components.Subtile import InstructionScheduler as IS
+        for i, gap in enumerate(self._gaps(self._body())):
+            kinds = self._kinds(gap)
+            for j, k in enumerate(kinds):
+                if k != "V":
+                    continue
+                assert not any(x in "WB" for x in kinds[:j]), (i, kinds)
+                assert IS._issueExcess([gap[:j + 1]]) == 0, (i, kinds)
+
+    def test_valu_opens_a_gap_only_under_budget(self):
+        from tensilelite.Components.Subtile import InstructionScheduler as IS
+        for i, gap in enumerate(self._gaps(self._body())):
+            if self._kinds(gap).startswith("V"):
+                assert IS._issueExcess([gap]) == 0, (i, self._kinds(gap))
+
+    @pytest.mark.xfail(strict=True, reason="stage 3: address updates follow the previous load")
+    def test_no_salu_shares_a_load_gap_while_the_half_has_an_empty_gap(self):
+        gaps = self._gaps(self._body())
+        assert not self._clumped(gaps, lambda k: "S" in k and "L" in k), [
+            self._kinds(g) for g in gaps]
+
+    @pytest.mark.xfail(strict=True, reason="stage 3: scale address updates pack behind the last load")
+    def test_no_gap_takes_three_salu_while_the_half_has_an_empty_gap(self):
+        gaps = self._gaps(self._body())
+        assert not self._clumped(
+            gaps, lambda k: k.count("S") + k.count("m") >= 3), [self._kinds(g) for g in gaps]
+
+    @pytest.mark.xfail(strict=True, reason="stage 4: the drain gap takes VALUs")
+    def test_no_half_with_an_empty_gap_has_a_clumped_gap(self):
+        from tensilelite.Components.Subtile import InstructionScheduler as IS
+        gaps = self._gaps(self._body())
+        clumped = self._clumped(gaps, lambda k: (
+            ("S" in k and "L" in k) or k.count("S") + k.count("m") >= 3
+            or ("V" in k and any(x in "WB" for x in k[:k.index("V")]))))
+        clumped += [i for half in self._halves(gaps) if any(not gaps[j] for j in half)
+                    for i in half if IS._issueExcess([gaps[i]]) > 0]
+        assert not clumped, [self._kinds(g) for g in gaps]
+
+    def test_load_run_and_order_stay(self):
+        gaps = self._gaps(self._body())
+        loads = [g for g in gaps if "L" in self._kinds(g)]
+        assert all(self._kinds(g).count("L") == 1 for g in loads)
+        order = [inst.comment for g in gaps for inst in g if "MT=n+2" in inst.comment]
+        assert order == ["A MT=n+2 tile=0", "A MT=n+2 tile=1", "B MT=n+2 tile=0",
+                         "B MT=n+2 tile=1"]
+        run = longest = 0
+        for g in gaps:
+            run = run + 1 if "L" in self._kinds(g) else 0
+            longest = max(longest, run)
+        assert longest <= 5
+
+    def test_body_keeps_the_mfma_cadence(self):
+        from tensilelite.Components.Subtile import InstructionScheduler as IS
+        assert IS._issueExcess(IS._moduleGaps(self._body())) == 0
+
+    @pytest.mark.xfail(strict=True, reason="stage 2: comments take placement slots")
+    def test_comments_take_no_slot(self):
+        def code(comments):
+            scheduled = self._scheduledFirstHalf(comments)
+            return [[inst.comment for inst in g] for g in self._gaps(scheduled)]
+        assert code(True) == code(False)
