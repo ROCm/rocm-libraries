@@ -711,14 +711,32 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         # longer produces. A pack that was renamed or split leaves its old file behind, which
         # declares the same kernel ids as its successor, and the loader then drops the whole
         # engine. That is how CONV_WRW vanished from a gfx1101 prefix updated across the
-        # wrw pack split. So clear this provider's subtree first. arch_content/ is per
-        # provider, so no other provider's content is touched; the path check below keeps an
-        # empty variable from widening the removal.
+        # wrw pack split.
+        #
+        # So clear, first, exactly the folders this tree is about to install: each
+        # <arch>/<family> directory the build staged (conv/, kpack/, ...). These are
+        # produced whole by this tree's packing and installed right after, so they cannot
+        # hold anything another component installed. Whatever else sits in the prefix
+        # survives, in any install order: other arch or family folders, and other
+        # providers. The suffix check keeps an empty variable from widening the removal.
         install(CODE "
+            set(_hkp_src \"${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}\")
             set(_hkp_tree \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}\")
             if(_hkp_tree MATCHES \"/arch_content/hip-kernel-provider$\" AND IS_DIRECTORY \"\${_hkp_tree}\")
-                message(STATUS \"Clearing the earlier descriptor tree: \${_hkp_tree}\")
-                file(REMOVE_RECURSE \"\${_hkp_tree}\")
+                file(GLOB _hkp_archs RELATIVE \"\${_hkp_src}\" \"\${_hkp_src}/*\")
+                foreach(_hkp_arch IN LISTS _hkp_archs)
+                    if(NOT IS_DIRECTORY \"\${_hkp_src}/\${_hkp_arch}\")
+                        continue()
+                    endif()
+                    file(GLOB _hkp_families RELATIVE \"\${_hkp_src}/\${_hkp_arch}\" \"\${_hkp_src}/\${_hkp_arch}/*\")
+                    foreach(_hkp_family IN LISTS _hkp_families)
+                        set(_hkp_old \"\${_hkp_tree}/\${_hkp_arch}/\${_hkp_family}\")
+                        if(IS_DIRECTORY \"\${_hkp_src}/\${_hkp_arch}/\${_hkp_family}\" AND IS_DIRECTORY \"\${_hkp_old}\")
+                            message(STATUS \"Clearing the earlier descriptors: \${_hkp_old}\")
+                            file(REMOVE_RECURSE \"\${_hkp_old}\")
+                        endif()
+                    endforeach()
+                endforeach()
             endif()")
         # cmake-lint: disable=E1122
         install(DIRECTORY "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/"

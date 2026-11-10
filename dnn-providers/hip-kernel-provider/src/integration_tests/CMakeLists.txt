@@ -122,6 +122,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
+        kernel_ingestor_engine/IntegrationKernelIngestorEngineCensus.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
         kernel_ingestor_engine/IntegrationGraphVerificationContext.cpp
     )
