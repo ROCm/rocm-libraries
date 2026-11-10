@@ -237,6 +237,12 @@ struct GemmPipelineAgBgCrCompTDMV4
     using BFrag                           = std::conditional_t<kMma32, int32x8_t, int32x16_t>;
     using RowFrag = std::conditional_t<kRowWords == 8, int32x8_t, int32x16_t>;
     using CVec    = std::conditional_t<kMma32, fp32x16_t, fp32x8_t>;
+    /// The accumulators: one CVec per M and N repeat, index rm * kRn + rn.
+    using CBlockTile = decltype(make_static_distributed_tensor<float>(
+        Policy::template MakeCBlockTileDistribution<Problem>()));
+    using AccRegs    = thread_buffer<CVec, kNumAcc>;
+    static_assert(CBlockTile::get_thread_buffer_size() == kNumAcc * kCFragLen,
+                  "comp_tdm_v4: the C block tile holds the C fragments of every repeat");
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return kLayout.lds_bytes; }
 
@@ -899,7 +905,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         /// The WMMAs of B fragments [First, First + Count) with signal at Signal WMMAs when
         /// SignalHere: half-B order (j outer, rm inner), else rm outer.
         template <bool BOuter, index_t First, index_t Count, bool SignalHere>
-        CK_TILE_DEVICE void Wmmas(CVec (&acc)[kNumAcc], const Head& h, const BRegs& b) const
+        CK_TILE_DEVICE void Wmmas(AccRegs& acc, const Head& h, const BRegs& b) const
         {
             constexpr index_t total = kRm * Count;
             static_for<0, total, 1>{}([&](auto i) {
@@ -917,7 +923,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         /// local_prefetch 1, half-B ahead: all reads of K step s + 1 before the first wait but
         /// B's second half, which follows the first half's WMMAs.
         template <index_t Steps, index_t StaticParity>
-        CK_TILE_DEVICE void TileHalfB(CVec (&acc)[kNumAcc],
+        CK_TILE_DEVICE void TileHalfB(AccRegs& acc,
                                       Carry& carry,
                                       index_t k0,
                                       index_t parity,
@@ -959,7 +965,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         /// local_prefetch 1, half-B late: wait, scales and A, half 0's WMMAs; wait, B half 0,
         /// half 1's WMMAs; B half 1.
         template <index_t Steps, index_t StaticParity>
-        CK_TILE_DEVICE void TileHalfBLate(CVec (&acc)[kNumAcc],
+        CK_TILE_DEVICE void TileHalfBLate(AccRegs& acc,
                                           Carry& carry,
                                           index_t k0,
                                           index_t parity,
@@ -993,7 +999,7 @@ struct GemmPipelineAgBgCrCompTDMV4
 
         /// local_prefetch 1, B whole.
         template <index_t Steps, index_t StaticParity>
-        CK_TILE_DEVICE void TileFull(CVec (&acc)[kNumAcc],
+        CK_TILE_DEVICE void TileFull(AccRegs& acc,
                                      Carry& carry,
                                      index_t k0,
                                      index_t parity,
@@ -1029,7 +1035,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         /// wait and TDM come cluster_signal_wmmas WMMAs later (at once without a cluster).
         template <index_t Steps, index_t StaticParity>
         CK_TILE_DEVICE void
-        TileDirect(CVec (&acc)[kNumAcc], index_t k0, index_t parity, index_t buffer) const
+        TileDirect(AccRegs& acc, index_t k0, index_t parity, index_t buffer) const
         {
             constexpr index_t late_at = kHasCluster ? kSignalWmmas : 0;
             static_for<0, Steps, 1>{}([&](auto s) {
@@ -1060,8 +1066,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         /// One K tile at k0 in buffer parity: StaticParity is its parity when known at compile
         /// time (the GL2 short-row choice), Steps its K step count.
         template <index_t Steps, index_t StaticParity>
-        CK_TILE_DEVICE void
-        Tile(CVec (&acc)[kNumAcc], Carry& carry, index_t k0, index_t parity) const
+        CK_TILE_DEVICE void Tile(AccRegs& acc, Carry& carry, index_t k0, index_t parity) const
         {
             const index_t buffer      = BufferBase(parity);
             const index_t next_buffer = BufferBase(1 - parity);
@@ -1078,7 +1083,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                 TileFull<Steps, StaticParity>(acc, carry, k0, parity, buffer, next_buffer);
         }
 
-        CK_TILE_DEVICE void Main(CVec (&acc)[kNumAcc])
+        CK_TILE_DEVICE void Main(AccRegs& acc)
         {
             Hoist();
             if constexpr(kHasCluster)
@@ -1145,15 +1150,16 @@ struct GemmPipelineAgBgCrCompTDMV4
         }
     };
 
-    /// Runs the K loop of the workgroup's tile into acc (one CVec per M and N repeat, index
-    /// rm * kRn + rn). `smem` is GetSmemSize() bytes of LDS.
-    CK_TILE_DEVICE void operator()(const mx_tdm_v4::Operands& p,
+    /// Runs the K loop of the workgroup's tile and returns its C block tile. `smem` is
+    /// GetSmemSize() bytes of LDS.
+    CK_TILE_DEVICE auto operator()(const mx_tdm_v4::Operands& p,
                                    const mx_tdm_v4::Coords& c,
-                                   CK_TILE_LDS_ADDR uint8_t* smem,
-                                   CVec (&acc)[kNumAcc]) const
+                                   CK_TILE_LDS_ADDR uint8_t* smem) const
     {
+        CBlockTile c_block_tile;
         Run run(p, c, smem);
-        run.Main(acc);
+        run.Main(c_block_tile.get_thread_buffer().template get_as<CVec>());
+        return c_block_tile;
     }
 };
 

@@ -59,6 +59,9 @@ struct MxAlphaBetaEpilogue
     using DsLayout   = typename Problem::DsLayout;
     using ELayout    = typename Problem::ELayout;
     using CVec       = typename Pipeline::CVec;
+    /// The C block tile's floats: slot `slot` of repeat (rm, rn) at (rm * kRn + rn) * kCFragLen +
+    /// slot.
+    using CBuffer = remove_cvref_t<decltype(typename Pipeline::CBlockTile{}.get_thread_buffer())>;
 
     static constexpr index_t kStoreWidth = Problem::kStoreWidth;
     static constexpr bool kEdgeM         = Problem::kEdgeM;
@@ -181,7 +184,7 @@ struct MxAlphaBetaEpilogue
                                      float alpha,
                                      float beta,
                                      const mx_tdm_v4::Coords& co,
-                                     const CVec (&acc)[kRm * kRn])
+                                     const CBuffer& acc)
     {
         // alpha * acc + beta * C rounds twice, as rocKE's (and the host reference's) fmul, fadd.
 #pragma clang fp contract(off)
@@ -218,8 +221,9 @@ struct MxAlphaBetaEpilogue
                 else
                 {
                     float values[kRn];
-                    static_for<0, kRn, 1>{}(
-                        [&](auto rn) { values[rn] = alpha * acc[rm * kRn + rn][slot]; });
+                    static_for<0, kRn, 1>{}([&](auto rn) {
+                        values[rn] = alpha * acc[(rm * kRn + rn) * kCFragLen + slot];
+                    });
                     if constexpr(ReadC)
                     {
                         SVec words[kRn / kStoreWidth];
@@ -258,7 +262,7 @@ struct MxAlphaBetaEpilogue
                                            index_t N,
                                            float alpha,
                                            float beta,
-                                           const CVec (&acc)[kRm * kRn])
+                                           const CBuffer& acc)
     {
 #pragma clang fp contract(off)
         static_for<0, kRn / kStoreWidth, 1>{}([&](auto chunk) {
@@ -273,7 +277,8 @@ struct MxAlphaBetaEpilogue
                 const index_t at = index + begin;
                 float values[kStoreWidth];
                 static_for<0, kStoreWidth, 1>{}([&](auto i) {
-                    values[i] = alpha * acc[Rm * kRn + begin + decltype(i)::value][Slot];
+                    values[i] =
+                        alpha * acc[(Rm * kRn + begin + decltype(i)::value) * kCFragLen + Slot];
                 });
                 if constexpr(ReadC)
                 {
@@ -296,8 +301,9 @@ struct MxAlphaBetaEpilogue
                                    float alpha,
                                    float beta,
                                    const mx_tdm_v4::Coords& co,
-                                   const CVec (&acc)[kRm * kRn]) const
+                                   const typename Pipeline::CBlockTile& c_block_tile) const
     {
+        const CBuffer& acc = c_block_tile.get_thread_buffer();
         const auto* c_bits = static_cast<const Storage*>(c);
         auto* d_bits       = static_cast<Storage*>(d);
         // GW_B0 / GW_B1.

@@ -1153,11 +1153,16 @@ struct MxGemmKernel
             kargs.M,
             kargs.N,
             kargs.K};
-        typename MxGemmPipeline::CVec acc[MxGemmPipeline::kNumAcc];
-        MxGemmPipeline{}(
-            operands, coords, c_style_pointer_cast<CK_TILE_LDS_ADDR uint8_t*>(smem_ptr), acc);
-        EpiloguePipeline{}(
-            kargs.ds_ptr[0], e_ptr, kargs.M, kargs.N, kargs.alpha, kargs.beta, coords, acc);
+        const auto c_block_tile = MxGemmPipeline{}(
+            operands, coords, c_style_pointer_cast<CK_TILE_LDS_ADDR uint8_t*>(smem_ptr));
+        EpiloguePipeline{}(kargs.ds_ptr[0],
+                           e_ptr,
+                           kargs.M,
+                           kargs.N,
+                           kargs.alpha,
+                           kargs.beta,
+                           coords,
+                           c_block_tile);
 #else
         ignore = e_ptr;
         ignore = smem_ptr;

@@ -237,6 +237,25 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
         return GetSpec<Problem>().signal_wmmas();
     }
 
+    /// The C block tile: per thread the WMMA C fragments of its M and N repeats, (rm, rn) outer
+    /// and the fragment slot inner. A lane's M repeats are adjacent rows and its N repeats
+    /// adjacent columns, so one slot across the N repeats is one vector store of D.
+    ///   M: (wave_m, slot / 8, lane / 16, slot % 8, rm)   N: (wave_n, lane % 16, rn)
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeCBlockTileDistribution()
+    {
+        constexpr MxTdmV4Spec s = GetSpec<Problem>();
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<s.warp_m, s.atom_m() / 16, 2, 8, s.wave_repeat_m()>,
+                      sequence<s.warp_n, s.atom_n(), s.wave_repeat_n()>>,
+                tuple<sequence<1, 2>, sequence<1, 2>>,
+                tuple<sequence<0, 0>, sequence<2, 1>>,
+                sequence<1, 2, 1, 1>,
+                sequence<4, 2, 1, 3>>{});
+    }
+
     /// The cluster the kernel must be launched with: (x, y, z) = (N tiles, M tiles, 1).
     CK_TILE_HOST_DEVICE static constexpr bool HasCluster()
     {
