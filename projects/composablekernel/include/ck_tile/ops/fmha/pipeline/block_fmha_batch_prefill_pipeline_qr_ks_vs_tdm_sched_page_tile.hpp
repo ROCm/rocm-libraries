@@ -219,8 +219,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         static_assert(Policy::template GetSmemSize<Problem>() == Policy::GetLdsArenaSize());
-        // A separate aligned slot stores the pending page-table ID metadata:
-        // 32 bytes for P16 (up to eight owned ids), 16 bytes otherwise.
+        // A separate aligned slot after the arena stores the pending page-table ID metadata:
+        // 32 bytes for P16 (up to eight owned ids), 16 bytes otherwise. The kernel places it and
+        // passes its address (page_id_slot).
         return Policy::GetLdsArenaSize() + PageTileTraits::kMetadataBytes;
     }
 
@@ -271,6 +272,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
         void* __restrict__ smem_ptrk1,
         void* __restrict__ smem_ptrv0,
         void* __restrict__ smem_ptrv1,
+        void* __restrict__ page_id_slot,
         float sink_v,
         float logits_soft_cap) const
     {
@@ -549,8 +551,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
         index_t remaining_loops          = num_total_loop;
         constexpr index_t k1_loops       = kN0 / kK1;
         index_t page_tile_i              = 0;
-        auto* id_lds_slot                = reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(
-            static_cast<char*>(smem_ptrk0) + Policy::GetLdsArenaSize());
+        auto* id_lds_slot = reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(page_id_slot);
 
         // Read each valid table entry once. Invalid lookahead tiles use page
         // zero with zero token rows, but retain the original TDM issue count.
@@ -1378,7 +1379,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                                         void* smem_ptrk0,
                                         void* smem_ptrk1,
                                         void* smem_ptrv0,
-                                        void* smem_ptrv1) const
+                                        void* smem_ptrv1,
+                                        void* page_id_slot) const
     {
         return run(q_dram_block_window_tmp,
                    k_dram_block_window_tmp,
@@ -1392,6 +1394,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                    smem_ptrk1,
                    smem_ptrv0,
                    smem_ptrv1,
+                   page_id_slot,
                    sink_v,
                    logits_soft_cap);
     }
