@@ -283,9 +283,16 @@ these suites. So a CDNA comprehensive case runs nightly on gfx942, the arch it r
 and gfx950's CDNA objects (the dual-wave kernel among them) are covered only by device runs
 outside CI, in either tier. An RDNA comprehensive case runs nightly on gfx1151 and no longer on
 gfx110X; both are `gfx11-generic` and load the same objects (REGEN.md, "Why `gfx11-generic`"),
-so the nightly runs every moved RDNA case on the objects gfx110X ships, on another member of
-the family. No CI tier tests gfx90a or gfx12 (gfx1200, gfx1201) either: the CDNA objects on
-gfx90a, and the gfx12 RDNA prefill, decode and aiw objects, are covered only by device runs
+so the nightly runs the moved RDNA cases on the objects gfx110X ships, on another member of
+the family, but only on a runner that stages the provider's content. The gfx1151 nightly
+splits these suites into four shards over a mixed runner pool, and on some of its runners no
+FlyDSL descriptor set loads: in the 2026-11-10 develop nightly, shard 2/4's RDNA dispatch
+cases failed with "nothing staged ... in this build's descriptor root" and its RDNA pack suites
+with "no descriptor set loaded for engine 'hipkernel:flydsl_sdpa_rdna'" (its kpack fixtures
+under `build/bin` were missing too), while shards 1, 3 and 4, on other runners, ran theirs.
+Until that staging fault is fixed, a moved RDNA case that lands on such a runner fails
+instead of running. No CI tier tests gfx90a or gfx12 (gfx1200, gfx1201) either: the CDNA
+objects on gfx90a, and the gfx12 RDNA prefill, decode and aiw objects, are covered only by device runs
 outside CI, in either tier, so the tier split changes nothing there or on gfx950. No feature
 lost its only CI arch to the move: every moved case is an RDNA prefill/decode or CDNA case.
 
@@ -554,7 +561,7 @@ at `check_support()`, never at `execute()`.
 
 | | Effort | What it takes |
 |---|---|---|
-| THD on the decode objects; packed with lengths on aiw | medium each | Decode: the merge kernel indexes O by batch, so the row-offset table would join its arguments (a decode ABI change, every decode object rebuilt and A/B'd); a packed decode step runs on the prefill objects meanwhile. aiw packed with lengths (which is also PyTorch's `seqused_k`, §5.9): the main kernel already decodes the form (`varlen_bits` 0x1515), but it clamps a length to `Max_seqlen` rather than to the slot (`POSITION ARRAY` gives starts only), and the fill kernel needs each sequence's base and slot (a row-offset argument). Either the main kernel loads `offset[b + 1]` and clamps (its prologue changes in every object: rebuild and A/B), or the fill kernel, launched first, writes the clamped lengths to the workspace for the main kernel to read (the main kernel's code unchanged); both rebuild every aiw object, and the Q side's `INDIVIDUAL`/`ARRAY` mode is one AOTriton never tested. The `seqused_k`-only form, `seq_len_kv` without `seq_len_q` (SEM-028: Q compact, no fill), is served (§5.9). The RDNA prefill objects serve the form on gfx12 meanwhile, and they are the faster ones on decode-shaped graphs (§5.6). |
+| THD on the decode objects; packed with lengths on aiw | medium (decode); aiw engine-only | Decode: the merge kernel indexes O by batch, so the row-offset table would join its arguments (a decode ABI change, every decode object rebuilt and A/B'd); a packed decode step runs on the prefill objects meanwhile. aiw packed with lengths (which is also PyTorch's `seqused_k`, §5.9): the kernel already reads the form (`varlen_bits` 0x1515; a length clamped to `Max_seqlen_q`, and no fill launch for a packed graph), so no aiw object changes. What is missing is the engine's side: binding its query lengths, and device cases, the Q side's `INDIVIDUAL`/`ARRAY` mode among them (one AOTriton never tested). The `seqused_k`-only form, `seq_len_kv` without `seq_len_q` (SEM-028: Q compact, no fill), is served (§5.9). The RDNA prefill objects serve the form on gfx12 meanwhile, and they are the faster ones on decode-shaped graphs (§5.6). |
 | Dropout under padding with a bottom-right window or band, on gfx12 | medium | The aiw objects resolve only bottom-right causal per sequence (§5.9), and on gfx12 only they drop (§5.10). Either the aiw kernel takes each sequence's bottom-right bounds (a kernel change, every aiw object rebuilt and A/B'd), or gfx12-generic builds of the RDNA dropout twins ship (+16 objects or more, and gfx12 would no longer drop on the aiw objects alone). gfx11 and CDNA serve the graph; gfx12 serves it dense or undropped. Kept as a documented decline until a model needs it. |
 | Bias on the wide decode (576/512, 512/512) objects | small per class | A `has_bias` variant of each class, built and checked against the reference as the generic tiers' were; not built until a model needs them. |
 | A prefill schedule for absorbed MLA; a pair with a sink, or past 256, on gfx11 | medium; small per class; **large** past 256 | 192/128 prefill (modification 20), the pair tiers to 256 (modification 32), their bias objects and the 576/512 and 512/512 decode objects ship; on gfx12 §5.6's padded tiers serve any pair to 512, with a mask too. Chunked prefill at 576/512 runs on the decode objects' 16-row tiles; a prefill schedule at that width would share each K/V tile across more rows. A sink on the pair tiers is a `has_sink` row each, not built until a model needs it. A pair past 256 on gfx11 (E5b) is a kernel change, not a row: the prefill kernel's K and V tiles at 512 need 66 KB of LDS, past the 64 KiB a workgroup has, its key tile cannot shrink below 32, and the decode kernel's generic path takes no V width of its own. Kept a decline until a model needs it. A pair on the decode engine runs on the prefill pair tiers meanwhile. |
