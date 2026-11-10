@@ -2160,15 +2160,13 @@ def build_unified_attention_2d_tiled(
     block_table_max_idx = block_table_max_idx_of(
         b, seq_base, seq_len, BS, num_seqs_p, bt_stride_p
     )
-    # A tile of one page takes its page base in ``soffset``, and the loop
-    # carries the page ids of the current and the next tile and reads the ids
-    # of the tile after next one iteration ahead, so no copy waits on a table
-    # read issued just before it. Tiles of several pages are faster with the
-    # page base in ``voffset`` and their ids read in place (measured: the
-    # carried ids and soffset bases cost up to 16% there, reading in place
-    # costs up to 14% on one-page tiles). The schedules that load two tiles
-    # ahead (the K ring, grouped KV2) read in place.
-    PAGE_BASE_IN_SOFFSET = N_BLOCKS_PER_TILE == 1
+    # A copy takes its page base in ``soffset``, and the loop carries the page
+    # ids of the current and the next tile and reads the ids of the tile after
+    # next one iteration ahead, so no copy waits on a table read issued just
+    # before it. Reading a multi-page tile's ids in place instead keeps them
+    # live across the loop, which spills on specs that also hold Q in
+    # registers. The schedules that load two tiles ahead (the K ring, grouped
+    # KV2) read in place.
     page_copies = PagedKVCopies(
         b,
         block_size=BS,
@@ -2187,7 +2185,7 @@ def build_unified_attention_2d_tiled(
         page_bytes=kv_block_bytes_c,
         zero_soff=zero_soff,
         i64=I64_KV_ADDR,
-        page_base_in_soffset=PAGE_BASE_IN_SOFFSET,
+        page_base_in_soffset=True,
     )
     # The bf16/fp16 loaders address a K/V copy by its page (_attention_paged_kv_copies)
     # when a wave's part of each copy lies in one page; otherwise the paged-KV
@@ -2195,8 +2193,11 @@ def build_unified_attention_2d_tiled(
     PAGE_COPIES = (
         not FAST_PAGED_KV_DESC and not KV_FP8 and page_copies.wave_part_in_page
     )
+    # Copies that span pages take their page from the wave and keep the base in
+    # ``voffset`` with their ids read in place: the carried ids are per block.
+    page_copies.page_base_in_soffset = page_copies.uniform_blocks
     PAGE_PREFETCH = (
-        PAGE_COPIES and PAGE_BASE_IN_SOFFSET and not RING3 and not GROUPED_KV2
+        PAGE_COPIES and page_copies.uniform_blocks and not RING3 and not GROUPED_KV2
     )
     # Page ids already read for a tile, by the tile index value.
     tile_pages = {}

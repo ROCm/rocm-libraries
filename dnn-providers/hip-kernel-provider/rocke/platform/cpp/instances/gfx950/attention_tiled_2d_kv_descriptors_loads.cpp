@@ -213,14 +213,13 @@ static rocke_value_t*
                                  ctx->N_BLOCKS_PER_TILE);
 }
 
-/* A tile of one page takes its page base in soffset, and the loop carries the
- * page ids of the current and the next tile and reads the ids of the tile after
- * next one iteration ahead (Python PAGE_PREFETCH). Tiles of several pages take
- * the page base in voffset and read their ids in place. The C++ port has no
- * deep K ring (kv_ring_depth != 2 is refused). */
+/* A copy takes its page base in soffset, and the loop carries the page ids of
+ * the current and the next tile and reads the ids of the tile after next one
+ * iteration ahead (Python PAGE_PREFETCH). The C++ port has no deep K ring
+ * (kv_ring_depth != 2 is refused). */
 bool rocke_gfx950_attn2d_page_prefetch(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
-    return rocke__page_copies(ctx) && ctx->N_BLOCKS_PER_TILE == 1 && !ctx->GROUPED_KV2;
+    return rocke__page_copies(ctx) && ctx->page_copies.uniform_blocks && !ctx->GROUPED_KV2;
 }
 
 void rocke_gfx950_attn2d_tile_page_ids(rocke_gfx950_attn2d_build_ctx_t* ctx,
@@ -314,7 +313,7 @@ void rocke_gfx950_attn2d_emit_preloop(rocke_gfx950_attn2d_build_ctx_t* ctx)
     rocke_value_t* max_idx = rocke__block_table_max_idx(ctx);
 
     /* Python page_copies (emits nothing): the page addressing of the bf16/fp16
-     * K/V copies; PAGE_BASE_IN_SOFFSET = one page per tile. */
+     * K/V copies, page base in soffset. */
     {
         rocke_kv_page_copies_t* pc = &ctx->page_copies;
         memset(pc, 0, sizeof(*pc));
@@ -335,9 +334,12 @@ void rocke_gfx950_attn2d_emit_preloop(rocke_gfx950_attn2d_build_ctx_t* ctx)
         pc->page_bytes = rocke__kv_block_bytes_c(ctx);
         pc->zero_soff = rocke__zero_soff(ctx);
         pc->i64 = ctx->I64_KV_ADDR;
-        pc->page_base_in_soffset = ctx->N_BLOCKS_PER_TILE == 1;
+        pc->page_base_in_soffset = true;
         rocke_kv_page_copies_init(pc);
         ctx->PAGE_COPIES = rocke__page_copies(ctx);
+        /* Copies that span pages take their page from the wave and keep the base
+         * in voffset with their ids read in place: the carried ids are per block. */
+        pc->page_base_in_soffset = pc->uniform_blocks;
     }
 
     (void)rocke__bytes_per_buf;
