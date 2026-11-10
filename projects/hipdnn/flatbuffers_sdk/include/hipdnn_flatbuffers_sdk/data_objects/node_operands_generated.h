@@ -929,6 +929,15 @@ void visit(const TopkAttributes& op, V& visitor)
     visitor.scalar(std::string_view("largest"), static_cast<bool>(op.largest()));
 }
 
+template <typename V>
+void visit(const GatherAttributes& op, V& visitor)
+{
+    visitor.tensor(std::string_view("x"), static_cast<int64_t>(op.x_tensor_uid()), false);
+    visitor.tensor(std::string_view("indices"), static_cast<int64_t>(op.indices_tensor_uid()), false);
+    visitor.tensor(std::string_view("y"), static_cast<int64_t>(op.y_tensor_uid()), false);
+    visitor.scalar(std::string_view("axis"), static_cast<int64_t>(op.axis()));
+}
+
 /// Visits @p node's operands. Returns false, visiting nothing, when the node has
 /// no attributes or a type this header predates.
 template <typename V>
@@ -936,7 +945,7 @@ bool visit(const Node& node, V&& visitor)
 {
     // Fails when NodeAttributes gains a member this header has no case for: rerun
     // scripts/gen_node_operands.py.
-    static_assert(NodeAttributes::MAX == NodeAttributes::TopkAttributes,
+    static_assert(NodeAttributes::MAX == NodeAttributes::GatherAttributes,
                   "node_operands_generated.h is stale: rerun scripts/gen_node_operands.py");
     switch(node.attributes_type())
     {
@@ -1131,6 +1140,13 @@ bool visit(const Node& node, V&& visitor)
         return false;
     case NodeAttributes::TopkAttributes:
         if(const auto* op = node.attributes_as_TopkAttributes(); op != nullptr)
+        {
+            visit(*op, visitor);
+            return true;
+        }
+        return false;
+    case NodeAttributes::GatherAttributes:
+        if(const auto* op = node.attributes_as_GatherAttributes(); op != nullptr)
         {
             visit(*op, visitor);
             return true;

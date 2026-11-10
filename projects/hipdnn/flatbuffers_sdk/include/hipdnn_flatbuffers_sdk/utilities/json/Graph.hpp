@@ -17,6 +17,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/ConvolutionFwdAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/ConvolutionWrwAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/CustomOpAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/GatherAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/GdnAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/KdaAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/LayernormAttributes.hpp>
@@ -68,6 +69,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::MoeGroupedMatmulAttributes, "MoeGroupedMatmulAttributes"},
      {NodeAttributes::MoeGroupedMatmulBwdAttributes, "MoeGroupedMatmulBwdAttributes"},
      {NodeAttributes::SoftmaxAttributes, "SoftmaxAttributes"},
+     {NodeAttributes::GatherAttributes, "GatherAttributes"},
      {NodeAttributes::TopkAttributes, "TopkAttributes"},
      {NodeAttributes::GdnAttributes, "GdnAttributes"},
      {NodeAttributes::KdaAttributes, "KdaAttributes"},
@@ -159,6 +161,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::SoftmaxAttributes:
         nodeJson = *node.attributes_as_SoftmaxAttributes();
+        break;
+    case data_objects::NodeAttributes::GatherAttributes:
+        nodeJson = *node.attributes_as_GatherAttributes();
         break;
     case data_objects::NodeAttributes::TopkAttributes:
         nodeJson = *node.attributes_as_TopkAttributes();
@@ -269,6 +274,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::MoeGroupedMatmulBwdAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::SoftmaxAttributes:
             return to<data_objects::SoftmaxAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::GatherAttributes:
+            return to<data_objects::GatherAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::TopkAttributes:
             return to<data_objects::TopkAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::GdnAttributes:

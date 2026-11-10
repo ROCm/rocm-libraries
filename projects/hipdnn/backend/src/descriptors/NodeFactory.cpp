@@ -37,6 +37,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return ConvolutionWrwOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::CustomOpAttributes:
         return CustomOpOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::GatherAttributes:
+        return GatherOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::LayernormAttributes:
         return LayernormOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::LayernormBackwardAttributes:

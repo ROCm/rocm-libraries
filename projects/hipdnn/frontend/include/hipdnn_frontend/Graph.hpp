@@ -89,6 +89,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
+#include <hipdnn_frontend/attributes/GatherAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
@@ -132,6 +133,7 @@
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_frontend/node/CustomOpNode.hpp>
+#include <hipdnn_frontend/node/GatherNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
@@ -6339,6 +6341,54 @@ public:
             std::make_shared<SoftmaxNode>(std::move(attributes), graph_attributes));
 
         return ret;
+    }
+
+    /**
+     * @brief Gathers slices of `x` along one axis (index_select / embedding lookup).
+     *
+     * With `indices` of rank m:
+     * `y[a_0..a_{axis-1}, i_0..i_{m-1}, b...] = x[a_0..a_{axis-1}, indices[i_0..i_{m-1}], b...]`,
+     * so `y.dims = x.dims[:axis] ++ indices.dims ++ x.dims[axis + 1:]` and `y` has the data
+     * type of `x`. Leaving `y` dimensions unset infers that shape (with packed strides);
+     * supplying them validates against it. Embedding lookup is `axis = 0` with `x` the table
+     * `[V, H]` and `indices` the token ids.
+     *
+     * @param x Source tensor.
+     * @param indices INT32 or INT64 indices, each in `[0, x.dim[axis])`.
+     * @param attributes Operation configuration (`axis`, `0 <= axis < rank(x)`).
+     * @return Output tensor `y`.
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> gather(std::shared_ptr<TensorAttributes> x,
+                                             std::shared_ptr<TensorAttributes> indices,
+                                             GatherAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Gather_" + std::to_string(_sub_nodes.size()));
+        }
+        // Null tensors are tolerated here so the error surfaces from pre_validate_node() as a
+        // missing-input error rather than a crash while auto-naming.
+        if(x && x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        if(indices && indices->get_name().empty())
+        {
+            indices->set_name(attributes.get_name() + "::INDICES");
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_indices(std::move(indices));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<GatherNode>(std::move(attributes), graph_attributes));
+
+        return y;
     }
 
     /**

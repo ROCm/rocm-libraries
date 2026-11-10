@@ -38,6 +38,7 @@ add_library(
     descriptors/EngineDescriptor.cpp
     descriptors/EngineHeuristicDescriptor.cpp
     descriptors/ExecutionPlanDescriptor.cpp
+    descriptors/GatherOperationDescriptor.cpp
     descriptors/GraphDescriptor.cpp
     descriptors/KnobDescriptor.cpp
     descriptors/KnobSettingDescriptor.cpp

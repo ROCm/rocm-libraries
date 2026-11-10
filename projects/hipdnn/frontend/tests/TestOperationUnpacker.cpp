@@ -19,6 +19,7 @@
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_frontend/node/CustomOpNode.hpp>
+#include <hipdnn_frontend/node/GatherNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
@@ -563,6 +564,15 @@ TEST(TestOperationUnpacker, CreateNodeForTypeCreatesTopkNode)
     EXPECT_TRUE(error.is_good()) << error.get_message();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->getNodeType(), NodeType::TOPK);
+}
+
+TEST(TestOperationUnpacker, CreateNodeForTypeCreatesGatherNode)
+{
+    const GraphAttributes graphAttrs;
+    const auto [node, error] = createNodeForType(HIPDNN_OPERATION_TYPE_GATHER_EXT, graphAttrs);
+    EXPECT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getNodeType(), NodeType::GATHER);
 }
 
 TEST(TestOperationUnpacker, CreateNodeForTypeCreatesRopeNode)

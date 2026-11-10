@@ -24,6 +24,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "convolution_wrw_attributes_generated.h"
 #include "custom_op_attributes_generated.h"
 #include "data_types_generated.h"
+#include "gather_attributes_generated.h"
 #include "gdn_attributes_generated.h"
 #include "kda_attributes_generated.h"
 #include "layernorm_attributes_generated.h"
@@ -98,11 +99,12 @@ enum class NodeAttributes : uint8_t {
   RopeAttributes = 26,
   SoftmaxAttributes = 27,
   TopkAttributes = 28,
+  GatherAttributes = 29,
   MIN = NONE,
-  MAX = TopkAttributes
+  MAX = GatherAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[29] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[30] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -132,13 +134,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[29] {
     NodeAttributes::KdaAttributes,
     NodeAttributes::RopeAttributes,
     NodeAttributes::SoftmaxAttributes,
-    NodeAttributes::TopkAttributes
+    NodeAttributes::TopkAttributes,
+    NodeAttributes::GatherAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[30] = {
+  static const char * const names[31] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -168,13 +171,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "RopeAttributes",
     "SoftmaxAttributes",
     "TopkAttributes",
+    "GatherAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::TopkAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::GatherAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -295,6 +299,10 @@ template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::Top
   static const NodeAttributes enum_value = NodeAttributes::TopkAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::GatherAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::GatherAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -409,6 +417,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects
 
 template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::TopkAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::GatherAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::GatherAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -665,6 +677,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::TopkAttributes ?
       reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(value) : nullptr;
   }
+  hipdnn_flatbuffers_sdk::data_objects::GatherAttributesT *AsGatherAttributes() {
+    return type == NodeAttributes::GatherAttributes ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::GatherAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::GatherAttributesT *AsGatherAttributes() const {
+    return type == NodeAttributes::GatherAttributes ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::GatherAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -785,6 +805,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::TopkAttributes: {
       return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::GatherAttributes: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::GatherAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::GatherAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -998,6 +1022,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_flatbuffers_sdk::data_objects::TopkAttributes *attributes_as_TopkAttributes() const {
     return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::TopkAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_flatbuffers_sdk::data_objects::GatherAttributes *attributes_as_GatherAttributes() const {
+    return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GatherAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::GatherAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -1126,6 +1153,10 @@ template<> inline const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes 
 
 template<> inline const hipdnn_flatbuffers_sdk::data_objects::TopkAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::TopkAttributes>() const {
   return attributes_as_TopkAttributes();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::GatherAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::GatherAttributes>() const {
+  return attributes_as_GatherAttributes();
 }
 
 struct NodeBuilder {
@@ -1672,6 +1703,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::GatherAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::GatherAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -1803,6 +1838,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::GatherAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::GatherAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -1922,6 +1961,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(value);
       return CreateTopkAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::GatherAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::GatherAttributesT *>(value);
+      return CreateGatherAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -2038,6 +2081,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::TopkAttributes: {
       value = new hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::GatherAttributes: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::GatherAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::GatherAttributesT *>(u.value));
       break;
     }
     default:
@@ -2184,6 +2231,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::TopkAttributes: {
       auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::GatherAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::GatherAttributesT *>(value);
       delete ptr;
       break;
     }

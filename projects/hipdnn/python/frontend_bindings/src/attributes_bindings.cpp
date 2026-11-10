@@ -13,6 +13,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
+#include <hipdnn_frontend/attributes/GatherAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
@@ -751,6 +752,31 @@ void attributesBindings(nb::module_& m)
         .def("get_output", &graph::MoeGroupedMatmulAttributes::get_output)
         .def("get_mode", &graph::MoeGroupedMatmulAttributes::get_mode)
         .def("get_top_k", &graph::MoeGroupedMatmulAttributes::get_top_k);
+
+    // GatherAttributes
+    nb::class_<graph::GatherAttributes>(m, "GatherAttributes")
+        .def(nb::init<>())
+        .def("set_name", &graph::GatherAttributes::set_name, nb::rv_policy::reference_internal)
+        .def("get_name", &graph::GatherAttributes::get_name)
+        .def("set_compute_data_type",
+             &graph::GatherAttributes::set_compute_data_type,
+             nb::rv_policy::reference_internal)
+        .def("get_compute_data_type", &graph::GatherAttributes::get_compute_data_type)
+        .def("set_x",
+             static_cast<TensorSetter<graph::GatherAttributes>>(&graph::GatherAttributes::set_x),
+             nb::rv_policy::reference_internal)
+        .def("set_indices",
+             static_cast<TensorSetter<graph::GatherAttributes>>(
+                 &graph::GatherAttributes::set_indices),
+             nb::rv_policy::reference_internal)
+        .def("set_y",
+             static_cast<TensorSetter<graph::GatherAttributes>>(&graph::GatherAttributes::set_y),
+             nb::rv_policy::reference_internal)
+        .def("set_axis", &graph::GatherAttributes::set_axis, nb::rv_policy::reference_internal)
+        .def("get_x", &graph::GatherAttributes::get_x)
+        .def("get_indices", &graph::GatherAttributes::get_indices)
+        .def("get_y", &graph::GatherAttributes::get_y)
+        .def("get_axis", &graph::GatherAttributes::get_axis);
 
     // RopeAttributes
     nb::class_<graph::RopeAttributes>(m, "RopeAttributes")

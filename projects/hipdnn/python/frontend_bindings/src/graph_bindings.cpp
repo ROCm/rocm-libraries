@@ -15,6 +15,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
+#include <hipdnn_frontend/attributes/GatherAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
@@ -717,6 +718,7 @@ void graphBindings(nb::module_& m)
                                std::shared_ptr<graph::TensorAttributes>,
                                graph::ReductionAttributes>(&graph::Graph::reduction))
         .def("moe_grouped_matmul", &graph::Graph::moe_grouped_matmul)
+        .def("gather", &graph::Graph::gather)
         .def("rope", &graph::Graph::rope)
         .def("softmax",
              [](graph::Graph& graph,

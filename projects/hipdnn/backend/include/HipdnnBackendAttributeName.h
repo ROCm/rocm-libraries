@@ -1524,6 +1524,26 @@ typedef enum
     /** @} */
 
     /**
+     * @name Gather Operation Attributes (4200-4299)
+     * Attributes for HIPDNN_BACKEND_OPERATION_GATHER_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Source tensor X */
+    HIPDNN_ATTR_OPERATION_GATHER_XDESC_EXT = 4200,
+
+    /** @brief Index tensor (INT32 or INT64) */
+    HIPDNN_ATTR_OPERATION_GATHER_INDICES_DESC_EXT = 4201,
+
+    /** @brief Output tensor Y */
+    HIPDNN_ATTR_OPERATION_GATHER_YDESC_EXT = 4202,
+
+    /** @brief Gather axis of X (int64) */
+    HIPDNN_ATTR_OPERATION_GATHER_AXIS_EXT = 4203,
+
+    /** @} */
+
+    /**
      * @name RoPE Forward Operation Attributes (3900-3999)
      * Attributes for HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR
      * @{

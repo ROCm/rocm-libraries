@@ -58,6 +58,8 @@ add_executable(
     IntegrationMoeGroupedMatmulBwd.cpp
     IntegrationMoeGroupedMatmulBwdDescriptorLifting.cpp
     IntegrationMoeGroupedMatmulBwdDescriptorLowering.cpp
+    IntegrationGatherDescriptorLifting.cpp
+    IntegrationGatherDescriptorLowering.cpp
     IntegrationSoftmaxDescriptorLifting.cpp
     IntegrationSoftmaxDescriptorLowering.cpp
     IntegrationMoeGroupedMatmulDescriptorLifting.cpp

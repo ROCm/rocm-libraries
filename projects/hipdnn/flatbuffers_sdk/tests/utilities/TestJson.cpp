@@ -242,6 +242,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid softmax graph)";
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GatherAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidGatherGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid gather graph)";
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::TopkAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidTopkGraph();
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());

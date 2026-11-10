@@ -41,6 +41,7 @@ from support_features import (
     convolution_fwd,
     convolution_wrw,
     custom_op,
+    gather,
     gdn,
     kda,
     layernorm,
@@ -783,6 +784,7 @@ class TestFeatureMatrixNames:
             "Block scale",
             "Convolution",
             "CustomOp",
+            "Gather",
             "Linear attention",
             "Layernorm",
             "Matmul",
@@ -7063,6 +7065,82 @@ def _custom_op(
         "data": list(data),
     }
     return node, tensors
+
+
+def _gather(
+    x_dims=(16, 8),
+    index_dims=(2, 3),
+    axis=0,
+    dtype="float",
+    y_dtype=None,
+    index_dtype="int32",
+    y_dims=None,
+) -> tuple[dict, dict]:
+    x_dims, index_dims = list(x_dims), list(index_dims)
+    if y_dims is None:
+        y_dims = x_dims[:axis] + index_dims + x_dims[axis + 1 :]
+    tensors = {
+        1: {"uid": 1, "dims": x_dims, "data_type": dtype},
+        2: {"uid": 2, "dims": index_dims, "data_type": index_dtype},
+        3: {"uid": 3, "dims": list(y_dims), "data_type": y_dtype or dtype},
+    }
+    node = {
+        "inputs": {"x_tensor_uid": 1, "indices_tensor_uid": 2},
+        "outputs": {"y_tensor_uid": 3},
+        "axis": axis,
+    }
+    return node, tensors
+
+
+class TestGatherExtract:
+    PLAIN = {"dtype:fp32", "index_dtype:int32", "axis:leading", "indices_rank:multi"}
+
+    def test_node_and_ports_cover_every_schema_field(self) -> None:
+        node, _ = _gather()
+        assert set(batchnorm.bound(node)) | {"axis"} == table_fields(
+            gather.SCHEMA_FILE, gather.SCHEMA_TABLE
+        )
+
+    def test_plain_graph(self) -> None:
+        assert gather.extract(*_gather()) == self.PLAIN
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = gather.extract(*_gather())
+        for kwargs in (
+            {"dtype": "half", "index_dtype": "int64", "index_dims": (4,)},
+            {"dtype": "bfloat16", "x_dims": (2, 5, 4), "axis": 1},
+        ):
+            reached |= gather.extract(*_gather(**kwargs))
+        assert reached == {f.id for f in gather.FEATURES}
+
+    def test_inner_axis(self) -> None:
+        features = gather.extract(*_gather(x_dims=(2, 5, 4), index_dims=(3,), axis=2))
+        assert features == {
+            "dtype:fp32",
+            "index_dtype:int32",
+            "axis:inner",
+            "indices_rank:single",
+        }
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            ({"axis": 2}, "axis 2 is not in"),
+            ({"axis": -1}, "axis -1 is not in"),
+            ({"y_dims": (2, 3, 4)}, "y_tensor_uid dims"),
+            ({"index_dtype": "float"}, "is not int32 or int64"),
+            ({"y_dtype": "half"}, "is not that of x_tensor_uid"),
+        ],
+    )
+    def test_rejects(self, kwargs: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            gather.extract(*_gather(**kwargs))
+
+    def test_rejects_unbound_port(self) -> None:
+        node, tensors = _gather()
+        node["inputs"]["indices_tensor_uid"] = None
+        with pytest.raises(FeatureError, match="indices_tensor_uid is not bound"):
+            gather.extract(node, tensors)
 
 
 def _topk(
