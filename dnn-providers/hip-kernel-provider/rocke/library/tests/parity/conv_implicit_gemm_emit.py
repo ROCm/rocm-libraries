@@ -608,7 +608,7 @@ def _spec_raw(idx: int):
         return _mfma_split_k_spec(idx)
     if 74 <= idx <= 81:
         return _mfma_gate_spec(idx)
-    if 82 <= idx <= 84:
+    if 82 <= idx <= 85:
         return _tf32_split_k_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
@@ -900,16 +900,18 @@ def _mfma_gate_spec(idx: int):
 
 
 # fp32 output under the two-stage split: Stage 2 casts to fp16 / bf16 only,
-# on every family, so both engines reject it. Keep in lockstep with
+# on every family, and the cluster form folds the slabs with the same cast,
+# so both engines reject either. Keep in lockstep with
 # make_cfg_tf32_split_k() in conv_implicit_gemm_emit.c.
 #   82: config 54 (gfx950 TF32 16x16x32, mem/cshuffle) with split_k=2
 #   83: config 56 (gfx942 TF32 16x16x8, compv3/cshuffle) with split_k=2
 #   84: config 41 (gfx1250 WMMA, mem/cshuffle, split_k=2) in fp32 storage on
 #       the 16x16x4 fp32 atom, 4-wide vectors
+#   85: config 84 in the cluster form (split_k_cluster=4): rejected by both
 
 
 def _tf32_split_k_spec(idx: int):
-    if idx == 84:
+    if idx in (84, 85):
         spec, arch = _split_k_spec(41)
         return (
             replace(
@@ -919,6 +921,7 @@ def _tf32_split_k_spec(idx: int):
                 vector_size_a=4,
                 vector_size_b=4,
                 vector_size_c=4,
+                split_k_cluster=4 if idx == 85 else 0,
             ),
             arch,
         )

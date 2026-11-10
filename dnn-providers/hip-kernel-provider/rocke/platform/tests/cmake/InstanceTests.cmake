@@ -119,7 +119,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/gemm_universal_spec_guards.cpp"
 endif()
 
 # Forward implicit-GEMM gates around the gfx950 MFMA split-K (parity configs
-# 66..84 of conv_implicit_gemm_emit, whose spec table it compiles in): the C++
+# 66..85 of conv_implicit_gemm_emit, whose spec table it compiles in): the C++
 # verdicts and reasons against Python's. CI checks those configs with the
 # Python engine only, and the pybind engine-agreement tests skip there.
 # Guarded on the sibling library tree, as in platform/CMakeLists.txt, so a

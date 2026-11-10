@@ -586,17 +586,23 @@ bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
                             pl != NULL ? pl : "None");
         }
     }
-    /* The two-stage form folds the slabs through Stage 2 on every family, so
-     * ask Stage 2's own validator for the output dtype: fp32 (plain or under
-     * mma_dtype "tf32") stays unsplit. Python: fwd_split_k_reduce_reason. */
-    if(s->split_k > 1 && !s->split_k_cluster)
+    /* The two-stage form folds the slabs through Stage 2 on every family, and
+     * the cluster form folds them in Stage 1 with the same cast, so ask Stage
+     * 2's own validator for the output dtype: fp32 (plain or under mma_dtype
+     * "tf32") stays unsplit. Python: fwd_split_k_reduce_reason. */
+    if(s->split_k > 1)
     {
         rocke_fwd_split_k_reduce_spec_t r = rocke_fwd_split_k_reduce_spec_default();
         char why[256] = {0};
         r.dtype_d = s->dtype_d;
         if(!rocke_fwd_split_k_reduce_is_valid_spec(&r, why, sizeof(why)))
         {
-            ROCKE_SPEC_FAIL(reason, reason_cap, "split-K forward reduces through Stage 2: %s", why);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split-K forward %s: %s",
+                            s->split_k_cluster ? "folds through the cluster"
+                                               : "reduces through Stage 2",
+                            why);
         }
     }
     if(!rocke_conv_acc_epilogue_is_identity(&s->acc_epilogue))

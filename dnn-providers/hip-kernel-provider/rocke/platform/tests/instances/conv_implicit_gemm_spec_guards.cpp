@@ -4,14 +4,14 @@
  * Host-only spec-validation test for the C++ forward implicit-GEMM gates
  * around the gfx950 MFMA split-K forward: the split-K admission gate, the
  * NULL pipeline / epilogue refusals, the LDS budget that charges compv4 one
- * A/B tile, and the refusal of a two-stage split with fp32 output (TF32 on
- * MFMA, plain fp32 on gfx1250 WMMA).
+ * A/B tile, and the refusal of a split with fp32 output (TF32 on MFMA, plain
+ * fp32 on gfx1250 WMMA, two-stage or cluster).
  *
  * CI checks the parity configs of conv_implicit_gemm_emit with the Python
  * engine only (the canonical golden), and the pybind tests that compare the
  * two engines skip where rocke_engine is not built, so without this test the
  * C++ verdicts on these specs run in no CI lane. It takes the specs from the
- * C parity emitter itself (configs 66..84), so the two cannot drift, and
+ * C parity emitter itself (configs 66..85), so the two cannot drift, and
  * checks that rocke_implicit_gemm_conv_is_valid_spec gives the verdict and
  * the reason text Python's is_valid_spec gives, that an accepted spec builds
  * and lowers, and that the builder refuses a rejected one.
@@ -135,6 +135,8 @@ int main()
         {82, k_fp32_split},
         {83, k_fp32_split},
         {84, k_fp32_split},
+        /* 85: config 84 in the cluster form, which folds with the same cast */
+        {85, "split-K forward folds through the cluster: dtype_d must be fp16 or bf16 (got fp32)"},
     };
     for(const Case& c : cases)
         run(c);

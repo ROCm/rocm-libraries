@@ -596,7 +596,7 @@ static int make_cfg_tf32(int idx, rocke_implicit_gemm_conv_spec_t* spec, const c
  * instead. Keep in lockstep with _mfma_split_k_spec() in
  * conv_implicit_gemm_emit.py. The rocke_conv_implicit_gemm_spec_guards CTest
  * (platform/tests/instances/conv_implicit_gemm_spec_guards.cpp) compiles this
- * file and checks the C++ verdicts on configs 66..84, which the CI goldens
+ * file and checks the C++ verdicts on configs 66..85, which the CI goldens
  * run with the Python engine only: a config added to that range needs a case
  * there too.
  *   66: mem/cshuffle, 32x32x64 tile, 2x2 warps, 16x16x32 warp tile
@@ -768,15 +768,17 @@ static int make_cfg_mfma_gate(int idx, rocke_implicit_gemm_conv_spec_t* spec, co
 }
 
 /* fp32 output under the two-stage split: Stage 2 casts to fp16 / bf16 only,
- * on every family, so both engines reject it. Keep in lockstep with
+ * on every family, and the cluster form folds the slabs with the same cast,
+ * so both engines reject either. Keep in lockstep with
  * _tf32_split_k_spec() in conv_implicit_gemm_emit.py.
  *   82: config 54 (gfx950 TF32 16x16x32, mem/cshuffle) with split_k=2
  *   83: config 56 (gfx942 TF32 16x16x8, compv3/cshuffle) with split_k=2
  *   84: config 41 (gfx1250 WMMA, mem/cshuffle, split_k=2) in fp32 storage on
- *       the 16x16x4 fp32 atom, 4-wide vectors */
+ *       the 16x16x4 fp32 atom, 4-wide vectors
+ *   85: config 84 in the cluster form (split_k_cluster=4): rejected by both */
 static int make_cfg_tf32_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
-    if(idx == 84)
+    if(idx == 84 || idx == 85)
     {
         if(make_cfg_split_k(41, spec, arch) != 0)
             return -1;
@@ -787,6 +789,7 @@ static int make_cfg_tf32_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec,
         spec->vector_size_a = 4;
         spec->vector_size_b = 4;
         spec->vector_size_c = 4;
+        spec->split_k_cluster = (idx == 85) ? 4 : 0;
         return 0;
     }
     if(idx != 82 && idx != 83)
@@ -824,7 +827,7 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         if(make_cfg_mfma_gate(idx, spec, arch) != 0)
             return -1;
     }
-    else if(idx >= 82 && idx <= 84)
+    else if(idx >= 82 && idx <= 85)
     {
         if(make_cfg_tf32_split_k(idx, spec, arch) != 0)
             return -1;

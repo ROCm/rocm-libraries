@@ -148,6 +148,22 @@ class TestSplitKGate(unittest.TestCase):
                     is_valid_spec(make(split_k=2), arch), (False, why_fp32)
                 )
 
+    def test_fp32_output_cluster_is_rejected(self):
+        # The cluster form folds the slabs in Stage 1 with Stage 2's cast, so
+        # it refuses fp32 output too; the bf16 cluster spec stays valid.
+        ok, why = is_valid_spec(
+            _spec(split_k=2, split_k_cluster=4, pipeline="mem"), "gfx1250"
+        )
+        self.assertTrue(ok, why)
+        self.assertEqual(
+            is_valid_spec(_fp32_wmma_spec(split_k=2, split_k_cluster=4), "gfx1250"),
+            (
+                False,
+                "split-K forward folds through the cluster: "
+                "dtype_d must be fp16 or bf16 (got fp32)",
+            ),
+        )
+
     def test_no_pipeline_or_epilogue_is_rejected_split_or_not(self):
         for field in ("pipeline", "epilogue"):
             for split_k in (1, 2):
@@ -976,6 +992,12 @@ class TestEngineAgreement(unittest.TestCase):
                 with self.subTest(arch=arch, backend=backend):
                     with self.assertRaisesRegex(Exception, why):
                         lower_conv_implicit_gemm(spec, arch=arch, backend=backend)
+        cluster = _fp32_wmma_spec(split_k=2, split_k_cluster=4)
+        why = r"folds through the cluster: dtype_d must be fp16 or bf16 \(got fp32\)"
+        for backend in ("python", "cpp"):
+            with self.subTest(arch="gfx1250", backend=backend, cluster=4):
+                with self.assertRaisesRegex(Exception, why):
+                    lower_conv_implicit_gemm(cluster, arch="gfx1250", backend=backend)
 
     def test_no_pipeline_or_epilogue_is_rejected_by_both(self):
         # pipeline / epilogue = None is malformed, not a request for the

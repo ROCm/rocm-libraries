@@ -670,16 +670,22 @@ def fwd_split_k_cluster_problem_reason(problem: ConvProblem) -> Optional[str]:
 _FWD_SPLIT_K_MFMA_PIPELINES = ("mem", "compv3", "compv4")
 
 
-def fwd_split_k_reduce_reason(dtype_d: Optional[str]) -> Optional[str]:
-    """Why Stage 2 cannot fold the split-K slabs into ``dtype_d``, or ``None``.
+def fwd_split_k_reduce_reason(
+    dtype_d: Optional[str], cluster: bool = False
+) -> Optional[str]:
+    """Why the split-K slabs cannot be folded into ``dtype_d``, or ``None``.
 
     The two-stage split-K forward hands its fp32 slabs to
     ``conv_fwd_split_k_reduce`` on every family, so its admission asks Stage
-    2's own validator rather than repeating its dtype list.
+    2's own validator rather than repeating its dtype list. The cluster form
+    (``cluster``) folds in Stage 1 with the same fp32-to-output cast, so it
+    takes the same outputs.
     """
     try:
         FwdSplitKReduceSpec(dtype_d=dtype_d).validate()
     except ValueError as exc:
+        if cluster:
+            return f"split-K forward folds through the cluster: {exc}"
         return f"split-K forward reduces through Stage 2: {exc}"
     return None
 
@@ -696,10 +702,10 @@ def fwd_split_k_reason(
     (``chiplet_swizzle``), merge groups, or take the pointwise fast path are
     not wired for it. Stage 1 stores raw partial sums and the reduction (Stage 2
     or the cluster fold) only adds and casts them, so the accumulator
-    epilogue (bias / scale / ReLU / clamp) must be the identity. The two-stage
-    form (no ``split_k_cluster``) takes only an output Stage 2 can fold into,
-    on every family (:func:`fwd_split_k_reduce_reason`): fp16 / bf16, so fp32
-    storage (and TF32 compute over it) stays unsplit. ``target`` (an
+    epilogue (bias / scale / ReLU / clamp) must be the identity. Both the
+    two-stage form and the cluster fold take only an output Stage 2 can fold
+    into, on every family (:func:`fwd_split_k_reduce_reason`): fp16 / bf16, so
+    fp32 storage (and TF32 compute over it) stays unsplit. ``target`` (an
     ``ArchTarget``) gates the cluster form on workgroup-cluster launch.
     """
     if spec.split_k < 1:
@@ -709,8 +715,10 @@ def fwd_split_k_reason(
             f"split-K forward on MFMA runs the plain K loop only "
             f"({', '.join(_FWD_SPLIT_K_MFMA_PIPELINES)}; got {spec.pipeline})"
         )
-    if spec.split_k > 1 and not spec.split_k_cluster:
-        _why = fwd_split_k_reduce_reason(spec.data.dtype_d)
+    if spec.split_k > 1:
+        _why = fwd_split_k_reduce_reason(
+            spec.data.dtype_d, cluster=bool(spec.split_k_cluster)
+        )
         if _why is not None:
             return _why
     if not spec.acc_epilogue.is_identity():
