@@ -735,12 +735,16 @@ kernel's build. A search builds and charges that build once in
 once, and trying another budget of a built kernel costs one measurement (past
 the build cap the budgets of built kernels stay reachable). The worker sets
 `CK_TILE_STREAMK_BUDGET_PCT` for each measured item and restores it; the
-library reads it at each launch. Candidates per problem with the six budgets
-below, fp16 or bf16 in any layout and fp8 in `rcr`: 2880 (480 kernels:
-`comp_tdm` 240, `comp_tdm_v2` 80, `comp_tdm_v3` 160) when N is a multiple of
-256, 2016 when it is a multiple of 128 only, and 1152 (`tdm` epilogue only)
-otherwise; fp8 in the other layouts has no `comp_tdm_v3` kernel (1920, 1344
-and 768).
+library reads it at each launch. A persistent kernel runs at `100` only: its
+workgroups also take the data-parallel tiles, so a smaller grid leaves CUs
+idle, and searches that mostly met persistent kernels at small budgets learned
+to avoid persistent kernels where they are the fastest (`streamk_gemm_full_benchmark.py
+--budget-pct` still measures every budget). Candidates per problem with the six
+budgets below, fp16 or bf16 in any layout and fp8 in `rcr`: 1680 (480 kernels:
+`comp_tdm` 240, `comp_tdm_v2` 80, `comp_tdm_v3` 160; half of them persistent)
+when N is a multiple of 256, 1176 when it is a multiple of 128 only, and 672
+(`tdm` epilogue only) otherwise; fp8 in the other layouts has no `comp_tdm_v3`
+kernel (1120, 784 and 448).
 
 ```bash
 RUN="gemm_streamk/configs/gfx1250_tdm_config.json --variant gemm_streamk \

@@ -631,15 +631,16 @@ def _sk_listing(monkeypatch, capsys, tmp_path, *argv, problems=PROBLEMS, fixed=S
 def test_streamk_list_pairs_cover_the_tdm_space_and_its_pairing(monkeypatch, capsys,
                                                                 tmp_path, fixed):
     # Every pipeline, persistent value, reduction strategy and budget reaches
-    # an aligned problem; each budget of a kernel is one more name of one
-    # build. A CShuffle epilogue needs N to be a tile_n multiple, the TDM one
-    # does not.
+    # an aligned problem; each budget of a non-persistent kernel is one more
+    # name of one build, a persistent kernel runs at 100 only. A CShuffle
+    # epilogue needs N to be a tile_n multiple, the TDM one does not.
     kernels, pairs = _sk_listing(monkeypatch, capsys, tmp_path, *SK_BUDGETS,
                                  problems=PROBLEMS + SK_MISALIGNED, fixed=fixed)
-    builds = {_kernel(n) for n in kernels}
-    assert len(kernels) == len(builds) * len(BUDGETS)
+    builds = {_kernel(n): r["persistent"] for n, r in kernels.items()}
+    assert len(kernels) == sum(1 if p else len(BUDGETS) for p in builds.values())
     for name, r in kernels.items():
         assert (name == _kernel(name)) == (r["budget_pct"] == 100)
+        assert r["budget_pct"] == 100 or not r["persistent"]
         assert name.endswith("" if r["budget_pct"] == 100 else f"@budget{r['budget_pct']}")
     for key in KEYS:
         got = [kernels[n] for n in pairs[key]]

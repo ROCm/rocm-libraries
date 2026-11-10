@@ -937,8 +937,9 @@ def main():
         help="gemm_streamk only: comma-list of Stream-K workgroup budgets, in "
         "percent of the kernel's default (CUs x occupancy); every kernel runs once "
         "per budget, all budgets of a kernel share its build, and a budget other "
-        "than 100 names its run <kernel>@budget<pct> (default: 100). A search "
-        "takes the budget as one more candidate field (budget_pct)",
+        "than 100 names its run <kernel>@budget<pct> (default: 100). Persistent "
+        "kernels run at 100 only. A search takes the budget as one more candidate "
+        "field (budget_pct)",
     )
     parser.add_argument(
         "--build-timeout",

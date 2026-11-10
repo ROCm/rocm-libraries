@@ -2975,14 +2975,19 @@ def with_streamk_budgets(
     configs: List[GemmKernelConfig], budgets: List[int]
 ) -> List[GemmKernelConfig]:
     """Each Stream-K config of ``configs`` once per budget (percent), kernel
-    by kernel; configs of other variants as they are."""
+    by kernel; configs of other variants as they are. A persistent kernel runs
+    at the full budget only: its workgroups also take the data-parallel tiles,
+    so a smaller grid leaves CUs idle. Over the gfx1250 TDM Stream-K space this
+    never changed a problem's best kernel and removes a third of the
+    candidates."""
     out: List[GemmKernelConfig] = []
     for c in configs:
         if c.variant != "stream_k":
             out.append(c)
             continue
         kernel = {f.name: getattr(c, f.name) for f in fields(GemmKernelConfig)}
-        out.extend(StreamKBudgetConfig(**kernel, budget_pct=b) for b in budgets)
+        pcts = [STREAMK_FULL_BUDGET] if c.persistent else budgets
+        out.extend(StreamKBudgetConfig(**kernel, budget_pct=b) for b in pcts)
     return out
 
 
