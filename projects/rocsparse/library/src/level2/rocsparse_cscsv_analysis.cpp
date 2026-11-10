@@ -53,7 +53,8 @@ namespace rocsparse
         hipStream_t   stream      = handle->stream;
         const I*      csc_col_ptr = reinterpret_cast<const I*>(csc_col_ptr_);
         const int64_t chunk       = static_cast<int64_t>(num_lanes) * s_cscsv_items;
-        const dim3    blocks(rocsparse::ceil_div(m, static_cast<int64_t>(BLOCKSIZE)));
+        const dim3    blocks(rocsparse::get_grid_size_x(
+            handle, rocsparse::ceil_div(m, static_cast<int64_t>(BLOCKSIZE)), BLOCKSIZE));
 
         // Temporaries in the user buffer, see cscsv_build_tasks_buffer_size_launch.
         char* ptr        = reinterpret_cast<char*>(buffer);
@@ -159,7 +160,8 @@ namespace rocsparse
         }
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::cscsv_analysis_pivot_kernel<BLOCKSIZE, I, J>),
-            dim3(rocsparse::ceil_div(m, static_cast<int64_t>(BLOCKSIZE))),
+            dim3(rocsparse::get_grid_size_x(
+                handle, rocsparse::ceil_div(m, static_cast<int64_t>(BLOCKSIZE)), BLOCKSIZE)),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
@@ -277,6 +279,8 @@ rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
                                            void*                       buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_check_matrix(A));
+    info->set_analyzed_operation(trans);
     if(trans == rocsparse_operation_none)
     {
         size_t required_buffer_size{};

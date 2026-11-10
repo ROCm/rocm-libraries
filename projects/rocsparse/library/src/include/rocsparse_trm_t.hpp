@@ -65,7 +65,6 @@ namespace rocsparse
         void destroy_bsrilu0_info();
         void destroy_bsric0_info();
         void destroy_ellsv_info();
-        void destroy_cscsv_info();
 
         void uncouple(rocsparse::trm_data_t* p);
 
@@ -103,7 +102,6 @@ namespace rocsparse
         void clear_bsrilu0_info();
         void clear_bsric0_info();
         void clear_ellsv_info();
-        void clear_cscsv_info();
 
     public:
         trm_t() = default;

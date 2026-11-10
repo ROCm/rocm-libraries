@@ -291,11 +291,6 @@ void _rocsparse_mat_info::clear_ellsv_info()
     this->m_trm.clear_ellsv_info();
 }
 
-void _rocsparse_mat_info::clear_cscsv_info()
-{
-    this->m_trm.clear_cscsv_info();
-}
-
 //
 // Duplicate all the trm_info_t.
 //

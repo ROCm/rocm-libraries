@@ -40,6 +40,10 @@ namespace rocsparse
                                                    : rocsparse_operation_none;
     }
 
+    // Square, general or triangular, sorted: the CSC solve without transpose does not go
+    // through the csrsv checks.
+    rocsparse_status cscsv_check_matrix(rocsparse_const_spmat_descr A);
+
     // CSC triangular solve. Without transpose, the system is solved on the columns of the matrix;
     // the other operations solve the transposed CSR system.
     rocsparse_status cscsv_analysis_buffer_size(rocsparse_handle            handle,

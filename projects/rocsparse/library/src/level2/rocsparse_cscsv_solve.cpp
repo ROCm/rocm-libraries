@@ -148,7 +148,8 @@ namespace rocsparse
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::cscsv_solve_kernel<BLOCKSIZE, NUM_LANES, I, J, T>),
-            dim3(rocsparse::ceil_div(num_tasks * NUM_LANES, BLOCKSIZE),
+            dim3(rocsparse::get_grid_size_x(
+                     handle, rocsparse::ceil_div(num_tasks * NUM_LANES, BLOCKSIZE), BLOCKSIZE),
                  rocsparse::get_grid_size_y(handle, batch_count)),
             dim3(BLOCKSIZE),
             0,
@@ -315,6 +316,7 @@ rocsparse_status rocsparse::cscsv_solve(rocsparse_handle            handle,
                                         void*                       buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_check_matrix(A));
     if(trans == rocsparse_operation_none)
     {
         hipStream_t               stream      = handle->stream;
@@ -322,12 +324,6 @@ rocsparse_status rocsparse::cscsv_solve(rocsparse_handle            handle,
         const int64_t             batch_count = y->batch_count;
         const int64_t             m           = A->cols;
         const rocsparse_indextype J_type      = A->row_type;
-
-        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((alpha_datatype != A->data_type)
-                                                   ? rocsparse_status_not_implemented
-                                                   : rocsparse_status_success,
-                                               "the CSC solve requires the compute "
-                                               "datatype to be the datatype of the matrix");
 
         size_t required_buffer_size{};
         RETURN_IF_ROCSPARSE_ERROR(
@@ -341,9 +337,9 @@ rocsparse_status rocsparse::cscsv_solve(rocsparse_handle            handle,
             = info->get(rocsparse_operation_none, descr->fill_mode);
         if(trm_info == nullptr)
         {
-            // LCOV_EXCL_START
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
-            // LCOV_EXCL_STOP
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_invalid_pointer,
+                "the CSC analysis was not performed for this fill mode");
         }
 
         RETURN_IF_ROCSPARSE_ERROR(
@@ -444,6 +440,7 @@ rocsparse_status rocsparse::cscsv_diagonal_solve(rocsparse_handle            han
                                                  rocsparse_cscsv_info        info)
 {
     ROCSPARSE_ROUTINE_TRACE;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_check_matrix(A));
     if(trans == rocsparse_operation_none)
     {
         const int64_t batch_count = y->batch_count;
@@ -452,9 +449,9 @@ rocsparse_status rocsparse::cscsv_diagonal_solve(rocsparse_handle            han
             = info->get(rocsparse_operation_none, A->descr->fill_mode);
         if(trm_info == nullptr)
         {
-            // LCOV_EXCL_START
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
-            // LCOV_EXCL_STOP
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_invalid_pointer,
+                "the CSC analysis was not performed for this fill mode");
         }
 
         // The CSC analysis indexes the diagonal directly in the CSC values.

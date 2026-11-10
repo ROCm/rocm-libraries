@@ -48,6 +48,9 @@ protected:
     // Transposed CSR analysis, shared with the matrix info with rocsparse_analysis_policy_reuse.
     std::shared_ptr<_rocsparse_csrsv_info> m_csrsv_info;
 
+    // Operation of the last analysis: none for the CSC analysis, otherwise the transposed one.
+    rocsparse_operation m_analyzed_operation{rocsparse_operation_none};
+
 public:
     _rocsparse_cscsv_info()                             = default;
     _rocsparse_cscsv_info(const _rocsparse_cscsv_info&) = delete;
@@ -78,6 +81,7 @@ public:
     void copy(const _rocsparse_cscsv_info* that, hipStream_t stream)
     {
         this->trm_data_t::copy(that, stream);
+        this->m_analyzed_operation = that->m_analyzed_operation;
         for(int f = 0; f < 2; ++f)
         {
             this->m_num_tasks[f] = that->m_num_tasks[f];
@@ -193,18 +197,26 @@ public:
         this->m_csrsv_info = value;
     }
 
+    void set_analyzed_operation(rocsparse_operation value)
+    {
+        this->m_analyzed_operation = value;
+    }
+
     // Pivots of the analysis that was performed, CSC or transposed.
     rocsparse::pivot_info_t* get_symbolic_pivot()
     {
-        return (this->m_csrsv_info != nullptr)
+        return (this->m_analyzed_operation != rocsparse_operation_none
+                && this->m_csrsv_info != nullptr)
                    ? static_cast<rocsparse::pivot_info_t*>(this->m_csrsv_info.get())
                    : static_cast<rocsparse::pivot_info_t*>(this);
     }
 
     rocsparse::singular_info_t* get_exact_pivot()
     {
-        return (this->m_csrsv_info != nullptr) ? this->m_csrsv_info->get_singularity_numeric_exact()
-                                               : &this->m_singularity_numeric_exact;
+        return (this->m_analyzed_operation != rocsparse_operation_none
+                && this->m_csrsv_info != nullptr)
+                   ? this->m_csrsv_info->get_singularity_numeric_exact()
+                   : &this->m_singularity_numeric_exact;
     }
 };
 typedef _rocsparse_cscsv_info* rocsparse_cscsv_info;

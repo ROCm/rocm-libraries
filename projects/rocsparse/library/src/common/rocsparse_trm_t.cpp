@@ -63,10 +63,6 @@ void rocsparse::trm_t::destroy_ellsv_info()
 {
     this->m_ellsv_info.reset();
 }
-void rocsparse::trm_t::destroy_cscsv_info()
-{
-    this->m_cscsv_info.reset();
-}
 
 rocsparse_csrsv_info rocsparse::trm_t::create_csrsv_info()
 {
@@ -227,12 +223,6 @@ void rocsparse::trm_t::clear_ellsv_info()
 {
     this->uncouple(this->m_ellsv_info.get());
     this->destroy_ellsv_info();
-}
-
-void rocsparse::trm_t::clear_cscsv_info()
-{
-    this->uncouple(this->m_cscsv_info.get());
-    this->destroy_cscsv_info();
 }
 
 void rocsparse::trm_t::copy(const trm_t& that, hipStream_t stream)

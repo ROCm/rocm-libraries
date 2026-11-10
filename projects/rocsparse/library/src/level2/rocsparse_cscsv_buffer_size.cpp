@@ -36,12 +36,29 @@ uint32_t rocsparse::cscsv_num_lanes(int64_t min_lanes, uint32_t wavefront_size)
     return num_lanes;
 }
 
+rocsparse_status rocsparse::cscsv_check_matrix(rocsparse_const_spmat_descr A)
+{
+    ROCSPARSE_CHECKARG(0, A, A->descr == nullptr, rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(0, A, (A->rows != A->cols), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(0,
+                       A,
+                       (A->descr->type != rocsparse_matrix_type_general
+                        && A->descr->type != rocsparse_matrix_type_triangular),
+                       rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(0,
+                       A,
+                       (A->descr->storage_mode != rocsparse_storage_mode_sorted),
+                       rocsparse_status_requires_sorted_storage);
+    return rocsparse_status_success;
+}
+
 rocsparse_status rocsparse::cscsv_analysis_buffer_size(rocsparse_handle            handle,
                                                        rocsparse_operation         trans,
                                                        rocsparse_const_spmat_descr A,
                                                        size_t*                     buffer_size)
 {
     ROCSPARSE_ROUTINE_TRACE;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_check_matrix(A));
     if(trans == rocsparse_operation_none)
     {
         buffer_size[0] = 0;
@@ -71,6 +88,7 @@ rocsparse_status rocsparse::cscsv_solve_buffer_size(rocsparse_handle            
                                                     size_t*                     buffer_size)
 {
     ROCSPARSE_ROUTINE_TRACE;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_check_matrix(A));
     if(trans == rocsparse_operation_none)
     {
         // Ticket, remaining dependencies and partial sums of each batch instance.
