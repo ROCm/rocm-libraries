@@ -2704,6 +2704,75 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_CloseDsConsumerUsesBaselineOrder
     EXPECT_EQ(shape, "WdWWWWWWWWWWW");
 }
 
+// A close consumer rejects the loop-header fill, but that decision is not function-wide. The
+// barrier wait starts a new reset whose unrelated DS has no matrix consumer, so it fills the
+// queue independently. Explicit register edges keep the two WMMA groups on their barrier sides.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_EachResetDecidesIndependently) {
+    bb->addSuccessor(bb);
+    StinkyInstruction* firstDs =
+        createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80, /*ldsToken=*/1);
+    std::vector<StinkyInstruction*> firstWmmas;
+    for (int i = 0; i < 12; ++i) {
+        const int src = i == 4 ? 200 : 1000 + 16 * i;
+        firstWmmas.push_back(createWmmaF32_16x16x16_bf16(/*destStart=*/3000 + 16 * i, src));
+    }
+
+    auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/2);
+    for (int i = 0; i < 12; ++i)
+        signal->addSrcReg(StinkyRegister("v", /*index=*/3000 + 16 * i, /*size=*/8));
+    wait->addDestReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+
+    StinkyInstruction* secondDs =
+        createMovableDsLoad(/*destReg=*/800, /*addrReg=*/84, /*ldsToken=*/3);
+    secondDs->addSrcReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+    for (int i = 0; i < 12; ++i) {
+        StinkyInstruction* wmma = createWmmaF32_16x16x16_bf16(
+            /*destStart=*/4000 + 16 * i, /*src0Start=*/5000 + 16 * i);
+        wmma->addSrcReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+    }
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    int firstResetWmmas = 0;
+    int secondResetWmmas = 0;
+    bool afterWait = false;
+    bool sawFirstDs = false;
+    bool sawSecondDs = false;
+    for (IRBase& ir : *bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (inst == wait) {
+            afterWait = true;
+            continue;
+        }
+        if (inst == firstDs) {
+            sawFirstDs = true;
+            EXPECT_EQ(firstResetWmmas, 1);
+            continue;
+        }
+        if (inst == secondDs) {
+            sawSecondDs = true;
+            EXPECT_TRUE(afterWait);
+            EXPECT_EQ(secondResetWmmas, 9);
+            break;
+        }
+        if (!isMatrixInstruction(*inst)) continue;
+        if (afterWait)
+            ++secondResetWmmas;
+        else
+            ++firstResetWmmas;
+    }
+    EXPECT_TRUE(sawFirstDs);
+    EXPECT_TRUE(sawSecondDs);
+}
+
 // A ready tensor_load is placed at the Prefetch level, above the queue fill: it is not held
 // behind the fill's WMMAs.
 TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_TensorLoadIsNotHeld) {
