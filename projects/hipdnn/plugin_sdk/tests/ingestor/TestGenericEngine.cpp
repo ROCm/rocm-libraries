@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -15,7 +16,9 @@
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+#include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
@@ -150,6 +153,45 @@ TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)
     EXPECT_EQ(knobs[0]->description(), "Enable benchmarking");
     EXPECT_EQ(knobs[1]->knobId(), "block_size");
     EXPECT_EQ(knobs[2]->knobId(), "dtype");
+}
+
+/// Absent numerical_notes stays absent in the buffer (the backend reads that as unknown);
+/// an authored empty list and an authored note are carried through verbatim, alongside the
+/// engine's behavior notes.
+TEST(TestIngestorGenericEngine, GetDetailsCarriesTheEnginesNumericalNotes)
+{
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+
+    const std::vector<int32_t> behaviorNotes
+        = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION, HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE};
+
+    const auto notesFor = [&](const std::optional<std::vector<int32_t>>& authored) {
+        auto descriptor = makeEngineWithKnobs({BLOCK_SIZE});
+        descriptor.behaviorNotes = behaviorNotes;
+        descriptor.numericalNotes = authored;
+        const StubEngine engine(std::move(descriptor), makeStubStateManager(), resolver);
+        StubHandle handle;
+        const TestGraph graph(makeGraphId(0x67));
+        hipdnnPluginConstData_t details{};
+        engine.getDetails(handle, graph, details);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(
+            details.ptr, details.size);
+        EXPECT_TRUE(wrapper.isValid());
+        EXPECT_EQ(wrapper.behaviorNotes(), behaviorNotes);
+        return wrapper.numericalNotes();
+    };
+
+    EXPECT_FALSE(notesFor(std::nullopt).has_value());
+
+    const auto empty = notesFor(std::vector<int32_t>{});
+    ASSERT_TRUE(empty.has_value());
+    EXPECT_TRUE(empty->empty());
+
+    const auto nondeterministic
+        = notesFor(std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
+    ASSERT_TRUE(nondeterministic.has_value());
+    EXPECT_EQ(*nondeterministic, (std::vector<int32_t>{4}));
 }
 
 /// GenericEngine::getDetails() advertises global.benchmarking out-of-band, so a UED

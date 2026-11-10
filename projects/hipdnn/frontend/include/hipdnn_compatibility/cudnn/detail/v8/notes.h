@@ -12,7 +12,6 @@
 #include <hipdnn_backend.h>
 
 #include <hipdnn_compatibility/cudnn/detail/c_types.h>
-#include <hipdnn_compatibility/cudnn/detail/engine_filters.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 #include <hipdnn_compatibility/cudnn/detail/type_mapping.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
@@ -25,15 +24,69 @@
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 {
 
-// hipDNN engines declare no numerical notes (its ENGINE_NUMERICAL_NOTE GET is
-// NOT_SUPPORTED); only a determinism claim lifts NONDETERMINISTIC.
-inline std::vector<cudnnBackendNumericalNote_t> numericalNotes(std::int64_t engineId)
+// Only notes with a cuDNN counterpart, in hipDNN's order. `context` prefixes
+// the error when the GET fails. An older same-major backend does not know
+// HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE and answers HIPDNN_STATUS_NOT_SUPPORTED; that
+// status alone reads as {NONDETERMINISTIC}, the conservative claim for an engine
+// that declares nothing. Any other failure throws.
+inline std::vector<cudnnBackendNumericalNote_t>
+    readCudnnNumericalNotes(hipdnnBackendDescriptor_t engine, const std::string& context)
 {
-    if(isDeterminismClaimed(engineId))
+    const auto backend = ::hipdnn_frontend::detail::hipdnnBackend();
+
+    std::int64_t count = 0;
+    hipdnnStatus_t status = backend->backendGetAttribute(
+        engine, HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 0, &count, nullptr);
+    if(status == HIPDNN_STATUS_NOT_SUPPORTED)
     {
-        return {};
+        takeHipdnnMessage();
+        return {CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
     }
-    return {CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+    checkHipdnn(status, context + ": failed to get count for engine numerical notes");
+    if(count < 0)
+    {
+        throw CompatibilityError(CUDNN_STATUS_INTERNAL_ERROR,
+                                 context + ": negative count for engine numerical notes");
+    }
+
+    std::vector<hipdnnBackendNumericalNote_t> hipdnnNotes;
+    if(count > 0)
+    {
+        hipdnnNotes.resize(static_cast<std::size_t>(count));
+        std::int64_t actualCount = 0;
+        status = backend->backendGetAttribute(engine,
+                                              HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE,
+                                              HIPDNN_TYPE_NUMERICAL_NOTE,
+                                              count,
+                                              &actualCount,
+                                              hipdnnNotes.data());
+        if(status == HIPDNN_STATUS_NOT_SUPPORTED)
+        {
+            takeHipdnnMessage();
+            return {CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+        }
+        checkHipdnn(status, context + ": failed to get engine numerical notes");
+        if(actualCount != count)
+        {
+            throw CompatibilityError(CUDNN_STATUS_INTERNAL_ERROR,
+                                     context
+                                         + ": element count mismatch for engine numerical notes");
+        }
+    }
+
+    std::vector<cudnnBackendNumericalNote_t> notes;
+    for(const hipdnnBackendNumericalNote_t note : hipdnnNotes)
+    {
+        const std::optional<NumericalNote_t> mapped
+            = ::hipdnn_frontend::fromHipdnnNumericalNote(note);
+        const std::optional<cudnnBackendNumericalNote_t> cudnnNote
+            = mapped ? toCudnn(*mapped) : std::nullopt;
+        if(cudnnNote)
+        {
+            notes.push_back(*cudnnNote);
+        }
+    }
+    return notes;
 }
 
 // Only notes with a cuDNN counterpart, in hipDNN's order. `context` prefixes
@@ -96,8 +149,8 @@ inline bool engineConfigHasNumericalNote(hipdnnBackendDescriptor_t engineConfig,
 {
     bool found = false;
     return guarded([&] {
-               const std::vector<cudnnBackendNumericalNote_t> notes
-                   = numericalNotes(engineGlobalIndex(engineOfConfig(engineConfig).get()));
+               const std::vector<cudnnBackendNumericalNote_t> notes = readCudnnNumericalNotes(
+                   engineOfConfig(engineConfig).get(), "reading engine numerical notes");
                found = std::find(notes.begin(), notes.end(), note) != notes.end();
            })
            && found;
