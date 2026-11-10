@@ -42,7 +42,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 1000
     },
@@ -79,7 +87,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 999
     },
@@ -116,7 +132,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 998
     },
@@ -153,7 +177,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 997
     },
@@ -190,7 +222,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 996
     },
@@ -227,7 +267,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 995
     },
@@ -264,7 +312,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 994
     },
@@ -301,9 +357,152 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 993
+    },
+    {
+      "version": "1.0",
+      "id": "55c9f82b-f6d2-5571-9e81-7fa488b8c8d9",
+      "name": "conv_direct.bwd.f16.1x3x3.mfma16x32_f16.native.rows.p8f4.w2x2x2c64.v8.pp0.epi1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDirect.cpp",
+        "entry_point": "ConvDirect"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "kind": "rows",
+        "atom": "mfma16x32_f16",
+        "archs": "gfx950",
+        "atom_id": 9,
+        "math": 0,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "bm": 16,
+        "bn": 128,
+        "bc": 64,
+        "wm": 0,
+        "wn": 0,
+        "vec": 8,
+        "ring": 0,
+        "bl": 0,
+        "split": 0,
+        "tm": 0,
+        "tn": 0,
+        "nt": 0,
+        "threads": 0,
+        "pipe": 0,
+        "rows": 1,
+        "pw": 8,
+        "fn": 4,
+        "wp": 2,
+        "wq": 2,
+        "wk": 2,
+        "pp": 0,
+        "epi": 1
+      },
+      "priority": 992
+    },
+    {
+      "version": "1.0",
+      "id": "6689de62-7817-5300-87cb-2870f8f34a34",
+      "name": "conv_direct.bwd.f16.1x3x3.mfma16x32_f16.native.rows.p8f4.w2x2x2c64.v8.pp1.epi0",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDirect.cpp",
+        "entry_point": "ConvDirect"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "kind": "rows",
+        "atom": "mfma16x32_f16",
+        "archs": "gfx950",
+        "atom_id": 9,
+        "math": 0,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "bm": 16,
+        "bn": 128,
+        "bc": 64,
+        "wm": 0,
+        "wn": 0,
+        "vec": 8,
+        "ring": 0,
+        "bl": 0,
+        "split": 0,
+        "tm": 0,
+        "tn": 0,
+        "nt": 0,
+        "threads": 0,
+        "pipe": 0,
+        "rows": 1,
+        "pw": 8,
+        "fn": 4,
+        "wp": 2,
+        "wq": 2,
+        "wk": 2,
+        "pp": 1,
+        "epi": 0
+      },
+      "priority": 991
+    },
+    {
+      "version": "1.0",
+      "id": "7e729c18-82a1-502a-b48a-fd02db3d9e66",
+      "name": "conv_direct.bwd.f16.1x3x3.mfma16x32_f16.native.rows.p8f2.w2x2x2c64.v8.pp0.epi1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDirect.cpp",
+        "entry_point": "ConvDirect"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "kind": "rows",
+        "atom": "mfma16x32_f16",
+        "archs": "gfx950",
+        "atom_id": 9,
+        "math": 0,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "bm": 16,
+        "bn": 64,
+        "bc": 64,
+        "wm": 0,
+        "wn": 0,
+        "vec": 8,
+        "ring": 0,
+        "bl": 0,
+        "split": 0,
+        "tm": 0,
+        "tn": 0,
+        "nt": 0,
+        "threads": 0,
+        "pipe": 0,
+        "rows": 1,
+        "pw": 8,
+        "fn": 2,
+        "wp": 2,
+        "wq": 2,
+        "wk": 2,
+        "pp": 0,
+        "epi": 1
+      },
+      "priority": 990
     },
     {
       "version": "1.0",
@@ -338,9 +537,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 992
+      "priority": 989
     },
     {
       "version": "1.0",
@@ -375,9 +582,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 991
+      "priority": 988
     },
     {
       "version": "1.0",
@@ -412,9 +627,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 990
+      "priority": 987
     },
     {
       "version": "1.0",
@@ -449,9 +672,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 989
+      "priority": 986
     },
     {
       "version": "1.0",
@@ -486,9 +717,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 988
+      "priority": 985
     },
     {
       "version": "1.0",
@@ -523,9 +762,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 987
+      "priority": 984
     },
     {
       "version": "1.0",
@@ -560,9 +807,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 986
+      "priority": 983
     },
     {
       "version": "1.0",
@@ -597,9 +852,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 985
+      "priority": 982
     },
     {
       "version": "1.0",
@@ -634,9 +897,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 984
+      "priority": 981
     },
     {
       "version": "1.0",
@@ -671,9 +942,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 983
+      "priority": 980
     },
     {
       "version": "1.0",
@@ -708,9 +987,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 982
+      "priority": 979
     },
     {
       "version": "1.0",
@@ -745,9 +1032,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 981
+      "priority": 978
     },
     {
       "version": "1.0",
@@ -782,9 +1077,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 980
+      "priority": 977
     },
     {
       "version": "1.0",
@@ -819,9 +1122,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 979
+      "priority": 976
     },
     {
       "version": "1.0",
@@ -856,9 +1167,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 978
+      "priority": 975
     },
     {
       "version": "1.0",
@@ -893,9 +1212,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 977
+      "priority": 974
     },
     {
       "version": "1.0",
@@ -930,9 +1257,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 976
+      "priority": 973
     },
     {
       "version": "1.0",
@@ -967,9 +1302,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 975
+      "priority": 972
     },
     {
       "version": "1.0",
@@ -1004,9 +1347,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 974
+      "priority": 971
     },
     {
       "version": "1.0",
@@ -1041,9 +1392,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 973
+      "priority": 970
     },
     {
       "version": "1.0",
@@ -1078,9 +1437,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 972
+      "priority": 969
     },
     {
       "version": "1.0",
@@ -1115,9 +1482,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 971
+      "priority": 968
     },
     {
       "version": "1.0",
@@ -1152,9 +1527,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 970
+      "priority": 967
     },
     {
       "version": "1.0",
@@ -1189,9 +1572,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 969
+      "priority": 966
     },
     {
       "version": "1.0",
@@ -1226,9 +1617,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 968
+      "priority": 965
     },
     {
       "version": "1.0",
@@ -1263,9 +1662,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 967
+      "priority": 964
     },
     {
       "version": "1.0",
@@ -1300,9 +1707,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 966
+      "priority": 963
     },
     {
       "version": "1.0",
@@ -1337,9 +1752,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 965
+      "priority": 962
     },
     {
       "version": "1.0",
@@ -1374,9 +1797,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 964
+      "priority": 961
     },
     {
       "version": "1.0",
@@ -1411,9 +1842,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 963
+      "priority": 960
     },
     {
       "version": "1.0",
@@ -1448,9 +1887,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 962
+      "priority": 959
     },
     {
       "version": "1.0",
@@ -1485,9 +1932,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 961
+      "priority": 958
     },
     {
       "version": "1.0",
@@ -1522,9 +1977,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 960
+      "priority": 957
     },
     {
       "version": "1.0",
@@ -1559,9 +2022,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 959
+      "priority": 956
     },
     {
       "version": "1.0",
@@ -1596,9 +2067,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 958
+      "priority": 955
     },
     {
       "version": "1.0",
@@ -1633,9 +2112,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 957
+      "priority": 954
     },
     {
       "version": "1.0",
@@ -1670,9 +2157,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 956
+      "priority": 953
     },
     {
       "version": "1.0",
@@ -1707,9 +2202,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 955
+      "priority": 952
     },
     {
       "version": "1.0",
@@ -1744,9 +2247,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 954
+      "priority": 951
     },
     {
       "version": "1.0",
@@ -1781,9 +2292,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 953
+      "priority": 950
     },
     {
       "version": "1.0",
@@ -1818,9 +2337,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 952
+      "priority": 949
     },
     {
       "version": "1.0",
@@ -1855,9 +2382,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 951
+      "priority": 948
     },
     {
       "version": "1.0",
@@ -1892,7 +2427,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 1000
     },
@@ -1929,7 +2472,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 999
     },
@@ -1966,7 +2517,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 998
     },
@@ -2003,7 +2562,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 997
     },
@@ -2040,7 +2607,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 996
     },
@@ -2077,7 +2652,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 995
     },
@@ -2114,7 +2697,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 994
     },
@@ -2151,9 +2742,152 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 993
+    },
+    {
+      "version": "1.0",
+      "id": "4b61776c-365a-550c-afd5-16f1485a40f7",
+      "name": "conv_direct.bwd.bf16.1x3x3.mfma16x32_bf16.native.rows.p8f4.w2x2x2c64.v8.pp0.epi1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDirect.cpp",
+        "entry_point": "ConvDirect"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "kind": "rows",
+        "atom": "mfma16x32_bf16",
+        "archs": "gfx950",
+        "atom_id": 10,
+        "math": 0,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "bm": 16,
+        "bn": 128,
+        "bc": 64,
+        "wm": 0,
+        "wn": 0,
+        "vec": 8,
+        "ring": 0,
+        "bl": 0,
+        "split": 0,
+        "tm": 0,
+        "tn": 0,
+        "nt": 0,
+        "threads": 0,
+        "pipe": 0,
+        "rows": 1,
+        "pw": 8,
+        "fn": 4,
+        "wp": 2,
+        "wq": 2,
+        "wk": 2,
+        "pp": 0,
+        "epi": 1
+      },
+      "priority": 992
+    },
+    {
+      "version": "1.0",
+      "id": "4df6a4c1-c3a6-5049-92a7-35df8d466967",
+      "name": "conv_direct.bwd.bf16.1x3x3.mfma16x32_bf16.native.rows.p8f4.w2x2x2c64.v8.pp1.epi0",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDirect.cpp",
+        "entry_point": "ConvDirect"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "kind": "rows",
+        "atom": "mfma16x32_bf16",
+        "archs": "gfx950",
+        "atom_id": 10,
+        "math": 0,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "bm": 16,
+        "bn": 128,
+        "bc": 64,
+        "wm": 0,
+        "wn": 0,
+        "vec": 8,
+        "ring": 0,
+        "bl": 0,
+        "split": 0,
+        "tm": 0,
+        "tn": 0,
+        "nt": 0,
+        "threads": 0,
+        "pipe": 0,
+        "rows": 1,
+        "pw": 8,
+        "fn": 4,
+        "wp": 2,
+        "wq": 2,
+        "wk": 2,
+        "pp": 1,
+        "epi": 0
+      },
+      "priority": 991
+    },
+    {
+      "version": "1.0",
+      "id": "9868146f-ec99-52b5-bbd0-ba1da4aa75b6",
+      "name": "conv_direct.bwd.bf16.1x3x3.mfma16x32_bf16.native.rows.p8f2.w2x2x2c64.v8.pp0.epi1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDirect.cpp",
+        "entry_point": "ConvDirect"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "kind": "rows",
+        "atom": "mfma16x32_bf16",
+        "archs": "gfx950",
+        "atom_id": 10,
+        "math": 0,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "bm": 16,
+        "bn": 64,
+        "bc": 64,
+        "wm": 0,
+        "wn": 0,
+        "vec": 8,
+        "ring": 0,
+        "bl": 0,
+        "split": 0,
+        "tm": 0,
+        "tn": 0,
+        "nt": 0,
+        "threads": 0,
+        "pipe": 0,
+        "rows": 1,
+        "pw": 8,
+        "fn": 2,
+        "wp": 2,
+        "wq": 2,
+        "wk": 2,
+        "pp": 0,
+        "epi": 1
+      },
+      "priority": 990
     },
     {
       "version": "1.0",
@@ -2188,9 +2922,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 992
+      "priority": 989
     },
     {
       "version": "1.0",
@@ -2225,9 +2967,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 991
+      "priority": 988
     },
     {
       "version": "1.0",
@@ -2262,9 +3012,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 990
+      "priority": 987
     },
     {
       "version": "1.0",
@@ -2299,9 +3057,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 989
+      "priority": 986
     },
     {
       "version": "1.0",
@@ -2336,9 +3102,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 988
+      "priority": 985
     },
     {
       "version": "1.0",
@@ -2373,9 +3147,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 987
+      "priority": 984
     },
     {
       "version": "1.0",
@@ -2410,9 +3192,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 986
+      "priority": 983
     },
     {
       "version": "1.0",
@@ -2447,9 +3237,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 985
+      "priority": 982
     },
     {
       "version": "1.0",
@@ -2484,9 +3282,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 984
+      "priority": 981
     },
     {
       "version": "1.0",
@@ -2521,9 +3327,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 983
+      "priority": 980
     },
     {
       "version": "1.0",
@@ -2558,9 +3372,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 982
+      "priority": 979
     },
     {
       "version": "1.0",
@@ -2595,9 +3417,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 981
+      "priority": 978
     },
     {
       "version": "1.0",
@@ -2632,9 +3462,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 980
+      "priority": 977
     },
     {
       "version": "1.0",
@@ -2669,9 +3507,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 979
+      "priority": 976
     },
     {
       "version": "1.0",
@@ -2706,9 +3552,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 978
+      "priority": 975
     },
     {
       "version": "1.0",
@@ -2743,9 +3597,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 977
+      "priority": 974
     },
     {
       "version": "1.0",
@@ -2780,9 +3642,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 976
+      "priority": 973
     },
     {
       "version": "1.0",
@@ -2817,9 +3687,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 975
+      "priority": 972
     },
     {
       "version": "1.0",
@@ -2854,9 +3732,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 974
+      "priority": 971
     },
     {
       "version": "1.0",
@@ -2891,9 +3777,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 973
+      "priority": 970
     },
     {
       "version": "1.0",
@@ -2928,9 +3822,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 972
+      "priority": 969
     },
     {
       "version": "1.0",
@@ -2965,9 +3867,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 971
+      "priority": 968
     },
     {
       "version": "1.0",
@@ -3002,9 +3912,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 970
+      "priority": 967
     },
     {
       "version": "1.0",
@@ -3039,9 +3957,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 969
+      "priority": 966
     },
     {
       "version": "1.0",
@@ -3076,9 +4002,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 968
+      "priority": 965
     },
     {
       "version": "1.0",
@@ -3113,9 +4047,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 967
+      "priority": 964
     },
     {
       "version": "1.0",
@@ -3150,9 +4092,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 966
+      "priority": 963
     },
     {
       "version": "1.0",
@@ -3187,9 +4137,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 965
+      "priority": 962
     },
     {
       "version": "1.0",
@@ -3224,9 +4182,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 964
+      "priority": 961
     },
     {
       "version": "1.0",
@@ -3261,9 +4227,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 963
+      "priority": 960
     },
     {
       "version": "1.0",
@@ -3298,9 +4272,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 962
+      "priority": 959
     },
     {
       "version": "1.0",
@@ -3335,9 +4317,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 961
+      "priority": 958
     },
     {
       "version": "1.0",
@@ -3372,9 +4362,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 960
+      "priority": 957
     },
     {
       "version": "1.0",
@@ -3409,9 +4407,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 959
+      "priority": 956
     },
     {
       "version": "1.0",
@@ -3446,9 +4452,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 958
+      "priority": 955
     },
     {
       "version": "1.0",
@@ -3483,9 +4497,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 957
+      "priority": 954
     },
     {
       "version": "1.0",
@@ -3520,9 +4542,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 956
+      "priority": 953
     },
     {
       "version": "1.0",
@@ -3557,9 +4587,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 955
+      "priority": 952
     },
     {
       "version": "1.0",
@@ -3594,9 +4632,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 954
+      "priority": 951
     },
     {
       "version": "1.0",
@@ -3631,9 +4677,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 953
+      "priority": 950
     },
     {
       "version": "1.0",
@@ -3668,9 +4722,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 952
+      "priority": 949
     },
     {
       "version": "1.0",
@@ -3705,9 +4767,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 951
+      "priority": 948
     },
     {
       "version": "1.0",
@@ -3742,9 +4812,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 950
+      "priority": 947
     },
     {
       "version": "1.0",
@@ -3779,9 +4857,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 949
+      "priority": 946
     },
     {
       "version": "1.0",
@@ -3816,9 +4902,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 948
+      "priority": 945
     },
     {
       "version": "1.0",
@@ -3853,9 +4947,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 947
+      "priority": 944
     },
     {
       "version": "1.0",
@@ -3890,9 +4992,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 946
+      "priority": 943
     },
     {
       "version": "1.0",
@@ -3927,9 +5037,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 945
+      "priority": 942
     },
     {
       "version": "1.0",
@@ -3964,9 +5082,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 944
+      "priority": 941
     },
     {
       "version": "1.0",
@@ -4001,9 +5127,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 943
+      "priority": 940
     },
     {
       "version": "1.0",
@@ -4038,7 +5172,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 1000
     },
@@ -4075,7 +5217,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 999
     },
@@ -4112,7 +5262,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 998
     },
@@ -4149,7 +5307,15 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 997
     },
@@ -4186,9 +5352,62 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
       "priority": 996
+    },
+    {
+      "version": "1.0",
+      "id": "55ba5861-a66e-59f0-a5f8-932dbc6b9c01",
+      "name": "conv_direct.bwd.f32.1x3x3.mfma16_f32.native.rows.p8f4.w2x2x2c32.v4.pp0.epi0",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDirect.cpp",
+        "entry_point": "ConvDirect"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "kind": "rows",
+        "atom": "mfma16_f32",
+        "archs": "gfx950",
+        "atom_id": 7,
+        "math": 0,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "bm": 16,
+        "bn": 128,
+        "bc": 32,
+        "wm": 0,
+        "wn": 0,
+        "vec": 4,
+        "ring": 0,
+        "bl": 0,
+        "split": 0,
+        "tm": 0,
+        "tn": 0,
+        "nt": 0,
+        "threads": 0,
+        "pipe": 0,
+        "rows": 1,
+        "pw": 8,
+        "fn": 4,
+        "wp": 2,
+        "wq": 2,
+        "wk": 2,
+        "pp": 0,
+        "epi": 0
+      },
+      "priority": 995
     },
     {
       "version": "1.0",
@@ -4223,9 +5442,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 995
+      "priority": 994
     },
     {
       "version": "1.0",
@@ -4260,9 +5487,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 994
+      "priority": 993
     },
     {
       "version": "1.0",
@@ -4297,9 +5532,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 993
+      "priority": 992
     },
     {
       "version": "1.0",
@@ -4334,9 +5577,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 992
+      "priority": 991
     },
     {
       "version": "1.0",
@@ -4371,9 +5622,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 991
+      "priority": 990
     },
     {
       "version": "1.0",
@@ -4408,9 +5667,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 990
+      "priority": 989
     },
     {
       "version": "1.0",
@@ -4445,9 +5712,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 989
+      "priority": 988
     },
     {
       "version": "1.0",
@@ -4482,9 +5757,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 988
+      "priority": 987
     },
     {
       "version": "1.0",
@@ -4519,9 +5802,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 1
+        "pipe": 1,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 987
+      "priority": 986
     },
     {
       "version": "1.0",
@@ -4556,9 +5847,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 1
+        "pipe": 1,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 986
+      "priority": 985
     },
     {
       "version": "1.0",
@@ -4593,9 +5892,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 985
+      "priority": 984
     },
     {
       "version": "1.0",
@@ -4630,9 +5937,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 984
+      "priority": 983
     },
     {
       "version": "1.0",
@@ -4667,9 +5982,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 983
+      "priority": 982
     },
     {
       "version": "1.0",
@@ -4704,9 +6027,62 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 982
+      "priority": 981
+    },
+    {
+      "version": "1.0",
+      "id": "1d197142-f325-585c-a7c9-9747361c66ea",
+      "name": "conv_direct.bwd.f32.1x3x3.mfma16x32_bf16.bf16x3.rows.p8f4.w2x2x2c64.v8.pp0.epi0",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDirect.cpp",
+        "entry_point": "ConvDirect"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "kind": "rows",
+        "atom": "mfma16x32_bf16",
+        "archs": "gfx950",
+        "atom_id": 10,
+        "math": 1,
+        "kd": 1,
+        "r": 3,
+        "s": 3,
+        "bm": 16,
+        "bn": 128,
+        "bc": 64,
+        "wm": 0,
+        "wn": 0,
+        "vec": 8,
+        "ring": 0,
+        "bl": 0,
+        "split": 0,
+        "tm": 0,
+        "tn": 0,
+        "nt": 0,
+        "threads": 0,
+        "pipe": 0,
+        "rows": 1,
+        "pw": 8,
+        "fn": 4,
+        "wp": 2,
+        "wq": 2,
+        "wk": 2,
+        "pp": 0,
+        "epi": 0
+      },
+      "priority": 980
     },
     {
       "version": "1.0",
@@ -4741,9 +6117,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 981
+      "priority": 979
     },
     {
       "version": "1.0",
@@ -4778,9 +6162,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 980
+      "priority": 978
     },
     {
       "version": "1.0",
@@ -4815,9 +6207,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 979
+      "priority": 977
     },
     {
       "version": "1.0",
@@ -4852,9 +6252,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 978
+      "priority": 976
     },
     {
       "version": "1.0",
@@ -4889,9 +6297,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 977
+      "priority": 975
     },
     {
       "version": "1.0",
@@ -4926,9 +6342,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 976
+      "priority": 974
     },
     {
       "version": "1.0",
@@ -4963,9 +6387,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 975
+      "priority": 973
     },
     {
       "version": "1.0",
@@ -5000,9 +6432,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 974
+      "priority": 972
     },
     {
       "version": "1.0",
@@ -5037,9 +6477,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 973
+      "priority": 971
     },
     {
       "version": "1.0",
@@ -5074,9 +6522,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 972
+      "priority": 970
     },
     {
       "version": "1.0",
@@ -5111,9 +6567,17 @@
         "tn": 0,
         "nt": 0,
         "threads": 0,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 971
+      "priority": 969
     },
     {
       "version": "1.0",
@@ -5148,9 +6612,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 970
+      "priority": 968
     },
     {
       "version": "1.0",
@@ -5185,9 +6657,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 969
+      "priority": 967
     },
     {
       "version": "1.0",
@@ -5222,9 +6702,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 968
+      "priority": 966
     },
     {
       "version": "1.0",
@@ -5259,9 +6747,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 967
+      "priority": 965
     },
     {
       "version": "1.0",
@@ -5296,9 +6792,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 966
+      "priority": 964
     },
     {
       "version": "1.0",
@@ -5333,9 +6837,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 965
+      "priority": 963
     },
     {
       "version": "1.0",
@@ -5370,9 +6882,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 964
+      "priority": 962
     },
     {
       "version": "1.0",
@@ -5407,9 +6927,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 963
+      "priority": 961
     },
     {
       "version": "1.0",
@@ -5444,9 +6972,17 @@
         "tn": 4,
         "nt": 16,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 962
+      "priority": 960
     },
     {
       "version": "1.0",
@@ -5481,9 +7017,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 961
+      "priority": 959
     },
     {
       "version": "1.0",
@@ -5518,9 +7062,17 @@
         "tn": 8,
         "nt": 8,
         "threads": 256,
-        "pipe": 0
+        "pipe": 0,
+        "rows": 0,
+        "pw": 0,
+        "fn": 0,
+        "wp": 0,
+        "wq": 0,
+        "wk": 0,
+        "pp": 0,
+        "epi": 0
       },
-      "priority": 960
+      "priority": 958
     }
   ]
 }

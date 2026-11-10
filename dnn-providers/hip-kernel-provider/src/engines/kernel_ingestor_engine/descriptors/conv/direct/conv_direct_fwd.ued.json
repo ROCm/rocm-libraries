@@ -25,7 +25,15 @@
     "tn",
     "nt",
     "threads",
-    "pipe"
+    "pipe",
+    "rows",
+    "pw",
+    "fn",
+    "wp",
+    "wq",
+    "wk",
+    "pp",
+    "epi"
   ],
   "behavior_notes": [
     "runtime_compilation"

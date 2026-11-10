@@ -98,6 +98,38 @@
     {
       "name": "pipe",
       "type": "int"
+    },
+    {
+      "name": "rows",
+      "type": "int"
+    },
+    {
+      "name": "pw",
+      "type": "int"
+    },
+    {
+      "name": "fn",
+      "type": "int"
+    },
+    {
+      "name": "wp",
+      "type": "int"
+    },
+    {
+      "name": "wq",
+      "type": "int"
+    },
+    {
+      "name": "wk",
+      "type": "int"
+    },
+    {
+      "name": "pp",
+      "type": "int"
+    },
+    {
+      "name": "epi",
+      "type": "int"
     }
   ]
 }

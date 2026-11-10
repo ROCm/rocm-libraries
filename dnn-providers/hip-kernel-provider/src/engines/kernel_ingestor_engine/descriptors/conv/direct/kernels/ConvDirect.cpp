@@ -9,13 +9,23 @@
 //   CONV_DIRECT_MATH    0 native, 1 three-bf16 (fp32 graph run as a 3C-channel bf16 conv)
 //   CONV_DIRECT_KD, _R, _S   filter extent
 //   CONV_DIRECT_FMA     1 for the FMA kernel: _BC, _TM, _TN, _NT, _THREADS, _VEC, _RING, _PIPE
-//                       0 for the matrix-core kernel: CONV_DIRECT_ATOM, _BM, _BN, _BC, _WM, _WN,
-//                       _VEC, _RING, _BL, _SPLIT
+//                       0 for the matrix-core kernels: CONV_DIRECT_ATOM, _BC, _VEC, and
+//   CONV_DIRECT_ROWS    0: the halo-tile kernel, _BM, _BN, _WM, _WN, _RING, _BL, _SPLIT
+//                       1: the filter-row reuse kernel (ConvDirectRows.h), _PW, _FN, _WP, _WQ,
+//                       _WK, _PP, _EPI
 
 #include "ConvDirectCore.h"
+#ifndef CONV_DIRECT_ROWS
+#define CONV_DIRECT_ROWS 0
+#endif
+#if CONV_DIRECT_ROWS
+#include "ConvDirectRows.h"
+#endif
 
 #if CONV_DIRECT_FMA
 #define CONV_DIRECT_BLOCK CONV_DIRECT_THREADS
+#elif CONV_DIRECT_ROWS
+#define CONV_DIRECT_BLOCK (CONV_DIRECT_WP * CONV_DIRECT_WQ * CONV_DIRECT_WK * 64)
 #else
 #define CONV_DIRECT_BLOCK (CONV_DIRECT_WM * CONV_DIRECT_WN * CONV_DIRECT_ATOM::WAVE)
 #endif
@@ -35,6 +45,20 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
               CONV_DIRECT_VEC,
               CONV_DIRECT_RING,
               CONV_DIRECT_PIPE>(a);
+#elif CONV_DIRECT_ROWS
+    k2ConvRows<CONV_DIRECT_T,
+               CONV_DIRECT_ATOM,
+               CONV_DIRECT_R,
+               CONV_DIRECT_S,
+               CONV_DIRECT_PW,
+               CONV_DIRECT_FN,
+               CONV_DIRECT_WP,
+               CONV_DIRECT_WQ,
+               CONV_DIRECT_WK,
+               CONV_DIRECT_BC,
+               CONV_DIRECT_PP,
+               CONV_DIRECT_EPI,
+               CONV_DIRECT_TO>(a);
 #else
     k2ConvMma<CONV_DIRECT_T,
               CONV_DIRECT_ATOM,
@@ -57,7 +81,9 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
 /// Formats the graph's filter into the layout this config reads.
 extern "C" __global__ void __launch_bounds__(256) ConvDirectFormat(K2FormatArgs a)
 {
-#if CONV_DIRECT_MATH
+#if CONV_DIRECT_ROWS
+    k2rFormatWeights<CONV_DIRECT_T, CONV_DIRECT_ATOM::KPL, CONV_DIRECT_FN, CONV_DIRECT_MATH>(a);
+#elif CONV_DIRECT_MATH
     k2FormatWeightsSplit(a);
 #else
     k2FormatWeights<CONV_DIRECT_T>(a);

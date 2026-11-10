@@ -456,11 +456,12 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     const auto atom = stringField(kernel, "atom");
     const auto archs = stringField(kernel, "archs");
     if(!kind.has_value() || !atom.has_value() || !archs.has_value()
-       || (*kind != "mma" && *kind != "fma"))
+       || (*kind != "mma" && *kind != "fma" && *kind != "rows"))
     {
         return std::nullopt;
     }
     config.fma = *kind == "fma";
+    config.rows = *kind == "rows";
     config.atom = *atom;
     config.archs = *archs;
     const auto info = conv_igemm::atomNamed(config.atom);
@@ -472,25 +473,17 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     config.wave = info->wave;
     int math = 0;
     int atomId = 0;
-    const std::array<std::pair<const char*, int*>, 19> ints{{{"atom_id", &atomId},
-                                                             {"math", &math},
-                                                             {"kd", &config.kd},
-                                                             {"r", &config.r},
-                                                             {"s", &config.s},
-                                                             {"bm", &config.bm},
-                                                             {"bn", &config.bn},
-                                                             {"bc", &config.bc},
-                                                             {"wm", &config.wm},
-                                                             {"wn", &config.wn},
-                                                             {"vec", &config.vec},
-                                                             {"ring", &config.ring},
-                                                             {"bl", &config.bl},
-                                                             {"split", &config.split},
-                                                             {"tm", &config.tm},
-                                                             {"tn", &config.tn},
-                                                             {"nt", &config.nt},
-                                                             {"threads", &config.threads},
-                                                             {"pipe", &config.pipe}}};
+    int rowsKnob = 0;
+    const std::array<std::pair<const char*, int*>, 27> ints{
+        {{"atom_id", &atomId},   {"math", &math},          {"kd", &config.kd},
+         {"r", &config.r},       {"s", &config.s},         {"bm", &config.bm},
+         {"bn", &config.bn},     {"bc", &config.bc},       {"wm", &config.wm},
+         {"wn", &config.wn},     {"vec", &config.vec},     {"ring", &config.ring},
+         {"bl", &config.bl},     {"split", &config.split}, {"tm", &config.tm},
+         {"tn", &config.tn},     {"nt", &config.nt},       {"threads", &config.threads},
+         {"pipe", &config.pipe}, {"rows", &rowsKnob},      {"pw", &config.pw},
+         {"fn", &config.fn},     {"wp", &config.wp},       {"wq", &config.wq},
+         {"wk", &config.wk},     {"pp", &config.pp},       {"epi", &config.epi}}};
     for(const auto& [name, target] : ints)
     {
         const auto value = intField(kernel, name);
@@ -500,7 +493,25 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         }
         *target = *value;
     }
-    if(math != 0 && math != 1)
+    if((math != 0 && math != 1) || rowsKnob != (config.rows ? 1 : 0))
+    {
+        return std::nullopt;
+    }
+    // The rows knobs belong to rows configs only; the halo-tile knobs to the others.
+    const bool rowsFields = config.pw != 0 || config.fn != 0 || config.wp != 0 || config.wq != 0
+                            || config.wk != 0 || config.pp != 0 || config.epi != 0;
+    if(config.rows)
+    {
+        if(config.pw < 1 || config.fn < 1 || config.wp < 1 || config.wq < 1 || config.wk < 1
+           || (config.pp != 0 && config.pp != 1) || (config.pp == 1 && config.wk != 2)
+           || (config.epi != 0 && config.epi != 1) || config.kd != 1 || config.ring != 0
+           || config.bl != 0 || config.split != 0 || config.wm != 0 || config.wn != 0
+           || config.bm != config.wp * config.pw || config.bn != config.wk * config.fn * 16)
+        {
+            return std::nullopt;
+        }
+    }
+    else if(rowsFields)
     {
         return std::nullopt;
     }
@@ -588,7 +599,33 @@ std::optional<Plan>
     {
         return std::nullopt;
     }
-    const auto tile = tileFor(a, config, columnBlocks, computeUnits);
+    std::optional<Tile> tile;
+    if(config.rows)
+    {
+        // Fixed tile; each block walks tiles, one block per compute unit at most.
+        Tile t;
+        t.th = config.wp * config.pw;
+        t.tw = config.wq * 16;
+        t.ds = 1;
+        t.tilesW = static_cast<int>(divUp(a.wo, t.tw));
+        t.tilesH = static_cast<int>(divUp(a.ho, t.th));
+        t.tilesD = 1;
+        t.blocks = static_cast<long long>(t.tilesW) * t.tilesH * a.n * columnBlocks;
+        // The halo moves in 16-byte granules of whole channels; 32-bit offsets within one input
+        // image; the tile count fits an int.
+        const int operandBytes = config.math ? 2 : problem.elementBytes;
+        const long long imageBytes = static_cast<long long>(a.hi) * a.wi * reduction * operandBytes;
+        if(config.vec * operandBytes != 16 || a.dout != 1 || a.di != 1 || imageBytes >= BUFFER_LIMIT
+           || t.blocks > INT_LIMIT)
+        {
+            return std::nullopt;
+        }
+        tile = t;
+    }
+    else
+    {
+        tile = tileFor(a, config, columnBlocks, computeUnits);
+    }
     if(!tile.has_value())
     {
         return std::nullopt;
@@ -630,6 +667,13 @@ std::optional<Plan>
     plan.grid[0] = static_cast<unsigned int>(gridX);
     plan.grid[1] = static_cast<unsigned int>(columnBlocks);
     plan.grid[2] = static_cast<unsigned int>(k2.splits);
+    if(config.rows)
+    {
+        // One 1-D grid of at most one block per unit; the kernel walks the tiles.
+        plan.grid[0] = static_cast<unsigned int>(std::min<long long>(tile->blocks, computeUnits));
+        plan.grid[1] = 1;
+        plan.grid[2] = 1;
+    }
 
     // Workspace: [staged activations][formatted weights][three-bf16 input][split partials].
     size_t offset = problem.stagingBytes;
@@ -951,6 +995,18 @@ public:
             options.add("CONV_DIRECT_NT", std::to_string(config.nt));
             options.add("CONV_DIRECT_THREADS", std::to_string(config.threads));
             options.add("CONV_DIRECT_PIPE", std::to_string(config.pipe));
+        }
+        else if(config.rows)
+        {
+            options.add("CONV_DIRECT_ROWS", std::string("1"));
+            options.add("CONV_DIRECT_ATOM", std::string(config.kernelType));
+            options.add("CONV_DIRECT_PW", std::to_string(config.pw));
+            options.add("CONV_DIRECT_FN", std::to_string(config.fn));
+            options.add("CONV_DIRECT_WP", std::to_string(config.wp));
+            options.add("CONV_DIRECT_WQ", std::to_string(config.wq));
+            options.add("CONV_DIRECT_WK", std::to_string(config.wk));
+            options.add("CONV_DIRECT_PP", std::to_string(config.pp));
+            options.add("CONV_DIRECT_EPI", std::to_string(config.epi));
         }
         else
         {

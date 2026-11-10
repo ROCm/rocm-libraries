@@ -105,20 +105,24 @@ struct Config
     int bm = 0, bn = 0, bc = 0, wm = 0, wn = 0, vec = 0;
     int ring = 1, bl = 0, split = 0;
     int tm = 0, tn = 0, nt = 0, threads = 0, pipe = 0;
+    /// The filter-row reuse kernel (kind "rows", ConvDirectRows.h): waves WP x WQ x WK, each PW
+    /// output rows x 16 columns x 16 FN channels; ping-pong (pp) and staged epilogue (epi).
+    bool rows = false;
+    int pw = 0, fn = 0, wp = 0, wq = 0, wk = 0, pp = 0, epi = 0;
     std::string archs; ///< ship list: comma-separated arch groups, or "any"
 
     /// Output pixels per block (the planner's tile budget) and output channels per block.
     int blockPixels() const
     {
-        return fma ? (threads / nt) * tm : bm;
+        return fma ? (threads / nt) * tm : rows ? wp * pw * wq * 16 : bm;
     }
     int blockColumns() const
     {
-        return fma ? nt * tn : bn;
+        return fma ? nt * tn : rows ? wk * fn * 16 : bn;
     }
     int blockThreads() const
     {
-        return fma ? threads : wm * wn * wave;
+        return fma ? threads : rows ? wp * wq * wk * wave : wm * wn * wave;
     }
 };
 
@@ -153,6 +157,9 @@ struct Plan
  *
  * @p computeUnits counts the units workgroups are dispatched onto (device_units::dispatchUnits:
  * CUs on gfx9, WGPs on gfx10+); the per-unit block targets below are in that unit.
+ *
+ * A rows config has a fixed tile (wp pw rows x 16 wq columns) and launches at most one block per
+ * compute unit, each walking its share of the tiles (rows kernels hold ~153 KiB of LDS).
  *
  * The tile is th x tw output pixels (tw a multiple of the FMA run length) of ds planes, chosen to
  * minimize padded pixel slots plus halo loads within the config's halo bound; depth is split
