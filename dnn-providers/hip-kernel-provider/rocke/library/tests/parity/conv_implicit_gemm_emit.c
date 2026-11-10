@@ -518,6 +518,75 @@ static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
     }
 }
 
+/* TF32 compute (mma_dtype "tf32"): fp32 storage, each LDS fragment bitcast to
+ * vec<tf32xN> for the arch's TF32 atom -- native XF32 on gfx942 (16x16x8,
+ * 32x32x4), BF16x3 emulation on gfx950 (16x16x32, 32x32x16). 64x64x32 tile,
+ * 2x2 warps. Keep in lockstep with _tf32_spec() in conv_implicit_gemm_emit.py
+ * (which lists what each index covers). */
+static int make_cfg_tf32(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    /* idx: is_3d, depthwise, arch, warp tile m=n, k, pipeline, epilogue */
+    static const struct
+    {
+        int is_3d;
+        int depthwise;
+        const char* arch;
+        int m;
+        int k;
+        const char* pipeline;
+        const char* epilogue;
+    } cfgs[] = {
+        {0, 0, "gfx950", 16, 32, "mem", "cshuffle"}, /* 54 */
+        {0, 0, "gfx950", 32, 16, "compv4", "default"}, /* 55 */
+        {0, 0, "gfx942", 16, 8, "compv3", "cshuffle"}, /* 56 */
+        {0, 0, "gfx942", 32, 4, "compv4", "default"}, /* 57 */
+        {1, 0, "gfx950", 16, 32, "compv3", "cshuffle"}, /* 58 */
+        {1, 0, "gfx942", 16, 8, "mem", "default"}, /* 59 */
+        {0, 0, "gfx950", 32, 16, "mem", "cshuffle"}, /* 60: async_dma */
+        {0, 0, "gfx942", 32, 4, "compv4", "cshuffle"}, /* 61: unroll_k */
+        {0, 0, "gfx950", 16, 32, "basic", "default"}, /* 62 */
+        {0, 1, "gfx942", 16, 8, "mem", "cshuffle"}, /* 63: group_merge=4 */
+        {0, 0, "gfx942", 16, 32, "mem", "cshuffle"}, /* 64: rejected */
+        {0, 0, "gfx950", 16, 32, "mem", "cshuffle"}, /* 65: lds_k_pad=2, rejected */
+    };
+    const int i = idx - 54;
+    *spec = rocke_implicit_gemm_conv_spec_default();
+    if(cfgs[i].is_3d)
+        spec->problem
+            = rocke_conv_problem_make_3d(1, 4, 6, 6, 32, 32, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+    else if(cfgs[i].depthwise)
+    {
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 64;
+        spec->group_merge = 4;
+    }
+    else
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 32, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+    spec->dtype_a = "fp32";
+    spec->dtype_b = "fp32";
+    spec->dtype_d = "fp32";
+    spec->mma_dtype = "tf32";
+    spec->tile_m = 64;
+    spec->tile_n = 64;
+    spec->tile_k = 32;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = cfgs[i].m;
+    spec->warp_tile_n = cfgs[i].m;
+    spec->warp_tile_k = cfgs[i].k;
+    spec->pipeline = cfgs[i].pipeline;
+    spec->epilogue = cfgs[i].epilogue;
+    spec->async_dma = (idx == 60);
+    spec->unroll_k = (idx == 61);
+    if(idx == 65)
+    {
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 2;
+    }
+    *arch = cfgs[i].arch;
+    return 0;
+}
+
 /* Split-K forward on gfx950 MFMA (wave64): the plain mem / compv3 / compv4 K
  * loops over one slice, the tile / warp-tile axes the AOT grid varies, a
  * 4-wide-vector variant, the direct epilogue, and the MFMA loops the split is
@@ -526,14 +595,14 @@ static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
  * dtype, so bf16 is covered by the representative golden and the GPU numerics
  * instead. Keep in lockstep with _mfma_split_k_spec() in
  * conv_implicit_gemm_emit.py.
- *   54: mem/cshuffle, 32x32x64 tile, 2x2 warps, 16x16x32 warp tile
- *   55: compv3/cshuffle, 64x128x64 tile, 2x4 warps
- *   56: mem/cshuffle, grouped (groups=2), 64x64x64 tile, 4-wide vectors
- *   57: compv4/cshuffle, 128x64x64 tile, 4x2 warps
- *   58: compv3/default (vector_size_c=1), 32x32x32 tile, 2x1 warps
- *   59: basic pipeline: rejected by both engines (mem/compv3/compv4 only)
- *   60: mem with async_dma: rejected by both engines
- *   61: compv3/cshuffle, 128x128x64 tile, 4x2 warps */
+ *   66: mem/cshuffle, 32x32x64 tile, 2x2 warps, 16x16x32 warp tile
+ *   67: compv3/cshuffle, 64x128x64 tile, 2x4 warps
+ *   68: mem/cshuffle, grouped (groups=2), 64x64x64 tile, 4-wide vectors
+ *   69: compv4/cshuffle, 128x64x64 tile, 4x2 warps
+ *   70: compv3/default (vector_size_c=1), 32x32x32 tile, 2x1 warps
+ *   71: basic pipeline: rejected by both engines (mem/compv3/compv4 only)
+ *   72: mem with async_dma: rejected by both engines
+ *   73: compv3/cshuffle, 128x128x64 tile, 4x2 warps */
 static int make_cfg_split_k_mfma(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
     const rocke_conv_problem_t small_m
@@ -568,7 +637,7 @@ static int make_cfg_split_k_mfma(int idx, rocke_implicit_gemm_conv_spec_t* spec,
     spec->split_k = 2;
     *arch = "gfx950";
 
-    const bool wt32 = idx == 55 || idx == 56 || idx == 57 || idx == 61;
+    const bool wt32 = idx == 67 || idx == 68 || idx == 69 || idx == 73;
     if(wt32)
     {
         spec->warp_tile_m = 32;
@@ -578,16 +647,16 @@ static int make_cfg_split_k_mfma(int idx, rocke_implicit_gemm_conv_spec_t* spec,
 
     switch(idx)
     {
-    case 54:
+    case 66:
         return 0;
-    case 55:
+    case 67:
         spec->problem = csh_64;
         spec->tile_m = 64;
         spec->tile_n = 128;
         spec->warp_n = 4;
         spec->pipeline = "compv3";
         return 0;
-    case 56:
+    case 68:
         spec->problem = grouped;
         spec->tile_m = 64;
         spec->tile_n = 64;
@@ -595,14 +664,14 @@ static int make_cfg_split_k_mfma(int idx, rocke_implicit_gemm_conv_spec_t* spec,
         spec->vector_size_b = 4;
         spec->vector_size_c = 4;
         return 0;
-    case 57:
+    case 69:
         spec->tile_m = 128;
         spec->tile_n = 64;
         spec->warp_m = 4;
         spec->warp_n = 2;
         spec->pipeline = "compv4";
         return 0;
-    case 58:
+    case 70:
         spec->problem = dflt;
         spec->tile_k = 32;
         spec->warp_n = 1;
@@ -610,13 +679,13 @@ static int make_cfg_split_k_mfma(int idx, rocke_implicit_gemm_conv_spec_t* spec,
         spec->epilogue = "default";
         spec->vector_size_c = 1;
         return 0;
-    case 59:
+    case 71:
         spec->pipeline = "basic";
         return 0;
-    case 60:
+    case 72:
         spec->async_dma = true;
         return 0;
-    case 61:
+    case 73:
         spec->tile_m = 128;
         spec->tile_n = 128;
         spec->warp_m = 4;
@@ -629,23 +698,23 @@ static int make_cfg_split_k_mfma(int idx, rocke_implicit_gemm_conv_spec_t* spec,
 
 /* The gfx950 spec gate around the MFMA split: a missing (NULL) pipeline or
  * epilogue, split or not, and the LDS budget that charges compv4 one A/B
- * tile. Built on config 54 (mem/cshuffle, 32x32x64 tile, split_k=2). Keep in
+ * tile. Built on config 66 (mem/cshuffle, 32x32x64 tile, split_k=2). Keep in
  * lockstep with _mfma_gate_spec() in conv_implicit_gemm_emit.py.
- *   62: unsplit, pipeline NULL: rejected by both engines
- *   63: unsplit, epilogue NULL: rejected by both engines
- *   64: split, pipeline NULL: rejected by both engines
- *   65: split, epilogue NULL: rejected by both engines
- *   66: split compv4/cshuffle, 128x64x256 tile, 4x2 warps, lds_k_pad=0 (fits
+ *   74: unsplit, pipeline NULL: rejected by both engines
+ *   75: unsplit, epilogue NULL: rejected by both engines
+ *   76: split, pipeline NULL: rejected by both engines
+ *   77: split, epilogue NULL: rejected by both engines
+ *   78: split compv4/cshuffle, 128x64x256 tile, 4x2 warps, lds_k_pad=0 (fits
  *       only because compv4 is charged one A/B tile)
- *   67: config 66 unsplit
- *   68: config 66 unsplit on compv3 with unroll_k (two A/B tiles): rejected
+ *   79: config 78 unsplit
+ *   80: config 78 unsplit on compv3 with unroll_k (two A/B tiles): rejected
  *       by both engines on the LDS budget
- *   69: config 66 at 256x128x256: rejected by both engines on the LDS budget */
+ *   81: config 78 at 256x128x256: rejected by both engines on the LDS budget */
 static int make_cfg_mfma_gate(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
-    if(make_cfg_split_k_mfma(54, spec, arch) != 0)
+    if(make_cfg_split_k_mfma(66, spec, arch) != 0)
         return -1;
-    if(idx >= 66)
+    if(idx >= 78)
     {
         spec->tile_m = 128;
         spec->tile_n = 64;
@@ -661,31 +730,31 @@ static int make_cfg_mfma_gate(int idx, rocke_implicit_gemm_conv_spec_t* spec, co
     }
     switch(idx)
     {
-    case 62:
+    case 74:
         spec->split_k = 1;
         spec->pipeline = NULL;
         return 0;
-    case 63:
+    case 75:
         spec->split_k = 1;
         spec->epilogue = NULL;
         return 0;
-    case 64:
+    case 76:
         spec->pipeline = NULL;
         return 0;
-    case 65:
+    case 77:
         spec->epilogue = NULL;
         return 0;
-    case 66:
+    case 78:
         return 0;
-    case 67:
+    case 79:
         spec->split_k = 1;
         return 0;
-    case 68:
+    case 80:
         spec->split_k = 1;
         spec->pipeline = "compv3";
         spec->unroll_k = true;
         return 0;
-    case 69:
+    case 81:
         spec->tile_m = 256;
         spec->tile_n = 128;
         return 0;
@@ -706,12 +775,17 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         if(make_cfg_split_k(idx, spec, arch) != 0)
             return -1;
     }
-    else if(idx >= 54 && idx <= 61)
+    else if(idx >= 54 && idx <= 65)
+    {
+        if(make_cfg_tf32(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(idx >= 66 && idx <= 73)
     {
         if(make_cfg_split_k_mfma(idx, spec, arch) != 0)
             return -1;
     }
-    else if(idx >= 62 && idx <= 69)
+    else if(idx >= 74 && idx <= 81)
     {
         if(make_cfg_mfma_gate(idx, spec, arch) != 0)
             return -1;

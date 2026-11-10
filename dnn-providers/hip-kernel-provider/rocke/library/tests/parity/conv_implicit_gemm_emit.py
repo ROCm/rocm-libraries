@@ -10,6 +10,7 @@
 # with the C emitter conv_implicit_gemm_emit.c.
 from kernels.common.conv_implicit_gemm import (
     ConvAccumulatorEpilogue,
+    ConvDataSpec,
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
@@ -601,9 +602,11 @@ def _spec_raw(idx: int):
         )
     if 40 <= idx <= 53:
         return _split_k_spec(idx)
-    if 54 <= idx <= 61:
+    if 54 <= idx <= 65:
+        return _tf32_spec(idx)
+    if 66 <= idx <= 73:
         return _mfma_split_k_spec(idx)
-    if 62 <= idx <= 69:
+    if 74 <= idx <= 81:
         return _mfma_gate_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
@@ -710,6 +713,66 @@ def _split_k_spec(idx: int):
     )
 
 
+# TF32 compute (ConvDataSpec(mma_dtype="tf32")): fp32 storage, each LDS
+# fragment bitcast to vec<tf32xN> for the arch's TF32 atom -- native XF32 on
+# gfx942 (16x16x8, 32x32x4), BF16x3 emulation on gfx950 (16x16x32, 32x32x16).
+# 64x64x32 tile, 2x2 warps. Keep in lockstep with make_cfg_tf32() in
+# conv_implicit_gemm_emit.c.
+#   54: gfx950 16x16x32, 2-D, mem/cshuffle
+#   55: gfx950 32x32x16, 2-D, compv4/default (the scheduling-hint counts)
+#   56: gfx942 16x16x8, 2-D, compv3/cshuffle
+#   57: gfx942 32x32x4, 2-D, compv4/default
+#   58: gfx950 16x16x32, 3-D, compv3/cshuffle
+#   59: gfx942 16x16x8, 3-D, mem/default
+#   60: gfx950 32x32x16, 2-D, async_dma mem/cshuffle
+#   61: gfx942 32x32x4, 2-D, unroll_k compv4/cshuffle
+#   62: gfx950 16x16x32, 2-D, basic/default
+#   63: gfx942 16x16x8, depthwise group_merge=4, mem/cshuffle
+#   64: gfx942 16x16x32 (gfx950's atom): rejected by both engines
+#   65: gfx950 16x16x32 with lds_k_pad=2 (misaligned row stride): rejected
+_TF32 = ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
+_TF32_2D = dict(N=2, Hi=14, Wi=14, C=32, K=64, fy=3, fx=3, pH=1, pW=1)
+_TF32_3D = dict(
+    N=1, Hi=6, Wi=6, C=32, K=32, fy=3, fx=3, pH=1, pW=1, Di=4, Z=3, sD=1, pD=1, dD=1
+)
+_TF32_DW = dict(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)
+
+
+def _tf32_spec(idx: int):
+    prob, arch, m, k, pipeline, epilogue, kw = {
+        54: (_TF32_2D, "gfx950", 16, 32, "mem", "cshuffle", {}),
+        55: (_TF32_2D, "gfx950", 32, 16, "compv4", "default", {}),
+        56: (_TF32_2D, "gfx942", 16, 8, "compv3", "cshuffle", {}),
+        57: (_TF32_2D, "gfx942", 32, 4, "compv4", "default", {}),
+        58: (_TF32_3D, "gfx950", 16, 32, "compv3", "cshuffle", {}),
+        59: (_TF32_3D, "gfx942", 16, 8, "mem", "default", {}),
+        60: (_TF32_2D, "gfx950", 32, 16, "mem", "cshuffle", dict(async_dma=True)),
+        61: (_TF32_2D, "gfx942", 32, 4, "compv4", "cshuffle", dict(unroll_k=True)),
+        62: (_TF32_2D, "gfx950", 16, 32, "basic", "default", {}),
+        63: (_TF32_DW, "gfx942", 16, 8, "mem", "cshuffle", dict(group_merge=4)),
+        64: (_TF32_2D, "gfx942", 16, 32, "mem", "cshuffle", {}),
+        65: (_TF32_2D, "gfx950", 16, 32, "mem", "cshuffle", dict(lds_k_pad=2)),
+    }[idx]
+    return (
+        ImplicitGemmConvSpec(
+            problem=_cp(**prob),
+            data=_TF32,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=m,
+            warp_tile_n=m,
+            warp_tile_k=k,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            **kw,
+        ),
+        arch,
+    )
+
+
 # Split-K forward on gfx950 MFMA (wave64): the plain mem / compv3 / compv4 K
 # loops over one slice, the tile / warp-tile axes the AOT grid varies, a
 # 4-wide-vector variant, the direct epilogue, and the MFMA loops the split is
@@ -718,14 +781,14 @@ def _split_k_spec(idx: int):
 # test_conv_fwd_split_k.TestEngineAgreement), so bf16 is covered by the
 # representative golden and the GPU numerics instead. Keep in lockstep with
 # make_cfg_split_k_mfma() in conv_implicit_gemm_emit.c.
-#   54: mem/cshuffle, 32x32x64 tile, 2x2 warps, 16x16x32 warp tile
-#   55: compv3/cshuffle, 64x128x64 tile, 2x4 warps
-#   56: mem/cshuffle, grouped (groups=2), 64x64x64 tile, 4-wide vectors
-#   57: compv4/cshuffle, 128x64x64 tile, 4x2 warps
-#   58: compv3/default (vector_size_c=1), 32x32x32 tile, 2x1 warps
-#   59: basic pipeline: rejected by both engines (mem/compv3/compv4 only)
-#   60: mem with async_dma: rejected by both engines
-#   61: compv3/cshuffle, 128x128x64 tile, 4x2 warps
+#   66: mem/cshuffle, 32x32x64 tile, 2x2 warps, 16x16x32 warp tile
+#   67: compv3/cshuffle, 64x128x64 tile, 2x4 warps
+#   68: mem/cshuffle, grouped (groups=2), 64x64x64 tile, 4-wide vectors
+#   69: compv4/cshuffle, 128x64x64 tile, 4x2 warps
+#   70: compv3/default (vector_size_c=1), 32x32x32 tile, 2x1 warps
+#   71: basic pipeline: rejected by both engines (mem/compv3/compv4 only)
+#   72: mem with async_dma: rejected by both engines
+#   73: compv3/cshuffle, 128x128x64 tile, 4x2 warps
 
 
 def _mfma_split_k_spec(idx: int):
@@ -748,12 +811,12 @@ def _mfma_split_k_spec(idx: int):
     )
     wt32 = dict(warp_tile_m=32, warp_tile_n=32, warp_tile_k=16)
     prob, kw = {
-        54: (_SMALL_M, {}),
-        55: (
+        66: (_SMALL_M, {}),
+        67: (
             _CSH_64,
             dict(wt32, tile_m=64, tile_n=128, warp_n=4, pipeline="compv3"),
         ),
-        56: (
+        68: (
             _GROUPED,
             dict(
                 wt32,
@@ -764,11 +827,11 @@ def _mfma_split_k_spec(idx: int):
                 vector_size_c=4,
             ),
         ),
-        57: (
+        69: (
             _SMALL_M,
             dict(wt32, tile_m=128, tile_n=64, warp_m=4, warp_n=2, pipeline="compv4"),
         ),
-        58: (
+        70: (
             _DEFAULT,
             dict(
                 tile_k=32,
@@ -778,9 +841,9 @@ def _mfma_split_k_spec(idx: int):
                 vector_size_c=1,
             ),
         ),
-        59: (_SMALL_M, dict(pipeline="basic")),
-        60: (_SMALL_M, dict(async_dma=True)),
-        61: (
+        71: (_SMALL_M, dict(pipeline="basic")),
+        72: (_SMALL_M, dict(async_dma=True)),
+        73: (
             _SMALL_M,
             dict(wt32, tile_m=128, tile_n=128, warp_m=4, pipeline="compv3"),
         ),
@@ -791,23 +854,23 @@ def _mfma_split_k_spec(idx: int):
 
 # The gfx950 spec gate around the MFMA split: a missing (None) pipeline or
 # epilogue, split or not, and the LDS budget that charges compv4 one A/B tile.
-# Built on config 54 (mem/cshuffle, 32x32x64 tile, split_k=2). Keep in
+# Built on config 66 (mem/cshuffle, 32x32x64 tile, split_k=2). Keep in
 # lockstep with make_cfg_mfma_gate() in conv_implicit_gemm_emit.c.
-#   62: unsplit, pipeline None: rejected by both engines
-#   63: unsplit, epilogue None: rejected by both engines
-#   64: split, pipeline None: rejected by both engines
-#   65: split, epilogue None: rejected by both engines
-#   66: split compv4/cshuffle, 128x64x256 tile, 4x2 warps, lds_k_pad=0 (fits
+#   74: unsplit, pipeline None: rejected by both engines
+#   75: unsplit, epilogue None: rejected by both engines
+#   76: split, pipeline None: rejected by both engines
+#   77: split, epilogue None: rejected by both engines
+#   78: split compv4/cshuffle, 128x64x256 tile, 4x2 warps, lds_k_pad=0 (fits
 #       only because compv4 is charged one A/B tile)
-#   67: config 66 unsplit
-#   68: config 66 unsplit on compv3 with unroll_k (two A/B tiles): rejected by
+#   79: config 78 unsplit
+#   80: config 78 unsplit on compv3 with unroll_k (two A/B tiles): rejected by
 #       both engines on the LDS budget
-#   69: config 66 at 256x128x256: rejected by both engines on the LDS budget
+#   81: config 78 at 256x128x256: rejected by both engines on the LDS budget
 
 
 def _mfma_gate_spec(idx: int):
-    spec, arch = _mfma_split_k_spec(54)
-    if idx >= 66:
+    spec, arch = _mfma_split_k_spec(66)
+    if idx >= 78:
         spec = replace(
             spec,
             tile_m=128,
@@ -822,14 +885,14 @@ def _mfma_gate_spec(idx: int):
             pipeline="compv4",
         )
     kw = {
-        62: dict(split_k=1, pipeline=None),
-        63: dict(split_k=1, epilogue=None),
-        64: dict(pipeline=None),
-        65: dict(epilogue=None),
-        66: {},
-        67: dict(split_k=1),
-        68: dict(split_k=1, pipeline="compv3", unroll_k=True),
-        69: dict(tile_m=256, tile_n=128),
+        74: dict(split_k=1, pipeline=None),
+        75: dict(split_k=1, epilogue=None),
+        76: dict(pipeline=None),
+        77: dict(epilogue=None),
+        78: {},
+        79: dict(split_k=1),
+        80: dict(split_k=1, pipeline="compv3", unroll_k=True),
+        81: dict(tile_m=256, tile_n=128),
     }[idx]
     return replace(spec, **kw), arch
 

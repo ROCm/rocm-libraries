@@ -169,8 +169,9 @@ def _is_16bit(dtype: str) -> bool:
 
 
 def _operand_bytes(dtype: str) -> int:
-    # The conv kernels read A and B, and write the output, in one dtype.
-    return 4 if dtype == "fp32" else 2
+    # The conv kernels read A and B, and write the output, in one dtype;
+    # tf32 is a compute mode over fp32 storage.
+    return 4 if dtype in ("fp32", "tf32") else 2
 
 
 def _atomic_reduction(dtype: str) -> SplitKReduction:

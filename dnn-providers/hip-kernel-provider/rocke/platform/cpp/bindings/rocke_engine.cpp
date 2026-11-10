@@ -1479,6 +1479,10 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
             s.dtype_d = keep(v);
         if(dict_str(d, "dtype_acc", v))
             s.dtype_acc = keep(v);
+        /* ConvDataSpec.mma_dtype: absent or None keeps the NULL default (the
+         * MMA consumes the storage dtype); "tf32" builds the TF32 kernel. */
+        if(dict_str(d, "mma_dtype", v))
+            s.mma_dtype = keep(v);
     }
     s.tile_m = dict_int(d, "tile_m", s.tile_m);
     s.tile_n = dict_int(d, "tile_n", s.tile_n);
@@ -1618,7 +1622,7 @@ rocke_direct_conv_16c_spec_t dg16_build_spec(const py::dict& d, std::deque<std::
     };
     rocke_direct_conv_16c_spec_t s = rocke_direct_conv_16c_spec_default();
     if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
-        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>());
+        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>(), &store);
     {
         std::string v;
         if(dict_str(d, "name", v))
@@ -3234,11 +3238,15 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     s.chiplet_num_xcds = dict_int(d, "chiplet_num_xcds", s.chiplet_num_xcds);
     s.chiplet_chunk_size = dict_int(d, "chiplet_chunk_size", s.chiplet_chunk_size);
     /* Optional ints: absent or None keeps Python's None (has_* = false).
-     * Only the fields the C builder or validator honours are read: the C wgrad
-     * builder does not apply lds_k_pad, so reading it would tag the kernel
-     * name ("pad<N>") without changing its body. vector_size_a/b cap the sync
-     * free-axis load widths (and are rejected on the async K loop); dropped,
-     * the engine would build the uncapped kernel and skip those checks. */
+     * lds_k_pad sets the M-outer LDS row stride (and the "pad<N>" name tag).
+     * vector_size_a/b cap the sync free-axis load widths (and are rejected on
+     * the async K loop); dropped, the engine would build the uncapped kernel
+     * and skip those checks. */
+    if(d.contains("lds_k_pad") && !d["lds_k_pad"].is_none())
+    {
+        s.has_lds_k_pad = true;
+        s.lds_k_pad = d["lds_k_pad"].cast<int>();
+    }
     if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
     {
         s.has_waves_per_eu = true;
@@ -3273,6 +3281,9 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
             s.dtype_b = keep(v);
         if(dict_str(d, "dtype_d", v))
             s.dtype_d = keep(v);
+        /* ConvDataSpec.mma_dtype: absent or None keeps the NULL default. */
+        if(dict_str(d, "mma_dtype", v))
+            s.mma_dtype = keep(v);
         if(dict_str(d, "pipeline", v))
             s.pipeline = keep(v);
         if(dict_str(d, "epilogue", v))
