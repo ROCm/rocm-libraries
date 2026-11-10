@@ -151,6 +151,17 @@ static int make_cfg(int idx, rocke_grouped_wgrad_wmma_spec_t* s, const char** ar
         s->problem = make_problem(4, 64, 3, 3, 1, "bf16", 1, 1);
         s->waves_c = 3;
         return 0;
+    case 25: /* rejected: PAD 1 with column padding 0 */
+        s->problem = make_problem(4, 64, 3, 3, 1, "bf16", 1, 1);
+        s->problem.pad_w = 0;
+        return 0;
+    case 26: /* rejected: 1x3 filter with PAD 1 */
+        s->problem = make_problem(4, 64, 1, 3, 1, "bf16", 1, 1);
+        return 0;
+    case 27: /* rejected: cpg 4, kpg 8 */
+        s->problem = make_problem(4, 64, 3, 3, 1, "bf16", 1, 1);
+        s->problem.kpg = 8;
+        return 0;
     default:
         return -1;
     }

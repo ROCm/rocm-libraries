@@ -38,6 +38,10 @@
 #  23  rejected by both engines: PAD 3 on a 3x3 filter
 #  24  rejected by both engines: C 36 (not a multiple of 8)
 #  25  rejected by both engines: LDS past 300 KiB (16 waves, rows 4, 8 stages)
+#  26  rejected by both engines: PAD 1 with column padding 0 (one padding only)
+#  27  rejected by both engines: 3x1 filter with PAD 1 (PAD > KW - 1)
+from dataclasses import replace
+
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_direct_wgrad_wmma import (
@@ -225,6 +229,8 @@ def _spec(idx: int):
             S(problem=_p(), waves_k=4, waves_c=4, rows=4, stages=8),
             "gfx1250",
         ),
+        26: (S(problem=replace(_p(), pad_w=0)), "gfx1250"),
+        27: (S(problem=_p(KH=3, KW=1)), "gfx1250"),
     }
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")

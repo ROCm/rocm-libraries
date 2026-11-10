@@ -75,6 +75,10 @@ class TestWgradWmmaSpec(unittest.TestCase):
             (dict(stride=2), {}, "stride 1 only"),
             (dict(PAD=3), {}, "PAD <= K - 1"),
             (dict(KH=1, KW=3), {}, "PAD <= K - 1"),
+            (dict(KH=3, KW=1), {}, "PAD <= K - 1"),
+            # The kernel offsets columns by PAD: a different column padding
+            # is refused.
+            (dict(pad_w=0), {}, "one padding for both axes (got PAD=1x0)"),
             (dict(C=36), {}, "multiples of 8"),
             ({}, dict(waves_k=3, waves_c=1), "2, 4, 8 or 16 waves"),
             ({}, dict(tiles_k=3), "tiles_k / tiles_c"),
@@ -94,6 +98,8 @@ class TestWgradWmmaSpec(unittest.TestCase):
                 self.assertIn(needle, why)
         why = _reason(DirectWgradWmmaSpec(problem=_problem()), "gfx950")
         self.assertEqual(why, "ds_load_tr16_b128 and wmma 16x16x32 need gfx1250")
+        # An explicit column padding equal to PAD is the same problem.
+        self.assertEqual(_reason(DirectWgradWmmaSpec(problem=_problem(pad_w=1))), "ok")
 
     def test_tdm_spreads_rows_over_waves(self):
         """2 * rows transfers go to waves 0 .. 2 * rows - 1 (mod the wave
@@ -214,6 +220,8 @@ class TestWgradWmmaEngines(unittest.TestCase):
             (dict(dtype="fp32"), {}),
             (dict(stride=2), {}),
             (dict(PAD=3), {}),
+            (dict(KH=3, KW=1), {}),
+            (dict(pad_w=0), {}),
             (dict(C=36), {}),
             (dict(K=12), {}),
             ({}, dict(waves_k=3, waves_c=1)),

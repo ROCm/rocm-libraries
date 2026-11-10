@@ -45,6 +45,7 @@ def _problem(
     stride=1,
     dil=1,
     pad_w=-1,
+    kpg=None,
 ):
     return DirectConvProblem(
         N=N,
@@ -52,7 +53,7 @@ def _problem(
         W=W,
         groups=C // cpg,
         cpg=cpg,
-        kpg=cpg,
+        kpg=cpg if kpg is None else kpg,
         KH=KH,
         KW=KW,
         PAD=PAD,
@@ -93,34 +94,56 @@ def _grid_specs():
     return specs
 
 
-# (problem overrides, knob overrides) the validator refuses on gfx1250.
+# (problem overrides, knob overrides, reason) the validator refuses on gfx1250.
 _REJECTED = (
-    (dict(cpg=16), {}),
-    (dict(cpg=2, C=32), {}),
-    (dict(dtype="fp32"), {}),
-    (dict(stride=2), {}),
-    (dict(PAD=3), {}),
-    (dict(KW=1, PAD=1), {}),
-    (dict(C=24), {}),
-    (dict(dil=2), {}),
-    (dict(C=8 * 2**28), {}),  # groups * cpg past i32
-    ({}, dict(waves_c=3)),
-    ({}, dict(waves_c=0)),
-    ({}, dict(q_steps=0)),
-    ({}, dict(q_steps=5)),
-    ({}, dict(rows_per_chunk=0)),
-    ({}, dict(target_blocks=0)),
-    ({}, dict(stages=1)),
-    ({}, dict(stages=5)),
-    ({}, dict(waves_c=8, q_steps=4, stages=4)),  # LDS
+    (dict(cpg=16), {}, "cpg = kpg in (4, 8)"),
+    (dict(cpg=2, C=32), {}, "cpg = kpg in (4, 8)"),
+    (dict(kpg=8), {}, "cpg = kpg in (4, 8)"),
+    (dict(dtype="fp32"), {}, "fp16/bf16 only"),
+    (dict(stride=2), {}, "stride 1 only"),
+    (dict(PAD=3), {}, "PAD <= K - 1"),
+    (dict(KW=1, PAD=1), {}, "PAD <= K - 1"),
+    (dict(KH=1, KW=3, PAD=1), {}, "PAD <= K - 1"),
+    # The kernel offsets columns by PAD: a different column padding is refused.
+    (dict(pad_w=0), {}, "one padding for both axes (got PAD=1x0)"),
+    (dict(C=24), {}, "C must be a multiple of 16 (whole packed tiles)"),
+    (dict(dil=2), {}, "this direct conv kernel has no dilation (got 2x2)"),
+    (dict(C=8 * 2**28), {}, "must fit in i32"),  # groups * cpg past i32
+    ({}, dict(waves_c=3), "waves_c in (1, 2, 4, 8)"),
+    ({}, dict(waves_c=0), "waves_c in (1, 2, 4, 8)"),
+    ({}, dict(q_steps=0), "q_steps in 1..4"),
+    ({}, dict(q_steps=5), "q_steps in 1..4"),
+    ({}, dict(rows_per_chunk=0), "rows_per_chunk >= 1"),
+    ({}, dict(target_blocks=0), "target_blocks >= 1"),
+    ({}, dict(stages=1), "stages in 2..4"),
+    ({}, dict(stages=5), "stages in 2..4"),
+    ({}, dict(waves_c=8, q_steps=4, stages=4), "B > 160 KiB"),  # LDS
 )
 
 
 def _rejected_specs():
     return [
         GroupedWgradWmmaSpec(problem=_problem(**pkw), **knobs)
-        for pkw, knobs in _REJECTED
+        for pkw, knobs, _ in _REJECTED
     ]
+
+
+@pytest.mark.parametrize("pkw, knobs, reason", _REJECTED)
+def test_rejects(pkw, knobs, reason):
+    """Each rejected spec fails Python's validator with its own reason and
+    does not build (no C++ engine needed)."""
+    spec = GroupedWgradWmmaSpec(problem=_problem(**pkw), **knobs)
+    ok, why = is_valid_grouped_wgrad_wmma_spec(spec, "gfx1250")
+    assert not ok
+    assert reason in why
+    with pytest.raises(ValueError, match="invalid GroupedWgradWmmaSpec"):
+        build_grouped_wgrad_wmma(spec, arch="gfx1250")
+
+
+def test_one_padding_accepts_a_matching_column_padding():
+    """An explicit column padding equal to PAD is the same problem."""
+    spec = GroupedWgradWmmaSpec(problem=_problem(pad_w=1))
+    assert is_valid_grouped_wgrad_wmma_spec(spec, "gfx1250") == (True, "ok")
 
 
 def _describe(eng, spec, arch):

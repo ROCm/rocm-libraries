@@ -220,6 +220,13 @@ static int make_cfg(int idx, rocke_direct_wgrad_wmma_spec_t* s, const char** arc
         s->rows = 4;
         s->stages = 8;
         return 0;
+    case 26: /* rejected: PAD 1 with column padding 0 */
+        s->problem = base(1, "bf16");
+        s->problem.pad_w = 0;
+        return 0;
+    case 27: /* rejected: 3x1 filter with PAD 1 */
+        s->problem = make_problem(3, 1, 1, "bf16", 1, 1, 64, 96, 1);
+        return 0;
     default:
         return -1;
     }
