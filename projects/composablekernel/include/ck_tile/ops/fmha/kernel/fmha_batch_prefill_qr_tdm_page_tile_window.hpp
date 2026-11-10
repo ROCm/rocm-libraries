@@ -378,7 +378,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             }
             return valid_tokens;
         }
-        // P>=128 keeps its original statement order (its code objects are compared bit for bit).
+        // P>=128 keeps this statement form: another form changes the code of the measured kernels.
         if(get_thread_id() == 0)
         {
             amd_async_global_load_to_lds<int32_t, 1>(
@@ -634,8 +634,8 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         constexpr index_t kVec = 8;
         const index_t wave     = state.wave_row0;
         const index_t rows     = [&]() {
-            // P >= 128: from the scalar tile origin (no sinks on the lean loop). Reading the
-            // queue value into a scalar instead spills on P128 D64 (VGPR limit ~320). A
+            // P >= 128: from the scalar tile origin (no sinks on the lean loop); reading the queue
+            // value into a scalar instead spills on P128 D64. A
             // look-ahead past the loop end can get rows > 0 here while its queue entry is empty;
             // it then loads the dummy page 0, which nothing reads.
             if constexpr(ScalarRowClamp_ != 0)

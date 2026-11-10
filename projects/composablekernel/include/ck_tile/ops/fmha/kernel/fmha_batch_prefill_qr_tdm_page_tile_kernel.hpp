@@ -17,18 +17,19 @@
 namespace ck_tile {
 
 // Batch prefill over a paged KV cache with a physical page size independent of the logical N128
-// KV tile; reads page IDs from a vLLM 2D block table or an SGLang 1D page list while preserving
-// the QR M128/N128 compute layout.
+// KV tile (M128 or M64 query tiles); reads page IDs from a vLLM 2D block table or an SGLang 1D
+// page list.
 //
-// Experimental, gfx1250 only: BF16 or FP16, group mode, linear [page, token, kv_head, dim] K/V
-// pools, D64/V64 or D128/V128, no mask or a left/right window aligned to the top-left or
+// gfx1250 only: BF16 or FP16, group mode, linear [page, token, kv_head, dim] or vectorized
+// (K [page, kv_head, dim / 8, token, 8], V [page, kv_head, token / 8, dim, 8]) K/V pools,
+// D64/V64 or D128/V128, no mask or a left/right window aligned to the top-left or
 // bottom-right corner (causal is left unbounded, right 0; a bounded left is a sliding window),
 // optional sink tokens (sink_size) and per-head sink logits (sink_ptr), optional tanh logits soft
-// cap (no bias), optional elementwise bias or ALiBi, optional LSE output, no dropout. Build each
-// instance in its own translation unit with the scheduled-TDM FMHA flags (-mllvm
-// -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero): the launch contract below rests on
-// measurements of that generated code, and the generated code was observed to change when several
-// instances share a translation unit.
+// cap (no bias), optional elementwise bias or ALiBi, optional LSE output, no dropout. Build with
+// the scheduled-TDM FMHA flags (-mllvm -amdgpu-expert-scheduling-mode
+// -fgpu-flush-denormals-to-zero) and one page-tile instance per translation unit, as generated: the
+// generated code depends on what shares the unit, and the measured code is that of such units (a
+// query-tail unit also holds its M128 main kernel, with the same code as in its own unit).
 template <typename FmhaPipeline_,
           typename EpiloguePipeline_,
           index_t KvSplits_      = 1,
@@ -126,12 +127,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         kKVLookupTable == BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D;
     static_assert(kSglangTable ||
                   kKVLookupTable == BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D);
-    // The physical allocation page may differ from the logical N128 tile.
-    static_assert(FmhaPipeline::kPageBlockSize == 16 || FmhaPipeline::kPageBlockSize == 64 ||
-                  FmhaPipeline::kPageBlockSize == 128 || FmhaPipeline::kPageBlockSize == 256 ||
-                  FmhaPipeline::kPageBlockSize == 1024);
-    static_assert(FmhaPipeline::kPageBlockSize % FmhaPipeline::kN0 == 0 ||
-                  FmhaPipeline::kN0 % FmhaPipeline::kPageBlockSize == 0);
+    // The physical allocation page may differ from the logical N128 tile (the traits gate it).
     using PageTileTraits =
         FmhaBatchPrefillPageTileTraits<FmhaPipeline::kPageBlockSize, FmhaPipeline::kQKHeaddim>;
 
@@ -357,7 +353,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             return;
 
         // This sequence's page ids (page_row) and, for the SGLang list, how many it has. The vLLM
-        // path keeps its original statement order (its code objects are compared bit for bit).
+        // path keeps its statement order: another order changes the code of the measured kernels.
         const int32_t* page_row = nullptr;
         index_t sglang_pages    = 0;
         if constexpr(kSglangTable)
