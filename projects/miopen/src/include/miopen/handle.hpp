@@ -189,6 +189,9 @@ struct MIOPEN_EXPORT Handle : miopenHandle
 
     mutable std::size_t m_MaxMemoryAllocSizeCached = 0;
     virtual std::size_t GetMaxMemoryAllocSize() const;
+    /// Device memory free right now (hipMemGetInfo); not cached, so it tracks allocations made
+    /// since the handle was created.
+    virtual std::size_t GetAvailableMemory() const;
     virtual bool CooperativeLaunchSupported() const;
 
     std::string GetDeviceName() const;

@@ -246,6 +246,9 @@ std::size_t Handle::GetMaxMemoryAllocSize() const
         return this->impl->max_mem_alloc_size;
 }
 
+// NOGPU has no live device, so nothing is allocated on it.
+std::size_t Handle::GetAvailableMemory() const { return this->impl->global_mem_size; }
+
 bool Handle::CooperativeLaunchSupported() const { return false; }
 
 const TargetProperties& Handle::GetTargetProperties() const

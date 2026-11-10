@@ -1174,6 +1174,8 @@ std::size_t Handle::GetMaxMemoryAllocSize() const
     return m_MaxMemoryAllocSizeCached;
 }
 
+std::size_t Handle::GetAvailableMemory() const { return miopen::GetAvailableMemory(); }
+
 bool Handle::CooperativeLaunchSupported() const
 {
     int result;

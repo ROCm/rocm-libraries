@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 // miopenConvolutionForwardGetWorkSpaceSize must report the GemmFwdRest workspace for dilated
-// convolutions, up to the 288 MiB cap in GetWorkSpaceSizeGEMM (src/convolution.cpp).
+// convolutions when it fits in the device memory free at query time (GetWorkSpaceSizeGEMM in
+// src/convolution.cpp).
 //
 // Applications such as PyTorch size the Find workspace from that query. When it under-reports,
 // Find drops GemmFwdRest for lack of workspace, and if no other solver applies it fails with
-// "No suitable algorithm was found" (rocm-libraries#14965). Above the cap the size is not
-// reported, so callers do not allocate it (#6974).
+// "No suitable algorithm was found" (rocm-libraries#14965). A size that does not fit in free
+// memory is not reported, so callers do not try to allocate it (#6974).
 //
-// MIOPEN_DEBUG_FIND_ONLY_SOLVER=GemmFwdRest makes GemmFwdRest the only candidate on every arch,
-// and ScopedFindDb keeps find-db records from short-circuiting either the query or Find.
+// MIOPEN_DEBUG_FIND_ONLY_SOLVER=GemmFwdRest makes GemmFwdRest the only candidate on every arch.
+// ScopedFindDb keeps find-db records from short-circuiting either the query or Find, except in the
+// test of the find-db path, which points the find-db at a temporary file.
 
 #include <gtest/gtest.h>
 
@@ -24,10 +26,20 @@
 #include "gtest_common.hpp"
 #include "../tensor_holder.hpp"
 #include "../workspace.hpp"
+#include "find_db.hpp"
 
 namespace {
 
-constexpr std::size_t DilatedGemmWorkspaceCap = 301989888; // 288 MiB
+// A real device handle that reports a fixed amount of free memory.
+class AvailableMemoryHandle final : public miopen::Handle
+{
+public:
+    explicit AvailableMemoryHandle(std::size_t available) : available_(available) {}
+    std::size_t GetAvailableMemory() const override { return available_; }
+
+private:
+    std::size_t available_;
+};
 
 struct ScopedFindDb
 {
@@ -81,7 +93,42 @@ struct DilatedConv
                   miopenStatusSuccess);
         return size;
     }
+
+    // Find with the given workspace; returns the chosen algorithm.
+    miopenConvFwdAlgorithm_t FindForward(miopen::Handle& handle, std::size_t workspace_size)
+    {
+        auto x_dev = handle.Write(x.data);
+        auto w_dev = handle.Write(w.data);
+        auto y_dev = handle.Write(y.data);
+        Workspace workspace{workspace_size};
+
+        int returned_algo_count = 0;
+        miopenConvAlgoPerf_t perf{};
+        EXPECT_EQ(miopenFindConvolutionForwardAlgorithm(&handle,
+                                                        &x.desc,
+                                                        x_dev.get(),
+                                                        &w.desc,
+                                                        w_dev.get(),
+                                                        &conv,
+                                                        &y.desc,
+                                                        y_dev.get(),
+                                                        1,
+                                                        &returned_algo_count,
+                                                        &perf,
+                                                        workspace.ptr(),
+                                                        workspace.size(),
+                                                        false),
+                  miopenStatusSuccess);
+        EXPECT_EQ(returned_algo_count, 1);
+        return perf.fwd_algo;
+    }
 };
+
+// rocm-libraries#14965 in miniature: dilated fp32 Conv1d.
+DilatedConv ReproDilatedConv() { return {{1, 32, 1, 1024}, {32, 32, 1, 3}, {0, 3}, {1, 3}}; }
+
+// Im2Col: 256 * 3 * 3 * 256 * 256 * sizeof(float) = 576 MiB.
+DilatedConv LargeDilatedConv() { return {{1, 256, 256, 256}, {16, 256, 3, 3}, {2, 2}, {2, 2}}; }
 
 } // namespace
 
@@ -92,66 +139,85 @@ TEST(GPU_ConvDilatedGemmWorkspace_FP32, FindWithQueriedWorkspaceRunsGemmFwdRest)
 #if !MIOPEN_USE_GEMM
     GTEST_SKIP() << "Built without GEMM support";
 #else
-    auto& handle_ref      = get_handle();
-    miopenHandle_t handle = &handle_ref;
+    auto& handle = get_handle();
 
     ScopedFindDb no_find_db;
     ScopedEnvironment<std::string> only_gemm(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
                                              std::string{"GemmFwdRest"});
 
-    DilatedConv problem{{1, 32, 1, 1024}, {32, 32, 1, 3}, {0, 3}, {1, 3}};
+    auto problem = ReproDilatedConv();
 
-    const auto required = problem.GemmFwdRestWorkspace(handle);
+    const auto required = problem.GemmFwdRestWorkspace(&handle);
     ASSERT_GT(required, 0) << "GemmFwdRest needs Im2Col workspace for this problem";
-    ASSERT_LE(required, DilatedGemmWorkspaceCap);
 
-    const auto queried = problem.QueriedWorkspace(handle);
+    const auto queried = problem.QueriedWorkspace(&handle);
     EXPECT_GE(queried, required);
-
-    auto x_dev = handle_ref.Write(problem.x.data);
-    auto w_dev = handle_ref.Write(problem.w.data);
-    auto y_dev = handle_ref.Write(problem.y.data);
-    Workspace workspace{queried};
-
-    int returned_algo_count = 0;
-    miopenConvAlgoPerf_t perf{};
-    ASSERT_EQ(miopenFindConvolutionForwardAlgorithm(handle,
-                                                    &problem.x.desc,
-                                                    x_dev.get(),
-                                                    &problem.w.desc,
-                                                    w_dev.get(),
-                                                    &problem.conv,
-                                                    &problem.y.desc,
-                                                    y_dev.get(),
-                                                    1,
-                                                    &returned_algo_count,
-                                                    &perf,
-                                                    workspace.ptr(),
-                                                    workspace.size(),
-                                                    false),
-              miopenStatusSuccess);
-    ASSERT_EQ(returned_algo_count, 1);
-    EXPECT_EQ(perf.fwd_algo, miopenConvolutionFwdAlgoGEMM);
+    EXPECT_EQ(problem.FindForward(handle, queried), miopenConvolutionFwdAlgoGEMM);
 #endif
 }
 
-// Above the cap, the dilated GemmFwdRest workspace must not be reported.
-TEST(GPU_ConvDilatedGemmWorkspace_FP32, WorkspaceAboveCapIsNotReported)
+// With twice the requirement free, the dilated GemmFwdRest workspace is reported.
+TEST(GPU_ConvDilatedGemmWorkspace_FP32, WorkspaceFittingFreeMemoryIsReported)
 {
 #if !MIOPEN_USE_GEMM
     GTEST_SKIP() << "Built without GEMM support";
 #else
-    auto& handle_ref      = get_handle();
-    miopenHandle_t handle = &handle_ref;
-
     ScopedFindDb no_find_db;
     ScopedEnvironment<std::string> only_gemm(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
                                              std::string{"GemmFwdRest"});
 
-    // Im2Col: 256 * 3 * 3 * 256 * 256 * sizeof(float) = 576 MiB.
-    DilatedConv problem{{1, 256, 256, 256}, {16, 256, 3, 3}, {2, 2}, {2, 2}};
+    auto problem        = LargeDilatedConv();
+    const auto required = problem.GemmFwdRestWorkspace(&get_handle());
+    ASSERT_GT(required, 0) << "GemmFwdRest needs Im2Col workspace for this problem";
 
-    ASSERT_GT(problem.GemmFwdRestWorkspace(handle), DilatedGemmWorkspaceCap);
-    EXPECT_EQ(problem.QueriedWorkspace(handle), 0);
+    AvailableMemoryHandle handle{2 * required};
+    EXPECT_EQ(problem.QueriedWorkspace(&handle), required);
+#endif
+}
+
+// With only half the requirement free, the dilated GemmFwdRest workspace is not reported.
+TEST(GPU_ConvDilatedGemmWorkspace_FP32, WorkspaceExceedingFreeMemoryIsNotReported)
+{
+#if !MIOPEN_USE_GEMM
+    GTEST_SKIP() << "Built without GEMM support";
+#else
+    ScopedFindDb no_find_db;
+    ScopedEnvironment<std::string> only_gemm(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                             std::string{"GemmFwdRest"});
+
+    auto problem        = LargeDilatedConv();
+    const auto required = problem.GemmFwdRestWorkspace(&get_handle());
+    ASSERT_GT(required, 0) << "GemmFwdRest needs Im2Col workspace for this problem";
+
+    AvailableMemoryHandle handle{required / 2};
+    EXPECT_EQ(problem.QueriedWorkspace(&handle), 0);
+#endif
+}
+
+// A find-db record of GemmFwdRest must not make the query report a workspace that does not fit in
+// free memory: the record is honoured while it fits and skipped once it does not.
+TEST(GPU_ConvDilatedGemmWorkspace_FP32, FindDbRecordDoesNotBypassFreeMemoryBudget)
+{
+#if !MIOPEN_USE_GEMM
+    GTEST_SKIP() << "Built without GEMM support";
+#else
+    auto& handle = get_handle();
+
+    const miopen::TempFile find_db{"miopen.test.conv_dilated_gemm_workspace"};
+    const miopen::FindDbPathOverride find_db_override{find_db.Path()};
+    ScopedEnvironment<std::string> only_gemm(MIOPEN_DEBUG_FIND_ONLY_SOLVER,
+                                             std::string{"GemmFwdRest"});
+
+    auto problem        = ReproDilatedConv();
+    const auto required = problem.GemmFwdRestWorkspace(&handle);
+    ASSERT_GT(required, 0) << "GemmFwdRest needs Im2Col workspace for this problem";
+    ASSERT_EQ(problem.FindForward(handle, required), miopenConvolutionFwdAlgoGEMM)
+        << "Find did not record GemmFwdRest";
+
+    AvailableMemoryHandle roomy{2 * required};
+    EXPECT_EQ(problem.QueriedWorkspace(&roomy), required);
+
+    AvailableMemoryHandle tight{required / 2};
+    EXPECT_EQ(problem.QueriedWorkspace(&tight), 0);
 #endif
 }

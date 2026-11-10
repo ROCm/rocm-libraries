@@ -64,6 +64,11 @@ std::size_t MockHandle::GetMaxMemoryAllocSize() const
     return std::numeric_limits<std::size_t>::max();
 }
 
+std::size_t MockHandle::GetAvailableMemory() const
+{
+    return std::numeric_limits<std::size_t>::max();
+}
+
 bool MockHandle::CooperativeLaunchSupported() const { return false; }
 
 std::string_view GetBaseDeviceName(std::string_view dev_name)
