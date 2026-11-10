@@ -23,7 +23,8 @@
     "pack",
     "cf",
     "swz",
-    "dma"
+    "dma",
+    "fuse"
   ],
   "behavior_notes": [
     "runtime_compilation"

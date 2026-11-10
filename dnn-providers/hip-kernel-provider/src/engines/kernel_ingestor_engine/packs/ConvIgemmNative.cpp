@@ -512,6 +512,10 @@ std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context, ConvD
             = static_cast<size_t>(problem.w.copy.total) * static_cast<size_t>(elementBytes);
     }
     problem.filterKtrsc = krsc;
+    problem.filterExpandable = krsc || kcrs;
+    problem.wSrcK = a.wStrides[0];
+    problem.wSrcC = a.wStrides[1];
+    problem.wSrcTap = krsc ? cg : 1;
     layOutWorkspace(problem);
 
     // Rows of the GEMM, and how far one block's rows reach in the gathered tensor.
@@ -553,6 +557,41 @@ IgemmProblem withoutFilterStaging(const IgemmProblem& problem)
     direct.args.wTapStride = 0;
     layOutWorkspace(direct);
     return direct;
+}
+
+std::optional<IgemmProblem> withFusedGroups(const IgemmProblem& problem, int64_t fuse)
+{
+    const auto& a = problem.args;
+    if(fuse < 2 || a.groups % fuse != 0 || !problem.filterExpandable)
+    {
+        return std::nullopt;
+    }
+    IgemmProblem fused = problem;
+    fused.args.groups = static_cast<int>(a.groups / fuse);
+    fused.args.wRowStride = 0;
+    fused.args.wTapStride = 0;
+    const long long cg = a.c / a.groups, kg = a.k / a.groups;
+    const long long taps = static_cast<long long>(a.ft) * a.fr * a.fs;
+    Staging w;
+    w.needed = true;
+    w.expand = true;
+    auto& e = w.expandArgs;
+    e.k = a.k;
+    e.taps = taps;
+    e.cg = cg;
+    e.kg = kg;
+    e.f = fuse;
+    e.srcK = problem.wSrcK;
+    e.srcC = problem.wSrcC;
+    e.srcTap = problem.wSrcTap;
+    e.elementBytes = problem.elementBytes;
+    w.copy.total = a.k * taps * fuse * cg;
+    w.bytes = static_cast<size_t>(w.copy.total) * static_cast<size_t>(problem.elementBytes);
+    fused.w = w;
+    // The expanded filter is packed K T R S C/g (per fused group): direct-filter readable.
+    fused.filterKtrsc = true;
+    layOutWorkspace(fused);
+    return fused;
 }
 
 bool outputChannelsFirst(const IgemmProblem& problem)
@@ -716,6 +755,7 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_igemm.dispatch";
 /// The staging copy: the same source as the convolution, under another entry point.
 constexpr std::string_view COPY_ENTRY_POINT = "ConvIgemmCopy";
 constexpr std::string_view TRANSPOSE_ENTRY_POINT = "ConvIgemmTranspose";
+constexpr std::string_view EXPAND_ENTRY_POINT = "ConvIgemmExpand";
 constexpr std::string_view REDUCE_ENTRY_POINT = "ConvIgemmReduce";
 constexpr unsigned int COPY_BLOCK = 256;
 /// Bytes a 32-bit buffer offset reaches.
@@ -790,6 +830,7 @@ struct Tile
     int64_t cf = 0; ///< the output written packed channels-first from the epilogue
     int64_t swz = 0; ///< XOR-swizzled LDS tiles read in 16-byte chunks
     int64_t dma = 0; ///< gfx950: buffer loads straight into this many swizzled LDS stages
+    int64_t fuse = 0; ///< groups run as one block-diagonal group (group fusion), 0 none
 
     int64_t blockThreads() const
     {
@@ -834,6 +875,7 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.cf = kernel.getIntMetadata("cf");
     tile.swz = kernel.getIntMetadata("swz");
     tile.dma = kernel.getIntMetadata("dma");
+    tile.fuse = kernel.getIntMetadata("fuse");
     if(tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1
        || (tile.xcd != 0 && tile.xcd != 1) || (tile.halo != 0 && tile.halo != 1)
        || (tile.halo != 0 && (tile.info.wave == 0 || tile.stages != 1))
@@ -846,7 +888,9 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
                || tile.pack != 0 || tile.vec != 8
                || (tile.bk != 16 && tile.bk != 32 && tile.bk != 64) || tile.info.swizzleK == 0
                || tile.bk % tile.info.swizzleK != 0))
-       || (tile.dma != 0 && (tile.dma < 2 || tile.dma > 4 || tile.swz == 0)))
+       || (tile.dma != 0 && (tile.dma < 2 || tile.dma > 4 || tile.swz == 0))
+       || (tile.fuse != 0 && tile.fuse != 2 && tile.fuse != 4 && tile.fuse != 8 && tile.fuse != 16)
+       || (tile.fuse != 0 && (tile.halo != 0 || tile.pack != 0)))
     {
         return std::nullopt;
     }
@@ -877,7 +921,20 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    const auto problem = conv_igemm::parseIgemmProblem(context, *direction);
+    auto problem = conv_igemm::parseIgemmProblem(context, *direction);
+    if(problem.has_value() && tile->fuse != 0)
+    {
+        // Group fusion serves small groups (fused groups of at most 64 channels each way) whose
+        // expanded filter forward or the direct-filter backward-data configs read.
+        const auto& p = problem->args;
+        const long long cg = p.c / p.groups, kg = p.k / p.groups;
+        if((*direction == ConvDirection::BACKWARD_DATA && tile->wdirect == 0)
+           || cg * tile->fuse > 64 || kg * tile->fuse > 64)
+        {
+            return false;
+        }
+        problem = conv_igemm::withFusedGroups(*problem, tile->fuse);
+    }
     // The split-K plan is sized from the device's units: none reported, nothing to size.
     if(!problem.has_value() || device_units::dispatchUnits(context.deviceProperties) < 1
        || kernel.getStringMetadata("dtype")
@@ -944,12 +1001,18 @@ bool kernelMatches(const MatchContext& context,
 }
 
 /// The problem a config runs: a direct-filter config reads the graph's filter, and a
-/// channels-first-output config writes the graph's output, so nothing stages them.
+/// channels-first-output config writes the graph's output, so nothing stages them; a group-fusion
+/// config stages the expanded filter.
 std::optional<IgemmProblem>
     problemFor(const MatchContext& context, ConvDirection direction, const Tile& tile)
 {
     auto problem = conv_igemm::parseIgemmProblem(context, direction);
-    if(problem.has_value() && tile.wdirect != 0)
+    if(problem.has_value() && tile.fuse != 0)
+    {
+        // The expanded filter is the staged operand, direct filter or not.
+        problem = conv_igemm::withFusedGroups(*problem, tile.fuse);
+    }
+    else if(problem.has_value() && tile.wdirect != 0)
     {
         problem = conv_igemm::withoutFilterStaging(*problem);
     }
@@ -984,6 +1047,13 @@ const std::vector<KernelArgument>& transposeSignature()
 {
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(ConvIgemmTransposeArgs)), 0, ""}};
+    return s_signature;
+}
+
+const std::vector<KernelArgument>& expandSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(ConvIgemmExpandArgs)), 0, ""}};
     return s_signature;
 }
 
@@ -1186,14 +1256,18 @@ public:
             }
             KernelDefinition copyKernel = kernel;
             const bool transpose = stagings[i]->transpose;
-            copyKernel.source.entryPoint
-                = std::string(transpose ? TRANSPOSE_ENTRY_POINT : COPY_ENTRY_POINT);
+            const bool expand = stagings[i]->expand;
+            copyKernel.source.entryPoint = std::string(expand      ? EXPAND_ENTRY_POINT
+                                                       : transpose ? TRANSPOSE_ENTRY_POINT
+                                                                   : COPY_ENTRY_POINT);
             auto copy = buildIngestorKernelCode(_kernelCompiler,
                                                 _kpackLoader,
                                                 context,
                                                 copyKernel,
                                                 options,
-                                                transpose ? transposeSignature() : copySignature());
+                                                expand      ? expandSignature()
+                                                : transpose ? transposeSignature()
+                                                            : copySignature());
             long long blocks = 0;
             if(transpose)
             {
@@ -1256,7 +1330,14 @@ public:
             char* staged = base + stagings[i]->workspaceOffset;
             void* src = in ? graphSide : staged;
             void* dst = in ? staged : graphSide;
-            if(stagings[i]->transpose)
+            if(stagings[i]->expand)
+            {
+                ConvIgemmExpandArgs args = stagings[i]->expandArgs;
+                args.src = src;
+                args.dst = dst;
+                dispatch.copyForStream(i, stream).launch(stream, args);
+            }
+            else if(stagings[i]->transpose)
             {
                 ConvIgemmTransposeArgs args = stagings[i]->transposeArgs;
                 args.src = src;

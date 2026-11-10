@@ -27,6 +27,9 @@ struct Staging
     /// Packed channels-first activations move by a tiled transpose; anything else by the copy.
     bool transpose = false;
     ConvIgemmTransposeArgs transposeArgs{};
+    /// Group fusion: the filter expanded into block-diagonal fused groups (ConvIgemmExpand).
+    bool expand = false;
+    ConvIgemmExpandArgs expandArgs{};
     ConvIgemmCopyArgs copy{};
     int64_t graphOffset = 0;
     size_t workspaceOffset = 0;
@@ -58,11 +61,21 @@ struct IgemmProblem
     /// The graph's filter is packed K T R S C/g and not reflected: backward data can read it
     /// directly (the direct-filter configs) instead of staging the transposed copy.
     bool filterKtrsc = false;
+    /// The graph's filter is packed K T R S C/g or K C/g T R S and not reflected: group fusion
+    /// can expand it. Element (k, c, tap) at k * wSrcK + c * wSrcC + tap * wSrcTap.
+    bool filterExpandable = false;
+    long long wSrcK = 0, wSrcC = 0, wSrcTap = 0;
 };
 
 /// @p problem without the filter staging, for a direct-filter config: the remaining staged
 /// operands keep their order in the workspace.
 IgemmProblem withoutFilterStaging(const IgemmProblem& problem);
+
+/// @p problem with @p fuse consecutive groups run as one (group fusion): the filter expanded into
+/// block-diagonal fused groups of fuse x C/g input channels in the workspace (packed K T R S C/g,
+/// which forward and the direct-filter backward-data configs read), or nullopt where the groups or
+/// the filter do not allow it.
+std::optional<IgemmProblem> withFusedGroups(const IgemmProblem& problem, int64_t fuse);
 
 /// Whether @p problem's output (forward y, backward data dx) is packed channels-first, so a
 /// channels-first-output config writes it in place of the staging transpose.
