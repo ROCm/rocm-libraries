@@ -1006,16 +1006,17 @@ namespace rocalution
         /** \brief Analyse the matrix for subsequent matrix-vector multiplications
       * \details
       * Optional. Performs the analysis of the matrix-vector multiplication up front,
-      * instead of during the first call to Apply() or ApplyAdd(). The analysis is
-      * kept by the operations that change the values in place, such as Scale(),
-      * ScaleDiagonal(), ScaleOffDiagonal(), AddScalar(), AddScalarDiagonal() and
-      * AddScalarOffDiagonal(). It is discarded by CopyFrom(), CopyFromAsync() and the
-      * other functions that copy into the matrix, even if the structure is the same,
-      * by UpdateValuesCSR(), by any operation that changes the structure of the
-      * matrix, by a conversion to another format and by a move to another backend.
-      * CloneFrom() does not copy the analysis of the source. Without a prior call, the
-      * first Apply() or ApplyAdd() modifies the internal state of the matrix, so
-      * concurrent calls on the same matrix are not safe.
+      * instead of during the first call to Apply() or ApplyAdd(). In CSR format, the
+      * analysis is kept by the operations that change the values in place, such as
+      * Scale(), ScaleDiagonal(), ScaleOffDiagonal(), AddScalar(), AddScalarDiagonal()
+      * and AddScalarOffDiagonal(). The other formats perform these operations in CSR on
+      * the host, which discards the analysis. It is also discarded by CopyFrom(),
+      * CopyFromAsync() and the other functions that copy into the matrix, even if the
+      * structure is the same, by UpdateValuesCSR(), by any operation that changes the
+      * structure of the matrix, by a conversion to another format and by a move to
+      * another backend. CloneFrom() does not copy the analysis of the source. Without
+      * a prior call, the first Apply() or ApplyAdd() modifies the internal state of the
+      * matrix, so concurrent calls on the same matrix are not safe.
       * \par Example
       * \code{.cpp}
       * LocalMatrix<T> A;

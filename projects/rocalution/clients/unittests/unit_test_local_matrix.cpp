@@ -1932,6 +1932,11 @@ TEST_P(local_matrix_formats, apply_analyse_keeps_the_analysis_until_the_entries_
         A->ApplyAnalyse();
         EXPECT_FALSE(analyses());
 
+        // The other formats scale in CSR on the host
+        A->Scale(static_cast<T>(2));
+        EXPECT_EQ(analyses(), !is(CSR));
+
+        A->ApplyAnalyse();
         A->MoveToHost();
         A->MoveToAccelerator();
         EXPECT_TRUE(analyses());
