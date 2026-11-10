@@ -63,7 +63,7 @@ namespace TensileLite
                 }
                 case msgpack::type::object_type::POSITIVE_INTEGER:
                 {
-                    auto iKey = element.key.as<uint32_t>();
+                    auto iKey = element.key.as<uint64_t>();
                     key       = std::to_string(iKey);
                     break;
                 }
@@ -344,6 +344,14 @@ namespace TensileLite
             filename,
             "library mapping",
             [](msgpack::object const& object, std::string& value) { object.convert(value); });
+    }
+
+    std::map<uint64_t, int> MessagePackLoadUidMapping(std::string const& filename)
+    {
+        return messagePackLoadStringKeyMapping<uint64_t, int>(
+            filename, "UID mapping", [](msgpack::object const& object, int& value) {
+                object.convert(value);
+            });
     }
 
     template <typename MyProblem, typename MySolution>
