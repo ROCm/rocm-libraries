@@ -15,7 +15,7 @@ Run it on each new AITER release, or when a GPU arch needs forward kernels.
 
 ## Rules
 
-1. **ASM kernels only, never CK.** Port only the prebuilt objects and CSV tables under AITER's `hsa/<arch>/<module>/`. Never port a CK kernel, CK host code, FlyDSL or Triton code. When AITER's `fmha_fwd_v3()` returns -1 for a case, AITER hands it to CK; the engine must decline that case, not look for another kernel. The script enforces the parts it can see: it fetches only allowlisted `hsa/` modules, rejects any object with a CK symbol, and never copies upstream source.
+1. **ASM kernels only, never CK.** Port only the prebuilt objects and CSV tables under AITER's `hsa/<arch>/<module>/`. Never port a CK kernel, CK host code, FlyDSL or Triton code. When AITER's `fmha_fwd_v3()` returns -1 for a case, or its Python gate `can_impl_fmha_v3_fwd` rejects it, AITER hands it to CK; the engine must decline that case, not look for another kernel. The script enforces the parts it can see: it fetches only allowlisted `hsa/` modules, rejects any object with a CK symbol, and never copies upstream source.
 2. **Ask which GPU archs to update.** Before planning, run `archs`, show the user the archs AITER ships tracked forward ASM modules for, and ask which ones to update. Never pick archs for the user. If the request already names archs, check each against that list and confirm.
 3. **Nothing changes the checkout until the user approves the plan report.** `plan` only writes a report. Run `apply` only after the user has read the report and approved its scope.
 4. **One approved code edit at a time.** Tier 2 and tier 3 findings need engine changes. Propose each change, with the finding it answers, and wait for approval.
@@ -28,14 +28,14 @@ Run it on each new AITER release, or when a GPU arch needs forward kernels.
 - **Mode**: `check` (is there anything to pull?), `update` (pull a release), or `verify` (is the tree consistent?). Infer it from the request.
 - **AITER ref** (`<aiter-ref>`): a release tag such as `v0.1.27`, or a commit. Default: the newest release, from `latest`.
 - **GPU archs** (`<archs>`): comma-separated, such as `gfx942,gfx950,gfx1250`. Always asked for; see rule 2.
-- **Baseline** (`<baseline-commit>`): needed only on the first update of a module that has no pin yet. It is the AITER commit the vendored files came from, and it also seeds the host-code commit (see below). Take it from the forward rows of the provenance table in `asm/asm_kernels/README.md`, and confirm it with the user. Modules with a pin use the pinned commits. For the current gfx942 and gfx950 forward kernels this is `17d4a33b6f9535e820353ebc6217769efc3766d6`. `asm/SdpaFwdKernelArgs.hpp` and `asm/SgprPadding.hpp` name `9522048` instead: a commit on an AITER side branch whose argument and padding structs are identical to those at `17d4a33`. The engine's MI308 detection already follows `17d4a33`, so `17d4a33` is the right host-code baseline as well.
+- **Baseline** (`<baseline-commit>`): needed only on the first update of a vendored module that has no pin yet. It is the AITER commit the vendored files came from, and it also seeds the host-code commit (see below). Take it from the module's `SOURCE.md` or the provenance table in `asm/asm_kernels/README.md`, and confirm it with the user. Modules with a pin use their pinned commits and ignore `--baseline`. The gfx942 and gfx950 `fmha_v3_fwd` modules are pinned.
 
 ## Two pinned commits per module
 
 Each module's pin records two AITER commits:
 
 - `commit`: where the vendored objects and CSVs came from. `apply` sets it.
-- `abi_commit`: the AITER code the engine mirrors by hand: the kernel argument structs, their packing, the launch grid and block size, the dispatch rules, the MI308 detection, and `hsa/codegen.py`, from which the vendored `asm/asm_kernels/codegen.py` is derived. Plans diff that upstream code from this commit, so a change stays in every later report until it is ported. `apply` advances it only when none of that code changed. After porting a change, run `mark-ported --module <module>`.
+- `abi_commit`: the AITER code the engine mirrors by hand: the kernel argument structs, their packing, the launch grid and block size, the dispatch rules, the MI308 detection, and `hsa/codegen.py`, from which the vendored `asm/asm_kernels/codegen.py` is derived. The dispatch rules live in the C++ host code (`csrc/cpp_itfs/mha_fwd.cu`) and in AITER's Python dispatch gate, `can_impl_fmha_v3_fwd` in `aiter/ops/mha.py` (a batch and a varlen copy). Plans diff that upstream code from this commit, so a change stays in every later report until it is ported. `apply` advances it only when none of that code changed or went missing. After porting a change, run `mark-ported --module <module>`.
 
 While `abi_commit` lags `commit`, plans report `abi_unported` at tier 3.
 
@@ -88,7 +88,7 @@ python3 <skill-directory>/scripts/aiter_fwd_sync.py plan --ref <aiter-ref> --arc
 4. **Decide the scope with the user.** Use [tiers.md](tiers.md). For each row added with a new value, decide whether to keep it or exclude it, and for each excluded row record a reason. Re-run `plan` with `--exclude` and `--include` until the report is what the user wants, then get explicit approval.
 5. **Apply.** Run `apply --report <report-dir>/plan.json`, then `verify`. Both must succeed.
 6. **Engine work.** Work through each finding with its page: tier 0 and 1 in [data-changes.md](data-changes.md), tier 2 in [new-values.md](new-values.md), tier 3 in [structural.md](structural.md). A large tier 3 item, such as a new arch, can go in its own PR; agree that with the user. Once every `reference_changed` diff for a module is ported, run `mark-ported --module <module>` and `verify`.
-7. **Provenance outside the pin.** Update the forward rows of the provenance table in `asm/asm_kernels/README.md` to the new tag and commit, point them at the generated `SOURCE.md` files, and fix its forward notes (it still says only `MI300/` objects are vendored; both `MI300/` and `MI308/` are). Update the forward commit in the header comment of `asm/AsmKernelPath.hpp`. After `mark-ported`, update the commit in the provenance comments of `asm/SdpaFwdKernelArgs.hpp`, and of `asm/SgprPadding.hpp` if its padding structs were ported. Point each of them at `aiter_fwd_pins.json`. `apply` replaces each forward module's `SOURCE.md` with a generated one.
+7. **Provenance outside the pin.** `apply` replaces each forward module's `SOURCE.md` with a generated one. The other forward provenance names no commit; it points at the `<arch>/fmha_v3_fwd` pins in `asm/asm_kernels/aiter_fwd_pins.json`. The forward row of `asm/asm_kernels/README.md` names both pinned fields, `asm/AsmKernelPath.hpp` cites `commit`, and `asm/SdpaFwdKernelArgs.hpp` cites `abi_commit`. Update the README's forward row and layout notes only when the archs or the object directories change. If a padding struct was ported, update the provenance comment of `asm/SgprPadding.hpp`, which the backward kernels share.
 8. **Build and test.** Follow [validation.md](validation.md).
 9. **PR.** Follow [pr.md](pr.md).
 
@@ -111,5 +111,5 @@ Report:
 - The highest tier per module, each exclusion and inclusion with its reason, and the forward modules not ported.
 - Each engine change made for a tier 2 or tier 3 finding, and each CK fallback case that became a decline.
 - `verify` output, the build result, and the unit tests run.
-- GPU validation per arch: run and passed, run and failed, or not run. A forward kernel on an arch with no GPU run is unvalidated, and so is a group-mode kernel no test checked numerically ([validation.md](validation.md)).
+- GPU validation per arch: run and passed, run and failed, or not run. A forward kernel on an arch with no GPU run is unvalidated ([validation.md](validation.md)).
 - The branch and the PR draft. Nothing is pushed or posted without approval.

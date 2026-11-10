@@ -31,11 +31,18 @@ Port the change field by field. Update the size assert from the new upstream str
 
 When every `reference_changed` diff of a module is ported, run `mark-ported --module <module>` (`<module>` is `<arch>/<module-name>`). Until then the pin keeps the older host-code commit and every later plan repeats the diffs, so a change deferred to another PR is not lost.
 
+## Python dispatch gate (`reference_changed`, tier 3)
+
+AITER also decides in Python whether a call reaches the ASM forward kernels: `can_impl_fmha_v3_fwd` in `aiter/ops/mha.py`, with one copy for batch mode and one for varlen (group) mode. The report diffs both from `abi_commit`. A case the gate rejects goes to CK, so port each new kernel limit as a decline in `SdpaFwdPlanBuilder::isApplicable`, as [new-values.md](new-values.md) describes for `fmha_fwd_v3()`.
+
+- The engine mirrors the hd192x128 K/V row-extent decline (2^32 bytes) on gfx942 and gfx950. Both gate copies compute the extent in the helper `_fmha_kv_byte_extent_ge_u32`, which the report diffs too.
+- The engine does not port the fp8 rule that `nhead_q / nhead_k` be a power of two. The gfx950 fp8 rows are excluded, and the gfx942 fp8 objects divide by the GQA ratio in full. Port the rule before enabling the gfx950 fp8 rows.
+
 ## New arch (`new_arch`, `cmake_arch_missing`)
 
 1. Add the arch to `ASM_SDPA_GPU_ARCHS` in `CMakeLists.txt`. That runs codegen and packs a `hip_kernel_provider_sdpa_<arch>.kpack` for it.
 2. Allow the arch in the device check of the builder that will serve it. `SdpaFwdPlanBuilder::isApplicable` accepts only gfx942 and gfx950.
-3. Work out what is arch-specific. The forward builder has gfx942-only rules: `bf16_cvt` matching in `getKernelNameKey`, the MI300/MI308 split in `getKernelTocKey`, and the hd192x128 tuning and grid rules in `computeFwdLaunchParams`. Decide each one for the new arch from AITER's own host code for it.
+3. Work out what is arch-specific. The forward builder has gfx942-only rules: `bf16_cvt` matching in `getKernelNameKey`, the MI300/MI308 split in `getKernelTocKey`, and the hd192x128 tuning and grid rules in `computeFwdLaunchParams`. It has gfx950-only rules too: the bf16 hd256 grid and block-size rules in `computeFwdLaunchParams`, and the bf16 hd256 GQA/MQA decline (`kernelServesHeadCounts` in `plans/SdpaFwdPlanBuilder.cpp`). Decide each one for the new arch from AITER's own host code for it, including the arch checks in `can_impl_fmha_v3_fwd`.
 4. Check that the arch's objects pack and load. `asm/asm_kernels/pack.py` names the archive's target, and the runtime loads by device string. Extend `tests/engines/asm_sdpa_engine/TestAsmKpackLoading.cpp` with one object of the new arch.
 5. Update the tests that name archs: the gfx942 and gfx950 skip guards in `tests/engines/asm_sdpa_engine/TestSdpaFwdPlanBuilder.cpp` and `TestAsmSdpaEngine.cpp`, and the arch strings of the shape-sweep cases in `integration_tests/asm_sdpa_engine/IntegrationGpuSdpaForward.cpp`.
 6. Add the arch to the forward GPU tests and to the cross-provider claims once it passes ([validation.md](validation.md)).
@@ -56,7 +63,7 @@ A new module, such as gfx1250's `fmha_fwd_bf16` and `fmha_fwd_bf16_varlen`, has 
 - **`header_mismatch_across_archs`**: the vendored `codegen.py` stops the build when same-named CSVs of two arch directories have different headers, and it reads every arch directory on disk, not only the archs being updated. Either update the other archs in the same plan so the headers agree again, or port AITER's column union into `codegen.py` (see [new-values.md](new-values.md)). Agree which with the user.
 - **`csv_removed_upstream`**: AITER dropped a CSV, and every row in it is lost. Treat it as a removal of all its kernels ([new-values.md](new-values.md)).
 - **`layout_changed`**: the object directories changed. The gfx942 forward objects live in `MI300/` and `MI308/`, chosen at runtime by `isMi308Device` and `getKernelTocKey`. Mirror the new split in both, and in the archive-key tests.
-- **`reference_missing`**: a mirrored upstream function or struct is gone or renamed. Find where its logic now lives upstream. If it moved, record the new name in `REFERENCES` in the helper script, in a change to this skill.
+- **`reference_missing`**: a mirrored upstream function or struct is gone or renamed. Find where its logic now lives upstream. If it moved, record the new name in `REFERENCES` in the helper script, in a change to this skill. `apply` keeps the older host-code commit while a reference is missing, so once the new name is recorded, later plans report the moved code until it is ported.
 - **`baseline_unknown`**: re-run `plan` with `--baseline`. If no one knows the baseline, read the reference sources in full and compare them with the engine by hand.
 
 ## Forward modules not ported

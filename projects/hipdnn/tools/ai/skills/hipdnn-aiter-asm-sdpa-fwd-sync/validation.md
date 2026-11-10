@@ -16,7 +16,7 @@ Run the hip-kernel-provider unit tests with the `hipdnn-superbuild-test` skill (
 
 Every arch whose objects changed needs the forward GPU tests in `dnn-providers/hip-kernel-provider/src/integration_tests/asm_sdpa_engine/IntegrationGpuSdpaForward.cpp` to pass on a GPU of that arch: `IntegrationGpuSdpaFwdBf16` (instances `Smoke`, `SmokeFp8` and `SmokeStats`, built from the kernel registry) and `IntegrationGpuSdpaFwdShapeSweepBf16`. Filter on `*IntegrationGpuSdpaFwd*`.
 
-- The registry cases validate every kept batch-mode row numerically, with equal query and key-value head counts and FNUZ fp8 inputs. They skip numerical validation of group-mode rows, so a new or changed group-mode kernel needs another check, such as a cross-provider bundle with ragged tensors. Say so in the report when there is none.
+- The registry cases check every kept row numerically: batch-mode rows against the CPU reference, group-mode rows against the CPU ragged reference. They use only equal query and key-value head counts and FNUZ fp8 inputs.
 - A rule the diff added for a case the registry does not exercise, such as GQA, needs a shape-sweep case.
 
 Where to run them:
