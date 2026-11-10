@@ -70,12 +70,15 @@ struct K7Block
     bool live;
 };
 
-/// The jd range of one axis: filter rows t0 + s j < f, dy rows q0 - j in [0, extent).
-__device__ inline void k7AxisTaps(int q0, int t0, int s, int f, int extent, int& lo, int& count)
+/// The j range of one axis: filter rows t0 + s j < f, dy rows q0 - step j in [0, extent) (step:
+/// the dilation, at stride 1; 1 otherwise).
+__device__ inline void
+    k7AxisTaps(int q0, int t0, int s, int step, int f, int extent, int& lo, int& count)
 {
     const int hiFilter = t0 < f ? (f - t0 + s - 1) / s : 0; // j < hiFilter
-    const int hiDy = q0 + 1; // q0 - j >= 0
-    lo = q0 - extent + 1 > 0 ? q0 - extent + 1 : 0; // q0 - j < extent
+    const int hiDy = q0 / step + 1; // q0 - step j >= 0
+    const int over = q0 - extent + 1; // q0 - step j < extent: j >= over / step, rounded up
+    lo = over > 0 ? (over + step - 1) / step : 0;
     const int hi = hiFilter < hiDy ? hiFilter : hiDy;
     count = hi > lo ? hi - lo : 0;
 }
@@ -86,7 +89,7 @@ __device__ inline void k7PairOf(const K7Args& a, const K7Block& b, int pi, int& 
     const int i = pi / b.nH;
     const int jd = b.jdLo + i;
     const int jh = b.jhLo + pi - i * b.nH;
-    rowY = (b.qd0 - jd) * a.hy + b.qh0 - jh;
+    rowY = (b.qd0 - jd * a.dd) * a.hy + b.qh0 - jh * a.dh;
     toff = ((b.td0 + a.sd * jd) * a.fh + b.th0 + a.sh * jh) * a.fs;
 }
 
@@ -108,8 +111,8 @@ __device__ inline K7Block k7Block(const K7Args& a, int bmq, int bn)
     b.qh0 = nh / a.sh;
     b.td0 = nd - b.qd0 * a.sd;
     b.th0 = nh - b.qh0 * a.sh;
-    k7AxisTaps(b.qd0, b.td0, a.sd, a.fd, a.dyDepth, b.jdLo, b.nD);
-    k7AxisTaps(b.qh0, b.th0, a.sh, a.fh, a.hy, b.jhLo, b.nH);
+    k7AxisTaps(b.qd0, b.td0, a.sd, a.dd, a.fd, a.dyDepth, b.jdLo, b.nD);
+    k7AxisTaps(b.qh0, b.th0, a.sh, a.dh, a.fh, a.hy, b.jhLo, b.nH);
     b.live = b.nD * b.nH > 0;
     b.rowY = 0;
     b.toff = 0;
@@ -574,6 +577,15 @@ __device__ inline void k7ZeroTile(const K7Args& a, const K7Block& b)
     }
 }
 
+/// The FMA filter tile's pitch per channel, in elements: the taps rounded up to an odd number of
+/// 16-byte chunks, so the lanes' per-channel tap vectors (channels one pitch apart) spread over
+/// the banks.
+__host__ __device__ constexpr int k7FmaPitch(int smax, int pade)
+{
+    const int chunks = (smax + pade - 1) / pade;
+    return (chunks % 2 == 0 ? chunks + 1 : chunks) * pade;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Matrix-core kernel. Block: WM x WN x WP waves (phase indices x channels x phase groups); tile
 // BMQ phase indices (all ST phases) x BN channels; k-step BK. Each wave holds FQ x FN fragments
@@ -614,8 +626,15 @@ __device__ void k7DgradMma(const K7Args& a)
     static_assert(HALOK % VEC == 0, "K7 window in whole vectors");
     constexpr int SMAX = ST * TAPS;
     typedef K7Tiles<T, VEC, KV, BK, WQ, BN, SMAX, THREADS, (FLAT > 0)> Tiles;
-    constexpr int A_LDS = Tiles::template aRow<LDK>(WQ);
-    constexpr int B_LDS = SMAX * BN * LDK;
+    // One k per lane (the fp32 atoms): the operands need no k-contiguous runs, so the tiles are
+    // k-major as the FMA kernel's (As[k][q], Bs[k][c][tap]), stored as whole vectors, untransposed.
+    constexpr bool KMAJOR = Atom::KPL == 1;
+    constexpr int PADE = 16 / static_cast<int>(sizeof(T));
+    constexpr int LDA = WQ + PADE;
+    constexpr int CP = k7FmaPitch(SMAX, PADE);
+    constexpr int LDB = BN * CP + PADE;
+    constexpr int A_LDS = KMAJOR ? BK * LDA : Tiles::template aRow<LDK>(WQ);
+    constexpr int B_LDS = KMAJOR ? BK * LDB : SMAX * BN * LDK;
     constexpr int OLD = BMQ * ST + 16 / static_cast<int>(sizeof(T));
     constexpr int OUT_LDS = BN * OLD;
     constexpr int LDS = A_LDS + B_LDS > OUT_LDS ? A_LDS + B_LDS : OUT_LDS;
@@ -662,13 +681,17 @@ __device__ void k7DgradMma(const K7Args& a)
     const int kb = Atom::template kBase<Atom::KPL>(lane);
     // The lane's A row at tile index i, shift d: aRow0 + i DIM + d dil.
     const int aRow0 = wq * WTQ + fragRow + halo;
-    const T* bBase = Bs + (wn * WTN + fragRow) * LDK + kb;
+    const T* bBase
+        = KMAJOR ? Bs + kb * LDB + (wn * WTN + fragRow) * CP : Bs + (wn * WTN + fragRow) * LDK + kb;
 
     const int iters = tiles.start(a) * b.nD * b.nH;
     for(int it = 0; it < iters; ++it)
     {
         __syncthreads();
-        tiles.template storeRows<LDK>(As, Bs);
+        if constexpr(KMAJOR)
+            tiles.template storeColumns<LDA, LDB, CP>(As, Bs);
+        else
+            tiles.template storeRows<LDK>(As, Bs);
         __syncthreads();
         if(it + 1 < iters)
         {
@@ -697,8 +720,13 @@ __device__ void k7DgradMma(const K7Args& a)
                 typename Atom::frag af[FQ];
 #pragma unroll
                 for(int i = 0; i < FQ; ++i)
-                    af[i] = k1Frag<Atom>(As + Tiles::template aRow<LDK>(aRow0 + i * DIM + d * dil)
-                                         + kk + kb);
+                {
+                    if constexpr(KMAJOR)
+                        af[i] = As[(kk + kb) * LDA + aRow0 + i * DIM + d * dil];
+                    else
+                        af[i] = k1Frag<Atom>(
+                            As + Tiles::template aRow<LDK>(aRow0 + i * DIM + d * dil) + kk + kb);
+                }
 #pragma unroll
                 for(int p = 0; p < PW; ++p)
                 {
@@ -709,7 +737,12 @@ __device__ void k7DgradMma(const K7Args& a)
                         typename Atom::frag bf[FN];
 #pragma unroll
                         for(int n = 0; n < FN; ++n)
-                            bf[n] = k1Frag<Atom>(bBase + (s * BN + n * DIM) * LDK + kk);
+                        {
+                            if constexpr(KMAJOR)
+                                bf[n] = bBase[kk * LDB + n * DIM * CP + s];
+                            else
+                                bf[n] = k1Frag<Atom>(bBase + (s * BN + n * DIM) * LDK + kk);
+                        }
 #pragma unroll
                         for(int i = 0; i < FQ; ++i)
 #pragma unroll
@@ -767,15 +800,6 @@ __device__ void k7DgradMma(const K7Args& a)
 // FMA kernel: every arch and dtype (fp32 on RDNA, everything on gfx906). Threads TX (channels)
 // x TY (tile indices); each computes TQ consecutive tile indices, all ST phases, of TC channels
 // TX apart. Tile BMQ = TY TQ by BN = TX TC; k-step BK.
-
-/// The FMA filter tile's pitch per channel, in elements: the taps rounded up to an odd number of
-/// 16-byte chunks, so the lanes' per-channel tap vectors (channels one pitch apart) spread over
-/// the banks.
-__host__ __device__ constexpr int k7FmaPitch(int smax, int pade)
-{
-    const int chunks = (smax + pade - 1) / pade;
-    return (chunks % 2 == 0 ? chunks + 1 : chunks) * pade;
-}
 
 /// The FMA main loop for r = pad mod ST = R: phase p's tap p + ST j reads shift below(p) - j,
 /// below(p) = p < R, so every register index is compile-time. The launcher checks the filter

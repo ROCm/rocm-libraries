@@ -108,12 +108,13 @@ std::optional<NchwProblem>
     {
         return std::nullopt;
     }
-    // Depth and height: unit dilation; any stride, padding and filter (a dx row reduces over
-    // each (dy row, filter row) pair that reaches it).
+    // Depth and height: any stride, padding and filter, a dilation only at stride 1 (a dx row
+    // reduces over each (dy row, filter row) pair that reaches it).
     for(int axis = 0; axis < 2; ++axis)
     {
-        if(a.dilation[axis] != 1 || a.stride[axis] < 1 || a.prePadding[axis] < 0
-           || a.filter[axis] < 1 || a.inSpatial[axis] < 1 || a.outSpatial[axis] < 1)
+        if(a.dilation[axis] < 1 || (a.dilation[axis] != 1 && a.stride[axis] != 1)
+           || a.stride[axis] < 1 || a.prePadding[axis] < 0 || a.filter[axis] < 1
+           || a.inSpatial[axis] < 1 || a.outSpatial[axis] < 1)
         {
             return std::nullopt;
         }
@@ -146,6 +147,8 @@ std::optional<NchwProblem>
                                  a.prePadding[2],
                                  a.stride[2],
                                  a.dilation[2],
+                                 a.dilation[0],
+                                 a.dilation[1],
                                  a.prePadding[0],
                                  a.prePadding[1],
                                  a.stride[0],
@@ -178,7 +181,8 @@ std::optional<NchwProblem>
                    && a.n * rows * a.inSpatial[2] <= INT_LIMIT;
     for(int axis = 0; axis < 3; ++axis)
     {
-        problem.flat = problem.flat && a.prePadding[axis] == 0 && a.filter[axis] <= a.stride[axis]
+        problem.flat = problem.flat && a.prePadding[axis] == 0 && a.dilation[axis] == 1
+                       && a.filter[axis] <= a.stride[axis]
                        && a.inSpatial[axis] == a.stride[axis] * a.outSpatial[axis];
     }
     problem.dxUid = base->operands.x;
@@ -206,6 +210,8 @@ std::optional<NchwProblem>
     k7.fh = static_cast<int>(a.filter[1]);
     k7.fStride = static_cast<int>(filterRun);
     k7.dil = static_cast<int>(a.dilation[2]);
+    k7.dd = static_cast<int>(a.dilation[0]);
+    k7.dh = static_cast<int>(a.dilation[1]);
     k7.dyImage = *dyImage;
     k7.dxImage = *dxImage;
     problem.base = std::move(*base);
@@ -233,10 +239,17 @@ int64_t ldsBytesOf(const NchwConfig& config, int elementBytes)
         return config.stages * config.bk * (lda + ldb) * elementBytes;
     }
     const int64_t wq = config.bmq + config.halo;
+    const int64_t out = config.bn * (config.bmq * config.stride + pad);
+    if(config.atom.size() >= 3 && config.atom.substr(config.atom.size() - 3) == "f32")
+    {
+        // One k per lane: k-major tiles as the FMA kernel's (no transposing stores).
+        const int64_t chunks = divUp(smax, pad);
+        const int64_t cp = (chunks % 2 == 0 ? chunks + 1 : chunks) * pad;
+        return std::max(config.bk * ((wq + pad) + config.bn * cp + pad), out) * elementBytes;
+    }
     const int64_t ldk = config.bk + pad;
     const int64_t aTile = wq * ldk + (config.vec > 0 ? wq / config.vec : 0) * pad;
     const int64_t bTile = smax * config.bn * ldk;
-    const int64_t out = config.bn * (config.bmq * config.stride + pad);
     return std::max(aTile + bTile, out) * elementBytes;
 }
 

@@ -113,7 +113,7 @@ struct NchwLaunch
  *
  * Everything parseConvNaiveProblem gates, plus: fp32, fp16 or bf16; one group;
  * cross-correlation; dy, dx and the filter packed channels-first (N C D H W, K C T R S); along
- * depth and height unit dilation and non-negative padding;
+ * depth and height non-negative padding and a dilation only at stride 1;
  * dilation along the width only at stride 1; every extent, stride and padding within 32 bits, one image of
  * dy and the whole filter within 32-bit byte offsets, images times dx rows within the grid's
  * third axis.

@@ -144,6 +144,12 @@ std::vector<AcceptCase> acceptCases()
     heightOnly.input = {4, 37};
     heightOnly.stride = {2, 4};
     cases.push_back({"StrideOnHeightOnly", heightOnly});
+    auto heightDilated = baseShape();
+    heightDilated.input = {13, 37};
+    heightDilated.filter = {3, 8};
+    heightDilated.prePadding = heightDilated.postPadding = {4, 2};
+    heightDilated.dilation = {4, 1};
+    cases.push_back({"HeightDilatedAtStride1", heightDilated});
     auto dilated = baseShape();
     dilated.filter = {1, 7};
     dilated.stride = {1, 1};
@@ -311,19 +317,24 @@ std::vector<RefusalCase> refusalCases()
              reshape(s, shape);
          }},
         // Depth and height: unit dilation.
-        {"DilationOnHeight",
+        // Depth and height: a dilation only at stride 1.
+        {"DilationOnHeightPastStride1",
          [](ConvGraphSpec& s) {
              auto shape = baseShape();
+             shape.input = {9, 37};
+             shape.filter = {3, 8};
+             shape.prePadding = shape.postPadding = {2, 2};
+             shape.stride = {2, 4};
              shape.dilation = {2, 1};
              reshape(s, shape);
          }},
-        {"DilationOnDepth",
+        {"DilationOnDepthPastStride1",
          [](ConvGraphSpec& s) {
              auto shape = baseShape();
-             shape.input = {2, 3, 37};
-             shape.filter = {1, 1, 8};
-             shape.prePadding = shape.postPadding = {0, 0, 2};
-             shape.stride = {1, 1, 4};
+             shape.input = {9, 3, 37};
+             shape.filter = {3, 1, 8};
+             shape.prePadding = shape.postPadding = {2, 0, 2};
+             shape.stride = {2, 1, 4};
              shape.dilation = {2, 1, 1};
              reshape(s, shape);
          }},
