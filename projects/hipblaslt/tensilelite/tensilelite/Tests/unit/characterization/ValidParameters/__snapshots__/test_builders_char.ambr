@@ -1515,6 +1515,7 @@
     'TDMLoadWaveSync',
     'TDMPlusLdsBuf',
     'TDMSplit',
+    'TDMStoreInst',
     'TailloopInNll',
     'TemporalHint',
     'TemporalHintA',
@@ -2863,6 +2864,15 @@
         True,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'TDMStoreInst': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 4,
       'type': 'list',
     }),
     'TailloopInNll': dict({

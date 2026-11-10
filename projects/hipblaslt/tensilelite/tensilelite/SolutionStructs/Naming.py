@@ -318,6 +318,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("TDMFuse")
 
+    # TDMStoreInst=0 keeps the buffer_store epilogue, so naming it would rename every kernel.
+    if not state.get("TDMStoreInst", 0):
+      requiredParametersTemp.discard("TDMStoreInst")
+
     # StinkyTofuRegisterAllocation=0 leaves Tensile's colouring, so naming it
     # would rename every kernel that does not opt in. Any other value changes
     # the colouring (and mode 3 changes which kernels are accepted), so it

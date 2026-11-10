@@ -65,19 +65,20 @@ def decodeNonTemporal(
     return (False, False, False, scope, temporal_hint, non_volatile)
 
 
-def tdmCacheModifiers(asm_caps, hints, decider=None):
-    """Return ``TENSORModifiers`` for one ``tensor_load_to_lds``, or ``None``.
+def tdmCacheModifiers(asm_caps, hints, decider=None, is_store=False):
+    """Return ``TENSORModifiers`` for one ``tensor_load_to_lds`` or, with
+    ``is_store``, one ``tensor_store_from_lds``, or ``None``.
 
     ``hints`` holds one ``(nt_value, temporal_hint, non_volatile)`` tuple per
-    tensor the instruction loads.  Wave-separated TDM issues a single
+    tensor the instruction moves.  Wave-separated TDM issues a single
     instruction for every member of a descriptor set, and its TH/SCOPE/NV bits
     cannot differ per wave.  ``decider`` lists the positions in ``hints`` of the
     members that decide them: the hints of the other members are ignored, so the
     instruction follows the deciders (``None``: every member decides).  Among the
     deciders a field is kept only when all of them decode to the same value;
     otherwise it stays at the ISA default.  The defaults (SCOPE_CU, TH_RT, no nv)
-    encode as zero and are left out, so a load without hints is emitted exactly
-    as before.
+    encode as zero and are left out, so a TDM instruction without hints
+    carries no cache modifier.
     """
     if not _has_temporal_hint(asm_caps) or not hints:
         return None
@@ -99,7 +100,7 @@ def tdmCacheModifiers(asm_caps, hints, decider=None):
         th = TemporalHint.TH_NONE
     if (scope, th, nv) == (CacheScope.SCOPE_NONE, TemporalHint.TH_NONE, NonVolatile.NV_NONE):
         return None
-    return TENSORModifiers(scope=scope, th=th, nv=nv)
+    return TENSORModifiers(scope=scope, th=th, nv=nv, isStore=is_store)
 
 
 def _at_least_device_scope(scope):
