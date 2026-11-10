@@ -108,13 +108,12 @@ std::optional<NchwProblem>
     {
         return std::nullopt;
     }
-    // Depth and height: unit dilation and a filter no longer than the stride, so each dx row
-    // takes at most one dy row and one filter row.
+    // Depth and height: unit dilation; any stride, padding and filter (a dx row reduces over
+    // each (dy row, filter row) pair that reaches it).
     for(int axis = 0; axis < 2; ++axis)
     {
         if(a.dilation[axis] != 1 || a.stride[axis] < 1 || a.prePadding[axis] < 0
-           || a.filter[axis] < 1 || a.filter[axis] > a.stride[axis] || a.inSpatial[axis] < 1
-           || a.outSpatial[axis] < 1)
+           || a.filter[axis] < 1 || a.inSpatial[axis] < 1 || a.outSpatial[axis] < 1)
         {
             return std::nullopt;
         }
@@ -176,7 +175,7 @@ std::optional<NchwProblem>
                    && a.n * rows * a.inSpatial[2] <= INT_LIMIT;
     for(int axis = 0; axis < 3; ++axis)
     {
-        problem.flat = problem.flat && a.prePadding[axis] == 0
+        problem.flat = problem.flat && a.prePadding[axis] == 0 && a.filter[axis] <= a.stride[axis]
                        && a.inSpatial[axis] == a.stride[axis] * a.outSpatial[axis];
     }
     problem.dxUid = base->operands.x;
