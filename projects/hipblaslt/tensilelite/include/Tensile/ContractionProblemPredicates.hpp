@@ -2915,6 +2915,47 @@ namespace TensileLite
                 }
             };
 
+            // Emitted only on TriggeredGateEpilogue solutions (value = true), so
+            // problems that do not ask for the gate never select them.
+            struct TriggeredGateEpilogue
+                : public Predicate_CRTP<TriggeredGateEpilogue, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                TriggeredGateEpilogue() = default;
+                TriggeredGateEpilogue(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "TriggeredGateEpilogue";
+                }
+
+                bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.triggeredGateEpilogue() == value;
+                }
+
+                bool debugEval(ContractionProblemGemm const& problem,
+                               std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob",
+                                        problem.triggeredGateEpilogue(),
+                                        "==",
+                                        "sol",
+                                        value);
+                }
+            };
+
             // value is the solution's MacroTile0.
             struct GemmA2AShape : public Predicate_CRTP<GemmA2AShape, ContractionProblemGemm>
             {

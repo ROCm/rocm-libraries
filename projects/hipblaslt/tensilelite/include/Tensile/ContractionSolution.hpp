@@ -184,7 +184,10 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+        X_MACRO(ESMRuntimeSupported) \
+        /* Triggered-gate kernarg tail (GateKernArg.hpp) */ \
+        X_MACRO(GateView) \
+        X_MACRO(GateTileBase)
 
     enum class CustomArgSemantic
     {
@@ -1494,6 +1497,7 @@ namespace TensileLite
             bool swizzleTensorA             = false;
             bool swizzleTensorB             = false;
             bool fusedGemmA2A               = false;
+            bool triggeredGateEpilogue      = false;
             int  metadataLayout             = 0;
             // w4a16 group size, zero-point and encoding come from predicates and the problem;
             // a runtime-group kernel matches several group sizes.

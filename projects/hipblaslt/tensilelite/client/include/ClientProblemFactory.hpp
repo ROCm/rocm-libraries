@@ -115,6 +115,7 @@ namespace TensileLite
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
             bool                             m_fusedGemmA2A;
+            bool                             m_triggeredGateEpilogue;
             std::vector<int>                 m_worlds;
             std::vector<int>                 m_fusedA2AExtents;
             int                              m_metadataLayout;

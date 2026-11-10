@@ -98,6 +98,8 @@ namespace TensileLite
         {
             if(commFlags != nullptr)
                 static_cast<void>(hipFree(commFlags));
+            if(gateTable != nullptr)
+                static_cast<void>(hipFree(gateTable));
             if(stream != nullptr)
                 static_cast<void>(hipStreamDestroy(stream));
         }
@@ -157,6 +159,13 @@ namespace TensileLite
         {
             const size_t slot = launch % devices[rank]->inputArr.size();
             auto const*  gemm = dynamic_cast<ContractionProblemGemm const*>(&problem);
+            if(gemm != nullptr && gemm->triggeredGateEpilogue())
+            {
+                scratch = dynamic_cast<ContractionInputs const&>(*devices[rank]->inputArr[slot]);
+                scratch.gateView     = devices[rank]->gateTable;
+                scratch.gateTileBase = 0;
+                return &scratch;
+            }
             if(gemm == nullptr || !gemm->fusedGemmA2A())
                 return devices[rank]->inputArr[slot].get();
 

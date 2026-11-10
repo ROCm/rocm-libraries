@@ -26,6 +26,7 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/GateKernArg.hpp>
 #include <Tensile/RocRollerWgmKernargs.hpp>
 #include <Tensile/ScaleAlphaVec.hpp>
 
@@ -3060,6 +3061,17 @@ namespace TensileLite
                                inputs.fusedA2ADrain,
                                static_cast<uint32_t>(problem.fusedA2AExtent()));
 
+        // The triggered-gate tail follows the same position (mutually exclusive
+        // with the fused segment). Keyed on the solution: the kernel has these
+        // args exactly when it was generated with TriggeredGateEpilogue.
+        if(problemType.triggeredGateEpilogue)
+        {
+            if(inputs.gateView == nullptr)
+                throw std::runtime_error(
+                    "[gate] TriggeredGateEpilogue kernel without a gate table");
+            appendGateSegment(rv.args, inputs.gateView, inputs.gateTileBase);
+        }
+
         // CU-occupancy probe tail args (layout: Signature.py addOccupancyProbeArgs).
         // A grid smaller than minGrid is padded with probe-only WGs so the probe
         // covers minGrid CUs. Only a 1-D grid can be padded; otherwise the probe
@@ -4021,6 +4033,12 @@ namespace TensileLite
                                        static_cast<uint32_t>(problem.fusedA2AExtent()));
                     break;
                 }
+                case CustomArgSemantic::GateView:
+                    rv.args.template appendAligned<void const*>("GateView", inputs.gateView);
+                    break;
+                case CustomArgSemantic::GateTileBase:
+                    rv.args.template append<uint32_t>("GateTileBase", inputs.gateTileBase);
+                    break;
                 // ---- Random seed args ----
                 case CustomArgSemantic::RNDSeed:
                 {

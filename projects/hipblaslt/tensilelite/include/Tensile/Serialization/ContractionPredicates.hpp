@@ -133,6 +133,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::SwizzleTensorB>(),
                      Base::template Pair<Predicates::Contraction::FusedGemmA2A>(),
                      Base::template Pair<Predicates::Contraction::GemmA2AShape>(),
+                     Base::template Pair<Predicates::Contraction::TriggeredGateEpilogue>(),
                      Base::template Pair<Predicates::Contraction::MXBlockA>(),
                      Base::template Pair<Predicates::Contraction::MXBlockB>(),
                      Base::template Pair<Predicates::Contraction::MXBlockFreeA>(),
@@ -595,6 +596,12 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::GemmA2AShape, IO>
             : public AutoMappingTraits<Predicates::Contraction::GemmA2AShape, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::TriggeredGateEpilogue, IO>
+            : public AutoMappingTraits<Predicates::Contraction::TriggeredGateEpilogue, IO>
         {
         };
 

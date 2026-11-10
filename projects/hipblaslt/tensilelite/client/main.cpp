@@ -46,6 +46,7 @@
 #include "SynchronizerValidator.hpp"
 #include "TimingEvents.hpp"
 #include "TimingInstrumentation.hpp"
+#include "TriggeredGateValidator.hpp"
 
 #include "LibraryUpdateReporter.hpp"
 #include "LogReporter.hpp"
@@ -231,6 +232,7 @@ namespace TensileLite
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
                 ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")
+                ("triggered-gate-epilogue",  po::value<bool>()->default_value(false), "Supply a gate table to TriggeredGateEpilogue kernels and check every band's gate after the first launch.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -779,6 +781,17 @@ namespace TensileLite
         }
 #endif // defined(__linux__)
 
+        void checkTriggeredGateArgs(po::variables_map const& args)
+        {
+            if(args["fused-gemm-a2a"].as<bool>())
+                throw std::runtime_error("[gate] --triggered-gate-epilogue and --fused-gemm-a2a "
+                                         "are mutually exclusive.");
+            if(args["use-user-args"].as<bool>())
+                throw std::runtime_error("[gate] --use-user-args is not supported.");
+            if(args["grouped-gemm"].as<bool>())
+                throw std::runtime_error("[gate] --grouped-gemm is not supported.");
+        }
+
         void checkFusedA2AArgs(po::variables_map const& args)
         {
             const int toValidate = args["num-elements-to-validate"].as<int>();
@@ -853,6 +866,8 @@ int main(int argc, const char* argv[])
     bool fusedA2A = args["fused-gemm-a2a"].as<bool>();
     if(fusedA2A)
         checkFusedA2AArgs(args);
+    if(args["triggered-gate-epilogue"].as<bool>())
+        checkTriggeredGateArgs(args);
     auto const& worldFilter = args["world-filter"].as<std::vector<int>>();
     if(!fusedA2A && !worldFilter.empty())
         throw std::runtime_error("--world-filter applies only with --fused-gemm-a2a");
@@ -1032,6 +1047,7 @@ int main(int argc, const char* argv[])
             // reverse, so the dirty-buffer verdict lands after the reference
             // one rather than being overwritten by it.
             listeners.addListener(std::make_shared<SynchronizerValidator>(args));
+            listeners.addListener(std::make_shared<TriggeredGateValidator>(args));
             listeners.addListener(std::make_shared<ReferenceValidator>(args));
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
             listeners.addListener(benchmarkTimer);

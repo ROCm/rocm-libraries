@@ -748,6 +748,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('swizzle-tensor-a', problemType.swizzleTensorA)
         param('swizzle-tensor-b', problemType.swizzleTensorB)
         param('fused-gemm-a2a', problemType.fusedGemmA2A)
+        if getattr(problemType, 'triggeredGateEpilogue', False):
+            param('triggered-gate-epilogue', True)
         if problemType.mxBlockA:
             param('mx-a-block', problemType.mxBlockA)
             param('mx-a-free-block', problemType.mxBlockFreeA)
