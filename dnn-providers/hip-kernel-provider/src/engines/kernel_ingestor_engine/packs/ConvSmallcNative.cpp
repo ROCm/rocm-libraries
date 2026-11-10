@@ -354,7 +354,8 @@ std::optional<Plan> planFor(const SmallcProblem& problem, const Config& config)
     auto& args = plan.args;
     const long long columns = config.blockColumns();
     const long long columnBlocks = (a.k + columns - 1) / columns;
-    const long long th = static_cast<long long>(config.wm) * config.fm;
+    // Tile rows: wm fragments of fm rows (MMA), wm rows (FMA).
+    const long long th = config.fma ? config.wm : static_cast<long long>(config.wm) * config.fm;
     const long long tw = static_cast<long long>(config.wq) * 16;
     const long long tilesH = (a.outSpatial[1] + th - 1) / th;
     const long long tilesW = (a.outSpatial[2] + tw - 1) / tw;
