@@ -484,21 +484,33 @@ rocke_value_t* rocke_gfx942_attn2d_read_k8_mfma_operand(rocke_gfx942_attn2d_buil
                                                         int k_iter,
                                                         int n_tile);
 
+/* _tile_page_ptrs: base pointers of the tile's pages (i64 K/V addressing); an
+ * arena-owned array of N_BLOCKS_PER_TILE values, or NULL on out of memory. */
+rocke_value_t** rocke_gfx942_attn2d_tile_page_ptrs(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                                   rocke_value_t* src,
+                                                   rocke_value_t* kv_tile_idx);
+
+/* PAGE_RSRC_I64: i64 K/V addressing through per-page pointers. */
+bool rocke_gfx942_attn2d_page_rsrc_i64(const rocke_gfx942_attn2d_build_ctx_t* ctx);
+
+/* _kv_head_page_b: the kv head's byte offset within a page. */
+rocke_value_t* rocke_gfx942_attn2d_kv_head_page_b(rocke_gfx942_attn2d_build_ctx_t* ctx);
+
+/* _kv_page_off: byte offset of K/V[token, dim] within its page. */
+rocke_value_t* rocke_gfx942_attn2d_kv_page_off(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                               rocke_value_t* token,
+                                               rocke_value_t* dim,
+                                               rocke_value_t* kv_head_b);
+
 /* ----- transposed-V store path (cfv / cfvst, lines 2621-2904) ----- */
 void rocke_gfx942_attn2d_issue_v_transposed(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                             rocke_value_t* kv_tile_idx);
 /* _cfvst_load_v_regs -> opaque payload (the loaded V register set + coords) the
- * matching store consumes; _load_token_row_pair and _cfvst_block_coords are its
- * inner closures. The payload is arena-owned. */
+ * matching store consumes; its inner closures (_load_token_row_pair,
+ * _cfvst_block_coords) are file-local to the cfvst TU. The payload is
+ * arena-owned. */
 void* rocke_gfx942_attn2d_cfvst_load_v_regs(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                             rocke_value_t* kv_tile_idx);
-rocke_value_t* rocke_gfx942_attn2d_load_token_row_pair(rocke_gfx942_attn2d_build_ctx_t* ctx,
-                                                       rocke_value_t* t_row,
-                                                       rocke_value_t* d0);
-void rocke_gfx942_attn2d_cfvst_block_coords(rocke_gfx942_attn2d_build_ctx_t* ctx,
-                                            rocke_value_t* blk,
-                                            rocke_value_t** out_a,
-                                            rocke_value_t** out_b);
 void rocke_gfx942_attn2d_cfvst_store_v_regs(rocke_gfx942_attn2d_build_ctx_t* ctx, void* payload);
 void rocke_gfx942_attn2d_issue_v_transposed_store(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                                   rocke_value_t* kv_tile_idx);
@@ -585,6 +597,11 @@ typedef struct rocke_gfx942_attn2d_pv_inputs
     int alpha_count;
     rocke_value_t* const* new_l_vals; /* SOFTMAX_STATE_SLOTS                       */
     rocke_value_t* const* m_carry; /* SOFTMAX_STATE_SLOTS: unclamped running max */
+    /* NULL m_carry[r]: the yield rebuilds the raw max as new_l == 0 ? -inf :
+     * m_new[r] (the transposed path), so the raw max does not stay live. */
+    rocke_value_t* const* m_new; /* SOFTMAX_STATE_SLOTS: clamped running max */
+    rocke_value_t* zero_f;
+    rocke_value_t* neg_inf;
     /* PT32 register groups: pt32[g] is the flat [p_tile*RPL + reg] array for
      * group g; group 0 = current tile, group 1 = GROUPED_KV2 second tile. */
     rocke_value_t* const* pt32_g0;

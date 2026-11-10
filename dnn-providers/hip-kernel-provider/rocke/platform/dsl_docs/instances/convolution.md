@@ -128,7 +128,7 @@ class ImplicitGemmConvSpec:
 
 `lds_k_pad=None` lets the kernel pick: `+8` on sync paths when `block_k >= 16`, `+0` on async paths. Override only for sweep experiments.
 
-`lds_k_outer` is a backward-only field (`WgradConvSpec`, `DgradConvSpec`); the forward spec above has no counterpart. It stores the LDS tile K-outer as `T[k][mn]` and transposes inside the MFMA operand fetch instead of transposing on store. Its row stride does not come from `lds_k_pad`: it is fixed at `_KOUTER_PAD` — 8, or 0 on the wgrad async path — and wgrad rejects an explicit `lds_k_pad` under `lds_k_outer` rather than silently ignoring it. dgrad keeps its A tile M-outer, so `lds_k_pad` still applies there; dgrad instead rejects an explicit `lds_layout` or `async_dma`. Do not set the field by hand: ask `WgradConvSpec.default_lds_k_outer(...)` / `DgradConvSpec.default_lds_k_outer(...)`. The backward sections below cover the layout, the pad, and the gate.
+`lds_k_outer` is a backward-only field (`WgradConvSpec`, `DgradConvSpec`); the forward spec above has no counterpart. It stores the LDS tile K-outer as `T[k][mn]` and transposes inside the MFMA operand fetch instead of transposing on store. Its row stride does not come from `lds_k_pad`: it is fixed at `_KOUTER_PAD` — 8, or 0 on the wave64 wgrad async path — and wgrad rejects an explicit `lds_k_pad` under `lds_k_outer` rather than silently ignoring it. dgrad keeps its A tile M-outer, so `lds_k_pad` still applies there; dgrad instead rejects an explicit `lds_layout` or `async_dma`. Do not set the field by hand: ask `WgradConvSpec.default_lds_k_outer(...)` / `DgradConvSpec.default_lds_k_outer(...)`. The backward sections below cover the layout, the pad, and the gate.
 
 The example bake-off (`example/ck_tile/dsl/08_bake_off_implicit_gemm`) uses:
 
@@ -365,7 +365,7 @@ The removed writes were bank-degenerate by construction. In `"row"` mode the dec
 
 The K-outer row stride must **not** be a multiple of the 32-dword LDS bank period, or the transpose read degenerates. The row-walking lane term differs per regime but the condition does not: on wave64 it is `((l % 16) // 4)`, four row-groups; on wave32 it is `(l % 8)`, eight. Either contributes zero bank spread whenever `(stride_elems * 2 / 4) % 32 == 0`. A pad of 8 makes a 64-wide tile 36 dwords (`36 % 32 == 4`), spreading the row-groups across banks (`0, 4, 8, 12` on wave64; `0, 4, ..., 28` on wave32), and keeps rows 16-byte aligned for the `b128` store side.
 
-The two directions carry the constant differently. dgrad fixes it at 8 as a module constant shared by the builder and `is_valid_dgrad_spec` so the charged and allocated shapes cannot drift (mirrored as `ROCKE_DGRAD_KOUTER_PAD`). wgrad derives it per build as `0 if spec.async_dma else 8`: the direct global→LDS load deposits packed lane-contiguous bytes and cannot skip a row pad. That is not free on the read side — a pad of 0 puts the row stride back at a whole multiple of the bank period, which is the degenerate case above, so the async leg gives up exactly the bank spread K-outer was introduced to obtain. `async_dma` trades read-side bank spread for the write-side and prefetch win of the direct path, which is why it is a swept axis rather than a deduced one.
+The two directions carry the constant differently. dgrad fixes it at 8 as a module constant shared by the builder and `is_valid_dgrad_spec` so the charged and allocated shapes cannot drift (mirrored as `ROCKE_DGRAD_KOUTER_PAD`). wgrad derives it per build (`_kouter_pad`) as 0 on the wave64 async path and 8 otherwise: the gfx9 direct global→LDS load (`buffer_load_lds`) deposits packed lane-contiguous bytes and cannot skip a row pad. The gfx1250 async copy (`global_load_async_to_lds`) writes a per-lane LDS address, so the wave32 async path keeps the pad of 8. That is not free on the read side — a pad of 0 puts the row stride back at a whole multiple of the bank period, which is the degenerate case above, so the async leg gives up exactly the bank spread K-outer was introduced to obtain. `async_dma` trades read-side bank spread for the write-side and prefetch win of the direct path, which is why it is a swept axis rather than a deduced one.
 
 ### Fragment Length Is Per-Atom
 
@@ -463,6 +463,7 @@ M-outer default for dgrad, and matches the fp32 reference for wgrad.
 
 - `pipeline="basic"`: now uses a bounded runtime `scf.for` K-loop (load → sync → MFMA → sync per tile), identical to the `"mem"` path. No K-trip-count limit. dgrad has no `basic` branch.
 - `async_dma` is a swept axis on the wgrad sweep driver, not a run-level flag. Unlike `lds_k_outer` it is not deducible from `(arch, spec)`: it removes the register staging of the tile, but it also forces the K-outer row pad to 0 and coarsens the load-width ladder to the widths the intrinsic accepts, and both terms are functions of tile width and channel run, which are themselves sweep axes.
+- WMMA wgrad (gfx1250): `async_dma` is a ping-pong over `global_load_async_to_lds` (`CoalescedTileLoader.load_async_to_lds`, one barrier per tile, drained by `s_wait_asynccnt`). It reuses the synchronous K-outer loaders' slot partition, needs `lds_k_outer` and a 4-, 8- or 16-byte chunk on both operands, and ANDs the buffer-range check (`byte offset < num_bytes`, unsigned as the resource compares it) into each chunk's `valid`, zero-filling failing chunks with an LDS store of the tile's element type. `epilogue="cshuffle"` is admitted on WMMA too: both cshuffle epilogues (direct store and split-K atomic) read the WMMA fragment through `CShuffleEpilogue.from_grid_op`. Two-stage (f32 workspace) split-K runs on gfx1250 as well: the Stage 1 scratch epilogue decodes the WMMA fragment through `op.c_layout()` (`wgrad_two_stage_available` needs the arch's float global atomics on wave32). `pipeline` stays `mem`; `unroll_k`, `prefetch_addr` and `chiplet_swizzle` stay rejected on WMMA.
 - No K loop is unrolled at build time any more: `async_dma` runs `SoftwarePipeline.run_ping_pong_dynamic` and `unroll_k` a hand-rolled 2x ping-pong, both over the runtime extent, so the former `_MAX_UNROLLED_K_ITERS` / `ROCKE_MAX_UNROLLED_K_ITERS` cap is gone.
 - wgrad `split_k`: `1` = no split (direct store); any value `> 1` builds the one split-K kernel (name tag `spk`), whose degree is the `ks_count` / `ks` kernargs chosen at launch. There is no `split_k=0` "runtime degree" encoding.
 - Removed: the `--lds-k-outer`, `--lds-k-pad` and `--dtype-d` CLI flags and the `ROCKE_WGRAD_LDS_K_OUTER` env override. All replaced by deduction or dropped.
@@ -648,7 +649,10 @@ knobs make it a single kernel (all default off, so every existing generic
 kernel is unchanged):
 
 - `preload_weights` (`waves_k == 1`): every weight fragment is loaded once in
-  the prologue and kept in registers for the whole row loop.
+  the prologue and kept in registers for the whole row loop. Bounded by
+  `PRELOAD_WEIGHT_VGPR_BUDGET`; `preload_weight_vgprs` counts the fragments at
+  storage width, so an fp32 / tf32 preload needs twice the VGPRs of the
+  16-bit one.
 - `dgrad_fused_weights`: `B` is the original weight `W[groups*cpg', KH, KW,
   kpg']` (transposed-problem terms); the prologue gathers each fragment with
   flipped taps and k<->c transposed addressing, so there is no pre-pass and no
@@ -683,9 +687,10 @@ field by the C++ engine's `rocke_build_direct_conv` and byte-identity gated):
 - `lds_pad` (multiple of 8): extra elements per staged input column, so the
   16 q-lanes of a fragment read spread over the LDS banks.
 - `stage_out` (`kpg % 16 == 0`): each finished output row goes through a
-  double-buffered LDS tile and is stored with 16-byte lanes over the
-  workgroup's contiguous channel span; the offsets come from the output
-  stride kernargs.
+  double-buffered LDS tile and is stored with 8-element lanes (one 16-byte
+  store at 16-bit storage, two at fp32) over the workgroup's contiguous
+  channel span; the offsets come from the output stride kernargs. fp32 / tf32
+  keeps the accumulators unrounded in the tile.
 - `xcd_tiles` (gfx950 only): the launch-order workgroup id is remapped with
   `chiplet_transform_chunked_runtime` so the `q_tiles * group_tiles`
   workgroups of one image row band run on one XCD; the grid and the chunk are
@@ -697,7 +702,8 @@ field by the C++ engine's `rocke_build_direct_conv` and byte-identity gated):
   so a tile taller than the image skips every dead row -- loads, staging,
   barriers and masked flushes -- where `row_guard` only skips their MFMAs.
 
-`direct_conv_lds_bytes` accounts for the column pad and the output tiles;
+`direct_conv_lds_bytes` accounts for the column pad and the output tiles, all
+at storage width (2 bytes per element for fp16 / bf16, 4 for fp32 / tf32);
 `direct_conv_grid` is the launch grid.
 
 The kernel name carries `pw` / `fw` / `fwl` / `we<n>` / `pf<n>` / `lso` /
@@ -1527,7 +1533,11 @@ bf16 I/O). Four implementations:
   extents). There is no merged K1 + K2 launch.
   `benchmarks/common/benchmark_winograd_aot.py` compiles the grid
   (`--compile-all`) and runs cases from it (`--run-from-cache`), choosing each
-  stage's binary by timing and verifying the assembled pipeline.
+  stage's binary by timing and verifying the assembled pipeline. The
+  transforms are not WMMA code, so the same cache also builds for gfx950
+  (`--arch gfx950`), with K3 on the implicit-GEMM conv only; its K3 grid
+  (`k3_configs`) adds the 32x32 warp tile and the compv3 / compv4 pipelines
+  (`K3_CONFIGS_MFMA`, `K3_MFMA_ARCHS`) to the gfx1250 list.
   `benchmark_conv_compare.py --run-from-cache` runs it beside the direct-conv
   and implicit-GEMM sweeps when the cache directory holds its binaries, and
   `--results` merges the three engines' rows.
@@ -1640,6 +1650,59 @@ golden `conv_direct_wgrad/*` in `tests/instances/rocke_ir_parity_harness.py`.
 On-GPU numeric coverage: `TestDirectWgradAotKernelsCorrectness` in
 `library/tests/test_direct_conv_correctness.py` (built on the cache probe,
 launched on other shapes); the two-step plans:
+`library/tests/test_direct_kernel_cache.py`.
+
+### gfx1250 WMMA and depthwise VALU direct wgrad
+
+Source: `library/kernels/common/conv_direct_grouped.py`. Three weight-gradient
+kernels of the direct-conv AOT sweep, all taking the
+`conv_direct_arg_names("wgrad")` kernargs and accumulating in fp32. The two WMMA
+kernels build for gfx1250 only; the depthwise kernel is VALU and builds for every
+target at its wave size, but the AOT cache carries it for the wave32 targets only.
+
+| Spec / variant | Builds for | Validator accepts | AOT cache carries | Output |
+|---|---|---|---|---|
+| `DirectConvWgradSpec(image_per_block=True)` / `direct_wgrad` | gfx1250 | dense and grouped, stride 1, `KH, KW <= 8` and within the accumulator and fragment register estimate of `_wgrad_image_reason` (budget `_WGRAD_IMG_VGPR_BUDGET`; C++ `rocke_wgrad_image_reason`): square filters up to 4x4 at one tile per wave, so 5x5 and 7x7 are refused | 3x3, `PAD` 0 and 1 | `ws_replicas` fp32 scratch slabs, or the zeroed fp32 `dW` at one replica |
+| `DirectConvWgradSpec(small_c=True)` / `direct_wgrad_small_c` | gfx1250 | ungrouped, `kpg` a multiple of 8, any filter, stride and padding (channel counts baked) | 3-channel stems 3x3/s1 `PAD` 1, 3x3/s2 `PAD` 0 and 1, 7x7/s2, 4x4/s4, 14x14/s14, 16x16/s16; 4-channel 3x3/s1 `PAD` 1 | `ws_replicas` fp32 scratch slabs |
+| `DirectDepthwiseWgradSpec` / `direct_depthwise_wgrad` | every target at its wave size (wave64 on gfx9, wave32 on gfx11 / gfx12 / gfx1250) | depthwise (`cpg = kpg = 1`, channel count from the kernargs, a multiple of `chan_per_lane`), any stride and padding | every wave32 target (gfx11, gfx12, gfx1250): 3x3, 5x5 and 7x7, stride 1 and 2, `PAD` 0 and "same" | `ws_replicas` fp32 scratch slabs |
+
+The plain wave32 port of `DirectConvWgradSpec` (`image_per_block=False`,
+`small_c=False`) also builds for gfx1250 (dense and grouped, stride 1, filters up
+to 8x8); the AOT cache does not carry it.
+
+- **Image per block.** One workgroup per image and `k x c` tile on WMMA
+  16x16x32, with register blocking (`wave_tiles_k` / `wave_tiles_c`),
+  `rows_per_sync` input rows staged behind one barrier pair, a row split over
+  grid y (`row_blocks`), an optional TDM ring (`tdm_stages`, llvm23 or
+  llvm24) and an LDS-staged coalesced epilogue (`lds_epilogue`).
+- **Small C.** A GEMM over the flattened `(r, s, c)` filter row, with
+  vectorised X loads (`vec_x`), `sub_steps` staging, an optional uniform wave
+  index (`uniform_wave`) and a pixel-range split over grid y (`row_blocks`).
+- **Depthwise VALU.** Lanes own `chan_per_lane` channels and accumulate the
+  filter taps in fp32 registers (`r_split` splits the filter rows over wave
+  groups), with an LDS reduction over the waves.
+- **Two-stage reduction.** The blocks add into one of `ws_replicas` fp32 slabs
+  with `buffer_atomic_fadd_f32` (the `tile.buffer_atomic_fadd_f32` IR op, with a
+  cache policy; the kernels guard each atomic with `scf_if` because an atomic
+  at the out-of-range sentinel faults on gfx1250, where a load reads 0),
+  spreading the same-address atomics; the cached
+  `direct_wgrad_reduce` helper (`WgradReduceSpec`, one binary per replica
+  count) folds the slabs into `dW`. The run-from-cache plan zeroes the scratch
+  (`DirectPlan.zeroed`) and launches both steps.
+- A problem whose column padding differs from its row padding is refused
+  (`direct_spec_for_problem`).
+
+C++ engine twins: `rocke_dconv_wgrad_build_image`
+(`cpp/instances/common/conv_direct_grouped_build_wgrad_image.cpp`),
+`rocke_dconv_wgrad_build_small_c` (`conv_direct_grouped_build_wgrad_small_c.cpp`),
+`rocke_build_direct_depthwise_wgrad` (`conv_direct_grouped_build_depthwise_wgrad.cpp`);
+byte-identity gated by `library/tests/parity/conv_direct_grouped_emit.{c,py}`
+(configs 318..358), Python IR golden `conv_direct_wgrad/gfx1250/*`. Served by the
+direct-conv AOT cache (`--directions wgrad`), not the dispatcher.
+On-GPU numeric coverage: `TestDirectConvWgradCorrectness` (gfx950, gfx1250) and
+`TestDirectDepthwiseWgradCorrectness` (every arch the AOT grid caches the
+depthwise kernel for, by `grid_caches_variant`, plus gfx950) in
+`library/tests/test_direct_conv_correctness.py`; the launch plans:
 `library/tests/test_direct_kernel_cache.py`.
 
 ## Img2Col

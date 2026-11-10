@@ -21,6 +21,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/SdpaLayoutTestSupport.hpp"
 
 /**
  * @file FlydslSdpaRdnaTestGraphs.hpp
@@ -118,15 +119,6 @@ constexpr int64_t FLYDSL_SDPA_RDNA_SINK_UID = 99;
 /// An f32 [1] device tensor a graph carries when a case names it from a field the spec has
 /// no member for (a page table, a dropout seed, a descale), so the field refers to something.
 constexpr int64_t FLYDSL_SDPA_RDNA_AUX_UID = 111;
-
-/// Physical arrangement of a (B, H, S, D) logical tensor.
-enum class SdpaLayout
-{
-    /// Token-major, head varying fastest: [B, S, H, D] in memory.
-    BSHD,
-    /// Head-major: [B, H, S, D] in memory.
-    BHSD
-};
 
 /// The mask a graph asks for, in the spelling the frontend lowers it to.
 enum class SdpaMask
@@ -311,17 +303,6 @@ inline std::pair<std::vector<int64_t>, std::vector<int64_t>>
         }
     }
     return {dims, strides};
-}
-
-/// Element strides of a (B, H, S, D) logical tensor laid out as @p layout.
-inline std::vector<int64_t>
-    sdpaStrides(SdpaLayout layout, int64_t heads, int64_t sequence, int64_t headDim)
-{
-    if(layout == SdpaLayout::BSHD)
-    {
-        return {sequence * heads * headDim, headDim, heads * headDim, 1};
-    }
-    return {heads * sequence * headDim, sequence * headDim, headDim, 1};
 }
 
 /// Element strides of Q, K and V as views into one packed [B, S, 3, H, D] buffer, in the
