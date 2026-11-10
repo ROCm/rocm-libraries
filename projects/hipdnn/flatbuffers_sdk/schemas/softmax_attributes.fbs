@@ -1,0 +1,20 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+// Softmax over the last dim. Mirrors cudnn-frontend Softmax_attributes
+// (CUDNN_BACKEND_OPERATION_SOFTMAX_DESCRIPTOR):
+//   s = exp(p - max(p)) / sum(exp(p - max(p)))
+//   stats = max(p) + ln(sum(exp(p - max(p))))      (log-sum-exp)
+// With stats_use_log2, stats is reported in log2 units (stats / ln 2).
+table SoftmaxAttributes {
+    p_tensor_uid:     long (cache_uid);         // logits
+    s_tensor_uid:     long (cache_uid);         // probabilities, dims of p
+    stats_tensor_uid: long = null (cache_uid);  // dims of p with last dim 1
+
+    stats_use_log2: bool = false;
+}

@@ -33,6 +33,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/RopeAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/SdpaAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/SdpaBackwardAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/SoftmaxAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/TensorAttributes.hpp>
 #include <optional>
 
@@ -65,6 +66,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::ResampleBwdAttributes, "ResampleBwdAttributes"},
      {NodeAttributes::MoeGroupedMatmulAttributes, "MoeGroupedMatmulAttributes"},
      {NodeAttributes::MoeGroupedMatmulBwdAttributes, "MoeGroupedMatmulBwdAttributes"},
+     {NodeAttributes::SoftmaxAttributes, "SoftmaxAttributes"},
      {NodeAttributes::GdnAttributes, "GdnAttributes"},
      {NodeAttributes::KdaAttributes, "KdaAttributes"},
      {NodeAttributes::NONE, ""}})
@@ -152,6 +154,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes:
         nodeJson = *node.attributes_as_MoeGroupedMatmulBwdAttributes();
+        break;
+    case data_objects::NodeAttributes::SoftmaxAttributes:
+        nodeJson = *node.attributes_as_SoftmaxAttributes();
         break;
     case data_objects::NodeAttributes::GdnAttributes:
         nodeJson = *node.attributes_as_GdnAttributes();
@@ -257,6 +262,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::MoeGroupedMatmulAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes:
             return to<data_objects::MoeGroupedMatmulBwdAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::SoftmaxAttributes:
+            return to<data_objects::SoftmaxAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::GdnAttributes:
             return to<data_objects::GdnAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::KdaAttributes:

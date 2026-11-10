@@ -1,0 +1,102 @@
+operation:
+  name: "Softmax"
+  class_name: "SoftmaxOperationDescriptor"
+  fbs_table: "SoftmaxAttributes"
+  fbs_generated_header: "softmax_attributes_generated.h"
+
+  # cuDNN parity: cudnn-frontend node/softmax.h UnifiedSoftmaxNode builds
+  # CUDNN_BACKEND_OPERATION_SOFTMAX_DESCRIPTOR and sets
+  # CUDNN_ATTR_OPERATION_SOFTMAX_{XDESC,YDESC,STATS_DESC,STATS_LOG2}.
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_SOFTMAX_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_SOFTMAX"
+
+  error_label: "softmax"
+  packer_operation_label: "softmax"
+  packer_finalize_label: "softmax"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_SOFTMAX_EXT"
+
+  frontend:
+    packer_function: "createSoftmaxOperation"
+    unpacker_function: "unpackSoftmaxOperation"
+    node_class: "SoftmaxNode"
+    attributes_class: "SoftmaxAttributes"
+
+    inputs:
+      - name: "p"
+        enum_name: "P"
+        enum_value: 0
+        required: true
+        getter_name: "get_p"
+        setter_name: "set_p"
+    outputs:
+      - name: "s"
+        enum_name: "S"
+        enum_value: 0
+        required: true
+        getter_name: "get_s"
+        setter_name: "set_s"
+      - name: "stats"
+        enum_name: "Stats"
+        enum_value: 1
+        required: false
+        getter_name: "get_stats"
+        setter_name: "set_stats"
+    graph_method_name: "softmax"
+    graph_method_params:
+      - name: "p"
+        tensor_name: "p"
+    graph_return_type: "array"
+    graph_return_outputs:
+      - "s"
+    node_type_enum: "NodeType::SOFTMAX"
+    node_attributes_union_type: "SoftmaxAttributes"
+    compatibility_typedef: "Softmax_attributes"
+
+  tensor_fields:
+    - name: "p"
+      fbs_field: "p_tensor_uid"
+      attr_suffix: "XDESC"
+      required: true
+      frontend_getter: "get_p()"
+
+    - name: "s"
+      fbs_field: "s_tensor_uid"
+      attr_suffix: "YDESC"
+      required: true
+      frontend_getter: "get_s()"
+
+    - name: "stats"
+      fbs_field: "stats_tensor_uid"
+      attr_suffix: "STATS_DESC"
+      required: false
+      frontend_getter: "get_stats()"
+
+  data_fields:
+    - name: "stats_use_log2"
+      fbs_field: "stats_use_log2"
+      attr_name: "HIPDNN_ATTR_OPERATION_SOFTMAX_STATS_LOG2"
+      type: "bool"
+      required: false
+      frontend_getter: "get_stats_use_log2()"
+
+  tensor_array_fields: []
+
+  # cuDNN's softmax descriptor has no compute-type attribute; hipDNN keeps the
+  # per-node compute type, so the attribute is hipDNN-only.
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_SOFTMAX_COMP_TYPE_EXT"
+
+  test_data:
+    tensor_const_prefix: "K_SOFTMAX_"
+    tensor_uids:
+      p: 9200
+      s: 9201
+      stats: 9202
+    tensor_configs:
+      p: { dims: [2, 4, 8, 16], strides: [512, 128, 16, 1] }
+      s: { dims: [2, 4, 8, 16], strides: [512, 128, 16, 1] }
+      stats: { dims: [2, 4, 8, 1], strides: [32, 8, 1, 1] }
+    field_values:
+      stats_use_log2: "true"

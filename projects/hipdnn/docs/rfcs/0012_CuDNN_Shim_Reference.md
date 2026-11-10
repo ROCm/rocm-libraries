@@ -233,7 +233,7 @@ materialize the inner hipDNN attribute object on calls into hipDNN.
 | `SDPA_attributes` | 1922 | `SdpaAttributes` (gated by `HIPDNN_ENABLE_SDPA`) |
 | `SDPA_backward_attributes` | 2253 | `SdpaBackwardAttributes` |
 | `SDPA_fp8_backward_attributes` | 2493 | (none — FP8 SDPA) |
-| `Softmax_attributes` | 2701 | (none — Softmax as a top-level op) |
+| `Softmax_attributes` | 2701 | `SoftmaxAttributes` (shim subclass keeps `set_sink`, which records `GRAPH_NOT_SUPPORTED`) |
 | `DiagonalBandMask_attributes` | 2730 | (none) |
 | `Conv_wgrad_attributes` | 2761 | `ConvolutionWgradAttributes` |
 | `Slice_attributes` | 2853 | (none) |

@@ -33,6 +33,7 @@
 #include <hipdnn_frontend/node/ResampleFwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
+#include <hipdnn_frontend/node/SoftmaxNode.hpp>
 
 #include "HipdnnOperationType.h"
 #include "fake_backend/MockHipdnnBackend.hpp"
@@ -544,6 +545,15 @@ TEST(TestOperationUnpacker, CreateNodeForTypeCreatesMoeGroupedMatmulBwdNode)
     EXPECT_TRUE(error.is_good()) << error.get_message();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->getNodeType(), NodeType::MOE_GROUPED_MATMUL_BWD);
+}
+
+TEST(TestOperationUnpacker, CreateNodeForTypeCreatesSoftmaxNode)
+{
+    const GraphAttributes graphAttrs;
+    const auto [node, error] = createNodeForType(HIPDNN_OPERATION_TYPE_SOFTMAX_EXT, graphAttrs);
+    EXPECT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getNodeType(), NodeType::SOFTMAX);
 }
 
 TEST(TestOperationUnpacker, CreateNodeForTypeCreatesRopeNode)

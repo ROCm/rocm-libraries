@@ -1024,6 +1024,25 @@ public:
         return y;
     }
 
+    /// @brief Adds a softmax node over the last dim of p, returning {s, stats}; stats is
+    /// created only with set_generate_stats(true). cuDNN builds softmax through its internal
+    /// INode API; this is the public hipDNN spelling. A set sink records GRAPH_NOT_SUPPORTED.
+    std::array<std::shared_ptr<Tensor_attributes>, 2> softmax(std::shared_ptr<Tensor_attributes> p,
+                                                              Softmax_attributes attributes)
+    {
+        using Result = std::array<std::shared_ptr<Tensor_attributes>, 2>;
+        if(attributes.get_sink())
+        {
+            recordError(error_code_t::GRAPH_NOT_SUPPORTED,
+                        "cuDNN-shim softmax: the sink input has no hipDNN equivalent");
+            return detail::makeUnsupportedNodeResult<Result>(*this);
+        }
+        auto outputs = _graph->softmax(
+            std::move(p), static_cast<hipdnn_frontend::graph::SoftmaxAttributes&&>(attributes));
+        _mode = Mode::Native;
+        return outputs;
+    }
+
     // Nodes with no hipDNN engine yet.
 
     /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or

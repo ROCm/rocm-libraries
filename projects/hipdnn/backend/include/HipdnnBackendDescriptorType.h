@@ -353,6 +353,14 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR = 38,
 
     /**
+     * @brief Softmax operation descriptor
+     *
+     * Computes softmax of P along its last dimension into S, with an optional
+     * log-sum-exp STATS output (natural-log or log2 units).
+     */
+    HIPDNN_BACKEND_OPERATION_SOFTMAX_DESCRIPTOR = 40,
+
+    /**
      * @brief RoPE forward operation descriptor
      *
      * Applies rotate-half rotary position embedding to a segment of the last

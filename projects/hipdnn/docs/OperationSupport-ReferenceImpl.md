@@ -38,6 +38,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | MoE Grouped Matmul Forward | FP16, BFP16, FP32 | Op-defined | CPU Reference | Ragged tensors rejected |
 | MoE Grouped Matmul Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference |  |
 | RoPE Forward | FP16, BFP16, FP32 x/y; FP32 freqs | Any rank >= 2 | CPU Reference | Rotate-half on `[o, o + rope_dim)` of the last dim (`o` = `rope_offset`, default `D - rope_dim`); freqs broadcast over non-last dims; computes in FP32; ragged tensors rejected |
+| Softmax | FP16, BFP16, FP32 p; same type or FP32 s; FP32 stats | Any rank >= 1 | CPU Reference | Along the last dim, max-subtracted in FP32; optional log-sum-exp stats (`stats_use_log2`: log2 units); a fully `-inf` row gives s = 0 and stats = -inf; NaN propagates within its row; ragged tensors rejected |
 | Layernorm Forward | FP16, BFP16, FP32 | All | CPU Reference | Normalizes the trailing `normalizedDimCount` dims; mean/inv-variance outputs optional |
 | Layernorm Backward | FP16, BFP16, FP32 | All | CPU Reference | `mean` and `inv_variance` must be provided together or not at all |
 | RMSNorm Forward | FP16, BFP16, FP32 | All | CPU Reference | Input rank >= 2; scale rank equals input rank |
@@ -101,6 +102,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | SDPA Forward (ragged) | `SdpaRaggedFwdPlanBuilder` | `SdpaRaggedFwdSignatureKey` | Packed (RFC-0014 ragged) attention forward pass |
 | SDPA Backward | `SdpaBwdPlanBuilder` | `SdpaBwdSignatureKey` | Scaled dot-product attention gradients |
 | RoPE Forward | `RopePlanBuilder` | `RopeSignatureKey` | Rotary position embedding (rotate-half) with partial and offset rotation |
+| Softmax | `SoftmaxPlanBuilder` | `SoftmaxSignatureKey` | Softmax over the last dim with optional log-sum-exp stats |
 
 ### Block-Scale Quantization Operations
 

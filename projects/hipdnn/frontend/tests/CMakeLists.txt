@@ -85,6 +85,9 @@ add_executable(
     TestMoeGroupedMatmulBwdAttributes.cpp
     TestMoeGroupedMatmulBwdNode.cpp
     TestGraphMoeGroupedMatmulBwd.cpp
+    TestSoftmaxAttributes.cpp
+    TestSoftmaxNode.cpp
+    TestGraphSoftmax.cpp
     TestRopeAttributes.cpp
     TestRopeNode.cpp
     TestGraphRope.cpp

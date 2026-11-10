@@ -545,6 +545,46 @@ TEST(TestCudnnShimGraphNodes, RopeValidGraphValidates)
     EXPECT_EQ(y->get_dim(), expectedYDims);
 }
 
+// cuDNN Softmax_attributes forwards to the native softmax node; stats is inferred as p's
+// dims with the last dim 1.
+TEST(TestCudnnShimGraphNodes, SoftmaxValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto p = hipdnn_shim_test::makeTensor(graph, {2, 4, 8, 16}, {512, 128, 16, 1}, 1);
+
+    fe::graph::Softmax_attributes attributes;
+    attributes.set_stats_use_log2(true).set_generate_stats(true);
+    attributes.set_name("SoftmaxNode");
+    auto [s, stats] = graph.softmax(p, attributes);
+    ASSERT_NE(s, nullptr);
+    ASSERT_NE(stats, nullptr);
+    EXPECT_EQ(s->get_name(), "SoftmaxNode::S");
+
+    EXPECT_TRUE(graph.validate().is_good());
+
+    const std::vector<int64_t> expectedStatsDims{2, 4, 8, 1};
+    EXPECT_EQ(stats->get_dim(), expectedStatsDims);
+}
+
+// cuDNN's softmax sink input has no hipDNN equivalent: it records GRAPH_NOT_SUPPORTED.
+TEST(TestCudnnShimGraphNodes, SoftmaxWithSinkIsNotSupported)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto p = hipdnn_shim_test::makeTensor(graph, {2, 4, 8, 16}, {512, 128, 16, 1}, 1);
+    auto sink = hipdnn_shim_test::makeTensor(graph, {1, 4, 1, 1}, {4, 1, 1, 1}, 2);
+
+    auto [s, stats] = graph.softmax(p, fe::graph::Softmax_attributes{}.set_sink(sink));
+    ASSERT_NE(s, nullptr);
+
+    auto error = graph.validate();
+    EXPECT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+}
+
 // --- (a2) Unhappy path: Tier-1 nodes still enforce constraints --------------
 //
 // The wrapper forwards to the real hipDNN engines, so a malformed Tier-1 graph
@@ -890,6 +930,7 @@ TEST(TestCudnnShimGraphNodes, AllAttributeClassesExposeUniversalSurface)
     expectConstructsAndExposesUniversalSurface<fe::graph::Moe_grouped_matmul_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Moe_grouped_matmul_bwd_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::RoPE_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Softmax_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Pointwise_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Reduction_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Resample_attributes>();
@@ -922,7 +963,6 @@ TEST(TestCudnnShimGraphNodes, AllAttributeClassesExposeUniversalSurface)
 
     // Attribute-only stubs (no Graph method): must still exist and chain.
     expectConstructsAndExposesUniversalSurface<fe::graph::Matmul_fp8_attributes>();
-    expectConstructsAndExposesUniversalSurface<fe::graph::Softmax_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::PagedCacheLoad_attributes>();
 }
 

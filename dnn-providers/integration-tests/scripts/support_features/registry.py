@@ -39,6 +39,7 @@ from support_features import (
     rmsnorm,
     rmsnorm_backward,
     rope,
+    softmax,
     sdpa,
     sdpa_backward,
 )
@@ -74,6 +75,7 @@ OPS: dict[str, ModuleType] = {
         rmsnorm,
         rmsnorm_backward,
         rope,
+        softmax,
         sdpa,
         sdpa_backward,
     )
