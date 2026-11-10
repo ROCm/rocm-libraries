@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "2e0a7bdc-7ce4-5833-8028-8f8d54989e17",
+  "name": "flydsl topk engine estimate",
+  "provenance": "Default slot for the engine estimate: a trained model installed under heuristics/ for an arch takes precedence there. No scorer is registered under this symbol, so on any other arch the loader disables the estimate and keeps the engine.",
+  "adapter": "native",
+  "objective": "max",
+  "score": {
+    "metric": "tflops"
+  },
+  "native": {
+    "symbol": "hipkernel.flydsl_topk.engine_estimate"
+  }
+}

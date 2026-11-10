@@ -146,10 +146,14 @@ GRAPH_DETERMINED_FIELDS = {
     "has_sink",
     "merge_symbol",
     "kernel",
+    # Top-k: the indices' dtype (a load width).
+    "index_dtype",
     "out_dtype",
     # Softmax (`out_dtype` above is s's dtype): the width an object's copies need N
     # to be a multiple of.
     "n_align",
+    # Top-k: the largest k an object serves (1 for the k = 1 reduction body).
+    "k_max",
 }
 
 # Fields that say when an object is preferred rather than how it was built: the

@@ -1,0 +1,24 @@
+{
+  "version": "1.0",
+  "id": "503b6d38-23b2-522e-81b6-e6828ff984d3",
+  "name": "flydsl topk variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "index_dtype",
+      "type": "string"
+    },
+    {
+      "name": "k_max",
+      "type": "int"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    }
+  ]
+}

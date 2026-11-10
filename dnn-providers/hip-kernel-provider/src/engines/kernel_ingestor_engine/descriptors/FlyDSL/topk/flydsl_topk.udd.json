@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "ff3307c9-7267-5ef4-8bd3-7b2e32101dfd",
+  "name": "flydsl topk dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_topk.dispatch"
+}

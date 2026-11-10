@@ -113,10 +113,12 @@ _ABBREV = {
     "store_rstd": "rstd",
     "n_max": "nmax",
     "reduce_symbol": "",
+    "index_dtype": "idx",
     "out_dtype": "out",
     "n_align": "align",
     "threads_per_row": "tpr",
     "unroll": "u",
+    "k_max": "kmax",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -1595,6 +1597,46 @@ def softmax_instances() -> list[Instance]:
     return instances
 
 
+# --- Top-k ------------------------------------------------------------------------
+
+# kernels_src/kernels/topk/topk_kernel.py: one workgroup per row; the row width, the
+# row count, k, `largest`, whether values are written and whether the row starts admit
+# 128-bit loads are runtime arguments. Baked: x's dtype, the indices' dtype, and the
+# body, by `k_max`. `k_max` 1 is the (key, column) reduction, which serves k = 1 only
+# (argmax / argmin, greedy decoding) and ranks above the radix-select objects that also
+# serve it; `k_max` TOPK_GENERAL_K_MAX is the exact radix select for every k up to it.
+TOPK_DTYPES = ("bf16", "f16", "f32")
+TOPK_INDEX_DTYPES = ("i32", "i64")
+# Mirrors GENERAL_K_MAX and GENERAL_BLOCK_THREADS in the kernel; gen_topk asserts both.
+TOPK_GENERAL_K_MAX = 1024
+TOPK_GENERAL_BLOCK_THREADS = 256
+TOPK_REDUCE_BLOCK_THREADS = 1024
+
+
+def topk_instances() -> list[Instance]:
+    """The top-k table: every dtype x index dtype, the k = 1 body and the general one."""
+    instances = [
+        Instance(
+            op="topk",
+            dtype=dtype,
+            priority=PRIORITY_SPECIALIZED if k_max == 1 else PRIORITY_GENERIC,
+            knobs={
+                "index_dtype": index_dtype,
+                "k_max": k_max,
+                "block_threads": block_threads,
+            },
+        )
+        for dtype in TOPK_DTYPES
+        for index_dtype in TOPK_INDEX_DTYPES
+        for k_max, block_threads in (
+            (1, TOPK_REDUCE_BLOCK_THREADS),
+            (TOPK_GENERAL_K_MAX, TOPK_GENERAL_BLOCK_THREADS),
+        )
+    ]
+    _assert_unique(instances)
+    return instances
+
+
 OPS = {
     "rmsnorm": rmsnorm_instances,
     "rmsnorm_bwd": rmsnorm_bwd_instances,
@@ -1606,6 +1648,7 @@ OPS = {
     "sdpa_aiw": sdpa_aiw_instances,
     "rope": rope_instances,
     "softmax": softmax_instances,
+    "topk": topk_instances,
 }
 # Ops whose table differs by target and so takes the arch.
 _PER_TARGET_OPS = {"sdpa_cdna", "sdpa_cdna_dualwave", "sdpa_cdna_decode", "sdpa_aiw"}

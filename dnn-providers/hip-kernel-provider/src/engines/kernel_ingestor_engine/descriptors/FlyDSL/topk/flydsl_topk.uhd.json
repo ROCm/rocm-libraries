@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "77642292-1ead-5991-835f-5c83447a15bc",
+  "name": "flydsl topk selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_topk.score"
+  }
+}

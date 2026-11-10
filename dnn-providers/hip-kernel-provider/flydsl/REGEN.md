@@ -115,9 +115,9 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 |---|---|---|
 | `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode` | 309 (90 + 63 + 84 + 72) |
 | `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 381 (90 + 63 + 84 + 72 + 72) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode rope softmax` | 319 (90 + 63 + 56 + 20 + 24 + 3 + 63) |
-| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode rope softmax` | 321 (90 + 63 + 78 + 24 + 3 + 63) |
-| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode rope softmax` | 321 (90 + 63 + 78 + 24 + 3 + 63) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode rope topk softmax` | 331 (90 + 63 + 56 + 20 + 24 + 3 + 12 + 63) |
+| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode rope topk softmax` | 333 (90 + 63 + 78 + 24 + 3 + 12 + 63) |
+| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode rope topk softmax` | 333 (90 + 63 + 78 + 24 + 3 + 12 + 63) |
 
 ```bash
 ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode"
@@ -210,9 +210,10 @@ done
 # FlyDSL's generic kernel (every arch), its dual-wave kernel (gfx950 only; the
 # generator builds nothing for gfx942 or gfx90a) and the generic kernel's split-KV decode
 # objects. Each refuses any other arch before compiling. RMSNorm builds for every arch; rope
-# (rotate-half RoPE, scalar global loads and stores) for these three only; softmax (buffer
-# loads and stores, warp and block reductions that assume a 64-lane wave) for these three
-# only.
+# (rotate-half RoPE, scalar global loads and stores) for these three only; topk (per-row
+# top-k, buffer loads and stores, wave64 shuffles and ballots) for these three only; softmax
+# (buffer loads and stores, warp and block reductions that assume a 64-lane wave) for these
+# three only.
 for ARCH in gfx950 gfx942 gfx90a; do
   $PY -m generators.gen_rmsnorm --arch $ARCH
   $PY -m generators.gen_rmsnorm_bwd --arch $ARCH
@@ -220,6 +221,7 @@ for ARCH in gfx950 gfx942 gfx90a; do
   $PY -m generators.gen_sdpa_cdna_dualwave --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_decode --arch $ARCH
   $PY -m generators.gen_rope --arch $ARCH
+  $PY -m generators.gen_topk --arch $ARCH
   $PY -m generators.gen_softmax --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH --check

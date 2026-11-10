@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "1769d322-e7ab-5ce1-8260-89f0cbd36a61",
+  "name": "flydsl topk: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_topk.kernel_match"
+}

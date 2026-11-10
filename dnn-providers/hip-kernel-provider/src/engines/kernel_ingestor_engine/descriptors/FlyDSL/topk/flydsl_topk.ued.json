@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "id": "05f719c0-8c8d-5beb-ac06-a46fc8da17a2",
+  "name": "hipkernel:flydsl_topk",
+  "graph_match": {
+    "native": "hipkernel.flydsl_topk.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "77642292-1ead-5991-835f-5c83447a15bc"
+  },
+  "predict_engine": {
+    "default": "2e0a7bdc-7ce4-5833-8028-8f8d54989e17"
+  },
+  "metadata": "503b6d38-23b2-522e-81b6-e6828ff984d3",
+  "knobs": [
+    "block_threads"
+  ]
+}

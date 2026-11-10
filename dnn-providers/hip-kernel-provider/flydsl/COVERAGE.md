@@ -1085,6 +1085,82 @@ the census `TestFlydslRopePacks`.
 
 ---
 
+## Top-k — `hipkernel:flydsl_topk`
+
+12 objects per arch, built for **gfx90a, gfx942 and gfx950**: the kernel uses buffer loads
+and stores, LDS atomics and wave64 shuffles and ballots, nothing gfx94x-only. RDNA is not
+built (the kernel refuses wave32 targets). Kernel:
+[`kernels_src/kernels/topk/topk_kernel.py`](kernels_src/kernels/topk/topk_kernel.py), written
+for this provider against flydsl 0.3.4 after AITER's FlyDSL top-k kernels (commit
+`8253efc40595`, the pinned AITER commit: `topk_per_row_argmax.py` and `ord_signed_f32`);
+native half: [`FlydslTopkNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslTopkNative.cpp).
+AITER's selectors are f32-only and INT32-only, its argmax splits a row across workgroups and
+folds the partials in a second launch, and its small-k selector breaks ties by lane rather
+than by column, so none of them is vendored.
+
+It computes the schema's top-k (`topk_attributes.fbs`, `CpuFpReferenceTopk`) exactly: for
+each row of x viewed as `[rows, n]`, the positions of the k largest (or smallest) entries,
+best first, equal values in position order, NaN above every number (first for largest, last
+for smallest), -0.0 equal to +0.0; values copied from x bit for bit. Every element maps to
+an int32 key whose order is the reference's float order (bf16 and f16 widen to f32
+exactly; all NaNs share one key above +inf; the smallest-first key is its complement), so
+`(key desc, column asc)` is the reference's order and there is no rounding to disagree
+about. One workgroup per row.
+
+**Baked:** x's dtype (`bf16`, `f16`, `f32`), the indices' dtype (`i32`, `i64`), and the
+body, by `k_max`:
+
+- `k_max` 1, 1024 threads, priority 100: a (key, column) max-reduction, one pass over the
+  row. Serves k = 1 only: greedy decoding's argmax (or argmin).
+- `k_max` 1024, 256 threads, priority 10: an exact radix select. Four 8-bit histogram passes
+  find the k-th key, a collect pass takes every key above it and the lowest-column ties at
+  it, and the k survivors are ranked into their output slots. Serves every k from 1 to 1024.
+  A row of up to 2048 columns is read once and its keys kept in LDS; a longer one is re-read
+  by every pass.
+
+**Runtime:** rows (the grid), n, k, `largest`, whether values are written, and whether x's
+rows are read with 128-bit loads (`VecOk`: chosen at launch from x's actual base and row
+bytes; otherwise element by element).
+
+| Graph-scoped (`flydslTopkGraphMatches`) | Accepted | Declined |
+|---|---|---|
+| Nodes | exactly one `TopkAttributes` node | anything else; override-shape graphs |
+| Operands | x, indices and (optional) values real device tensors | virtual, pass-by-value or ragged |
+| Dtypes | x in bf16 / f16 / f32, values in x's dtype; indices INT32 / INT64 | other dtypes; values converting |
+| Compute type | UNSET, FLOAT, DOUBLE or x's own (each orders x as f32 does) | a narrower one, which would round before comparing |
+| k | `1 <= k <= n`, n the last dim | outside |
+| Shape | x of any rank >= 1; indices and values x's dims with the last one k | any other output shape |
+| Layout | x, indices, values packed row-major (unit axes' strides free) | padded or permuted strides; a zero extent |
+| Alignment | each operand on its element size | less |
+| Extents | rows <= 2^31 - 1; one row of x <= 2^31 - 1 bytes | larger |
+
+| Kernel-scoped (`flydslTopkKernelMatches`) | |
+|---|---|
+| `dtype`, `index_dtype` | equal the graph's |
+| `k_max` | `k <= k_max`: the reduction objects serve k = 1, the radix select every k up to 1024 |
+
+**Declined, not served:** k above 1024 (no object; the radix select's survivor buffer is
+sized by `k_max`), and non-packed operands.
+
+**Performance (gfx90a, MI210, measured with the standalone objects).** Being one workgroup
+per row, a single long row runs on one CU and is bound by its VALU: argmax over one row of
+248320 bf16 takes about 40 us (64 rows: 44 us). The MoE router's top-8 over 512 experts takes
+9 us for one row and 91 us for 4096 rows. The radix select over a vocabulary-sized row
+(k = 50 over 248320) takes about 0.75 ms: five passes over the row on one CU, the histogram
+passes' LDS atomics landing on few bins. Splitting a row across workgroups (as AITER's
+argmax does, with a second launch) is the follow-up for both long-row cases.
+
+**Checked by:** `TestFlydslTopkEngine` (every row of both tables, host-only),
+`TestGpuFlydslTopkObjects` (every staged object against `CpuFpReferenceTopk`, indices equal
+and values bit for bit: every k the object serves among 1, 2, 8, 10, 64, 257 and 1024,
+largest and smallest, with and without values, over normal rows, rows of four distinct
+values (nearly every selection breaks ties), and rows of NaNs of both signs, infinities,
+signed zeros and small integers; widths 1, 7, 512, 3001 and 5000 and the 248320-wide
+vocabulary; x at a 16-byte aligned base and one element past it), and the census
+`TestFlydslTopkPacks`.
+
+---
+
 ## Softmax — `hipkernel:flydsl_softmax`
 
 63 objects per arch, built for **gfx90a, gfx942 and gfx950**: buffer loads and stores, f32

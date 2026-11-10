@@ -94,6 +94,10 @@ void resetFlydslRopeModuleCache();
 void registerFlydslSoftmaxSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslSoftmaxModuleCache();
 
+/// @see packs/FlydslTopkNative.cpp
+void registerFlydslTopkSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslTopkModuleCache();
+
 /// @see packs/Gfx950AttentionDenseNative.cpp
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();
