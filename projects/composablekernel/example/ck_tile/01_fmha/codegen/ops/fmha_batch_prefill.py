@@ -93,9 +93,18 @@ FMHA_BATCH_PREFILL_LAUNCH = """    auto [kargs, grids] = fmha_batch_prefill_crea
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
     return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu>(k_{}, grids, blocks, 0, kargs));"""
 
-# MakeCheckedKernel owns the dynamic LDS request (residency limit) and checks the launch contract.
-FMHA_BATCH_PREFILL_PAGE_TILE_LAUNCH = """    auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<k_>(a);
-    return ck_tile::launch_kernel(s, k_::MakeCheckedKernel(kargs, grids));"""
+# MakeCheckedKernel owns the dynamic LDS request (residency limit) and checks the launch contract;
+# a violation is reported as unsupported arguments are (CK_TILE_ERROR, then -1).
+FMHA_BATCH_PREFILL_PAGE_TILE_LAUNCH = """    try
+    {
+        auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<k_>(a);
+        return ck_tile::launch_kernel(s, k_::MakeCheckedKernel(kargs, grids));
+    }
+    catch(const std::invalid_argument& e)
+    {
+        ck_tile::CK_TILE_ERROR(e.what());
+        return -1;
+    }"""
 
 # KV split (kKvSplits 2): the partial kernel writes the workspace planes, the merge
 # kernel combines them into a.o_ptr.

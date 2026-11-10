@@ -473,6 +473,8 @@ TYPED_TEST(PageTileContract, CheckLaunch)
     expect_refused("hdim_q differs", need, [](Kargs& k) { k.hdim_q += 64; });
     expect_refused("hdim_v differs", need, [](Kargs& k) { k.hdim_v += 64; });
     expect_refused("nhead_ratio_qk must be positive", need, [](Kargs& k) { k.nhead_ratio_qk = 0; });
+    expect_refused(
+        "num_total_pages must be positive", need, [](Kargs& k) { k.num_total_pages = 0; });
     if constexpr(kSglang)
     {
         expect_refused(
@@ -490,6 +492,9 @@ TYPED_TEST(PageTileContract, CheckLaunch)
             "seqlen_k_ptr is null", need, [](Kargs& k) { k.page_table.seqlen_k_ptr = nullptr; });
         expect_refused("block_table_ptr is null", need, [](Kargs& k) {
             k.page_table.block_table_ptr = nullptr;
+        });
+        expect_refused("batch_stride_block_table must be positive", need, [](Kargs& k) {
+            k.page_table.batch_stride_block_table = 0;
         });
     }
     expect_refused("seqstart_q_ptr is null", need, [](Kargs& k) { k.seqstart_q_ptr = nullptr; });

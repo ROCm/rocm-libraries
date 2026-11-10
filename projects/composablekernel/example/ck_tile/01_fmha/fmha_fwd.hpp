@@ -680,11 +680,14 @@ struct fmha_batch_prefill_args
     // KV split (gfx125x page tile; other targets ignore it), decided by the caller as for
     // fmha_fwd_splitkv. num_splits 1 (default): no split. 2: each split of the keys writes an
     // FP32 partial output and its LSE to the caller's workspace, and a merge kernel combines them
-    // into o_ptr. Workspace layout, with row the packed (group-mode) query position:
+    // into o_ptr. Workspace layout, with row the packed (group-mode) query position
+    // (0 <= row < seqstart_q[batch]):
     //   O:   o_acc_ptr + split * split_stride_o_acc + row * stride_o_acc
     //        + head * nhead_stride_o_acc + d,
     //   LSE: lse_acc_ptr + split * split_stride_lse_acc + head * nhead_stride_lse_acc + row.
-    // The dispatch returns -1 when no split instance matches the problem.
+    // The dispatch returns -1 when no split instance matches the problem. The page-tile arms also
+    // return -1, after CK_TILE_ERROR with the reason, when the kernel's launch contract
+    // (CheckLaunch) does not hold.
     ck_tile::index_t num_splits           = 1;
     void* o_acc_ptr                       = nullptr;
     void* lse_acc_ptr                     = nullptr;
@@ -1537,13 +1540,22 @@ template <typename SplitKernel, typename MergeKernel>
 float fmha_batch_prefill_split_launch(const ck_tile::stream_config& s,
                                       const fmha_batch_prefill_args& args)
 {
-    auto [kargs, grids]    = fmha_batch_prefill_create_split_kargs_and_grids<SplitKernel>(args);
-    const auto merge_kargs = fmha_batch_prefill_create_merge_kargs<MergeKernel>(args);
-    return ck_tile::launch_kernel(
-        s,
-        SplitKernel::MakeCheckedKernel(kargs, grids),
-        MergeKernel::MakeKernel(
-            merge_kargs, MergeKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_q)));
+    // A launch-contract violation (CheckLaunch) is reported as unsupported arguments are: -1.
+    try
+    {
+        auto [kargs, grids]    = fmha_batch_prefill_create_split_kargs_and_grids<SplitKernel>(args);
+        const auto merge_kargs = fmha_batch_prefill_create_merge_kargs<MergeKernel>(args);
+        return ck_tile::launch_kernel(
+            s,
+            SplitKernel::MakeCheckedKernel(kargs, grids),
+            MergeKernel::MakeKernel(
+                merge_kargs, MergeKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_q)));
+    }
+    catch(const std::invalid_argument& e)
+    {
+        ck_tile::CK_TILE_ERROR(e.what());
+        return -1;
+    }
 }
 
 // Launches a query-tail instance (one sequence): the main kernel on the full R-row query tiles of
@@ -1557,23 +1569,32 @@ float fmha_batch_prefill_tail_launch(const ck_tile::stream_config& s,
     constexpr ck_tile::index_t rows = TailKernel::kQueryTailRows;
     static_assert(rows > 0 && MergeKernel::kQueryTailRows == rows && MainKernel::kKvSplits == 1 &&
                   MainKernel::FmhaPipeline::kM0 == rows);
-    auto [main_kargs, main_grids]    = fmha_batch_prefill_create_kargs_and_grids<MainKernel>(args);
-    const ck_tile::index_t full_rows = args.max_seqlen_q / rows * rows;
-    main_grids      = MainKernel::GridSize(args.batch, args.nhead_q, full_rows, args.hdim_v);
-    const auto main = MainKernel::MakeCheckedKernel(main_kargs, main_grids);
-    auto [tail_kargs, tail_grids] =
-        fmha_batch_prefill_create_split_kargs_and_grids<TailKernel>(args);
-    const auto merge_kargs = fmha_batch_prefill_create_merge_kargs<MergeKernel>(args);
-    return ck_tile::launch_kernel(
-        s,
-        // No full tile (max_seqlen_q < R): the tail kernel covers every row.
-        [=](const ck_tile::stream_config& sc) {
-            if(full_rows > 0)
-                main(sc);
-        },
-        TailKernel::MakeCheckedKernel(tail_kargs, tail_grids),
-        MergeKernel::MakeKernel(
-            merge_kargs, MergeKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_q)));
+    // A launch-contract violation (CheckLaunch) is reported as unsupported arguments are: -1.
+    try
+    {
+        auto [main_kargs, main_grids] = fmha_batch_prefill_create_kargs_and_grids<MainKernel>(args);
+        const ck_tile::index_t full_rows = args.max_seqlen_q / rows * rows;
+        main_grids      = MainKernel::GridSize(args.batch, args.nhead_q, full_rows, args.hdim_v);
+        const auto main = MainKernel::MakeCheckedKernel(main_kargs, main_grids);
+        auto [tail_kargs, tail_grids] =
+            fmha_batch_prefill_create_split_kargs_and_grids<TailKernel>(args);
+        const auto merge_kargs = fmha_batch_prefill_create_merge_kargs<MergeKernel>(args);
+        return ck_tile::launch_kernel(
+            s,
+            // No full tile (max_seqlen_q < R): the tail kernel covers every row.
+            [=](const ck_tile::stream_config& sc) {
+                if(full_rows > 0)
+                    main(sc);
+            },
+            TailKernel::MakeCheckedKernel(tail_kargs, tail_grids),
+            MergeKernel::MakeKernel(
+                merge_kargs, MergeKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_q)));
+    }
+    catch(const std::invalid_argument& e)
+    {
+        ck_tile::CK_TILE_ERROR(e.what());
+        return -1;
+    }
 }
 
 // this is used to pattern-match internl kernel implementation, not to instantiate kernel
