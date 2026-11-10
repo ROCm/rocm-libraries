@@ -716,7 +716,7 @@ namespace
                                                      descr,
                                                      rocsparse_sptrsv_input_scalar_alpha,
                                                      &alpha,
-                                                     sizeof(alpha),
+                                                     sizeof(&alpha),
                                                      nullptr),
                           rocsparse_status_success);
             }
