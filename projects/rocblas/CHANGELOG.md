@@ -16,6 +16,7 @@ rocBLAS documentation is available at
 
 ### Resolved issues
 
+* Fix wrong results from `gemm_strided_batched_ex` when `batch_count > 1` and a batch stride is 2^32 elements or more (for example `int8` with `m = n = 65536` and `stride_c = m * n`). Tensile and hipBLASLt kernels receive batch strides as 32-bit values, so every batch after the first was read from or written to the wrong place while the call returned `rocblas_status_success`. Such problems are now issued one batch at a time.
 * Fix trace and bench logging of `alpha` for `axpy_ex` and `scal_ex`, including batched and strided-batched forms, when `alpha_type` is `bf16_r`. The trace log wrote an empty `alpha` field, and the bench log omitted `--alpha`, so replaying the logged command with `rocblas-bench` ran with the default `alpha` of 1. Logging-helper failures in the `_ex` functions are now reported on `stderr` rather than silently discarded.
 * Fix the hipBLASLt backend ignoring the `rocblas_xf32_xdl_math_op` math mode for real `f32_r` Level 3 `gemm` and `gemm_ex`. The hipBLASLt compute type was always derived from the compute precision alone, so the backend ran full single precision while `rocblas_get_math_mode` still reported xf32, whereas the Tensile path applied `setF32XdlMathOp(XFloat32)` for the same problem. The hipBLASLt path now selects `HIPBLAS_COMPUTE_32F_FAST_TF32` when the handle requests xf32. This is newly reachable because `f32_r` now defaults to hipBLASLt on the MI300A.
 
