@@ -87,6 +87,8 @@ inline float toleranceForNodeAttributes(data::NodeAttributes attrType)
         return tol::gather::getTolerance<T>();
     case NA::CausalConv1dAttributes:
         return tol::causal_conv1d::getTolerance<T>();
+    case NA::MoeRoutingAttributes:
+        return tol::moe_routing::getTolerance<T>();
     default:
         return 1e-3f;
     }

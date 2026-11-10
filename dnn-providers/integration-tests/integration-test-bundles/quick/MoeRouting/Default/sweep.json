@@ -1,0 +1,289 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "s64_k8_e512_i32",
+      "values": {
+        "num_experts": 512,
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              64,
+              8
+            ],
+            "strides": [
+              8,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              513,
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              512,
+              1
+            ],
+            "strides": [
+              512,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              512,
+              1
+            ],
+            "strides": [
+              512,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL moe_routing",
+        "seed": 1,
+        "notes": "Qwen3.8 router: [S=64, top_k=8] ids, all in [0, 512); int32 offsets",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceMoeRouting); S=64 tokens, top_k=8 of E=512 experts from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "s7_k2_e8_i32",
+      "values": {
+        "num_experts": 8,
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              2
+            ],
+            "strides": [
+              2,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              9,
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              14,
+              1
+            ],
+            "strides": [
+              14,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              14,
+              1
+            ],
+            "strides": [
+              14,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL moe_routing",
+        "seed": 1,
+        "notes": "Tiny: [7, 2] ids over 8 experts, all routed; int32 offsets",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceMoeRouting)"
+      }
+    },
+    {
+      "id": "s16_k1_e4_i32",
+      "values": {
+        "num_experts": 4,
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              5,
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL moe_routing",
+        "seed": 1,
+        "notes": "top_k=1: [16, 1] ids over 4 experts, all routed; int32 offsets",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceMoeRouting)"
+      }
+    },
+    {
+      "id": "s300_k6_e128_i64",
+      "values": {
+        "num_experts": 128,
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              300,
+              6
+            ],
+            "strides": [
+              6,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              129,
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1,
+              1
+            ],
+            "data_type": "int64"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1800,
+              1
+            ],
+            "strides": [
+              1800,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1800,
+              1
+            ],
+            "strides": [
+              1800,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL moe_routing",
+        "seed": 1,
+        "notes": "[300, 6] ids over 128 experts, all routed, several scatter blocks; int64 offsets",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceMoeRouting)"
+      }
+    }
+  ]
+}

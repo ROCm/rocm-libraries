@@ -102,6 +102,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGraphSession.cpp
     TestOutputComparison.cpp
     TestRngDumpHandoff.cpp
+    TestMoeRoutingUnroutedRows.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests

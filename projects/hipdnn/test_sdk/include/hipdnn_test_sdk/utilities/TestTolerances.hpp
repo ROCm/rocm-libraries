@@ -619,4 +619,27 @@ constexpr float getTolerance()
 
 } // namespace causal_conv1d
 
+namespace moe_routing
+{
+
+// Exact: every output (first_token_offset, token_index, token_ks) is an integer produced by
+// a stable counting sort, so engine and reference agree element for element or the routing
+// is wrong. The integer validators compare exactly whatever this returns; 0 keeps a graph
+// that mixes MoE routing with float ops from being loosened by it.
+template <typename T>
+constexpr float getTolerance()
+{
+    if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float> || std::is_same_v<T, half>
+                 || std::is_same_v<T, bfloat16>)
+    {
+        return 0.0f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace moe_routing
+
 } // namespace hipdnn_test_sdk::utilities

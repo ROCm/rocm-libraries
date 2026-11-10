@@ -318,6 +318,25 @@ void setGatherInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Graph& gr
     }
 }
 
+// ── MoE routing ──────────────────────────────────────────────────────────────
+
+void setMoeRoutingInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                               InputFillRecipes& recipes)
+{
+    const auto* a = node.attributes_as_MoeRoutingAttributes();
+    if(a == nullptr || a->num_experts() < 1)
+    {
+        return;
+    }
+
+    // Every expert id in [0, num_experts), so every (s, k) pair is routed. An integer tensor
+    // casts both bounds to its type and draws uniformly from [lo, hi), truncating each draw,
+    // so [0, E) reaches every expert and never E. An expert-parallel bundle widens the range
+    // in its metadata to leave some ids unrouted.
+    recipes.setDefault(a->topk_ids_tensor_uid(),
+                       FillRecipe::free(0.0f, static_cast<float>(a->num_experts())));
+}
+
 // ── Paged cache store ────────────────────────────────────────────────────────
 
 void setPagedCacheStoreInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -746,6 +765,9 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
         return true;
     case NA::GatherAttributes:
         setGatherInitDefaults(graph, node, recipes);
+        return true;
+    case NA::MoeRoutingAttributes:
+        setMoeRoutingInitDefaults(node, recipes);
         return true;
     case NA::PagedCacheStoreAttributes:
         setPagedCacheStoreInitDefaults(node, recipes);

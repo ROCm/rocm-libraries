@@ -1461,6 +1461,51 @@ TEST(TestFillInputs, SoftmaxLogitsSpanSeveralDecadesOfProbability)
     EXPECT_GT(*hi, 4.0f);
 }
 
+// MoE routing ids are drawn from [0, num_experts), so every pair is routed, and every expert
+// is reachable.
+TEST(TestFillInputs, MoeRoutingIdsStayInsideTheExperts)
+{
+    GraphResult gr;
+    auto& b = gr.builder;
+    const std::vector<int64_t> idDims = {64, 8};
+    const std::vector<int64_t> idStrides = {8, 1};
+    const std::vector<int64_t> offsetDims = {6, 1, 1};
+    const std::vector<int64_t> offsetStrides = {1, 1, 1};
+    const std::vector<int64_t> rowDims = {1, 512, 1};
+    const std::vector<int64_t> rowStrides = {512, 1, 1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 1, "topk_ids", DataType::INT32, &idStrides, &idDims));
+    tensors.push_back(CreateTensorAttributesDirect(
+        b, 2, "first_token_offset", DataType::INT64, &offsetStrides, &offsetDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 3, "token_index", DataType::INT32, &rowStrides, &rowDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 4, "token_ks", DataType::INT32, &rowStrides, &rowDims));
+
+    auto routing = CreateMoeRoutingAttributes(b, 1, 2, 3, 4, /*num_experts=*/5);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(
+        b, "moe_routing", DataType::FLOAT, NodeAttributes::MoeRoutingAttributes, routing.Union()));
+    b.Finish(CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes));
+
+    gr.graph = GetGraph(b.GetBufferPointer());
+    const auto leafUids = gr.leafInputUids({2, 3, 4});
+    auto inputs = makeTensorsFromGraph(gr, leafUids);
+    InputFillRecipes recipes;
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(recipes.fill(1), FillRecipe::free(0.0f, 5.0f));
+
+    auto& ids = *inputs.at(1);
+    const auto* values = static_cast<const int32_t*>(ids.rawHostData());
+    const std::set<int32_t> seen(values, values + ids.elementCount());
+    EXPECT_EQ(seen, (std::set<int32_t>{0, 1, 2, 3, 4}));
+}
+
 namespace
 {
 

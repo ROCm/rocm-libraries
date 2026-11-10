@@ -11,9 +11,10 @@ matmul ``gather`` and ``scatter`` as they are. The features come from
 ``moe_routing_attributes.fbs``. The serializer
 (``utilities/json/MoeRoutingAttributes.hpp``) writes ``topk_ids`` under
 ``inputs``, the three routing tensors under ``outputs`` and ``num_experts``
-at the top of the node. No provider implements the op, so the dtypes are
-those the CPU reference executor registers (``MoeRoutingSignatureKey``):
-``first_token_offset`` int32 or int64, everything else int32. By group:
+at the top of the node. The dtypes are those the CPU reference executor
+registers (``MoeRoutingSignatureKey``) and the FlyDSL engine
+(``hipkernel:flydsl_moe_routing``) accepts: ``first_token_offset`` int32 or
+int64, everything else int32. By group:
 
 - ``offset_dtype`` (exclusive): the dtype of ``first_token_offset``.
 - ``top_k`` (exclusive): ``one`` (each token to one expert) or ``multi``.

@@ -29,6 +29,7 @@
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/MoeRoutingUnroutedRows.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
@@ -1157,6 +1158,15 @@ VerificationOutcome
             ADD_FAILURE() << "Bundle: " << _bundlePath.string() << ": " << problem;
             return comparisonOutcome(false, verifier);
         }
+    }
+    // MoE routing's unrouted rows are unspecified: check the engine left them untouched,
+    // then take them out of the comparison.
+    if(const auto problem
+       = bundle::settleMoeRoutingUnroutedRows(wrapper, engineOutputs, expectedFor);
+       !problem.empty())
+    {
+        ADD_FAILURE() << "Bundle: " << _bundlePath.string() << ": " << problem;
+        return comparisonOutcome(false, verifier);
     }
     const auto mismatches
         = bundle::compareOutputs(wrapper,

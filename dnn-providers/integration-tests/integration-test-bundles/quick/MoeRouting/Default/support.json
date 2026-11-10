@@ -1,0 +1,26 @@
+{
+  "claims": {
+    "hipkernel:flydsl_moe_routing": [
+      {
+        "cases": [
+          "s16_k1_e4_i32",
+          "s300_k6_e128_i64",
+          "s64_k8_e512_i32",
+          "s7_k2_e8_i32"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "s64_k8_e512_i64",
+      "values": {
+        "num_experts": 512,
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              64,
+              8
+            ],
+            "strides": [
+              8,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              513,
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1,
+              1
+            ],
+            "data_type": "int64"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              512,
+              1
+            ],
+            "strides": [
+              512,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              512,
+              1
+            ],
+            "strides": [
+              512,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL moe_routing",
+        "seed": 1,
+        "notes": "Expert parallelism, Qwen3.8 router shape: [64, 8] ids drawn from [-64, 576), so about 20% (negative or >= 512) are not routed and the trailing token_index/token_ks rows stay untouched; int64 offsets",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceMoeRouting); S=64 tokens, top_k=8 of E=512 experts from the Qwen3.8 layer graph",
+        "inputs": {
+          "0": {
+            "kind": "free",
+            "lo": -64.0,
+            "hi": 576.0
+          }
+        }
+      }
+    },
+    {
+      "id": "s33_k4_e32_i32",
+      "values": {
+        "num_experts": 32,
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              33,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              33,
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              132,
+              1
+            ],
+            "strides": [
+              132,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              132,
+              1
+            ],
+            "strides": [
+              132,
+              1,
+              1
+            ],
+            "data_type": "int32"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL moe_routing",
+        "seed": 1,
+        "notes": "Expert parallelism: [33, 4] ids drawn from [-4, 36), about 20% not routed; int32 offsets",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceMoeRouting)",
+        "inputs": {
+          "0": {
+            "kind": "free",
+            "lo": -4.0,
+            "hi": 36.0
+          }
+        }
+      }
+    }
+  ]
+}
