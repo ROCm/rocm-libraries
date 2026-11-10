@@ -27,6 +27,7 @@
 #pragma once
 
 #include <Tensile/AMDGPU.hpp>
+#include <Tensile/ReadMostlyMap.hpp>
 #include <Tensile/Tensile.hpp>
 #include <hip/hip_runtime.h>
 #include <unordered_set>
@@ -151,19 +152,25 @@ namespace TensileLite
         private:
             hipError_t loadCodeObjectFileOnce(std::string const& path);
             hipError_t getKernel(hipFunction_t& rv, std::string const& name);
+            // Cached function for `name`, or null. Takes no lock.
+            hipFunction_t cachedKernel(std::string const& name) const;
 
             ModuleApi  m_moduleApi;
             std::mutex m_access;
 
-            std::vector<hipModule_t>                       m_modules;
-            std::unordered_map<std::string, hipFunction_t> m_kernels;
-            bool                                           m_debug           = false;
-            bool                                           m_debugSkipLaunch = false;
-            std::string                                    m_name            = "HipSolutionAdapter";
-            std::string                                    m_codeObjectDirectory;
+            std::vector<hipModule_t> m_modules;
+            // Written under m_access, read without it by getKernel(). Null
+            // means not loaded: recovery resets entries instead of removing them.
+            ReadMostlyMap<std::string, std::atomic<hipFunction_t>> m_kernels;
+            bool                                                   m_debug           = false;
+            bool                                                   m_debugSkipLaunch = false;
+            std::string                                            m_name = "HipSolutionAdapter";
+            std::string                                            m_codeObjectDirectory;
 
-            std::vector<std::string>        m_loadedModuleNames;
-            std::unordered_set<std::string> m_loadedCOFiles;
+            std::vector<std::string> m_loadedModuleNames;
+            // Written under m_access, read without it by FindCodeObject().
+            // Recovery resets entries to false instead of removing them.
+            ReadMostlyMap<std::string, std::atomic<bool>> m_loadedCOFiles;
 
             // Extra rotation copies for I-cache cold-miss testing.
             //   m_extraModuleCopies[i] is parallel to m_modules and holds
@@ -175,8 +182,8 @@ namespace TensileLite
             //     0      -> original m_modules / m_kernels;
             //     k > 0  -> m_extraModuleCopies[k-1] / m_extraKernels[k-1].
             //   std::atomic<int> lets selectRotationCopy() update without locking
-            //     and getKernel() snapshot the index without locking; the actual
-            //     module/cache search is still guarded by m_access.
+            //     and getKernel() snapshot the index without locking; a copy k > 0
+            //     is searched under m_access.
             std::vector<std::vector<hipModule_t>>                       m_extraModuleCopies;
             std::vector<std::unordered_map<std::string, hipFunction_t>> m_extraKernels;
             std::atomic<int>                                            m_currentRotationCopy{0};

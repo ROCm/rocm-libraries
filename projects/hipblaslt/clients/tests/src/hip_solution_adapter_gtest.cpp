@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -30,6 +31,7 @@
 namespace
 {
     constexpr char primary[] = "/library/primary.co";
+    constexpr char other[]   = "/library/other.co";
     constexpr char helper[]  = "/library/Kernels.so-000-gfx942.hsaco";
     constexpr char minus[]   = "/library/Kernels.so-000-gfx942-xnack-.hsaco";
     constexpr char plus[]    = "/library/Kernels.so-000-gfx942-xnack+.hsaco";
@@ -40,6 +42,8 @@ namespace
         std::map<hipModule_t, std::unique_ptr<int>>    live;
         hipError_t                                     lastError = hipSuccess;
         unsigned                                       unloads   = 0;
+        // Runs once, inside the next module unload.
+        std::function<void()> onUnload;
     };
 
     // Each test owns this state and destroys the adapter before releasing it.
@@ -116,6 +120,8 @@ namespace
     {
         EXPECT_EQ(hipLoads->live.erase(module), 1u) << "double or unowned module unload";
         ++hipLoads->unloads;
+        if(auto hook = std::exchange(hipLoads->onUnload, nullptr))
+            hook();
         return hipSuccess;
     }
 
@@ -240,6 +246,47 @@ namespace
         EXPECT_EQ(adapter->numRotationModules(), 1);
         EXPECT_EQ(loads.unloads, 4u);
         EXPECT_EQ(loads.live.size(), 2u);
+    }
+
+    // Recovery marks every loaded file as not loaded, so the next lookup loads
+    // it again instead of trusting a module that recovery unloaded.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_FindCodeObjectReloadsAfterRecovery)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(other);
+        EXPECT_FALSE(adapter->FindCodeObject("other.co"));
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+
+        expectLoad(primary, GetParam());
+        expectLoad(helper);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        EXPECT_EQ(loads.unloads, 2u);
+
+        expectLoad(other);
+        EXPECT_FALSE(adapter->FindCodeObject("other.co"));
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+        EXPECT_EQ(loads.live.size(), 3u);
+    }
+
+    // Recovery unloads the old modules after releasing the adapter lock. A load
+    // that lands meanwhile belongs to the new module set: it is kept, and the
+    // adapter unloads it exactly once when destroyed.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_LoadDuringRecoveryUnloadIsKept)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        loads.onUnload = [this] { EXPECT_EQ(adapter->loadCodeObjectFile(other), hipSuccess); };
+
+        expectLoad(primary, GetParam());
+        expectLoad(other);
+        expectLoad(helper);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        EXPECT_EQ(loads.unloads, 1u) << "only the old helper is unloaded";
+        EXPECT_EQ(loads.live.size(), 3u) << "the module loaded during recovery is still live";
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
     }
 
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS

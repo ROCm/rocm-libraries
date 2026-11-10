@@ -708,6 +708,68 @@ TEST_F(IndexedLibraryParityTest, ResolveByIndexWorksWithoutAnyPriorQuery)
     EXPECT_EQ(solution->index, indices.front());
     EXPECT_EQ(master->blobCache->materializedCount(), 1u)
         << "resolving one index must not materialize the rest";
+
+    ASSERT_NE(master->resolvedSolutions.find(indices.front()), nullptr)
+        << "a resolved index must be recorded for the lock-free path";
+    EXPECT_EQ(master->resolveSolutionByIndex(indices.front()), solution)
+        << "a resolved index must return the object it published";
+    EXPECT_EQ(master->blobCache->materializedCount(), 1u);
+}
+
+TEST_F(IndexedLibraryParityTest, ResolvingALegacyIndexAgainReturnsTheSameObject)
+{
+    auto fixture = legacyFixture();
+    if(!fs::is_regular_file(fixture))
+        GTEST_SKIP() << "no legacy library fixture at " << fixture;
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(fixture.string());
+    if(!lib)
+        GTEST_SKIP() << fixture << " does not load";
+    auto* master
+        = dynamic_cast<MasterSolutionLibrary<ContractionProblemGemm, ContractionSolution>*>(
+            lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_FALSE(master->solutions.empty());
+
+    int const index    = master->solutions.begin()->first;
+    auto      solution = master->resolveSolutionByIndex(index);
+    ASSERT_NE(solution, nullptr);
+    EXPECT_EQ(solution, master->solutions.at(index));
+    ASSERT_NE(master->resolvedSolutions.find(index), nullptr)
+        << "a resolved index must be recorded for the lock-free path";
+    EXPECT_EQ(master->resolveSolutionByIndex(index), solution);
+}
+
+// A local-kernel index would always fill `owner`; local kernels are compiled
+// only with TENSILELITE_ENABLE_LOCAL_KERNELS, so that case is not covered here.
+TEST_F(IndexedLibraryParityTest, SolutionForCallOwnsOnlyUnresolvedIndices)
+{
+    auto fixture = legacyFixture();
+    if(!fs::is_regular_file(fixture))
+        GTEST_SKIP() << "no legacy library fixture at " << fixture;
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(fixture.string());
+    if(!lib)
+        GTEST_SKIP() << fixture << " does not load";
+    auto* master
+        = dynamic_cast<MasterSolutionLibrary<ContractionProblemGemm, ContractionSolution>*>(
+            lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_FALSE(master->solutions.empty());
+
+    const AMDGPU device = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
+    const int  index   = master->solutions.begin()->first;
+
+    std::shared_ptr<ContractionSolution> owner;
+    auto const* first = master->getSolutionByIndexForCall(problem, device, index, owner);
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first, owner.get()) << "an unresolved index is returned through owner";
+
+    std::shared_ptr<ContractionSolution> second;
+    EXPECT_EQ(master->getSolutionByIndexForCall(problem, device, index, second), first);
+    EXPECT_EQ(second, nullptr) << "a resolved index needs no owner";
 }
 
 // ---------------------------------------------------------------------------
