@@ -1226,6 +1226,10 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         make_spec(59, s);
         s->use_i64_kv_addr = true;
         break;
+    case 76: /* cfg48 with one 64-token page per tile (page base in soffset). */
+        make_spec(48, s);
+        s->block_size = 64;
+        break;
     default:
         return -1;
     }

@@ -1509,6 +1509,23 @@ GFX950_ATTENTION_TILED_2D = [
         "use_softmax_mfma_interleave": True,
         "use_i64_kv_addr": True,
     },
+    {
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 64,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "num_warps": 4,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+        "use_mfma_32x32": True,
+        "use_transposed_qk_32x32": True,
+        "use_transposed_scalar_state": True,
+        "use_grouped_kv2_softmax": True,
+    },
 ]
 
 GFX942_ATTENTION_TILED_3D = [

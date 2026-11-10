@@ -1175,6 +1175,9 @@ _CONFIGS[73] = {**_CONFIGS[71], "use_i64_kv_addr": True}
 # (cfg68) and mid-row copies (cfg59).
 _CONFIGS[74] = {**_CONFIGS[68], "use_i64_kv_addr": True}
 _CONFIGS[75] = {**_CONFIGS[59], "use_i64_kv_addr": True}
+# cfg48 with one 64-token page per tile: the page base stays in soffset
+# without prefetching (grouped KV2 carries no page ids).
+_CONFIGS[76] = {**_CONFIGS[48], "block_size": 64}
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:
