@@ -7551,12 +7551,16 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetBias"] = epilogueOffset
       state["LdsOffsetBiasNonGSU"] = epilogueOffset
       state["LdsOffsetBiasGSU"] = epilogueOffset
-    # The TDM block stages the D tile from a 256-byte boundary after the vectors, which every store
-    # batch reads, so the two must not overlap.
+    # The TDM block stages the D tile from a 256-byte boundary after the LDS that is live while it is
+    # written: the vectors, which every store batch reads, and the main-loop buffers unless the tile may
+    # lie over them. It may unless the next tile's loads already write them (PrefetchAcrossPersistent).
     tdmStoreBytes = tdmStoreLdsBytes(state)
-    state["_TDMStoreLdsOffset"] = int(math.ceil((state["LdsOffsetBias"] + epilogueSize) / 256) * 256) \
-      if tdmStoreBytes and epilogueSize else 0
-    assert not (tdmStoreBytes and epilogueSize) or state["_TDMStoreLdsOffset"] >= state["LdsOffsetBias"] + epilogueSize
+    state["_TDMStoreOverMainLoop"] = bool(tdmStoreBytes) and not state["PrefetchAcrossPersistent"]
+    liveEnd = state["LdsOffsetBias"] + epilogueSize if epilogueSize else 0
+    if tdmStoreBytes and not state["_TDMStoreOverMainLoop"]:
+      liveEnd = max(liveEnd, ldsNumBytes)
+    state["_TDMStoreLdsOffset"] = int(math.ceil(liveEnd / 256) * 256) if tdmStoreBytes else 0
+    assert not tdmStoreBytes or state["_TDMStoreLdsOffset"] >= liveEnd
     ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize, state["_TDMStoreLdsOffset"] + tdmStoreBytes)
 
     state["LdsBytesNoAmax"] = ldsNumBytes

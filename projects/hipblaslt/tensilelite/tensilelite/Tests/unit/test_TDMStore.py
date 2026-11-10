@@ -15,8 +15,8 @@ from rocisa.enum import CacheScope, NonVolatile, TemporalHint
 from tensilelite.Common.DataType import DataType
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.ValidParameters import validParameters
-from tensilelite.Components.TDMStore import STINKY_KEEP, TDM_STORE_PATHS, tdmStoreBlocks, tdmStoreLdsBytes, \
-  tdmStoreModifiers, tdmStoreRejectReason
+from tensilelite.Components.TDMStore import STINKY_KEEP, TDM_STORE_PATHS, storesFinalD, tdmStoreBlocks, \
+  tdmStoreLdsBytes, tdmStoreModifiers, tdmStoreRejectReason
 from tensilelite.SolutionStructs.Naming import getKernelNameMin
 
 from emit_test_helpers import assert_every_vector_preload_barriers, emit_asm
@@ -112,7 +112,7 @@ def test_disabled_is_not_validated():
   assert tdmStoreRejectReason(_state(TDMStoreInst=0, ISA=(9, 5, 0), GlobalSplitU=4)) is None
 
 
-_HPA = "TDMStoreInst requires HighPrecisionAccumulate with a single-precision ComputeDataType"
+_OUTPUT = "TDMStoreInst supports bf16 and fp16 D converted from fp32 accumulators"
 _GSU_DYNAMIC = "TDMStoreInst supports GlobalSplitU=-1 only with MultipleBuffer and AdaptiveGemmGSUA=0"
 _PERSISTENT = "TDMStoreInst supports persistent kernels only as non-atomic StreamK=3"
 _ACROSS_TILES = \
@@ -123,10 +123,9 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
 
 
 @pytest.mark.parametrize("overrides, reason", [
-  ({"ISA": (9, 5, 0)}, "TDMStoreInst requires gfx1250"),
-  ({"DestDataType": DataType("s")}, "TDMStoreInst supports only bf16 and fp16 DestDataType"),
-  ({"HighPrecisionAccumulate": False}, _HPA),
-  ({"ComputeDataType": DataType("h")}, _HPA),
+  ({"DestDataType": DataType("s")}, _OUTPUT),
+  ({"HighPrecisionAccumulate": False}, _OUTPUT),
+  ({"ComputeDataType": DataType("h")}, _OUTPUT),
   ({"BufferStore": False}, "TDMStoreInst requires BufferStore"),
   ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1"),
   ({"GlobalSplitU": -1, "GlobalSplitUAlgorithm": "SingleBuffer"}, _GSU_DYNAMIC),
@@ -198,6 +197,18 @@ def test_each_level_picks_blocks_of_the_store_width_cascade(svw, adaptive):
 def test_partial_and_atomic_stores_keep_buffer_store(accumulation, atomic):
   assert _blocks(3, atomic=atomic, accumulation=accumulation) == set()
   assert _blocks(3, edge=False, vectorWidths=(8,), atomic=atomic, accumulation=accumulation) == set()
+
+
+@pytest.mark.parametrize("accumulation", [None, "PartialsBuffer", "MultipleBuffer", "MultipleBufferSingleKernel",
+                                          "SingleBuffer"])
+@pytest.mark.parametrize("atomic", [False, True])
+def test_stores_final_d_predicate(accumulation, atomic):
+  """A block writes D's final elements unless it is atomic or a GSU workspace store, and tdmStoreBlocks lets
+  such a block store through the TDM block when its elements are narrower than 4 bytes."""
+  final = not atomic and accumulation in (None, "PartialsBuffer")
+  assert storesFinalD({"_GlobalAccumulation": accumulation}, atomic) == final
+  for bpe in (2, 4):
+    assert bool(_blocks(3, atomic=atomic, accumulation=accumulation, bpe=bpe)) == (final and bpe < 4), bpe
 
 
 @pytest.mark.parametrize("level", _LEVELS)
@@ -624,6 +635,28 @@ def test_staged_tile_goes_after_the_epilogue_vectors(gp_gfx1250, gfx1250_iim, as
     assert sum(add.startswith("v_add") for add in adds) == 1, adds
     assert sum(add.startswith("s_add_u32") for add in adds) == descriptors, adds
     assert all(str(offset) in add or hex(offset) in add for add in adds), adds
+
+
+_VECTORS = {"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}}
+
+
+@pytest.mark.parametrize("overrides", [{}, dict(_VECTORS, GlobalSplitU=-1), dict(_VECTORS, StreamK=3)],
+                         ids=["plain", "gsu-1_vectors", "sk3_vectors"])
+def test_staged_tile_over_main_loop_property(gp_gfx1250, gfx1250_iim, assembler, capsys, overrides):
+  """Without PrefetchAcrossPersistent the staged tile lies over the main-loop buffers (_TDMStoreOverMainLoop):
+  it starts at 0, or at the first 256-byte boundary after the epilogue vectors, and the setup fences the
+  main-loop LDS. TDMStoreInst 0 reserves no tile."""
+  for level in (0, 2):
+    sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, **deepcopy(overrides))
+    assert sol.get("Valid"), capsys.readouterr().out
+    offset = sol["_TDMStoreLdsOffset"]
+    assert sol["_TDMStoreOverMainLoop"] == bool(level), level
+    if not level:
+      assert offset == 0 and tdmStoreLdsBytes(sol) == 0
+      continue
+    assert (offset > 0) == bool(overrides) and offset % 256 == 0 and offset >= sol["LdsOffsetBias"], offset
+    assert sol["LdsNumBytes"] >= offset + tdmStoreLdsBytes(sol)
+    assert "all waves are done with the main-loop LDS" in asm
 
 
 @pytest.mark.parametrize("storeVectorWidth", [-1, 1])
