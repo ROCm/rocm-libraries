@@ -20,17 +20,15 @@
 
 #include "data_set.h"
 #include "../../shared/arithmetic.h"
-#include "../../shared/precision_type.h"
+#include "../../shared/array_predicate.h"
 #include "../../shared/ptrdiff.h"
-#include "../../shared/rocfft_enums_vs_fft_enums.h"
-#include "rocfft/rocfft.h"
+#include "enum_printer.h"
 #include "rocfft_current_function.h"
 
 #include <algorithm>
 #include <iterator>
 #include <numeric>
 #include <stdexcept>
-#include <type_traits>
 
 namespace
 {
@@ -56,6 +54,20 @@ namespace
         return a == b
                || (array_type_is_complex(a) && array_type_is_complex(b)
                    && array_type_is_interleaved(a) == array_type_is_interleaved(b));
+    }
+
+    // complex counterpart of a Hermitian array type, other array types unchanged
+    rocfft_array_type complex_counterpart(rocfft_array_type t)
+    {
+        switch(t)
+        {
+        case rocfft_array_type_hermitian_interleaved:
+            return rocfft_array_type_complex_interleaved;
+        case rocfft_array_type_hermitian_planar:
+            return rocfft_array_type_complex_planar;
+        default:
+            return t;
+        }
     }
 }
 
@@ -138,18 +150,6 @@ data_set_t::data_set_t(const std::vector<size_t>& lower,
     }
 }
 
-data_set_t::data_set_t(rocfft_precision           precision,
-                       rocfft_array_type          array_type,
-                       const std::vector<size_t>& lower,
-                       const std::vector<size_t>& upper,
-                       const std::vector<size_t>& strides,
-                       size_t                     batch_rank)
-    : data_set_t(lower, upper, strides, batch_rank)
-{
-    this->array_type = array_type;
-    set_precision(precision);
-}
-
 data_set_t data_set_t::full_range(const std::vector<size_t>& lengths,
                                   const std::vector<size_t>& strides,
                                   size_t                     batch,
@@ -191,7 +191,18 @@ size_t data_set_t::get_full_rank() const
 
 rocfft_array_type data_set_t::get_array_type() const
 {
+    if(!has_array_type())
+    {
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                               + " called on a data set without array type.");
+    }
+
     return array_type;
+}
+
+bool data_set_t::has_array_type() const
+{
+    return array_type != rocfft_array_type_unset;
 }
 
 rocfft_precision data_set_t::get_precision() const
@@ -333,22 +344,49 @@ size_t data_set_t::logical_count() const
     return product(len_and_batches.begin(), len_and_batches.end());
 }
 
-size_t data_set_t::buffer_element_count() const
+size_t data_set_t::buffer_element_count(data_part part) const
 {
+    if(array_type_is_planar(array_type) == (part == data_part::ALL))
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " requires data_part::ALL for non-planar data sets, and"
+                                      " data_part::REAL or data_part::IMAGINARY for planar ones.");
     return compute_ptrdiff(lengths_and_batches(), strides_and_distances());
 }
 
-size_t data_set_t::element_size() const
+size_t data_set_t::element_byte_size() const
 {
-    if(array_type == rocfft_array_type_unset)
-        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
-                               + " called on a data set without array type.");
-    return ::element_size(get_precision(), array_type);
+    size_t real_bytes = 0;
+    switch(get_precision())
+    {
+    case rocfft_precision_half:
+        real_bytes = 2;
+        break;
+    case rocfft_precision_single:
+        real_bytes = 4;
+        break;
+    case rocfft_precision_double:
+        real_bytes = 8;
+        break;
+    default:
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " found an unexpected precision.");
+    }
+    switch(get_array_type())
+    {
+    case rocfft_array_type_complex_interleaved:
+    case rocfft_array_type_hermitian_interleaved:
+        return 2 * real_bytes;
+    case rocfft_array_type_real:
+    case rocfft_array_type_complex_planar:
+    case rocfft_array_type_hermitian_planar:
+        return real_bytes;
+    default:
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " found an unexpected array type.");
+    }
 }
 
-size_t data_set_t::buffer_size_bytes() const
+size_t data_set_t::buffer_size_bytes(data_part part) const
 {
-    return buffer_element_count() * element_size();
+    return buffer_element_count(part) * element_byte_size();
 }
 
 data_set_t data_set_t::reinterpret_as(rocfft_array_type new_array_type) const
@@ -367,15 +405,33 @@ data_set_t data_set_t::reinterpret_as(rocfft_array_type new_array_type) const
     return ret;
 }
 
+data_set_t data_set_t::get_packed_data_set(bool real_inplace_padding) const
+{
+    // keeps precision and array type; full_range_reset drops the embedding
+    auto ret = *this;
+    ret.full_range_reset(lengths(), {}, batches(), {}, real_inplace_padding);
+    for(size_t dim = 0; dim < get_full_rank(); dim++)
+    {
+        ret[dim].lower = (*this)[dim].lower;
+        ret[dim].upper = (*this)[dim].upper;
+    }
+    return ret;
+}
+
 bool data_set_t::is_contiguous() const
 {
-    return buffer_element_count() == logical_count();
+    return compute_ptrdiff(lengths_and_batches(), strides_and_distances()) == logical_count();
+}
+
+bool data_set_t::has_same_axes_as(const data_set_t& other) const
+{
+    return len_axes == other.len_axes && batch_axes == other.batch_axes;
 }
 
 bool data_set_t::operator==(const data_set_t& other) const
 {
-    return len_axes == other.len_axes && batch_axes == other.batch_axes
-           && array_type == other.array_type && precision == other.precision;
+    return has_same_axes_as(other) && array_type == other.array_type
+           && precision == other.precision;
 }
 
 bool data_set_t::has_same_logical_range_as(const data_set_t& other) const
@@ -415,11 +471,8 @@ data_set_t data_set_t::make_contiguous_intersection_of(const data_set_t& first,
     if(first.embedding != second.embedding)
         throw std::invalid_argument("Different embeddings for arguments of "
                                     + ROCFFT_CURRENT_FUNCTION);
-    if(first.precision != second.precision)
-        throw std::invalid_argument("Different precisions for arguments of "
-                                    + ROCFFT_CURRENT_FUNCTION);
-    if(!same_format_up_to_hermitian(first.array_type, second.array_type))
-        throw std::invalid_argument("Incompatible array types for arguments of "
+    if(first.precision != second.precision || first.array_type != second.array_type)
+        throw std::invalid_argument("Different precisions or array types for arguments of "
                                     + ROCFFT_CURRENT_FUNCTION);
 
     data_set_t ret;
@@ -511,6 +564,10 @@ size_t data_set_t::offset_in(const data_set_t& other) const
         throw std::invalid_argument(
             "This object is not dimensionally consistent with the argument of "
             + ROCFFT_CURRENT_FUNCTION);
+    if(precision != other.precision || array_type != other.array_type)
+        throw std::invalid_argument(
+            "This object's precision or array type differs from the argument of "
+            + ROCFFT_CURRENT_FUNCTION);
     for(size_t dim = 0; dim < get_full_rank(); dim++)
         if(!other[dim].logically_contains((*this)[dim].lower))
             throw std::invalid_argument(
@@ -529,6 +586,10 @@ bool data_set_t::is_continuous_in(const data_set_t& other) const
     if(!is_dimensionally_consistent_with(other))
         throw std::invalid_argument(
             "This object is not dimensionally consistent with the argument of "
+            + ROCFFT_CURRENT_FUNCTION);
+    if(precision != other.precision || array_type != other.array_type)
+        throw std::invalid_argument(
+            "This object's precision or array type differs from the argument of "
             + ROCFFT_CURRENT_FUNCTION);
 
     bool ret = true;
@@ -571,9 +632,9 @@ std::string data_set_t::str() const
     }
 
     ret += " precision ";
-    ret += has_precision() ? precision_name(get_precision()) : "unset";
+    ret += has_precision() ? PrintPrecision(get_precision()) : "unset";
     ret += " array type ";
-    ret += fft_enum_to_string(fft_array_type_from_rocfft_array_type(array_type));
+    ret += PrintArrayType(array_type);
 
     if(is_embedded())
     {
@@ -665,17 +726,31 @@ std::optional<data_set_t>
             + " is assuming full length axes, non-zero lower bounds are rejected for length axes.");
     }
 
-    if(fft_type == rocfft_transform_type_complex_forward
-       || fft_type == rocfft_transform_type_complex_inverse)
-    {
-        // simple copy
-        return std::make_optional<data_set_t>(*this);
-    }
-    else if(fft_type != rocfft_transform_type_real_forward
-            && fft_type != rocfft_transform_type_real_inverse)
+    const bool complex_fft = fft_type == rocfft_transform_type_complex_forward
+                             || fft_type == rocfft_transform_type_complex_inverse;
+    if(!complex_fft && fft_type != rocfft_transform_type_real_forward
+       && fft_type != rocfft_transform_type_real_inverse)
     {
         throw std::invalid_argument("Unknown type of transform given to "
                                     + ROCFFT_CURRENT_FUNCTION);
+    }
+
+    // a set array type must match this data set's side of the transform
+    const auto io = other(other_io);
+    if(has_array_type()
+       && !(complex_fft                    ? array_type_is_complex(array_type)
+            : is_real_domain(fft_type, io) ? array_type_is_real(array_type)
+                                           : array_type_is_hermitian(array_type)))
+    {
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " found array type "
+                               + PrintArrayType(array_type)
+                               + " on the wrong side of the transform.");
+    }
+
+    if(complex_fft)
+    {
+        // simple copy
+        return std::make_optional<data_set_t>(*this);
     }
 
     // a Hermitian innermost length of 1 can only come from a real innermost length of 1
@@ -706,7 +781,7 @@ std::optional<data_set_t>
     }
     // copy data set and modify what needs be
     auto ret = std::make_optional<data_set_t>(*this);
-    if(array_type != rocfft_array_type_unset)
+    if(has_array_type())
         ret->array_type = is_real_domain(fft_type, other_io)
                               ? rocfft_array_type_real
                               : rocfft_array_type_hermitian_interleaved;
@@ -738,7 +813,7 @@ data_set_t data_set_t::get_data_set_for_len_axes(const std::set<size_t>& len_ind
         return *this;
 
     data_set_t ret;
-    ret.array_type = array_type;
+    ret.array_type = complex_counterpart(array_type);
     ret.precision  = precision;
     // map of current object's to returned object's axis indices
     std::vector<size_t> current_to_ret(get_full_rank());
@@ -797,7 +872,7 @@ data_set_t data_set_t::get_embedding_data_set() const
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " detected an inconsistent embedding map");
 
     data_set_t ret;
-    ret.array_type = array_type;
+    ret.array_type = is_embedded() ? complex_counterpart(array_type) : array_type;
     ret.precision  = precision;
     for(const auto& axis_idx : *embedding)
         ret.len_axes.push_back((*this)[axis_idx]);
