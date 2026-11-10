@@ -31,7 +31,7 @@ reporter's detail for it:
 ctest -j8 --output-on-failure     # print the failing operator's output
 ctest -R Rotate                   # one operator (CTest test names are the GTest suite names)
 ctest -L Image_Geometric          # one category
-ctest -L voxel                    # one domain: image, misc, voxel, core
+ctest -L voxel                    # one domain: image, misc, voxel, audio, core
 ctest -N                          # list the registered tests
 ctest --no-label-summary          # drop the per-label timing block CTest prints after a run
 GTEST_COLOR=yes ctest ...         # keep colour; CTest captures output, so it is off by default
@@ -92,6 +92,7 @@ src/
     image/     image ops, grouped by category (color, geometric, ...)
     misc/      misc ops, grouped by category
     voxel/     voxel ops, grouped by category
+    audio/     audio ops, grouped by category (built only when rpp has audio support)
 ```
 
 Adding an op = a `reference/<op>_ref.hpp` golden model plus a short `TEST_P` under `tests/`.

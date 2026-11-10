@@ -13,6 +13,7 @@ test_categories:
       - "Image_Filter/SobelFilterTest.*HIP_U8toU8_PLN1_FullRoi_*"
       - "Misc_*/*HIP_*_2D_*2x24x32"
       - "Voxel_*/*HIP_*_NCDHW1_FullRoi_XYZWHD_*"
+      - "Audio_*/*HIP_*_1ch_Ragged_*"
     labels:
       - "ffm-quick"
 

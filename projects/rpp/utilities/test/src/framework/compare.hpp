@@ -34,14 +34,15 @@ SOFTWARE.
 #include <string>
 #include <vector>
 
+#include "framework/audio_setup.hpp"
 #include "framework/intensity.hpp"
 #include "framework/nd_config_param.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "framework/voxel_config_param.hpp"
 
-// Comparators for every domain (image ROI, ND tensor, voxel box, reduction array). They share the
-// tolerance rule, mismatch accounting and failure message; only the element walk differs.
+// Comparators for every domain (image ROI, ND tensor, voxel box, audio, reduction array). They
+// share the tolerance rule, mismatch accounting and failure message; only the element walk differs.
 
 namespace rpptest {
 
@@ -147,6 +148,31 @@ template <typename T>
             mismatches.check(to_double(actual[idx]), to_double(reference[idx]),
                              named_coord({{"n", n}, {"c", c}, {"z", z}, {"y", y}, {"x", x}}));
         });
+    return mismatches.result();
+}
+
+// ---- audio domain ----------------------------------------------------------
+
+// Compares each sample's frames within its length only.
+inline ::testing::AssertionResult compare_audio(const Rpp32f* actual, const Rpp32f* reference,
+                                                const RpptDesc& d,
+                                                const std::vector<Rpp32s>& lengths, Bound bound) {
+    Mismatches mismatches(bound);
+    for_each_audio_element(d, lengths, [&](Rpp32u n, Rpp32u t, Rpp32u c, std::size_t idx) {
+        mismatches.check(actual[idx], reference[idx], named_coord({{"n", n}, {"t", t}, {"c", c}}));
+    });
+    return mismatches.result();
+}
+
+// Every element past a sample's length still holds kAudioSentinel. Opt-in: call it only where the
+// op leaves padding alone (some kernels store whole vectors over the tail).
+inline ::testing::AssertionResult compare_audio_padding(const Rpp32f* actual, const RpptDesc& d,
+                                                        const std::vector<Rpp32s>& lengths) {
+    Mismatches mismatches(Bound{});
+    for_each_audio_padding(d, lengths, [&](Rpp32u n, std::size_t idx) {
+        mismatches.check(actual[idx], kAudioSentinel,
+                         named_coord({{"n", n}, {"offset", idx - n * d.strides.nStride}}));
+    });
     return mismatches.result();
 }
 
