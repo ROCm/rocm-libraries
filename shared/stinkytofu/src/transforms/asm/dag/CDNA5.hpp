@@ -426,16 +426,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     // Hardware queue depth, read from the region's WMMA instruction metadata.
     int hardwareWmmaQueueDepth_ = 1;
-    bool queueFillPolicyEnabled_ = false;
-    // Fallback for direct queue use without the function-wide ScheduleAnalysisCache.
-    std::optional<bool> localQueueFillPolicy_;
-    std::optional<bool> queueFillPolicy() const {
-        return getAnalysisCache() ? getAnalysisCache()->queueFillPolicy() : localQueueFillPolicy_;
-    }
-    void setQueueFillPolicy(bool enabled) {
-        localQueueFillPolicy_ = enabled;
-        if (getAnalysisCache()) getAnalysisCache()->setQueueFillPolicy(enabled);
-    }
 
     // Throttle tensor issues vs other work.
     int globalReadCounter = 0;
@@ -1901,9 +1891,8 @@ bool CDNA5ReadyQueue::issuableNow(DAGNode* node) const {
 // is above the WMMA queue, so the load issues through the non-WMMA phase instead of waiting out
 // a queue fill. The best dsReadPriority wins, matching the load the phases would pick.
 bool CDNA5ReadyQueue::promoteDueLastDs() {
-    // This promotion belongs to a region whose reset-time queue-fill policy was enabled. Without
-    // that policy, the normal non-WMMA phase owns DS selection.
-    if (!queueFillPolicyEnabled_) return false;
+    // The promotion is needed only while this reset's fill could hold the due load.
+    if (!wmmaQueueFillPending_) return false;
     DAGNode* due = nullptr;
     for (DAGNode* n : localReadQueue) {
         if (!dsSpread_.due(n->id, wmmaIssuedCountThisRegion_)) continue;
@@ -2771,12 +2760,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             // window. It can issue later than that (a predecessor was held, an SCC chain, an open
             // barrier pair). Count the batches from here; the stage's planned end stays.
             dsSpread_.noteOpen(barrier->id, wmmaIssuedCountThisRegion_);
-            if (queueReset) {
-                const std::optional<bool> policy = queueFillPolicy();
-                wmmaQueueFillPending_ =
-                    wmmaQueueOn() &&
-                    (policy.has_value() ? *policy : queueFillHasConsumerDistance());
-            }
+            if (queueReset) wmmaQueueFillPending_ = wmmaQueueOn() && queueFillHasConsumerDistance();
             PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
                                  << " promoted=" << (promotedPhase_ == PromotePhase::Barrier)
                                  << "\n";
@@ -3010,7 +2994,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     regionDag_ = &deps.dag;
     carryQueuedWar();
     hardwareWmmaQueueDepth_ = 1;
-    queueFillPolicyEnabled_ = queueFillPolicy().value_or(false);
     for (const auto& n : deps.dag.nodes) {
         if (!isMatrixInstruction(*n.inst)) continue;
         const int depth = n.inst->getHwInstDesc()->wmmaQueueDepth;
@@ -3148,10 +3131,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         }
         if (headerStart) headerFillPending_ = false;
         const bool resetCandidate = (headerStart || afterWait) && !deferHeadBalanceThisRegion_;
-        wmmaQueueFillPending_ = resetCandidate && queueFillPolicy().value_or(true);
-        if (wmmaQueueFillPending_) {
-            queueFillPolicyEnabled_ = true;
-        }
+        wmmaQueueFillPending_ = resetCandidate;
     }
 
     // Ceil, not floor: a typical loop has far fewer fillers than WMMAs (e.g.
@@ -3810,7 +3790,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             planned[id] = dsOrdinal++ * wmmaTotalThisRegion_ / dsTotalThisRegion_;
         }
     }
-    const auto unplannedBarrierThresholds = barrierWmmaThresholds_;
     std::vector<int> wmmaPos;
     auto lockWmmaOrder = [&]() {
         StinkyInstruction* prevWmma = nullptr;
@@ -4068,21 +4047,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                              << " catchUp=" << dagFeatures.dsCatchUpPace << "\n");
     };
     planDsSpread();
-    // Decide the reset-time queue fill only after the DS plan is complete. Promotion rules remain
-    // pure decisions: they read this state and never disable or consume the pending fill. A
-    // rejected candidate disables the fill and due-last-DS promotion, restores the unplanned
-    // barrier thresholds, and replans DS pacing. Hardware depth and DS priority do not change.
-    if (wmmaQueueFillPending_ && !queueFillPolicy().has_value()) {
-        if (queueFillHasConsumerDistance()) {
-            setQueueFillPolicy(true);
-        } else {
-            wmmaQueueFillPending_ = false;
-            queueFillPolicyEnabled_ = false;
-            setQueueFillPolicy(false);
-            barrierWmmaThresholds_ = unplannedBarrierThresholds;
-            planDsSpread();
-        }
-    }
+    // Each queue reset uses this region's DS plan and remaining consumers to decide its own fill.
+    if (wmmaQueueFillPending_) wmmaQueueFillPending_ = queueFillHasConsumerDistance();
     lockDsReadOrder();
     lockWmmaOrder();
 

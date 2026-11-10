@@ -834,8 +834,8 @@ static void scheduleRegionWithMovableSideEffects(
 //
 // In the end, the instructions will be reordered in the block
 // to reflect the scheduling order.
-static void scheduleInDAGOnce(BasicBlock& bb, ReadyQueue& readyQueue,
-                              const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex) {
+static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
+                          const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex) {
     PASS_DEBUG(std::cerr << "*** Scheduling Instructions in DAG: ***\n");
 
     if (bb.empty()) return;
@@ -900,44 +900,6 @@ static void scheduleInDAGOnce(BasicBlock& bb, ReadyQueue& readyQueue,
     }
 
     readyQueue.onFinishBB();
-}
-
-static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
-                          const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex) {
-    ScheduleAnalysisCache* cache = readyQueue.getAnalysisCache();
-    const bool policyWasUnknown = cache != nullptr && !cache->queueFillPolicy().has_value();
-    if (!policyWasUnknown) {
-        scheduleInDAGOnce(bb, readyQueue, wmmaIndex);
-        return;
-    }
-
-    std::vector<IRBase*> original;
-    original.reserve(bb.size());
-    std::unordered_set<IRBase*> originalSet;
-    for (IRBase& ir : bb) {
-        original.push_back(&ir);
-        originalSet.insert(&ir);
-    }
-
-    scheduleInDAGOnce(bb, readyQueue, wmmaIndex);
-    if (cache->queueFillPolicy() != std::optional<bool>{false}) return;
-
-    // The first queue-reset candidate is the policy's dry run. If it rejects queue fill, replay
-    // this BB from its original order so work before that candidate also follows the baseline
-    // policy. The same scheduler performs both attempts; only detached filler instructions from
-    // the rejected attempt are discarded.
-    while (!bb.empty()) {
-        auto it = bb.begin();
-        IRBase* ir = it.getNodePtr();
-        if (originalSet.contains(ir))
-            bb.removeIR(ir);
-        else
-            bb.eraseIR(it);
-    }
-    for (IRBase* ir : original) bb.appendIR(ir);
-    (void)readyQueue.takeLayer2BarrierOverlapCandidates();
-    cache->erase(&bb);
-    scheduleInDAGOnce(bb, readyQueue, wmmaIndex);
 }
 
 // Convert tentative Layer 2 overlap candidates into the published analysis only
