@@ -867,7 +867,7 @@ TEST(TestEngineFeatures, EveryNodeTypePublishesItsOperands)
             EXPECT_GT(operands, 0U);
         }
     }
-    EXPECT_EQ(visited, 26U);
+    EXPECT_EQ(visited, 27U);
 }
 
 TEST(TestEngineFeatures, ConvolutionBackwardDataPublishesItsOperands)
@@ -1503,6 +1503,14 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
              return single({{2, 4, 16, 8}, {1, 1, 16, 4}, {2, 4, 16, 8}}, rope);
          },
          3072.0},
+        // 5 * p.numel (2 * 4 * 8 * 16 = 1024).
+        {[] {
+             SoftmaxAttributesT softmax;
+             softmax.p_tensor_uid = 1;
+             softmax.s_tensor_uid = 2;
+             return single({{2, 4, 8, 16}, {2, 4, 8, 16}}, softmax);
+         },
+         5120.0},
     };
     std::set<NodeAttributes> counted;
     for(const auto& [make, flops] : cases)

@@ -26,6 +26,7 @@
 #include <hipdnn_frontend/attributes/RopeAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
+#include <hipdnn_frontend/attributes/SoftmaxAttributes.hpp>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
@@ -782,6 +783,37 @@ void attributesBindings(nb::module_& m)
         .def("get_output_scale", &graph::RopeAttributes::get_output_scale)
         .def("get_rope_dim", &graph::RopeAttributes::get_rope_dim)
         .def("get_rope_offset", &graph::RopeAttributes::get_rope_offset);
+
+    // SoftmaxAttributes
+    nb::class_<graph::SoftmaxAttributes>(m, "SoftmaxAttributes")
+        .def(nb::init<>())
+        .def("set_name", &graph::SoftmaxAttributes::set_name, nb::rv_policy::reference_internal)
+        .def("get_name", &graph::SoftmaxAttributes::get_name)
+        .def("set_compute_data_type",
+             &graph::SoftmaxAttributes::set_compute_data_type,
+             nb::rv_policy::reference_internal)
+        .def("get_compute_data_type", &graph::SoftmaxAttributes::get_compute_data_type)
+        .def("set_p",
+             static_cast<TensorSetter<graph::SoftmaxAttributes>>(&graph::SoftmaxAttributes::set_p),
+             nb::rv_policy::reference_internal)
+        .def("set_s",
+             static_cast<TensorSetter<graph::SoftmaxAttributes>>(&graph::SoftmaxAttributes::set_s),
+             nb::rv_policy::reference_internal)
+        .def("set_stats",
+             static_cast<TensorSetter<graph::SoftmaxAttributes>>(
+                 &graph::SoftmaxAttributes::set_stats),
+             nb::rv_policy::reference_internal)
+        .def("set_stats_use_log2",
+             &graph::SoftmaxAttributes::set_stats_use_log2,
+             nb::rv_policy::reference_internal)
+        .def("set_generate_stats",
+             &graph::SoftmaxAttributes::set_generate_stats,
+             nb::rv_policy::reference_internal)
+        .def("get_p", &graph::SoftmaxAttributes::get_p)
+        .def("get_s", &graph::SoftmaxAttributes::get_s)
+        .def("get_stats", &graph::SoftmaxAttributes::get_stats)
+        .def("get_stats_use_log2", &graph::SoftmaxAttributes::get_stats_use_log2)
+        .def("get_generate_stats", &graph::SoftmaxAttributes::get_generate_stats);
 
     // PointwiseAttributes
     nb::class_<graph::PointwiseAttributes>(m, "PointwiseAttributes")

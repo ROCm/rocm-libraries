@@ -34,6 +34,7 @@
 #include <hipdnn_frontend/node/RopeNode.hpp>
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
+#include <hipdnn_frontend/node/SoftmaxNode.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -124,6 +125,8 @@ namespace hipdnn_frontend::detail
         return {std::make_shared<graph::MoeGroupedMatmulBwdNode>(
                     graph::MoeGroupedMatmulBwdAttributes{}, graphAttrs),
                 {}};
+    case HIPDNN_OPERATION_TYPE_SOFTMAX_EXT:
+        return {std::make_shared<graph::SoftmaxNode>(graph::SoftmaxAttributes{}, graphAttrs), {}};
     case HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_EXT:
         return {std::make_shared<graph::MoeGroupedMatmulNode>(graph::MoeGroupedMatmulAttributes{},
                                                               graphAttrs),

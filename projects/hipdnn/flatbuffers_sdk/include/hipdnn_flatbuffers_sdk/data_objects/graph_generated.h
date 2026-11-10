@@ -40,6 +40,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "rope_attributes_generated.h"
 #include "sdpa_attributes_generated.h"
 #include "sdpa_backward_attributes_generated.h"
+#include "softmax_attributes_generated.h"
 #include "tensor_attributes_generated.h"
 
 namespace hipdnn_flatbuffers_sdk {
@@ -94,11 +95,12 @@ enum class NodeAttributes : uint8_t {
   GdnAttributes = 24,
   KdaAttributes = 25,
   RopeAttributes = 26,
+  SoftmaxAttributes = 27,
   MIN = NONE,
-  MAX = RopeAttributes
+  MAX = SoftmaxAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[27] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[28] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -126,13 +128,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[27] {
     NodeAttributes::MoeGroupedMatmulBwdAttributes,
     NodeAttributes::GdnAttributes,
     NodeAttributes::KdaAttributes,
-    NodeAttributes::RopeAttributes
+    NodeAttributes::RopeAttributes,
+    NodeAttributes::SoftmaxAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[28] = {
+  static const char * const names[29] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -160,13 +163,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "GdnAttributes",
     "KdaAttributes",
     "RopeAttributes",
+    "SoftmaxAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::RopeAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::SoftmaxAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -279,6 +283,10 @@ template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::Rop
   static const NodeAttributes enum_value = NodeAttributes::RopeAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::SoftmaxAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -385,6 +393,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects
 
 template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::RopeAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::SoftmaxAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -625,6 +637,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::RopeAttributes ?
       reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(value) : nullptr;
   }
+  hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *AsSoftmaxAttributes() {
+    return type == NodeAttributes::SoftmaxAttributes ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *AsSoftmaxAttributes() const {
+    return type == NodeAttributes::SoftmaxAttributes ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -737,6 +757,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::RopeAttributes: {
       return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::SoftmaxAttributes: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -944,6 +968,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_flatbuffers_sdk::data_objects::RopeAttributes *attributes_as_RopeAttributes() const {
     return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RopeAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes *attributes_as_SoftmaxAttributes() const {
+    return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SoftmaxAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -1064,6 +1091,10 @@ template<> inline const hipdnn_flatbuffers_sdk::data_objects::KdaAttributes *Nod
 
 template<> inline const hipdnn_flatbuffers_sdk::data_objects::RopeAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::RopeAttributes>() const {
   return attributes_as_RopeAttributes();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes>() const {
+  return attributes_as_SoftmaxAttributes();
 }
 
 struct NodeBuilder {
@@ -1602,6 +1633,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::SoftmaxAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -1725,6 +1760,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::SoftmaxAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -1836,6 +1875,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(value);
       return CreateRopeAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::SoftmaxAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(value);
+      return CreateSoftmaxAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -1944,6 +1987,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::RopeAttributes: {
       value = new hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::SoftmaxAttributes: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(u.value));
       break;
     }
     default:
@@ -2080,6 +2127,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::RopeAttributes: {
       auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::SoftmaxAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(value);
       delete ptr;
       break;
     }

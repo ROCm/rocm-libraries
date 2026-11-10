@@ -565,6 +565,26 @@ def build_rope_graph():
     return graph, x, freqs, y
 
 
+def build_softmax_graph():
+    """Build a softmax graph (p [2, 4, 8, 16]) with the log2 log-sum-exp stats output.
+
+    Returns (graph, p, s, stats).
+    """
+    graph = create_float_graph()
+    p = hipdnn.Tensor.create([2, 4, 8, 16], hipdnn.DataType.FLOAT)
+    p.set_name("p")
+
+    s, stats = graph.softmax(
+        p, hipdnn.SoftmaxAttributes().set_generate_stats(True).set_stats_use_log2(True)
+    )
+    s.set_name("s")
+    s.set_output(True)
+    stats.set_name("stats")
+    stats.set_output(True)
+
+    return graph, p, s, stats
+
+
 def build_custom_op_graph():
     """Build a two-in/two-out custom-op graph returning (graph, a, b, y0, y1)."""
     graph = create_float_graph()

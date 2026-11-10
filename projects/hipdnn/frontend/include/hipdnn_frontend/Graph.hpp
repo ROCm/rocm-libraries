@@ -100,6 +100,7 @@
 #include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
 #include <hipdnn_frontend/attributes/RopeAttributes.hpp>
+#include <hipdnn_frontend/attributes/SoftmaxAttributes.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
@@ -143,6 +144,7 @@
 #include <hipdnn_frontend/node/ResampleBwdNode.hpp>
 #include <hipdnn_frontend/node/ResampleFwdNode.hpp>
 #include <hipdnn_frontend/node/RopeNode.hpp>
+#include <hipdnn_frontend/node/SoftmaxNode.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
@@ -6290,6 +6292,51 @@ public:
             std::make_shared<MoeGroupedMatmulBwdNode>(std::move(attributes), graph_attributes));
 
         return dweight;
+    }
+
+    /**
+     * @brief Softmax over the last dimension of `p` (mirrors cuDNN's unified softmax).
+     *
+     * Computes `s = exp(p - max(p)) / sum(exp(p - max(p)))` along the last dimension.
+     * When `attributes.set_generate_stats(true)` is set, also produces the log-sum-exp
+     * `stats = max(p) + ln(sum(exp(p - max(p))))`, shaped like `p` with the last dim 1
+     * (in log2 units with `set_stats_use_log2(true)`). Unset output dims/strides are
+     * inferred from `p`.
+     *
+     * @param p Input logits, rank >= 1.
+     * @param attributes Operation configuration.
+     * @return `{s, stats}`; `stats` is nullptr unless generate_stats is set.
+     */
+    std::array<std::shared_ptr<TensorAttributes>, 2> softmax(std::shared_ptr<TensorAttributes> p,
+                                                             SoftmaxAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Softmax_" + std::to_string(_sub_nodes.size()));
+        }
+        // A null input is tolerated here so the error surfaces from pre_validate_node().
+        if(p && p->get_name().empty())
+        {
+            p->set_name(attributes.get_name() + "::P");
+        }
+
+        auto s = outputTensor(attributes.get_name() + "::S");
+        std::array<std::shared_ptr<TensorAttributes>, 2> ret = {s, nullptr};
+
+        attributes.set_p(std::move(p));
+        attributes.set_s(s);
+
+        if(attributes.get_generate_stats())
+        {
+            auto stats = outputTensor(attributes.get_name() + "::STATS");
+            attributes.set_stats(stats);
+            ret[1] = stats;
+        }
+
+        _sub_nodes.emplace_back(
+            std::make_shared<SoftmaxNode>(std::move(attributes), graph_attributes));
+
+        return ret;
     }
 
     /**

@@ -904,6 +904,18 @@ void visit(const RopeAttributes& op, V& visitor)
     }
 }
 
+template <typename V>
+void visit(const SoftmaxAttributes& op, V& visitor)
+{
+    visitor.tensor(std::string_view("p"), static_cast<int64_t>(op.p_tensor_uid()), false);
+    visitor.tensor(std::string_view("s"), static_cast<int64_t>(op.s_tensor_uid()), false);
+    if(const auto uid = op.stats_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("stats"), static_cast<int64_t>(*uid), false);
+    }
+    visitor.scalar(std::string_view("stats_use_log2"), static_cast<bool>(op.stats_use_log2()));
+}
+
 /// Visits @p node's operands. Returns false, visiting nothing, when the node has
 /// no attributes or a type this header predates.
 template <typename V>
@@ -911,7 +923,7 @@ bool visit(const Node& node, V&& visitor)
 {
     // Fails when NodeAttributes gains a member this header has no case for: rerun
     // scripts/gen_node_operands.py.
-    static_assert(NodeAttributes::MAX == NodeAttributes::RopeAttributes,
+    static_assert(NodeAttributes::MAX == NodeAttributes::SoftmaxAttributes,
                   "node_operands_generated.h is stale: rerun scripts/gen_node_operands.py");
     switch(node.attributes_type())
     {
@@ -1092,6 +1104,13 @@ bool visit(const Node& node, V&& visitor)
         return false;
     case NodeAttributes::RopeAttributes:
         if(const auto* op = node.attributes_as_RopeAttributes(); op != nullptr)
+        {
+            visit(*op, visitor);
+            return true;
+        }
+        return false;
+    case NodeAttributes::SoftmaxAttributes:
+        if(const auto* op = node.attributes_as_SoftmaxAttributes(); op != nullptr)
         {
             visit(*op, visitor);
             return true;

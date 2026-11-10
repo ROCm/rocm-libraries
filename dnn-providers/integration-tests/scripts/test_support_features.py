@@ -56,6 +56,7 @@ from support_features import (
     rmsnorm,
     rmsnorm_backward,
     rope,
+    softmax,
     sdpa,
     scalar_source,
     sdpa_backward,
@@ -789,6 +790,7 @@ class TestFeatureMatrixNames:
             "Resample",
             "RMSNorm",
             "Rope",
+            "Softmax",
         }
 
     def test_rmsnorm_backward_is_rmsnorm_not_pointwise(self) -> None:
@@ -7059,6 +7061,74 @@ def _custom_op(
         "data": list(data),
     }
     return node, tensors
+
+
+def _softmax(
+    p_dims=(2, 8),
+    dtype="float",
+    s_dtype=None,
+    stats=True,
+    stats_dtype="float",
+    stats_dims=None,
+    stats_use_log2=False,
+) -> tuple[dict, dict]:
+    p_dims = list(p_dims)
+    tensors = {
+        1: {"uid": 1, "dims": p_dims, "data_type": dtype},
+        2: {"uid": 2, "dims": list(p_dims), "data_type": s_dtype or dtype},
+    }
+    node = {
+        "inputs": {"p_tensor_uid": 1},
+        "outputs": {"s_tensor_uid": 2, "stats_tensor_uid": None},
+        "stats_use_log2": stats_use_log2,
+    }
+    if stats:
+        if stats_dims is None:
+            stats_dims = p_dims[:-1] + [1]
+        tensors[3] = {"uid": 3, "dims": list(stats_dims), "data_type": stats_dtype}
+        node["outputs"]["stats_tensor_uid"] = 3
+    return node, tensors
+
+
+class TestSoftmaxExtract:
+    PLAIN = {"dtype:fp32", "output:same", "stats:natural"}
+
+    def test_node_and_ports_cover_every_schema_field(self) -> None:
+        node, _ = _softmax()
+        assert set(batchnorm.bound(node)) | {"stats_use_log2"} == table_fields(
+            softmax.SCHEMA_FILE, softmax.SCHEMA_TABLE
+        )
+
+    def test_plain_graph(self) -> None:
+        assert softmax.extract(*_softmax()) == self.PLAIN
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = softmax.extract(*_softmax())
+        for kwargs in (
+            {"dtype": "half", "s_dtype": "float", "stats_use_log2": True},
+            {"dtype": "bfloat16", "stats": False},
+        ):
+            reached |= softmax.extract(*_softmax(**kwargs))
+        assert reached == {f.id for f in softmax.FEATURES}
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            ({"p_dims": ()}, "not rank >= 1"),
+            ({"stats_dims": (2, 8)}, "stats_tensor_uid dims"),
+            ({"stats_dtype": "half"}, "is not fp32"),
+            ({"dtype": "float", "s_dtype": "half"}, "is neither that of"),
+        ],
+    )
+    def test_rejects(self, kwargs: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            softmax.extract(*_softmax(**kwargs))
+
+    def test_rejects_unbound_port(self) -> None:
+        node, tensors = _softmax()
+        node["outputs"]["s_tensor_uid"] = None
+        with pytest.raises(FeatureError, match="s_tensor_uid is not bound"):
+            softmax.extract(node, tensors)
 
 
 def _rope(

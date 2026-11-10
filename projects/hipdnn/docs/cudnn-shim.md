@@ -101,9 +101,11 @@ These `Graph` node methods compile but record `GRAPH_NOT_SUPPORTED`, reported by
 
 `adalayernorm`, `adalayernorm_backward`, `bn_finalize`, `concatenate`, `dbn_weight`, `diagonal_band_mask`, `genstats`, `instancenorm`, `instancenorm_backward`, `reshape`, `rng`, `rope_backward`, `sdpa_fp8` (FP8 and MXFP8), `sdpa_fp8_backward` (FP8 and MXFP8), `slice`, `transpose`.
 
-Their `*_attributes` classes exist so the code compiles. `Matmul_fp8_attributes`, `Softmax_attributes`, and `PagedCacheLoad_attributes` are declared for the same reason.
+Their `*_attributes` classes exist so the code compiles. `Matmul_fp8_attributes` and `PagedCacheLoad_attributes` are declared for the same reason.
 
-Supported nodes forward to hipDNN: `batchnorm`, `batchnorm_backward`, `batchnorm_inference`, `block_scale_dequantize`, `block_scale_quantize`, `conv_dgrad`, `conv_fprop`, `conv_wgrad`, `layernorm`, `layernorm_backward`, `matmul`, `moe_grouped_matmul`, `moe_grouped_matmul_bwd`, `pointwise`, `reduction`, `resample`, `rmsnorm`, `rmsnorm_backward`, `rope`, `sdpa`, `sdpa_backward`. Whether a configuration runs depends on the loaded providers; see [Operation Support](./OperationSupport.md).
+Supported nodes forward to hipDNN: `batchnorm`, `batchnorm_backward`, `batchnorm_inference`, `block_scale_dequantize`, `block_scale_quantize`, `conv_dgrad`, `conv_fprop`, `conv_wgrad`, `layernorm`, `layernorm_backward`, `matmul`, `moe_grouped_matmul`, `moe_grouped_matmul_bwd`, `pointwise`, `reduction`, `resample`, `rmsnorm`, `rmsnorm_backward`, `rope`, `sdpa`, `sdpa_backward`, `softmax`. Whether a configuration runs depends on the loaded providers; see [Operation Support](./OperationSupport.md).
+
+`softmax(p, Softmax_attributes)` returns `{s, stats}`; cuDNN builds softmax only through its internal `INode` API, so this public method is the hipDNN spelling. `Softmax_attributes` keeps cuDNN's `set_stats_use_log2` and `set_sink`; a set sink records `GRAPH_NOT_SUPPORTED`. Request the stats output with `set_generate_stats(true)`.
 
 Not provided (compile error):
 

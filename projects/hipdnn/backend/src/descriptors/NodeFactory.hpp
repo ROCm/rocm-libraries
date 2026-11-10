@@ -27,6 +27,7 @@
 #include "RopeOperationDescriptor.hpp"
 #include "SdpaBwdOperationDescriptor.hpp"
 #include "SdpaFwdOperationDescriptor.hpp"
+#include "SoftmaxOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <memory>

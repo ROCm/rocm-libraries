@@ -36,6 +36,7 @@
 #include "RopeOperationDescriptor.hpp"
 #include "SdpaBwdOperationDescriptor.hpp"
 #include "SdpaFwdOperationDescriptor.hpp"
+#include "SoftmaxOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include "VariantDescriptor.hpp"
 // Required: EngineHeuristicDescriptor holds std::unique_ptr<SelectionHeuristic>
@@ -118,6 +119,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR:
         privateDesc = std::make_shared<MoeGroupedMatmulBwdOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_SOFTMAX_DESCRIPTOR:
+        privateDesc = std::make_shared<SoftmaxOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR:
         privateDesc = std::make_shared<RopeOperationDescriptor>();

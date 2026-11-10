@@ -237,6 +237,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid MoE grouped matmul backward graph)";
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SoftmaxAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidSoftmaxGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid softmax graph)";
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RopeAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidRopeGraph();
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
@@ -365,6 +370,35 @@ TEST(TestJson, MoeGroupedMatmulBwdRoundTrip)
     EXPECT_EQ(outputs.at("dweight_tensor_uid").get<int64_t>(), 4);
 
     toJsonAndBackTestSuite(graph, "(MoE grouped matmul backward)");
+}
+
+TEST(TestJson, SoftmaxRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidSoftmaxGraph();
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    const auto& nodeJson = graphJson.at("nodes").at(0);
+
+    EXPECT_EQ(nodeJson.at("type").get<std::string>(), "SoftmaxAttributes");
+    EXPECT_EQ(nodeJson.at("inputs").at("p_tensor_uid").get<int64_t>(), 1);
+    EXPECT_EQ(nodeJson.at("outputs").at("s_tensor_uid").get<int64_t>(), 2);
+    EXPECT_EQ(nodeJson.at("outputs").at("stats_tensor_uid").get<int64_t>(), 3);
+    EXPECT_TRUE(nodeJson.at("stats_use_log2").get<bool>());
+
+    toJsonAndBackTestSuite(graph, "(softmax with stats)");
+}
+
+TEST(TestJson, SoftmaxWithoutStatsRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidSoftmaxGraph(false);
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    const auto& nodeJson = graphJson.at("nodes").at(0);
+
+    EXPECT_TRUE(nodeJson.at("outputs").at("stats_tensor_uid").is_null());
+    EXPECT_FALSE(nodeJson.at("stats_use_log2").get<bool>());
+
+    toJsonAndBackTestSuite(graph, "(softmax without stats)");
 }
 
 TEST(TestJson, RopeRoundTrip)

@@ -191,6 +191,8 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
 inline bool logicallyEqual(const SdpaAttributes* a, const SdpaAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, const UidCanon& canon);
 inline bool logicallyEqual(const SdpaBackwardAttributes* a, const SdpaBackwardAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
+inline void hashAppend(Hasher& hasher, const SoftmaxAttributes* value, const UidCanon& canon);
+inline bool logicallyEqual(const SoftmaxAttributes* a, const SoftmaxAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const TensorAttributes* value, const UidCanon& canon);
 inline bool logicallyEqual(const TensorAttributes* a, const TensorAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, NodeAttributes type, const void* value, const UidCanon& canon);
@@ -281,6 +283,9 @@ inline void hashAppend(Hasher& hasher, NodeAttributes type, const void* value, c
     case NodeAttributes::RopeAttributes:
         hashAppend(hasher, static_cast<const RopeAttributes*>(value), canon);
         break;
+    case NodeAttributes::SoftmaxAttributes:
+        hashAppend(hasher, static_cast<const SoftmaxAttributes*>(value), canon);
+        break;
     default:
         break;
     }
@@ -346,6 +351,8 @@ inline bool logicallyEqual(NodeAttributes aType, const void* a, NodeAttributes b
         return logicallyEqual(static_cast<const KdaAttributes*>(a), static_cast<const KdaAttributes*>(b), aCanon, bCanon);
     case NodeAttributes::RopeAttributes:
         return logicallyEqual(static_cast<const RopeAttributes*>(a), static_cast<const RopeAttributes*>(b), aCanon, bCanon);
+    case NodeAttributes::SoftmaxAttributes:
+        return logicallyEqual(static_cast<const SoftmaxAttributes*>(a), static_cast<const SoftmaxAttributes*>(b), aCanon, bCanon);
     default:
         return true;
     }
@@ -4645,6 +4652,64 @@ inline bool logicallyEqual(const SdpaBackwardAttributes* a, const SdpaBackwardAt
         return false;
     }
     if(a->diagonal_alignment() != b->diagonal_alignment())
+    {
+        return false;
+    }
+    return true;
+}
+
+inline void hashAppend(Hasher& hasher, const SoftmaxAttributes* value, const UidCanon& canon)
+{
+    if(value == nullptr)
+    {
+        hasher.tag(0);
+        return;
+    }
+    hasher.tag(1);
+    hashAppend(hasher, canon(value->p_tensor_uid()));
+    hashAppend(hasher, canon(value->s_tensor_uid()));
+    {
+        const auto optional = value->stats_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    hasher.raw(value->stats_use_log2());
+}
+
+inline bool logicallyEqual(const SoftmaxAttributes* a, const SoftmaxAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
+{
+    if(a == b)
+    {
+        return true;
+    }
+    if(a == nullptr || b == nullptr)
+    {
+        return false;
+    }
+    if(aCanon(a->p_tensor_uid()) != bCanon(b->p_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->s_tensor_uid()) != bCanon(b->s_tensor_uid()))
+    {
+        return false;
+    }
+    {
+        const auto aUid = a->stats_tensor_uid();
+        const auto bUid = b->stats_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    if(a->stats_use_log2() != b->stats_use_log2())
     {
         return false;
     }

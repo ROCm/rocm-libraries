@@ -27,6 +27,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RopePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SoftmaxPlan.hpp>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <sstream>

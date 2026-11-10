@@ -1478,6 +1478,29 @@ typedef enum
     /** @} */
 
     /**
+     * @name Softmax Operation Attributes (4000-4099)
+     * Attributes for HIPDNN_BACKEND_OPERATION_SOFTMAX_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Input logits tensor (P); softmax is taken along its last dimension */
+    HIPDNN_ATTR_OPERATION_SOFTMAX_XDESC = 4000,
+
+    /** @brief Output probabilities tensor (S); dims of P */
+    HIPDNN_ATTR_OPERATION_SOFTMAX_YDESC = 4001,
+
+    /** @brief Optional log-sum-exp stats output tensor; dims of P with last dim 1 */
+    HIPDNN_ATTR_OPERATION_SOFTMAX_STATS_DESC = 4002,
+
+    /** @brief Report stats in log2 units (HIPDNN_TYPE_BOOLEAN) */
+    HIPDNN_ATTR_OPERATION_SOFTMAX_STATS_LOG2 = 4003,
+
+    /** @brief Compute data type (HIPDNN_TYPE_DATA_TYPE) */
+    HIPDNN_ATTR_SOFTMAX_COMP_TYPE_EXT = 4004,
+
+    /** @} */
+
+    /**
      * @name RoPE Forward Operation Attributes (3900-3999)
      * Attributes for HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR
      * @{

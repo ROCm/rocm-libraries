@@ -35,6 +35,7 @@ enum class NodeType
     RESAMPLE_BWD = 21,
     MOE_GROUPED_MATMUL = 22,
     MOE_GROUPED_MATMUL_BWD = 23,
+    SOFTMAX = 25,
     ROPE = 24,
 };
 

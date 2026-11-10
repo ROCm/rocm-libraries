@@ -3751,6 +3751,62 @@ inline flatbuffers::FlatBufferBuilder createValidMoeGroupedMatmulBwdGraph()
     return builder;
 }
 
+/// One Softmax node: p [2, 3, 5] -> s [2, 3, 5]. With withStats, also the log-sum-exp
+/// stats [2, 3, 1] (uid 3) reported in log2 units (stats_use_log2).
+inline flatbuffers::FlatBufferBuilder createValidSoftmaxGraph(bool withStats = true)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> pDims = {2, 3, 5};
+    const std::vector<int64_t> pStrides = {15, 5, 1};
+    const std::vector<int64_t> statsDims = {2, 3, 1};
+    const std::vector<int64_t> statsStrides = {3, 1, 1};
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "p", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &pStrides, &pDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "s", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &pStrides, &pDims));
+    if(withStats)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                3,
+                "stats",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &statsStrides,
+                &statsDims));
+    }
+
+    auto softmaxAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateSoftmaxAttributes(
+        builder,
+        1,
+        2,
+        withStats ? ::flatbuffers::Optional<int64_t>(3) : ::flatbuffers::nullopt,
+        withStats);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "softmax",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SoftmaxAttributes,
+        softmaxAttributes.Union()));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 // RoPE, Qwen-style partial rotary: x [1, 2, 3, 8] FLOAT, freqs [1, 1, 3, 4] FLOAT, rope_dim 4,
 // leading segment (rope_offset_ext 0), output_scale 0.5 -> y [1, 2, 3, 8]. When
 // withOffset is false, rope_offset_ext is absent (cuDNN trailing segment).
