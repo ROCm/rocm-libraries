@@ -7528,7 +7528,6 @@ class TestHalfDisjointClumping:
         from tensilelite.Components.Subtile import InstructionScheduler as IS
         assert IS._issueExcess(IS._moduleGaps(self._body())) == 0
 
-    @pytest.mark.xfail(strict=True, reason="stage 2: comments take placement slots")
     def test_comments_take_no_slot(self):
         def code(comments):
             scheduled = self._scheduledFirstHalf(comments)

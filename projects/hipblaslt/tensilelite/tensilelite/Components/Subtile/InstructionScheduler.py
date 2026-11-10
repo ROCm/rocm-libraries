@@ -3427,6 +3427,42 @@ def _splitHalfDisjointCell(emittedModules, pathOrders, preMfmaOrders, mfmas):
     return syncItems, prefix, reads, requests, others
 
 
+def _detachComments(items, anchors):
+    """items without their comments, which take no slot.
+
+    Each run of comments rides on the next instruction of items, or on the
+    last one when none follows; anchors gets (comments, anchor, ahead).
+    """
+    code, held = [], []
+    for item in items:
+        if isinstance(item[1], TextBlock):
+            held.append(item)
+            continue
+        if held:
+            anchors.append((held, item[1], True))
+            held = []
+        code.append(item)
+    if held:
+        if not code:
+            return held
+        anchors.append((held, code[-1][1], False))
+    return code
+
+
+def _attachComments(placer, anchors):
+    """Put every detached comment back beside its instruction's slot."""
+    ahead, behind = {}, {}
+    for comments, anchor, isAhead in anchors:
+        (ahead if isAhead else behind).setdefault(id(anchor), []).extend(comments)
+    for slot in placer._placed + [placer.leftovers]:
+        items = []
+        for item in slot:
+            items += ahead.pop(id(item[1]), []) + [item] + behind.pop(id(item[1]), [])
+        slot[:] = items
+    for comments in list(ahead.values()) + list(behind.values()):
+        placer.leftovers.extend(comments)
+
+
 def _requestBundles(requests):
     """Split a request stream after each load: (bundles, trailing items)."""
     bundles, pending = [], []
@@ -3441,7 +3477,7 @@ def _requestBundles(requests):
 def _scheduleHalfDisjointCell(
         emittedModules, pathOrders, preMfmaOrders, mfmas,
         minGapDsReadToWait, earliestWriteShadow=None, mfmaBase=0,
-        scaleShadows=None):
+        scaleShadows=None, commentsTakeSlots=None):
     """Schedule one partition of a half-disjoint body.
 
     The VMEM wait, local-read drain, and barrier that open a half follow
@@ -3461,8 +3497,33 @@ def _scheduleHalfDisjointCell(
     C0-entry scale refreshes to the C1 tail.  The gaps of this cell that
     placeScaleShadowReads gives them without sharing a load stay free of
     requests, and the entries placed here are removed from the list, so
-    a later tail cell reserves only the rest.
+    a later tail cell reserves only the rest.  Comments take no slot and
+    issue beside the instruction they describe, unless the schedule with
+    comments taking slots is estimated to run closer to the MFMA cadence
+    (_issueExcess); the forced placements of a dense cell can land either way.
     """
+    if commentsTakeSlots is None:
+        waits = [inst for em in emittedModules for inst in em.instructions
+                 if _isWaitCnt(inst)]
+        counts = [(inst.vlcnt, inst.dscnt) for inst in waits]
+        shadows = list(scaleShadows) if scaleShadows else None
+
+        def build(slotted):
+            for inst, (vlcnt, dscnt) in zip(waits, counts):
+                inst.vlcnt, inst.dscnt = vlcnt, dscnt
+            if shadows:
+                scaleShadows[:] = shadows
+            return _scheduleHalfDisjointCell(
+                emittedModules, pathOrders, preMfmaOrders, mfmas,
+                minGapDsReadToWait, earliestWriteShadow, mfmaBase,
+                scaleShadows, slotted)
+
+        detached = build(False)
+        slotted = build(True)
+        if _issueExcess(_moduleGaps(slotted)) < _issueExcess(_moduleGaps(detached)):
+            return slotted
+        return build(False)
+
     spi = _MXFP8_FOLLOWER_SLOTS
     syncItems, prefix, reads, requests, others = _splitHalfDisjointCell(
         emittedModules, pathOrders, preMfmaOrders, mfmas)
@@ -3476,6 +3537,11 @@ def _scheduleHalfDisjointCell(
         for _, inst in syncItems + reads + requests + others:
             result.add(inst)
         return result
+    anchors = []
+    if not commentsTakeSlots:
+        syncItems, reads, requests, others = (
+            _detachComments(items, anchors)
+            for items in (syncItems, reads, requests, others))
 
     rules = _SchedulingRules(
         totalSlots=(len(mfmas) - 1) * spi,
@@ -3638,6 +3704,7 @@ def _scheduleHalfDisjointCell(
         if not capped or (overfullIntervals() <= before and (
                 readLimit is None or longestDtlRun() <= _MXFP8_MAX_DTL_RUN)):
             break
+    _attachComments(placer, anchors)
 
     scheduled = Module()
     for _, inst in prefix:
@@ -3970,6 +4037,7 @@ def _scheduleHalfDisjointHalf(
     two-read cap. The entries placed here are removed from the list.
 
     cellComments is the marker emitted ahead of each later cell's wait.
+    Comments of the cells' paths take no slot.
     Returns None when the cells do not fit this scheme, no load placement
     keeps every gap within its limits and the load-run cap, or the result
     would reorder a cross-cell dependency; the caller then schedules each
@@ -3991,6 +4059,10 @@ def _scheduleHalfDisjointHalf(
         starts.append(len(mfmas))
         mfmas.extend(cellMfmas)
     ends = starts[1:] + [len(mfmas)]
+    anchors = []
+    split = [(_detachComments(sync, anchors), prefix, _detachComments(reads, anchors),
+              _detachComments(requests, anchors), _detachComments(others, anchors))
+             for sync, prefix, reads, requests, others in split]
     for c in range(1, len(cells)):
         if split[c][0] or any(
                 _isBarrier(inst) or (_isWaitCnt(inst) and inst.vlcnt >= 0)
@@ -4277,6 +4349,7 @@ def _scheduleHalfDisjointHalf(
             break
     else:
         return None
+    _attachComments(placer, anchors)
 
     sequence = [item for item in split[0][1]] + [(None, mfmas[0])]
     scheduled = Module()
