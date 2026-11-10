@@ -30,7 +30,7 @@
 # cases are skipped by the harness rather than filtered out here.
 _common_excludes: &common_excludes
   - "*DISABLED*"
-  # The SDPA forward plan bundles run in the SDPA engine lanes only.
+  # The SdpaFwdPlan bundles are generic SDPA forward tests for every SDPA engine; HIP_MLOPS_ENGINE has no SDPA support.
   - "*_SdpaFwdPlan_*"
 
 test_categories:
