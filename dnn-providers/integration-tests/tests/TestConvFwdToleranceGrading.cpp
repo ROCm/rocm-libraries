@@ -343,6 +343,92 @@ protected:
         EXPECT_NEAR(reported->atol, expected.atol, 1e-4 * expected.atol);
         EXPECT_NEAR(reported->rtol, expected.rtol, 1e-4 * expected.rtol);
     }
+
+    // The negative check at a long reduction (see HalfOutputJustOutsideTheComputedBand...).
+    static constexpr float K_LONG_X_BOUND = 16.0f;
+    static constexpr float K_LONG_W_BOUND = 1.41421356f; // sqrt(2)
+    static constexpr double K_LONG_REDUCTION = 18432.0; // A of the longest conv-fwd test-plan case
+
+    /// E[v^2] of a draw uniform on [-bound, bound].
+    static double uniformMeanSquare(float bound)
+    {
+        return static_cast<double>(bound) * static_cast<double>(bound) / 3.0;
+    }
+
+    static void widenFills(InputFillRecipes& recipes)
+    {
+        recipes.set(X_UID, FillRecipe::free(-K_LONG_X_BOUND, K_LONG_X_BOUND));
+        recipes.set(W_UID, FillRecipe::free(-K_LONG_W_BOUND, K_LONG_W_BOUND));
+    }
+
+    static ConvFpropErrorScale longReductionScale()
+    {
+        ConvFpropErrorScale scale;
+        scale.accumulationLength = K_ACCUMULATION;
+        scale.inputMeanSquare = uniformMeanSquare(K_LONG_X_BOUND);
+        scale.weightMeanSquare = uniformMeanSquare(K_LONG_W_BOUND);
+        return scale;
+    }
+
+    /// The band of the model in tolerances.md, written out here and not taken from the library:
+    /// 2 * eps * |ref| + (sqrt(K) * u32 + lambda * eps) * sigma + minNormal.
+    static double documentedBand(bool isHalf, double sigma, double reference)
+    {
+        const double eps = std::ldexp(1.0, isHalf ? -10 : -7);
+        const double lambda = isHalf ? 12.0 : 0.0;
+        const double minNormal = std::ldexp(1.0, isHalf ? -14 : -126);
+        const double u32 = std::ldexp(1.0, -24);
+        const double atol
+            = (std::sqrt(static_cast<double>(K_ACCUMULATION)) * u32 + lambda * eps) * sigma
+              + minNormal;
+        return atol + 2.0 * eps * std::abs(reference);
+    }
+
+    /// The value the output type stores for `value`.
+    static double stored(bool isHalf, double value)
+    {
+        const auto asFloat = static_cast<float>(value);
+        return isHalf ? static_cast<double>(static_cast<float>(static_cast<half>(asFloat)))
+                      : static_cast<double>(static_cast<float>(static_cast<bfloat16>(asFloat)));
+    }
+
+    /// An engine value 0.95 of the computed band from the reference passes, one 1.05 of it away
+    /// fails, on either side of the reference.
+    void expectBandIsTheLimit(bool isHalf, double reference)
+    {
+        SCOPED_TRACE(::testing::Message()
+                     << (isHalf ? "half" : "bfloat16") << ", reference " << reference);
+        const auto scale = longReductionScale();
+        const double sigma = std::sqrt(static_cast<double>(K_ACCUMULATION) * scale.inputMeanSquare
+                                       * scale.weightMeanSquare);
+        ASSERT_NEAR(sigma, std::sqrt(K_LONG_REDUCTION / 9.0), 1e-6 * sigma);
+
+        const auto tolerance = dynamicTolerance(isHalf, scale);
+        const double band = tolerance.atol + tolerance.rtol * std::abs(reference);
+        ASSERT_NEAR(band, documentedBand(isHalf, sigma, reference), 1e-9 * band);
+        ASSERT_EQ(stored(isHalf, reference), reference) << "pick a reference the type stores";
+
+        Spec spec;
+        spec.isHalf = isHalf;
+        for(const double direction : {1.0, -1.0})
+        {
+            for(const bool outside : {false, true})
+            {
+                const double engine
+                    = stored(isHalf, reference + direction * (outside ? 1.05 : 0.95) * band);
+                const double distance = std::abs(engine - reference);
+                ASSERT_TRUE(outside ? distance > band : distance < band)
+                    << "rounding to the output type moved " << engine << " across the band "
+                    << band;
+                const auto graded = grade(
+                    spec, static_cast<float>(engine), static_cast<float>(reference), widenFills);
+                EXPECT_EQ(graded.failed, outside)
+                    << "engine " << engine << " is " << distance / band << " bands from "
+                    << reference << "\n"
+                    << graded.messages;
+            }
+        }
+    }
 };
 
 } // namespace
@@ -383,6 +469,41 @@ TEST_F(TestConvFwdToleranceGradingFixture, Bfloat16OutputInsideTheDynamicBandPas
     spec.isHalf = false;
     EXPECT_FALSE(grade(spec, K_REFERENCE + 0.0625f, K_REFERENCE).failed);
     EXPECT_TRUE(grade(spec, K_REFERENCE + 0.25f, K_REFERENCE).failed);
+}
+
+// ── The band is the limit: just outside fails, just inside passes ───────────
+
+// The graph here has K = 36, so the fills are widened until sigma, the typical output magnitude,
+// is that of A = 18,432 products (the longest reduction of the conv-fwd test plan) over inputs
+// uniform on [-1, 1]: sigma^2 = K * E[x^2] * E[w^2] = 36 * 256/3 * 2/3 = 2048. The half atol is
+// then about 0.53, five times the fixed 0.1 that the dynamic tolerance replaces.
+//
+// The engine value is the reference moved by 1.05 and by 0.95 times the band that
+// calculateConvFpropOutputTolerance() computes, to the nearest value of the output type, so the
+// test follows the formula instead of fixed steps. Rounding to the output type moves a value by
+// up to half a step, so the test asserts that each value kept the side of the band it was picked
+// for. The band is also compared with the model written out from tolerances.md: both ends of the
+// test use the one function, so without that comparison a change that widens or narrows it
+// moves the limit and the values together and nothing fails.
+TEST_F(TestConvFwdToleranceGradingFixture, HalfOutputJustOutsideTheComputedBandFailsAtLongReduction)
+{
+    for(const double reference : {0.0, 10.0})
+    {
+        expectBandIsTheLimit(true, reference);
+    }
+}
+
+// bfloat16's atol is tiny next to its rtol at this sigma (about 1.6e-5), so the reference 0 grades
+// the summation-order term alone and the reference 10 the rtol. 10 sits at 1.25 times a power of
+// two, where the band is two and a half steps: a whole number of steps could not be told on
+// either side of it.
+TEST_F(TestConvFwdToleranceGradingFixture,
+       Bfloat16OutputJustOutsideTheComputedBandFailsAtLongReduction)
+{
+    for(const double reference : {0.0, 10.0})
+    {
+        expectBandIsTheLimit(false, reference);
+    }
 }
 
 // A graph the model does not describe keeps the per-op default for both atol and rtol.

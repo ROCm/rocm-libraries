@@ -251,6 +251,19 @@ How much tighter it is: the median headroom per output, by range of `K`, is
 66 (bfloat16) and 4 to 160 (half), and for the older bound it passes 5,000 at
 large `K`.
 
+Against the fixed 0.1 per element (a band of 0.1 + 0.1 * `|ref|`), bfloat16 is
+tighter at every element and every `K`: for inputs uniform in [-1, 1] its
+`atol` is 0.0013 at `K` = 65,536 and its `rtol` is 0.0156. half is tighter
+relative to a typical output at every `K` (1.4 % of it, against 10 % to
+17.5 %), but not for an element near zero, where the band is the `atol`. The
+`atol` grows with `sigma`, which is `sqrt(K / 9)` for those inputs, and passes
+0.1 from `K` of about 650 on: 0.133 at `K` = 1,152 and 0.53 at 18,432. At
+`K` = 18,432 (`sigma` about 45) the dynamic band is wider than the fixed one
+for outputs smaller than about 4.4 in magnitude. That is the intended
+behavior and it cannot be capped at 0.1: the error of the half kernels in
+absolute terms grows with the size of the outputs, and the correct gfx90a
+output above, 0.12 off at `K` = 18,432, is already outside the fixed 0.1.
+
 Detection, measured by injecting each bug into the exact result and grading
 it against the real reference (gfx942, 3 seeds):
 
