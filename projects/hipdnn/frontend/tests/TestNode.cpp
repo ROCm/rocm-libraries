@@ -86,7 +86,7 @@ class TestNodePostValidateNodeTensors : public ::testing::TestWithParam<FakeNode
 protected:
     void SetUp() override
     {
-        const auto param = GetParam();
+        const auto& param = GetParam();
 
         const auto validTensorAttribute = std::make_shared<TensorAttributes>();
         validTensorAttribute->set_data_type(DataType::FLOAT)

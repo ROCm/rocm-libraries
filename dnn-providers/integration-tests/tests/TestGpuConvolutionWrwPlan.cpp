@@ -122,12 +122,12 @@ void runWrwPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
 
     GpuConvolutionWrwPlan<XType, DyType, DwType, ComputeType> patient(std::move(params));
 
-    const auto xCount = std::accumulate(
-        xDims.begin(), xDims.end(), static_cast<size_t>(1), std::multiplies<size_t>());
-    const auto dyCount = std::accumulate(
-        dyDims.begin(), dyDims.end(), static_cast<size_t>(1), std::multiplies<size_t>());
-    const auto dwCount = std::accumulate(
-        dwDims.begin(), dwDims.end(), static_cast<size_t>(1), std::multiplies<size_t>());
+    const auto xCount = static_cast<size_t>(
+        std::accumulate(xDims.begin(), xDims.end(), int64_t{1}, std::multiplies<>()));
+    const auto dyCount = static_cast<size_t>(
+        std::accumulate(dyDims.begin(), dyDims.end(), int64_t{1}, std::multiplies<>()));
+    const auto dwCount = static_cast<size_t>(
+        std::accumulate(dwDims.begin(), dwDims.end(), int64_t{1}, std::multiplies<>()));
 
     // Prepare CPU tensors and fill with random data
     hipdnn_data_sdk::utilities::Tensor<XType> cpuX(xDims, xStrides);

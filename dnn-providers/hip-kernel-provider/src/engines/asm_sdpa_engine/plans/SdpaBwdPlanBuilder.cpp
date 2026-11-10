@@ -711,12 +711,11 @@ bool SdpaBwdPlanBuilder::isApplicable(
         if(key.empty())
         {
             HIPDNN_PLUGIN_LOG_INFO(
-                std::string{HIP_KERNEL_LOG_PREFIX} + "No matching " + registryName
-                + " kernel for arch=" + deviceString + " dtype=" + dataTypeId
-                + " hdim=" + std::to_string(headDimQk) + " mask=" + std::to_string(tuple.mask)
-                + " atomic32=" + std::to_string(tuple.atomic32)
-                + " pssk=" + std::to_string(tuple.pssk) + " pddv=" + std::to_string(tuple.pddv)
-                + " mode=batch bf16_cvt=" + std::to_string(tuple.bf16Cvt));
+                HIP_KERNEL_LOG_PREFIX
+                << "No matching " << registryName << " kernel for arch=" << deviceString
+                << " dtype=" << dataTypeId << " hdim=" << headDimQk << " mask=" << tuple.mask
+                << " atomic32=" << tuple.atomic32 << " pssk=" << tuple.pssk
+                << " pddv=" << tuple.pddv << " mode=batch bf16_cvt=" << tuple.bf16Cvt);
             return false;
         }
         return true;

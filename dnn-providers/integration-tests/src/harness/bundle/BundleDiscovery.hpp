@@ -333,7 +333,7 @@ inline std::string deriveSuiteName(const std::filesystem::path& relativeDir,
     {
         if(!suite.empty())
         {
-            suite += "_";
+            suite += '_';
         }
         suite += sanitizeForGtest(segment.string());
     }

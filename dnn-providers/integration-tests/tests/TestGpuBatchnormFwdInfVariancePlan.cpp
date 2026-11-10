@@ -302,7 +302,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     constexpr int64_t VARIANCE_UID = 6;
     constexpr int64_t EPSILON_UID = 7;
 
-    // NOLINTNEXTLINE(readability-suspicious-call-argument)
+    // NOLINTBEGIN(readability-suspicious-call-argument)
     const auto graphBuilder
         = createValidBatchnormWithVarianceInferenceGraph(X_UID,
                                                          Y_UID,
@@ -321,6 +321,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
                                                          meanVarianceDataType,
                                                          computeDataType,
                                                          epsilonDataType);
+    // NOLINTEND(readability-suspicious-call-argument)
 
     const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());

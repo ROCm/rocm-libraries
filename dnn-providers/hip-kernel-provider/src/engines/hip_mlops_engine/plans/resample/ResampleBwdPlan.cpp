@@ -226,8 +226,8 @@ void ResampleBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelComp
     }
 
     constexpr uint64_t BLOCK_SIZE = 256;
-    const auto numDxElements
-        = std::accumulate(dxDims.begin(), dxDims.end(), 1ULL, std::multiplies<>());
+    const auto numDxElements = static_cast<uint64_t>(
+        std::accumulate(dxDims.begin(), dxDims.end(), int64_t{1}, std::multiplies<>()));
     const auto gridSize = (numDxElements + BLOCK_SIZE - 1) / BLOCK_SIZE;
     if(gridSize > std::numeric_limits<unsigned int>::max())
     {

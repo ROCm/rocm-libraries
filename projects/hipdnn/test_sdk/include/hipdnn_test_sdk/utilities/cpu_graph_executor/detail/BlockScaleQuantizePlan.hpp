@@ -136,9 +136,7 @@ public:
         const auto& tensorMap = graph.getTensorMap();
 
         const auto blockSize = nodeAttributes->block_size();
-        const auto axis = nodeAttributes->axis()
-                              ? std::make_optional(nodeAttributes->axis().value())
-                              : std::nullopt;
+        const auto axis = nodeAttributes->axis();
 
         BlockScaleQuantizeParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
                                         *tensorMap.at(nodeAttributes->y_tensor_uid()),
