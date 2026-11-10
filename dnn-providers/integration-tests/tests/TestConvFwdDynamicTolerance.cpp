@@ -69,6 +69,10 @@ struct GraphSpec
     std::optional<float> bakedScale; ///< the scale is a constant stored in the graph
     bool withBias = false; ///< ADD(previous result, bias) after the multiply
     bool bakeScaleAsFloat32 = false; ///< a baked value of the wrong type for a half tensor
+    DataType convOutputType
+        = DataType::FLOAT; ///< the type of the convolution's result when virtual
+    DataType intermediateType = DataType::FLOAT; ///< the type of the multiplies' virtual outputs
+    DataType pointwiseCompute = DataType::FLOAT; ///< the compute type of every pointwise node
 };
 
 // x [2, 16, 8, 8], w as given, y [2, 32, 6, 6]; scale [1, 3, 1, 1].
@@ -82,12 +86,16 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
     const std::vector<int64_t> ones = {1, 1, 1, 1};
 
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    const auto addTensor
-        = [&](int64_t uid, const char* name, const std::vector<int64_t>& dims, bool isVirtual) {
-              tensors.push_back(CreateTensorAttributesDirect(
-                  b, uid, name, DataType::HALF, &ones, &dims, isVirtual));
-          };
-    addTensor(Y_UID, "y", yDims, spec.convOutputVirtual);
+    // Graph inputs and outputs are half; virtual tensors are float unless a test says otherwise.
+    const auto addTensor = [&](int64_t uid,
+                               const char* name,
+                               const std::vector<int64_t>& dims,
+                               bool isVirtual,
+                               DataType virtualType = DataType::FLOAT) {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, uid, name, isVirtual ? virtualType : DataType::HALF, &ones, &dims, isVirtual));
+    };
+    addTensor(Y_UID, "y", yDims, spec.convOutputVirtual, spec.convOutputType);
     addTensor(W_UID, "w", spec.wDims, false);
     if(spec.bakedX.has_value())
     {
@@ -140,8 +148,8 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
     }
     addTensor(OUT_UID, "out", yDims, false);
     addTensor(BIAS_UID, "bias", biasDims, false);
-    addTensor(MUL_OUT_UID, "mul_out", yDims, true);
-    addTensor(MUL2_OUT_UID, "mul2_out", yDims, true);
+    addTensor(MUL_OUT_UID, "mul_out", yDims, true, spec.intermediateType);
+    addTensor(MUL2_OUT_UID, "mul2_out", yDims, true, spec.intermediateType);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     const auto addPointwise
@@ -158,7 +166,7 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
                                                                out);
               nodes.push_back(CreateNodeDirect(b,
                                                "pointwise",
-                                               DataType::FLOAT,
+                                               spec.pointwiseCompute,
                                                NodeAttributes::PointwiseAttributes,
                                                pointwise.Union()));
           };
@@ -417,6 +425,46 @@ TEST(TestConvFwdDynamicTolerance, NonFloatAccumulatorIsNotModeled)
     {
         GraphSpec spec;
         spec.convCompute = compute;
+        EXPECT_FALSE(errorScale(spec).has_value()) << EnumNameDataType(compute);
+    }
+}
+
+// The model has one rounding, of the final result. A convolution result kept in a type other
+// than float (half, bfloat16, an unset type) is one more rounding, so the fixed default applies.
+TEST(TestConvFwdDynamicTolerance, VirtualConvolutionResultNotStoredInFloatIsNotModeled)
+{
+    for(const auto type : {DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE, DataType::UNSET})
+    {
+        GraphSpec spec;
+        spec.convOutputType = type;
+        EXPECT_FALSE(errorScale(spec).has_value()) << EnumNameDataType(type);
+    }
+}
+
+// The same for the virtual output of a pointwise node between the convolution and the output.
+TEST(TestConvFwdDynamicTolerance, VirtualPointwiseResultNotStoredInFloatIsNotModeled)
+{
+    for(const auto type : {DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE, DataType::UNSET})
+    {
+        GraphSpec spec;
+        spec.mul = Mul::SCALE_SECOND;
+        spec.withBias = true;
+        spec.intermediateType = type;
+        EXPECT_FALSE(errorScale(spec).has_value()) << EnumNameDataType(type);
+    }
+}
+
+// A pointwise node that computes in a type other than float rounds its result in that type, even
+// when every tensor of the graph is float.
+TEST(TestConvFwdDynamicTolerance, PointwiseNotComputingInFloatIsNotModeled)
+{
+    for(const auto compute :
+        {DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE, DataType::UNSET})
+    {
+        GraphSpec spec;
+        spec.mul = Mul::SCALE_SECOND;
+        spec.withBias = true;
+        spec.pointwiseCompute = compute;
         EXPECT_FALSE(errorScale(spec).has_value()) << EnumNameDataType(compute);
     }
 }

@@ -20,7 +20,7 @@ applies:
 |---|---|---|
 | A `[[validator_overrides]]` entry | The tensors its glob names | The engine's TOML (see [File Formats](file-formats.md)) |
 | A `[[tolerance_overrides]]` entry | The tests its glob names | The engine's TOML |
-| The convolution-forward dynamic tolerance | half and bfloat16 outputs of a graph with one `ConvolutionFwd` node that accumulates in float | `src/harness/tolerance/ConvFwdDynamicTolerance.hpp` |
+| The convolution-forward dynamic tolerance | half and bfloat16 outputs of a graph with one `ConvolutionFwd` node that accumulates in float, and float intermediates | `src/harness/tolerance/ConvFwdDynamicTolerance.hpp` |
 | The per-op default | Everything else; the loosest node of the graph wins, and the same value is used for `atol` and `rtol` | `TestTolerances.hpp` through `src/harness/tolerance/ToleranceResolver.hpp` |
 
 TOML overrides describe how far one engine may drift. They are never applied
@@ -120,7 +120,14 @@ The function is `calculateConvFpropOutputTolerance<T>()` in
 
 `convFwdErrorScale()` applies the model only when the graph has exactly one
 `ConvolutionFwd` node, with float compute type, and its `x` and `w` are graph
-inputs: not virtual, and not written by another node. A `MUL` node with one
+inputs: not virtual, and not written by another node. Every pointwise node
+must compute in float and every virtual tensor (the convolution's result and
+the pointwise intermediates) must be stored as float; an unset type does not
+count as float. The model has one rounding, of the final result to the output
+type; an intermediate stored or computed in half or bfloat16 adds roundings it
+does not describe (ALMIOPEN-3239 tracks that), so such a graph uses the per-op
+default. A bundle whose virtual tensors take the case's data type is outside
+the model in half and bfloat16. A `MUL` node with one
 operand from the convolution and the other a graph input (in either operand
 order) scales `sigma` by that input's largest magnitude, and the scales of
 several multiplies multiply; a `MUL` of anything else (the result with itself,

@@ -88,6 +88,8 @@ struct Spec
     ScaleSource scaleSource = ScaleSource::BAKED;
     double bakedValue = 0.5;
     std::string convCompute = "float";
+    std::string intermediateType = "float"; ///< the type of every virtual tensor
+    std::string pointwiseCompute = "float"; ///< the compute type of every pointwise node
     bool inputBlobs = false;
 
     int64_t outUid() const
@@ -111,11 +113,15 @@ std::string tensorJson(int64_t uid,
     return out.str();
 }
 
-std::string pointwiseJson(
-    const char* name, const char* operation, int64_t in0, std::optional<int64_t> in1, int64_t out)
+std::string pointwiseJson(const char* name,
+                          const char* operation,
+                          int64_t in0,
+                          std::optional<int64_t> in1,
+                          int64_t out,
+                          const std::string& computeType)
 {
     std::ostringstream o;
-    o << R"({"compute_data_type": "float", "inputs": {"axis_tensor_uid": null, )"
+    o << R"({"compute_data_type": ")" << computeType << R"(", "inputs": {"axis_tensor_uid": null, )"
       << R"("elu_alpha": null, "in_0_tensor_uid": )" << in0 << R"(, "in_1_tensor_uid": )"
       << (in1.has_value() ? std::to_string(*in1) : std::string("null"))
       << R"(, "in_2_tensor_uid": null, "operation": ")" << operation
@@ -143,7 +149,7 @@ std::string graphJson(const Spec& spec)
     std::vector<std::string> tensors{
         tensorJson(X_UID, "x", "[1, 4, 6, 6]", "[144, 36, 6, 1]", dtype, false),
         tensorJson(W_UID, "w", "[8, 4, 3, 3]", "[36, 9, 3, 1]", dtype, false),
-        tensorJson(Y_UID, "y", yDims, yStrides, dtype, !plain),
+        tensorJson(Y_UID, "y", yDims, yStrides, plain ? dtype : spec.intermediateType, !plain),
     };
     if(!plain)
     {
@@ -154,16 +160,21 @@ std::string graphJson(const Spec& spec)
                          + R"(, "value_type": ")" + (spec.isHalf ? "Float16Value" : "BFloat16Value")
                          + "\"";
         }
-        nodes.push_back(pointwiseJson("mul", "mul", Y_UID, SCALE_UID, MUL_OUT_UID));
-        nodes.push_back(pointwiseJson("add", "add", MUL_OUT_UID, BIAS_UID, ADD_OUT_UID));
-        nodes.push_back(pointwiseJson("relu", "relu_fwd", ADD_OUT_UID, std::nullopt, OUT_UID));
+        nodes.push_back(
+            pointwiseJson("mul", "mul", Y_UID, SCALE_UID, MUL_OUT_UID, spec.pointwiseCompute));
+        nodes.push_back(
+            pointwiseJson("add", "add", MUL_OUT_UID, BIAS_UID, ADD_OUT_UID, spec.pointwiseCompute));
+        nodes.push_back(pointwiseJson(
+            "relu", "relu_fwd", ADD_OUT_UID, std::nullopt, OUT_UID, spec.pointwiseCompute));
         tensors.push_back(tensorJson(
             SCALE_UID, "scale", "[1, 1, 1, 1]", "[1, 1, 1, 1]", dtype, false, scaleExtra));
         tensors.push_back(tensorJson(OUT_UID, "out", yDims, yStrides, dtype, false));
-        tensors.push_back(tensorJson(MUL_OUT_UID, "mul_out", yDims, yStrides, dtype, true));
+        tensors.push_back(
+            tensorJson(MUL_OUT_UID, "mul_out", yDims, yStrides, spec.intermediateType, true));
         tensors.push_back(
             tensorJson(BIAS_UID, "bias", "[1, 8, 1, 1]", "[8, 1, 1, 1]", dtype, false));
-        tensors.push_back(tensorJson(ADD_OUT_UID, "add_out", yDims, yStrides, dtype, true));
+        tensors.push_back(
+            tensorJson(ADD_OUT_UID, "add_out", yDims, yStrides, spec.intermediateType, true));
     }
 
     const auto join = [](const std::vector<std::string>& parts) {
@@ -516,6 +527,31 @@ TEST_F(TestConvFwdToleranceGradingFixture, ConvolutionComputingInHalfKeepsTheDef
         bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF));
     expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
                    AbsRelTolerance{fixedDefault, fixedDefault});
+}
+
+// The model has one rounding, of the final result to the output type. Intermediates stored in
+// the output type, or computed in it, are more roundings: the graph keeps the default.
+TEST_F(TestConvFwdToleranceGradingFixture, IntermediatesInTheOutputTypeKeepTheDefaultTolerance)
+{
+    for(const bool isHalf : {true, false})
+    {
+        for(const bool storedNotComputed : {true, false})
+        {
+            Spec spec;
+            spec.isHalf = isHalf;
+            spec.topology = Topology::VARIANT3;
+            const std::string lowPrecision = isHalf ? "half" : "bfloat16";
+            (storedNotComputed ? spec.intermediateType : spec.pointwiseCompute) = lowPrecision;
+            SCOPED_TRACE(lowPrecision + (storedNotComputed ? " stored" : " computed"));
+            const auto bundle = loadBundle(spec);
+            const auto fixedDefault = static_cast<double>(tolerance::defaultTolerance(
+                bundle->graphWrapper(),
+                isHalf ? hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+                       : hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16));
+            expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
+                           AbsRelTolerance{fixedDefault, fixedDefault});
+        }
+    }
 }
 
 // ── Where the input statistics come from ────────────────────────────────────
