@@ -40,3 +40,33 @@ TEST(HipUtilsCopyTensor, CopiesPaddedSourceWithoutChangingPadding)
 
     EXPECT_EQ(dst, expected);
 }
+
+TEST(HipUtilsCopyTensor, TypedCopyRepeatsAZeroStrideDimension)
+{
+    // A 4-element bias shared by 3 batches. Coalescing the batch dimension would copy
+    // 3 elements instead of 4; the last element of dst is a canary.
+    std::array<int32_t, 4> const src{1, 2, 3, 4};
+    std::array<int32_t, 5>       dst;
+    dst.fill(-1);
+
+    TensileLite::TensorDescriptor const desc("copy", rocisa::DataType::Int32, {4, 3}, {1, 0});
+    TensileLite::hip::CopyTensor(dst.data(), src.data(), desc, hipMemcpyHostToHost);
+    ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+
+    EXPECT_EQ(dst, (std::array<int32_t, 5>{1, 2, 3, 4, -1}));
+}
+
+TEST(HipUtilsCopyTensor, TypedCopyDoesNotReadPastAZeroStrideTensor)
+{
+    // A 2-element tensor shared by 5 batches. Coalescing the batch dimension would copy
+    // 5 elements; the elements of src past the tensor are never copied.
+    std::array<int32_t, 6> const src{1, 2, 77, 77, 77, 77};
+    std::array<int32_t, 6>       dst;
+    dst.fill(-1);
+
+    TensileLite::TensorDescriptor const desc("copy", rocisa::DataType::Int32, {2, 5}, {1, 0});
+    TensileLite::hip::CopyTensor(dst.data(), src.data(), desc, hipMemcpyHostToHost);
+    ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+
+    EXPECT_EQ(dst, (std::array<int32_t, 6>{1, 2, -1, -1, -1, -1}));
+}
