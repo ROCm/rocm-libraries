@@ -31,6 +31,9 @@
 #define HIPCUB_ROCPRIM_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
 
 #include "../../../config.hpp"
+
+#if HIPCUB_USE_LEGACY_API
+
 #include "../../../util_deprecated.hpp"
 
 #include "iterator_category.hpp"
@@ -42,8 +45,6 @@
 #include <cstddef>
 #include <iterator>
 #include <type_traits>
-
-#if HIPCUB_USE_LEGACY_API
 
 BEGIN_HIPCUB_NAMESPACE
 
