@@ -79,47 +79,47 @@ rtol = 1e-5
 # 12,672 off by 2.5e-5 on gfx90a at the default atol 1e-5).
 [[tolerance_overrides]]
 filters = [
-    "*_ConvolutionFwd*.L*_fp32_*",
-    "*_ConvolutionFwd*.M*_fp32_*",
-    "*_ConvolutionFwd*.H*_fp32_*",
-    "*_ConvolutionFwd*.X*_fp32_*",
-    "*_ConvolutionFwd*.S31_*_fp32_*",
-    "*_ConvolutionFwd*.S59_*_fp32_*",
-    "*_ConvolutionFwd*.R029_*_fp32_*",
-    "*_ConvolutionFwd*.R061_*_fp32_*",
-    "*_ConvolutionFwd*.R065_*_fp32_*",
-    "*_ConvolutionFwd*.R121_*_fp32_*",
-    "*_ConvolutionFwd*.R122_*_fp32_*",
+    "*_ConvolutionFwd*.l*_fp32_*",
+    "*_ConvolutionFwd*.m*_fp32_*",
+    "*_ConvolutionFwd*.h*_fp32_*",
+    "*_ConvolutionFwd*.x*_fp32_*",
+    "*_ConvolutionFwd*.s31_*_fp32_*",
+    "*_ConvolutionFwd*.s59_*_fp32_*",
+    "*_ConvolutionFwd*.r029_*_fp32_*",
+    "*_ConvolutionFwd*.r061_*_fp32_*",
+    "*_ConvolutionFwd*.r065_*_fp32_*",
+    "*_ConvolutionFwd*.r121_*_fp32_*",
+    "*_ConvolutionFwd*.r122_*_fp32_*",
 ]
 atol = 1e-4
 rtol = 1e-4
 
 [[tolerance_overrides]]
 filters = [
-    "*_ConvolutionFwd*.A*_fp32_*",
-    "*_ConvolutionFwd*.L10_*_fp32_*",
-    "*_ConvolutionFwd*.L30_*_fp32_*",
-    "*_ConvolutionFwd*.L36_*_fp32_*",
-    "*_ConvolutionFwd*.L40_*_fp32_*",
-    "*_ConvolutionFwd*.L41_*_fp32_*",
-    "*_ConvolutionFwd*.L43_*_fp32_*",
-    "*_ConvolutionFwd*.R028_*_fp32_*",
-    "*_ConvolutionFwd*.R083_*_fp32_*",
-    "*_ConvolutionFwd*.R119_*_fp32_*",
-    "*_ConvolutionFwd*.R131_*_fp32_*",
+    "*_ConvolutionFwd*.a*_fp32_*",
+    "*_ConvolutionFwd*.l10_*_fp32_*",
+    "*_ConvolutionFwd*.l30_*_fp32_*",
+    "*_ConvolutionFwd*.l36_*_fp32_*",
+    "*_ConvolutionFwd*.l40_*_fp32_*",
+    "*_ConvolutionFwd*.l41_*_fp32_*",
+    "*_ConvolutionFwd*.l43_*_fp32_*",
+    "*_ConvolutionFwd*.r028_*_fp32_*",
+    "*_ConvolutionFwd*.r083_*_fp32_*",
+    "*_ConvolutionFwd*.r119_*_fp32_*",
+    "*_ConvolutionFwd*.r131_*_fp32_*",
 ]
 atol = 5e-4
 rtol = 1e-4
 
 [[tolerance_overrides]]
 filters = [
-    "*_ConvolutionFwd*.S19_*_fp32_*",
-    "*_ConvolutionFwd*.L19_*_fp32_*",
-    "*_ConvolutionFwd*.X4_*_fp32_*",
-    "*_ConvolutionFwd*.S45_*_fp32_*",
-    "*_ConvolutionFwd*.L45_*_fp32_*",
-    "*_ConvolutionFwd*.R066_*_fp32_*",
-    "*_ConvolutionFwd*.R067_*_fp32_*",
+    "*_ConvolutionFwd*.s19_*_fp32_*",
+    "*_ConvolutionFwd*.l19_*_fp32_*",
+    "*_ConvolutionFwd*.x4_*_fp32_*",
+    "*_ConvolutionFwd*.s45_*_fp32_*",
+    "*_ConvolutionFwd*.l45_*_fp32_*",
+    "*_ConvolutionFwd*.r066_*_fp32_*",
+    "*_ConvolutionFwd*.r067_*_fp32_*",
 ]
 atol = 2e-2
 rtol = 1e-4
@@ -156,34 +156,34 @@ reason  = "conv -> add(residual) -> relu is accepted as a bias fusion and fp32 o
 
 [[test_skips]]
 archs   = ["gfx942"]
-filters = ["*_ConvolutionFwd_Default.*_F20_*"]
+filters = ["*_ConvolutionFwd_Default.*_f20_*"]
 reason  = "mixed-precision conv (x, w, y or compute types differ) is accepted but fails at execute (miopenStatusBadParm), has no reference, or faults the device (hipErrorIllegalAddress, 3D fp32 x fp16 w); tracked in ALMIOPEN-3010 (MIOpen) and ALMIOPEN-3015 (provider)"
 
 [[test_skips]]
 archs   = ["gfx942"]
-filters = ["*_ConvolutionFwd_Default.*_F15_*"]
+filters = ["*_ConvolutionFwd_Default.*_f15_*"]
 reason  = "conv with mixed x, w and y layouts is accepted; MIOpen output disagrees with the GPU and CPU references for the cases that execute; tracked in ALMIOPEN-3012 (MIOpen) and ALMIOPEN-3017 (provider)"
 
 [[test_skips]]
 archs   = ["gfx942"]
-filters = ["*_ConvolutionFwdPointwise_Variant2.*_F25type_*"]
+filters = ["*_ConvolutionFwdPointwise_Variant2.*_f25type_*"]
 reason  = "conv -> bias -> relu with a bias data type different from the io type is accepted and the output is garbage (differences up to 5.8e4); tracked in ALMIOPEN-3011 (MIOpen) and ALMIOPEN-3016 (provider)"
 
 [[test_skips]]
 archs   = ["gfx942"]
 filters = [
-    "*_ConvolutionFwd_Default.S13a_F16chan_2d_i16x16_n2c16k16g16_f3x3_fp32_cf",
-    "*_ConvolutionFwd_Default.S13a_F16fast_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl",
-    "*_ConvolutionFwd_Default.S13b_F16plane_1d_i16_n2c16k32g16_f3_bf16_cf",
-    "*_ConvolutionFwd_Default.S13b_F16chan_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cf",
-    "*_ConvolutionFwd_Default.S14_F16plane_3d_i15x15x15_n2c13k17_f3x3x3_fp32_cl",
-    "*_ConvolutionFwd_Default.S20_F16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
-    "*_ConvolutionFwd_Default.S3_F16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
-    "*_ConvolutionFwd_Default.S3_F16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
-    "*_ConvolutionFwd_Default.S7_F16fast_2d_i16x16_n2c16k32g2_f3x3_bf16_cl",
-    "*_ConvolutionFwd_Default.S7_F16plane_1d_i16_n2c16k32g2_f3_bf16_cf",
-    "*_ConvolutionFwd_Default.S8_F16chan_2d_i16x16_n2c32k64g4_f3x3_fp32_cf",
-    "*_ConvolutionFwd_Default.S8_F16chan_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cf",
-    "*_ConvolutionFwd_Default.S9_F16plane_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl",
+    "*_ConvolutionFwd_Default.s13a_f16chan_2d_i16x16_n2c16k16g16_f3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.s13a_f16fast_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl",
+    "*_ConvolutionFwd_Default.s13b_f16plane_1d_i16_n2c16k32g16_f3_bf16_cf",
+    "*_ConvolutionFwd_Default.s13b_f16chan_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.s14_f16plane_3d_i15x15x15_n2c13k17_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.s20_f16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.s3_f16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
+    "*_ConvolutionFwd_Default.s3_f16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.s7_f16fast_2d_i16x16_n2c16k32g2_f3x3_bf16_cl",
+    "*_ConvolutionFwd_Default.s7_f16plane_1d_i16_n2c16k32g2_f3_bf16_cf",
+    "*_ConvolutionFwd_Default.s8_f16chan_2d_i16x16_n2c32k64g4_f3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.s8_f16chan_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.s9_f16plane_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl",
 ]
 reason  = "conv on non-packed strides (padded rows, channel or plane stride) is accepted; MIOpen output disagrees with the GPU and CPU references for these cases (grouped, depthwise and 3D shapes); tracked in ALMIOPEN-3013 (MIOpen) and ALMIOPEN-3018 (provider)"

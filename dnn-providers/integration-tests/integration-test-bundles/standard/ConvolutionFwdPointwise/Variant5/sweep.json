@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S16_1d_i32_n2c16k32_f3_fp32_cf",
+      "id": "s16_1d_i32_n2c16k32_f3_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -181,7 +181,7 @@
       }
     },
     {
-      "id": "S17_1d_i16_n2c1k16_f3_fp32_cl",
+      "id": "s17_1d_i16_n2c1k16_f3_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -360,7 +360,7 @@
       }
     },
     {
-      "id": "S18_1d_i16_n2c16k32_f2_fp16_cf",
+      "id": "s18_1d_i16_n2c16k32_f2_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -539,7 +539,7 @@
       }
     },
     {
-      "id": "S19_1d_i16_n2c16k32_f16_fp16_cl",
+      "id": "s19_1d_i16_n2c16k32_f16_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -718,7 +718,7 @@
       }
     },
     {
-      "id": "S20_1d_i16_n2c16k32_f3_bf16_cf",
+      "id": "s20_1d_i16_n2c16k32_f3_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -897,7 +897,7 @@
       }
     },
     {
-      "id": "S21_1d_i16_n2c16k32_f2_bf16_cl",
+      "id": "s21_1d_i16_n2c16k32_f2_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1076,7 +1076,7 @@
       }
     },
     {
-      "id": "S13b_2d_i16x16_n2c16k32g16_f3x3_fp32_cf",
+      "id": "s13b_2d_i16x16_n2c16k32g16_f3x3_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -1275,7 +1275,7 @@
       }
     },
     {
-      "id": "S14_2d_i15x15_n2c13k17_f3x3_fp32_cl",
+      "id": "s14_2d_i15x15_n2c13k17_f3x3_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -1474,7 +1474,7 @@
       }
     },
     {
-      "id": "S15_2d_i16x16_n2c16k32_f3x3_fp16_cf",
+      "id": "s15_2d_i16x16_n2c16k32_f3x3_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1673,7 +1673,7 @@
       }
     },
     {
-      "id": "S16_2d_i32x32_n2c16k32_f3x3_fp16_cl",
+      "id": "s16_2d_i32x32_n2c16k32_f3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1872,7 +1872,7 @@
       }
     },
     {
-      "id": "S17_2d_i16x16_n2c1k16_f3x3_bf16_cf",
+      "id": "s17_2d_i16x16_n2c1k16_f3x3_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2071,7 +2071,7 @@
       }
     },
     {
-      "id": "S18_2d_i16x16_n2c16k32_f2x2_bf16_cl",
+      "id": "s18_2d_i16x16_n2c16k32_f2x2_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2270,7 +2270,7 @@
       }
     },
     {
-      "id": "S15_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf",
+      "id": "s15_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2489,7 +2489,7 @@
       }
     },
     {
-      "id": "S16_3d_i32x32x32_n2c16k32_f3x3x3_fp32_cl",
+      "id": "s16_3d_i32x32x32_n2c16k32_f3x3x3_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2708,7 +2708,7 @@
       }
     },
     {
-      "id": "S17_3d_i16x16x16_n2c1k16_f3x3x3_fp16_cf",
+      "id": "s17_3d_i16x16x16_n2c1k16_f3x3x3_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -2927,7 +2927,7 @@
       }
     },
     {
-      "id": "S18_3d_i16x16x16_n2c16k32_f2x2x2_fp16_cl",
+      "id": "s18_3d_i16x16x16_n2c16k32_f2x2x2_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -3146,7 +3146,7 @@
       }
     },
     {
-      "id": "S19_3d_i16x16x16_n2c16k32_f16x16x16_bf16_cf",
+      "id": "s19_3d_i16x16x16_n2c16k32_f16x16x16_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -3365,7 +3365,7 @@
       }
     },
     {
-      "id": "S20_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl",
+      "id": "s20_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",

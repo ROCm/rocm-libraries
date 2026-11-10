@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S3_F27const_1d_i16_n2c16k32_f3_fp16_cl",
+      "id": "s3_f27const_1d_i16_n2c16k32_f3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -185,7 +185,7 @@
       ]
     },
     {
-      "id": "S3_F27runtime_1d_i16_n2c16k32_f3_fp16_cl",
+      "id": "s3_f27runtime_1d_i16_n2c16k32_f3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -373,7 +373,7 @@
       ]
     },
     {
-      "id": "S3_F27channel_1d_i16_n2c16k32_f3_fp16_cl",
+      "id": "s3_f27channel_1d_i16_n2c16k32_f3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -553,7 +553,7 @@
       }
     },
     {
-      "id": "S3_F27const_2d_i16x16_n2c16k32_f3x3_fp16_cl",
+      "id": "s3_f27const_2d_i16x16_n2c16k32_f3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -756,7 +756,7 @@
       ]
     },
     {
-      "id": "S3_F27runtime_2d_i16x16_n2c16k32_f3x3_fp16_cl",
+      "id": "s3_f27runtime_2d_i16x16_n2c16k32_f3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -964,7 +964,7 @@
       ]
     },
     {
-      "id": "S3_F27channel_2d_i16x16_n2c16k32_f3x3_fp16_cl",
+      "id": "s3_f27channel_2d_i16x16_n2c16k32_f3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1164,7 +1164,7 @@
       }
     },
     {
-      "id": "S3_F27const_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
+      "id": "s3_f27const_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1387,7 +1387,7 @@
       ]
     },
     {
-      "id": "S3_F27runtime_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
+      "id": "s3_f27runtime_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1615,7 +1615,7 @@
       ]
     },
     {
-      "id": "S3_F27channel_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
+      "id": "s3_f27channel_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",

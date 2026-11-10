@@ -17,6 +17,7 @@ plan in the same pull request.
 | Plan | Bundles |
 |---|---|
 | [Convolution forward](convolution-fwd.md) | `ConvolutionFwd/Default`, `ConvolutionFwdPointwise/Default`, `ConvolutionFwdPointwise/Variant2` … `Variant6` (written by `reference-data-scripts/generate_conv_fwd_bundles.py`) |
+| [SDPA backward](sdpa-bwd.md) | `SdpaBackward/<Topology>` (written by `reference-data-scripts/generate_sdpa_bwd_bundles.py`) |
 
 ## Tiers
 

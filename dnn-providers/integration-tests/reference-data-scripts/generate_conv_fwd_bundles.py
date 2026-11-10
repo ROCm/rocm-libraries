@@ -425,7 +425,10 @@ def sweep_case(c, cid):
     total = sum(P.numel(d) * P.BYTES.get(t, 1) for d, _, t in tensor_specs(c).values())
     if total > (1 << 30):
         meta["minimum_vram_mb"] = int(total * 2 / (1 << 20)) + 1
-    entry = {"id": cid, "values": values, "metadata": meta}
+    # The written id is lowercase_snake_case (verify_golden_bundles.py CASE_ID_PATTERN).
+    # Seeds keep using ``cid`` with its plan item ids (S13a, F20) as written, so the
+    # inputs, and the claims harvested on them, do not change with the id's case.
+    entry = {"id": cid.lower(), "values": values, "metadata": meta}
     if patches:
         entry["tensor_patches"] = patches
     return entry
@@ -935,7 +938,7 @@ def write_tree(result, bundle_dir, dry_run):
             files[rel / "graph.template.json"] = dump(tpl)
             files[rel / "sweep.json"] = dump({"version": 1, "cases": entries})
             files[rel / "support.json"] = support_json(
-                bundle_dir / rel / "support.json", {cid for _, cid in cs}
+                bundle_dir / rel / "support.json", {cid.lower() for _, cid in cs}
             )
     if dry_run:
         return files

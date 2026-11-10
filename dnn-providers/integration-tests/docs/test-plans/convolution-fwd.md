@@ -699,9 +699,11 @@ lands.
 
 Engine-specific tolerances and skips go in the engine TOML and are keyed to the
 generated case ids; the generator's id scheme is
-`<plan items>_<rank>d_i<spatial>_n<N>c<C>k<K>[g<G>]_f<filter>_<dtype>_<layout>[_<activation>]`.
-A change to the generator that renames ids updates the TOML globs and exact ids
-in the same pull request.
+`<plan items>_<rank>d_i<spatial>_n<N>c<C>k<K>[g<G>]_f<filter>_<dtype>_<layout>[_<activation>]`,
+written in lowercase as the bundle verifier requires (`s13a_f16chan_2d_…` for plan
+items S13a and F16chan). Input seeds come from the id as the plan items spell it, so
+the case of an id does not change its data. A change to the generator that renames
+ids updates the TOML globs and exact ids in the same pull request.
 
 ---
 
