@@ -30,7 +30,6 @@ namespace
 {
 
 namespace fb = hipdnn_flatbuffers_sdk::data_objects;
-using hipdnn_data_sdk::utilities::ITensor;
 
 const fb::TensorAttributes* findTensor(const fb::Graph& graph, int64_t uid)
 {
@@ -58,14 +57,14 @@ bool deviceVisible()
 // The executors are stateless plan registries; build each once per process.
 CpuReferenceGraphExecutorAdapter& cpuExecutor()
 {
-    static CpuReferenceGraphExecutorAdapter executor;
-    return executor;
+    static CpuReferenceGraphExecutorAdapter s_executor;
+    return s_executor;
 }
 
 gpu_graph_executor::GpuReferenceGraphExecutor& gpuExecutor()
 {
-    static gpu_graph_executor::GpuReferenceGraphExecutor executor;
-    return executor;
+    static gpu_graph_executor::GpuReferenceGraphExecutor s_executor;
+    return s_executor;
 }
 
 // The SDPA forward graph whose outputs are the backward node's O and stats: one forward
@@ -99,8 +98,10 @@ ForwardGraph buildForwardGraph(const fb::Graph& graph,
             tensor->strides.push_back(1);
         }
         // A pass-by-value scale that is not a runtime value lives in the graph itself.
-        if(!(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(findTensor(graph, uid))
-             && !tensor->is_runtime_pass_by_value))
+        const bool baked
+            = hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(findTensor(graph, uid))
+              && !tensor->is_runtime_pass_by_value;
+        if(!baked)
         {
             out.uids.push_back(uid);
         }
@@ -134,7 +135,7 @@ ForwardGraph buildForwardGraph(const fb::Graph& graph,
     auto node = std::make_unique<fb::NodeT>();
     node->name = "sdpa_forward";
     node->compute_data_type = graph.compute_data_type();
-    node->attributes.Set(std::move(a));
+    node->attributes.Set(a);
     fwd.nodes.push_back(std::move(node));
 
     flatbuffers::FlatBufferBuilder builder;
