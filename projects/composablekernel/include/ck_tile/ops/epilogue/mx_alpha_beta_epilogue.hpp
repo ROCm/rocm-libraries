@@ -17,9 +17,14 @@ namespace ck_tile {
 /**
  * @brief Problem of MxAlphaBetaEpilogue: the pipeline whose accumulators it stores, the D store
  *        width in elements and the shape traits of the stores (EdgeM / EdgeN mask partial tiles,
- *        WideD addresses rows in i64). C is the single D tensor, row-major and of D's type.
+ *        WideD addresses rows in i64), by default the pipeline's MxTdmV4GemmTraits. C is the
+ *        single D tensor, row-major and of D's type.
  */
-template <typename Pipeline_, index_t StoreWidth_, bool EdgeM_, bool EdgeN_, bool WideD_>
+template <typename Pipeline_,
+          index_t StoreWidth_ = remove_cvref_t<Pipeline_>::Traits::kStoreWidth,
+          bool EdgeM_         = remove_cvref_t<Pipeline_>::Traits::kEdgeM,
+          bool EdgeN_         = remove_cvref_t<Pipeline_>::Traits::kEdgeN,
+          bool WideD_         = remove_cvref_t<Pipeline_>::Traits::kWideD>
 struct MxAlphaBetaEpilogueProblem
 {
     using Pipeline   = remove_cvref_t<Pipeline_>;

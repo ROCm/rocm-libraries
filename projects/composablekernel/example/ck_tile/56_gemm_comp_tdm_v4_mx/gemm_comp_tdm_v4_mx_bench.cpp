@@ -22,13 +22,13 @@
 #include <map>
 #include <random>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
 #include "ck_tile/host/arg_parser.hpp"
-#include "ck_tile/ops/gemm/kernel/mx_gemm_tdm_v4_launch.hpp"
 #include "ck_tile/host/mx_scale_kmajor.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
@@ -53,7 +53,7 @@ template <typename A,
           index_t AtomM,
           typename Tuning,
           typename Traits>
-using Kernel = ck_tile::MxGemmTdmV4Kernel<ck_tile::GemmPipelineAgBgCrCompTDMV4<
+using Pipeline = ck_tile::GemmPipelineAgBgCrCompTDMV4<
     ck_tile::MxGemmTdmV4Problem<A,
                                 B,
                                 O,
@@ -61,7 +61,50 @@ using Kernel = ck_tile::MxGemmTdmV4Kernel<ck_tile::GemmPipelineAgBgCrCompTDMV4<
                                                        ck_tile::sequence<WarpM, WarpN, 1>,
                                                        ck_tile::sequence<AtomM, 16, 128>>,
                                 Traits>,
-    ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>>;
+    ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>;
+
+template <typename P>
+using KernelOf = ck_tile::MxGemmTdmV4Kernel<
+    ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
+    P,
+    ck_tile::MxAlphaBetaEpilogue<ck_tile::MxAlphaBetaEpilogueProblem<P>>>;
+
+template <typename A,
+          typename B,
+          typename O,
+          index_t TileM,
+          index_t TileN,
+          index_t TileK,
+          index_t WarpM,
+          index_t WarpN,
+          index_t AtomM,
+          typename Tuning,
+          typename Traits>
+using Kernel =
+    KernelOf<Pipeline<A, B, O, TileM, TileN, TileK, WarpM, WarpN, AtomM, Tuning, Traits>>;
+
+/// Launches K: the grid of GridSize, and with a cluster tuning the cluster of ClusterSize.
+template <typename K>
+float launch(const ck_tile::stream_config& s, const typename K::KernelArgs& kargs)
+{
+    if(!K::IsSupportedArgument(kargs))
+        throw std::runtime_error(K::GetName() + ": " + K::GetUnsupportedReason(kargs));
+    const dim3 grids  = K::GridSize(kargs.M, kargs.N);
+    const dim3 blocks = K::BlockSize();
+    if constexpr(K::ClusterLaunch)
+    {
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+        return ck_tile::launch_kernel(
+            s, ck_tile::make_kernel<1>(K{}, K::ClusterSize(), grids, blocks, 0, kargs));
+#else
+        throw std::runtime_error(K::GetName() + ": this build has no cluster launch");
+#endif
+    }
+    else
+    {
+        return ck_tile::launch_kernel(s, ck_tile::make_kernel<1>(K{}, grids, blocks, 0, kargs));
+    }
+}
 
 template <index_t CX,
           index_t CY,
@@ -215,8 +258,22 @@ int run(const Options& o)
     const float alpha = o.mode == "verify" ? 1.0f / 64 : o.alpha;
     {
         uint8_t dummy = 0;
-        const typename K::Args probe{
-            &dummy, &dummy, &dummy, &dummy, &dummy, &dummy, o.M, o.N, o.K, alpha, o.beta};
+        const typename K::HostArgs probe{&dummy,
+                                         &dummy,
+                                         &dummy,
+                                         &dummy,
+                                         &dummy,
+                                         &dummy,
+                                         1,
+                                         o.M,
+                                         o.N,
+                                         o.K,
+                                         o.K,
+                                         o.K,
+                                         o.N,
+                                         o.N,
+                                         alpha,
+                                         o.beta};
         if(const char* why = K::GetUnsupportedReason(probe))
         {
             std::cerr << K::GetName() << " does not run M " << o.M << " N " << o.N << " K " << o.K
@@ -250,28 +307,34 @@ int run(const Options& o)
     bs.ToDevice(h.bs.data());
     c.ToDevice(h.c.data());
     d.SetZero();
-    typename K::Args args{a.GetDeviceBuffer(),
-                          b.GetDeviceBuffer(),
-                          as.GetDeviceBuffer(),
-                          bs.GetDeviceBuffer(),
-                          c.GetDeviceBuffer(),
-                          d.GetDeviceBuffer(),
-                          o.M,
-                          o.N,
-                          o.K,
-                          alpha,
-                          o.beta};
+    const typename K::HostArgs host_args{a.GetDeviceBuffer(),
+                                         as.GetDeviceBuffer(),
+                                         b.GetDeviceBuffer(),
+                                         bs.GetDeviceBuffer(),
+                                         c.GetDeviceBuffer(),
+                                         d.GetDeviceBuffer(),
+                                         1,
+                                         o.M,
+                                         o.N,
+                                         o.K,
+                                         o.K,
+                                         o.K,
+                                         o.N,
+                                         o.N,
+                                         alpha,
+                                         o.beta};
+    const auto args = K::MakeKernelArgs(host_args);
 
     if(o.mode == "bench")
     {
-        const float ms = ck_tile::launch_mx_gemm_tdm_v4<K>(
-            ck_tile::stream_config{nullptr, true, 0, o.warmup, o.repeat}, args);
+        const float ms =
+            launch<K>(ck_tile::stream_config{nullptr, true, 0, o.warmup, o.repeat}, args);
         const double flops = 2.0 * o.M * o.N * static_cast<double>(o.K);
         std::printf("%.3f us, %.1f TFLOPS\n", ms * 1e3, flops / (ms * 1e-3) / 1e12);
         return 0;
     }
 
-    ck_tile::launch_mx_gemm_tdm_v4<K>(ck_tile::stream_config{nullptr, false}, args);
+    launch<K>(ck_tile::stream_config{nullptr, false}, args);
     HIP_CHECK_ERROR(hipDeviceSynchronize());
     std::vector<uint8_t> got(h.c.size());
     d.FromDevice(got.data());

@@ -258,38 +258,61 @@ struct SelectedKernel {{
 
     using Tuning = {mx_tdm_v4.cpp_tuning_type(tuning)};
     using Traits = {mx_tdm_v4.cpp_kernel_traits(spec, tuning)};
+    using Pipeline = ck_tile::GemmPipelineAgBgCrCompTDMV4<
+        ck_tile::MxGemmTdmV4Problem<
+            ADataType,
+            BDataType,
+            CDataType,
+            ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
+                                   ck_tile::sequence<WarpPerBlock_M, WarpPerBlock_N, 1>,
+                                   ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>,
+            Traits>,
+        ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>;
     using Kernel = ck_tile::MxGemmTdmV4Kernel<
-        ck_tile::GemmPipelineAgBgCrCompTDMV4<
-            ck_tile::MxGemmTdmV4Problem<
-                ADataType,
-                BDataType,
-                CDataType,
-                ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
-                                       ck_tile::sequence<WarpPerBlock_M, WarpPerBlock_N, 1>,
-                                       ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>,
-                Traits>,
-            ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>>;
+        ck_tile::GemmTile2DNMajorPartitioner<typename Pipeline::BlockGemmShape>,
+        Pipeline,
+        ck_tile::MxAlphaBetaEpilogue<ck_tile::MxAlphaBetaEpilogueProblem<Pipeline>>>;
 
     static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream)
     {{
-        if(args.k_batch != 1)
-            throw std::runtime_error("{V4_PIPELINE} requires k_batch==1");
-        if(args.stride_As[0] != args.K || args.stride_Bs[0] != args.K || args.stride_E != args.N)
-            throw std::runtime_error("{V4_PIPELINE} requires packed rcr strides");
-        const typename Kernel::Args kargs{{args.as_ptr[0],
-                                          args.bs_ptr[0],
-                                          args.as_scale_ptr[0],
-                                          args.bs_scale_ptr[0],
-                                          nullptr,
-                                          args.e_ptr,
-                                          args.M,
-                                          args.N,
-                                          args.K,
-                                          1.0f,
-                                          0.0f}};
-        if(const char* why = Kernel::GetUnsupportedReason(kargs))
-            throw std::runtime_error(std::string("Arguments not supported: ") + why);
-        return ck_tile::launch_mx_gemm_tdm_v4<Kernel>(stream, kargs);
+        // D = A @ B^T: alpha 1, beta 0, so no C.
+        const typename Kernel::HostArgs host_args{{args.as_ptr[0],
+                                                  args.as_scale_ptr[0],
+                                                  args.bs_ptr[0],
+                                                  args.bs_scale_ptr[0],
+                                                  nullptr,
+                                                  args.e_ptr,
+                                                  args.k_batch,
+                                                  args.M,
+                                                  args.N,
+                                                  args.K,
+                                                  args.stride_As[0],
+                                                  args.stride_Bs[0],
+                                                  args.stride_E,
+                                                  args.stride_E,
+                                                  1.0f,
+                                                  0.0f}};
+        if(!Kernel::IsSupportedArgument(host_args))
+            throw std::runtime_error(std::string("Arguments not supported: ") +
+                                     Kernel::GetUnsupportedReason(host_args));
+        const auto kargs  = Kernel::MakeKernelArgs(host_args);
+        const dim3 grids  = Kernel::GridSize(args.M, args.N);
+        const dim3 blocks = Kernel::BlockSize();
+        if constexpr(Kernel::ClusterLaunch)
+        {{
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+            return ck_tile::launch_kernel(
+                stream,
+                ck_tile::make_kernel<1>(Kernel{{}}, Kernel::ClusterSize(), grids, blocks, 0, kargs));
+#else
+            throw std::runtime_error(Kernel::GetName() + ": this build has no cluster launch");
+#endif
+        }}
+        else
+        {{
+            return ck_tile::launch_kernel(
+                stream, ck_tile::make_kernel<1>(Kernel{{}}, grids, blocks, 0, kargs));
+        }}
     }}
 }};
 """

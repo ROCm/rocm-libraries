@@ -92,8 +92,10 @@ scales of one tile with a single TDM box. Callers pass the natural `[MN][K / 32]
 scales as for the other pipelines; the bridge and the Tile Engine profiler
 convert them with `ck_tile::mx_scale_to_kmajor` when the generated
 `SelectedKernel` declares `KMajorScales`. The kernel checks the problem itself
-(`GetUnsupportedReason`): K must be a multiple of 32, and the K tail, the tile
-parity and partial M and N tiles must match the instance's shape traits.
+(`IsSupportedArgument` on its `MxGemmTdmV4HostArgs`; `GetUnsupportedReason`
+says why): `k_batch` must be 1 and the strides packed, K must be a multiple of
+32, and the K tail, the tile parity and partial M and N tiles must match the
+instance's shape traits.
 
 rocKE tunes each kernel with schedule knobs that CK-Tile pipelines normally fix.
 `comp_tdm_v4` takes them as a tuning, set per kernel (dispatcher) or as a

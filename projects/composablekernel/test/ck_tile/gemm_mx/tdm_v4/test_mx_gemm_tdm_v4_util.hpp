@@ -13,6 +13,7 @@
 #include <limits>
 #include <random>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -20,7 +21,6 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
-#include "ck_tile/ops/gemm/kernel/mx_gemm_tdm_v4_launch.hpp"
 #include "ck_tile/host/mx_scale_kmajor.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
@@ -45,7 +45,7 @@ template <typename A,
           index_t AtomM,
           typename Tuning,
           typename Traits>
-using Kernel = ck_tile::MxGemmTdmV4Kernel<ck_tile::GemmPipelineAgBgCrCompTDMV4<
+using Pipeline = ck_tile::GemmPipelineAgBgCrCompTDMV4<
     ck_tile::MxGemmTdmV4Problem<A,
                                 B,
                                 O,
@@ -53,7 +53,28 @@ using Kernel = ck_tile::MxGemmTdmV4Kernel<ck_tile::GemmPipelineAgBgCrCompTDMV4<
                                                        ck_tile::sequence<WarpM, WarpN, 1>,
                                                        ck_tile::sequence<AtomM, 16, 128>>,
                                 Traits>,
-    ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>>;
+    ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>;
+
+/// The kernel of a v4 pipeline: its N-major partitioner and its alpha / beta epilogue.
+template <typename P>
+using KernelOf = ck_tile::MxGemmTdmV4Kernel<
+    ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
+    P,
+    ck_tile::MxAlphaBetaEpilogue<ck_tile::MxAlphaBetaEpilogueProblem<P>>>;
+
+template <typename A,
+          typename B,
+          typename O,
+          index_t TileM,
+          index_t TileN,
+          index_t TileK,
+          index_t WarpM,
+          index_t WarpN,
+          index_t AtomM,
+          typename Tuning,
+          typename Traits>
+using Kernel =
+    KernelOf<Pipeline<A, B, O, TileM, TileN, TileK, WarpM, WarpN, AtomM, Tuning, Traits>>;
 
 /// rocKE's tuning knobs with its defaults after the cluster: GL2 distance, signal WMMAs (-1 for
 /// the default), local prefetch, half PLR, half-B order, segment interleave.
@@ -166,24 +187,66 @@ inline Inputs make_inputs(MxTdmV4Dtype a_dtype,
 /// rocKE's alpha for the sparse check.
 inline constexpr float kSparseAlpha = 1.0f / 64;
 
+/// The packed host arguments of a v4 run (k_batch 1, strides K for A and B, N for C and D).
+template <typename Kernel>
+typename Kernel::HostArgs host_args(const void* a,
+                                    const void* b,
+                                    const void* a_scale,
+                                    const void* b_scale,
+                                    const void* c,
+                                    void* d,
+                                    index_t M,
+                                    index_t N,
+                                    index_t K,
+                                    float alpha,
+                                    float beta)
+{
+    return typename Kernel::HostArgs{
+        a, a_scale, b, b_scale, c, d, 1, M, N, K, K, K, N, N, alpha, beta};
+}
+
+/// Launches Kernel: the grid of GridSize, and with a cluster tuning the cluster of ClusterSize.
+template <typename Kernel>
+float launch(const ck_tile::stream_config& s, const typename Kernel::KernelArgs& kargs)
+{
+    if(!Kernel::IsSupportedArgument(kargs))
+        throw std::runtime_error(Kernel::GetName() + ": " + Kernel::GetUnsupportedReason(kargs));
+    const dim3 grids  = Kernel::GridSize(kargs.M, kargs.N);
+    const dim3 blocks = Kernel::BlockSize();
+    if constexpr(Kernel::ClusterLaunch)
+    {
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+        return ck_tile::launch_kernel(
+            s, ck_tile::make_kernel<1>(Kernel{}, Kernel::ClusterSize(), grids, blocks, 0, kargs));
+#else
+        throw std::runtime_error(Kernel::GetName() + ": this build has no cluster launch");
+#endif
+    }
+    else
+    {
+        return ck_tile::launch_kernel(s,
+                                      ck_tile::make_kernel<1>(Kernel{}, grids, blocks, 0, kargs));
+    }
+}
+
 template <typename Kernel>
 std::vector<uint8_t> run_device(
     const Inputs& in, index_t M, index_t N, index_t K, float alpha, float beta, bool pass_c = true)
 {
 #ifdef MX_TDM_V4_DRY_RUN
     // CPU-only build: check that the instance runs the problem, launch nothing.
-    const typename Kernel::Args probe{in.a.data(),
-                                      in.b.data(),
-                                      in.a_scale.data(),
-                                      in.b_scale.data(),
-                                      pass_c ? in.c.data() : nullptr,
-                                      const_cast<uint8_t*>(in.c.data()),
-                                      M,
-                                      N,
-                                      K,
-                                      alpha,
-                                      beta};
-    const char* why = Kernel::GetUnsupportedReason(probe);
+    const auto probe = host_args<Kernel>(in.a.data(),
+                                         in.b.data(),
+                                         in.a_scale.data(),
+                                         in.b_scale.data(),
+                                         pass_c ? in.c.data() : nullptr,
+                                         const_cast<uint8_t*>(in.c.data()),
+                                         M,
+                                         N,
+                                         K,
+                                         alpha,
+                                         beta);
+    const char* why  = Kernel::GetUnsupportedReason(probe);
     EXPECT_EQ(why, nullptr) << Kernel::GetName() << ": " << why;
     return {};
 #else
@@ -195,18 +258,19 @@ std::vector<uint8_t> run_device(
     bs.ToDevice(in.b_scale.data());
     c.ToDevice(in.c.data());
     d.SetZero();
-    typename Kernel::Args args{a.GetDeviceBuffer(),
-                               b.GetDeviceBuffer(),
-                               as.GetDeviceBuffer(),
-                               bs.GetDeviceBuffer(),
-                               pass_c ? c.GetDeviceBuffer() : nullptr,
-                               d.GetDeviceBuffer(),
-                               M,
-                               N,
-                               K,
-                               alpha,
-                               beta};
-    ck_tile::launch_mx_gemm_tdm_v4<Kernel>(ck_tile::stream_config{nullptr, false}, args);
+    const auto args =
+        Kernel::MakeKernelArgs(host_args<Kernel>(a.GetDeviceBuffer(),
+                                                 b.GetDeviceBuffer(),
+                                                 as.GetDeviceBuffer(),
+                                                 bs.GetDeviceBuffer(),
+                                                 pass_c ? c.GetDeviceBuffer() : nullptr,
+                                                 d.GetDeviceBuffer(),
+                                                 M,
+                                                 N,
+                                                 K,
+                                                 alpha,
+                                                 beta));
+    launch<Kernel>(ck_tile::stream_config{nullptr, false}, args);
     HIP_CHECK_ERROR(hipDeviceSynchronize());
     std::vector<uint8_t> out(in.c.size());
     d.FromDevice(out.data());
@@ -293,19 +357,19 @@ void check(index_t M, index_t N, index_t K, std::initializer_list<float> betas =
     constexpr auto s = Kernel::kSpec;
     SCOPED_TRACE(Kernel::GetName() + " M" + std::to_string(M) + " N" + std::to_string(N) + " K" +
                  std::to_string(K));
-    Inputs in = make_inputs(s.a_dtype, s.b_dtype, s.out, M, N, K, s.tile_k);
-    typename Kernel::Args probe{in.a.data(),
-                                in.b.data(),
-                                in.a_scale.data(),
-                                in.b_scale.data(),
-                                in.c.data(),
-                                in.c.data(),
-                                M,
-                                N,
-                                K,
-                                kSparseAlpha,
-                                0.5f};
-    const char* why = Kernel::GetUnsupportedReason(probe);
+    Inputs in        = make_inputs(s.a_dtype, s.b_dtype, s.out, M, N, K, s.tile_k);
+    const auto probe = host_args<Kernel>(in.a.data(),
+                                         in.b.data(),
+                                         in.a_scale.data(),
+                                         in.b_scale.data(),
+                                         in.c.data(),
+                                         in.c.data(),
+                                         M,
+                                         N,
+                                         K,
+                                         kSparseAlpha,
+                                         0.5f);
+    const char* why  = Kernel::GetUnsupportedReason(probe);
     ASSERT_EQ(why, nullptr) << why;
     for(float beta : betas)
     {
