@@ -9,7 +9,10 @@
 //
 //   CONV_DW_TYPE      element type of all three tensors: float, _Float16 or __bf16
 //   CONV_DW_VARIANT   0 = W-strip floor, 1 = microtile, 2 = fused, 3 = LDS,
-//                     4 = backward-data gather (any stride; gather-term geometry)
+//                     4 = backward-data gather (any stride; gather-term geometry),
+//                     5 = backward-data stride phase blocks (gather-term geometry; 2-D, compile-time
+//                     filter and stride CONV_DW_STRIDE, unit dilation; channels-last: CONV_DW_VEC
+//                     channels per thread, CONV_DW_BK channel vectors per block)
 //   CONV_DW_LAYOUT    0 = channels-last (NHWC / NDHWC), 1 = channels-first (floor, 2-D LDS)
 //   CONV_DW_NDIMS     2 or 3 (3-D: floor or LDS)
 //   CONV_DW_FLIP      1 reflects the filter
@@ -74,8 +77,14 @@
 #ifndef CONV_DW_RW
 #define CONV_DW_RW 2
 #endif
+#ifndef CONV_DW_STRIDE
+#define CONV_DW_STRIDE 2
+#endif
+#ifndef CONV_DW_VEC
+#define CONV_DW_VEC 8
+#endif
 
-#if CONV_DW_LAYOUT == 1 && CONV_DW_VARIANT != 0 && CONV_DW_VARIANT != 4 \
+#if CONV_DW_LAYOUT == 1 && CONV_DW_VARIANT != 0 && CONV_DW_VARIANT != 4 && CONV_DW_VARIANT != 5 \
     && !(CONV_DW_VARIANT == 3 && CONV_DW_NDIMS == 2)
 #error "channels-first depthwise is served by the floor (CONV_DW_VARIANT 0) or the 2-D LDS tile"
 #endif
@@ -128,6 +137,16 @@ extern "C" __global__ void __launch_bounds__(CONV_DW_BLOCK)
 
 #if CONV_DW_VARIANT == 4
     dw::v5_gather_bwd<ElementType, CONV_DW_LAYOUT>(in, filter, out, p);
+#elif CONV_DW_VARIANT == 5 && CONV_DW_LAYOUT == 1
+    dw::v6_phase_block_nchw<ElementType, CONV_DW_KH, CONV_DW_KW, CONV_DW_STRIDE>(
+        in, filter, out, p);
+#elif CONV_DW_VARIANT == 5
+    dw::v6_phase_block_nhwc<ElementType,
+                            CONV_DW_KH,
+                            CONV_DW_KW,
+                            CONV_DW_STRIDE,
+                            CONV_DW_VEC,
+                            CONV_DW_BK>(in, filter, out, p);
 #elif CONV_DW_NDIMS == 3
 #if CONV_DW_VARIANT == 0
 #if CONV_DW_LAYOUT == 1

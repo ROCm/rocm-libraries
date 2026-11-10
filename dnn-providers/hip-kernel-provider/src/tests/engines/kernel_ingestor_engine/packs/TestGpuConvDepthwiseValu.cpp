@@ -65,6 +65,8 @@ struct Config
     std::string variant;
     int64_t kd = 0, kh = 0, kw = 0, wstrip = 0, th = 0, tw = 0;
     int64_t bd = 0, bh = 0, bw = 0, bk = 0, rd = 0, rh = 0, rw = 0;
+    /// Phase blocks: the baked stride; vec -1 = 16 bytes of the element type (channels-last).
+    int64_t stride = 0, vec = 0;
 
     std::string tag() const
     {
@@ -72,7 +74,7 @@ struct Config
                + std::to_string(kh) + "x" + std::to_string(kw) + "_t" + std::to_string(th) + "x"
                + std::to_string(tw) + "_b" + std::to_string(bd) + "x" + std::to_string(bh) + "x"
                + std::to_string(bw) + "x" + std::to_string(bk) + "_r" + std::to_string(rh) + "x"
-               + std::to_string(rw);
+               + std::to_string(rw) + "_s" + std::to_string(stride) + "_v" + std::to_string(vec);
     }
 };
 
@@ -99,6 +101,16 @@ Config blockedConfig(const std::string& variant, int64_t k, int64_t block, int64
     config.bh = config.bw = block;
     config.bk = bk;
     config.rh = config.rw = r;
+    return config;
+}
+
+Config phaseConfig(const std::string& layout, int64_t k, int64_t bk)
+{
+    Config config{layout, 2, "phase"};
+    config.kh = config.kw = k;
+    config.stride = 2;
+    config.bk = bk;
+    config.vec = layout == "NHWC" ? -1 : 0;
     return config;
 }
 
@@ -143,6 +155,15 @@ const std::vector<Config>& catalog()
             {
                 configs.push_back(Config{layout, ndims, "gather"});
             }
+        }
+        // Backward data only: stride-2 phase blocks.
+        for(const int64_t k : {3, 5, 7})
+        {
+            for(const int64_t bk : {8, 16, 32})
+            {
+                configs.push_back(phaseConfig("NHWC", k, bk));
+            }
+            configs.push_back(phaseConfig("NCHW", k, 0));
         }
         for(const auto& plane : {planeConfig(3, 16, 64, 1, 2, 4),
                                  planeConfig(3, 16, 32, 2, 2, 4),
@@ -199,7 +220,10 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition
            {"bk", config.bk},
            {"rd", config.rd},
            {"rh", config.rh},
-           {"rw", config.rw}};
+           {"rw", config.rw},
+           {"stride", config.stride},
+           {"vec",
+            config.vec == -1 ? int64_t{16} / (dataType == DataType::FLOAT ? 4 : 2) : config.vec}};
     return kernel;
 }
 
@@ -366,6 +390,24 @@ std::vector<DeviceCase> deviceCases()
     auto toOneH = depthwise(6, {4, 9}, {3, 3}, {0, 1}, false);
     toOneH.stride = {2, 2};
     cases.push_back({"NchwStride2OutputOneHigh", toOneH});
+    // Stride-2 filters the phase blocks bake, both layouts; channels that no vector or block
+    // divides, odd planes, padding below and at the filter's half, and none.
+    auto phase = [&](const char* name,
+                     int64_t c,
+                     std::vector<int64_t> in,
+                     int64_t k,
+                     int64_t pad,
+                     bool channelsLast) {
+        auto shape = depthwise(c, std::move(in), {k, k}, {pad, pad}, channelsLast);
+        shape.stride = {2, 2};
+        cases.push_back({name, shape});
+    };
+    phase("NchwPhase3x3", 19, {17, 14}, 3, 1, false);
+    phase("NhwcPhase5x5", 43, {19, 21}, 5, 2, true);
+    phase("NchwPhase5x5", 9, {16, 19}, 5, 2, false);
+    phase("NhwcPhase7x7", 24, {23, 18}, 7, 3, true);
+    phase("NchwPhase7x7Unpadded", 5, {21, 16}, 7, 0, false);
+    phase("NhwcPhase3x3Unpadded", 64, {15, 16}, 3, 0, true);
     return cases;
 }
 
@@ -757,15 +799,105 @@ TEST(TestConvDepthwiseValuCatalog, AnUncountedDeviceDeclinesOnlyTheUnitSizedWrw)
     }
 }
 
+// Host-only: what a phase-block config admits, one refusal per field it gates.
+bool phaseAdmits(const Config& config,
+                 ConvShape shape,
+                 ConvDirection direction = ConvDirection::BACKWARD_DATA,
+                 DataType dataType = DataType::HALF)
+{
+    shape.dataType = dataType;
+    const auto pack = packFor(direction);
+    const GraphFixture fixture(buildGraph(specFor(shape, direction)));
+    const auto bound = matchesGraph(pack, fixture.context());
+    return bound.has_value()
+           && matchesKernel(
+               pack, fixture.context(), kernelFor(config, dataType, direction), *bound);
+}
+
+ConvShape phaseShape(bool channelsLast)
+{
+    auto shape = depthwise(40, {17, 14}, {3, 3}, {1, 1}, channelsLast);
+    shape.stride = {2, 2};
+    return shape;
+}
+
+TEST(TestConvDepthwiseValuPhase, ServesStridedBackwardDataOfItsFilterAndStride)
+{
+    EXPECT_TRUE(phaseAdmits(phaseConfig("NHWC", 3, 16), phaseShape(true)));
+    EXPECT_TRUE(phaseAdmits(phaseConfig("NCHW", 3, 0), phaseShape(false)));
+    EXPECT_TRUE(phaseAdmits(phaseConfig("NHWC", 3, 16),
+                            phaseShape(true),
+                            ConvDirection::BACKWARD_DATA,
+                            DataType::FLOAT));
+}
+
+TEST(TestConvDepthwiseValuPhase, RefusesOneFieldAtATime)
+{
+    const auto base = phaseConfig("NHWC", 3, 16);
+    ASSERT_TRUE(phaseAdmits(base, phaseShape(true)));
+    // Forward.
+    EXPECT_FALSE(phaseAdmits(base, phaseShape(true), ConvDirection::FORWARD));
+    // Stride: another graph stride, or one axis only.
+    auto stride3 = phaseShape(true);
+    stride3.stride = {3, 3};
+    EXPECT_FALSE(phaseAdmits(base, stride3));
+    auto mixed = phaseShape(true);
+    mixed.stride = {2, 1};
+    EXPECT_FALSE(phaseAdmits(base, mixed));
+    auto unit = phaseShape(true);
+    unit.stride = {1, 1};
+    EXPECT_FALSE(phaseAdmits(base, unit));
+    // Filter.
+    auto k5 = phaseShape(true);
+    k5.filter = {5, 5};
+    k5.prePadding = k5.postPadding = {2, 2};
+    EXPECT_FALSE(phaseAdmits(base, k5));
+    // Dilation.
+    auto dilated = phaseShape(true);
+    dilated.dilation = {2, 2};
+    dilated.prePadding = dilated.postPadding = {2, 2};
+    EXPECT_FALSE(phaseAdmits(base, dilated));
+    // Rank.
+    auto threeD = depthwise(8, {5, 9, 10}, {3, 3, 3}, {1, 1, 1}, true);
+    threeD.stride = {2, 2, 2};
+    EXPECT_FALSE(phaseAdmits(base, threeD));
+    // Vector: past 16 bytes, not whole words, absent on channels-last, set on channels-first.
+    auto wide = base;
+    wide.vec = 16;
+    EXPECT_FALSE(phaseAdmits(wide, phaseShape(true)));
+    auto odd = base;
+    odd.vec = 3;
+    EXPECT_FALSE(phaseAdmits(odd, phaseShape(true)));
+    auto none = base;
+    none.vec = 0;
+    EXPECT_FALSE(phaseAdmits(none, phaseShape(true)));
+    auto nchwVec = phaseConfig("NCHW", 3, 0);
+    nchwVec.vec = 8;
+    EXPECT_FALSE(phaseAdmits(nchwVec, phaseShape(false)));
+    auto nchwBk = phaseConfig("NCHW", 3, 0);
+    nchwBk.bk = 8;
+    EXPECT_FALSE(phaseAdmits(nchwBk, phaseShape(false)));
+    // Channel vectors per block: positive, dividing the 256-thread block.
+    auto bk24 = base;
+    bk24.bk = 24;
+    EXPECT_FALSE(phaseAdmits(bk24, phaseShape(true)));
+    auto bk0 = base;
+    bk0.bk = 0;
+    EXPECT_FALSE(phaseAdmits(bk0, phaseShape(true)));
+    // Layout.
+    EXPECT_FALSE(phaseAdmits(base, phaseShape(false)));
+}
+
 // Host-only: every config of the catalog is admitted by some device case, so the device suite
 // runs every config (forward; a halo config's backward data runs on the same unit-stride case).
 TEST(TestConvDepthwiseValuCatalog, EveryConfigServesADeviceCase)
 {
     for(const auto& config : catalog())
     {
-        // The gather is a backward-data config; the rest serve forward too.
-        const auto direction
-            = config.variant == "gather" ? ConvDirection::BACKWARD_DATA : ConvDirection::FORWARD;
+        // The gather and the phase blocks are backward-data configs; the rest serve forward too.
+        const auto direction = config.variant == "gather" || config.variant == "phase"
+                                   ? ConvDirection::BACKWARD_DATA
+                                   : ConvDirection::FORWARD;
         const auto pack = packFor(direction);
         bool served = false;
         for(const auto& deviceCase : deviceCases())

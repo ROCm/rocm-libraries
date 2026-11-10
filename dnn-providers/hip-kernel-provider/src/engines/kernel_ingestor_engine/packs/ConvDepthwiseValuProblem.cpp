@@ -106,6 +106,10 @@ std::optional<DepthwiseVariant> variantNamed(const std::string& name)
     {
         return DepthwiseVariant::LDS;
     }
+    if(name == "phase")
+    {
+        return DepthwiseVariant::PHASE;
+    }
     if(name == "gather")
     {
         return DepthwiseVariant::GATHER;
@@ -284,6 +288,32 @@ std::optional<DepthwiseLaunch> launchFor(const DepthwiseValuProblem& problem,
         const auto& g = problem.gatherArgs;
         launch.block = 256;
         launch.grid = divUp(int64_t{g.n} * g.c * g.dOut * g.ho * g.wo, launch.block);
+        break;
+    }
+    case DepthwiseVariant::PHASE:
+    {
+        // A thread per dy position (qy, qx) of the phase grid covering dx: channels-last, VEC
+        // channels each and bk channel vectors per block; channels-first, one channel each.
+        const auto& g = problem.gatherArgs;
+        if(tile.stride < 1
+           || (problem.layout == DepthwiseLayout::CHANNELS_LAST
+               && (tile.vec < 1 || tile.bk < 1 || 256 % tile.bk != 0)))
+        {
+            return std::nullopt;
+        }
+        const int64_t qh = (int64_t{g.ho} - 1 + g.ph) / tile.stride + 1;
+        const int64_t qw = (int64_t{g.wo} - 1 + g.pw) / tile.stride + 1;
+        const int64_t positions = int64_t{g.n} * qh * qw;
+        launch.block = 256;
+        launch.grid
+            = problem.layout == DepthwiseLayout::CHANNELS_LAST
+                  ? divUp(positions, 256 / tile.bk) * divUp(int64_t{g.c}, tile.bk * tile.vec)
+                  : divUp(positions * g.c, launch.block);
+        // The kernel indexes positions (times channels, channels-first) in 32 bits.
+        if(positions * g.c > INT_LIMIT)
+        {
+            return std::nullopt;
+        }
         break;
     }
     case DepthwiseVariant::MICROTILE:
