@@ -995,7 +995,7 @@ int runEngineMode(hipdnnHandle_t handle,
     }
     // Flushed per line: a later graph of a --graph-list that crashes the process must not take
     // the lines already measured with it.
-    std::cout << output.dump() << std::endl;
+    std::cout << output.dump() << '\n' << std::flush;
     return error.is_good() ? 0 : 1;
 }
 
@@ -1121,7 +1121,8 @@ int runGraphList(hipdnnHandle_t handle, const Options& options)
                                     {"is_valid", false},
                                     {"skip_reason", failure}}
                          .dump()
-                  << std::endl;
+                  << '\n'
+                  << std::flush;
         allMeasured = false;
     }
     return allMeasured ? 0 : 1;

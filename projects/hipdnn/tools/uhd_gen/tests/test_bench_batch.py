@@ -5,6 +5,7 @@ executable that answers `--graph` and `--graph-list` as hipdnn_bench does."""
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -12,16 +13,18 @@ import pytest
 pytest.importorskip("pandas")
 
 # One immediate response per graph, as hipdnn_bench --collect-immediate writes it. A graph
-# whose id names "crash" kills a --graph-list process when reached; one naming "stall" holds
-# a --graph-list process for STALL_SECONDS before it answers; one naming "poison" is measured
-# but fails every graph a --graph-list process measures after it, as a broken device or
-# handle would; one naming "bad" fails on its own. Every process start is appended to
-# calls.txt beside the script.
+# whose id names "crash" kills a --graph-list process when reached; one naming "slow" takes
+# SLOW_SECONDS in a --graph-list process; one naming "stall" starts a child that holds the
+# output pipes, then holds a --graph-list process for STALL_SECONDS before it answers; one
+# naming "poison" is measured but fails every graph a --graph-list process measures after
+# it, as a broken device or handle would; one naming "bad" fails on its own. Every process
+# start is appended to calls.txt beside the script.
 _BENCH = r"""
-import json, os, sys, time
+import json, os, subprocess, sys, time
 from pathlib import Path
 
-STALL_SECONDS = 6
+SLOW_SECONDS = 1.2
+STALL_SECONDS = 90
 argv = sys.argv[1:]
 here = Path(__file__).parent
 with open(here / "calls.txt", "a", encoding="utf-8") as calls:
@@ -36,7 +39,11 @@ def answer(path, listed):
     if "crash" in graph["id"] and listed:
         sys.stdout.flush()
         os._exit(3)
+    if "slow" in graph["id"] and listed:
+        time.sleep(SLOW_SECONDS)
     if "stall" in graph["id"] and listed:
+        # Inherits stdout and stderr, as a helper the bench or a wrapper started would.
+        subprocess.Popen([sys.executable, "-c", f"import time; time.sleep({STALL_SECONDS})"])
         time.sleep(STALL_SECONDS)
     reason = "hipErrorIllegalAddress" if poisoned else None
     poisoned = poisoned or ("poison" in graph["id"] and listed)
@@ -199,21 +206,69 @@ def test_graphs_a_poisoned_batch_fails_are_measured_alone(tmp_path, monkeypatch)
     assert manifest["failed_graphs"] == []
 
 
-def test_a_batch_that_stalls_on_a_graph_is_cut_at_the_per_graph_timeout(
+def test_a_batch_that_stalls_is_killed_with_what_it_started_at_the_timeout(
     tmp_path, monkeypatch
 ):
-    """--bench-timeout bounds each graph of a batch, not the batch: a graph that stalls for
-    3x the limit (well inside 8x, the whole batch's share) gets the batch killed, and the
-    graphs it left are measured alone."""
+    """A graph that stalls gets the batch killed after --bench-timeout, with the child it
+    started that still holds the output pipes, so the run returns in seconds rather than
+    when that child exits; the graphs the batch left are measured alone."""
     monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
-    world = _world(tmp_path, ["g0", "stall1", *(f"g{i}" for i in range(2, 8))])
+    world = _world(tmp_path, ["g0", "stall1", "g2", "g3"])
 
-    assert _collect(world, tmp_path / "out", 8, "--bench-timeout", "2") == 0
+    started = time.monotonic()
+    assert _collect(world, tmp_path / "out", 4, "--bench-timeout", "2") == 0
+    elapsed = time.monotonic() - started
 
-    calls = world["calls"].read_text(encoding="utf-8").split()
-    assert calls[0] == "list"
-    assert calls[1:] and set(calls[1:]) == {"single"}
-    assert len(_rows(tmp_path / "out")) == 8
+    assert elapsed < 45, f"the run waited {elapsed:.0f} s for the stalled batch's child"
+    assert (
+        world["calls"].read_text(encoding="utf-8").split() == ["list"] + ["single"] * 3
+    )
+    assert len(_rows(tmp_path / "out")) == 4
+
+
+def test_a_batch_longer_than_the_timeout_runs_while_each_graph_answers_in_time(
+    tmp_path, monkeypatch
+):
+    """--bench-timeout bounds each graph of a batch, not the batch: five graphs of 1.2 s
+    each take 6 s under a 3 s limit and still finish in one process."""
+    monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
+    world = _world(tmp_path, [f"slow{i}" for i in range(5)])
+
+    assert _collect(world, tmp_path / "out", 5, "--bench-timeout", "3") == 0
+
+    assert world["calls"].read_text(encoding="utf-8").split() == ["list"]
+    assert len(_rows(tmp_path / "out")) == 5
+
+
+def test_each_metric_of_a_batch_keeps_its_rows_on_their_graphs(tmp_path, monkeypatch):
+    """A graph that fails on the first metric is left out of the second metric's batch;
+    every other graph's row stays its own in both corpora."""
+    monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
+    world = _world(tmp_path, ["g0", "bad1", "g2", "g3"])
+
+    assert (
+        _collect(
+            world,
+            tmp_path / "out",
+            4,
+            "--metric",
+            "tflops",
+            "time",
+            "--max-graph-failures",
+            "0.5",
+        )
+        == 0
+    )
+
+    for metric in ("tflops", "time"):
+        corpus = json.loads(
+            (tmp_path / "out" / f"corpus_{metric}.json").read_text(encoding="utf-8")
+        )
+        assert {row["benchmark"]: row["avgTimeMs"] for row in corpus} == {
+            "g0": 1.0,
+            "g2": 1.2,
+            "g3": 1.3,
+        }, metric
 
 
 def test_a_catalog_sweep_is_not_batched(tmp_path, caplog):

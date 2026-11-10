@@ -9,8 +9,10 @@ import hashlib
 import json
 import logging
 import math
+import os
 import queue
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -668,12 +670,37 @@ def _descriptor(tree: Path, suffix: str, identity: str) -> tuple[Path, dict]:
     return matches[0]
 
 
+# Seconds the output pipes may stay open once the bench has finished or been killed. A process
+# that left the bench's process tree can still hold them, and a run must return anyway.
+_PIPE_DRAIN_SECONDS = 5.0
+
+
+def _kill_tree(process: subprocess.Popen) -> None:
+    """Kill `process` and every process it started: a `--bench` wrapper that does not `exec`
+    leaves the bench as its child, and either may have started helpers that hold the pipes.
+    """
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+        )
+    else:
+        try:
+            # `_run_bench` starts the bench in a session of its own, whose id is its pid.
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.kill()
+
+
 def _communicate(
     process: subprocess.Popen, timeout: float | None, per_line: bool
 ) -> tuple[bool, str, str]:
-    """Read `process`'s streams to their end, killing it once `timeout` seconds pass: since
-    it started, or with `per_line` since it last wrote a line to stdout. Returns whether it
-    was killed, and the output read until then.
+    """Read `process`'s streams to their end, killing its process tree once `timeout` seconds
+    pass: since it started, or with `per_line` since it last wrote a line to stdout. Returns
+    whether it was killed, and the output read until then. An interruption (Ctrl+C) kills the
+    tree too: on POSIX the bench runs in a session of its own and does not receive it.
     """
     lines: queue.Queue = queue.Queue()
     errors: list[str] = []
@@ -696,35 +723,43 @@ def _communicate(
     output: list[str] = []
     deadline = None if timeout is None else time.monotonic() + timeout
     killed = False
-    while True:
-        try:
-            line = lines.get(
-                timeout=(
-                    None if deadline is None else max(0.0, deadline - time.monotonic())
+    try:
+        while True:
+            try:
+                line = lines.get(
+                    timeout=(
+                        None
+                        if deadline is None
+                        else max(0.0, deadline - time.monotonic())
+                    )
                 )
-            )
-        except queue.Empty:
-            killed = True
-            break
-        if line is None:
-            break
-        output.append(line)
-        if per_line and timeout is not None:
-            deadline = time.monotonic() + timeout
-    if not killed:
-        try:
-            process.wait(
-                timeout=(
-                    None if deadline is None else max(0.0, deadline - time.monotonic())
+            except queue.Empty:
+                killed = True
+                break
+            if line is None:
+                break
+            output.append(line)
+            if per_line and timeout is not None:
+                deadline = time.monotonic() + timeout
+        if not killed:
+            try:
+                process.wait(
+                    timeout=(
+                        None
+                        if deadline is None
+                        else max(0.0, deadline - time.monotonic())
+                    )
                 )
-            )
-        except subprocess.TimeoutExpired:
-            killed = True
+            except subprocess.TimeoutExpired:
+                killed = True
+    except BaseException:
+        _kill_tree(process)
+        raise
     if killed:
-        process.kill()
-    # The pipes close when the process (and anything it started) exits.
+        _kill_tree(process)
+    drained = time.monotonic() + _PIPE_DRAIN_SECONDS
     for pump in pumps:
-        pump.join()
+        pump.join(max(0.0, drained - time.monotonic()))
     process.wait()
     return killed, "".join(output), "".join(errors)
 
@@ -778,6 +813,8 @@ def _run_bench(
             text=True,
             encoding="utf-8",
             errors="replace",
+            # A session of its own, so a timeout can kill the bench with everything it started.
+            start_new_session=os.name != "nt",
         )
         killed, stdout, stderr = _communicate(process, timeout, per_line)
         returncode = None if killed else process.returncode
