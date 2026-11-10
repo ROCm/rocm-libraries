@@ -229,36 +229,118 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 }
 #endif
 
+// Record a failure without throwing, so these are safe in a destructor.
+// Inline so GOOGLE_TEST is taken from the including translation unit.
+inline void log_hip_error(const char* call, hipError_t status)
+{
+#ifdef GOOGLE_TEST
+    EXPECT_EQ(status, hipSuccess) << call << " failed: " << hipGetErrorString(status);
+#else
+    fprintf(
+        stderr, "%s failed: %s (%d)\n", call, hipGetErrorString(status), static_cast<int>(status));
+#endif
+}
+
+inline void log_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+#ifdef GOOGLE_TEST
+    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS)
+        << call << " failed: " << hipsparseStatusToString(status);
+#else
+    fprintf(stderr, "%s failed: %s\n", call, hipsparseStatusToString(status));
+#endif
+}
+
 // Throw so a failure in a helper unwinds to the test or benchmark boundary.
-inline void throw_on_hip_error(const char* call, hipError_t status, const char* file, int line)
+// file and line are optional so existing two-argument callers keep their message.
+[[noreturn]] inline void
+    throw_hip_error(const char* call, hipError_t status, const char* file = nullptr, int line = 0)
 {
-    if(status == hipSuccess)
-    {
-        return;
-    }
-
     std::ostringstream message;
-    message << file << ":" << line << ": " << call << " failed: " << hipGetErrorString(status)
-            << " (" << static_cast<int>(status) << ")";
+    if(file != nullptr)
+    {
+        message << file << ":" << line << ": ";
+    }
+    message << call << " failed: " << hipGetErrorString(status) << " (" << static_cast<int>(status)
+            << ")";
     throw std::runtime_error(message.str());
 }
 
-inline void
-    throw_on_hipsparse_error(const char* call, hipsparseStatus_t status, const char* file, int line)
+[[noreturn]] inline void throw_hipsparse_error(const char*       call,
+                                               hipsparseStatus_t status,
+                                               const char*       file = nullptr,
+                                               int               line = 0)
 {
-    if(status == HIPSPARSE_STATUS_SUCCESS)
-    {
-        return;
-    }
-
     std::ostringstream message;
-    message << file << ":" << line << ": " << call
-            << " failed: " << hipsparseStatusToString(status);
+    if(file != nullptr)
+    {
+        message << file << ":" << line << ": ";
+    }
+    message << call << " failed: " << hipsparseStatusToString(status) << " ("
+            << static_cast<int>(status) << ")";
     throw std::runtime_error(message.str());
 }
 
-#define CHECK_HIP_ERROR(ERROR) throw_on_hip_error(#ERROR, (ERROR), __FILE__, __LINE__)
-#define CHECK_HIPSPARSE_ERROR(ERROR) throw_on_hipsparse_error(#ERROR, (ERROR), __FILE__, __LINE__)
+// Constructors throw so a failed create cannot be used by the rest of the test.
+// Destructors record a failed destroy without throwing, so teardown stays safe
+// while another exception is unwinding.
+inline void throw_if_hip_error(const char* call,
+                               hipError_t  status,
+                               const char* file = nullptr,
+                               int         line = 0)
+{
+    if(status != hipSuccess)
+    {
+        throw_hip_error(call, status, file, line);
+    }
+}
+
+inline void throw_if_hipsparse_error(const char*       call,
+                                     hipsparseStatus_t status,
+                                     const char*       file = nullptr,
+                                     int               line = 0)
+{
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        throw_hipsparse_error(call, status, file, line);
+    }
+}
+
+inline void log_if_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        log_hipsparse_error(call, status);
+    }
+}
+
+#define CHECK_HIP_ERROR(ERROR) throw_if_hip_error(#ERROR, (ERROR), __FILE__, __LINE__)
+#define CHECK_HIPSPARSE_ERROR(ERROR) throw_if_hipsparse_error(#ERROR, (ERROR), __FILE__, __LINE__)
+
+// EXPECT_HIPSPARSE_STATUS
+#ifdef GOOGLE_TEST
+#define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)                                                 \
+    do                                                                                           \
+    {                                                                                            \
+        hipsparseStatus_t expect_hipsparse_status_status_ = (STATUS);                            \
+        hipsparseStatus_t expect_hipsparse_status_expect_ = (EXPECT);                            \
+        ASSERT_EQ(expect_hipsparse_status_status_, expect_hipsparse_status_expect_)              \
+            << "received " << hipsparseStatusToString(expect_hipsparse_status_status_)           \
+            << ", expected " << hipsparseStatusToString(expect_hipsparse_status_expect_) << "."; \
+    } while(0)
+#else
+#define EXPECT_HIPSPARSE_STATUS2(status, expect)                                            \
+    if(status != expect)                                                                    \
+    {                                                                                       \
+        std::cerr << "hipSPARSE status error: Expected " << hipsparseStatusToString(expect) \
+                  << ", received " << hipsparseStatusToString(status) << std::endl;         \
+        if(expect == HIPSPARSE_STATUS_SUCCESS)                                              \
+        {                                                                                   \
+            exit(EXIT_FAILURE);                                                             \
+        }                                                                                   \
+    }
+#endif
+#define EXPECT_HIPSPARSE_STATUS(STATUS, EXPECT) EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)
 
 inline void
     throw_on_generate_matrix_error(const char* call, bool generated, const char* file, int line)
