@@ -217,6 +217,8 @@ rules:
       pools are laid out to match (L1 rejected candidate "A shared K/V page table only with equal page
       sizes"). The frontend fixes each table's width from its own page size, so one tensor cannot be both
       widths unless they happen to agree. Read in code, not run.
+    debatable: true
+    debatable_reason: "A shared table read with two page sizes is well defined only if the caller lays out both pools to match; the frontend width check makes it unstateable in general."
   - id: F-SCALE-TENSOR-BY-VALUE
     kind: frontend
     reason: "A scale tensor must be passed by value (a compile-time constant or a runtime parameter), so a scale held in device memory cannot be stated."
@@ -397,7 +399,7 @@ expressibility:
     alibi_head_count: "the query head count is Q dims[1] (NODE::pre_validate_node, Rule 4, checks only divisibility by the K and V head counts); set_alibi_mask(true) (SA::set_alibi_mask) takes no slope or head-count setting."
     descale_granularity: "per_head: a FLOAT descale tensor [B, H_kv, 1, 1] in device memory; finer: any larger shape. The node has no descale shape check (NODE::pre_validate_node; setters SA::set_descale_q, SA::set_descale_k, SA::set_descale_v). The references take a scalar or [B, H_kv, 1, 1] (CpuFpReferenceSdpa.hpp::validateDescaleShape) and refuse a pass-by-value descale with more than one element (PU::isSupportedSdpaFwdNode: 'A pass-by-value descale is staged as one value, so it must be one element')."
     max_sumexp_output_alone: "max_only: set_logit_max alone; sum_exp_only: set_score_sum_exp alone (SA::set_logit_max, SA::set_score_sum_exp). No node check pairs them (NODE::pre_validate_node)."
-    batch_packing_per_side: "ragged_q_side / ragged_kv_side: set_ragged_offset on the tensors of one side only (TA::set_ragged_offset). The frontend checks only the offset tensor itself (DH::createOrFindTensorDesc). Each ragged tensor takes its own offset tensor: offsets count that tensor's elements (RaggedTokenBoundaries.hpp::raggedTokenBoundaries). Run on the GPU on gfx942."
+    batch_packing_per_side: "ragged_q_side / ragged_kv_side: set_ragged_offset on the tensors of one side only (TA::set_ragged_offset). The frontend checks only the offset tensor itself (DH::createOrFindTensorDesc). Each ragged tensor takes its own offset tensor: offsets count that tensor's elements (RaggedTensor.hpp::raggedBatches at 4faed2e1219). Run on the GPU on gfx942."
     matmul_input_precision_fp8: "set_mma_core_mode takes any DataType (SA::SdpaAttributes::mma_core_mode; SA::set_mma_core_mode)."
     dropout_mask_broadcast: "the dropout mask dims [1 or B, 1 or H_q, S_q, S_kv]; the node does not check the dropout mask shape (NODE::pre_validate_node). The references take [B or 1, H or 1, Sq, key extent], the key extent being max_seq_len_kv when K is paged (PU::isSupportedSdpaDropout); rng_dump is still compared with K's dim 2 (PU::isSdpaPhiloxDropoutWithDump)."
     head_dim_stride: "head_dim_strided: a D stride of 2 or more through set_stride; d_not_innermost: strides that put D outside the innermost place. The tensor check compares only the stride count with the dim count (TA::validate)."
@@ -441,9 +443,9 @@ api_only_settings:
   - {id: runtime_shape_overrides, values: [off, on], cite: "G::set_override_shape_enabled; G::execute, the overloads that take override shapes and strides or an override map"}
   - {id: workspace_memory, values: [none, enough], cite: "G::get_workspace_size; G::execute"}
 
-# Debatable count for this layer: 8 of the 18 rules
+# Debatable count for this layer: 9 of the 18 rules
 # (F-ALIBI-NO-SLOPES, F-SCALE-NO-DEFAULT-SOURCE, F-ONE-DIAGONAL, F-RAGGED-OFFSETS-ARE-LENGTHS,
-# F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN, F-SCALE-TENSOR-BY-VALUE, F-SINK-FLOAT-ONLY,
-# F-BLOCK-MASK-TILE-128), plus 2 inferred mappings that are not rules (matmul_input_precision
+# F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN, F-SHARED-TABLE-ONE-WIDTH, F-SCALE-TENSOR-BY-VALUE,
+# F-SINK-FLOAT-ONLY, F-BLOCK-MASK-TILE-128), plus 2 inferred mappings that are not rules (matmul_input_precision
 # native = NOT_SET; window whole_span = −1).
-debatable_count: {rules: 8, mappings: 2}
+debatable_count: {rules: 9, mappings: 2}
