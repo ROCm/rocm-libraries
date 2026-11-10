@@ -1899,6 +1899,9 @@ matches → zero re-pack. See §17.4 for the quantitative reduction.
 | `split_barrier` | GEMM `TraitSpec` (WMMA `mem` pipeline, with `tdm`, depth >= 2, `split_k == 1`) | False / True | Split the per-tile workgroup barrier into signal and wait, so the WMMAs of the tile overlap the wait. Named `spb` |
 | `tdm_alternate_issuers` | GEMM `TraitSpec` (with `tdm`, depth 2, at least four waves) | False / True | Give each LDS half its own pair of TDM issuer waves, taking the refill off the waiting waves' critical path. Named `alti` |
 | `tdm_early_refill` | GEMM `TraitSpec` (with `split_barrier` and `tdm_alternate_issuers`, depth 2) | False / True | Refill an LDS half as soon as every wave has read it. Named `erf` |
+| `lds_store_after_mma` | GEMM `TraitSpec` (WMMA compv4 double-buffered loop: gfx1201) | False / True | In the double-buffered K loop, issue the next tile's global loads, run the WMMAs, then do its LDS stores, so the loads stay in flight across the WMMAs instead of being waited on before them. Costs the loaded tile's VGPRs across the WMMAs. Named `lsam` |
+| `group_m` | GEMM `TraitSpec` (WMMA path; not with `chiplet_swizzle`) | 0 / M-tiles per group | GROUP_M raster: launch workgroups in groups of `group_m` M-tiles so those running together share A/B panels in L2 (`super_tile_swizzle_dynamic` without the XCD remap). Named `gm{N}` |
+| `k_stagger` / `k_stagger_step` | GEMM `TraitSpec` (WMMA compv4 double-buffered loop; `split_k == 1`, no `pad_k`) | 0 / 1 | Workgroup `w` starts its K loop at tile `(w mod k_stagger) * k_stagger_step` and wraps at K. When K is a large power of two (or 3 × 2048) the A/B row stride is too, and workgroups walking K in lockstep load from the same memory channels; staggering spreads them. The same tiles are summed in another order. Named `kst{S}x{step}` |
 | `ab_load_elem_bytes` | GEMM `TraitSpec` (not with `tdm`) | None (the operand's size) / 1 / 2 / 4 / 8 | Overrides the element width the A/B global loads are vectorised for, so two widths can be compared in one binary. TDM loads whole tiles and never reads it, so it is rejected with `tdm`. Named `abeb{N}` only when set |
 | `async_dma` | conv_implicit_gemm, conv_implicit_gemm_wgrad, conv_implicit_gemm_dgrad | False / True | Enable direct global → LDS DMA (`raw_ptr_buffer_load_lds`). It **pins the schedule**: forward conv and wgrad both build `SchedulePolicy.for_pipeline("async_dma")` (interwave, `s_setprio 1`) and ignore `spec.pipeline` on that leg, which is why the sweep pins the pipeline to `"mem"` there instead of compiling one body under five kernel names. Incompatible with `pipeline="basic"` (all conv families) and with `pipeline="wavelet"` (forward conv); rejected outright on dgrad by `is_valid_dgrad_spec` (the dgrad builder has no direct global→LDS path). A **swept axis**, not a run-level flag — unlike `lds_k_outer` it is not deducible from `(arch, spec)`: it removes the register staging of the tile, but it also forces the LDS pad to 0 (the intrinsic writes a packed lane-contiguous tile) and coarsens the load-width ladder to the chunk widths the intrinsic accepts, and both terms are functions of tile width and channel run, which are themselves sweep axes. On wgrad it *requires* `lds_k_outer=True`; on dgrad it is *rejected* under `lds_k_outer` (the tilde builder has no direct global→LDS path). Python-unrolls the K loop, so it is bounded by `_MAX_UNROLLED_K_ITERS` |
 | `_MAX_UNROLLED_K_ITERS` | `instances/common/conv_implicit_gemm_wgrad.py` module constant (mirrored as `ROCKE_MAX_UNROLLED_K_ITERS` in the C engine) | 128 | Cap on `ceil((wg_K_padded / split_k) / tile_k)` for the statically-unrolled wgrad `async_dma` loop. A build-practicality bound, not a hardware one: over the cap `is_valid_wgrad_spec` rejects the spec, so raise `split_k` or `tile_k` rather than raising the constant. `pipeline="basic"` no longer applies — it uses a runtime `scf.for` loop and is not bounded by this constant |
@@ -2476,6 +2479,19 @@ sweep CSVs.
   no split-K binary at all. Scope each validator rule to the code path
   that consumes it, and test reachability through the AOT grid, not a
   hand-built spec.
+- **VGPR-to-AGPR spill at the 512-register ceiling computes wrong
+  results.** A kernel that reaches the register-file ceiling makes comgr
+  spill VGPRs into AGPRs, and that path has produced kernels that are
+  silently wrong (a two-stage TF32 wgrad on gfx950, a preloading MFMA
+  dgrad), while the same IR is correct at `-O1` or with
+  `-amdgpu-spill-vgpr-to-agpr=0`. Keep such kernels out of the grid with
+  a register estimate in the validator (`_tf32_conv_spec_reason`'s
+  accumulator cap, `direct_mfma_knobs_reason`'s preload budget), not by
+  testing after the fact. Count operands at their storage width: fp32
+  storage holds one element per register where fp16 / bf16 packs two,
+  and an emulated TF32 atom (BF16x3) keeps each fragment's bf16 halves
+  live next to it. A 16-bit estimate applied to fp32 storage admits
+  kernels that spill.
 
 ### 14.2 Performance Failures
 
@@ -2632,6 +2648,11 @@ An optimization is done when:
   timing observation only; the cause was not classified with hardware
   counters. When no cap avoids such a loss, turn the automatic split off for
   that dtype and leave the explicit degree as an opt-in.
+- If a kernel family gains a wider storage dtype (fp32 next to fp16 /
+  bf16), re-derive every register estimate and budget for it before
+  enumerating the new grid (§14.1). Compile the new jobs and confirm none
+  spills; a budget that is conservative for the wider dtype costs some
+  clean binaries, which is cheaper than one silently wrong kernel.
 
 ### 16.2 Anti-patterns (what to avoid)
 

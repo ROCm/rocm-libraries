@@ -29,6 +29,7 @@
 
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
 #include "rocke/instance_gemm_internal.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* Widest global A/B load vector, in elements: the 4-dword buffer_load limit is
  * 16 bytes, so a 1-byte operand tops out at 16 elements. The pad_k gather
@@ -169,6 +170,55 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
     rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
 }
 
+/* One VGPR-staged LDS store: emitted now when defer_stores is NULL (the
+ * historical order, byte-identical), else captured for
+ * rocke_gemm_flush_lds_stores. n == 0 is a scalar store. Mirrors Python
+ * emit_load_phase's _lds_store. */
+static void rocke_gemm_lds_store(rocke_ir_builder_t* b,
+                                 rocke_gemm_lds_store_queue_t* defer_stores,
+                                 const rocke_tile_window_t* win,
+                                 rocke_value_t* const* lidx,
+                                 rocke_value_t* val,
+                                 int n)
+{
+    if(defer_stores == NULL)
+    {
+        if(n == 0)
+            rocke_tile_window_store_scalar(b, win, lidx, 2, val, 0);
+        else
+            rocke_tile_window_store_vec(b, win, lidx, 2, val, n);
+        return;
+    }
+    if(defer_stores->count >= ROCKE_GEMM_MAX_LDS_STORES)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "lds_store_after_mma: more than %d LDS stores per K tile",
+                        ROCKE_GEMM_MAX_LDS_STORES);
+        return;
+    }
+    rocke_gemm_lds_store_t* s = &defer_stores->items[defer_stores->count++];
+    s->win = *win;
+    s->idx[0] = lidx[0];
+    s->idx[1] = lidx[1];
+    s->val = val;
+    s->n = n;
+}
+
+void rocke_gemm_flush_lds_stores(rocke_gemm_build_ctx_t* ctx, rocke_gemm_lds_store_queue_t* q)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    for(int i = 0; i < q->count; ++i)
+    {
+        rocke_gemm_lds_store_t* s = &q->items[i];
+        if(s->n == 0)
+            rocke_tile_window_store_scalar(b, &s->win, s->idx, 2, s->val, 0);
+        else
+            rocke_tile_window_store_vec(b, &s->win, s->idx, 2, s->val, s->n);
+    }
+    q->count = 0;
+}
+
 void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                 rocke_value_t* A_dst,
                                 rocke_value_t* B_dst,
@@ -177,7 +227,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                 rocke_value_t* parity_v)
 {
     rocke_gemm_emit_hook_t none = {NULL, NULL};
-    rocke_gemm_emit_load_phase_ex(ctx, A_dst, B_dst, k_off, parity_imm, parity_v, none);
+    rocke_gemm_emit_load_phase_ex(ctx, A_dst, B_dst, k_off, parity_imm, parity_v, none, NULL);
 }
 
 void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
@@ -186,7 +236,8 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                                    rocke_value_t* k_off,
                                    int parity_imm,
                                    rocke_value_t* parity_v,
-                                   rocke_gemm_emit_hook_t before_issue)
+                                   rocke_gemm_emit_hook_t before_issue,
+                                   rocke_gemm_lds_store_queue_t* defer_stores)
 {
     rocke_ir_builder_t* b = ctx->b;
     const rocke_gemm_universal_spec_t* spec = ctx->spec;
@@ -497,23 +548,23 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                                     : rocke_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
             rocke_value_t* lidx[2] = {LD_ROW(row, ctx->block_m), rocke_gemm_swz_col(ctx, col, row)};
             if(load_vec == 1)
-                rocke_tile_window_store_scalar(b, &a_lds_tile, lidx, 2, a_val, 0);
+                rocke_gemm_lds_store(b, defer_stores, &a_lds_tile, lidx, a_val, 0);
             else
-                rocke_tile_window_store_vec(b, &a_lds_tile, lidx, 2, a_val, load_vec);
+                rocke_gemm_lds_store(b, defer_stores, &a_lds_tile, lidx, a_val, load_vec);
         }
         else if(load_vec == 1)
         {
             rocke_value_t* gidx[3] = {rocke_b_const_i32(b, 0), row, col};
             rocke_value_t* a_val = rocke_tile_window_load_scalar(b, &a_global_tile, gidx, 3);
             rocke_value_t* lidx[2] = {LD_ROW(row, ctx->block_m), rocke_gemm_swz_col(ctx, col, row)};
-            rocke_tile_window_store_scalar(b, &a_lds_tile, lidx, 2, a_val, 0);
+            rocke_gemm_lds_store(b, defer_stores, &a_lds_tile, lidx, a_val, 0);
         }
         else
         {
             rocke_value_t* gidx[3] = {rocke_b_const_i32(b, 0), row, col};
             rocke_value_t* a_val = rocke_tile_window_load_vec(b, &a_global_tile, gidx, 3, load_vec);
             rocke_value_t* lidx[2] = {LD_ROW(row, ctx->block_m), rocke_gemm_swz_col(ctx, col, row)};
-            rocke_tile_window_store_vec(b, &a_lds_tile, lidx, 2, a_val, load_vec);
+            rocke_gemm_lds_store(b, defer_stores, &a_lds_tile, lidx, a_val, load_vec);
         }
     }
 
@@ -564,9 +615,9 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                 rocke_value_t* lidx[2]
                     = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
                 if(load_vec == 1)
-                    rocke_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
+                    rocke_gemm_lds_store(b, defer_stores, &b_lds_tile, lidx, b_val, 0);
                 else
-                    rocke_tile_window_store_vec(b, &b_lds_tile, lidx, 2, b_val, load_vec);
+                    rocke_gemm_lds_store(b, defer_stores, &b_lds_tile, lidx, b_val, load_vec);
             }
             else if(load_vec == 1)
             {
@@ -574,7 +625,7 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                     = rocke_b_global_load(b, ctx->Bp, glob_off, ctx->storage_dtype, 0);
                 rocke_value_t* lidx[2]
                     = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
-                rocke_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
+                rocke_gemm_lds_store(b, defer_stores, &b_lds_tile, lidx, b_val, 0);
             }
             else
             {
@@ -582,7 +633,7 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                     = rocke_b_global_load_vN(b, ctx->Bp, glob_off, ctx->storage_dtype, load_vec, 0);
                 rocke_value_t* lidx[2]
                     = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
-                rocke_tile_window_store_vec(b, &b_lds_tile, lidx, 2, b_val, load_vec);
+                rocke_gemm_lds_store(b, defer_stores, &b_lds_tile, lidx, b_val, load_vec);
             }
         }
     }
@@ -615,9 +666,9 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                 rocke_value_t* lidx[2]
                     = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
                 if(load_vec == 1)
-                    rocke_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
+                    rocke_gemm_lds_store(b, defer_stores, &b_lds_tile, lidx, b_val, 0);
                 else
-                    rocke_tile_window_store_vec(b, &b_lds_tile, lidx, 2, b_val, load_vec);
+                    rocke_gemm_lds_store(b, defer_stores, &b_lds_tile, lidx, b_val, load_vec);
             }
             else if(load_vec == 1)
             {
@@ -625,7 +676,7 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                 rocke_value_t* b_val = rocke_tile_window_load_scalar(b, &b_global_tile, gidx, 3);
                 rocke_value_t* lidx[2]
                     = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
-                rocke_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
+                rocke_gemm_lds_store(b, defer_stores, &b_lds_tile, lidx, b_val, 0);
             }
             else
             {
@@ -634,7 +685,7 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                     = rocke_tile_window_load_vec(b, &b_global_tile, gidx, 3, load_vec);
                 rocke_value_t* lidx[2]
                     = {LD_ROW(row, ctx->block_n), rocke_gemm_swz_col(ctx, col, row)};
-                rocke_tile_window_store_vec(b, &b_lds_tile, lidx, 2, b_val, load_vec);
+                rocke_gemm_lds_store(b, defer_stores, &b_lds_tile, lidx, b_val, load_vec);
             }
         }
     }

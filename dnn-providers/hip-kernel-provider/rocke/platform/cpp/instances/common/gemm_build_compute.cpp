@@ -217,22 +217,55 @@ void rocke_gemm_emit_compute_and_epilogue(rocke_gemm_build_ctx_t* ctx)
 /* ===================================================================== *
  *  _emit_kloop_db: compv4 double-buffered K-loop (non-DTL, VGPR-staged).
  * ===================================================================== */
+/* trait.k_stagger: _k_tile(k) of Python _emit_kloop_db. k_shifted = k + off,
+ * wrapped at K. Temporaries pin the SSA order add, cmp_ge, sub, select. */
+static rocke_value_t*
+    rocke_gemm_k_tile(rocke_gemm_build_ctx_t* ctx, rocke_value_t* kstag_off, rocke_value_t* k)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    if(kstag_off == NULL)
+        return k;
+    rocke_value_t* k_shifted = rocke_b_add(b, k, kstag_off);
+    rocke_value_t* past_k = rocke_b_cmp_ge(b, k_shifted, ctx->K);
+    rocke_value_t* wrapped = rocke_b_sub(b, k_shifted, ctx->K);
+    return rocke_b_select(b, past_k, wrapped, k_shifted);
+}
+
 void rocke_gemm_emit_kloop_db(rocke_gemm_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* c1_i32;
     rocke_value_t* K_minus_one_tile;
+    rocke_value_t* kstag_off = NULL;
     rocke_iter_arg_t loop_args[1 + ROCKE_GEMM_MAX_ACCS];
     int num_loop_args;
     rocke_for_t for_op;
     int i;
+    const rocke_gemm_trait_spec_t* tr = &ctx->spec->trait;
 
     c1_i32 = rocke_b_const_i32(b, 1);
     /* K-loop upper bound is the slice end (k_upper == K when not split-K). */
     K_minus_one_tile = rocke_b_sub(b, ctx->k_upper, ctx->c_block_k);
 
+    /* trait.k_stagger: workgroup w starts at K tile (w mod k_stagger) *
+     * k_stagger_step (mod the K-tile count) and wraps at K. The gate
+     * guarantees split_k == 1 and no pad_k. */
+    if(tr->k_stagger)
+    {
+        rocke_value_t* n_pid_n = rocke_b_div(
+            b, rocke_b_add(b, ctx->N, rocke_b_const_i32(b, ctx->block_n - 1)), ctx->c_block_n);
+        rocke_value_t* wgid_mul = rocke_b_mul(b, rocke_b_block_id_y(b), n_pid_n);
+        rocke_value_t* wgid_bx = rocke_b_block_id_x(b);
+        rocke_value_t* wgid_flat = rocke_b_add(b, wgid_mul, wgid_bx);
+        rocke_value_t* slot = rocke_b_mod(b, wgid_flat, rocke_b_const_i32(b, tr->k_stagger));
+        rocke_value_t* step = rocke_b_const_i32(b, tr->k_stagger_step * ctx->block_k);
+        rocke_value_t* raw_off = rocke_b_mul(b, slot, step);
+        kstag_off = rocke_b_to_sgpr_u32(b, rocke_b_mod(b, raw_off, ctx->K));
+    }
+
     /* Prologue: issue tile 0's load into half 0 (slice base k_lo in split-K). */
-    rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, ctx->k_lo, 0, NULL);
+    rocke_gemm_emit_load_phase(
+        ctx, ctx->A_smem, ctx->B_smem, rocke_gemm_k_tile(ctx, kstag_off, ctx->k_lo), 0, NULL);
 
     /* loop_args = [("par", c0)] + list(accs) */
     loop_args[0].name = "par";
@@ -260,16 +293,36 @@ void rocke_gemm_emit_kloop_db(rocke_gemm_build_ctx_t* ctx)
         rocke_value_t* const* acc_iter = &for_op.iter_vars[1];
         int num_acc_iter = for_op.num_iter_vars - 1;
         rocke_value_t* next_parity = rocke_b_sub(b, c1_i32, parity);
-        rocke_value_t* k_next = rocke_b_add(b, for_op.iv, ctx->c_block_k);
+        rocke_value_t* k_next
+            = rocke_gemm_k_tile(ctx, kstag_off, rocke_b_add(b, for_op.iv, ctx->c_block_k));
         rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
         rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
 
         /* Start-of-iter barrier (compv4 non-TDM path; TDM never reaches kloop_db). */
         rocke_b_sync(b);
-        /* Issue next-tile global->VGPR->LDS copy into the other half. */
-        rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity);
-        rocke_gemm_emit_mfma_phase(
-            ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, parity, new_accs);
+        if(tr->lds_store_after_mma)
+        {
+            /* Loads of tile k+1 into VGPRs, the WMMAs of tile k, then the LDS
+             * stores of tile k+1, fenced as in Python. */
+            rocke_gemm_lds_store_queue_t pending;
+            rocke_gemm_emit_hook_t none = {NULL, NULL};
+            pending.count = 0;
+            rocke_gemm_emit_load_phase_ex(
+                ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity, none, &pending);
+            rocke_b_sched_barrier(b, 0);
+            rocke_gemm_emit_mfma_phase(
+                ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, parity, new_accs);
+            rocke_b_sched_barrier(b, 0);
+            rocke_gemm_flush_lds_stores(ctx, &pending);
+            rocke_b_sched_barrier(b, 0);
+        }
+        else
+        {
+            /* Issue next-tile global->VGPR->LDS copy into the other half. */
+            rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity);
+            rocke_gemm_emit_mfma_phase(
+                ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, parity, new_accs);
+        }
 
         yield_vals[0] = next_parity;
         for(i = 0; i < num_acc_iter; ++i)
@@ -719,7 +772,8 @@ static void rocke_gemm_er_refill(rocke_gemm_build_ctx_t* ctx, void* user)
     {
         rocke_gemm_emit_hook_t wait = {rocke_gemm_er_wait, NULL};
         rocke_value_t* k_next = rocke_b_add(b, r->k_cur, r->bk2);
-        rocke_gemm_emit_load_phase_ex(ctx, ctx->A_smem, ctx->B_smem, k_next, r->p, NULL, wait);
+        rocke_gemm_emit_load_phase_ex(
+            ctx, ctx->A_smem, ctx->B_smem, k_next, r->p, NULL, wait, NULL);
     }
     else
     {

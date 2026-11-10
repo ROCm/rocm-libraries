@@ -202,6 +202,65 @@ int main()
              s.trait.lds_swizzle = true;
          },
          nullptr},
+        {"K-loop traits on gfx1201 compv4",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_tile(s);
+             s.trait.pipeline = "compv4";
+             s.trait.lds_store_after_mma = true;
+             s.trait.group_m = 4;
+             s.trait.k_stagger = 8;
+             s.trait.k_stagger_step = 4;
+         },
+         nullptr},
+        {"lds_store_after_mma on mem",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_tile(s);
+             s.trait.lds_store_after_mma = true;
+         },
+         "lds_store_after_mma needs the WMMA compv4 double-buffered K loop"},
+        {"k_stagger on mem",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_tile(s);
+             s.trait.k_stagger = 8;
+         },
+         "k_stagger needs the WMMA compv4 double-buffered K loop"},
+        {"k_stagger with split_k",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_tile(s);
+             s.trait.pipeline = "compv4";
+             s.trait.k_stagger = 8;
+             s.trait.split_k = 2;
+         },
+         "k_stagger does not support split_k"},
+        {"k_stagger with pad_k",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_tile(s);
+             s.trait.pipeline = "compv4";
+             s.trait.k_stagger = 8;
+             s.trait.pad_k = true;
+         },
+         "k_stagger does not support pad_k"},
+        {"k_stagger_step 0",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_tile(s);
+             s.trait.pipeline = "compv4";
+             s.trait.k_stagger = 2;
+             s.trait.k_stagger_step = 0;
+         },
+         "k_stagger must be >= 0 and k_stagger_step >= 1 (got 2, 0)"},
+        {"negative group_m",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_tile(s);
+             s.trait.group_m = -1;
+         },
+         "group_m must be >= 0 (got -1)"},
         {"cshuffle off gfx1250",
          "gfx1201",
          [](Spec& s) {

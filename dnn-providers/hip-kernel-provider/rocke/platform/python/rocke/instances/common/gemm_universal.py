@@ -320,6 +320,32 @@ class TraitSpec:
     # than the early refill saves. False (default) keeps the current loop and
     # byte-identical output.
     tdm_early_refill: bool = False
+    # In the compv4 double-buffered K loop, issue the next tile's global loads,
+    # run the current tile's WMMAs, and only then store the loaded tile to LDS.
+    # The loads stay in flight across the WMMAs instead of being waited on
+    # before them (each LDS store has to wait for its load). Costs the loaded
+    # tile's VGPRs across the WMMAs. Needs the double buffer (compv4, direct
+    # epilogue, fitting LDS) on the WMMA path. False (default) stores before
+    # the WMMAs and keeps byte-identical output.
+    lds_store_after_mma: bool = False
+    # Launch workgroups in groups of ``group_m`` M-tiles, walking the N-tiles of
+    # one group before the next (the GROUP_M raster), so concurrently running
+    # workgroups share A and B panels in L2. The super-tile walk of
+    # ``chiplet_swizzle`` without its multi-die XCD remap; the two are
+    # exclusive. WMMA path only. 0 (default) keeps the row-major launch order
+    # and byte-identical output.
+    group_m: int = 0
+    # Per-workgroup K stagger for the compv4 double-buffered loop: workgroup
+    # ``w`` starts at K tile ``(w mod k_stagger) * k_stagger_step`` (mod the
+    # K-tile count) and wraps at K, so concurrently running workgroups read
+    # different K columns. When K is a large power of two the A/B row stride is
+    # too, and workgroups walking K in lockstep otherwise load from the same
+    # memory channels. The same K tiles are summed in another order. Needs the
+    # double buffer on the WMMA path, ``split_k == 1`` and no ``pad_k``. 0
+    # (default) starts every workgroup at K tile 0 and keeps byte-identical
+    # output.
+    k_stagger: int = 0
+    k_stagger_step: int = 1
 
 
 @dataclass(frozen=True)
@@ -403,6 +429,11 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
                 "spb": tr.split_barrier,
                 "alti": tr.tdm_alternate_issuers,
                 "erf": tr.tdm_early_refill,
+                # The WMMA K-loop placement / raster / stagger knobs, each named
+                # only when on.
+                "lsam": tr.lds_store_after_mma,
+                f"gm{tr.group_m}": tr.group_m > 0,
+                f"kst{tr.k_stagger}x{tr.k_stagger_step}": tr.k_stagger > 0,
                 # The C dtype, named only when it differs from A's (the fp8/bf8
                 # path), so fp8 with bf16 C and fp8 with fp16 C are two symbols
                 # and every other kernel keeps its name.
@@ -857,6 +888,35 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             )
         if spec.trait.tdm_depth != 2:
             return False, "tdm_early_refill needs tdm_depth == 2"
+
+    # The store placement and the K stagger reshape the compv4 double-buffered
+    # K loop; without it they would be silently inert. Both are measured on the
+    # WMMA path only, which keeps the MFMA compv4 HotLoop schedule untouched.
+    _, _db, _ = _ab_lds_plan(spec, arch)
+    if spec.trait.lds_store_after_mma:
+        if family != "wmma" or not _db:
+            return False, (
+                "lds_store_after_mma needs the WMMA compv4 double-buffered K loop"
+            )
+    if spec.trait.k_stagger < 0 or spec.trait.k_stagger_step < 1:
+        return False, (
+            f"k_stagger must be >= 0 and k_stagger_step >= 1 (got "
+            f"{spec.trait.k_stagger}, {spec.trait.k_stagger_step})"
+        )
+    if spec.trait.k_stagger:
+        if family != "wmma" or not _db:
+            return False, "k_stagger needs the WMMA compv4 double-buffered K loop"
+        if spec.trait.split_k != 1:
+            return False, "k_stagger does not support split_k"
+        if spec.trait.pad_k:
+            return False, "k_stagger does not support pad_k"
+    if spec.trait.group_m < 0:
+        return False, f"group_m must be >= 0 (got {spec.trait.group_m})"
+    if spec.trait.group_m:
+        if family != "wmma":
+            return False, "group_m is supported on the WMMA path only"
+        if spec.trait.chiplet_swizzle:
+            return False, "group_m and chiplet_swizzle are exclusive"
     # fp64 is limited to the 16x16x4 MFMA atom, the mem / compv3 / compv4
     # pipelines, DirectToLDS without pad_k and the matmul-only default /
     # cshuffle epilogues.
@@ -1521,6 +1581,26 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # ``readfirstlane`` is safe.
         block_m_off = b.to_sgpr_u32(b.mul(swz.row, c_block_m))
         block_n_off = b.to_sgpr_u32(b.mul(swz.col, c_block_n))
+    elif spec.trait.group_m:
+        # GROUP_M raster (``trait.group_m``): the super-tile walk without the
+        # XCD remap, so workgroups launched together share A/B panels in L2.
+        from ...helpers.grid import super_tile_swizzle_dynamic
+
+        n_pid_m = b.div(b.add(M, b.const_i32(block_m - 1)), c_block_m)
+        n_pid_n = b.div(b.add(N, b.const_i32(block_n - 1)), c_block_n)
+        wgid_flat = b.add(
+            b.mul(b.block_id_y(), n_pid_n),
+            b.block_id_x(),
+        )
+        swz = super_tile_swizzle_dynamic(
+            b,
+            wgid_flat,
+            num_pid_m=n_pid_m,
+            num_pid_n=n_pid_n,
+            wgm=spec.trait.group_m,
+        )
+        block_m_off = b.to_sgpr_u32(b.mul(swz.row, c_block_m))
+        block_n_off = b.to_sgpr_u32(b.mul(swz.col, c_block_n))
     else:
         # P57: pin the non-swizzled batched-GEMM offsets in SGPR too.
         block_m_off = b.to_sgpr_u32(b.mul(b.block_id_y(), c_block_m))
@@ -1736,6 +1816,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         k_off: Value,
         lds_parity=0,
         before_issue: Optional[Callable[[], None]] = None,
+        defer_stores: Optional[List[Callable[[], None]]] = None,
     ) -> None:
         """Coalesced global -> LDS copy for one K tile.
 
@@ -1750,7 +1831,20 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         half-buffer; 1 writes the second. May be a Python int (0/1) or
         an i32 :class:`Value` for runtime parity. Ignored when prefetch
         is off.
+
+        ``defer_stores`` (VGPR-staged path): when a list, every global load
+        is issued here and each LDS store is appended to it as a thunk for
+        the caller to emit later (``trait.lds_store_after_mma``); the store
+        address arithmetic is still emitted here. None stores each tile
+        right after its load.
         """
+
+        def _lds_store(store, *args, **kwargs) -> None:
+            if defer_stores is None:
+                store(*args, **kwargs)
+            else:
+                defer_stores.append(lambda: store(*args, **kwargs))
+
         if spec.trait.tdm:
             # One descriptor per operand. The tile origin rides in the global
             # address; the tensor extents are what remains of the tensor from
@@ -2082,8 +2176,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     if spec.trait.pad_k
                     else a_global_tile.load_scalar(b, b.const_i32(0), row, col)
                 )
-                a_lds_tile.store_scalar(
-                    b, _ld_a_row(row), _swz_col(col, row), value=a_val
+                _lds_store(
+                    a_lds_tile.store_scalar,
+                    b,
+                    _ld_a_row(row),
+                    _swz_col(col, row),
+                    value=a_val,
                 )
             else:
                 a_val = (
@@ -2091,8 +2189,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     if spec.trait.pad_k
                     else a_global_tile.load_vec(b, b.const_i32(0), row, col, n=load_vec)
                 )
-                a_lds_tile.store_vec(
-                    b, _ld_a_row(row), _swz_col(col, row), value=a_val, n=load_vec
+                _lds_store(
+                    a_lds_tile.store_vec,
+                    b,
+                    _ld_a_row(row),
+                    _swz_col(col, row),
+                    value=a_val,
+                    n=load_vec,
                 )
         # B-load branch.
         #
@@ -2132,8 +2235,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         if spec.trait.pad_k
                         else b.global_load(Bp, glob_off, storage_dtype)
                     )
-                    b_lds_tile.store_scalar(
-                        b, _ld_b_row(row), _swz_col(col, row), value=b_val
+                    _lds_store(
+                        b_lds_tile.store_scalar,
+                        b,
+                        _ld_b_row(row),
+                        _swz_col(col, row),
+                        value=b_val,
                     )
                 else:
                     b_val = (
@@ -2141,8 +2248,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         if spec.trait.pad_k
                         else b.global_load_vN(Bp, glob_off, storage_dtype, load_vec)
                     )
-                    b_lds_tile.store_vec(
-                        b, _ld_b_row(row), _swz_col(col, row), value=b_val, n=load_vec
+                    _lds_store(
+                        b_lds_tile.store_vec,
+                        b,
+                        _ld_b_row(row),
+                        _swz_col(col, row),
+                        value=b_val,
+                        n=load_vec,
                     )
         else:
             for e in range(b_vecs_per_thread):
@@ -2154,8 +2266,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         if spec.trait.pad_k
                         else b_global_tile.load_scalar(b, b.const_i32(0), row, col)
                     )
-                    b_lds_tile.store_scalar(
-                        b, _ld_b_row(row), _swz_col(col, row), value=b_val
+                    _lds_store(
+                        b_lds_tile.store_scalar,
+                        b,
+                        _ld_b_row(row),
+                        _swz_col(col, row),
+                        value=b_val,
                     )
                 else:
                     b_val = (
@@ -2165,8 +2281,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                             b, b.const_i32(0), row, col, n=load_vec
                         )
                     )
-                    b_lds_tile.store_vec(
-                        b, _ld_b_row(row), _swz_col(col, row), value=b_val, n=load_vec
+                    _lds_store(
+                        b_lds_tile.store_vec,
+                        b,
+                        _ld_b_row(row),
+                        _swz_col(col, row),
+                        value=b_val,
+                        n=load_vec,
                     )
 
     def _emit_frag_smem_load(
@@ -2689,10 +2810,34 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         c1_i32 = b.const_i32(1)
         K_minus_one_tile = b.sub(_k_upper, c_block_k)
 
+        # ``trait.k_stagger``: workgroup ``w`` starts at K tile
+        # ``(w mod k_stagger) * k_stagger_step`` (mod the K-tile count) and
+        # wraps at K. The gate guarantees split_k == 1 (k_lo == 0, K is the
+        # bound) and no pad_k (K is a multiple of block_k).
+        kstag_off = None
+        if spec.trait.k_stagger:
+            n_pid_n = b.div(b.add(N, b.const_i32(block_n - 1)), c_block_n)
+            wgid_flat = b.add(b.mul(b.block_id_y(), n_pid_n), b.block_id_x())
+            kstag_off = b.to_sgpr_u32(
+                b.mod(
+                    b.mul(
+                        b.mod(wgid_flat, b.const_i32(spec.trait.k_stagger)),
+                        b.const_i32(spec.trait.k_stagger_step * block_k),
+                    ),
+                    K,
+                )
+            )
+
+        def _k_tile(k: Value) -> Value:
+            if kstag_off is None:
+                return k
+            k_shifted = b.add(k, kstag_off)
+            return b.select(b.cmp_ge(k_shifted, K), b.sub(k_shifted, K), k_shifted)
+
         # Prologue: issue tile 0's load into half 0. The first iteration's
         # start-sync drains these ds_writes before the MFMA reads half 0.
         # In split-K mode tile 0 is the slice base ``k_lo``.
-        emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
+        emit_load_phase(A_smem, B_smem, _k_tile(k_lo), lds_parity=0)
 
         loop_args = [("par", c0)] + list(accs)
         for_op = b.scf_for_iter(
@@ -2702,15 +2847,35 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             parity = iter_vars[0]
             acc_iter = iter_vars[1:]
             next_parity = b.sub(c1_i32, parity)
-            k_next = b.add(k0, c_block_k)
+            k_next = _k_tile(b.add(k0, c_block_k))
             # Start-of-iter barrier: makes half(parity) RAW-safe to read
             # (its load was issued last iter / prologue) and half(next)
             # WAR-safe to overwrite (its reads finished last iter).
             b.sync()
             # Issue next-tile global->VGPR->LDS copy into the other half;
             # this VMEM + ds_write stream overlaps the MFMAs below.
-            emit_load_phase(A_smem, B_smem, k_next, lds_parity=next_parity)
-            new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
+            if spec.trait.lds_store_after_mma:
+                # Loads of tile k+1 into VGPRs, the WMMAs of tile k, then the
+                # LDS stores of tile k+1: the loads stay in flight across the
+                # WMMAs. The fences keep the scheduler from sinking the loads
+                # past the WMMAs or hoisting the stores back above them.
+                pending: List[Callable[[], None]] = []
+                emit_load_phase(
+                    A_smem,
+                    B_smem,
+                    k_next,
+                    lds_parity=next_parity,
+                    defer_stores=pending,
+                )
+                b.sched_barrier(0)
+                new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
+                b.sched_barrier(0)
+                for store in pending:
+                    store()
+                b.sched_barrier(0)
+            else:
+                emit_load_phase(A_smem, B_smem, k_next, lds_parity=next_parity)
+                new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
             b.scf_yield(next_parity, *new_accs)
 
         # Epilogue: drain the last in-loop load (it wrote the K-1 tile

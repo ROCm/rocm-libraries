@@ -1260,6 +1260,22 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.block_m_off = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, swz.row, ctx.c_block_m));
         ctx.block_n_off = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, swz.col, ctx.c_block_n));
     }
+    else if(spec->trait.group_m > 0)
+    {
+        /* GROUP_M raster (trait.group_m): the super-tile walk without the XCD
+         * remap. Same SSA order as the chiplet branch above. */
+        rocke_value_t* n_pid_m = rocke_b_div(
+            b, rocke_b_add(b, ctx.M, rocke_b_const_i32(b, ctx.block_m - 1)), ctx.c_block_m);
+        rocke_value_t* n_pid_n = rocke_b_div(
+            b, rocke_b_add(b, ctx.N, rocke_b_const_i32(b, ctx.block_n - 1)), ctx.c_block_n);
+        rocke_value_t* wgid_mul = rocke_b_mul(b, rocke_b_block_id_y(b), n_pid_n);
+        rocke_value_t* wgid_bx = rocke_b_block_id_x(b);
+        rocke_value_t* wgid_flat = rocke_b_add(b, wgid_mul, wgid_bx);
+        rocke_super_tile_swizzle_result_t swz
+            = rocke_super_tile_swizzle_dynamic(b, wgid_flat, n_pid_m, n_pid_n, spec->trait.group_m);
+        ctx.block_m_off = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, swz.row, ctx.c_block_m));
+        ctx.block_n_off = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, swz.col, ctx.c_block_n));
+    }
     else
     {
         ctx.block_m_off
