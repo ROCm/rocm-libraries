@@ -315,6 +315,35 @@ class TestConvFwdTf32Name(unittest.TestCase):
         self.assertEqual(tf32.kernel_name(), plain.kernel_name() + "_tf32")
 
 
+class TestConvFwdTf32SpecDict(unittest.TestCase):
+    """The dict the C++ engine builds from carries ``spec.data``'s dtypes.
+
+    Host-only (no ``rocke_engine``), so it runs in CI where the engine tests
+    skip: a dict that dropped them would make the engine build its fp16
+    default under the spec's name.
+    """
+
+    def test_tf32_dict_carries_storage_and_mma_dtype(self):
+        from rocke.core.backend import conv_implicit_gemm_spec_to_dict
+
+        d = conv_implicit_gemm_spec_to_dict(_spec(16, 32))
+        self.assertEqual(
+            (d["dtype_a"], d["dtype_b"], d["dtype_d"]), ("fp32", "fp32", "fp32")
+        )
+        self.assertEqual(d["mma_dtype"], "tf32")
+
+    def test_storage_dtypes_without_tf32(self):
+        from rocke.core.backend import conv_implicit_gemm_spec_to_dict
+
+        for dt in ("fp32", "bf16"):
+            with self.subTest(dtype=dt):
+                d = conv_implicit_gemm_spec_to_dict(
+                    _spec(16, 32, data=ConvDataSpec(dt, dt, dt))
+                )
+                self.assertEqual((d["dtype_a"], d["dtype_b"], d["dtype_d"]), (dt,) * 3)
+                self.assertNotIn("mma_dtype", d)
+
+
 # ---------------------------------------------------------------------------
 # ISA: one comgr compile per atom
 # ---------------------------------------------------------------------------
