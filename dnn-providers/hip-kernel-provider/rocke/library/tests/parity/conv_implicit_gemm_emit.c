@@ -594,7 +594,11 @@ static int make_cfg_tf32(int idx, rocke_implicit_gemm_conv_spec_t* spec, const c
  * fp16 only: this engine's forward builder stages A/B as f16 whatever the
  * dtype, so bf16 is covered by the representative golden and the GPU numerics
  * instead. Keep in lockstep with _mfma_split_k_spec() in
- * conv_implicit_gemm_emit.py.
+ * conv_implicit_gemm_emit.py. The rocke_conv_implicit_gemm_spec_guards CTest
+ * (platform/tests/instances/conv_implicit_gemm_spec_guards.cpp) compiles this
+ * file and checks the C++ verdicts on configs 66..83, which the CI goldens
+ * run with the Python engine only: a config added to that range needs a case
+ * there too.
  *   66: mem/cshuffle, 32x32x64 tile, 2x2 warps, 16x16x32 warp tile
  *   67: compv3/cshuffle, 64x128x64 tile, 2x4 warps
  *   68: mem/cshuffle, grouped (groups=2), 64x64x64 tile, 4-wide vectors
