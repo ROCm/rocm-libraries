@@ -33,6 +33,10 @@ from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftO
 
 from ..Component import LocalRead
 from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile
+from ..Common.LdsReadPlan import (
+    gfx1250_lds_offset_bytes,
+    make_local_read_loop_plan,
+)
 
 from math import ceil
 
@@ -838,8 +842,6 @@ class LocalReadMFMA(LocalRead):
 
         numOffsets       = instruction.numOffsets
         blockWidth       = instruction.blockWidth
-        unrollBlockWidth = instruction.blockWidth if kernel["UnrollMajorLDS%s"%tc] else tP["bpeDS"]/4
-        tileBlockWidth   = tP["bpeDS"]/4 if kernel["UnrollMajorLDS%s"%tc] else instruction.blockWidth
 
         vectorWidth  = kernel["VectorWidth%s"%tc]
 
@@ -885,14 +887,6 @@ class LocalReadMFMA(LocalRead):
         matrixInstT = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
         matrixInstTO = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
         matrixInstTO = matrixInstT if ("MXS" in tc) else matrixInstTO
-        numTilePerInst = matrixInstT // matrixInstTO
-        MIInputPerThUnroll = kernel["MIInputPerThread%s"%tc] // numTilePerInst
-        numVectorsPerTile = kernel["MIWaveTile"][tile01] // vectorWidth
-        numReadsPerVector = int((vectorWidth * tP["bpeDS"]) / (tileBlockWidth * bpr))
-        # overloading numReadsPerUnroll for DirectToLds x2/x4 case when blockWidth of instruction < LocalReadVectorWidth
-        # fp64 TLU=1 reading 0.5element/lane/read..
-        # for TLU=0 case, blockWidth and LRVW should match
-        numReadsPerUnroll = ceil(tP["bpeDS"] * MIInputPerThUnroll / (unrollBlockWidth * bpr))
         numVgpr  = int(ceil(blockWidth))
         tmpvgprFP32 = []
 
@@ -914,7 +908,25 @@ class LocalReadMFMA(LocalRead):
         else:
             raise Exception(f"unsupport tc %s{tc}")
 
-        numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else int(int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
+        readLoopPlan = make_local_read_loop_plan(
+            vectorWidth=vectorWidth,
+            bpeDS=tP["bpeDS"],
+            bpe=tP["bpe"],
+            blockWidth=blockWidth,
+            unrollMajorLDS=kernel["UnrollMajorLDS%s"%tc],
+            miInputPerThread=kernel["MIInputPerThread%s"%tc],
+            miWaveTile=kernel["MIWaveTile"][tile01],
+            matrixInstT=matrixInstT,
+            matrixInstTO=matrixInstTO,
+            lrvwTile=lrvwTile,
+            convertAfterDS=kernel["ConvertAfterDS"],
+            useF32XEmulation=kernel["UseF32XEmulation"])
+        numTilePerInst = readLoopPlan.numTilePerInst
+        MIInputPerThUnroll = readLoopPlan.miInputPerThUnroll
+        numVectorsPerTile = readLoopPlan.numVectorsPerTile
+        numReadsPerVector = readLoopPlan.numReadsPerVector
+        numReadsPerUnroll = readLoopPlan.numReadsPerUnroll
+        numElementPerRead = readLoopPlan.numElementPerRead
         perpStride = abmatrixinfo.gNLCPerpStride
 
         # pack register
@@ -1743,21 +1755,22 @@ class LocalReadMFMA(LocalRead):
                             # gfx1250 LDS offset formula shared by XF32 and BF16/Half/FP8/etc paths.
                             # The WMMA V3 LDS layout uses a *2 factor on the unroll stride.
                             def calcGfx1250LdsOffset():
-                                if "MXS" in tc:
-                                    # rIdx walks the K-scales packed into one MFMA-K sub-iter.
-                                    # Step is UnrollStride, which equals mxUnit for K-major LDS
-                                    # (UMLDS=1) and MT+LdsPad for M-major LDS (UMLDS=0). For
-                                    # UMLDS=1, numReadsPerUnroll is typically 1 so this loop
-                                    # degenerates to the pre-existing incOffset=0 behavior.
-                                    incOffset = rIdx * numElementPerRead * UnrollStride
-                                elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
-                                    incOffset = rIdx * numElementPerRead * UnrollStride * 2
-                                    incOffset += tiIdx * matrixInstTO * vectorWidth * tileStride
-                                else:
-                                    vw = kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]
-                                    incOffset = (rIdx // vw) * UnrollStride * vw
-                                    incOffset += rIdx * numElementPerRead * UnrollStride
-                                return int((incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
+                                return gfx1250_lds_offset_bytes(
+                                    rIdx=rIdx,
+                                    tiIdx=tiIdx,
+                                    tileOffsetElements=offset_val,
+                                    localReadOffsetElements=tP["localReadOffset"],
+                                    localReadVectorWidth=kernel[
+                                        f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"],
+                                    numElementPerRead=numElementPerRead,
+                                    unrollStrideElements=UnrollStride,
+                                    tileStrideElements=tileStride,
+                                    matrixInstTO=matrixInstTO,
+                                    vectorWidth=vectorWidth,
+                                    bpeDS=tP["bpeDS"],
+                                    unrollMajorLDS=kernel[
+                                        "UnrollMajorLDS%s" % tP["tensorChar"]],
+                                    isMXS=("MXS" in tc))
 
                             for oIdx in range(0, numOffsets):
                                 # segment-interleave: a vIdx group can cross the LDS component

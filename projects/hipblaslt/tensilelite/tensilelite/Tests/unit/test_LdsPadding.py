@@ -126,12 +126,12 @@ def test_fp32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
                               miInputPerThread, miWaveTile,
                               matrixInstK=_K_B32,
                               usesTDM=_TDM,
-                              xf32EmuPack=False) == perBlock
+                              xf32EmuPack=False, lrvwTile=1) == perBlock
     assert get_fp32_mt_config(mt, "pad", vw, lrvw, miWaveGroup,
                               miInputPerThread, miWaveTile,
                               matrixInstK=_K_B32,
                               usesTDM=_TDM,
-                              xf32EmuPack=False) == pad
+                              xf32EmuPack=False, lrvwTile=1) == pad
 
 
 @pytest.mark.parametrize(
@@ -146,13 +146,13 @@ def test_fp32_wave_separated_tdm_component_phase(
     kwargs = {"tdmComponentBytes": componentBytes, "tdmNumComponents": 4}
     assert get_fp32_mt_config(
         mt, "perBlock", 1, 2, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
-        False, **kwargs) == perBlock
+        False, **kwargs, lrvwTile=1) == perBlock
     assert get_fp32_mt_config(
         mt, "pad", 1, 2, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
-        False, **kwargs) == pad
+        False, **kwargs, lrvwTile=1) == pad
     assert oldBlock not in _L.get_fp32_valid_blocks(
         mt, 1, 2, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
-        False, **kwargs)
+        False, **kwargs, lrvwTile=1)
 
 
 @pytest.mark.parametrize(
@@ -177,19 +177,19 @@ def test_fp32_tile_major_tail_padding_phase(
     }
     assert get_fp32_mt_config(
         mt, "perBlock", 1, 4, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
-        False, **kwargs) == perBlock
+        False, **kwargs, lrvwTile=1) == perBlock
     assert get_fp32_mt_config(
         mt, "pad", 1, 4, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
-        False, **kwargs) == pad
+        False, **kwargs, lrvwTile=1) == pad
     assert oldBlock not in _L.get_fp32_valid_blocks(
         mt, 1, 4, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
-        False, **kwargs)
+        False, **kwargs, lrvwTile=1)
 
 
 def test_fp32_tile_major_main_and_tail_bases_match_codegen():
     """LraTileAssignment uses LRVW in main and MIInputPerThread in tail."""
     main, tail = _L._fp32_shapes(
-        48, 1, 4, 1, 2, 3, _K_B32, _TDM, False)
+        48, 1, 4, 1, 2, 3, _K_B32, _TDM, False, lrvwTile=1)
     assert main.rawAddrs[16] == 48 * 4 * 4
     assert tail.rawAddrs[16] == 48 * 2 * 4
 
@@ -197,8 +197,13 @@ def test_fp32_tile_major_main_and_tail_bases_match_codegen():
 def test_fp32_tile_major_instruction_offsets_match_codegen():
     """Model every rIdx/eIdx/vIdx emitted by the standard FP32 path."""
     assert _L._build_fp32_instOffs(
-        48, 1, 4, 2, 3, 1, False) == (
+        48, 1, 4, 2, 3, 1, False, lrvwTile=1) == (
             0, 64, 128, 192, 256, 320)
+
+
+def test_xf32_tile_major_rejects_incompatible_read_width():
+    with pytest.raises(ValueError, match="VectorWidth 2 is not divisible by lrvwTile 4"):
+        _L._build_fp32_instOffs(128, 2, 4, 16, 4, 2, xf32EmuPack=True, lrvwTile=4)
 
 
 # XF32 (xf32EmuPack=True)
@@ -212,6 +217,7 @@ def test_fp32_tile_major_instruction_offsets_match_codegen():
         ( 32, 1, 4, 2, 16, 1,  512, 16),
         ( 64, 2, 4, 2, 16, 2, 1024, 32),
         (128, 2, 4, 2, 16, 4, 1024, 16),
+        (128, 4, 4, 2, 16, 4,    0,  0),
     ],
 )
 def test_xf32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
@@ -220,12 +226,12 @@ def test_xf32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
                               miInputPerThread, miWaveTile,
                               matrixInstK=_K_XF32,
                               usesTDM=_TDM,
-                              xf32EmuPack=True) == perBlock
+                              xf32EmuPack=True, lrvwTile=vw) == perBlock
     assert get_fp32_mt_config(mt, "pad", vw, lrvw, miWaveGroup,
                               miInputPerThread, miWaveTile,
                               matrixInstK=_K_XF32,
                               usesTDM=_TDM,
-                              xf32EmuPack=True) == pad
+                              xf32EmuPack=True, lrvwTile=vw) == pad
 
 
 # MX
@@ -293,7 +299,7 @@ def test_fp32_pad_is_even_dwords():
             for vw in (1, 2, 4):
                 if wt % vw:
                     continue
-                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt, _K_B32, _TDM)
+                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt, _K_B32, _TDM, lrvwTile=1)
                 assert _pad_bytes_x2(pad, 4.0) % 16 == 0, (mt, wt, wg, vw, pad)
 
 
@@ -350,11 +356,22 @@ def test_fp32_config_falls_back_when_search_finds_no_legal_candidate(monkeypatch
     monkeypatch.setattr(_L, "_search_padding", lambda *args: None)
     _L._compute_fp32_config.cache_clear()
     try:
-        config = _L._compute_fp32_config(32, 1, 2, 1, 2, 2, _K_B32, _TDM)
+        config = _L._compute_fp32_config(32, 1, 2, 1, 2, 2, _K_B32, _TDM, lrvwTile=1)
     finally:
         _L._compute_fp32_config.cache_clear()
 
     assert config == {"perBlock": 0, "pad": 0}
+
+
+def test_xf32_config_rejects_misaligned_read_offsets():
+    shape = _L._fp32_shape(
+        33, 2, 4, 1, 16, 2, _K_XF32, _TDM, xf32EmuPack=True, lrvwTile=2)
+    assert shape.instOffs[1] == 132
+    assert _L._fp32_wave_costs(
+        shape.rawAddrs, 0, 0, shape.wOffsets, shape.instOffs, lrvwTile=2) is None
+    assert _L._compute_fp32_config(
+        33, 2, 4, 1, 16, 2, _K_XF32, _TDM, xf32EmuPack=True, lrvwTile=2) == {
+            "perBlock": 0, "pad": 0}
 
 
 def test_no_block_carry_detects_a_carrying_pair():
@@ -434,14 +451,21 @@ def test_fp16_config_is_legal_over_the_reachable_shapes():
 def test_b32_wave_costs_counts_one_bank_per_thread():
     # 32 threads, 4 bytes apart, no padding: banks 0..31, all distinct.
     raw = [4 * i for i in range(32)]
-    assert _L._b32_wave_costs(raw, 0, 0, (0,), (0,)) == [1]
+    assert _L._fp32_wave_costs(raw, 0, 0, (0,), (0,), lrvwTile=1) == [1]
     # Every thread 256 bytes apart lands on bank 0.
     raw = [256 * i for i in range(32)]
-    assert _L._b32_wave_costs(raw, 0, 0, (0,), (0,)) == [32]
+    assert _L._fp32_wave_costs(raw, 0, 0, (0,), (0,), lrvwTile=1) == [32]
 
 
 def test_b32_wave_costs_rejects_addresses_below_dword_alignment():
-    assert _L._b32_wave_costs([1] * 32, 0, 0, (0,), (0,)) is None
+    assert _L._fp32_wave_costs([1] * 32, 0, 0, (0,), (0,), lrvwTile=1) is None
+
+
+def test_ordinary_b128_wave_costs_sum_both_service_groups():
+    lower = [16 * (i % 8) + 256 * (i // 8) for i in range(16)]
+    upper = [128 + 16 * (i % 6) + 256 * (i // 6) for i in range(16)]
+    assert _L._fp32_wave_costs(
+        lower + upper, 0, 0, (0,), (0,), lrvwTile=4) == [5]
 
 
 def test_fp32_config_is_legal_over_the_reachable_shapes():
@@ -451,8 +475,8 @@ def test_fp32_config_is_legal_over_the_reachable_shapes():
             for vw in (1, 2, 4):
                 if wt % vw:
                     continue
-                perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, _TDM)
-                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt, _K_B32, _TDM)
+                perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, _TDM, lrvwTile=1)
+                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt, _K_B32, _TDM, lrvwTile=1)
                 if perBlock == 0:
                     assert pad == 0, (mt, wt, wg, vw, pad)
                     continue
@@ -523,7 +547,7 @@ def test_chosen_block_divides_the_tail_loop_step():
             for vw in (1, 2, 4):
                 if wt % vw:
                     continue
-                perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, _TDM)
+                perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, _TDM, lrvwTile=1)
                 if perBlock:
                     assert mt * 4 * _K_B32 % perBlock == 0, (mt, wt, wg, vw, perBlock)
 
@@ -551,10 +575,10 @@ def test_chosen_block_is_one_the_validator_accepts():
                 for vw in (1, 2, 4):
                     if wt % vw:
                         continue
-                    perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, tdm)
+                    perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, tdm, lrvwTile=1)
                     if perBlock:
                         assert perBlock in _L.get_fp32_valid_blocks(
-                            mt, vw, 2, wg, 2, wt, _K_B32, tdm), (mt, wt, wg, vw, tdm, perBlock)
+                            mt, vw, 2, wg, 2, wt, _K_B32, tdm, lrvwTile=1), (mt, wt, wg, vw, tdm, perBlock)
 
 
 def test_chosen_pad_and_block_are_a_legal_pair():

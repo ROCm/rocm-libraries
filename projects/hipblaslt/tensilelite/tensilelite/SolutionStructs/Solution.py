@@ -46,6 +46,7 @@ from ..Common.DataType import DataType
 from ..Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from ..Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
                                        ldsBlockError, ldsPadError
+from ..Common.LdsReadPlan import effective_lrvw_tile, fp32_lds_read_bytes
 from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, \
                                        dcpLdsSide, \
                                        decoupledOneBlockBoth, decouplePGRBlocks, \
@@ -4568,6 +4569,18 @@ class Solution(collections.abc.Mapping):
       def getLdsBpe(tc: str) -> float:
         return state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc].numBytes()
 
+      def fp32LrvwTile(tc: str) -> int:
+        return effective_lrvw_tile(
+            vectorWidth=state[f"VectorWidth{tc}"],
+            unrollMajorLDS=state[f"UnrollMajorLDS{tc}"],
+            macDataTypeBytes=state["ProblemType"][f"MacDataType{tc}"].numBytes(),
+            enableMatrixInstruction=state["EnableMatrixInstruction"],
+            miInputPerThread=state["MIInputPerThread" if tc == "A" else "MIInputPerThreadB"],
+            useF32XEmulation=state["UseF32XEmulation"],
+            useMFMAF32XEmulation=state["UseMFMAF32XEmulation"],
+            useCustomMainLoopSchedule=state["UseCustomMainLoopSchedule"],
+            hasWMMAV3=wmmaV3)
+
       def tdmTileMajorComponentLayout(tc: str, mt: int) -> Tuple[int, int]:
         """Raw equal-component layout used by wave-separated TDM."""
         if (not (state["enableTDMA"] and state["enableTDMB"])
@@ -4685,13 +4698,14 @@ class Solution(collections.abc.Mapping):
                 elif macDtype.numBytes() == 4 and tdm:
                   ldsPad = get_fp32_mt_config(mt, "pad",
                               vw, state[f"LocalReadVectorWidth{tc}"], miwg,
-                              miInputPerThread=state["MIInputPerThread"],
+                              miInputPerThread=state[f"MIInputPerThread{tc}"],
                               miWaveTile=miwt,
                               matrixInstK=state["MatrixInstK"],
                               usesTDM=tdm,
                               xf32EmuPack=state.get("UseF32XEmulation", False),
                               tdmComponentBytes=tdmComponentBytes,
-                              tdmNumComponents=tdmNumComponents)
+                              tdmNumComponents=tdmNumComponents,
+                              lrvwTile=fp32LrvwTile(tc))
               if state[f"DirectToLds{tc}"]:
                 # TODO: Check if there are cases which benefit from padding, currently set to zero by default
                 ldsPad = state["MatrixInstM"] if ldstr else 0
@@ -4936,13 +4950,14 @@ class Solution(collections.abc.Mapping):
                   elif tmpBpe == 4 and state.get(f"enableTDM{tc}", False):
                     LdsBlockSizePerPad = get_fp32_mt_config(mt, "perBlock",
                                             state[f"VectorWidth{tc}"], lrvw, miwg,
-                                            miInputPerThread=state["MIInputPerThread"],
+                                            miInputPerThread=state[f"MIInputPerThread{tc}"],
                                             miWaveTile=miwt,
                                             matrixInstK=state["MatrixInstK"],
                                             usesTDM=True,
                                             xf32EmuPack=state.get("UseF32XEmulation", False),
                                             tdmComponentBytes=tdmComponentBytes,
-                                            tdmNumComponents=tdmNumComponents)
+                                            tdmNumComponents=tdmNumComponents,
+                                            lrvwTile=fp32LrvwTile(tc))
               else:
                 LdsBlockSizePerPad = 0
           else:
@@ -6588,10 +6603,11 @@ class Solution(collections.abc.Mapping):
       if dtype.numBytes() == 4 and tdm:
         return get_fp32_valid_blocks(mt, state["VectorWidth%s"%tc],
                                      state["LocalReadVectorWidth%s"%tc], miwg,
-                                     state["MIInputPerThread"], miwt, k, tdm,
+                                     state[f"MIInputPerThread{tc}"], miwt, k, tdm,
                                      state.get("UseF32XEmulation", False),
                                      tdmComponentBytes=tdmComponentBytes,
-                                     tdmNumComponents=tdmNumComponents)
+                                     tdmNumComponents=tdmNumComponents,
+                                     lrvwTile=fp32LrvwTile(tc))
       return None
 
     def solverPadStepBytes(tc):
@@ -6603,6 +6619,8 @@ class Solution(collections.abc.Mapping):
       """
       if ldsBpe(tc) == 2 and state.get("enableLDSTr%s"%tc, False):
         return B128_PAD_STEP_BYTES
+      if ldsBpe(tc) == 4 and state.get("enableTDM%s"%tc, False):
+        return max(LDS_PAD_STEP_BYTES, fp32_lds_read_bytes(fp32LrvwTile(tc)))
       return LDS_PAD_STEP_BYTES
 
     # A and B only: metadata has a formula of its own, and calcLdsPad already
