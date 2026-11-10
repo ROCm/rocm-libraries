@@ -20,6 +20,7 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -107,26 +108,9 @@ namespace
     std::vector<SolutionCase> buildCases()
     {
         std::vector<SolutionCase> cases;
-        // Indices come from a half-open range or from a file with one per line.
-        std::vector<int> indices;
-        if(char const* range = std::getenv("HIPBLASLT_SOLUTION_INDEX_RANGE"))
-        {
-            int begin = 0, end = 0;
-            if(std::sscanf(range, "%d:%d", &begin, &end) != 2 || begin < 0 || end < begin)
-            {
-                std::cerr << "Invalid HIPBLASLT_SOLUTION_INDEX_RANGE " << range << std::endl;
-                return cases;
-            }
-            for(int index = begin; index < end; ++index)
-                indices.push_back(index);
-        }
-        else if(char const* list = std::getenv("HIPBLASLT_SOLUTION_INDEX_LIST"))
-        {
-            std::ifstream file(list);
-            for(int index; file >> index;)
-                indices.push_back(index);
-        }
-        if(indices.empty())
+        char const*               range = std::getenv("HIPBLASLT_SOLUTION_INDEX_RANGE");
+        char const*               list  = std::getenv("HIPBLASLT_SOLUTION_INDEX_LIST");
+        if(!range && !list)
             return cases;
         std::string reason;
         auto        library  = loadLibrary(reason);
@@ -136,6 +120,36 @@ namespace
             std::cerr << "Solution-index cases not generated: "
                       << (library ? "no TensileLite hardware description" : reason) << std::endl;
             return cases;
+        }
+        // Indices come from a half-open range or from a file with one per line.
+        std::vector<int> indices;
+        if(range)
+        {
+            int begin = 0, end = 0;
+            if(std::sscanf(range, "%d:%d", &begin, &end) != 2 || begin < 0 || end < begin)
+            {
+                std::cerr << "Invalid HIPBLASLT_SOLUTION_INDEX_RANGE " << range << std::endl;
+                return cases;
+            }
+            // Indices are contiguous. A lazy library maps the first index of each
+            // shard, so past the last of those the library ends at the first index
+            // it lacks; a range can therefore reach past the end cheaply.
+            int last
+                = library->libraryMapping.empty() ? -1 : library->libraryMapping.rbegin()->first;
+            if(!library->solutions.empty())
+                last = std::max(last, library->solutions.rbegin()->first);
+            for(int index = begin; index < end; ++index)
+            {
+                if(index > last && !library->resolveSolutionByIndex(index))
+                    break;
+                indices.push_back(index);
+            }
+        }
+        else
+        {
+            std::ifstream file(list);
+            for(int index; file >> index;)
+                indices.push_back(index);
         }
         hipDeviceProp_t     props{};
         int                 device = 0;
