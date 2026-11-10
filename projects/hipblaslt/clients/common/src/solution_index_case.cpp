@@ -130,14 +130,22 @@ namespace
     }
 
     // The client's scaling mode for an MX operand, or nullopt when it has none.
-    std::optional<hipblaslt_scaling_format> mxScaling(
-        int block, rocisa::DataType scaleType, int format, bool transposed, bool isA, bool gfx1250)
+    // `anyLayout`: the client accepts the preswizzled layout in every
+    // orientation, which it does for FP4 x FP4.
+    std::optional<hipblaslt_scaling_format> mxScaling(int              block,
+                                                      rocisa::DataType scaleType,
+                                                      int              format,
+                                                      bool             transposed,
+                                                      bool             isA,
+                                                      bool             anyLayout,
+                                                      bool             gfx1250)
     {
         using S = hipblaslt_scaling_format;
         if(format == 1)
         {
-            // The gfx950 host-preswizzled layout needs A transposed and B normal.
-            if(block == 32 && scaleType == rocisa::DataType::E8 && transposed == isA)
+            // Otherwise the gfx950 host-preswizzled layout needs A transposed
+            // and B normal.
+            if(block == 32 && scaleType == rocisa::DataType::E8 && (anyLayout || transposed == isA))
                 return S::Block_32_UE8M0_32_8_EXT;
             return std::nullopt;
         }
@@ -503,12 +511,14 @@ std::variant<Arguments, UnsupportedSolution> solutionIndexCase(
         (isA ? arg.swizzle_a : arg.swizzle_b) = swz;
         if(!block)
             continue;
-        auto mode = mxScaling(block,
-                              isA ? p.mxTypeA : p.mxTypeB,
-                              p.mxScaleFormat,
-                              isA ? p.transA : p.transB,
-                              isA,
-                              options.gfx1250);
+        auto mode
+            = mxScaling(block,
+                        isA ? p.mxTypeA : p.mxTypeB,
+                        p.mxScaleFormat,
+                        isA ? p.transA : p.transB,
+                        isA,
+                        p.aType == rocisa::DataType::Float4 && p.bType == rocisa::DataType::Float4,
+                        options.gfx1250);
         if(!mode)
             return unsupported("MX scale layout the client cannot express");
         (isA ? arg.scaleA : arg.scaleB) = *mode;

@@ -132,6 +132,16 @@ TEST(HostUnitSolutionIndexCase, smoke_MXScaleLayout)
     EXPECT_EQ(arg.scaleA, hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT);
     EXPECT_EQ(arg.scaleB, hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT);
 
+    // FP4 x FP4 accepts the preswizzled layout in every orientation.
+    p.transA              = false;
+    p.operationIdentifier = "Contraction_l_Ailk_Bljk_Cijk_Dijk";
+    EXPECT_EQ(unsupported(solution), "MX scale layout the client cannot express");
+    p.aType = p.bType = p.computeInputTypeA = p.computeInputTypeB = rocisa::DataType::Float4;
+    EXPECT_EQ(made(solution).scaleA, hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT);
+    p.transA              = true;
+    p.operationIdentifier = "Contraction_l_Alik_Bljk_Cijk_Dijk";
+    p.aType = p.bType = p.computeInputTypeA = p.computeInputTypeB = rocisa::DataType::Float8;
+
     p.mxScaleFormat = 2;
     EXPECT_EQ(unsupported(solution), "MX scale layout the client cannot express");
     SolutionCaseOptions gfx1250;
