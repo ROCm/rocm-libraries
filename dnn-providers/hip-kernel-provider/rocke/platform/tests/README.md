@@ -70,6 +70,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 | `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py`, `test_rocke_gfx950_smoke.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` 47 `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
 | `runtime/` | (covered via `test_rocke.py`; dedicated split is a follow-up) | - |
 | `dispatch/` | `dispatch_tests/{gemm,attention,conv,moe,norm}` | - |
+| `numeric/` | `test_gfx1201_wmma_kloop_traits_numeric.py` (including one-workgroup LDS layouts), `test_gfx1201_gemm_dispatch_numeric.py` (real FP16 selections across output/reduction/alignment bands) | Matching-device reference checks through both engines; exact integer GEMM references and NaN-filled outputs. These are architecture-specific legacy/manual numeric tests, not independently qualified pinned-reference bundles. |
 | `analysis/` | (covered via `test_rocke.py`) | - |
 | `benchmark/` | `test_occupancy_targets.py` (the occupancy model on every target rocKE lowers for; gfx908 checked against llc) | - |
 | `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py` | - |

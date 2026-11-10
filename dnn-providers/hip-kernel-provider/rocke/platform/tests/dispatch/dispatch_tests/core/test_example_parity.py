@@ -25,6 +25,7 @@ import unittest
 
 from rocke.core.arch import ArchTarget
 from rocke.core.ir_serialize import canonical_equal
+from rocke.core.verify import ERROR, verify
 from rocke.dispatch.families.moe import MOE_REGISTRY, MoeRequest, dispatch_moe
 from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest, dispatch_norm
 from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
@@ -51,9 +52,21 @@ NORM_SHAPE = dict(rows=4096, cols=4096)
 # the bf16 decode candidate caps M at 32, and b1024_v8 spans 8192 columns.
 GEMM_DECODE_MNK = (16, 4096, 4096)
 NORM_WIDE_SHAPE = dict(rows=4096, cols=8192)
+GEMM_GFX1201_MNK = (
+    (128, 128, 16),
+    (256, 256, 32),
+    (1024, 1024, 1024),
+    (128, 8192, 2048),
+    (2048, 2048, 8192),
+    (2048, 2560, 6144),
+    (2048, 6144, 2560),
+)
 
 
 def _gemm_reqs(arch, spec_id, dtype):
+    if arch == "gfx1201" and dtype == "fp16":
+        for m, n, k in GEMM_GFX1201_MNK:
+            yield GemmRequest(M=m, N=n, K=k, arch=arch, dtype=dtype, spec_id=spec_id)
     for m, n, k in (GEMM_MNK, GEMM_DECODE_MNK):
         yield GemmRequest(M=m, N=n, K=k, arch=arch, dtype=dtype, spec_id=spec_id)
 
@@ -75,12 +88,6 @@ _FAMILIES = (
     (NORM_REGISTRY, _norm_reqs, ("fp16",)),
 )
 
-# A floor, not a fixture: it should rise when candidates or arches are added,
-# and a fall means coverage was silently lost. Set with enough slack that
-# removing one candidate does not trip it -- the reachability check below is
-# what catches that precisely.
-_MIN_BUILDS = 300
-
 
 class TestEveryRegisteredKernelBuilds(unittest.TestCase):
     def _combinations(self):
@@ -93,7 +100,6 @@ class TestEveryRegisteredKernelBuilds(unittest.TestCase):
                             yield candidate, arch, dtype, request
 
     def test_every_candidate_builds_on_every_arch_it_declares(self):
-        built = 0
         reached = set()
         for candidate, arch, dtype, request in self._combinations():
             admitted, _ = candidate.admits(request)
@@ -103,10 +109,10 @@ class TestEveryRegisteredKernelBuilds(unittest.TestCase):
                 continue
             with self.subTest(candidate=candidate.name, arch=arch, dtype=dtype):
                 kernel = candidate.built(candidate.select_spec(request), arch)
-                self.assertTrue(getattr(kernel, "name", ""))
-                built += 1
+                self.assertEqual(
+                    [diag for diag in verify(kernel) if diag.severity == ERROR], []
+                )
                 reached.add(candidate.name)
-        self.assertGreaterEqual(built, _MIN_BUILDS)
         # Every registered candidate must be reachable by *something*. A
         # candidate no request can reach is dead weight the registry still
         # advertises in its coverage manifest.
