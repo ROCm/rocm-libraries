@@ -199,8 +199,8 @@ namespace rocalution
                      rocsparse_fill_mode         fill_mode,
                      rocsparse_diag_type         diag_type);
 
-        // Points the triangle to the arrays of mat. The analysis is kept if the sizes of
-        // mat did not change, and cleared otherwise.
+        // Points the triangle to the values of mat. The analysis is kept if only the
+        // values array changed, and cleared otherwise.
         void Update(rocsparse_const_spmat_descr mat);
 
         // Iterates until the residual norm drops below tolerance, or for max_iter

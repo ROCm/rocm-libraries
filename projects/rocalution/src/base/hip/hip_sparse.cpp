@@ -654,6 +654,30 @@ namespace rocalution
             mat, &nrow, &ncol, &nnz, &row, &col, &val, &row_type, &col_type, &base, &data_type);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
+        const void* row_T;
+        const void* col_T;
+        const void* val_T;
+
+        status = rocsparse_const_csr_get(this->triangle_,
+                                         &nrow_T,
+                                         &ncol_T,
+                                         &nnz_T,
+                                         &row_T,
+                                         &col_T,
+                                         &val_T,
+                                         &row_type,
+                                         &col_type,
+                                         &base,
+                                         &data_type);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        // The csrmv analysis inside the spitsv analysis rejects other row and column arrays
+        if(row != row_T || col != col_T)
+        {
+            this->Clear();
+            return;
+        }
+
         // Recreating the triangle would discard the analysis
         status = rocsparse_csr_set_pointers(this->triangle_,
                                             const_cast<void*>(row),
