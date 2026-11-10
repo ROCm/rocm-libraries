@@ -2603,33 +2603,8 @@ py::tuple conv_direct_dgrad_wmma_describe(const py::dict& d, const std::string& 
  * DirectWgradWmmaSpec with the problem nested. */
 rocke_direct_wgrad_wmma_spec_t dwgw_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
-    auto keep = [&](const std::string& s) -> const char* {
-        store.push_back(s);
-        return store.back().c_str();
-    };
     rocke_direct_wgrad_wmma_spec_t s = rocke_direct_wgrad_wmma_spec_default();
-    /* The problem's shape fields are required, as in DirectConvProblem: a
-     * missing one would silently read as the zero default. */
-    if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
-        throw py::value_error("DirectWgradWmmaSpec requires a problem dictionary");
-    {
-        py::dict pd = d["problem"].cast<py::dict>();
-        const char* required[] = {"N", "H", "W", "groups", "cpg", "kpg"};
-        for(const char* key : required)
-        {
-            if(!pd.contains(key))
-                throw py::value_error(std::string("DirectWgradWmmaSpec.problem requires ") + key);
-        }
-        std::string v;
-        fill_direct_conv_problem(&s.problem, pd);
-        if(dict_str(pd, "dtype", v))
-            s.problem.dtype = keep(v);
-    }
-    {
-        std::string v;
-        if(dict_str(d, "name", v))
-            s.name = keep(v);
-    }
+    direct_spec_fill_problem(&s.problem, &s.name, d, store, "DirectWgradWmmaSpec");
     s.waves_k = dict_int(d, "waves_k", s.waves_k);
     s.waves_c = dict_int(d, "waves_c", s.waves_c);
     s.tiles_k = dict_int(d, "tiles_k", s.tiles_k);
@@ -3588,33 +3563,8 @@ std::vector<std::string> conv_wgrad_reduce_verify(const py::dict& d, const std::
  * nested. */
 rocke_grouped_wgrad_wmma_spec_t gwgw_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
-    auto keep = [&](const std::string& s) -> const char* {
-        store.push_back(s);
-        return store.back().c_str();
-    };
     rocke_grouped_wgrad_wmma_spec_t s = rocke_grouped_wgrad_wmma_spec_default();
-    /* The problem's shape fields are required, as in DirectConvProblem: a
-     * missing one would silently read as the zero default. */
-    if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
-        throw py::value_error("GroupedWgradWmmaSpec requires a problem dictionary");
-    {
-        py::dict pd = d["problem"].cast<py::dict>();
-        const char* required[] = {"N", "H", "W", "groups", "cpg", "kpg"};
-        for(const char* key : required)
-        {
-            if(!pd.contains(key))
-                throw py::value_error(std::string("GroupedWgradWmmaSpec.problem requires ") + key);
-        }
-        std::string v;
-        fill_direct_conv_problem(&s.problem, pd);
-        if(dict_str(pd, "dtype", v))
-            s.problem.dtype = keep(v);
-    }
-    {
-        std::string v;
-        if(dict_str(d, "name", v))
-            s.name = keep(v);
-    }
+    direct_spec_fill_problem(&s.problem, &s.name, d, store, "GroupedWgradWmmaSpec");
     s.waves_c = dict_int(d, "waves_c", s.waves_c);
     s.q_steps = dict_int(d, "q_steps", s.q_steps);
     s.rows_per_chunk = dict_int(d, "rows_per_chunk", s.rows_per_chunk);

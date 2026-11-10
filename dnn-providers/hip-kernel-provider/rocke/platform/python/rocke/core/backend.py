@@ -1274,24 +1274,8 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
 def conv_direct_grouped_wgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`GroupedWgradWmmaSpec` -> flat dict (problem nested, dtype and
     ``pad_w`` included: the column padding sets ``Wo``, hence the grid)."""
-    p = spec.problem
     return dict(
-        problem=dict(
-            N=p.N,
-            H=p.H,
-            W=p.W,
-            groups=p.groups,
-            cpg=p.cpg,
-            kpg=p.kpg,
-            KH=p.KH,
-            KW=p.KW,
-            PAD=p.PAD,
-            pad_w=p.pad_w,
-            stride=p.stride,
-            dil_h=p.dil_h,
-            dil_w=p.dil_w,
-            dtype=p.dtype,
-        ),
+        problem=_fwd_small_problem_dict(spec.problem),
         name=spec.name,
         waves_c=spec.waves_c,
         q_steps=spec.q_steps,
@@ -1303,24 +1287,8 @@ def conv_direct_grouped_wgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
 
 def conv_direct_wgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`DirectWgradWmmaSpec` -> flat dict (problem nested, dtype included)."""
-    p = spec.problem
     return dict(
-        problem=dict(
-            N=p.N,
-            H=p.H,
-            W=p.W,
-            groups=p.groups,
-            cpg=p.cpg,
-            kpg=p.kpg,
-            KH=p.KH,
-            KW=p.KW,
-            PAD=p.PAD,
-            pad_w=p.pad_w,
-            stride=p.stride,
-            dil_h=p.dil_h,
-            dil_w=p.dil_w,
-            dtype=p.dtype,
-        ),
+        problem=_fwd_small_problem_dict(spec.problem),
         name=spec.name,
         waves_k=spec.waves_k,
         waves_c=spec.waves_c,

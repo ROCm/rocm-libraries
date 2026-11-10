@@ -178,7 +178,9 @@ def test_binding_rejects_bad_input():
     )
     partial = dict(good["problem"])
     del partial["kpg"]
-    for problem in (None, "N2H19", partial):
+    # An explicit dtype=None is refused (Python rejects it), not read as fp16.
+    no_dtype = dict(good["problem"], dtype=None)
+    for problem in (None, "N2H19", partial, no_dtype):
         sd = dict(good)
         if problem is None:
             del sd["problem"]
