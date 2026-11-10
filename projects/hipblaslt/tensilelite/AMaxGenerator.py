@@ -694,7 +694,6 @@ class AMaxKernelGenerator:
         label_upper = Label("upper", f'upper')
         label_lower = Label("lower", f'lower')
         label_empty = Label("empty", f'empty')
-        label_sync  = Label("inter_sync", f'inter-wave LDS reuse')
         label_end   = Label("end", f'end')
         mod = Module("inter_wave_reduction")
         mod.addComment0("inter_wave_reduction")
@@ -713,30 +712,41 @@ class AMaxKernelGenerator:
         mod.add(ri.SCBranchVCCNZ(label_lower.getLabelName()))
         mod.add(ri.SBranch(label_empty.getLabelName()))
 
+        # Publish into the slot named by this wave's own id, and let the
+        # partner wave read slot (Widx + Offset).
+        #
+        # The slot range a tree level touches is [Offset, 2*Offset), so the
+        # successive levels (Offset = num_waves/2, /4, /8, ...) use disjoint
+        # ranges.  A level can therefore never overwrite a slot that another
+        # level is still reading, which is what lets the level use exactly one
+        # barrier.
+        #
+        # One barrier per level is not a stylistic choice: s_barrier is a
+        # counting barrier over a single resource, so every wave must reach
+        # the barrier the same number of times per level.  Letting the upper
+        # waves pass two barriers (one after the store, one at the sync point)
+        # while the lower waves pass one before the load lets the count reach
+        # the wave count with only some waves having published their LDS
+        # value, and the lower waves then read a slot nobody has written.
         mod.add(label_upper)
-        mod.add(ri.VSubU32(vgpr("Tmp"), vgpr("Widx"), sgpr("Offset")))
-        mod.add(ri.VLShiftLeftB32(vgpr("Tmp"), int(log2(self.bpe)), vgpr("Tmp")))
+        mod.add(ri.VLShiftLeftB32(vgpr("Tmp"), int(log2(self.bpe)), vgpr("Widx")))
         ds = DSModifiers(offset=0)
         DSStorex1 = self.local_write_inst_type(1)
         mod.add(DSStorex1(vgpr("Tmp"), vgpr("Output"), ds))
         mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(ri.SBarrier())
-        mod.add(ri.SBranch(label_sync.getLabelName()))
+        mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_lower)
         mod.add(ri.SBarrier())
-        mod.add(ri.VLShiftLeftB32(vgpr("Tmp"), int(log2(self.bpe)), vgpr("Widx")))
+        mod.add(ri.VAddU32(vgpr("Tmp"), vgpr("Widx"), sgpr("Offset")))
+        mod.add(ri.VLShiftLeftB32(vgpr("Tmp"), int(log2(self.bpe)), vgpr("Tmp")))
         ds = DSModifiers(offset=0)
         DSLoadx1 = self.local_read_inst_type(1)
         mod.add(DSLoadx1(vgpr("OutputB"), vgpr("Tmp"), ds))
         mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(self.merge_sum())
-        mod.add(ri.SBranch(label_sync.getLabelName()))
+        mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_empty)
-        mod.add(ri.SBarrier())
-        mod.add(label_sync)
-        # The first barrier publishes the upper-wave writes. This second
-        # barrier retires the lower-wave reads before the next tree level
-        # reuses the same LDS slots.
         mod.add(ri.SBarrier())
         mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_end)
@@ -914,7 +924,11 @@ if __name__ == '__main__':
         assignGlobalParameters({}, isaInfoMap)
 
     _global_ti.init(isa, toolchain_path, False)
-    waveFrontSize = 32 if isa[0] in [11, 12] else 64
+    # gfx9xx is wave64; every RDNA part (gfx101x/gfx103x/gfx11xx/gfx12xx) is
+    # wave32. This mirrors rocisa's "HasWave32" capability (ISA major 10/11/12);
+    # the old test stopped at 11 and left gfx1030 on the wave64 path, which
+    # assembles 64-wide code for a wave32-only part.
+    waveFrontSize = 32 if isa[0] >= 10 else 64
     _global_ti.setKernel(isa, waveFrontSize)
     amax = AMaxKernelGenerator(DataType(t), DataType(d), DataType(s), w, c, 4, waveFrontSize, arch, isa, is_scale)
     kernel_body = amax.amax_kernel_body()

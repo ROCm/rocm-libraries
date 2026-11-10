@@ -147,9 +147,12 @@ class LayerNormKernelGenerator:
 
     @property
     def lds_usage_byte(self) -> int:
-        # used in reduce inter wave mean and invvar
-        # 4 data * half_wave_num * bpe
-        return 4 * (self.num_workitems // self.wavefront_size // 2) * self.bpe
+        # The inter-wave reduction publishes into the slot named by the wave id
+        # and the partner wave reads slot (Widx + Offset), so the tree touches
+        # slots 1 .. num_waves-1 plus slot 0 for the broadcast: num_waves slots
+        # of 4 data (count, mean, invvar, spare) each.
+        # 4 data * wave_num * bpe
+        return 4 * (self.num_workitems // self.wavefront_size) * self.bpe
 
     @property
     def func_name(self):
@@ -536,7 +539,6 @@ class LayerNormKernelGenerator:
         label_upper = Label("upper", f'upper')
         label_lower = Label("lower", f'lower')
         label_empty = Label("empty", f'empty')
-        label_sync  = Label("inter_sync", f'inter-wave LDS reuse')
         label_end   = Label("end", f'end')
         mod = Module("inter_wave_reduction")
         mod.addComment0("inter_wave_reduction")
@@ -555,9 +557,21 @@ class LayerNormKernelGenerator:
         mod.add(ri.SCBranchVCCNZ(label_lower.getLabelName()))
         mod.add(ri.SBranch(label_empty.getLabelName()))
 
+        # Publish into the slot named by this wave's own id, and let the
+        # partner wave read slot (Widx + Offset).  The slot range a tree level
+        # touches is [Offset, 2*Offset), so successive levels use disjoint
+        # ranges and a level can never overwrite a slot another level is still
+        # reading.
+        #
+        # That is what lets the level use exactly one barrier: s_barrier is a
+        # counting barrier over a single resource, so all waves have to reach
+        # it the same number of times per level.  Letting the upper waves pass
+        # two barriers (one after the store, one at the sync point) while the
+        # lower waves pass one before the load lets the count reach the wave
+        # count while only some waves have published their LDS value, and the
+        # lower waves then merge with a slot nobody has written.
         mod.add(label_upper)
-        mod.add(ri.VSubU32(vgpr("Tmp"), vgpr("Widx"), sgpr("Offset")))
-        mod.add(ri.VMulLOU32(vgpr("Tmp"), vgpr("Tmp"), 4))
+        mod.add(ri.VMulLOU32(vgpr("Tmp"), vgpr("Widx"), 4))
         mod.add(ri.VLShiftLeftB32(vgpr("Tmp"), 2, vgpr("Tmp")))
         ds = DSModifiers(offset=0)
         mod.add(ri.DSStoreB32(vgpr("Tmp"), vgpr("Count"), ds))
@@ -567,10 +581,11 @@ class LayerNormKernelGenerator:
         mod.add(ri.DSStoreB32(vgpr("Tmp"), vgpr("Invvar"), ds))
         mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(ri.SBarrier())
-        mod.add(ri.SBranch(label_sync.getLabelName()))
+        mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_lower)
         mod.add(ri.SBarrier())
-        mod.add(ri.VMulLOU32(vgpr("Tmp"), vgpr("Widx"), 4))
+        mod.add(ri.VAddU32(vgpr("Tmp"), vgpr("Widx"), sgpr("Offset")))
+        mod.add(ri.VMulLOU32(vgpr("Tmp"), vgpr("Tmp"), 4))
         mod.add(ri.VLShiftLeftB32(vgpr("Tmp"), 2, vgpr("Tmp")))
         ds = DSModifiers(offset=0)
         mod.add(ri.DSLoadB32(vgpr("CountB"), vgpr("Tmp"), ds))
@@ -580,13 +595,8 @@ class LayerNormKernelGenerator:
         mod.add(ri.DSLoadB32(vgpr("StdB"), vgpr("Tmp"), ds))
         mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(self.merge_sum())
-        mod.add(ri.SBranch(label_sync.getLabelName()))
+        mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_empty)
-        mod.add(ri.SBarrier())
-        mod.add(label_sync)
-        # The first barrier publishes the upper-wave writes. This second
-        # barrier retires the lower-wave reads before the next tree level
-        # reuses the same LDS slots.
         mod.add(ri.SBarrier())
         mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_end)
@@ -988,7 +998,11 @@ if __name__ == '__main__':
         assignGlobalParameters({}, isaInfoMap)
 
     _global_ti.init(isa, toolchain_path, False)
-    waveFrontSize = 32 if isa[0] in [11, 12] else 64
+    # gfx9xx is wave64; every RDNA part (gfx101x/gfx103x/gfx11xx/gfx12xx) is
+    # wave32. This mirrors rocisa's "HasWave32" capability (ISA major 10/11/12);
+    # the old test stopped at 11 and left gfx1030 on the wave64 path, which
+    # assembles 64-wide code for a wave32-only part.
+    waveFrontSize = 32 if isa[0] >= 10 else 64
     _global_ti.setKernel(isa, waveFrontSize)
     layernorm = LayerNormKernelGenerator(DataType('S'), w, c, 4, sweep_once, waveFrontSize, arch, isa)
     kernel_body = layernorm.layernorm_kernel_body()
