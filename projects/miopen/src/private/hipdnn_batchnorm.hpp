@@ -31,8 +31,9 @@ namespace hipdnn {
 //   x, but not the rank of dx.
 // - miopenStatusBadParm for non-default alpha or beta on inference and backward.
 // - miopenStatusUnknownError for non-default alpha or beta on training.
-// - miopenStatusUnknownError when x does not have 4 or 5 dimensions. MIOpen's
-//   problem description supports only those ranks.
+// - miopenStatusBadParm when x has fewer than 3 dimensions.
+// - miopenStatusUnknownError when x has 3 or more than 5 dimensions. MIOpen's
+//   problem description supports only 4 and 5.
 // - miopenStatusNotImplemented when no MIOpen solver applies: x, y, dy or dx
 //   not FLOAT, HALF or BFLOAT16, or scale, bias or statistics not FLOAT. Also
 //   an activation other than PASTHRU, RELU, CLIPPEDRELU or CLAMP on spatial
