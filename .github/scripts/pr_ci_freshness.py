@@ -1,22 +1,46 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Report how far behind ``develop`` an open pull request's base is.
+"""Report how old the ``develop`` behind each open pull request's CI result is.
 
-A PR that was branched a week ago is tested against a week-old ``develop``, so a
-green CI run says very little about whether the merge result actually works.
-GitHub's only built-in control here is "require branches to be up to date",
-which demands zero commits behind and would put every PR in this repo on an
-update-rerun-CI treadmill. This script implements the softer rule we actually
-want: the base may drift, but not for more than a few days.
+PR CI does not build the branch as pushed. On a ``pull_request`` event GitHub
+hands the workflow a test merge commit, the PR head merged into ``develop`` as
+it stood at that moment, and that merge is what TheRock Multi-Arch CI builds
+and tests. How long ago the branch itself last merged ``develop`` says nothing
+about what CI saw; how long ago CI made its merge says everything.
+
+That merge is fixed when the run is created. Re-running failed jobs, or the
+whole run, reuses it, so a re-run a week later still tests the week-old
+``develop``. Only a new run (a push, a reopen, a label change) merges the
+current tip. GitHub's built-in "require branches to be up to date" rule would
+force a new run after every commit to ``develop`` and put every PR in this repo
+on an update-rerun-CI treadmill. This script implements the softer rule we
+actually want: the ``develop`` that CI tested against may lag, but not by more
+than a few days.
 
 Staleness definition
 --------------------
 Let ``cutoff`` be the commit that was ``develop``'s tip ``--max-age-days`` ago.
-A PR is *stale* when its head does not contain ``cutoff``, i.e. when it is
-missing at least one commit that has been on ``develop`` for that long. Phrasing
-it against a time-based cutoff rather than "age of the merge base" means a quiet
-``develop`` never makes anyone stale: if nothing landed, there is nothing to
-miss.
+A PR's CI is *stale* when the newest CI run for its head merged a ``develop``
+that does not contain ``cutoff``, i.e. when CI missed at least one commit that
+has been on ``develop`` for that long. Phrasing it against a time-based cutoff
+rather than "age of the CI run" means a quiet ``develop`` never makes anyone
+stale: if nothing landed, there is nothing to miss.
+
+Which ``develop`` a run merged is inferred rather than read back, because
+GitHub keeps no record of it: the run carries the PR head, not the merge
+commit, and its ``pull_requests[].base`` is the PR's base as of the query, not
+as of the run. What does survive is the run's ``created_at``, which, unlike
+``run_started_at``, does not move on a re-run. The run merged ``develop`` as it
+stood then, so it contains ``cutoff`` exactly when it was created after
+``cutoff`` landed. That is good to within the few minutes GitHub can lag in
+refreshing a PR's merge commit, which is immaterial against a threshold
+measured in days.
+
+A head with no CI run yet is fresh, since whatever run it gets will merge the
+current tip.
+
+Only TheRock Multi-Arch CI is judged. Component CI and the Jenkins Math CI
+build a merge too, each with its own base, and are not covered here.
 
 Reporting
 ---------
@@ -56,8 +80,9 @@ Before enforcement is enabled, confirm from the job summary that a full sweep
 finishes inside the allowance and publishes every status.
 
 Usage:
-  python pr_base_freshness.py --pr 1234
-  python pr_base_freshness.py --all-open
+  python pr_ci_freshness.py --pr 1234
+  python pr_ci_freshness.py --head-sha 0123abcd...
+  python pr_ci_freshness.py --all-open
 """
 
 import argparse
@@ -77,15 +102,18 @@ from typing import Any, Iterable, Optional
 
 API_ROOT = "https://api.github.com"
 
-# Deliberately no third-party HTTP client. This runs in a
-# `pull_request_target` job holding `statuses: write`, so anything it installs
+# Deliberately no third-party HTTP client. This runs in a base-repo
+# `workflow_run` job holding `statuses: write`, so anything it installs
 # is code running at that privilege, and an unpinned install is a standing
 # invitation. The workload is a handful of JSON GETs and POSTs, which the
 # standard library does perfectly well. The only cost is the lost connection
 # pooling, measured at about 1.3x per request against the real API, which over
 # a full sweep is seconds against a 20 minute timeout.
 TIMEOUT_SECONDS = 60
-USER_AGENT = "rocm-libraries-pr-base-freshness"
+USER_AGENT = "rocm-libraries-pr-ci-freshness"
+
+# The workflow whose runs are judged, by file name as the Actions API takes it.
+DEFAULT_CI_WORKFLOW = "therock-multi-arch-ci.yml"
 
 # GitHub truncates commit status descriptions past this length.
 MAX_DESCRIPTION_LENGTH = 140
@@ -98,14 +126,14 @@ MAX_WORKERS = 16
 # Writes are the scarce resource, not reads. Commit statuses count against
 # GitHub's content-generation secondary limit (roughly 80 per minute, 500 per
 # hour), which is far tighter than the hourly request allowance, and it is
-# shared with the statuses the PR-event runs are posting at the same time.
+# shared with the statuses the CI-run trigger is posting at the same time.
 # Hence both the pacing below and skipping writes that would change nothing.
 POSTS_PER_MINUTE = 70
 
-# Requests a PR costs before the optional dating call: the ancestry compare,
-# the read of its current status, and the status post. A PR is not started
-# unless all three can be paid for, so we never evaluate a PR and then fail to
-# publish the answer.
+# Requests a PR costs: the lookup of its newest CI run, the read of its
+# current status, and the status post. A PR is not started unless all three
+# can be paid for, so we never evaluate a PR and then fail to publish the
+# answer.
 REQUESTS_PER_PR = 3
 
 # Of those, the one spent in the serial write phase, long after the reads are
@@ -113,11 +141,6 @@ REQUESTS_PER_PR = 3
 # releasing the whole claim when the reads finish would leave every write in
 # the sweep outside the reserve those reads were careful to respect.
 REQUESTS_PER_WRITE = 1
-
-# The dating call that turns "over the limit" into "6.0 days" is cosmetic, so
-# it is only spent when there is this much slack left. Under pressure the
-# human-readable day count is the first thing dropped, never the verdict.
-COSMETIC_SLACK = 50
 
 # A write that fails is the one outcome this job cannot shrug off: in enforce
 # mode a required context that is simply absent blocks its PR with no way out,
@@ -200,9 +223,10 @@ class GitHub:
     def has_budget(self, cost: int = 1) -> bool:
         """Whether ``cost`` more requests fit, without claiming them.
 
-        For optional work only, where losing a race costs nothing worse than
-        a missing day count. Anything that must not be started unless it can
-        also be finished goes through ``claim_budget``.
+        For work outside the per-PR claims, such as listing pages, where
+        losing a race costs nothing worse than a shorter list. Anything that
+        must not be started unless it can also be finished goes through
+        ``claim_budget``.
         """
         with self._lock:
             return self._fits(cost)
@@ -323,9 +347,38 @@ class RetryBudget:
 
 @dataclass
 class PullRequest:
-    number: int
+    # None when the run was scoped by head SHA alone, as the CI-run trigger
+    # does: a fork PR's run does not say which PR it belongs to, and the
+    # status lands on the head either way.
+    number: Optional[int]
     head_sha: str
     draft: bool
+
+    @property
+    def label(self) -> str:
+        return f"#{self.number}" if self.number else self.head_sha[:12]
+
+
+@dataclass
+class Cutoff:
+    """The commit that was the base branch tip ``--max-age-days`` ago."""
+
+    sha: str
+    landed_at: datetime
+
+
+@dataclass
+class CIRun:
+    """The newest CI run for a PR head, which is the result the PR shows."""
+
+    id: int
+    url: str
+    attempt: int
+    # When the run, and with it the merge of develop it tests, was created.
+    # Fixed across re-runs, unlike run_started_at, which is exactly why a
+    # re-run cannot make stale CI fresh. Also what lets the status
+    # description stay byte-identical between sweeps and dedupe cleanly.
+    created_at: datetime
 
 
 @dataclass
@@ -333,15 +386,8 @@ class Verdict:
     """The freshness result for one PR, before it is translated to a status."""
 
     fresh: bool
-    # Commits on develop older than the cutoff that this PR is missing. None
-    # when the PR could not be evaluated. Reported in the run summary but
-    # deliberately kept out of the status description: the cutoff advances
-    # every run, so this number drifts even when the PR has not moved.
-    missing_commits: Optional[int] = None
-    # When the oldest develop commit this PR is missing landed. Fixed for a
-    # given head and merge base, unlike an age, which is what lets the status
-    # description stay byte-identical between sweeps and dedupe cleanly.
-    oldest_missing: Optional[datetime] = None
+    # None when the head has no CI run yet, or could not be evaluated.
+    ci_run: Optional[CIRun] = None
     error: Optional[str] = None
     # Set when the rate-limit reserve stopped us before this PR was looked at.
     # A skipped PR gets no status at all, since posting one would itself cost
@@ -369,17 +415,51 @@ def parse_timestamp(value: str) -> datetime:
 
 def find_cutoff_commit(
     gh: GitHub, base_branch: str, max_age_days: int, now: datetime
-) -> str:
-    """Returns the SHA that was ``base_branch``'s tip ``max_age_days`` ago."""
+) -> Cutoff:
+    """Returns the commit that was ``base_branch``'s tip ``max_age_days`` ago."""
     until = (now - timedelta(days=max_age_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     commits = gh.get("commits", sha=base_branch, until=until, per_page=1)
     if not commits:
         raise GitHubError(f"no commit on {base_branch} older than {until}")
-    return commits[0]["sha"]
+    try:
+        # The committer date of a squash or merge-queue merge is when it
+        # landed on the base branch, which is the moment that matters here.
+        return Cutoff(
+            sha=commits[0]["sha"],
+            landed_at=parse_timestamp(commits[0]["commit"]["committer"]["date"]),
+        )
+    except (KeyError, TypeError, ValueError) as e:
+        raise GitHubError(f"cannot date the cutoff commit: {e}") from e
 
 
-def evaluate(gh: GitHub, pr: PullRequest, base_branch: str, cutoff_sha: str) -> Verdict:
-    """Decides whether ``pr`` contains the cutoff commit.
+def find_ci_run(gh: GitHub, head_sha: str, workflow: str) -> Optional[CIRun]:
+    """Returns the newest ``pull_request`` run of ``workflow`` for ``head_sha``.
+
+    The newest run is the one whose result the PR shows. A label change or a
+    reopen starts a new run for the same head with a fresh merge, so it is
+    the newest run that matters, not the first.
+    """
+    response = gh.get(
+        f"actions/workflows/{workflow}/runs",
+        head_sha=head_sha,
+        event="pull_request",
+        per_page=1,
+    )
+    runs = response["workflow_runs"]
+    # len() rather than truthiness, so a null list is an error, not "no run".
+    if len(runs) == 0:
+        return None
+    run = runs[0]
+    return CIRun(
+        id=run["id"],
+        url=run["html_url"],
+        attempt=run.get("run_attempt") or 1,
+        created_at=parse_timestamp(run["created_at"]),
+    )
+
+
+def evaluate(gh: GitHub, pr: PullRequest, workflow: str, cutoff: Cutoff) -> Verdict:
+    """Decides whether the CI run ``pr`` shows merged the cutoff commit.
 
     Assumes the caller has already claimed the budget for this PR; see
     ``assess``, which is the only thing that should be calling it.
@@ -389,34 +469,14 @@ def evaluate(gh: GitHub, pr: PullRequest, base_branch: str, cutoff_sha: str) -> 
     ends the run before anything at all is published.
     """
     try:
-        comparison = gh.get(f"compare/{cutoff_sha}...{pr.head_sha}", per_page=1)
-        # "identical" or "ahead" means the cutoff is an ancestor of the head.
-        fresh = comparison["status"] in ("identical", "ahead")
-        missing = comparison["behind_by"]
-    except (GitHubError, KeyError, TypeError) as e:
+        ci_run = find_ci_run(gh, pr.head_sha, workflow)
+    except (GitHubError, KeyError, TypeError, ValueError, AttributeError) as e:
         return Verdict(fresh=True, error=str(e))
-
-    if fresh:
-        return Verdict(fresh=True, missing_commits=0)
-
-    oldest_missing = None
-    if gh.has_budget(COSMETIC_SLACK):
-        try:
-            # Only stale PRs pay for this second call. The merge base of the
-            # cutoff and the head is also the merge base of develop and the
-            # head, since a stale PR by definition diverged before the cutoff.
-            merge_base = comparison["merge_base_commit"]["sha"]
-            since_merge_base = gh.get(
-                f"compare/{merge_base}...{base_branch}", per_page=1
-            )
-            oldest = since_merge_base["commits"][0]["commit"]["committer"]["date"]
-            oldest_missing = parse_timestamp(oldest)
-        except (GitHubError, KeyError, IndexError):
-            # The headline verdict stands; we just cannot date it. The
-            # description falls back to a form that is equally stable.
-            pass
-
-    return Verdict(fresh=False, missing_commits=missing, oldest_missing=oldest_missing)
+    if ci_run is None:
+        return Verdict(fresh=True)
+    # The run merged the base branch as it stood when the run was created,
+    # so that merge contains the cutoff exactly when the cutoff landed first.
+    return Verdict(fresh=ci_run.created_at >= cutoff.landed_at, ci_run=ci_run)
 
 
 def current_status(
@@ -441,13 +501,13 @@ def current_status(
 def assess(
     gh: GitHub,
     pr: PullRequest,
-    base_branch: str,
-    cutoff_sha: str,
+    workflow: str,
+    cutoff: Cutoff,
     context: str,
 ) -> Assessment:
     """Evaluates ``pr`` and reads back whatever status it already carries.
 
-    Admission happens here, for the whole PR at once: the compare, the
+    Admission happens here, for the whole PR at once: the CI run lookup, the
     read-back, and the write that comes later. Claiming all three up front is
     what makes "never evaluate a PR we cannot publish for" true, and holding
     the claim rather than merely checking it is what stops the other workers
@@ -458,7 +518,7 @@ def assess(
     """
     if not gh.claim_budget(REQUESTS_PER_PR):
         return Assessment(Verdict(fresh=True, skipped=True))
-    verdict = evaluate(gh, pr, base_branch, cutoff_sha)
+    verdict = evaluate(gh, pr, workflow, cutoff)
     published = current_status(gh, pr.head_sha, context)
     gh.release_budget(REQUESTS_PER_PR - REQUESTS_PER_WRITE)
     return Assessment(verdict, published, holds_write_claim=True)
@@ -470,36 +530,37 @@ def describe(
     """Builds the one-line commit status description.
 
     Every branch here is worded to be stable for an unchanged PR. A status
-    that says "6.0 days behind" would have to be rewritten on every sweep as
+    that says "6.0 days old" would have to be rewritten on every sweep as
     that number drifts, which for a queue this size is a lot of writes to say
-    nothing new, so the stale case states when the drift started instead.
+    nothing new, so the stale case states the date of the CI run instead,
+    which only a new run can change.
+
+    The stale case also says what does not help. Re-running is the obvious
+    reaction to a CI result that looks old, and it is the one that reuses
+    the old merge.
     """
     if verdict.error:
-        text = f"Could not evaluate base freshness ({verdict.error})"
+        text = f"Could not evaluate CI freshness ({verdict.error})"
+    elif verdict.fresh and verdict.ci_run is None:
+        text = f"No CI run on this head yet; the next one merges current {base_branch}"
     elif verdict.fresh:
-        text = f"Base is within {max_age_days} days of {base_branch}"
+        text = f"CI merged {base_branch} within the last {max_age_days} days"
     else:
-        if verdict.oldest_missing:
-            since = verdict.oldest_missing.date().isoformat()
-            text = (
-                f"Base is missing {base_branch} commits from {since} onward. "
-                f"Merge or rebase {base_branch}"
-            )
-        else:
-            text = (
-                f"Base is more than {max_age_days} days behind {base_branch}. "
-                f"Merge or rebase {base_branch}"
-            )
+        since = verdict.ci_run.created_at.date().isoformat()
+        text = (
+            f"CI tested against {base_branch} from {since}. Push or merge "
+            f"{base_branch} for a new run; re-running jobs reuses that base"
+        )
         if not enforcing:
             text = f"WOULD FAIL: {text}"
     return text[:MAX_DESCRIPTION_LENGTH]
 
 
-def stale_days(verdict: Verdict, now: datetime) -> float:
-    """How long ``verdict`` has been missing commits, for run-summary display."""
-    if not verdict.oldest_missing:
+def ci_age_days(verdict: Verdict, now: datetime) -> float:
+    """How old the merge ``verdict``'s CI run tested is, for the run summary."""
+    if not verdict.ci_run:
         return 0.0
-    return (now - verdict.oldest_missing).total_seconds() / 86400
+    return (now - verdict.ci_run.created_at).total_seconds() / 86400
 
 
 def status_state(verdict: Verdict, enforcing: bool) -> str:
@@ -508,6 +569,15 @@ def status_state(verdict: Verdict, enforcing: bool) -> str:
         if enforcing and not verdict.fresh and not verdict.error
         else "success"
     )
+
+
+def status_target_url(verdict: Verdict, this_run_url: Optional[str]) -> Optional[str]:
+    """Where the status links: the CI run being judged, when there is one.
+
+    That run's date is what the verdict rests on. Without one, the link goes
+    to this job, whose summary at least says why.
+    """
+    return verdict.ci_run.url if verdict.ci_run else this_run_url
 
 
 def publish_status(
@@ -564,9 +634,9 @@ def list_open_prs(
 ) -> Listing:
     """Lists open PRs targeting ``base_branch``, least recent activity first.
 
-    Ordering matters when the reserve cuts a sweep short. The PR-event trigger
-    already posts a status on every open and push, so a PR touched minutes ago
-    has an accurate one. The PRs whose statuses are most likely to be wrong are
+    Ordering matters when the reserve cuts a sweep short. The CI-run trigger
+    already posts a status whenever a PR gets a new CI run, so a PR touched
+    minutes ago has an accurate one. The PRs whose statuses are most likely to be wrong are
     the ones nothing has touched in days, so they go first and the freshly
     evaluated ones are what gets dropped.
 
@@ -639,7 +709,12 @@ def main() -> int:
     parser.add_argument("--base-branch", default="develop")
     parser.add_argument("--max-age-days", type=day_count, default=3)
     parser.add_argument(
-        "--context", default="base-freshness", help="Commit status context name"
+        "--context", default="ci-freshness", help="Commit status context name"
+    )
+    parser.add_argument(
+        "--ci-workflow",
+        default=DEFAULT_CI_WORKFLOW,
+        help="Workflow file whose newest PR run for a head is judged",
     )
     parser.add_argument(
         "--mode",
@@ -648,6 +723,11 @@ def main() -> int:
         help="report: always post success, with the verdict in the description",
     )
     parser.add_argument("--pr", type=int, help="Evaluate a single PR")
+    parser.add_argument(
+        "--head-sha",
+        help="Evaluate a single PR head, as the CI-run trigger does; fork PR "
+        "runs do not say which PR they belong to",
+    )
     parser.add_argument(
         "--all-open", action="store_true", help="Evaluate every open PR"
     )
@@ -677,21 +757,22 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if bool(args.pr) == bool(args.all_open):
-        parser.error("pass exactly one of --pr or --all-open")
+    if [bool(args.pr), bool(args.head_sha), args.all_open].count(True) != 1:
+        parser.error("pass exactly one of --pr, --head-sha or --all-open")
     token = os.environ.get("GH_TOKEN")
     if not token:
         parser.error("GH_TOKEN is not set")
 
     enforcing = args.mode == "enforce"
     now = datetime.now(timezone.utc)
+    single = bool(args.pr or args.head_sha)
     # A single PR triggered by its own event is worth spending reserve on; only
     # the sweep can plausibly exhaust the shared allowance.
-    reserve = 0 if args.pr else args.rate_limit_reserve
+    reserve = 0 if single else args.rate_limit_reserve
     gh = GitHub(args.repo, token, reserve=reserve)
 
     try:
-        cutoff_sha = find_cutoff_commit(gh, args.base_branch, args.max_age_days, now)
+        cutoff = find_cutoff_commit(gh, args.base_branch, args.max_age_days, now)
     except GitHubError as e:
         # Fail open, loudly. Posting nothing is worse than posting success:
         # an unreported required status blocks its PR with no way out.
@@ -699,11 +780,13 @@ def main() -> int:
         return 0
 
     try:
+        # Single-PR modes evaluate drafts too, so the status is already
+        # present if the PR is marked ready and merged before the next
+        # scheduled run.
         if args.pr:
-            # Single-PR mode evaluates drafts too, so the status is already
-            # present if the PR is marked ready and merged before the next
-            # scheduled run.
             listing = Listing([fetch_pr(gh, args.pr)])
+        elif args.head_sha:
+            listing = Listing([PullRequest(None, args.head_sha, draft=False)])
         else:
             listing = list_open_prs(
                 gh, args.base_branch, include_drafts=False, limit=args.max_prs
@@ -728,17 +811,17 @@ def main() -> int:
             "requests; this sweep is working from a partial list"
         )
 
-    target_url = None
+    this_run_url = None
     server, run_id = os.environ.get("GITHUB_SERVER_URL"), os.environ.get(
         "GITHUB_RUN_ID"
     )
     if server and run_id:
-        target_url = f"{server}/{args.repo}/actions/runs/{run_id}"
+        this_run_url = f"{server}/{args.repo}/actions/runs/{run_id}"
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         assessments = list(
             pool.map(
-                lambda pr: assess(gh, pr, args.base_branch, cutoff_sha, args.context),
+                lambda pr: assess(gh, pr, args.ci_workflow, cutoff, args.context),
                 prs,
             )
         )
@@ -757,7 +840,7 @@ def main() -> int:
             continue
         state = status_state(verdict, enforcing)
         description = describe(verdict, args.base_branch, args.max_age_days, enforcing)
-        print(f"PR #{pr.number}: {state} - {description}")
+        print(f"PR {pr.label}: {state} - {description}")
         if not verdict.fresh and not verdict.error:
             stale.append((pr, verdict))
         try:
@@ -775,6 +858,7 @@ def main() -> int:
                 "context": args.context,
                 "description": description,
             }
+            target_url = status_target_url(verdict, this_run_url)
             if target_url:
                 payload["target_url"] = target_url
             error = publish_status(gh, pacer, retries, pr.head_sha, payload)
@@ -798,7 +882,7 @@ def main() -> int:
         print(
             f"::error::{len(unpublished)} of {len(prs)} PRs have no "
             f"{args.context} status from this run: "
-            + ", ".join(f"#{pr.number}" for pr, _ in unpublished[:20])
+            + ", ".join(pr.label for pr, _ in unpublished[:20])
         )
 
     if skipped:
@@ -812,12 +896,14 @@ def main() -> int:
 
     evaluated = len(prs) - len(skipped)
     summary = [
-        f"## Base freshness ({args.mode} mode)",
+        f"## CI freshness ({args.mode} mode)",
         "",
         f"Cutoff commit (`{args.base_branch}` tip {args.max_age_days} days ago): "
-        f"`{cutoff_sha[:12]}`",
+        f"`{cutoff.sha[:12]}`, landed {cutoff.landed_at.isoformat()}. A PR's "
+        f"CI is stale when its newest `{args.ci_workflow}` run was created "
+        f"before that, so it merged a `{args.base_branch}` without it.",
         "",
-        f"{len(stale)} of {evaluated} evaluated PRs are stale."
+        f"{len(stale)} of {evaluated} evaluated PRs have stale CI."
         + (f" {len(skipped)} skipped for rate-limit reserve." if skipped else ""),
         "",
     ]
@@ -838,11 +924,16 @@ def main() -> int:
         # The age belongs here rather than in the status description: this
         # table is rebuilt every run anyway, so a drifting number costs
         # nothing.
-        summary += ["| PR | Days behind | Missing commits |", "| --- | --- | --- |"]
-        for pr, verdict in sorted(stale, key=lambda s: -stale_days(s[1], now)):
-            days = stale_days(verdict, now)
-            shown = f"{days:.1f}" if days else "?"
-            summary.append(f"| #{pr.number} | {shown} | {verdict.missing_commits} |")
+        summary += [
+            "| PR | CI run | Attempt | CI age (days) |",
+            "| --- | --- | --- | --- |",
+        ]
+        for pr, verdict in sorted(stale, key=lambda s: -ci_age_days(s[1], now)):
+            run = verdict.ci_run
+            summary.append(
+                f"| {pr.label} | [{run.id}]({run.url}) | {run.attempt} | "
+                f"{ci_age_days(verdict, now):.1f} |"
+            )
         summary.append("")
     if unpublished:
         # Named individually, because clearing this is per-PR work: these are
@@ -852,7 +943,7 @@ def main() -> int:
             f"{POST_ATTEMPTS} attempts:",
             "",
         ]
-        summary += [f"- #{pr.number}: {error}" for pr, error in unpublished]
+        summary += [f"- {pr.label}: {error}" for pr, error in unpublished]
         summary.append("")
     summary.append(
         f"_{gh.request_count} API requests ({posted} statuses written, "
