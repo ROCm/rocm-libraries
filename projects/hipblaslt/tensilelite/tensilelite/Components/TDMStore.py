@@ -199,7 +199,8 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
 
   An odd 2-byte fp16 element goes to the high half of its own VGPR, where readInput loads it, with
   ds_load_u16_d16_hi. Only that half is read afterwards, so it does not matter that a d16 load writes
-  all 32 bits of its VGPR on gfx1250, where ECC zero-fills the other half.
+  all 32 bits of its VGPR on gfx1250, where ECC zero-fills the other half. A DS load reads at most
+  16 bytes, so a wider vector, such as bf16 at store vector width 16, is read 16 bytes at a time.
   """
   module = Module("TDMStoreLoadCElement")
   kw = gwb.parentWriter
@@ -210,10 +211,12 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
   if bpl == 2 and gwb.kernel["ProblemType"]["DestDataType"].isHalf() and not kw.states.HHH_WMMA and vc0 % 2:
     inst = DSLoadD16HIU16(dst=vgpr(data), src=vgpr(addr), ds=DSModifiers(offset=offset), comment=comment)
     inst.setMemToken(memToken)
-  else:
-    inst = dsLoad(bpl, dst=vgpr(data, max(1, bpl // kw.states.bpr)), src=vgpr(addr), ds=DSModifiers(offset=offset),
-                  comment=comment, memToken=memToken)
-  module.add(inst)
+    module.add(inst)
+    return module
+  width = min(bpl, 16)
+  for piece in range(bpl // width):
+    module.add(dsLoad(width, dst=vgpr(data + piece * width // kw.states.bpr, max(1, width // kw.states.bpr)),
+                      src=vgpr(addr), ds=DSModifiers(offset=offset + piece * width), comment=comment, memToken=memToken))
   return module
 
 
