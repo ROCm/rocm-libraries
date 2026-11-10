@@ -1339,11 +1339,16 @@ def getPytorchTestsCmds() {
         "cd pytorch && USE_ROCM_CK_SDPA=1 PYTORCH_ROCM_ARCH=gfx942 python3 setup.py develop"
     ]
 }
-def getAiterTestsCmds() {
-    return [
+def getAiterTestsCmds(String arch = "") {
+    def cmds = [
         // Pre-compile FlyDSL MoE AOT cache before the tests.
         "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/moe.py",
-        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/mxfp4_moe.py",
+    ]
+    // mxfp4_moe.py requires gfx950 and must not run on gfx942
+    if (arch != "gfx942") {
+        cmds << "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/mxfp4_moe.py"
+    }
+    cmds += [
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8_blockscale.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_mha.py",
@@ -1357,6 +1362,7 @@ def getAiterTestsCmds() {
         "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_sorting_mxfp4.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_tkw1.py"
     ]
+    return cmds
 }
 def getFaTestsCmds() {
     return [
