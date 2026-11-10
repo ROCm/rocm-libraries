@@ -612,6 +612,8 @@ TEST(TestConvIgemmCatalog, DirectFilterConfigsAreBackwardDataOnlyAndPackingIsNot
     EXPECT_GT(packed, 0);
 }
 
+hipdnn_plugin_sdk::ingestor::DeviceProperties deviceOf(const std::string& arch, int units);
+
 TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOutputTwin)
 {
     static constexpr std::array<const char*, 15> SHAPE{"atom",
@@ -792,8 +794,6 @@ TEST(TestConvIgemmCatalog, ChannelsFirstOutputProblemsStageNoOutput)
         }
     }
 }
-
-hipdnn_plugin_sdk::ingestor::DeviceProperties deviceOf(const std::string& arch, int units);
 
 TEST(TestConvIgemmCatalog, ChannelsFirstOutputConfigsServeOnlyChannelsFirstOutputs)
 {
