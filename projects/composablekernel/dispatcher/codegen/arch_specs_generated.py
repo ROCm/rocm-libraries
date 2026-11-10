@@ -1,10 +1,11 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
 """
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-11-09T14:43:45.864094
+Generated at: 2026-11-10T01:49:54.897101
 
 To update this file:
 1. Edit arch_specs.json
@@ -334,6 +335,18 @@ TRAIT_UNSUPPORTED_COMBINATIONS: Set[Tuple[str, str, str]] = {
     ("comp_tdm_v3", "default", "interwave"),
     ("comp_tdm_v3", "tdm", "interwave"),
 }
+
+# Pipelines whose C++ problem requires DoubleSmemBuffer == true.
+DOUBLE_SMEM_BUFFER_PIPELINES: Tuple[str, ...] = (
+    "compv4",
+    "preshufflev2",
+    "comp_async",
+    "comp_tdm",
+    "comp_tdm_v2",
+    "comp_tdm_pc",
+    "comp_tdm_v3",
+    "preshuffle_tdm",
+)
 
 # Valid dtype combinations: (A_dtype, B_dtype) -> acc_dtype and notes
 DTYPE_COMBINATIONS: Dict[str, Dict[str, str]] = {

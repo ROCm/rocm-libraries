@@ -5,7 +5,7 @@
  * AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
  *
  * Generated from: arch_specs.json
- * Generated at: 2026-11-09T14:43:45.866630
+ * Generated at: 2026-11-10T01:49:54.899289
  *
  * To update this file:
  * 1. Edit arch_specs.json
@@ -373,21 +373,61 @@ inline std::size_t get_lds_total_capacity(GpuArch arch)
 // Unsupported Trait Combinations (Generated)
 // =============================================================================
 
-inline bool
-is_trait_unsupported(Pipeline pipeline, [[maybe_unused]] Epilogue epilogue, Scheduler scheduler)
+inline bool is_trait_unsupported(Pipeline pipeline, Epilogue epilogue, Scheduler scheduler)
 {
-    // Generated from unsupported_trait_combos in arch_specs.json
-    if(scheduler == Scheduler::Interwave)
-    {
-        if(pipeline == Pipeline::CompV3 || pipeline == Pipeline::CompV4 ||
+    return (pipeline == Pipeline::CompV3 && epilogue == Epilogue::CShuffle &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompV3 && epilogue == Epilogue::Default &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompV4 && epilogue == Epilogue::CShuffle &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompV4 && epilogue == Epilogue::Default &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompV5 && epilogue == Epilogue::CShuffle &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompV5 && epilogue == Epilogue::Default &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompV6 && epilogue == Epilogue::CShuffle &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompV6 && epilogue == Epilogue::Default &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompAsync && epilogue == Epilogue::CShuffle &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompAsync && epilogue == Epilogue::Default &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompTDMV1 && epilogue == Epilogue::CShuffle &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompTDMV1 && epilogue == Epilogue::Default &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompTDMV1 && epilogue == Epilogue::Tdm &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompTDMV2 && epilogue == Epilogue::CShuffle &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompTDMV2 && epilogue == Epilogue::Default &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompTDMV2 && epilogue == Epilogue::Tdm &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompTDMPC && epilogue == Epilogue::CShuffle &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompTDMPC && epilogue == Epilogue::Default &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompTDMPC && epilogue == Epilogue::Tdm &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompTDMV3 && epilogue == Epilogue::CShuffle &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompTDMV3 && epilogue == Epilogue::Default &&
+            scheduler == Scheduler::Interwave) ||
+           (pipeline == Pipeline::CompTDMV3 && epilogue == Epilogue::Tdm &&
+            scheduler == Scheduler::Interwave);
+}
+
+// Pipelines whose C++ problem requires DoubleSmemBuffer == true.
+inline constexpr bool requires_double_smem_buffer(Pipeline pipeline)
+{
+    return pipeline == Pipeline::CompV4 || pipeline == Pipeline::PreShuffleV2 ||
            pipeline == Pipeline::CompAsync || pipeline == Pipeline::CompTDMV1 ||
            pipeline == Pipeline::CompTDMV2 || pipeline == Pipeline::CompTDMPC ||
-           pipeline == Pipeline::CompTDMV3)
-        {
-            return true;
-        }
-    }
-    return false;
+           pipeline == Pipeline::CompTDMV3 || pipeline == Pipeline::PreShuffleTDM;
 }
 
 } // namespace arch_specs

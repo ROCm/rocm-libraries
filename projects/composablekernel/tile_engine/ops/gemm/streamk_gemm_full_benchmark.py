@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Full Stream-K GEMM benchmark sweep driven through the Dispatcher bridge.
 
 Same 3-phase architecture as ``gemm_full_benchmark.py`` -- Stream-K is a
@@ -52,6 +56,7 @@ sys.path.insert(0, str(_COMMON_DIR))
 sys.path.insert(0, str(_THIS_DIR))
 
 from gemm_utils import (  # noqa: E402
+    parse_streamk_budgets,
     STREAMK_REDUCTION_STRATEGIES,
     _resolve_arch,
     expand_sweep,
@@ -314,7 +319,8 @@ def main():
     parser.add_argument(
         "--budget-pct",
         default="100",
-        help="Comma-list of Stream-K workgroup budgets, in percent of the kernel's "
+        help="Comma-list of distinct integer Stream-K workgroup budgets in 1..100, "
+        "in percent of the kernel's "
         "default (CUs x occupancy, 100); each kernel x problem runs once per value "
         "(e.g. 100,75,50,25)",
     )
@@ -333,10 +339,11 @@ def main():
     )
     add_vector_fallback_arg(parser)
     args = parser.parse_args()
+    try:
+        budget_pcts = parse_streamk_budgets(args.budget_pct)
+    except ValueError as exc:
+        parser.error(str(exc))
     args.arch = _resolve_arch(args.arch)
-    budget_pcts = [int(p) for p in str(args.budget_pct).split(",") if p.strip()]
-    if not budget_pcts or any(not 0 < p <= 100 for p in budget_pcts):
-        parser.error("--budget-pct values must be in 1..100")
 
     config_paths = resolve_configs(args)
     devices = resolve_devices(args.devices)

@@ -2901,6 +2901,18 @@ def unique_by_name(configs: List[GemmKernelConfig]) -> List[GemmKernelConfig]:
     return list(first.values())
 
 
+def parse_streamk_budgets(text) -> List[int]:
+    """A ``--budget-pct`` comma list: distinct percents in 1..100, in order.
+    Raises ValueError otherwise."""
+    try:
+        pcts = [int(p) for p in str(text).split(",") if p.strip()]
+    except ValueError:
+        pcts = []
+    if not pcts or any(not 0 < p <= 100 for p in pcts) or len(set(pcts)) < len(pcts):
+        raise ValueError(f"--budget-pct {text!r}: expected distinct values in 1..100")
+    return pcts
+
+
 def expand_sweep(
     config_path: str,
     arch: Optional[str] = None,
