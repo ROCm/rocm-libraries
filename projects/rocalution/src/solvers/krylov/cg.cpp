@@ -232,6 +232,8 @@ namespace rocalution
 
         if(this->build_ == true)
         {
+            this->op_->ApplyAnalyse();
+
             this->r_.Zeros();
             this->z_.Zeros();
             this->p_.Zeros();

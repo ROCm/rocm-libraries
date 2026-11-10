@@ -197,6 +197,12 @@ namespace rocalution
             }
         }
 
+        // Analyse the coarse operators in their final format
+        for(int i = 0; i < this->levels_ - 1; ++i)
+        {
+            this->op_level_[i]->ApplyAnalyse();
+        }
+
         this->build_ = true;
 
         log_debug(this, "BaseAMG::Build()", this->build_, " #*# end");

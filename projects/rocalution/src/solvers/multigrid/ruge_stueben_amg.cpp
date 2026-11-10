@@ -321,6 +321,12 @@ namespace rocalution
             }
         }
 
+        // Analyse the coarse operators in their final format
+        for(int i = 0; i < this->levels_ - 1; ++i)
+        {
+            this->op_level_[i]->ApplyAnalyse();
+        }
+
         log_debug(this, "RugeStuebenAMG::ReBuildNumeric()", " #*# end");
     }
 

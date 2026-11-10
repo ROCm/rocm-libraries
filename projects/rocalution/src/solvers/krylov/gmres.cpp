@@ -201,6 +201,8 @@ namespace rocalution
 
         if(this->build_ == true)
         {
+            this->op_->ApplyAnalyse();
+
             for(int i = 0; i < this->size_basis_ + 1; ++i)
             {
                 this->v_[i]->Zeros();

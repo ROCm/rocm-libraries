@@ -214,6 +214,8 @@ namespace rocalution
 
         if(this->build_ == true)
         {
+            this->op_->ApplyAnalyse();
+
             this->r0_.Zeros();
 
             for(int i = 0; i < this->l_ + 1; ++i)
