@@ -23,7 +23,7 @@ import tensilelite.KernelWriterAssembly as kwa_module
 from tensilelite.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
 from tensilelite.Components.TDMFuse import TDM_GROUPS, tdmGrouping, tdmPapRejectReason, tdmScaleSharesDataSet
 from tensilelite.Components.TileProcessingStrategy import DataParallel
-from tensilelite.Components.PersistentLoop import PersistentLoopOn
+from tensilelite.Components.PersistentLoop import PersistentKernelState, PersistentLoopOn
 from tensilelite.Components.WorkAssignment import StaticGrid, DynamicWorkQueue, Hybrid
 from tensilelite.Common.GlobalParameters import defaultSolution, globalParameters
 from tensilelite.Common.RequiredParameters import getRequiredParametersMin
@@ -1277,11 +1277,12 @@ def test_sk4_pap_setup_next_tile_uses_stashed_work_item(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# ReuseAcrossPersistent silences A for the whole reuse copy, but one load in it
-# belongs to the next tile, and that tile may not be able to reuse A.
+# ReuseAcrossPersistent silences the resident operand for the whole reuse copy,
+# but one load in it belongs to the next tile, and that tile may not be able to
+# reuse it.
 # ---------------------------------------------------------------------------
 class _RapTdmNullWriter:
-    """Just enough writer to render rapNullTdmDescriptorForEvenWaves.
+    """Just enough writer to render rapNullResidentTdmDescriptor.
 
     tdmParityPackedInArgType picks the parity form that needs no scratch, so what
     comes out is the parity compare plus the selects under test and nothing else.
@@ -1290,10 +1291,13 @@ class _RapTdmNullWriter:
     """
 
     _emitTdmWaveParitySCC = kwa_module.KernelWriterAssembly._emitTdmWaveParitySCC
+    rapResidentTcs = PersistentKernelState.rapResidentTcs
+    rapResidentTileSgpr = PersistentKernelState.rapResidentTileSgpr
+    _RAP_RESIDENT_TCS = PersistentKernelState._RAP_RESIDENT_TCS
 
     def __init__(self, in_pap_next_tile_prefetch):
         self.states = SimpleNamespace(
-            rapDropAResidentLoads=True,
+            rapDropResidentLoads=True,
             rapInPapNextTilePrefetch=in_pap_next_tile_prefetch,
             tdmParityPackedInArgType=True,
         )
@@ -1306,11 +1310,13 @@ class _RapTdmNullWriter:
         yield SimpleNamespace(idx=90, size=num)
 
 
-def _rap_null_tdm(in_pap_next_tile_prefetch):
+def _rap_null_tdm(in_pap_next_tile_prefetch, rap=1):
+    kernel = {"WavefrontSize": 32, "ReuseAcrossPersistent": rap, "NumWaves": 4, "TDMFuse": 0,
+              "ProblemType": {"MXBlockA": 32, "MXBlockB": 32}}
     return str(
-        kwa_module.KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves(
+        kwa_module.KernelWriterAssembly.rapNullResidentTdmDescriptor(
             _RapTdmNullWriter(in_pap_next_tile_prefetch),
-            {"WavefrontSize": 32},
+            kernel,
             "tdmAGroup0+0",
         )
     )
@@ -1345,7 +1351,7 @@ def test_rap_lets_the_next_tile_prefetch_fetch_a_when_a_changes():
     every phase turnover of rapPhaseWalkInit's walk, and with a runtime WGM also
     under the plain stride, where the remapped M-tile can hold for a few tiles
     before it changes. The guard and this prefetch have to agree on when A is
-    refilled. See rapNullTdmDescriptorForEvenWaves for the arithmetic.
+    refilled. See rapNullResidentTdmDescriptor for the arithmetic.
 
     WorkGroup* is the next tile's here: prefetchAcrossPersistent raises the flag
     only between setupNextTile and papRestoreCurrentTileIdentity.
@@ -1354,6 +1360,33 @@ def test_rap_lets_the_next_tile_prefetch_fetch_a_when_a_changes():
     assert "s[sgprWorkGroup2], s[sgprRAPResidentBatch]" in rendered
     assert "s[sgprWorkGroup0], s[sgprRAPResidentMTile]" in rendered
     assert "s[sgprtdmAGroup0+0]" in rendered
+
+
+def _selects(rendered):
+    return [line.split("//")[0].split() for line in rendered.splitlines() if "s_cselect_b32" in line]
+
+
+def test_rap_silences_the_parity_that_carries_the_resident_operand():
+    """A rides the even waves and B the odd ones, so a resident B nulls the odd set.
+
+    SCC holds "odd" after the parity test, and s_cselect keeps src0 on SCC: for A
+    the descriptor survives on odd waves, for B on even waves.
+    """
+    keepOnOdd = _selects(_rap_null_tdm(in_pap_next_tile_prefetch=False, rap=1))
+    keepOnEven = _selects(_rap_null_tdm(in_pap_next_tile_prefetch=False, rap=2))
+    assert keepOnOdd == [["s_cselect_b32", "s[sgprtdmAGroup0+0],", "s[sgprtdmAGroup0+0],", "0"]]
+    assert keepOnEven == [["s_cselect_b32", "s[sgprtdmAGroup0+0],", "0,", "s[sgprtdmAGroup0+0]"]]
+
+
+def test_rap_b_lets_the_next_tile_prefetch_fetch_b_when_b_changes():
+    """The keep-mask for a resident B follows the batch and the remapped N-tile."""
+    rendered = _rap_null_tdm(in_pap_next_tile_prefetch=True, rap=2)
+    assert "s[sgprWorkGroup2], s[sgprRAPResidentBatch]" in rendered
+    assert "s[sgprWorkGroup1], s[sgprRAPResidentNTile]" in rendered
+    assert "sgprRAPResidentMTile" not in rendered
+    assert "sgprWorkGroup0" not in rendered
+    # Even waves carry A, which the next tile always needs.
+    assert "s_cselect_b32 s90, 0, -1" in rendered
 
 
 # PrefetchAcrossPersistent against the non-default TDM descriptor groupings.
@@ -1940,7 +1973,7 @@ def test_pap_tail_reset_rebuilds_every_set_before_offsetting_any(monkeypatch, fu
 def test_rap_nulls_an_every_wave_a_set_on_every_wave(fuse, in_pap_next_tile_prefetch):
     """Without MX scales A rides every wave on a set of its own, so no wave parity selects it."""
     kernel = dict(_ks(fuse=fuse, ProblemType={"MXBlockA": 0, "MXBlockB": 0}), WavefrontSize=32)
-    rendered = str(kwa_module.KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves(
+    rendered = str(kwa_module.KernelWriterAssembly.rapNullResidentTdmDescriptor(
         _RapTdmNullWriter(in_pap_next_tile_prefetch), kernel, "tdmAGroup0+0"))
     assert "s[sgprArgType]" not in rendered, "an every-wave A set was nulled by wave parity"
     assert ("s[sgprWorkGroup2], s[sgprRAPResidentBatch]" in rendered) is in_pap_next_tile_prefetch
@@ -1949,7 +1982,7 @@ def test_rap_nulls_an_every_wave_a_set_on_every_wave(fuse, in_pap_next_tile_pref
 
 def test_rap_keeps_wave_parity_on_the_default_grouping():
     kernel = dict(_ks(fuse=0, ProblemType={"MXBlockA": 0, "MXBlockB": 0}), WavefrontSize=32)
-    rendered = str(kwa_module.KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves(
+    rendered = str(kwa_module.KernelWriterAssembly.rapNullResidentTdmDescriptor(
         _RapTdmNullWriter(False), kernel, "tdmAGroup0+0"))
     assert "s[sgprArgType]" in rendered
 

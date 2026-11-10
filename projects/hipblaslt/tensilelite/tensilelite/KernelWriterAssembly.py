@@ -471,7 +471,7 @@ class KernelWriterAssembly(KernelWriter):
     return sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx))
 
   def rapCheckStoreNeutrality(self, kernel, element, ss, numVgprAvailable, numElementsPerBatch, beta, edge):
-    """Reject the kernel if holding A resident costs the store an extra batch.
+    """Reject the kernel if holding an operand resident costs the store an extra batch.
 
     RAP buys fewer LDS transfers by withholding registers the store would
     otherwise use. That trade is only worth making while the store still fits in
@@ -561,22 +561,29 @@ class KernelWriterAssembly(KernelWriter):
                            comment="RAP: clamp the K dim at zero"))
     return module
 
-  def rapNullTdmDescriptorForEvenWaves(self, kernel, groupSgprName) -> Module:
-    """Stop this wave's next tensor_load_to_lds if it is the one carrying A.
+  def rapNullResidentTdmDescriptor(self, kernel, groupSgprName) -> Module:
+    """Stop this wave's next tensor_load_to_lds if it is the one carrying the resident operand.
 
     TDMFuse=0 aliases a single descriptor set: even waves hold A/MXSA,
-    odd waves hold B/MXSB. Zeroing the enable word on even waves silences A's
-    transfer and leaves B alone. The instruction is still issued and still
-    retires on tensorcnt -- it simply moves nothing -- so the wait bookkeeping is
-    untouched. It has to be re-applied before every load because the descriptor
-    is rebuilt from scratch on each persistent iteration.
+    odd waves hold B/MXSB. Zeroing the enable word on the resident operand's
+    parity silences its transfer and leaves the other operand alone. The
+    instruction is still issued and still retires on tensorcnt -- it simply moves
+    nothing -- so the wait bookkeeping is untouched. It has to be re-applied
+    before every load because the descriptor is rebuilt from scratch on each
+    persistent iteration.
     """
-    module = Module("RAP null %s on even waves" % groupSgprName)
-    if not self.states.rapDropAResidentLoads:
+    op = self.rapResidentTcs(kernel)[0] if kernel.get("ReuseAcrossPersistent") else "A"
+    # A rides the even waves; B, held only with TDMFuse 0, the odd ones.
+    residentOnOdd = op == "B"
+    if residentOnOdd:
+      assert all(w % 2 for w in tdmWavePartition(kernel, op)[1]), "a resident B expects the odd waves"
+    module = Module("RAP null %s on %s waves" % (groupSgprName, "odd" if residentOnOdd else "even"))
+    if not self.states.rapDropResidentLoads:
       return module
-    if tdmPairOnEveryWave(kernel, "A", "B"):
+    if not residentOnOdd and tdmPairOnEveryWave(kernel, "A", "B"):
       # A rides every wave on a set of its own and B issues from another set, so
       # every wave's load here is A's; the next-tile prefetch keeps the rule below.
+      # A resident B never gets here: RAP 2 requires TDMFuse 0.
       if not self.states.rapInPapNextTilePrefetch:
         module.add(SMovB32(dst=sgpr(groupSgprName), src=0,
                            comment="RAP: every wave carries A -> NULL descriptor, this load moves nothing"))
@@ -591,35 +598,46 @@ class KernelWriterAssembly(KernelWriter):
                                  comment="RAP: wave parity, odd waves carry B/MXSB")
     if not self.states.rapInPapNextTilePrefetch:
       # cselect rather than an inverted compare plus cmov: parity is already in SCC
-      # as "odd", and keeping the value on odd / zeroing it on even is one step.
-      module.add(SCSelectB32(dst=sgpr(groupSgprName), src0=sgpr(groupSgprName), src1=0,
-                             comment="RAP: even wave carries A -> NULL descriptor, this load moves nothing"))
+      # as "odd", and keeping the value on one parity / zeroing it on the other is
+      # one step.
+      if residentOnOdd:
+        module.add(SCSelectB32(dst=sgpr(groupSgprName), src0=0, src1=sgpr(groupSgprName),
+                               comment="RAP: odd wave carries B -> NULL descriptor, this load moves nothing"))
+      else:
+        module.add(SCSelectB32(dst=sgpr(groupSgprName), src0=sgpr(groupSgprName), src1=0,
+                               comment="RAP: even wave carries A -> NULL descriptor, this load moves nothing"))
       return module
-    # This load feeds the next tile, not this one. Silencing A is only right while
-    # that tile goes on reusing the resident registers; when it needs a different
-    # A the entry guard sends it to the fill copy, which computes from what this
-    # prefetch left behind. Fetch A for it. WorkGroup* already names the next tile
-    # here -- prefetchAcrossPersistentSetupNextTile has run and the current tile's
+    # This load feeds the next tile, not this one. Silencing the resident operand
+    # is only right while that tile goes on reusing the resident registers; when
+    # it needs a different one the entry guard sends it to the fill copy, which
+    # computes from what this prefetch left behind. Fetch it for that tile.
+    # WorkGroup* already names the next tile here --
+    # prefetchAcrossPersistentSetupNextTile has run and the current tile's
     # identity is checkpointed -- so each half of the identity is a compare away
     # rather than another divide.
     #
     # Both halves, not just the batch: the entry guard refills on either, and a
     # prefetch that stayed silent for the other would hand the fill copy a tile
-    # whose A was never fetched. WorkGroup0 is past DefaultWGM here, and the M-tile
-    # the guard peeks goes through the same remap, so the two agree on when A is
-    # refilled; they disagreed once already, over the batch.
+    # whose operand was never fetched. WorkGroup0/1 are past DefaultWGM here, and
+    # the tile the guard peeks goes through the same remap, so the two agree on
+    # when the operand is refilled; they disagreed once already, over the batch.
+    coord, workGroup = ("M", "WorkGroup0") if op == "A" else ("N", "WorkGroup1")
     with self.allocTmpSgpr(1, tag="rapPapKeepA") as keepRes:
       keep = keepRes.idx
-      module.add(SCSelectB32(dst=sgpr(keep), src0=-1, src1=0,
-                             comment="RAP: odd wave carries B -> keep descriptor"))
+      if residentOnOdd:
+        module.add(SCSelectB32(dst=sgpr(keep), src0=0, src1=-1,
+                               comment="RAP: even wave carries A -> keep descriptor"))
+      else:
+        module.add(SCSelectB32(dst=sgpr(keep), src0=-1, src1=0,
+                               comment="RAP: odd wave carries B -> keep descriptor"))
       module.add(SCmpEQU32(src0=sgpr("WorkGroup2"), src1=sgpr("RAPResidentBatch"),
                            comment="RAP: does the next tile stay in the resident batch?"))
       module.add(SCSelectB32(dst=sgpr(keep), src0=sgpr(keep), src1=-1,
-                             comment="RAP: next tile changes batch -> it needs A prefetched"))
-      module.add(SCmpEQU32(src0=sgpr("WorkGroup0"), src1=sgpr("RAPResidentMTile"),
-                           comment="RAP: does the next tile stay on the resident M-tile?"))
+                             comment="RAP: next tile changes batch -> it needs %s prefetched" % op))
+      module.add(SCmpEQU32(src0=sgpr(workGroup), src1=sgpr(self.rapResidentTileSgpr(kernel)),
+                           comment="RAP: does the next tile stay on the resident %s-tile?" % coord))
       module.add(SCSelectB32(dst=sgpr(keep), src0=sgpr(keep), src1=-1,
-                             comment="RAP: next tile changes M-tile -> it needs A prefetched"))
+                             comment="RAP: next tile changes %s-tile -> it needs %s prefetched" % (coord, op)))
       module.add(SCmpEQU32(src0=sgpr(keep), src1=0,
                            comment="RAP: no reason to keep the descriptor"))
     module.add(SCSelectB32(dst=sgpr(groupSgprName), src0=0, src1=sgpr(groupSgprName),
@@ -1683,8 +1701,7 @@ class KernelWriterAssembly(KernelWriter):
             numBiFactor = kernel["LoopIters"] * 2
           # RAP: a buffer set per iteration of every resident k-tile, matching the
           # grown allocation.
-          if kernel["ReuseAcrossPersistent"]:
-            numBiFactor = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
+          numBiFactor = self.rapResidentBufferSets(kernel, "MXSA", numBiFactor)
           if self.states.lrvwTileMXSA > 1:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
             for bi in range(0,numBiFactor): # buffer indices
@@ -1725,6 +1742,9 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["DirectToVgprB"] and (self.states.packDTVB or self.states.convDTVB):
             # DirectToVgpr case, we need LoopIters * 2 buffers
             numBiFactor = kernel["LoopIters"] * 2
+          # RAP: a buffer set per iteration of every resident k-tile, matching the
+          # grown allocation.
+          numBiFactor = self.rapResidentBufferSets(kernel, "MXSB", numBiFactor)
           if self.states.lrvwTileMXSB > 1:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprMXSBase", self.states.mxsb.startVgprValu))
             for bi in range(0,numBiFactor): # buffer indices
@@ -1822,8 +1842,7 @@ class KernelWriterAssembly(KernelWriter):
           numBiFactor = kernel["LoopIters"] * 2
         # RAP: a buffer set per iteration of every resident k-tile, matching the
         # grown allocation.
-        if kernel["ReuseAcrossPersistent"]:
-          numBiFactor = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
+        numBiFactor = self.rapResidentBufferSets(kernel, "A", numBiFactor)
         if self.states.lrvwTileA > 1:
           moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_BASE", "vgprBase", self.states.a.startVgprValu - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
@@ -1870,6 +1889,9 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["DirectToVgprB"] and (self.states.packDTVB or self.states.convDTVB):
           # DirectToVgpr case, we need LoopIters * 2 buffers
           numBiFactor = kernel["LoopIters"] * 2
+        # RAP: a buffer set per iteration of every resident k-tile, matching the
+        # grown allocation.
+        numBiFactor = self.rapResidentBufferSets(kernel, "B", numBiFactor)
         if self.states.lrvwTileB > 1:
           moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_BASE", "vgprBase", self.states.b.startVgprValu - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
@@ -3720,20 +3742,22 @@ class KernelWriterAssembly(KernelWriter):
 
       # C regs are not used during initialization so mark them as available -
       # we will claim then just before the start of the unroll loop:
-      # This runs on every persistent iteration, so under RAP the resident A and
-      # MXSA blocks must stay out of it -- lending them here would let the next
+      # This runs on every persistent iteration, so under RAP the resident operand
+      # and its scale block must stay out of it -- lending them here would let the next
       # tile's setup overwrite the data the whole feature exists to keep.
       if not kernel["UseSubtileImpl"]:
         if self.states.lastValuMXSAB:
-          mxsStart, mxsSize = self.rapReclaimableValuMXSABRange(kernel)
-          self.vgprPool.add(mxsStart, mxsSize, "ValuMXSAB") # Add as available
-          moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
-                              (mxsStart, self.states.lastValuMXSAB+self.states.mxsa.startVgprValu))
+          mxsRanges = self.rapReclaimableValuMXSABRanges(kernel)
+          for mxsStart, mxsSize in mxsRanges:
+            self.vgprPool.add(mxsStart, mxsSize, "ValuMXSAB") # Add as available
+            moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
+                                (mxsStart, self.rapPoolRangeEnd(mxsStart, mxsSize, self.states.lastValuMXSAB, self.states.lastValuMXSAB+self.states.mxsa.startVgprValu)))
 
-        reclaimStart, reclaimSize = self.rapReclaimableValuABRange(kernel)
-        self.vgprPool.add(reclaimStart, reclaimSize, "ValuAB") # Add as available
-        moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
-                            (reclaimStart, self.states.lastValuAB+self.states.a.startVgprValu))
+        reclaimRanges = self.rapReclaimableValuABRanges(kernel)
+        for reclaimStart, reclaimSize in reclaimRanges:
+          self.vgprPool.add(reclaimStart, reclaimSize, "ValuAB") # Add as available
+          moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
+                              (reclaimStart, self.rapPoolRangeEnd(reclaimStart, reclaimSize, self.states.lastValuAB, self.states.lastValuAB+self.states.a.startVgprValu)))
 
         self.vgprPool.add(self.states.c.startVgprValu, \
           self.states.c.numVgprValu, "ValuC-Block") # Add as available
@@ -7504,18 +7528,22 @@ class KernelWriterAssembly(KernelWriter):
     # Must mirror the add in defineAndResources exactly; a remove that spans
     # registers which were never added raises "already unavailable" warnings.
     if self.states.lastValuMXSAB:
-      mxsStart, mxsSize = self.rapReclaimableValuMXSABRange(kernel)
-      self.vgprPool.remove(mxsStart, mxsSize, "ValuMXSAB")
-      module.addComment1("initC: remove ValuMXSA/B vgpr buffer [%u...%u) from pool"%(mxsStart, self.states.lastValuMXSAB))
+      mxsRanges = self.rapReclaimableValuMXSABRanges(kernel)
+      for mxsStart, mxsSize in mxsRanges:
+        self.vgprPool.remove(mxsStart, mxsSize, "ValuMXSAB")
+        module.addComment1("initC: remove ValuMXSA/B vgpr buffer [%u...%u) from pool"%(mxsStart,
+                           self.rapPoolRangeEnd(mxsStart, mxsSize, self.states.lastValuMXSAB, self.states.lastValuMXSAB)))
 
     self.vgprPool.remove(self.states.c.startVgprValu, self.states.c.numVgprValu, "ValuC")
     module.addComment1("initC: remove ValuC vgpr buffer [%u...%u) from pool"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu))
     numAccvgprs = self.states.totalAgprs
     self.agprPool.remove(0, numAccvgprs, "ValuC")
     module.addComment1("initC: remove acc vgpr buffer [%u...%u) from pool"%(0, numAccvgprs))
-    reclaimStart, reclaimSize = self.rapReclaimableValuABRange(kernel)
-    self.vgprPool.remove(reclaimStart, reclaimSize, "ValuAB")
-    module.addComment1("initC: remove ValuA/B vgpr buffer [%u...%u) from pool"%(reclaimStart, self.states.lastValuAB))
+    reclaimRanges = self.rapReclaimableValuABRanges(kernel)
+    for reclaimStart, reclaimSize in reclaimRanges:
+      self.vgprPool.remove(reclaimStart, reclaimSize, "ValuAB")
+      module.addComment1("initC: remove ValuA/B vgpr buffer [%u...%u) from pool"%(reclaimStart,
+                         self.rapPoolRangeEnd(reclaimStart, reclaimSize, self.states.lastValuAB, self.states.lastValuAB)))
     numCVgpr = self.states.c.numVgprValu + numAccvgprs
 
     # TBD: optimize MfmaInitCVgprs case when using both VALU and ACC VGPRs (needs to init vgprs and acc separately)
@@ -13183,7 +13211,7 @@ class KernelWriterAssembly(KernelWriter):
       tdmAGroup2 = "tdmAGroup2" if isIterA else None
       tdmAGroup3 = "tdmAGroup3" if isIterA else None
       if not rapTdmDead:
-        imod.middle.add(self.rapNullTdmDescriptorForEvenWaves(kernel, "tdmAGroup0+0"))
+        imod.middle.add(self.rapNullResidentTdmDescriptor(kernel, "tdmAGroup0+0"))
         imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3,
                                        tensor=self.tdmLoadModifiers(kernel, tc)))
       self._addTdmStashedIssuesAfter(imod.middle, kernel, "A", comp)
@@ -13278,7 +13306,7 @@ class KernelWriterAssembly(KernelWriter):
           else:
             imod.middle.add(self.tdmResetTailLdsBuffer(kernel, ldsAddrSgprName))
         if not rapTdmDead:
-          imod.middle.add(self.rapNullTdmDescriptorForEvenWaves(kernel, "tdmMXSAGroup0+0"))
+          imod.middle.add(self.rapNullResidentTdmDescriptor(kernel, "tdmMXSAGroup0+0"))
           imod.middle.add(comp.issueLoad("tdmMXSAGroup0", "tdmMXSAGroup1", None, None,
                                          tensor=self.tdmLoadModifiers(kernel, tc)))
       return imod
@@ -14967,12 +14995,12 @@ class KernelWriterAssembly(KernelWriter):
       return Module("localReadSwapOffsets (no local read)")
     if kernel["1LDSBuffer"] or ((tc in ("A", "B", "MXSA", "MXSB")) and kernel["DirectToVgpr%s"%tc]): # no local read code if DirectToVgpr is enabled
       return Module("localReadSwapOffsets (Empty)")
-    if self.states.rapDropAResidentLoads and tc in ("A", "MXSA"):
-      # The reuse copy takes A and its scales from the resident registers and issues
-      # no local reads for them, so swapping their read addresses updates a value
-      # nothing goes on to read. Keyed on the tensor char, so B and its scales --
-      # still reloaded every tile, and out of their own address registers -- keep
-      # their swaps.
+    if self.rapSkipsResidentLoads(kernel, tc):
+      # The reuse copy takes the resident operand and its scales from the resident
+      # registers and issues no local reads for them, so swapping their read
+      # addresses updates a value nothing goes on to read. Keyed on the tensor char,
+      # so the other operand and its scales -- still reloaded every tile, and out of
+      # their own address registers -- keep their swaps.
       return Module("localReadSwapOffsets (RAP: %s is resident, nothing reads it)"%tc)
     if self.rapIsLastResidentSection(kernel):
       # A swap selects the buffer the next section reads from, and the last section
@@ -25182,14 +25210,12 @@ class KernelWriterAssembly(KernelWriter):
   def gl2PrefetchTpList(self, kernel, tPA, tPB):
     """The tensors the GL2 prefetch warms L2 for.
 
-    The RAP reuse copy loads neither A nor its scales -- they stay resident -- so
-    prefetching them only spends L2 requests, and HBM bandwidth when the lines
-    have been evicted, on data the tile never reads.
+    The RAP reuse copy loads neither the resident operand nor its scales -- A for
+    RAP 1, B for RAP 2 -- so prefetching them only spends L2 requests, and HBM
+    bandwidth when the lines have been evicted, on data the tile never reads.
     """
     tpList = mxIssueTpList(kernel, tPA, tPB, includeMetadata=True)
-    if self.states.rapDropAResidentLoads:
-      tpList = [tp for tp in tpList if tp["tensorChar"] not in ("A", "MXSA")]
-    return tpList
+    return [tp for tp in tpList if not self.rapSkipsResidentLoads(kernel, tp["tensorChar"])]
 
   def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Addresses Calculation")
@@ -25233,13 +25259,15 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("GL2 Prefetch Skip PGR")
     mod.addComment("GL2 Prefetch Skip PGR")
     comp = GL2PrefetchLoad.find(self)
-    prefetchA = not self.states.rapDropAResidentLoads
+    prefetchA = not self.rapSkipsResidentLoads(kernel, "A")
+    prefetchB = not self.rapSkipsResidentLoads(kernel, "B")
     if prefetchA:
       mod.add(comp.skipPGR(self, kernel, tPA))
-    mod.add(comp.skipPGR(self, kernel, tPB))
+    if prefetchB:
+      mod.add(comp.skipPGR(self, kernel, tPB))
     if kernel["ProblemType"]["MXBlockA"] and prefetchA:
       mod.add(comp.skipPGR(self, kernel, tPA["MX"]))
-    if kernel["ProblemType"]["MXBlockB"]:
+    if kernel["ProblemType"]["MXBlockB"] and prefetchB:
       mod.add(comp.skipPGR(self, kernel, tPB["MX"]))
     if kernel["enableTDMMetadata"]:
       mod.add(comp.skipPGR(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))

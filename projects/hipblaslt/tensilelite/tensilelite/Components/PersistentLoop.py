@@ -149,11 +149,46 @@ class PersistentKernelState:
     # this tile's compute, RAP holds A across tiles, and RAP 1 with PAP 0 is a
     # supported combination. RAP requires full-K tiles; PAP also supports partitioned work.
 
+    # Which operand ReuseAcrossPersistent holds, by value. The parameter names one
+    # operand, not a set of them: 1 holds A and 2 holds B, never both.
+    _RAP_RESIDENT_TCS = {0: (), 1: ("A", "MXSA"), 2: ("B", "MXSB")}
+
+    def rapResidentTcs(self, kernel):
+      """Tensor chars held resident: A and its scales, B and its scales, or none.
+
+      Emitters ask this rather than testing the parameter's value, so the operand a
+      site handles decides what it does, and the same code serves either side.
+      """
+      return self._RAP_RESIDENT_TCS[kernel["ReuseAcrossPersistent"]]
+
+    def rapResidentTileSgpr(self, kernel):
+      """The persistent SGPR naming the tile coordinate the resident operand depends on.
+
+      A depends on the M-tile and B on the N-tile, each after DefaultWGM; both also
+      depend on the batch, which RAPResidentBatch holds.
+      """
+      return "RAPResidentMTile" if "A" in self.rapResidentTcs(kernel) else "RAPResidentNTile"
+
     def rapResidentKTiles(self, kernel):
-      """How many k-tiles of A/MXSA are held resident; 1 (i.e. no residency) when RAP is off."""
+      """How many k-tiles of the resident operand are held; 1 (i.e. no residency) when RAP is off."""
       if not kernel["ReuseAcrossPersistent"]:
         return 1
       return kernel["_RAPNumResidentKTiles"]
+
+    def rapResidentBufferSets(self, kernel, tc, default):
+      """Register buffer sets for tc: LoopIters per resident k-tile if tc is resident.
+
+      rapResidentBufferIdx numbers a resident operand's sets k-tile * LoopIters + u,
+      so the block holds one set per iteration of every resident k-tile, whatever
+      the prefetch slots. A tensor that is not resident keeps the default count.
+      """
+      if tc not in self.rapResidentTcs(kernel):
+        return default
+      return kernel["LoopIters"] * self.rapResidentKTiles(kernel)
+
+    def rapSkipsResidentLoads(self, kernel, tc):
+      """Does the section being emitted skip tc's loads because tc is already resident?"""
+      return self.states.rapDropResidentLoads and tc in self.rapResidentTcs(kernel)
 
     # Suffix worn by the labels of the reuse copy of the compute section. Empty
     # everywhere else, so every other kernel -- and RAP's own fill copy -- keeps the
@@ -282,19 +317,21 @@ class PersistentKernelState:
       return self.rapResidentKTiles(kernel)
 
     def rapStoreWithheldVgprs(self, kernel):
-      """Registers RAP keeps out of the store's hands: the resident A plus its scales.
+      """Registers RAP keeps out of the store's hands: the resident operand plus its scales.
 
       Derived from the same ranges the reclaim sites use, so the guard and the
-      reclaim cannot drift apart.
+      reclaim cannot drift apart: whatever of the two blocks is not lent is withheld.
       """
       if not kernel["ReuseAcrossPersistent"]:
         return 0
-      abStart, _ = self.rapReclaimableValuABRange(kernel)
-      mxsStart, _ = self.rapReclaimableValuMXSABRange(kernel)
-      return (abStart - self.states.a.startVgprValu) + mxsStart
+      ab = self.states.lastValuAB - self.states.a.startVgprValu
+      ab -= sum(size for _, size in self.rapReclaimableValuABRanges(kernel))
+      mxs = self.states.lastValuMXSAB
+      mxs -= sum(size for _, size in self.rapReclaimableValuMXSABRanges(kernel))
+      return ab + mxs
 
     def rapResidentBufferIdx(self, kernel, tc, unwrappedIdx, defaultIdx):
-      """Buffer-set index for an A/MXSA access, or None when it leaves the resident block.
+      """Buffer-set index for an access to tc, or None when it leaves the resident block.
 
       Without RAP the buffer index wraps every LoopIters (`u % numVgprBuffer`),
       because only the PLR window is held. With RAP the whole K extent is held, so
@@ -304,11 +341,13 @@ class PersistentKernelState:
       Returning None means "do not emit this access". That happens for local reads,
       which run one iteration ahead of the MFMAs: on the last resident k-tile the
       lookahead addresses the k-tile after the block. That access is the prefetch
-      of the *next* tile's A -- exactly the transfer RAP exists to remove -- and
-      without the guard the index would wrap onto resident k-tile 0 and overwrite
-      it.
+      of the *next* tile's resident operand -- exactly the transfer RAP exists to
+      remove -- and without the guard the index would wrap onto resident k-tile 0
+      and overwrite it.
+
+      An operand that is not resident keeps the wrapping index it is given.
       """
-      if tc not in ("A", "MXSA") or not kernel["ReuseAcrossPersistent"]:
+      if tc not in self.rapResidentTcs(kernel):
         return defaultIdx
       if self.rapLookaheadLeavesBlock(kernel, unwrappedIdx):
         return None
@@ -361,43 +400,93 @@ class PersistentKernelState:
       """Does this access run past the last resident k-tile?
 
       Local reads run an iteration ahead of the MFMAs, so on the last section the
-      lookahead addresses a k-tile that is not there. For A that would wrap onto
-      resident k-tile 0 and overwrite it, which is why rapResidentBufferIdx refuses
-      the access. B and its scales cannot wrap -- they are re-read every tile from
-      a PLR window, so their buffer index is unaffected -- but the read is still
-      pointless: nothing consumes it, because the section it was fetched for does
-      not exist. Skipping it saves the LDS traffic and, more importantly, stops
-      handing the exit path loads that are still in flight with no consumer.
+      lookahead addresses a k-tile that is not there. For the resident operand
+      that would wrap onto resident k-tile 0 and overwrite it, which is why
+      rapResidentBufferIdx refuses the access. The other operand and its scales
+      cannot wrap -- they are re-read every tile from a PLR window, so their buffer
+      index is unaffected -- but the read is still pointless: nothing consumes it,
+      because the section it was fetched for does not exist. Skipping it saves the
+      LDS traffic and, more importantly, stops handing the exit path loads that are
+      still in flight with no consumer.
 
-      Only the section's own position decides this, so B asks the same question
-      without going through the A-only buffer-index path.
+      Only the section's own position decides this, so the other operand asks the
+      same question without going through the resident buffer-index path.
       """
       if not kernel["ReuseAcrossPersistent"]:
         return False
       idx = self.states.rapKTileIdx * kernel["LoopIters"] + unwrappedIdx
       return idx >= self.rapResidentKTiles(kernel) * kernel["LoopIters"]
 
-    def rapReclaimableValuABRange(self, kernel):
-      """(start, size) of the ValuA/B block that may be lent out as scratch.
+    def rapResidentValuABRange(self, kernel):
+      """[start, end) of the ValuA/B block RAP holds across the persistent loop.
 
-      Under RAP the ValuA half stays live across the whole persistent loop -- that
-      is the feature -- so only the ValuB half is lendable. ValuA and ValuB are
-      allocated contiguously, so the B half is [b.startVgprValu, lastValuAB).
+      ValuA and ValuB are allocated contiguously, A first, and the resident one is
+      grown to cover the whole K extent. A's block reaches up to ValuB, whatever
+      padding sits between; B's reaches up to lastValuAB. None when RAP is off.
       """
-      start = self.states.b.startVgprValu if kernel["ReuseAcrossPersistent"] \
-              else self.states.a.startVgprValu
-      return start, self.states.lastValuAB - start
+      tcs = self.rapResidentTcs(kernel)
+      if "A" in tcs:
+        return self.states.a.startVgprValu, self.states.b.startVgprValu
+      if "B" in tcs:
+        return self.states.b.startVgprValu, self.states.lastValuAB
+      return None
 
-    def rapReclaimableValuMXSABRange(self, kernel):
-      """(start, size) of the ValuMXSA/B block that may be lent out as scratch.
+    def rapResidentValuMXSABRange(self, kernel):
+      """[start, end) of the ValuMXSA/B block RAP holds; None when RAP is off.
 
       MXSA is pinned at the bottom of the register file (s_set_vgpr_msb has no
       field for the WMMA scale operands, so scales must live in v0-v255), so the
-      resident MXSA block is a prefix and the lendable part starts after it.
+      resident MXSA block is the prefix up to its end. MXSB follows MXSA, so a
+      resident MXSB sits in the middle of the scale registers.
       """
-      start = (self.states.mxsa.startVgprValu + self.states.mxsa.numVgprValu) \
-              if kernel["ReuseAcrossPersistent"] else 0
-      return start, self.states.lastValuMXSAB - start
+      tcs = self.rapResidentTcs(kernel)
+      if "MXSA" in tcs:
+        return 0, self.states.mxsa.startVgprValu + self.states.mxsa.numVgprValu
+      if "MXSB" in tcs:
+        return self.states.mxsb.startVgprValu, self.states.mxsb.startVgprValu + self.states.mxsb.numVgprValu
+      return None
+
+    @staticmethod
+    def _rapLendableRanges(start, end, resident):
+      """[(start, size)] of [start, end) outside the resident block.
+
+      Without RAP the whole block is lendable. A side that is empty is dropped only
+      when the other is not, so a kernel that lent one empty range still does.
+      """
+      if resident is None:
+        return [(start, end - start)]
+      ranges = [(start, resident[0] - start), (resident[1], end - resident[1])]
+      kept = [r for r in ranges if r[1] > 0]
+      return kept if kept else ranges[1:]
+
+    def rapReclaimableValuABRanges(self, kernel):
+      """[(start, size)] of the ValuA/B block that may be lent out as scratch.
+
+      Under RAP the resident operand stays live across the whole persistent loop --
+      that is the feature -- so only the other one is lendable: [b.startVgprValu,
+      lastValuAB) when A is held, [a.startVgprValu, b.startVgprValu) when B is.
+      """
+      return self._rapLendableRanges(self.states.a.startVgprValu, self.states.lastValuAB,
+                                     self.rapResidentValuABRange(kernel))
+
+    def rapReclaimableValuMXSABRanges(self, kernel):
+      """[(start, size)] of the ValuMXSA/B block that may be lent out as scratch.
+
+      A resident MXSA leaves the part after it; a resident MXSB leaves the parts on
+      both sides of it, which is why this is a list.
+      """
+      return self._rapLendableRanges(0, self.states.lastValuMXSAB,
+                                     self.rapResidentValuMXSABRange(kernel))
+
+    @staticmethod
+    def rapPoolRangeEnd(start, size, regionEnd, legacyEnd):
+      """End to print for a lent range in the asm comments.
+
+      A range that runs to the end of its block keeps the end its comment always
+      printed, so kernels whose lending did not change emit the same text; a range
+      that stops short of it -- below a resident B -- prints its own.
+      """
+      return legacyEnd if start + size == regionEnd else start + size
 
 class PersistentLoop(Component):
     """
@@ -417,15 +506,25 @@ class PersistentLoop(Component):
 
     def compute(self, writer, kernel, tensorParametersA, tensorParametersB, module, expand, tPM):
         if kernel["ReuseAcrossPersistent"]:
+          # The resident operand, and the tile coordinate it depends on besides the
+          # batch: A the M-tile, B the N-tile.
+          op = writer.rapResidentTcs(kernel)[0]
+          coord = "M" if op == "A" else "N"
+          residentTile = writer.rapResidentTileSgpr(kernel)
+          assignment = Component.WorkAssignment.find(writer)
+          def peek(dstBatch, dstTile):
+            if op == "A":
+              return assignment.peekTileBatch(writer, kernel, dstBatch, dstMTileSgpr=dstTile)
+            return assignment.peekTileBatch(writer, kernel, dstBatch, dstNTileSgpr=dstTile)
           # Peel the compute section in two: the first tile runs a copy that fills the
-          # resident A registers, every later tile re-enters at the second copy and
+          # resident registers, every later tile re-enters at the second copy and
           # reuses them. Only the compute half is duplicated -- the store is the bulk
           # of the kernel and stays shared, which keeps the instruction cache footprint
           # roughly unchanged.
-          # Record which A the fill below loads. Read here, at the loop head, because
-          # tile activation advances the cursor past this tile and PAP goes on to
-          # overwrite WorkGroup* with the next tile's, so neither survives the section.
-          module.add(Component.WorkAssignment.find(writer).peekTileBatch(writer, kernel, "RAPResidentBatch", "RAPResidentMTile"))
+          # Record which operand the fill below loads. Read here, at the loop head,
+          # because tile activation advances the cursor past this tile and PAP goes on
+          # to overwrite WorkGroup* with the next tile's, so neither survives the section.
+          module.add(peek("RAPResidentBatch", residentTile))
           snapshot = writer.rapSnapshotEmitterState(kernel, tensorParametersA, tensorParametersB)
           writer.states.rapDeferSgprUndef = True
           pack = writer._persistentComputeSection(kernel, tensorParametersA, tensorParametersB, module, expand, tPM)
@@ -441,11 +540,12 @@ class PersistentLoop(Component):
           module.add(SCBranchSCC1(labelName=storeJoin.getLabelName(),
                                   comment="RAP: first tile skips the reuse copy"))
           module.add(Label("RAP_IterN", ""))
-          # A is indexed by M and by the batch, so the resident copy only serves tiles
-          # sharing both with the one it was filled from. This copy has no A loads to
-          # supply any other, so send a tile that changed either through the fill copy
-          # instead -- it pays one tile's worth of reloads and leaves A resident for
-          # the tiles after it. Ahead of everything else in the section: the cursor
+          # A is indexed by M and by the batch, B by N and the batch, so the resident
+          # copy only serves tiles sharing both with the one it was filled from. This
+          # copy has no loads of the resident operand to supply any other, so send a
+          # tile that changed either through the fill copy instead -- it pays one
+          # tile's worth of reloads and leaves the operand resident for the tiles
+          # after it. Ahead of everything else in the section: the cursor
           # still names this tile and nothing has claimed WorkGroup* for it, so the
           # loop head can take it from the top.
           #
@@ -454,25 +554,26 @@ class PersistentLoop(Component):
           # gain from it here -- the second compare is only reached when the first
           # found a match, which is the common case in either arrangement.
           with writer.allocTmpSgpr(2, tag="RAPTileGuard") as sGuard:
-            sBatch, sMTile = sGuard.idx, sGuard.idx + 1
-            module.add(Component.WorkAssignment.find(writer).peekTileBatch(writer, kernel, sBatch, sMTile))
+            sBatch, sTile = sGuard.idx, sGuard.idx + 1
+            module.add(peek(sBatch, sTile))
             module.add(SCmpEQU32(src0=sgpr(sBatch), src1=sgpr("RAPResidentBatch"),
-                                 comment="RAP: is the resident A this tile's batch?"))
+                                 comment="RAP: is the resident %s this tile's batch?" % op))
             module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1,
-                                           comment="RAP: batch changed, refill A"))
-            module.add(SCmpEQU32(src0=sgpr(sMTile), src1=sgpr("RAPResidentMTile"),
-                                 comment="RAP: is the resident A this tile's M-tile?"))
+                                           comment="RAP: batch changed, refill %s" % op))
+            module.add(SCmpEQU32(src0=sgpr(sTile), src1=sgpr(residentTile),
+                                 comment="RAP: is the resident %s this tile's %s-tile?" % (op, coord)))
             module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1,
-                                           comment="RAP: M-tile changed, refill A"))
+                                           comment="RAP: %s-tile changed, refill %s" % (coord, op)))
           module.add(self.reinitWaveIdx(writer, kernel))
           writer.rapRestoreEmitterState(kernel, tensorParametersA, tensorParametersB, snapshot)
-          # From here on A and its scales come from the resident registers, so the
-          # reuse copy issues neither their LDS reads nor their global transfers.
-          # numReadsPerIter* feeds the analytically computed s_wait_dscnt immediate
-          # and the scheduler's latency budget, so it has to shrink with them.
-          writer.states.rapDropAResidentLoads = True
-          writer.states.numReadsPerIterA = 0
-          writer.states.numReadsPerIterMXSA = 0
+          # From here on the resident operand and its scales come from the resident
+          # registers, so the reuse copy issues neither their LDS reads nor their
+          # global transfers. numReadsPerIter* feeds the analytically computed
+          # s_wait_dscnt immediate and the scheduler's latency budget, so it has to
+          # shrink with them.
+          writer.states.rapDropResidentLoads = True
+          for tc in writer.rapResidentTcs(kernel):
+            setattr(writer.states, "numReadsPerIter%s" % tc, 0)
           with writer.rapIterNLabels():
             pack = writer._persistentComputeSection(kernel, tensorParametersA, tensorParametersB, module, expand, tPM)
           module.add(storeJoin)

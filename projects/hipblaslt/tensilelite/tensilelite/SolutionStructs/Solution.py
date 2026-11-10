@@ -4292,25 +4292,26 @@ class Solution(collections.abc.Mapping):
     if state.get("_GlobalAccumulation") == "MultipleBufferSingleKernel":
       vgprsPerElement += vgprsPerAddr  # addrGSUSyncVgprs
 
-    # One buffer set per resident k-tile: a ValuA block plus its MX scale block,
-    # LoopIters blocks of each, one per iteration whatever the prefetch slots.
-    # Mirrors vgprAllocationImplClassic, including its ceil: at MXBlock 128 a
-    # WaveTile's single e8 still takes a whole VGPR, which flooring the product
-    # would price at none. The MX TileSpan halving is deliberately not modelled:
-    # leaving it out overstates R, which understates k, and only the
-    # understating direction is safe here.
+    # One buffer set per resident k-tile: a Valu block of the resident operand
+    # plus its MX scale block, LoopIters blocks of each, one per iteration
+    # whatever the prefetch slots. Mirrors vgprAllocationImplClassic, including
+    # its ceil: at MXBlock 128 a WaveTile's single e8 still takes a whole VGPR,
+    # which flooring the product would price at none. The MX TileSpan halving is
+    # deliberately not modelled: leaving it out overstates R, which understates
+    # k, and only the understating direction is safe here.
+    tc = "A" if state["ReuseAcrossPersistent"] == 1 else "B"
     numVgprBuffer = state["LoopIters"]
-    macA = problemType.get("MacDataTypeA") or problemType["DataType"]
-    bpeA = bpr * macA.numRegisters()
-    mxsaPerBlock = 0
-    if problemType["MXBlockA"]:
-      mxsaWaveTiles = state["MIWaveTileMXSA"]
-      if problemType.get("MXBlockFreeA", 1) > 1:
+    mac = problemType.get("MacDataType%s" % tc) or problemType["DataType"]
+    bpe = bpr * mac.numRegisters()
+    mxsPerBlock = 0
+    if problemType["MXBlock%s" % tc]:
+      mxsWaveTiles = state["MIWaveTileMXS%s" % tc]
+      if problemType.get("MXBlockFree%s" % tc, 1) > 1:
         # A 2D tile gives VectorWidth WaveTiles one shared SSSS VGPR.
-        mxsaWaveTiles = max(1, mxsaWaveTiles // max(1, int(state["VectorWidthMXSA"])))
-      mxsaPerBlock = mxsaWaveTiles * int(math.ceil(state["MIInputPerThreadMXSA"] / bpr))
+        mxsWaveTiles = max(1, mxsWaveTiles // max(1, int(state["VectorWidthMXS%s" % tc])))
+      mxsPerBlock = mxsWaveTiles * int(math.ceil(state["MIInputPerThreadMXS%s" % tc] / bpr))
     residentPerKTile = numVgprBuffer * (
-        int(state["MIWaveTileA"] * state["MIInputPerThreadA"] * bpeA // bpr) + mxsaPerBlock)
+        int(state["MIWaveTile%s" % tc] * state["MIInputPerThread%s" % tc] * bpe // bpr) + mxsPerBlock)
     if residentPerKTile <= 0:
       return None
 
@@ -4319,7 +4320,13 @@ class Solution(collections.abc.Mapping):
     # that block is lent back to the store. Measured 24+2+14 and 28+2+10 on the two
     # audited configs -- exactly 40 both times. Anything in 29..52 reproduces both
     # bounds, so there is roughly a fifth of a k-tile of margin either side.
-    storeOverhead = 40
+    #
+    # A resident B lends the ValuA block below it rather than the block above, and
+    # its scales split the lendable scale registers in two. Against the true bounds
+    # of nine B-resident configs (MacroTile 256x64, 512x64, 128x128 by F8, MX F8 and
+    # MX F8 x F4), 40 is one k-tile high on 512x64 MX F8 x F4 and anything in 42..53
+    # reproduces all nine; 48 sits in the middle.
+    storeOverhead = 40 if tc == "A" else 48
     slack = (isaInfoMap[isa].regCaps["MaxVgpr"] - valuC
              - elementsPerThread * vgprsPerElement - storeOverhead)
     if slack < residentPerKTile:
@@ -7975,7 +7982,7 @@ class Solution(collections.abc.Mapping):
         return
       # The RAP null writes that parity assumption into the kernel: it zeroes the
       # even waves of a descriptor set's enable word
-      # (KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves), once per set
+      # (KernelWriterAssembly.rapNullResidentTdmDescriptor), once per set
       # owner. RAP holds both A and its scale resident, so both have to be
       # silenced. TDMFuse=0 gives each its own set on exactly the even waves and
       # both are, and without MX scales TDMFuse 1-3 give A and B a set each on
@@ -8003,8 +8010,10 @@ class Solution(collections.abc.Mapping):
       if state["InnerUnroll"] != 1:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires InnerUnroll = 1")
         return
-      if state["DirectToVgprA"] or state.get("DirectToVgprMXSA", False):
-        reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with DirectToVgpr on A")
+      # The resident operand: 1 holds A, 2 holds B (see ValidParameters).
+      tc = "A" if state["ReuseAcrossPersistent"] == 1 else "B"
+      if state["DirectToVgpr%s" % tc] or state.get("DirectToVgprMXS%s" % tc, False):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with DirectToVgpr on %s" % tc)
         return
       if state["ExpandPointerSwap"]:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires ExpandPointerSwap = 0")
@@ -8012,6 +8021,31 @@ class Solution(collections.abc.Mapping):
       if state.get("UseSubtileImpl", False):
         reject(state, printRejectionReason, "ReuseAcrossPersistent is not implemented for the subtile path")
         return
+      # HalfPLR sizes the value buffers at 1.5 blocks, which overrides the
+      # resident k-tile growth, and the kernel then aborts in the backend instead
+      # of being refused here.
+      if state["HalfPLR"]:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent does not support HalfPLR")
+        return
+      if tc == "B":
+        # Silencing the resident transfers relies on the per-parity aliased set,
+        # which only TDMFuse 0 gives B; the fused groupings keep B in its own set.
+        if state.get("TDMFuse", 0) != 0:
+          reject(state, printRejectionReason, "ReuseAcrossPersistent = 2 requires TDMFuse = 0")
+          return
+        # Sparse metadata travels with the sparse operand and is not part of the
+        # resident block.
+        if state["ProblemType"]["Sparse"]:
+          reject(state, printRejectionReason, "ReuseAcrossPersistent = 2 does not support Sparse")
+          return
+        # A 2D B scale whose MacroTile1 neither divides nor is a multiple of its
+        # tile takes the workgroup phase (mxPhaseLraFixup), which has not been
+        # verified on a resident scale block -- on either side; RAP 1 has the
+        # same gap for A.
+        freeB = state["ProblemType"]["MXBlockFreeB"]
+        if freeB > 1 and state["MacroTile1"] % freeB and freeB % state["MacroTile1"]:
+          reject(state, printRejectionReason, "ReuseAcrossPersistent = 2 does not support a 2D B scale with a workgroup phase")
+          return
       # The entry guard repeats DefaultWGM's remap to learn which M-tile a tile
       # reads, and the phased tile walk derives its period from that remap.
       # SpaceFillingCurveWalk is DefaultWGM's sibling,
@@ -8023,11 +8057,11 @@ class Solution(collections.abc.Mapping):
       if len(state["SpaceFillingAlgo"]):
         reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with SpaceFillingAlgo")
         return
-      # The A-side local-read pack buffers are sized from numVgprBufferPackA,
-      # which RAP does not grow, so the resident buffer sets would alias each
-      # other's pack registers. UnrollMajorLDSA is what suppresses that path.
-      if not state["UnrollMajorLDSA"]:
-        reject(state, printRejectionReason, "ReuseAcrossPersistent requires UnrollMajorLDSA (the A local-read pack path is not supported)")
+      # The local-read pack buffers are sized from numVgprBufferPack, which RAP
+      # does not grow, so the resident buffer sets would alias each other's pack
+      # registers. UnrollMajorLDS on the resident side suppresses that path.
+      if not state["UnrollMajorLDS%s" % tc]:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent requires UnrollMajorLDS%s (the %s local-read pack path is not supported)" % (tc, tc))
         return
       # The unrolled loop owns every resident k-tile, so the NGLL/NLL drain would
       # recompute the last PrefetchGlobalRead of them into the same accumulators.
