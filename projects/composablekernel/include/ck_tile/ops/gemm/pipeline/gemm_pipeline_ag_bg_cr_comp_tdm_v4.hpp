@@ -69,86 +69,43 @@ CK_TILE_DEVICE void fence()
     sched_fence<LLVMSchedGroupMask::VALU | LLVMSchedGroupMask::SALU | LLVMSchedGroupMask::TRANS>();
 }
 
-/// The five descriptor groups of a rank-2 TDM tile load; groups 3 and 4 are zero.
+/// The descriptor groups of a rank-2 TDM tile load; groups 3 and 4 are zero.
+// g1 first: its int32x8_t is 32-byte aligned, and after g0 it would add 16 bytes of padding
+// that amd_wave_read_first_lane reads as well.
 struct TdmDesc
 {
+    TDM_GROUP1 g1;
     TDM_GROUP0 g0;
-    uint32_t g1[8];
-    uint32_t g2[4];
+    TDM_GROUP2 g2;
 };
+static_assert(sizeof(TdmDesc) == 64, "TdmDesc must hold its 16 SGPRs without padding");
 
-CK_TILE_DEVICE void tensor_load([[maybe_unused]] const TdmDesc& d)
+/// Group 1 of a rank-2 load of 1-byte elements: tensor_dim1 rows of tensor_dim0 bytes,
+/// row_stride bytes apart, in a tile_dim0 x tile_dim1 box. The dim-1 stride is 1, as CK Tile
+/// programs rank 2. Padding is the zero config without padding.
+template <bool Iterate, bool Pad, TDMLdsPaddingConfig Padding = TDMLdsPaddingConfig{}>
+CK_TILE_DEVICE TDM_GROUP1 tdm_group1(uint32_t workgroup_mask,
+                                     uint32_t tensor_dim0,
+                                     uint32_t tensor_dim1,
+                                     uint16_t tile_dim0,
+                                     uint16_t tile_dim1,
+                                     uint32_t row_stride)
 {
-#if defined(__gfx125__) && CK_TILE_ENABLE_TDM_FEATURE
-    const uint32x4_t g0 = bit_cast<uint32x4_t>(d.g0.bitfield);
-    const int32x8_t g1  = {static_cast<int32_t>(d.g1[0]),
-                           static_cast<int32_t>(d.g1[1]),
-                           static_cast<int32_t>(d.g1[2]),
-                           static_cast<int32_t>(d.g1[3]),
-                           static_cast<int32_t>(d.g1[4]),
-                           static_cast<int32_t>(d.g1[5]),
-                           static_cast<int32_t>(d.g1[6]),
-                           static_cast<int32_t>(d.g1[7])};
-    const int32x4_t g2  = {static_cast<int32_t>(d.g2[0]),
-                           static_cast<int32_t>(d.g2[1]),
-                           static_cast<int32_t>(d.g2[2]),
-                           static_cast<int32_t>(d.g2[3])};
-    __builtin_amdgcn_tensor_load_to_lds(g0, g1, g2, int32x4_t{0, 0, 0, 0}, int32x8_t{}, 0);
-#endif
-}
-
-/// TDM pad_interval / pad_amount of a pad of pad_bytes after every period_bytes (TensileLite).
-CK_TILE_HOST_DEVICE constexpr uint32_t tdm_pad_interval(index_t period_bytes)
-{
-    uint32_t log2 = 0;
-    for(index_t dwords = period_bytes / 4; dwords > 1; dwords >>= 1)
-        ++log2;
-    return log2 - 1;
-}
-
-CK_TILE_HOST_DEVICE constexpr uint32_t tdm_pad_amount(index_t pad_bytes)
-{
-    return static_cast<uint32_t>(pad_bytes / 4 - 1);
-}
-
-/// Group-1 word 0 of a 1-byte-element rank-2 load.
-CK_TILE_HOST_DEVICE constexpr uint32_t
-tdm_flags(bool iterate, bool pad, uint32_t pad_interval, uint32_t pad_amount)
-{
-    return (static_cast<uint32_t>(iterate) << 19) | (static_cast<uint32_t>(pad) << 20) |
-           (pad_interval << 22) | (pad_amount << 25);
-}
-
-/// Group-1 words 1..7: tensor dims split 16/16 across words, tile dims, dim-0 stride; dim-1
-/// stride 1 << 16 (as CK Tile programs rank 2).
-CK_TILE_HOST_DEVICE constexpr void tdm_shape(uint32_t (&g1)[8],
-                                             uint32_t tensor_dim0,
-                                             uint32_t tensor_dim1,
-                                             uint32_t tile_dim0,
-                                             uint32_t tile_dim1,
-                                             uint32_t row_stride)
-{
-    g1[1] = tensor_dim0 << 16;
-    g1[2] = (tensor_dim0 >> 16) | (tensor_dim1 << 16);
-    g1[3] = (tensor_dim1 >> 16) | (tile_dim0 << 16);
-    g1[4] = tile_dim1;
-    g1[5] = row_stride;
-    g1[6] = 1u << 16;
-    g1[7] = 0;
-}
-
-/// A data descriptor of the tile at K byte k_byte: dim 0 holds the K bytes left.
-CK_TILE_HOST_DEVICE constexpr void tdm_patch_remaining_k(TdmDesc& d, uint32_t remaining_k)
-{
-    d.g1[1] = remaining_k << 16;
-    d.g1[2] = (d.g1[2] & 0xFFFF0000u) | (remaining_k >> 16);
-}
-
-/// A scale descriptor of the tile at K step k_step: dim 1 holds the K steps left.
-CK_TILE_HOST_DEVICE constexpr void tdm_patch_steps_left(TdmDesc& d, uint32_t steps_left)
-{
-    d.g1[2] = (d.g1[2] & 0xFFFFu) | (steps_left << 16);
-    d.g1[3] = (d.g1[3] & 0xFFFF0000u) | (steps_left >> 16);
+    // A cluster has at most 16 workgroups; without this the 16-bit field costs an s_and.
+    __builtin_assume(workgroup_mask <= 0xFFFFu);
+    TDM_GROUP1 g1;
+    g1.workgroup_mask = workgroup_mask;
+    g1.iterate_enable = Iterate;
+    g1.pad_enable     = Pad;
+    g1.pad_interval   = Padding.pad_interval;
+    g1.pad_amount     = Padding.pad_amount;
+    g1.tensorDim0(tensor_dim0);
+    g1.tensorDim1(tensor_dim1);
+    g1.tileDim(0, tile_dim0);
+    g1.tileDim(1, tile_dim1);
+    g1.tensorDim0Stride(row_stride);
+    g1.tensorDim1Stride(1);
+    return g1;
 }
 } // namespace mx_tdm_v4
 
@@ -397,18 +354,15 @@ struct GemmPipelineAgBgCrCompTDMV4
                               reinterpret_cast<uintptr_t>(global),
                               0,
                               0};
-            constexpr uint32_t flags =
-                mx_tdm_v4::tdm_flags(iterate,
-                                     pad,
-                                     pad ? mx_tdm_v4::tdm_pad_interval(L.block_bytes) : 0,
-                                     pad ? mx_tdm_v4::tdm_pad_amount(L.pad_bytes) : 0);
-            d.g1[0] = flags | (IsA ? a_mask : b_mask);
-            mx_tdm_v4::tdm_shape(d.g1,
-                                 static_cast<uint32_t>(packed_k),
-                                 static_cast<uint32_t>(rows_left),
-                                 kLayout.row_bytes,
-                                 tile_rows,
-                                 static_cast<uint32_t>(packed_k));
+            constexpr TDMLdsPaddingConfig padding =
+                pad ? make_tdm_lds_padding_config(L.block_bytes, L.pad_bytes)
+                    : TDMLdsPaddingConfig{};
+            d.g1 = mx_tdm_v4::tdm_group1<iterate, pad, padding>(IsA ? a_mask : b_mask,
+                                                                static_cast<uint32_t>(packed_k),
+                                                                static_cast<uint32_t>(rows_left),
+                                                                kLayout.row_bytes,
+                                                                tile_rows,
+                                                                static_cast<uint32_t>(packed_k));
             if constexpr(iterate)
             {
                 constexpr index_t count = L.rows / tile_rows;
@@ -421,10 +375,9 @@ struct GemmPipelineAgBgCrCompTDMV4
                     const index_t held = max(min(rows_left, L.rows), 1);
                     iterations = integer_divide_nonnegative<tile_rows>(held + tile_rows - 1);
                 }
-                d.g2[0] = 0;
-                d.g2[1] = static_cast<uint32_t>(L.iterate_stride);
-                d.g2[2] = static_cast<uint32_t>(packed_k * tile_rows);
-                d.g2[3] = static_cast<uint32_t>(iterations - 1) << 16;
+                d.g2.mode0.lds_addr_increment = static_cast<uint32_t>(L.iterate_stride);
+                d.g2.mode0.globalAddrIncrement(static_cast<uint32_t>(packed_k * tile_rows));
+                d.g2.mode0.iterate_count = static_cast<uint32_t>(iterations - 1);
             }
             return d;
         }
@@ -449,18 +402,15 @@ struct GemmPipelineAgBgCrCompTDMV4
                               reinterpret_cast<uintptr_t>(base + col0),
                               0,
                               0};
-            constexpr uint32_t flags =
-                mx_tdm_v4::tdm_flags(false,
-                                     pad,
-                                     pad ? mx_tdm_v4::tdm_pad_interval(L.block_bytes) : 0,
-                                     pad ? mx_tdm_v4::tdm_pad_amount(L.pad_bytes) : 0);
-            d.g1[0] = flags | (IsA ? a_mask : b_mask);
-            mx_tdm_v4::tdm_shape(d.g1,
-                                 static_cast<uint32_t>(bytes_left),
-                                 static_cast<uint32_t>(k_atoms),
-                                 L.rows * 4,
-                                 kLayout.k_steps,
-                                 static_cast<uint32_t>(row_stride));
+            constexpr TDMLdsPaddingConfig padding =
+                pad ? make_tdm_lds_padding_config(L.block_bytes, L.pad_bytes)
+                    : TDMLdsPaddingConfig{};
+            d.g1 = mx_tdm_v4::tdm_group1<false, pad, padding>(IsA ? a_mask : b_mask,
+                                                              static_cast<uint32_t>(bytes_left),
+                                                              static_cast<uint32_t>(k_atoms),
+                                                              L.rows * 4,
+                                                              kLayout.k_steps,
+                                                              static_cast<uint32_t>(row_stride));
             return d;
         }
 
@@ -491,8 +441,8 @@ struct GemmPipelineAgBgCrCompTDMV4
                               data_global + static_cast<uint32_t>(k_byte),
                               0,
                               0};
-            mx_tdm_v4::tdm_patch_remaining_k(d, static_cast<uint32_t>(remaining_k));
-            mx_tdm_v4::tensor_load(d);
+            d.g1.tensorDim0(static_cast<uint32_t>(remaining_k));
+            amd_tdm_load(d.g0, d.g1, d.g2);
             const index_t k_step     = integer_divide_nonnegative<mx_tdm_v4::kAtomK>(k0);
             const index_t steps_left = k_atoms - k_step;
             mx_tdm_v4::TdmDesc s     = scale;
@@ -500,8 +450,8 @@ struct GemmPipelineAgBgCrCompTDMV4
                               scale_global + static_cast<uint32_t>(k_step * scale_stride),
                               0,
                               0};
-            mx_tdm_v4::tdm_patch_steps_left(s, static_cast<uint32_t>(steps_left));
-            mx_tdm_v4::tensor_load(s);
+            s.g1.tensorDim1(static_cast<uint32_t>(steps_left));
+            amd_tdm_load(s.g0, s.g1, s.g2);
         }
 
         // ---------------------------------------------------------------- Gl2Prefetcher

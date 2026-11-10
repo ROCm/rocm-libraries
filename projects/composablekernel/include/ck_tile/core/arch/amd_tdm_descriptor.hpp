@@ -5,12 +5,14 @@
 
 #include <cstddef>
 
+#include "ck_tile/core/arch/amd_buffer_coherence.hpp"
 #include "ck_tile/core/arch/amd_wave_read_first_lane.hpp"
 #include "ck_tile/core/container/sequence.hpp"
 #include "ck_tile/core/container/tuple.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/type_convert.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
+#include "ck_tile/core/utility/bit_cast.hpp"
 
 namespace ck_tile {
 
@@ -25,6 +27,18 @@ struct TDMLdsPaddingConfig
     uint32_t pad_interval{0};
     uint32_t pad_amount{0};
 };
+
+/// The TDMLdsPaddingConfig of pad_bytes of LDS padding after every period_bytes. Both fields are
+/// biased by one: pad_interval is log2 of the period in dwords, minus 1 (a power of two of at
+/// least 2 dwords), and pad_amount the pad in dwords, minus 1.
+CK_TILE_HOST_DEVICE constexpr TDMLdsPaddingConfig make_tdm_lds_padding_config(index_t period_bytes,
+                                                                              index_t pad_bytes)
+{
+    uint32_t log2 = 0;
+    for(index_t dwords = period_bytes / 4; dwords > 1; dwords >>= 1)
+        ++log2;
+    return {log2 - 1, static_cast<uint32_t>(pad_bytes / 4 - 1)};
+}
 
 struct TDMIterationConfig
 {
@@ -348,6 +362,24 @@ union TDM_GROUP2
 
 static_assert(sizeof(TDM_GROUP2_MODE0) == 16, "group 2 fields must fit its four SGPRs");
 static_assert(sizeof(TDM_GROUP2) == 16, "group 2 fields must fit its four SGPRs");
+
+/// TENSOR_LOAD_TO_LDS of a load of rank 2 or less (groups 3 and 4 zero) from groups the caller
+/// built, for a caller that keeps them in registers across loads and updates only the fields
+/// that change. amd_tdm_load(const TDMDescriptor&) instead builds every group on each call.
+template <amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default>
+CK_TILE_DEVICE void amd_tdm_load([[maybe_unused]] const TDM_GROUP0& group0,
+                                 [[maybe_unused]] const TDM_GROUP1& group1,
+                                 [[maybe_unused]] const TDM_GROUP2& group2)
+{
+#if CK_TILE_ENABLE_TDM_FEATURE
+    __builtin_amdgcn_tensor_load_to_lds(bit_cast<uint32x4_t>(group0.bitfield),
+                                        group1.bitfield,
+                                        group2.bitfield,
+                                        int32x4_t{0, 0, 0, 0},
+                                        int32x8_t{},
+                                        static_cast<index_t>(coherence));
+#endif
+}
 
 union TDM_GROUP3_MODE0
 {
