@@ -2145,7 +2145,6 @@ class UnifiedGemmCodegen:
             variant_name=variant.value,
             persistent=bool(trait.persistent),
             pads=(bool(trait.pad_m), bool(trait.pad_n), bool(trait.pad_k)),
-            batched=variant == GemmVariant.BATCHED,
             tile_mn=(tile.tile_m, tile.tile_n),
             warp_k=tile.warp_k,
             streamk=variant == GemmVariant.STREAM_K,

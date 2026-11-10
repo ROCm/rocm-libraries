@@ -605,9 +605,10 @@ def _build_batched_compile_jobs(
         # WMMA/MX features, matching the CMake build and gemm_utils.
         *arch_feature_defines(gfx_arch),
         # Byte-identical AMDGPU backend flags to the single-problem bridge and
-        # Old-TE (see gemm_utils._tile_engine_codegen_flags) -- required for a
-        # fair A/B parity comparison.
-        *_gu._tile_engine_codegen_flags(),
+        # Old-TE for the same kernel (see gemm_utils._kernel_codegen_flags:
+        # Stream-K and comp_tdm_v3 differ) -- required for a fair A/B parity
+        # comparison.
+        *_gu._kernel_codegen_flags(config),
         "-Wno-undefined-func-template",
         "-Wno-float-equal",
         str(ctypes_source),

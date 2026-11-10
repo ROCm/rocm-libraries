@@ -2313,6 +2313,38 @@ def _ctypes_source_name(config: GemmKernelConfig) -> str:
     return "gemm_ctypes_lib.cpp"
 
 
+def _kernel_codegen_flags(config: GemmKernelConfig) -> Tuple[str, ...]:
+    """AMDGPU codegen flags of the kernel ``config`` describes, whatever ctypes
+    library hosts it.
+
+    The regular path matches Tile Engine's gemm_universal build via
+    _tile_engine_codegen_flags(). Stream-K must instead match TE's gemm_streamk
+    build EXACTLY for a fair A/B: -enable-post-misched=0 is applied
+    unconditionally (not persistent-gated) and it does NOT use
+    -enable-noalias-to-md-conversion=0. Pipeline-specific flags go last so they
+    override the ones above (e.g. comp_tdm_v3 turns the post-RA machine
+    scheduler back on, as the Tile Engine gemm_universal build does for it).
+    """
+    if getattr(config, "variant", "") == "stream_k":
+        variant_flags = (
+            "-std=c++20",
+            "-fno-offload-uniform-block",
+            "-mllvm", "--lsr-drop-solution=1",
+            "-mllvm", "-enable-post-misched=0",
+            "-mllvm", "-amdgpu-early-inline-all=true",
+            "-mllvm", "-amdgpu-function-calls=false",
+            "--offload-compress",
+        )
+    else:
+        variant_flags = _tile_engine_codegen_flags()
+    return (
+        *variant_flags,
+        *_codegen_common().PIPELINE_EXTRA_COMPILE_FLAGS.get(
+            getattr(config, "pipeline", ""), ()
+        ),
+    )
+
+
 def _build_compile_jobs(
     config: GemmKernelConfig, header: Path
 ) -> Tuple[Dict[str, Any], Path]:
@@ -2335,26 +2367,7 @@ def _build_compile_jobs(
     # directory, so ensure it exists before hipcc writes the object/.so here.
     lib_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Per-variant AMDGPU codegen flags. The regular path matches Tile Engine's
-    # gemm_universal build via _tile_engine_codegen_flags(). Stream-K must instead
-    # match TE's gemm_streamk build EXACTLY for a fair A/B: -enable-post-misched=0
-    # is applied unconditionally (not persistent-gated) and it does NOT use
-    # -enable-noalias-to-md-conversion=0.
     is_streamk = getattr(config, "variant", "") == "stream_k"
-    variant_flags = (
-        [
-            "-std=c++20",
-            "-fno-offload-uniform-block",
-            "-mllvm", "--lsr-drop-solution=1",
-            "-mllvm", "-enable-post-misched=0",
-            "-mllvm", "-amdgpu-early-inline-all=true",
-            "-mllvm", "-amdgpu-function-calls=false",
-            "--offload-compress",
-        ]
-        if is_streamk
-        else list(_tile_engine_codegen_flags())
-    )
-
     compile_cmd = [
         _resolve_hipcc(),
         "-c",
@@ -2373,19 +2386,13 @@ def _build_compile_jobs(
         # Keep host/device fp8 encodings consistent and enable the target's
         # WMMA/MX features, matching the CMake build.
         *arch_feature_defines(config.gfx_arch),
-        # Match Tile Engine's AMDGPU codegen flags exactly (see variant_flags /
-        # _tile_engine_codegen_flags). Without them the kernel is compiled with
+        # Match Tile Engine's AMDGPU codegen flags exactly (see
+        # _kernel_codegen_flags). Without them the kernel is compiled with
         # different inlining/register allocation, which changes occupancy;
         # persistent kernels size their grid by occupancy
         # (UniversalGemmKernel::MaxOccupancyGridSize = #CUs x occupancy), so a
         # mismatch shows up as large perf gaps vs Tile Engine on persistent tiles.
-        *variant_flags,
-        # Pipeline-specific flags go last so they override the ones above (e.g.
-        # comp_tdm_v3 turns the post-RA machine scheduler back on, as the Tile
-        # Engine gemm_universal build does for it).
-        *_codegen_common().PIPELINE_EXTRA_COMPILE_FLAGS.get(
-            getattr(config, "pipeline", ""), ()
-        ),
+        *_kernel_codegen_flags(config),
         "-Wno-undefined-func-template",
         "-Wno-float-equal",
         str(ctypes_source),
@@ -2817,7 +2824,6 @@ def _gfx1250_pipeline_supported(
         variant_name=variant,
         persistent=bool(persistent),
         pads=(bool(pad_m), bool(pad_n), bool(pad_k)),
-        batched=variant == "batched",
         tile_mn=tile_mn,
         warp_k=wave_k,
         streamk=variant == "stream_k",

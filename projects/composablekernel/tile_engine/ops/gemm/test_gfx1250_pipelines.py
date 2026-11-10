@@ -129,6 +129,20 @@ class TestTraitParse(unittest.TestCase):
         want = ["|".join(split_trait(t)[:3]) for t in traits]
         self.assertEqual(got, want)
 
+    def test_pipeline_compile_options_are_shared(self):
+        """comp_tdm_v3's post-RA scheduler flag lives in gemm_trait_parse.cmake only;
+        the ops that build the pipeline call the shared function."""
+        flag = "-enable-post-misched=1"
+        with open(os.path.join(_HERE, "gemm_trait_parse.cmake")) as f:
+            self.assertIn(flag, f.read())
+        for op in ("gemm_universal", "batched_gemm"):
+            with open(os.path.join(_HERE, op, "CMakeLists.txt")) as f:
+                text = f.read()
+            self.assertIn(
+                'ck_tile_gemm_pipeline_compile_options(${target_name} "${pipeline}")', text
+            )
+            self.assertNotIn(flag, text)
+
 
 class TestValidationRules(unittest.TestCase):
     def test_pipelines_by_arch(self):
@@ -724,8 +738,8 @@ def _v3_tile_ok(
 
 class TestCompTdmV3(unittest.TestCase):
     """comp_tdm_v3: [4, 4, 1] and the CShuffle epilogue for it only, fp8/bf8 A/B
-    (rcr) or fp16/bf16 A/B (any A/B layout), gemm_universal only, plain row-major
-    tile partitioner."""
+    (rcr) or fp16/bf16 A/B (any A/B layout), gemm_universal and batched_gemm only,
+    plain row-major tile partitioner."""
 
     OTHER_PIPELINES = (
         "comp_tdm",
@@ -788,7 +802,8 @@ class TestCompTdmV3(unittest.TestCase):
         )
         # Shared-table wave maps outside 2x2x1 / 4x4x1 are not v3 maps.
         self.assertFalse(_v3_tile_ok("comp_tdm_v3", dict(warp_m=4, warp_n=2)))
-        self.assertFalse(_v3_tile_ok("comp_tdm_v3", prefix="batched_gemm"))
+        self.assertTrue(_v3_tile_ok("comp_tdm_v3", prefix="batched_gemm"))
+        self.assertFalse(_v3_tile_ok("comp_tdm_v3", prefix="gemm_multi_d"))
         self.assertFalse(_v3_tile_ok("comp_tdm_v3", arch="gfx950"))
         self.assertIn(
             "2x2x1 and 4x4x1",
@@ -867,8 +882,8 @@ class TestCompTdmV3(unittest.TestCase):
                 False,
             )
         )
+        self.assertTrue(ok("comp_tdm_v3", "cshuffle", "intrawave", False, "batched_gemm"))
         for prefix in (
-            "batched_gemm",
             "gemm_multi_d",
             "gemm_aquant",
             "mx_gemm",
@@ -974,6 +989,15 @@ class TestBuilderCompTdmV3(_BuilderCase):
             'throw std::runtime_error("TDM pipeline requires k_batch==1")', code
         )
 
+    def test_v3_batched_instance(self):
+        code = self._gen_v3(prefix="batched_gemm")
+        self.assertIn("ck_tile::BatchedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>", code)
+        self.assertIn(
+            "using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;", code
+        )
+        self.assertIn("ck_tile::GemmPipelineAgBgCrCompTDMV3<UniversalGemmProblem>", code)
+        self.assertIn("CShuffleEpilogue<", code)
+
     def test_other_pipelines_keep_their_partitioner(self):
         for pipeline, epilogue in (("comp_tdm", "tdm"), ("comp_tdm_v2", "tdm")):
             code = self._gen("gemm_universal", pipeline, epilogue)
@@ -984,7 +1008,7 @@ class TestBuilderCompTdmV3(_BuilderCase):
         with self.assertRaisesRegex(ValueError, "requires the cshuffle epilogue"):
             self._gen_v3(epilogue="tdm")
         with self.assertRaisesRegex(ValueError, "does not support the comp_tdm_v3"):
-            self._gen_v3(prefix="batched_gemm")
+            self._gen_v3(prefix="gemm_multi_d")
         for pipeline in ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc"):
             with self.assertRaisesRegex(ValueError, "requires the tdm epilogue"):
                 self._gen_v3(pipeline=pipeline)

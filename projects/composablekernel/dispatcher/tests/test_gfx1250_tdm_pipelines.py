@@ -38,8 +38,6 @@ from arch_filter import (  # noqa: E402
 from arch_specs_generated import get_lds_limit  # noqa: E402
 import codegen_common as cc  # noqa: E402
 from codegen_common import (  # noqa: E402
-    COMP_TDM_PC_BATCHED_REJECT_REASON,
-    COMP_TDM_V3_BATCHED_REJECT_REASON,
     TDM_PAD_REJECT_REASON,
     COMP_TDM_PC_WARP_K_REJECT_REASON,
     CommonTypeMappings,
@@ -739,11 +737,15 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
             self.assertTrue(all("_compv3_cshuffle_" in n for n in names), names)
 
     def test_gfx1250_batched_has_tdm(self):
-        _, names = self._gen("gfx1250", "batched")
+        out, names = self._gen("gfx1250", "batched")
         self.assertTrue(any("_comp_tdm_tdm_" in n for n in names))
         self.assertTrue(any("_comp_tdm_v2_tdm_" in n for n in names))
-        # BatchedGemmKernel does not arm the producer/consumer barriers.
-        self.assertFalse(any("_comp_tdm_pc_" in n for n in names))
+        # BatchedGemmKernel arms the producer/consumer named barriers.
+        name = next(n for n in names if "_comp_tdm_pc_tdm_" in n)
+        text = (out / name).read_text()
+        self.assertIn("ck_tile::BatchedGemmKernel<TilePartitioner, GemmPipeline", text)
+        self.assertIn("GemmPipelineAgBgCrCompTDMProducerConsumer<", text)
+        self.assertIn("TdmEpilogue<", text)
 
     def test_gfx1250_batched_comp_async_epilogue_double_smem(self):
         out, names = self._gen("gfx1250", "batched")
@@ -878,7 +880,7 @@ class TestCompTdmV3(unittest.TestCase):
             dtype_a=dtype, dtype_b=dtype, layout=layout,
             variant_supported=variant in ("standard", "batched", "stream_k"),
             variant_name=variant, persistent=persist, pads=pads,
-            batched=variant == "batched", warp_k=waves[2],
+            warp_k=waves[2],
             streamk=variant == "stream_k", waves=waves,
         )
 
@@ -905,7 +907,9 @@ class TestCompTdmV3(unittest.TestCase):
         )
         self.assertIn("requires epilogue=cshuffle", self._gate(epi="tdm"))
         self.assertIn("persistent", self._gate(persist=True))
-        self.assertEqual(self._gate(variant="batched"), COMP_TDM_V3_BATCHED_REJECT_REASON)
+        # Batched GEMM runs it like plain GEMM.
+        self.assertEqual(self._gate(variant="batched"), "")
+        self.assertEqual(self._gate(waves=(4, 4, 1), variant="batched"), "")
         self.assertIn("requires gfx1250", self._gate(arch="gfx950"))
         self.assertEqual(self._gate(pads=(True, False, False)), TDM_PAD_REJECT_REASON)
         # Stream-K takes either epilogue (the reduction decides) and persistence.
@@ -1016,7 +1020,6 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
     def test_tdm_pc_rules(self):
         self.assertTrue(self._ok("comp_tdm_pc", "tdm"))
         self.assertTrue(self._ok("comp_tdm_pc", "tdm", waves=(4, 2, 1)))
-        self.assertFalse(self._ok("comp_tdm_pc", "tdm", variant="batched"))
         self.assertFalse(self._ok("comp_tdm_pc", "tdm", arch="gfx950"))
         self.assertFalse(self._ok("comp_tdm_pc", "tdm", persist=True))
         self.assertFalse(self._ok("comp_tdm_pc", "tdm", sched="interwave"))
@@ -1027,21 +1030,9 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
             self._ok("comp_tdm_pc", "tdm", waves=(4, 2, 1), tile_mn=(256, 256))
         )
         self.assertTrue(self._ok("comp_tdm", "tdm", tile_mn=(256, 256)))
-        self.assertEqual(
-            gfx1250_pipeline_reject_reason(
-                "gfx1250",
-                "comp_tdm_pc",
-                "tdm",
-                "intrawave",
-                4,
-                32,
-                "fp16",
-                "fp16",
-                "rcr",
-                batched=True,
-            ),
-            COMP_TDM_PC_BATCHED_REJECT_REASON,
-        )
+        # BatchedGemmKernel arms the producer/consumer named barriers.
+        self.assertTrue(self._ok("comp_tdm_pc", "tdm", variant="batched"))
+        self.assertFalse(self._ok("comp_tdm_pc", "tdm", variant="stream_k"))
 
     def _async(self, *args, **kw):
         return self._ok("comp_async", *args, pad_m=True, pad_n=True, pad_k=True, **kw)

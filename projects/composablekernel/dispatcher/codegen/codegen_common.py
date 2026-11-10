@@ -1456,13 +1456,9 @@ GFX1250_FP32_ACC_REJECT_REASON = (
 # comp_tdm_pc (producer/consumer TDM): the C tile lives on the consumer waves
 # only (the two producer waves hold no accumulator), one fp32 VGPR per element.
 # Past 256 accumulators per lane occupancy collapses; same cap as the Tile
-# Engine MAX_ACC_VGPRS_PER_LANE. BatchedGemmKernel does not arm the pipeline's
-# named barriers, so the pipeline is plain-GEMM only.
+# Engine MAX_ACC_VGPRS_PER_LANE. The plain and batched GEMM kernels arm the
+# pipeline's named barriers; Stream-K does not run it.
 COMP_TDM_PC_MAX_ACC_VGPRS_PER_LANE = 256
-COMP_TDM_PC_BATCHED_REJECT_REASON = (
-    "comp_tdm_pc is not supported for batched GEMM: BatchedGemmKernel does not "
-    "arm the producer/consumer named barriers"
-)
 # BlockGemm and the epilogue spread the C tile over warp_m x warp_n waves only,
 # with no K-wave reduction, so a K wave would be a consumer whose work is lost.
 # Mirrors the static_assert in GemmPipelineAgBgCrCompTDMProducerConsumer.
@@ -1474,8 +1470,8 @@ COMP_TDM_PC_WARP_K_REJECT_REASON = (
 # (tile_engine/ops/gemm/gemm_validation_utils.py; tests/test_gfx1250_gate_equivalence.py
 # pins the two copies): the CShuffle epilogue outside Stream-K, the 2x2x1 and 4x4x1
 # wave maps ([4, 4, 1] for this pipeline only, the shared table is unchanged), fp8/bf8
-# A/B with layout rcr or fp16/bf16 A/B with any A/B layout, plain and Stream-K GEMM
-# only. Its kernels build with the post-RA machine scheduler on, as the Tile Engine
+# A/B with layout rcr or fp16/bf16 A/B with any A/B layout, plain, batched and Stream-K
+# GEMM only. Its kernels build with the post-RA machine scheduler on, as the Tile Engine
 # gemm_universal build and the comp_tdm_v3 gtests do.
 COMP_TDM_V3 = "comp_tdm_v3"
 TDM_PIPELINE_EPILOGUE = {COMP_TDM_V3: "cshuffle"}
@@ -1485,7 +1481,6 @@ COMP_TDM_V3_WAVES = ((2, 2, 1), (4, 4, 1))
 COMP_TDM_V3_8BIT_DTYPES = ("fp8", "bf8")
 COMP_TDM_V3_16BIT_DTYPES = ("fp16", "bf16")
 COMP_TDM_V3_8BIT_LAYOUT = "rcr"
-COMP_TDM_V3_BATCHED_REJECT_REASON = "comp_tdm_v3 is plain and Stream-K GEMM only"
 
 
 def tdm_pipeline_epilogue(pipeline: str) -> str:
@@ -1707,7 +1702,6 @@ def gfx1250_pipeline_reject_reason(
     pads: Optional[Tuple[bool, bool, bool]] = None,
     warp_tile_m: int = 0,
     warp_tile_n: int = 0,
-    batched: bool = False,
     tile_mn: Optional[Tuple[int, int]] = None,
     warp_k: Optional[int] = None,
     streamk: bool = False,
@@ -1723,10 +1717,9 @@ def gfx1250_pipeline_reject_reason(
 
     ``variant_supported`` is False for GEMM variants the pipelines do not
     support (only plain, batched and preshuffle GEMM are, and Stream-K GEMM for
-    STREAMK_GFX1250_PIPELINES; comp_tdm_pc is plain only, comp_tdm_v3 plain and
-    Stream-K only). ``pads`` is
+    STREAMK_GFX1250_PIPELINES). ``pads`` is
     (pad_m, pad_n, pad_k); None means unknown and skips the
-    pad rules. ``batched`` marks the batched GEMM variant and ``tile_mn``
+    pad rules. ``tile_mn``
     (tile_m, tile_n) enables the comp_tdm_pc accumulator rule (None skips it).
     ``warp_k`` enables the comp_tdm_pc warp_k=1 rule (None skips it); ``waves``
     (warp_m, warp_n, warp_k) the comp_tdm_v3 wave-map rule and ``tile_k`` its K-tile
@@ -1771,16 +1764,12 @@ def gfx1250_pipeline_reject_reason(
         if pipeline == "comp_tdm_v2" and num_waves != 4:
             return "comp_tdm_v2 requires exactly 4 waves"
         if pipeline == COMP_TDM_V3:
-            if batched:
-                return COMP_TDM_V3_BATCHED_REJECT_REASON
             reason = comp_tdm_v3_reject_reason(
                 dtype_a, dtype_b, waves, layout, tile_k, warp_tile_k
             )
             if reason:
                 return reason
         if pipeline == "comp_tdm_pc":
-            if batched:
-                return COMP_TDM_PC_BATCHED_REJECT_REASON
             if warp_k is not None and warp_k != 1:
                 return COMP_TDM_PC_WARP_K_REJECT_REASON
             if tile_mn is not None:
