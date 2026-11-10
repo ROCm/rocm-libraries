@@ -42,19 +42,19 @@ extern "C" {
  * \note This routine ignores the environment variable \p ROCSPARSE_DEBUG_KERNEL_LAUNCH.
  */
 ROCSPARSE_EXPORT
-void rocsparse_enable_debug_kernel_launch();
+void rocsparse_enable_debug_kernel_launch(void);
 
 /*! \ingroup aux_module
  * \brief Disable debug kernel launch.
  *  \note This routine ignores the environment variable \p ROCSPARSE_DEBUG_KERNEL_LAUNCH.
  */
-ROCSPARSE_EXPORT void rocsparse_disable_debug_kernel_launch();
+ROCSPARSE_EXPORT void rocsparse_disable_debug_kernel_launch(void);
 
 /*! \ingroup aux_module
  * \details Query whether debugging for kernel launch has been enabled. See \ref rocsparse_enable_debug_kernel_launch.
  * \return 1 if enabled, 0 otherwise.
  */
-ROCSPARSE_EXPORT int rocsparse_state_debug_kernel_launch();
+ROCSPARSE_EXPORT int rocsparse_state_debug_kernel_launch(void);
 
 /*! \ingroup aux_module
  *  \brief Enable debug arguments.
@@ -65,7 +65,7 @@ ROCSPARSE_EXPORT int rocsparse_state_debug_kernel_launch();
  * \note This routine enables debug arguments verbose with \ref rocsparse_enable_debug_arguments_verbose.
  */
 ROCSPARSE_EXPORT
-void rocsparse_enable_debug_arguments();
+void rocsparse_enable_debug_arguments(void);
 
 /*! \ingroup aux_module
  *  \brief Disable debug arguments.
@@ -73,14 +73,14 @@ void rocsparse_enable_debug_arguments();
  *  \note This routine disables debug arguments.
  */
 ROCSPARSE_EXPORT
-void rocsparse_disable_debug_arguments();
+void rocsparse_disable_debug_arguments(void);
 
 /*! \ingroup aux_module
  *  \details Query whether debugging arguments have been enabled. See \ref rocsparse_enable_debug_arguments.
  * \return 1 if enabled, 0 otherwise.
  */
 ROCSPARSE_EXPORT
-int rocsparse_state_debug_arguments();
+int rocsparse_state_debug_arguments(void);
 
 /*! \ingroup aux_module
  *  \brief Enable debug arguments verbose.
@@ -89,21 +89,21 @@ int rocsparse_state_debug_arguments();
  *  \note This routine ignores the environment variable \p ROCSPARSE_DEBUG_ARGUMENTS_VERBOSE.
  */
 ROCSPARSE_EXPORT
-void rocsparse_enable_debug_arguments_verbose();
+void rocsparse_enable_debug_arguments_verbose(void);
 
 /*! \ingroup aux_module
  *  \brief Disable debug arguments verbose mode.
  *  \note This routine ignores the environment variable \p ROCSPARSE_DEBUG_ARGUMENTS_VERBOSE.
  */
 ROCSPARSE_EXPORT
-void rocsparse_disable_debug_arguments_verbose();
+void rocsparse_disable_debug_arguments_verbose(void);
 
 /*! \ingroup aux_module
  * \details Query whether debugging arguments in verbose mode has been enabled. See \ref rocsparse_enable_debug_arguments_verbose.
  * \return 1 if enabled, 0 otherwise.
  */
 ROCSPARSE_EXPORT
-int rocsparse_state_debug_arguments_verbose();
+int rocsparse_state_debug_arguments_verbose(void);
 
 /*! \ingroup aux_module
  *  \brief Enable debug.
@@ -113,7 +113,7 @@ int rocsparse_state_debug_arguments_verbose();
  * \note \ref rocsparse_enable_debug_verbose and \ref rocsparse_enable_debug_arguments are called.
  */
 ROCSPARSE_EXPORT
-void rocsparse_enable_debug();
+void rocsparse_enable_debug(void);
 
 /*! \ingroup aux_module
  *  \brief Disable debug.
@@ -121,14 +121,14 @@ void rocsparse_enable_debug();
  *  \note This routine ignores the environment variable \p ROCSPARSE_DEBUG.
  */
 ROCSPARSE_EXPORT
-void rocsparse_disable_debug();
+void rocsparse_disable_debug(void);
 
 /*! \ingroup aux_module
  * \details Query whether debug has been enabled. See \ref rocsparse_enable_debug.
  * \return 1 if enabled, 0 otherwise.
  */
 ROCSPARSE_EXPORT
-int rocsparse_state_debug();
+int rocsparse_state_debug(void);
 
 /*! \ingroup aux_module
  *  \brief Enable debug warnings
@@ -136,14 +136,14 @@ int rocsparse_state_debug();
  *  \note This routine ignores the environment variable \p ROCSPARSE_DEBUG_WARNINGS.
  */
 ROCSPARSE_EXPORT
-void rocsparse_enable_debug_warnings();
+void rocsparse_enable_debug_warnings(void);
 
 /*! \ingroup aux_module
  *  \brief Disable debug warnings
  *  \note This routine ignores the environment variable \p ROCSPARSE_DEBUG_WARNINGS.
  */
 ROCSPARSE_EXPORT
-void rocsparse_disable_debug_warnings();
+void rocsparse_disable_debug_warnings(void);
 
 /*! \ingroup aux_module
  *  \brief Enable debug verbose.
@@ -152,7 +152,7 @@ void rocsparse_disable_debug_warnings();
  *  \note This routine ignores the environment variable \p ROCSPARSE_DEBUG_VERBOSE.
  */
 ROCSPARSE_EXPORT
-void rocsparse_enable_debug_verbose();
+void rocsparse_enable_debug_verbose(void);
 
 /*! \ingroup aux_module
  *  \brief Disable debug verbose.
@@ -160,33 +160,33 @@ void rocsparse_enable_debug_verbose();
  *  \note This routine ignores the environment variable \p ROCSPARSE_DEBUG_VERBOSE.
  */
 ROCSPARSE_EXPORT
-void rocsparse_disable_debug_verbose();
+void rocsparse_disable_debug_verbose(void);
 /*! \ingroup aux_module
  * \details Query whether debug has been enabled in verbose mode. See \ref rocsparse_enable_debug_verbose.
  * \return 1 if enabled, 0 otherwise.
  */
 ROCSPARSE_EXPORT
-int rocsparse_state_debug_verbose();
+int rocsparse_state_debug_verbose(void);
 
 /*! \ingroup aux_module
  *  \brief Enable debug to force host asserts.
  *  \details Debug for force host assert forces the evaluation of asserts on the host when the compiler directive \p NDEBUG is used.
  */
 ROCSPARSE_EXPORT
-void rocsparse_enable_debug_force_host_assert();
+void rocsparse_enable_debug_force_host_assert(void);
 
 /*! \ingroup aux_module
  *  \brief Disable debug to force host asserts.
  */
 ROCSPARSE_EXPORT
-void rocsparse_disable_debug_force_host_assert();
+void rocsparse_disable_debug_force_host_assert(void);
 
 /*! \ingroup aux_module
  * \details Query whether the debug command to force host asserts has been enabled. See \ref rocsparse_enable_debug_force_host_assert.
  * \return 1 if enabled, 0 otherwise.
  */
 ROCSPARSE_EXPORT
-int rocsparse_state_debug_force_host_assert();
+int rocsparse_state_debug_force_host_assert(void);
 
 #ifdef __cplusplus
 }
