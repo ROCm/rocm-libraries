@@ -105,7 +105,8 @@ rocke_direct_depthwise_dgrad_win_spec_t
     rocke_direct_dw_fwd_wmma_win_spec(const rocke_direct_dw_fwd_wmma_spec_t* spec);
 
 /* build_dw_fwd_wmma(spec, arch) into an already-initialised builder (no
- * validation: the windowed builder's fwd form under the caller's name). */
+ * validation: the windowed builder's fwd form under the caller's name).
+ * `arch` NULL => "gfx1250". */
 rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
                                                    const rocke_direct_dw_fwd_wmma_spec_t* spec,
                                                    const char* arch);

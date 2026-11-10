@@ -272,7 +272,8 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
                                                    const char* arch)
 {
     const rocke_direct_depthwise_dgrad_win_spec_t w = rocke_direct_dw_fwd_wmma_win_spec(spec);
-    return rocke_build_direct_depthwise_dgrad_win(b, &w, arch);
+    /* NULL arch => gfx1250, as Python's build_dw_fwd_wmma default. */
+    return rocke_build_direct_depthwise_dgrad_win(b, &w, arch != NULL ? arch : "gfx1250");
 }
 
 rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma_new(rocke_ir_builder_t* b,
