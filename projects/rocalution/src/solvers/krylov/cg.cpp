@@ -199,6 +199,8 @@ namespace rocalution
         this->p_.Sync();
         this->q_.Sync();
 
+        IterativeLinearSolver<OperatorType, VectorType, ValueType>::Sync();
+
         log_debug(this, "CG::Sync()", this->build_, " #*# end");
     }
     template <class OperatorType, class VectorType, typename ValueType>

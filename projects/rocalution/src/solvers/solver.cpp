@@ -333,6 +333,19 @@ namespace rocalution
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
+    void IterativeLinearSolver<OperatorType, VectorType, ValueType>::Sync(void)
+    {
+        log_debug(this, "IterativeLinearSolver::Sync()");
+
+        Solver<OperatorType, VectorType, ValueType>::Sync();
+
+        if(this->build_ == true && this->op_ != NULL)
+        {
+            this->op_->ApplyAnalyse();
+        }
+    }
+
+    template <class OperatorType, class VectorType, typename ValueType>
     void IterativeLinearSolver<OperatorType, VectorType, ValueType>::Init(double abs_tol,
                                                                           double rel_tol,
                                                                           double div_tol,

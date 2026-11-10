@@ -355,6 +355,14 @@ namespace rocalution
         ROCALUTION_EXPORT
         virtual void MoveToAccelerator(void);
 
+        /** \brief Synchronize the solver
+      * \details
+      * If the solver has been built, the operator is analysed, as
+      * BuildMoveToAcceleratorAsync() can run before the operator is on the accelerator.
+      */
+        ROCALUTION_EXPORT
+        virtual void Sync(void);
+
         /** \brief Solve Operator x = rhs */
         ROCALUTION_EXPORT
         virtual void Solve(const VectorType& rhs, VectorType* x);

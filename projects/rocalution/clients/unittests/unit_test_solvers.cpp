@@ -2967,7 +2967,10 @@ TYPED_TEST(solvers, asynchronous_build_solves_on_the_accelerator_after_sync)
                 solver->Sync();
             }
 
-            const Outcome<T> out = solve(*solver, *A, b, Vec<T>(8, 0));
+            // Sync analyses the operator that landed on the accelerator
+            Outcome<T>        out;
+            const std::string log = logged([&] { out = solve(*solver, *A, b, Vec<T>(8, 0)); });
+            EXPECT_EQ(log.find("the SpMV analysis is performed lazily"), std::string::npos);
             EXPECT_EQ(out.status, 2);
             expect_near(
                 out.x,
