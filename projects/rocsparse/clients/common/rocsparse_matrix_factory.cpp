@@ -368,6 +368,18 @@ void rocsparse_matrix_factory<T, I, J>::init_csr(host_csr_matrix<T, I, J>& that,
 }
 
 //
+// CSC is the transpose of the CSR this builds, and GEBSC is the transpose of
+// the GEBSR this builds. The stored triangle is therefore the opposite of the
+// requested fill mode. General generators ignore uplo, so this flip leaves a
+// general matrix unchanged.
+//
+static rocsparse_fill_mode transposed_fill_mode(rocsparse_fill_mode uplo)
+{
+    return (uplo == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
+                                               : rocsparse_fill_mode_lower;
+}
+
+//
 // CSC
 //
 template <typename T, typename I, typename J>
@@ -389,7 +401,7 @@ void rocsparse_matrix_factory<T, I, J>::init_csc(std::vector<I>&      csc_col_pt
                                nnz,
                                base,
                                this->m_arg.matrix_type,
-                               this->m_arg.uplo,
+                               transposed_fill_mode(this->m_arg.uplo),
                                this->m_arg.storage);
 }
 
@@ -410,7 +422,7 @@ void rocsparse_matrix_factory<T, I, J>::init_csc(host_csc_matrix<T, I, J>& that,
                                that.nnz,
                                that.base,
                                this->m_arg.matrix_type,
-                               this->m_arg.uplo,
+                               transposed_fill_mode(this->m_arg.uplo),
                                this->m_arg.storage);
     that.m = m;
     that.n = n;
@@ -645,7 +657,7 @@ void rocsparse_matrix_factory<T, I, J>::init_gebsc(std::vector<I>&      bsc_col_
                                  col_block_dim,
                                  base,
                                  this->m_arg.matrix_type,
-                                 this->m_arg.uplo,
+                                 transposed_fill_mode(this->m_arg.uplo),
                                  this->m_arg.storage);
 }
 
