@@ -659,6 +659,20 @@ TEST(TestConvWinogradKernelMatch, CooperativeWmmaOnlyOnItsFamilyAndOnlyForSixtee
     EXPECT_FALSE(admits(coop("gfx11", 1), "gfx1100", strideTwo(), "HALF"));
 }
 
+TEST(TestConvWinogradKernelMatch, CooperativeMfmaOnCdnaFromGfx908AndBFloat16FromGfx90a)
+{
+    EXPECT_TRUE(admits(coop("gfx9", 1), "gfx942:sramecc+:xnack-", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(coop("gfx9", 1), "gfx950", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(coop("gfx9", 1), "gfx908", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(coop("gfx9", 0), "gfx90a", baseShape(), "BFLOAT16"));
+    // bf16 MFMA (bf16_1k) starts at gfx90a.
+    EXPECT_FALSE(admits(coop("gfx9", 0), "gfx908", baseShape(), "BFLOAT16"));
+    // No MFMA before gfx908, and not on RDNA.
+    EXPECT_FALSE(admits(coop("gfx9", 1), "gfx906", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop("gfx9", 1), "gfx1100", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop("gfx9", 0), "gfx942", baseShape(), "FLOAT"));
+}
+
 TEST(TestConvWinogradKernelMatch, RegisterValuOnlyOnWave64Gfx9AndNotForBFloat16)
 {
     EXPECT_TRUE(admits(sreg(0), "gfx906"));
@@ -787,6 +801,13 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
              f.bk = 256;
              return f;
          }},
+        {"CoopCdnaWaves32",
+         [] {
+             auto f = coop("gfx9", 1);
+             f.waves = 32;
+             f.bk = 128;
+             return f;
+         }},
         {"CoopArchAny",
          [] {
              auto f = coop("gfx11", 1);
@@ -878,6 +899,11 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
     EXPECT_TRUE(conv_winograd::configOf(kernelOf(wreg("gfx11", 1), "HALF")).has_value());
     EXPECT_TRUE(conv_winograd::configOf(kernelOf(sreg(0), "HALF")).has_value());
     EXPECT_TRUE(conv_winograd::configOf(kernelOf(coop("gfx11", 1), "HALF")).has_value());
+    // 32 waves (8 K groups) are legal on wave32 RDNA, not on wave64 CDNA (checked above).
+    auto rdna32 = coop("gfx11", 1);
+    rdna32.waves = 32;
+    rdna32.bk = 128;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(rdna32, "HALF")).has_value());
     // The largest legal tile counts parse: mt 1 x nt 4 and mt 2 x nt 2.
     auto wide = coop("gfx11", 1);
     wide.bt = 64;

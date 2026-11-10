@@ -510,10 +510,12 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             // bt / 16), and the double-buffered transformed input (bt KiB) within 64 KiB of LDS.
             const int kw = config.waves / 4;
             const int mt = kw > 0 && config.bk % (16 * kw) == 0 ? config.bk / (16 * kw) : 0;
+            // CDNA ("gfx9") runs wave64 MFMA: at most 16 waves in a 1024-thread block.
+            const bool cdna = config.arch == "gfx9";
             if(config.m != 2 || config.layout != Layout::NCHW || config.llcPlan
-               || (config.arch != "gfx11" && config.arch != "gfx12")
+               || (config.arch != "gfx11" && config.arch != "gfx12" && !cdna)
                || (config.waves != 4 && config.waves != 8 && config.waves != 16
-                   && config.waves != 32)
+                   && (config.waves != 32 || cdna))
                || (config.bt != 16 && config.bt != 32 && config.bt != 64) || (mt != 1 && mt != 2)
                || mt * (config.bt / 16) > 4)
             {
@@ -546,9 +548,16 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
     switch(config.variant)
     {
+    case Variant::COOP:
+        if(config.arch == "gfx9")
+        {
+            // 16 x 16 x 16 f16 / bf16 MFMA: gfx908 and later CDNA.
+            return arch == "gfx908" || arch == "gfx90a" || arch == "gfx940" || arch == "gfx941"
+                   || arch == "gfx942" || arch == "gfx950";
+        }
+        return arch.size() > 5 && arch.substr(0, 5) == config.arch;
     case Variant::WMMA:
     case Variant::WREG:
-    case Variant::COOP:
         return arch.size() > 5 && arch.substr(0, 5) == config.arch;
     case Variant::SREG:
         // Wave64 with v_dot2_f32_f16: gfx906 and later gfx9.
@@ -798,7 +807,8 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     case Variant::COOP:
     {
         // About 1024 resident threads per unit (the configs run at 4-8 waves per SIMD).
-        plan.mainThreads = static_cast<unsigned int>(32 * config.waves);
+        plan.mainThreads
+            = static_cast<unsigned int>((config.arch == "gfx9" ? 64 : 32) * config.waves);
         const long long items = groups * divUp(cgo, config.bk) * divUp(tiles, config.bt);
         if(!grid(plan.filterBlocks, divUp(groups * cgo * divUp(cgi, 16) * 16, 256), 1, 1))
         {
@@ -951,8 +961,12 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     // Register variants: packed fp16 transform math only for fp16 (bf16 / fp32 transform in fp32).
     const bool f16MathOk
         = !config->f16Math || problem->base.dataType == data_objects::DataType::HALF;
+    // CDNA bf16 MFMA (bf16_1k) starts at gfx90a.
+    const bool noBf16Mfma
+        = config->variant == Variant::COOP && config->arch == "gfx9" && bf16
+          && hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) == "gfx908";
     if((config->m == 4 && !fp32) || (wmmaFamily && fp32)
-       || (config->variant == Variant::SREG && bf16) || !f16MathOk)
+       || (config->variant == Variant::SREG && bf16) || !f16MathOk || noBf16Mfma)
     {
         return std::nullopt;
     }
@@ -1117,6 +1131,9 @@ public:
         options.add("CONV_WINO_KW", std::to_string(coopKw));
         options.add("CONV_WINO_MT", std::to_string(std::max(1, config.bk / (16 * coopKw))));
         options.add("CONV_WINO_NT", std::to_string(std::max(1, config.bt / 16)));
+        options.add(
+            "CONV_WINO_MFMA",
+            std::string(config.variant == Variant::COOP && config.arch == "gfx9" ? "1" : "0"));
 
         const auto build = [&](std::string_view entryPoint,
                                const std::vector<KernelArgument>& signature,
