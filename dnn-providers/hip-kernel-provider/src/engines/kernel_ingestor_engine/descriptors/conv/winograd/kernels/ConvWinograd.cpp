@@ -159,7 +159,7 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args 
 }
 
 extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
-    ConvWinogradCoop(K5Args a)
+    __attribute__((amdgpu_waves_per_eu(CONV_WINO_COOP_CFG::WPE))) ConvWinogradCoop(K5Args a)
 {
     k5CoopConv<CONV_WINO_T,
                CONV_WINO_GFX12 != 0,

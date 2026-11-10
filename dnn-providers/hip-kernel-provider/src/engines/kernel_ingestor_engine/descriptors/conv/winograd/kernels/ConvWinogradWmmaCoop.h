@@ -49,6 +49,9 @@ struct K5CoopCfg
     static constexpr int ZB = 4 * 2 * 16 * KWP * BT; // floats per epilogue pass
     static constexpr int LDSB = 2 * VB * 2 > ZB * 4 ? 2 * VB * 2 : ZB * 4; // bytes
     static constexpr int FD = GFX12 ? 4 : 8; // dwords per fragment
+    // Waves per SIMD the kernel is built for (VGPR budget 1536 / WPE): the loop is latency-bound,
+    // so the single-tile configs hold 8 (192 VGPRs); 2 x 2 tiles need the registers.
+    static constexpr int WPE = MT * NT <= 2 ? 8 : 4;
     static_assert(JW % WAVES == 0 || WAVES % JW == 0, "job split");
 };
 
@@ -426,6 +429,39 @@ __device__ __attribute__((always_inline)) void k5CoopConv(const K5Args& a)
         }
 
         // Epilogue, one 16-channel slab (m) at a time: Z[i][s][kw * 16 + kk][t] in LDS.
+        // This thread's epilogue tile (fixed per item): output base, per-position live bits (bit
+        // 2r + s), row bits (4 + r), second column in range (6), and the paired-store case.
+        const int eTt = tid % BT;
+        const int eT2 = t0 + eTt;
+        const bool eTile = eT2 < a.tiles;
+        long long eBase = 0;
+        const long long eChan = static_cast<long long>(a.ho) * a.wo;
+        unsigned eMask = 0;
+        bool ePair = false;
+        if(eTile)
+        {
+            const int tw = eT2 % a.tw, r1 = eT2 / a.tw;
+            const int th = r1 % a.th, img = r1 / a.th;
+            eBase = (static_cast<long long>(img) * a.co + g * cgo) * eChan
+                    + static_cast<long long>(th * 2) * a.wo + tw * 2;
+#pragma unroll
+            for(int r = 0; r < 2; ++r)
+            {
+                const int oh = th * 2 + r;
+                if(oh < a.ho)
+                    eMask |= 1u << (4 + r);
+#pragma unroll
+                for(int s = 0; s < 2; ++s)
+                {
+                    const int ow = tw * 2 + s;
+                    if(oh < a.ho && ow < a.wo && k5Live(a, oh, ow))
+                        eMask |= 1u << (2 * r + s);
+                }
+            }
+            if(tw * 2 + 1 < a.wo)
+                eMask |= 1u << 6;
+            ePair = (a.wo & 1) == 0 && sizeof(T) == 2;
+        }
         // Passes: 16-channel slab m of the K wave groups pg * KWP .. + KWP.
         constexpr int KWP = C::KWP;
 #pragma unroll
@@ -448,19 +484,21 @@ __device__ __attribute__((always_inline)) void k5CoopConv(const K5Args& a)
                         }
                 }
                 k5cLdsBarrier();
+                // THREADS is a multiple of BT: the thread's tile is fixed, only the channel steps.
+                static_assert(THREADS % BT == 0, "epilogue tile per thread");
+#pragma unroll
                 for(int pi = tid; pi < 16 * KWP * BT; pi += THREADS)
                 {
-                    const int kk = pi / BT, tt = pi % BT;
-                    const int k = k0 + (pg * KWP + kk / 16) * 16 * MT + m * 16 + kk % 16,
-                              t2 = t0 + tt;
-                    if(k >= cgo || t2 >= a.tiles)
+                    const int kk = pi / BT;
+                    const int k = k0 + (pg * KWP + kk / 16) * 16 * MT + m * 16 + kk % 16;
+                    if(!eTile || k >= cgo)
                         continue;
                     float z[4][2];
 #pragma unroll
                     for(int i = 0; i < 4; ++i)
 #pragma unroll
                         for(int s = 0; s < 2; ++s)
-                            z[i][s] = Zs[((i * 2 + s) * 16 * KWP + kk) * BT + tt];
+                            z[i][s] = Zs[((i * 2 + s) * 16 * KWP + kk) * BT + eTt];
                     float y[2][2];
 #pragma unroll
                     for(int s = 0; s < 2; ++s)
@@ -468,25 +506,27 @@ __device__ __attribute__((always_inline)) void k5CoopConv(const K5Args& a)
                         y[0][s] = z[0][s] + z[1][s] + z[2][s];
                         y[1][s] = z[1][s] - z[2][s] - z[3][s];
                     }
-                    const int tw = t2 % a.tw, r1 = t2 / a.tw;
-                    const int th = r1 % a.th, img = r1 / a.th;
-                    T* o = out
-                           + ((static_cast<long long>(img) * a.co + g * cgo + k) * a.ho + th * 2)
-                                 * a.wo
-                           + tw * 2;
+                    T* o = out + eBase + static_cast<long long>(k) * eChan;
 #pragma unroll
                     for(int r = 0; r < 2; ++r)
                     {
-                        const int oh = th * 2 + r;
-                        if(oh >= a.ho)
-                            continue;
-#pragma unroll
-                        for(int s = 0; s < 2; ++s)
+                        if(!((eMask >> (4 + r)) & 1u))
+                            continue; // row past the output
+                        const T v0 = K5Elem<T>::store(((eMask >> (2 * r)) & 1u) ? y[r][0] : 0.0f);
+                        const T v1
+                            = K5Elem<T>::store(((eMask >> (2 * r + 1)) & 1u) ? y[r][1] : 0.0f);
+                        if(ePair)
                         {
-                            const int ow = tw * 2 + s;
-                            if(ow < a.wo)
-                                o[r * a.wo + s]
-                                    = K5Elem<T>::store(k5Live(a, oh, ow) ? y[r][s] : 0.0f);
+                            // Both columns, a 4-byte aligned pair (even output width).
+                            const unsigned lo = __builtin_bit_cast(unsigned short, v0);
+                            const unsigned hi = __builtin_bit_cast(unsigned short, v1);
+                            *reinterpret_cast<unsigned*>(o + r * a.wo) = lo | (hi << 16);
+                        }
+                        else
+                        {
+                            o[r * a.wo] = v0;
+                            if((eMask >> 6) & 1u)
+                                o[r * a.wo + 1] = v1;
                         }
                     }
                 }
