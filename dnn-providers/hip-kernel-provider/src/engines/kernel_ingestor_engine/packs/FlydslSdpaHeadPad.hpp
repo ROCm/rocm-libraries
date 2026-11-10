@@ -39,6 +39,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDump.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaVarlen.hpp"
 
 /**
  * @file FlydslSdpaHeadPad.hpp
@@ -66,8 +67,9 @@
  *   A packed operand's copies go through its token table: each sequence at its table entry, for
  *   its per-batch length when the graph gives one (`seq_len_q` for Q and O, `seq_len_kv` for K
  *   and V: cuDNN's per-batch origins, in any order and with gaps), else for the table's
- *   difference, as the attention kernels read it; no token outside a sequence is read or
- *   written (headPadLengths()).
+ *   difference: the binding the attention kernels read, servablePackedVarlenWithLengths(), so
+ *   copies and kernels take the same lengths; no token outside a sequence is read or written
+ *   (headPadLengths()).
  *   The copies are the `sdpa_head_pad` op's object (`flydsl/kernels_src/kernels/head_pad/`),
  *   found beside the attention kernel's directory as the RNG dump's writer is; all four launch on
  *   the attention launch's stream.
@@ -166,37 +168,73 @@ inline HeadPadLayout headPadLayout(int64_t heads, int64_t sequence, int64_t widt
     return HeadPadLayout{sequence * heads * width, width, heads * width};
 }
 
-/// No per-batch length array: a packed operand's copy takes each sequence's token count from
-/// its table's differences.
-inline constexpr int64_t HEAD_PAD_NO_LENGTHS = -1;
+/**
+ * @brief The per-batch length tensors the copies of packed operands read: the query side's
+ *        (Q and O) and the key side's (K and V), each NO_SEQ_LEN when a sequence's token count
+ *        is its table's difference.
+ *
+ * Read from the binding the attention kernels themselves read, servablePackedVarlenWithLengths()
+ * (the RDNA, aiw and CDNA matchers' packed rule), over the padded graph the engine matches: that
+ * binding is the one home of which lengths each packed operand takes. Q and O take its `seqLenQ`
+ * unless that names Q's table (queryLengthsFromOffsets(): `seq_len_kv` alone, PyTorch's
+ * seqused_k), K and V its `seqLenKv`.
+ */
+struct HeadPadLengths
+{
+    int64_t query = NO_SEQ_LEN;
+    int64_t key = NO_SEQ_LEN;
+};
 
 /**
- * @brief The per-batch length tensor a packed operand @p uid's copy reads (HEAD_PAD_NO_LENGTHS
- *        for none), or nullopt when the operand plays two roles whose lengths differ.
- *
- * The attention kernels read packed sequence b as `seq_len[b]` tokens from its table entry
- * whenever the graph gives that side's lengths (RDNA prefill modification 37, CDNA
- * modification 47, the aiw kernel's seqused_k bits): Q and O take `seq_len_q`, K and V
- * `seq_len_kv`. Without `seq_len_q` (PyTorch's seqused_k) Q's and O's counts are their table's
- * differences, as the kernels then read them. A dense operand reads none.
+ * @brief HeadPadLengths for the padded graph @p context: none for a graph with no packed operand,
+ *        or nullopt for a packed graph the binding declines (as the engines then do).
  */
-inline std::optional<int64_t> headPadLengths(const data_objects::SdpaAttributes& attributes,
-                                             const data_objects::TensorAttributes& tensor,
-                                             int64_t uid)
+inline std::optional<HeadPadLengths> headPadLengths(const MatchContext& context)
 {
-    if(!tensor.ragged_offset_tensor_uid().has_value())
-    {
-        return HEAD_PAD_NO_LENGTHS;
-    }
-    const int64_t query = attributes.seq_len_q_tensor_uid().value_or(HEAD_PAD_NO_LENGTHS);
-    const int64_t key = attributes.seq_len_kv_tensor_uid().value_or(HEAD_PAD_NO_LENGTHS);
-    const bool queryRole = uid == attributes.q_tensor_uid() || uid == attributes.o_tensor_uid();
-    const bool keyRole = uid == attributes.k_tensor_uid() || uid == attributes.v_tensor_uid();
-    if(queryRole && keyRole && query != key)
+    const auto* attributes = sdpaNode(context);
+    if(attributes == nullptr)
     {
         return std::nullopt;
     }
-    return queryRole ? query : key;
+    if(!hasRaggedOperand(context, *attributes))
+    {
+        return HeadPadLengths{};
+    }
+    const auto* q = findTensor(context, attributes->q_tensor_uid());
+    if(q == nullptr || q->dims() == nullptr || q->dims()->size() != SDPA_RANK)
+    {
+        return std::nullopt;
+    }
+    const auto binding
+        = servablePackedVarlenWithLengths(context, *attributes, q->dims()->Get(BATCH_AXIS));
+    if(!binding.has_value())
+    {
+        return std::nullopt;
+    }
+    HeadPadLengths lengths;
+    lengths.query = queryLengthsFromOffsets(binding->seqLenQ, binding->raggedOffsetQ)
+                        ? NO_SEQ_LEN
+                        : binding->seqLenQ;
+    lengths.key = binding->seqLenKv;
+    return lengths;
+}
+
+/**
+ * @brief The per-batch length tensor operand @p uid's copy reads (@p lengths' query side for Q
+ *        and O, key side for K and V), or nullopt when the operand plays a query-side and a
+ *        key-side role whose lengths differ: one copy cannot hold both sets of sequences.
+ */
+inline std::optional<int64_t> headPadOperandLengths(const HeadPadLengths& lengths,
+                                                    const data_objects::SdpaAttributes& attributes,
+                                                    int64_t uid)
+{
+    const bool queryRole = uid == attributes.q_tensor_uid() || uid == attributes.o_tensor_uid();
+    const bool keyRole = uid == attributes.k_tensor_uid() || uid == attributes.v_tensor_uid();
+    if(queryRole && keyRole && lengths.query != lengths.key)
+    {
+        return std::nullopt;
+    }
+    return queryRole ? lengths.query : lengths.key;
 }
 
 /**
@@ -259,6 +297,8 @@ struct HeadPadGraph
 
     std::vector<uint8_t> bytes;
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph;
+    /// The lengths the copies of packed operands read (headPadLengths()).
+    HeadPadLengths lengths;
 
     /// A context over the padded graph for the same device and ranking as @p original.
     MatchContext contextFor(const MatchContext& original) const
@@ -271,9 +311,10 @@ struct HeadPadGraph
 /**
  * @brief The padded graph for @p context (the file comment), or nullptr when an operand cannot
  *        be copied: Q, K, V and O each headPadCopyable, and O's elements distinct, since the copy
- *        back writes each once. Also nullptr unless K has Q's head dim and O has V's, and
- *        when one packed tensor is both a query-side and a key-side operand whose lengths differ
- *        (headPadLengths()).
+ *        back writes each once. Also nullptr unless K has Q's head dim and O has V's, for a
+ *        packed graph the kernels' binding declines (headPadLengths()), and when one packed
+ *        tensor is both a query-side and a key-side operand whose lengths differ
+ *        (headPadOperandLengths()).
  */
 inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext& context)
 {
@@ -289,8 +330,7 @@ inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext&
     for(const int64_t uid : {qUid, kUid, vUid, oUid})
     {
         const auto* tensor = findTensor(context, uid);
-        if(tensor == nullptr || !headPadCopyable(*tensor)
-           || !headPadLengths(*attributes, *tensor, uid).has_value())
+        if(tensor == nullptr || !headPadCopyable(*tensor))
         {
             return nullptr;
         }
@@ -343,9 +383,27 @@ inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext&
     }
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(data_objects::Graph::Pack(builder, graph.get()));
-    auto padded = std::make_shared<const HeadPadGraph>(std::vector<uint8_t>(
+    auto padded = std::make_shared<HeadPadGraph>(std::vector<uint8_t>(
         builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()));
-    return padded->graph.isValid() ? padded : nullptr;
+    if(!padded->graph.isValid())
+    {
+        return nullptr;
+    }
+    // The lengths the kernels read on the padded graph are the ones the copies read.
+    const auto lengths = headPadLengths(padded->contextFor(context));
+    if(!lengths.has_value())
+    {
+        return nullptr;
+    }
+    for(const int64_t uid : {qUid, kUid, vUid, oUid})
+    {
+        if(!headPadOperandLengths(*lengths, *attributes, uid).has_value())
+        {
+            return nullptr;
+        }
+    }
+    padded->lengths = *lengths;
+    return padded;
 }
 
 /**
@@ -467,10 +525,10 @@ struct HeadPadOperand
 {
     int64_t uid = 0;
     /// The token table a packed operand goes through, or NO_SEQ_LEN.
-    int64_t rowOffset = -1;
-    /// The per-batch lengths a packed operand's sequences take (headPadLengths()), or
-    /// HEAD_PAD_NO_LENGTHS.
-    int64_t lengths = HEAD_PAD_NO_LENGTHS;
+    int64_t rowOffset = NO_SEQ_LEN;
+    /// The per-batch lengths a packed operand's sequences take (headPadOperandLengths()), or
+    /// NO_SEQ_LEN.
+    int64_t lengths = NO_SEQ_LEN;
     int32_t batch = 0;
     int32_t heads = 0;
     int32_t sequence = 0;
@@ -509,12 +567,13 @@ inline size_t headPadAlignUp(size_t bytes)
 }
 
 /**
- * @brief The plan for @p context's padded launch (buildHeadPadGraph() has accepted the graph),
- *        with @p innerBytes of the engine's own workspace after the copies.
+ * @brief The plan for @p context's padded launch, @p padded its buildHeadPadGraph(), with
+ *        @p innerBytes of the engine's own workspace after the copies.
  * @throws HipdnnPluginException when an extent passes the copy's 32-bit arguments or a size
  *         overflows.
  */
-inline HeadPadPlan headPadPlan(const MatchContext& context, size_t innerBytes)
+inline HeadPadPlan
+    headPadPlan(const MatchContext& context, const HeadPadGraph& padded, size_t innerBytes)
 {
     const auto* attributes = sdpaNode(context);
     if(attributes == nullptr)
@@ -547,8 +606,10 @@ inline HeadPadPlan headPadPlan(const MatchContext& context, size_t innerBytes)
         };
         HeadPadOperand result;
         result.uid = uid;
-        result.rowOffset = tensor.ragged_offset_tensor_uid().value_or(-1);
-        result.lengths = headPadLengths(*attributes, tensor, uid).value_or(HEAD_PAD_NO_LENGTHS);
+        result.rowOffset = tensor.ragged_offset_tensor_uid().value_or(NO_SEQ_LEN);
+        // buildHeadPadGraph() has declined an operand in two roles whose lengths differ.
+        result.lengths
+            = headPadOperandLengths(padded.lengths, *attributes, uid).value_or(NO_SEQ_LEN);
         const int64_t heads = dims->Get(HEAD_AXIS);
         const int64_t sequence = dims->Get(SEQ_AXIS);
         const auto elements = checkedProduct({dims->Get(BATCH_AXIS), sequence, heads, width});
@@ -669,6 +730,7 @@ public:
         }
         const auto padded = requirePadded(context);
         return headPadPlan(context,
+                           *padded,
                            _inner.workspaceBytes(padded->contextFor(context), bound, kernel))
             .totalBytes;
     }
@@ -684,7 +746,8 @@ public:
         const auto padded = requirePadded(context);
         const auto paddedContext = padded->contextFor(context);
         auto inner = _inner.prepare(paddedContext, bound, kernel);
-        auto plan = headPadPlan(context, _inner.workspaceBytes(paddedContext, bound, kernel));
+        auto plan
+            = headPadPlan(context, *padded, _inner.workspaceBytes(paddedContext, bound, kernel));
 
         const auto helper = helperKernel(
             kernel,

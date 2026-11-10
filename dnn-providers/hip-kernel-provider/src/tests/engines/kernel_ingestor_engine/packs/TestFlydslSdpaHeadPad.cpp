@@ -237,7 +237,8 @@ TEST(TestFlydslSdpaHeadPad, DeclinesOperandsTheCopyCannotRead)
     }
 }
 
-/// @p spec's graph with K bound to Q's tensor (self-attention over one packed tensor).
+/// @p spec's graph with K bound to Q's tensor (self-attention over one packed tensor), and V
+/// packed through Q's table, as K now is: K and V share one table, as the kernels require.
 flatbuffers::FlatBufferBuilder withKeyAsQuery(const SdpaGraphSpec& spec)
 {
     const auto built = buildFlydslSdpaRdnaGraph(spec);
@@ -248,6 +249,22 @@ flatbuffers::FlatBufferBuilder withKeyAsQuery(const SdpaGraphSpec& spec)
     if(sdpa != nullptr)
     {
         sdpa->k_tensor_uid = sdpa->q_tensor_uid;
+        decltype(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT::ragged_offset_tensor_uid)
+            queryTable{};
+        for(const auto& tensor : graph->tensors)
+        {
+            if(tensor != nullptr && tensor->uid == sdpa->q_tensor_uid)
+            {
+                queryTable = tensor->ragged_offset_tensor_uid;
+            }
+        }
+        for(auto& tensor : graph->tensors)
+        {
+            if(tensor != nullptr && tensor->uid == sdpa->v_tensor_uid)
+            {
+                tensor->ragged_offset_tensor_uid = queryTable;
+            }
+        }
     }
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graph.get()));
@@ -271,6 +288,53 @@ TEST(TestFlydslSdpaHeadPad, DeclinesATensorInTwoRolesWithDifferentLengths)
     setPadding(spec, {30, 11}, {37, 5});
     const GraphFixture fixture(withKeyAsQuery(spec));
     EXPECT_EQ(flydsl_sdpa::buildHeadPadGraph(fixture.context()), nullptr);
+}
+
+// The copies read the lengths the attention kernels read: the binding their matchers take,
+// servablePackedVarlenWithLengths(), on the padded graph. Q and O its query lengths, unless they
+// are Q's own table (seq_len_kv alone), K and V its key lengths.
+TEST(TestFlydslSdpaHeadPad, CopiesReadTheLengthBindingTheKernelsRead)
+{
+    struct Case
+    {
+        const char* name;
+        bool lengths;
+        bool omitSeqLenQ;
+        int64_t query;
+        int64_t key;
+    };
+    for(const auto& form :
+        {Case{"both lengths",
+              true,
+              false,
+              FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID,
+              FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID},
+         Case{"seq_len_kv alone",
+              true,
+              true,
+              flydsl_sdpa::NO_SEQ_LEN,
+              FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID},
+         Case{"no lengths", false, false, flydsl_sdpa::NO_SEQ_LEN, flydsl_sdpa::NO_SEQ_LEN}})
+    {
+        SCOPED_TRACE(form.name);
+        auto spec = compactSpec(53);
+        setPacked(spec, {37, 11}, {61, 29});
+        if(form.lengths)
+        {
+            setPadding(spec, {30, 11}, {50, 5});
+            spec.omitSeqLenQ = form.omitSeqLenQ;
+        }
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        const auto padded = flydsl_sdpa::buildHeadPadGraph(fixture.context());
+        ASSERT_NE(padded, nullptr);
+        const auto plan = flydsl_sdpa::headPadPlan(fixture.context(), *padded, 0);
+        ASSERT_EQ(plan.inputs.size(), 3U);
+        EXPECT_EQ(plan.inputs[0].uid, FLYDSL_SDPA_RDNA_Q_UID);
+        EXPECT_EQ(plan.inputs[0].lengths, form.query);
+        EXPECT_EQ(plan.inputs[1].lengths, form.key);
+        EXPECT_EQ(plan.inputs[2].lengths, form.key);
+        EXPECT_EQ(plan.output.lengths, form.query);
+    }
 }
 
 /// @p spec's graph with one tensor's head dim set to @p headDim, its strides contiguous BSHD at
@@ -503,7 +567,9 @@ TEST(TestFlydslSdpaHeadPad, AGraphOffEightReachesTheEnginePadded)
     const compilation::KpackKernelLoader loader(cache);
     const StandInHandler inner;
     const flydsl_sdpa::HeadPadDispatchHandler handler(inner, loader);
-    const auto plan = flydsl_sdpa::headPadPlan(context, StandInHandler::INNER_BYTES);
+    const auto padded = flydsl_sdpa::buildHeadPadGraph(context);
+    ASSERT_NE(padded, nullptr);
+    const auto plan = flydsl_sdpa::headPadPlan(context, *padded, StandInHandler::INNER_BYTES);
     ASSERT_EQ(plan.inputs.size(), 3U);
     const size_t q = size_t{2} * 37 * 4 * 40 * 2;
     const size_t kv = size_t{2} * 61 * 2 * 40 * 2;
@@ -530,7 +596,9 @@ TEST(TestFlydslSdpaHeadPad, CopiesF32AsTwoUnitsPerElement)
     auto spec = compactSpec(7);
     spec.dataType = DataType::FLOAT;
     const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
-    const auto plan = flydsl_sdpa::headPadPlan(fixture.context(), 0);
+    const auto padded = flydsl_sdpa::buildHeadPadGraph(fixture.context());
+    ASSERT_NE(padded, nullptr);
+    const auto plan = flydsl_sdpa::headPadPlan(fixture.context(), *padded, 0);
     EXPECT_EQ(plan.inputs[0].units, 14);
     EXPECT_EQ(plan.inputs[0].paddedUnits, 16);
     EXPECT_EQ(plan.inputs[0].strideSequence, int64_t{2} * spec.heads * 7);
