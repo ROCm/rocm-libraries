@@ -909,6 +909,25 @@ def test_rap_reuse_copy_prefetches_only_b_into_gl2(_gp_gfx1250, gfx1250_iim, ass
         "the reuse copy still computes A's prefetch addresses"
 
 
+def test_rap_b_reuse_copy_prefetches_only_a_into_gl2(_gp_gfx1250, gfx1250_iim, assembler):
+    """RAP 2 mirrors RAP 1: B and its scales stay resident, so the reuse copy warms L2 for A alone."""
+    sol = Solution(_make_params(gfx1250_iim, ReuseAcrossPersistent=2, MatrixInstruction=_MI_MT256x64,
+                                ProblemType=_MX_PROBLEM_TYPE, PrefetchGL2=1, **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    source = _kernelSource(sol, assembler)
+    fill, reuse = source.split("label_RAP_IterN:", 1)
+    reuse = reuse.split("label_RAP_StoreJoin:", 1)[0]
+
+    def prefetched(section):
+        return set(re.findall(r"prefetch_b8 v\[vgprGL2PrefetchAddr(A|B|MXSA|MXSB)_", section))
+
+    assert prefetched(fill) == {"A", "B", "MXSA", "MXSB"}
+    assert prefetched(reuse) == {"A", "MXSA"}
+    assert not re.search(r"GL2Prefetch(?:Addr|Inc)(?:B|MXSB)\b|GL2PrefetchAddr(?:B|MXSB)_", reuse), \
+        "the reuse copy still computes B's prefetch addresses"
+
+
 def test_rap_gives_each_iteration_of_a_resident_k_tile_its_own_buffer_set(
     _gp_gfx1250, gfx1250_iim, assembler
 ):

@@ -20,7 +20,7 @@ GlobalParameters:
   DataInitTypeBeta: 2
   PrintLevel: 2
 
-# Groups 1-13 hold A resident (ReuseAcrossPersistent 1); groups B1-B10, at the
+# Groups 1-13 hold A resident (ReuseAcrossPersistent 1); groups B1-B11, at the
 # end, hold B resident (ReuseAcrossPersistent 2) and have their own header.
 #
 # Two things to know before reading a green run here.
@@ -41,7 +41,7 @@ GlobalParameters:
 # code. Groups 1-13 are 700 rows: 678 PASSED, 22 rejected, 0 FAILED. The 22
 # rejections are the K-ceiling misses in groups 1-6; groups 7-13 should pass
 # every row. No size is dead: every one of them runs on some tile. With the
-# RAP 2 groups a full run is 1348 rows: 1316 PASSED, 32 rejected, 0 FAILED.
+# RAP 2 groups a full run is 1364 rows: 1332 PASSED, 32 rejected, 0 FAILED.
 
 BenchmarkProblems:
 
@@ -1052,8 +1052,8 @@ BenchmarkProblems:
   # - A rejected size looks like a pass (DID_NOT_SATISFY_ASSERTS leaves clientExit
   #   at 0). Sizes are a union across the MacroTiles in a group, so each tile
   #   rejects the N that is not its MacroTile1 and the K beyond its resident block.
-  #   Check the per-size verdicts, not the exit code. These groups are 648 rows:
-  #   638 PASSED, 10 rejected (K beyond MacroTile 128x128's resident block),
+  #   Check the per-size verdicts, not the exit code. These groups are 664 rows:
+  #   654 PASSED, 10 rejected (K beyond MacroTile 128x128's resident block),
   #   0 FAILED.
   #
   # MacroTile 512x64 runs at PrefetchAcrossPersistent 0 only. With PAP 1 it fails
@@ -1894,5 +1894,68 @@ BenchmarkProblems:
           - Exact: [384, 4096, 1, 512]    # nWG0=2: the second M-tile starts mid scale row
           - Exact: [768, 4096, 1, 512]
           - Exact: [384, 4096, 2, 1024]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # B11. A=F8 B=F8 (MX), off the audited configuration: the GL2 prefetch on.
+  #      The mirror of group 11. The reuse copy prefetches
+  #      only A and its scales into GL2, and suffixes the prefetch's skip label.
+  #      MT 256x64, kTiles 8. 8 kernels x 2 sizes = 16 rows.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F8
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8,  2,  2, 2] # MT 256x64, kTiles 8
+        # Required by RAP.
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [256]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchGL2: [1, 2]
+        - PrefetchAcrossPersistent: [0,1]
+        - ReuseAcrossPersistent: [0,2]
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [8]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 192, 2, 512]
+          - Exact: [4096, 320, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
