@@ -39,7 +39,7 @@
  *
  * Every config of the installed catalog that the kernel match admits on this device runs on
  * every case, forward and backward data, in fp32, fp16 and bf16: groups of 2, 4, 8 and 16
- * channels, both layouts, 2-D and 3-D (ResNeXt3D's 3x3x3 and 1x3x3 filters), stride 2 (backward
+ * channels, both layouts (channels-first staged and, cf configs, in place), 2-D and 3-D (ResNeXt3D's 3x3x3 and 1x3x3 filters), stride 2 (backward
  * data by stride phases, depth included), asymmetric padding, extents that are not tile
  * multiples, several channel blocks, and true convolution (the expansion reflects the filter).
  */
@@ -578,6 +578,27 @@ TEST(TestConvGroupProblem, ServesSmallGroupsBothDirections)
     }
 }
 
+TEST(TestConvGroupProblem, ChannelsFirstInPlaceNeedsBothActivationsPackedChannelsFirst)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const auto last = parsed(resnext(), direction);
+        ASSERT_TRUE(last.has_value());
+        EXPECT_FALSE(conv_group::channelsFirstInPlace(*last).has_value());
+        auto shape = resnext();
+        shape.channelsLast = false;
+        const auto first = parsed(shape, direction);
+        ASSERT_TRUE(first.has_value());
+        ASSERT_TRUE(first->igemm.x.needed && first->igemm.y.needed);
+        const auto inPlace = conv_group::channelsFirstInPlace(*first);
+        ASSERT_TRUE(inPlace.has_value());
+        EXPECT_FALSE(inPlace->igemm.x.needed);
+        EXPECT_FALSE(inPlace->igemm.y.needed);
+        EXPECT_EQ(inPlace->phases.front().expandOffset, 0u);
+        EXPECT_LT(inPlace->workspaceBytes, first->workspaceBytes);
+    }
+}
+
 TEST(TestConvGroupProblem, DeclinesEveryUnservedGraph)
 {
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
@@ -675,13 +696,32 @@ TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
         EXPECT_TRUE(declines("atom", std::string("mfma16_bf16"))); // another element type
         EXPECT_TRUE(declines("atom", std::string("fma"))); // no FMA form
         EXPECT_TRUE(declines("dtype", std::string("FLOAT")));
+        // Channels-first in place: not for channels-last activations, and only 0 or 1.
+        EXPECT_TRUE(declines("cf", int64_t{1}));
+        EXPECT_TRUE(declines("cf", int64_t{2}));
+        // Packed channels-first activations: the cf twin is admitted, with a smaller workspace
+        // (nothing staged), and the staged config still is.
+        auto first = resnext();
+        first.channelsLast = false;
+        first.dataType = DataType::HALF;
+        const GraphFixture firstFixture(buildGraph(specFor(first, direction)),
+                                        device("gfx942:sramecc+:xnack-"));
+        const auto firstBound = matchesGraph(pack, firstFixture.context());
+        ASSERT_TRUE(firstBound.has_value());
+        auto inPlace = *base;
+        inPlace.metadata["cf"] = int64_t{1};
+        EXPECT_TRUE(matchesKernel(pack, firstFixture.context(), inPlace, *firstBound));
+        EXPECT_TRUE(matchesKernel(pack, firstFixture.context(), *base, *firstBound));
+        const auto& handler = dispatchHandler(pack);
+        EXPECT_LT(handler.workspaceBytes(firstFixture.context(), *firstBound, inPlace),
+                  handler.workspaceBytes(firstFixture.context(), *firstBound, *base));
     }
 }
 
 TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
 {
-    static constexpr std::array<const char*, 8> KNOBS{
-        "atom", "t", "r", "s", "stride", "th", "wp", "cb"};
+    static constexpr std::array<const char*, 9> KNOBS{
+        "atom", "t", "r", "s", "stride", "th", "wp", "cb", "cf"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;

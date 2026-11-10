@@ -46,7 +46,8 @@
  * C/g groups per multiply, every input read once a workgroup. Forward gathers x into y; backward
  * data gathers dy into dx with the filter reflected and its channel roles swapped, which the
  * expansion does, by stride phases when strided. 3-D convolutions loop the depth taps over planes. The activations are staged channels-last by the implicit-GEMM
- * engine's own parse and staging kernels when the graph's are not. Every config is admitted on
+ * engine's own parse and staging kernels when the graph's are not, or (cf configs) read and
+ * written in place when both are packed channels-first. Every config is admitted on
  * correctness alone; autotune ranks them.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -102,6 +103,32 @@ std::optional<unsigned int> phaseBlocks(const K4Args& a, int th, int wp, int cb)
 
 namespace
 {
+
+/// Workspace: the staged activations (the implicit-GEMM layout of them), then each phase's
+/// expanded filter.
+void layOutWorkspace(GroupProblem& problem)
+{
+    auto& igemm = problem.igemm;
+    size_t offset = 0;
+    for(auto* staging : {&igemm.x, &igemm.y})
+    {
+        if(staging->needed)
+        {
+            staging->workspaceOffset = offset;
+            offset = alignUp(offset + staging->bytes);
+        }
+    }
+    const size_t expandBytes
+        = static_cast<size_t>(igemm.args.c / 16)
+          * static_cast<size_t>(problem.kernelT * problem.kernelR * problem.kernelS) * 256
+          * static_cast<size_t>(igemm.elementBytes);
+    for(auto& phase : problem.phases)
+    {
+        phase.expandOffset = offset;
+        offset = alignUp(offset + expandBytes);
+    }
+    problem.workspaceBytes = offset;
+}
 
 /// One axis of a backward-data stride phase: dx[st j + p] = sum over q < ceil(F / st) of
 /// dy[j + dmin + q] w[p + pad - st (dmin + q)], dmin = ceil((p + pad - F + 1) / st), taps past
@@ -269,35 +296,33 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
     {
         return std::nullopt;
     }
-    // Workspace: the staged activations (the implicit-GEMM layout of them), then each phase's
-    // expanded filter; the implicit-GEMM filter staging is not used.
+    // The implicit-GEMM filter staging is not used.
     igemm->w = conv_igemm::Staging{};
-    size_t offset = 0;
-    for(auto* staging : {&igemm->x, &igemm->y})
+    problem.igemm = std::move(*igemm);
+    for(const auto& phase : problem.phases)
     {
-        if(staging->needed)
-        {
-            staging->workspaceOffset = offset;
-            offset = alignUp(offset + staging->bytes);
-        }
-    }
-    const size_t expandBytes
-        = static_cast<size_t>(k.c / 16)
-          * static_cast<size_t>(problem.kernelT * problem.kernelR * problem.kernelS) * 256
-          * static_cast<size_t>(igemm->elementBytes);
-    for(auto& phase : problem.phases)
-    {
-        phase.expandOffset = offset;
-        offset = alignUp(offset + expandBytes);
         // The smallest tile's grid within the launch limits.
         if(!phaseBlocks(phase.args, 1, 1, 1).has_value())
         {
             return std::nullopt;
         }
     }
-    problem.workspaceBytes = offset;
-    problem.igemm = std::move(*igemm);
+    layOutWorkspace(problem);
     return problem;
+}
+
+std::optional<GroupProblem> channelsFirstInPlace(const GroupProblem& problem)
+{
+    const auto& igemm = problem.igemm;
+    if(!igemm.x.needed || !igemm.x.transpose || !igemm.y.needed || !igemm.y.transpose)
+    {
+        return std::nullopt;
+    }
+    GroupProblem inPlace = problem;
+    inPlace.igemm.x = conv_igemm::Staging{};
+    inPlace.igemm.y = conv_igemm::Staging{};
+    layOutWorkspace(inPlace);
+    return inPlace;
 }
 
 } // namespace conv_group
@@ -380,7 +405,7 @@ struct Tile
 {
     std::string atom;
     conv_igemm::AtomInfo info;
-    int64_t t = 0, r = 0, s = 0, stride = 0, th = 0, wp = 0, cb = 0;
+    int64_t t = 0, r = 0, s = 0, stride = 0, th = 0, wp = 0, cb = 0, cf = 0;
 };
 
 std::optional<Tile> tileOf(const KernelDefinition& kernel)
@@ -400,18 +425,32 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.th = kernel.getIntMetadata("th");
     tile.wp = kernel.getIntMetadata("wp");
     tile.cb = kernel.getIntMetadata("cb");
+    tile.cf = kernel.getIntMetadata("cf");
     if(tile.t < 1 || tile.r < 1 || tile.s < 1 || tile.stride < 1 || tile.th < 1 || tile.wp < 1
-       || tile.cb < 1)
+       || tile.cb < 1 || (tile.cf != 0 && tile.cf != 1))
     {
         return std::nullopt;
     }
     return tile;
 }
 
+/// The problem a config runs: a channels-first config reads and writes the graph's packed
+/// channels-first activations in place (nullopt where they are not), others the staged ones.
+std::optional<GroupProblem>
+    problemFor(const MatchContext& context, ConvDirection direction, const Tile& tile)
+{
+    auto problem = conv_group::parseGroupProblem(context, direction);
+    if(problem.has_value() && tile.cf != 0)
+    {
+        return conv_group::channelsFirstInPlace(*problem);
+    }
+    return problem;
+}
+
 /// Kernel-scoped applicability: the config's atom runs on this device and multiplies the graph's
 /// element type (the 16x16 atoms whose k-step divides 16), its compile-time filter (depth, rows,
-/// columns) and stride
-/// are the graph's, its channel tile divides the channels, and its halo fits the LDS.
+/// columns) and stride are the graph's, its channel tile divides the channels, its halo fits the
+/// LDS, and a channels-first (cf) config's graph has both activations packed channels-first.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -422,7 +461,7 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    const auto problem = conv_group::parseGroupProblem(context, *direction);
+    const auto problem = problemFor(context, *direction, *tile);
     if(!problem.has_value()
        || kernel.getStringMetadata("dtype")
               != data_objects::EnumNameDataType(problem->igemm.base.dataType)
@@ -556,11 +595,12 @@ public:
                           const KernelDefinition& kernel) const override
     {
         const auto direction = directionFor(kernel);
-        if(!direction.has_value())
+        const auto tile = tileOf(kernel);
+        if(!direction.has_value() || !tile.has_value())
         {
             return 0;
         }
-        const auto problem = conv_group::parseGroupProblem(context, *direction);
+        const auto problem = problemFor(context, *direction, *tile);
         return problem.has_value() ? problem->workspaceBytes : 0;
     }
 
@@ -571,9 +611,9 @@ public:
         const auto direction = directionFor(kernel);
         const auto tile = tileOf(kernel);
         std::optional<GroupProblem> problem;
-        if(direction.has_value())
+        if(direction.has_value() && tile.has_value())
         {
-            problem = conv_group::parseGroupProblem(context, *direction);
+            problem = problemFor(context, *direction, *tile);
         }
         const auto x = tryGetBoundInt(bound, X_TOKEN);
         const auto w = tryGetBoundInt(bound, W_TOKEN);
@@ -612,6 +652,7 @@ public:
         options.add("CONV_GROUP_TH", std::to_string(tile->th));
         options.add("CONV_GROUP_WP", std::to_string(tile->wp));
         options.add("CONV_GROUP_CB", std::to_string(tile->cb));
+        options.add("CONV_GROUP_CF", std::to_string(tile->cf));
 
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4Args>());

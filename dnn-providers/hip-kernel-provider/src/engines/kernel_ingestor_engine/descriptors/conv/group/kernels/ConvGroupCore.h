@@ -16,7 +16,10 @@
 // output columns each, accumulating every (row, column) tap's A fragment (from LDS) against that
 // tap's B fragments (the block's expanded filter). Grid: (blocks of CB channel blocks) x (column
 // tiles) x (row tiles) x output planes x images, flattened.
-template <class T, class Atom, int FT, int R, int S, int ST, int TH, int WP, int CB>
+// CF: in and out are packed channels-first (N C D H W) and read and written in place: the halo is
+// gathered along its rows (consecutive threads, consecutive columns of one channel), and the
+// accumulators go out through LDS so each row of output columns is written contiguously.
+template <class T, class Atom, int FT, int R, int S, int ST, int TH, int WP, int CB, int CF = 0>
 __device__ void k4ConvMma(const K4Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -73,19 +76,49 @@ __device__ void k4ConvMma(const K4Args& a)
         if(ft > 0)
             __syncthreads(); // the previous plane's reads are done
         const long long plane = img * a.di + id;
-        for(int i = tid; i < HR * HC * VP; i += THREADS)
+        if constexpr(CF != 0)
         {
-            const int v = i % VP, p = i / VP, hc = p % HC, hr = p / HC;
-            const int ih = ih0 + hr, iw = iw0 + hc;
-            // Clamped address, then zero: no per-load branch.
-            const bool ok = static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)
-                            && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi);
-            const long long at = ((plane * a.hi + (ok ? ih : 0)) * a.wi + (ok ? iw : 0)) * a.c
-                                 + static_cast<long long>(cbt) * CH + v * VEC;
-            Raw val = *reinterpret_cast<const Raw*>(in + at);
-            if(!ok)
-                val = Raw{};
-            *reinterpret_cast<Raw*>(halo + p * PITCH + v * VEC) = val;
+            const long long planes = static_cast<long long>(a.di) * a.hi * a.wi;
+            const T* src = in + (img * a.c + static_cast<long long>(cbt) * CH) * planes
+                           + static_cast<long long>(id) * a.hi * a.wi;
+            // A thread gathers VEC channels of one halo pixel (one load a channel, consecutive
+            // threads consecutive columns) and stores them as one 16-byte vector.
+            for(int i = tid; i < VP * HR * HC; i += THREADS)
+            {
+                const int hc = i % HC, hr = (i / HC) % HR, v = i / (HC * HR);
+                const int ih = ih0 + hr, iw = iw0 + hc;
+                const bool ok = static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)
+                                && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi);
+                const T* at = src + v * VEC * planes + (ok ? ih : 0) * a.wi + (ok ? iw : 0);
+                union
+                {
+                    Raw raw;
+                    T e[VEC];
+                } val;
+#pragma unroll
+                for(int j = 0; j < VEC; ++j)
+                    val.e[j] = at[j * planes];
+                if(!ok)
+                    val.raw = Raw{};
+                *reinterpret_cast<Raw*>(halo + (hr * HC + hc) * PITCH + v * VEC) = val.raw;
+            }
+        }
+        else
+        {
+            for(int i = tid; i < HR * HC * VP; i += THREADS)
+            {
+                const int v = i % VP, p = i / VP, hc = p % HC, hr = p / HC;
+                const int ih = ih0 + hr, iw = iw0 + hc;
+                // Clamped address, then zero: no per-load branch.
+                const bool ok = static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)
+                                && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi);
+                const long long at = ((plane * a.hi + (ok ? ih : 0)) * a.wi + (ok ? iw : 0)) * a.c
+                                     + static_cast<long long>(cbt) * CH + v * VEC;
+                Raw val = *reinterpret_cast<const Raw*>(in + at);
+                if(!ok)
+                    val = Raw{};
+                *reinterpret_cast<Raw*>(halo + p * PITCH + v * VEC) = val;
+            }
         }
         __syncthreads();
 #pragma unroll
@@ -123,6 +156,41 @@ __device__ void k4ConvMma(const K4Args& a)
     }
 
     const long long outPlane = img * a.outD + od * a.osd + a.ood;
+    if constexpr(CF != 0)
+    {
+        // Through LDS: [row][channel][column] (a column pad), then rows of columns out.
+        constexpr int OP = TW + 1;
+        static_assert(TH * CH * OP <= HR * HC * PITCH, "the output tile fits the halo");
+        __syncthreads();
+#pragma unroll
+        for(int it = 0; it < ITEMS; ++it)
+        {
+            const int item = wave + 4 * it;
+            const int r = item / CB, cbi = item % CB;
+            if(oh0 + r >= a.ho)
+                continue;
+#pragma unroll
+            for(int p = 0; p < WP; ++p)
+#pragma unroll
+                for(int e = 0; e < Atom::ACC; ++e)
+                    halo[(r * CH + cbi * 16 + lane % 16) * OP + p * 16 + Atom::dRow(lane, e)]
+                        = K1Elem<T>::store(acc[it][p][e]);
+        }
+        __syncthreads();
+        const long long outPlanes = static_cast<long long>(a.outD) * a.outH * a.outW;
+        T* dst = out + (img * a.c + static_cast<long long>(cbt) * CH) * outPlanes
+                 + static_cast<long long>(od * a.osd + a.ood) * a.outH * a.outW;
+        for(int i = tid; i < TH * CH * TW; i += THREADS)
+        {
+            const int ow = i % TW, ch = (i / TW) % CH, r = i / (TW * CH);
+            const int oh = oh0 + r;
+            if(oh < a.ho && ow0 + ow < a.wo)
+                dst[ch * outPlanes + static_cast<long long>(oh * a.osh + a.ooh) * a.outW
+                    + (ow0 + ow) * a.osw + a.oow]
+                    = halo[(r * CH + ch) * OP + ow];
+        }
+        return;
+    }
 #pragma unroll
     for(int it = 0; it < ITEMS; ++it)
     {

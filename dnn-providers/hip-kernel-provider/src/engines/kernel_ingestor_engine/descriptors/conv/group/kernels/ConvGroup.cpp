@@ -8,6 +8,7 @@
 //   CONV_GROUP_FT, _R, _S  filter extent (the kernel's taps: depth 1 for 2-D)
 //   CONV_GROUP_ST       the gather's stride (both axes)
 //   CONV_GROUP_TH, _WP, _CB   output rows, 16-column fragments and 16-channel blocks a workgroup
+//   CONV_GROUP_CF       1: packed channels-first activations read and written in place
 //   K1_BUFFER           0 (the K1 header's buffer loads are not used here)
 
 #ifndef K1_BUFFER
@@ -25,7 +26,8 @@ extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGrou
               CONV_GROUP_ST,
               CONV_GROUP_TH,
               CONV_GROUP_WP,
-              CONV_GROUP_CB>(a);
+              CONV_GROUP_CB,
+              CONV_GROUP_CF>(a);
 }
 
 /// Expands the graph's filter into the per-block block-diagonal layout the kernel reads.

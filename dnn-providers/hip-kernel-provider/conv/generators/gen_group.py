@@ -14,7 +14,7 @@ def w(name, obj):
     (out / name).write_text(json.dumps(obj, indent=2) + "\n")
 
 
-FIELDS = ["direction", "dtype", "atom", "t", "r", "s", "stride", "th", "wp", "cb"]
+FIELDS = ["direction", "dtype", "atom", "t", "r", "s", "stride", "th", "wp", "cb", "cf"]
 KNOBS = [f for f in FIELDS if f not in ("direction", "dtype")]
 STRINGS = {"direction", "dtype", "atom"}
 
@@ -27,6 +27,9 @@ ATOMS = {
 EB = {"HALF": 2, "BFLOAT16": 2, "FLOAT": 4}
 # (th, wp, cb): output rows, 16-column fragments and 16-channel blocks a workgroup.
 TILES = [(4, 2, 2), (4, 2, 4), (4, 4, 2), (8, 2, 2), (8, 1, 4), (2, 4, 4)]
+# Tiles that also ship channels-first in place (cf 1: the graph's packed N C D H W activations
+# read and written without staging): the bench winners of that form on every target.
+CF_TILES = [(4, 2, 2), (4, 4, 2), (8, 2, 2)]
 # (t, r, s): filter depth, rows and columns (depth 1 serves 2-D graphs too).
 FILTERS = [(1, 3, 3), (3, 3, 3)]
 
@@ -90,7 +93,12 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
         for atom in atoms:
             for t, r, s in FILTERS:
                 for st in strides:
-                    for th, wp, cb in TILES:
+                    for th, wp, cb, cf in [
+                        tile + (cf,)
+                        for cf in (0, 1)
+                        for tile in TILES
+                        if cf == 0 or tile in CF_TILES
+                    ]:
                         # Backward data runs stride phases: ceil(R / st) taps at unit stride.
                         kr, ks, kst = (
                             (r, s, st)
@@ -100,10 +108,19 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                         if lds(EB[dtype], kr, ks, kst, th, wp, cb) > 64 * 1024:
                             continue
                         c = dict(
-                            atom=atom, t=t, r=r, s=s, stride=st, th=th, wp=wp, cb=cb
+                            atom=atom,
+                            t=t,
+                            r=r,
+                            s=s,
+                            stride=st,
+                            th=th,
+                            wp=wp,
+                            cb=cb,
+                            cf=cf,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.t{th}x{wp}x{cb}"
+                        name += ".cf" if cf else ""
                         kernels.append(
                             {
                                 "version": "1.0",
