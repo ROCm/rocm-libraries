@@ -44,8 +44,9 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 // index is consistent across calls.
 constexpr std::size_t MAX_CONFIGS = hipconv::ALL_RANKED_CONFIGS;
 
-// The device the context's stream runs on, or nullopt for an architecture hipconv lacks or a
-// handle without compute units (HIPNOGPU).
+// The device the context's stream runs on, or nullopt for an architecture hipconv lacks, a
+// handle without compute units (HIPNOGPU) or a libMIOpen built without hipconv's code for
+// the device.
 static std::optional<hipconv::Device> ResolveDevice(const ExecutionContext& ctx)
 {
     const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
@@ -53,6 +54,8 @@ static std::optional<hipconv::Device> ResolveDevice(const ExecutionContext& ctx)
         return std::nullopt;
     const auto cu_count = static_cast<int>(ctx.GetStream().GetMaxComputeUnits());
     if(cu_count <= 0)
+        return std::nullopt;
+    if(!hipconv::has_device_code(ctx.GetStream().GetDeviceId()))
         return std::nullopt;
     return hipconv::Device{*arch, cu_count};
 }
