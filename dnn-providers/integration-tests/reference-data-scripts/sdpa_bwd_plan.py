@@ -627,7 +627,7 @@ EXT_RULES = [
     ("head dim not a multiple of 8", "always: engines decide", "SdpaBwdNode.hpp:118-125"),
     ("FLOAT dropout mask", "always: the references need FLOAT", "SEM-015"),
     ("dropout_probability without RNG state", "dropout_probability = 0",
-     "the fill and engines read it as no dropout; the references decline it (ALMIOPEN-3149, ALMIOPEN-3150)"),
+     "the fill and engines read it as no dropout; the references accept it as the graph without dropout"),
 ]
 # fmt: on
 
