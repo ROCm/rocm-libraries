@@ -489,6 +489,20 @@ ConfigFields wreg(const std::string& arch, int64_t f16math)
     return f;
 }
 
+/// Cooperative WMMA: 16 waves (4 K groups of 4 rows), 16-channel K tiles, 32 tiles: bk 64.
+ConfigFields coop(const std::string& arch, int64_t f16math)
+{
+    ConfigFields f;
+    f.variant = "coop";
+    f.arch = arch;
+    f.gemmBm = f.gemmBn = f.gemmBk = 0;
+    f.bk = 64;
+    f.bt = 32;
+    f.waves = 16;
+    f.f16math = f16math;
+    return f;
+}
+
 /// Register-operand VALU (wave64 gfx9): 16-wide K block, 64 tiles, 4 waves.
 ConfigFields sreg(int64_t f16math)
 {
@@ -631,6 +645,34 @@ TEST(TestConvWinogradKernelMatch, RegisterWmmaOnlyOnItsFamilyAndOnlyForSixteenBi
     EXPECT_FALSE(admits(wreg("gfx11", 1), "gfx1100", strideTwo(), "HALF"));
 }
 
+TEST(TestConvWinogradKernelMatch, CooperativeWmmaOnlyOnItsFamilyAndOnlyForSixteenBitTypes)
+{
+    EXPECT_TRUE(admits(coop("gfx11", 1), "gfx1100", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(coop("gfx11", 0), "gfx1151", baseShape(), "BFLOAT16"));
+    EXPECT_TRUE(admits(coop("gfx12", 1), "gfx1201", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop("gfx11", 1), "gfx1201", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop("gfx12", 1), "gfx942", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop("gfx11", 0), "gfx1100", baseShape(), "FLOAT"));
+    // Packed fp16 transform math is for fp16 only.
+    EXPECT_FALSE(admits(coop("gfx11", 1), "gfx1100", baseShape(), "BFLOAT16"));
+    // F(2,3): stride 1 only.
+    EXPECT_FALSE(admits(coop("gfx11", 1), "gfx1100", strideTwo(), "HALF"));
+}
+
+TEST(TestConvWinogradKernelMatch, CooperativeMfmaOnCdnaFromGfx908AndBFloat16FromGfx90a)
+{
+    EXPECT_TRUE(admits(coop("gfx9", 1), "gfx942:sramecc+:xnack-", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(coop("gfx9", 1), "gfx950", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(coop("gfx9", 1), "gfx908", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(coop("gfx9", 0), "gfx90a", baseShape(), "BFLOAT16"));
+    // bf16 MFMA (bf16_1k) starts at gfx90a.
+    EXPECT_FALSE(admits(coop("gfx9", 0), "gfx908", baseShape(), "BFLOAT16"));
+    // No MFMA before gfx908, and not on RDNA.
+    EXPECT_FALSE(admits(coop("gfx9", 1), "gfx906", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop("gfx9", 1), "gfx1100", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop("gfx9", 0), "gfx942", baseShape(), "FLOAT"));
+}
+
 TEST(TestConvWinogradKernelMatch, RegisterValuOnlyOnWave64Gfx9AndNotForBFloat16)
 {
     EXPECT_TRUE(admits(sreg(0), "gfx906"));
@@ -721,6 +763,87 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
              f.f16math = 2;
              return f;
          }},
+        {"CoopWaves12",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.waves = 12;
+             return f;
+         }},
+        {"CoopWaves64",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.waves = 64;
+             f.bk = 256;
+             return f;
+         }},
+        {"CoopTileBlock128",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.bt = 128;
+             return f;
+         }},
+        {"CoopOverFourAccumulatorTiles",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.bk = 128; // mt 2 with 4 K groups
+             f.bt = 64; // nt 4
+             return f;
+         }},
+        {"CoopKBlockNotSixteenPerKGroup",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.bk = 48;
+             return f;
+         }},
+        {"CoopKBlockThreeTilesPerKGroup",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.bk = 192;
+             return f;
+         }},
+        {"CoopKBlockEightTilesPerKGroup",
+         [] {
+             auto f = coop("gfx9", 1);
+             f.bk = 512;
+             return f;
+         }},
+        {"CoopCdnaWaves32",
+         [] {
+             auto f = coop("gfx9", 1);
+             f.waves = 32;
+             f.bk = 128;
+             return f;
+         }},
+        {"CoopArchAny",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.arch = "any";
+             return f;
+         }},
+        {"CoopTileF43",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.m = 4;
+             return f;
+         }},
+        {"CoopLlc",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.llc = 1;
+             return f;
+         }},
+        {"CoopNhwc",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.layout = "NHWC";
+             return f;
+         }},
+        {"CoopBins",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.bins = 4;
+             return f;
+         }},
         {"SregKBlock32",
          [] {
              auto f = sreg(0);
@@ -781,6 +904,24 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
     // The unmodified configs parse, so each decline above is its field's.
     EXPECT_TRUE(conv_winograd::configOf(kernelOf(wreg("gfx11", 1), "HALF")).has_value());
     EXPECT_TRUE(conv_winograd::configOf(kernelOf(sreg(0), "HALF")).has_value());
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(coop("gfx11", 1), "HALF")).has_value());
+    // 32 waves (8 K groups) are legal on wave32 RDNA, not on wave64 CDNA (checked above).
+    auto rdna32 = coop("gfx11", 1);
+    rdna32.waves = 32;
+    rdna32.bk = 128;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(rdna32, "HALF")).has_value());
+    // CDNA takes up to 4 x 4 accumulator tiles per bin.
+    auto cdnaWide = coop("gfx9", 1);
+    cdnaWide.bk = 256; // mt 4 with 4 K groups
+    cdnaWide.bt = 64;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(cdnaWide, "HALF")).has_value());
+    // The largest legal tile counts parse: mt 1 x nt 4 and mt 2 x nt 2.
+    auto wide = coop("gfx11", 1);
+    wide.bt = 64;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(wide, "HALF")).has_value());
+    auto deep = coop("gfx11", 1);
+    deep.bk = 128;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(deep, "HALF")).has_value());
 }
 
 TEST(TestConvWinogradKernelMatch, RefusesUnknownMetadata)
