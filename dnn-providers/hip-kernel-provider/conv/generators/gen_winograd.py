@@ -191,11 +191,14 @@ def fused(blocks, ms=(2, 3)):
 
 
 # The 16-wide K blocks serve groups of up to 16 output channels.
+# 24-wide K blocks (12-row micro-tiles) for K = 24 / 48 layers: no padded FMAs (IGM 3x3 c24 k24 fp32).
 F32_BLOCKS = [
     (64, 32, 4, 8, 8),
     (32, 32, 8, 8, 4),
     (32, 32, 8, 4, 8),
     (16, 32, 4, 8, 4),
+    (24, 64, 4, 12, 8),
+    (24, 32, 4, 12, 4),
 ]
 F16_BLOCKS = [(64, 32, 2, 8, 8), (32, 32, 8, 8, 4), (16, 32, 2, 8, 4)]
 BF16_BLOCKS = [(64, 32, 4, 8, 8), (32, 32, 8, 8, 4), (16, 32, 4, 8, 4)]

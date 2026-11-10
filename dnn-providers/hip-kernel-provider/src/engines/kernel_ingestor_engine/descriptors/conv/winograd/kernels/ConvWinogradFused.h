@@ -156,7 +156,11 @@ struct K5F2Cfg
     static constexpr int TYN = BK / TM, TXN = BT / TN, LB = TYN * TXN, BPW = 64 / LB;
     static constexpr int THREADS = P / BPW * 64;
     static constexpr int NTASK = CCV * VW * BT, NPS = (NTASK + THREADS - 1) / THREADS;
-    static constexpr int NU = P * CCV * BK / THREADS;
+    // U slots per thread. Regular: THREADS a multiple of BK * CCV, every thread the same (k,
+    // channel) at UQ-strided bins. Otherwise (e.g. BK 24) each slot decodes its own (bin,
+    // channel, k), the last ones guarded.
+    static constexpr bool UREG = THREADS % (BK * CCV) == 0 && P * CCV * BK % THREADS == 0;
+    static constexpr int NU = (P * CCV * BK + THREADS - 1) / THREADS;
     static constexpr int BUF = P * CCV * (BK + BT); // dwords per buffer
     static constexpr int RPP = (TM / 4) * TYN, LDM = BT + 1;
     static constexpr int RAW
@@ -180,10 +184,10 @@ __device__ void k5FusedConv2(const K5Args& a)
         = QUAD ? THREADS : (C::NTASK + 63) / 64 * 64; // raw region stride per element
     static_assert(LB * C::BPW == 64 && P % C::BPW == 0, "wave layout");
     static_assert(TM % 4 == 0 && TN % 4 == 0, "4-runs");
-    static_assert(NU * THREADS == P * CCV * BK && THREADS % (BK * CCV) == 0, "U slots");
+    static_assert(C::UREG || (!DMA && !QUAD), "irregular U slots: plain staging only");
     // Software-pipelined Hadamard (8 x 8 micro-tiles; K5_PIPE=0 for the plain loop).
     constexpr bool PIPE = K5_PIPE && TM == 8 && TN == 8 && !K5_LDS_SWIZZLE;
-    constexpr int UQ = THREADS / (BK * CCV);
+    constexpr int UQ = C::UREG ? THREADS / (BK * CCV) : 1;
     // LDS bank swizzle: the two bins of a wave are adjacent (even, odd); their rows of U and V are
     // CCV*BK (or CCV*BT) dwords apart, a multiple of the 32 banks, so their 16-byte reads would hit
     // the same banks. Odd bins store row index ^ 16 (when the row has 32+ entries).
@@ -362,6 +366,25 @@ __device__ void k5FusedConv2(const K5Args& a)
                             = k5BufLoad<T>(rIn, static_cast<unsigned>(row + sCol[s][j]), 0);
                 }
             }
+            if constexpr(!C::UREG)
+            {
+#pragma unroll
+                for(int q = 0; q < NU; ++q)
+                {
+                    const int sl = tid + q * THREADS;
+                    const int sp = sl / (CCV * BK), scv = (sl / BK) % CCV, skk = sl % BK;
+                    const int cvg = ch * CCV + scv;
+                    const bool ok = sl < P * CCV * BK && k0 + skk < cgo && cvg < cgiV;
+                    ureg[q] = __builtin_amdgcn_raw_buffer_load_b32(
+                        rU,
+                        ok ? static_cast<unsigned>((((g * P + sp) * cgiV + cvg) * cgo + k0 + skk)
+                                                   * 4)
+                           : static_cast<unsigned>(K5_OOB),
+                        0,
+                        0);
+                }
+                return;
+            }
             const int cvg = ch * CCV + uCv;
             const unsigned uoff
                 = uKok && cvg < cgiV
@@ -442,10 +465,24 @@ __device__ void k5FusedConv2(const K5Args& a)
                     }
                 }
             }
+            if constexpr(!C::UREG)
+            {
 #pragma unroll
-            for(int q = 0; q < (DMA ? 0 : NU); ++q)
-                Us[((uP + q * UQ) * CCV + uCv) * BK + (uKk ^ (((uP + q * UQ) & 1) * SWU))]
-                    = ureg[q];
+                for(int q = 0; q < NU; ++q)
+                {
+                    const int sl = tid + q * THREADS;
+                    const int sp = sl / (CCV * BK), scv = (sl / BK) % CCV, skk = sl % BK;
+                    if(sl < P * CCV * BK)
+                        Us[(sp * CCV + scv) * BK + (skk ^ ((sp & 1) * SWU))] = ureg[q];
+                }
+            }
+            else
+            {
+#pragma unroll
+                for(int q = 0; q < (DMA ? 0 : NU); ++q)
+                    Us[((uP + q * UQ) * CCV + uCv) * BK + (uKk ^ (((uP + q * UQ) & 1) * SWU))]
+                        = ureg[q];
+            }
 #pragma unroll
             for(int s = 0; s < NPS; ++s)
             {
