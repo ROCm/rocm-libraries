@@ -317,3 +317,155 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a)
         __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// FMA kernel (fp32 where no fp32 MMA exists: gfx11/gfx12, and any dtype anywhere). 256 threads;
+// output channels in NG = BN / FN groups of FN, pixels in runs of FM adjacent columns: thread t
+// owns channel group t % NG and pixel run t / NG of a TH = WM row x TW = 16 WQ column tile. The
+// window is staged as in the MMA kernel; the weights go to LDS transposed ([kp][n]) so a thread
+// reads its FN weights of one k as vectors. Accumulation in fp32.
+template <class T,
+          class TO,
+          int CMAX,
+          int KD,
+          int R,
+          int S,
+          int SD,
+          int SH,
+          int SW,
+          int DD,
+          int DH,
+          int DW,
+          int FM,
+          int FN,
+          int WM,
+          int WQ,
+          int WN>
+__device__ __attribute__((always_inline)) void smallcConvFma(const SmallcArgs& a)
+{
+    constexpr int THREADS = 256;
+    constexpr int SP = SmallcPow2<S>::value;
+    constexpr int ROWS = CMAX * KD * R;
+    constexpr int KP = ROWS * SP; // the format's row length (ka 1)
+    constexpr int TH = WM, TW = WQ * 16, BN = WN * 16;
+    constexpr int NG = BN / FN;
+    constexpr int RUNS = THREADS / NG; // pixel runs
+    static_assert(BN % FN == 0 && THREADS % NG == 0 && RUNS * FM == TH * TW && TW % FM == 0,
+                  "the threads cover the tile exactly");
+    constexpr int WROWS = (TH - 1) * SH + (R - 1) * DH + 1;
+    constexpr int WCOLS = ((TW - 1) * SW + (SP - 1) * DW + 1 + 1) / 2 * 2;
+    constexpr int TS = WROWS * WCOLS;
+    constexpr int CS = KD * TS;
+    constexpr int WIN = CMAX * CS;
+    constexpr int WIN_BYTES = (WIN * static_cast<int>(sizeof(T)) + 15) / 16 * 16;
+    constexpr int BNS = BN + 4; // padded weight row ([kp][n]), in float
+    __shared__ __attribute__((aligned(16))) char lds[WIN_BYTES + KP * BNS * sizeof(float)];
+    T* win = reinterpret_cast<T*>(lds);
+    float* wl = reinterpret_cast<float*>(lds + WIN_BYTES);
+
+    const int tid = threadIdx.x;
+    int bx = blockIdx.x;
+    const int tq = bx % a.tilesW;
+    bx /= a.tilesW;
+    const int tp = bx % a.tilesH;
+    bx /= a.tilesH;
+    const int od = bx % a.dout;
+    const int img = bx / a.dout;
+    const int oh0 = tp * TH, ow0 = tq * TW;
+    const int nb = blockIdx.y * BN;
+    {
+        const T* x = static_cast<const T*>(a.x) + img * a.xs[0];
+        const long long span = (a.c - 1) * a.xs[1] + (a.di - 1) * a.xs[2] + (a.hi - 1) * a.xs[3]
+                               + (a.wi - 1) * a.xs[4] + 1;
+        const __amdgpu_buffer_rsrc_t xr = k1Rsrc(x, span * static_cast<long long>(sizeof(T)));
+        const int s1 = static_cast<int>(a.xs[1]), s2 = static_cast<int>(a.xs[2]);
+        const int s3 = static_cast<int>(a.xs[3]), s4 = static_cast<int>(a.xs[4]);
+        const int id0 = od * SD - a.pd, ih0 = oh0 * SH - a.ph, iw0 = ow0 * SW - a.pw;
+        typedef typename K1Raw<sizeof(T)>::type RawE;
+        constexpr int LSTEP = THREADS / WCOLS, CSTEP = THREADS % WCOLS;
+        int col = tid % WCOLS, line = tid / WCOLS;
+        for(int e = tid; e < WIN; e += THREADS)
+        {
+            const int row = line % WROWS;
+            const int ct = line / WROWS;
+            const int t = ct % KD;
+            const int c = ct / KD;
+            const int id = id0 + t * DD, ih = ih0 + row, iw = iw0 + col;
+            const bool ok = (c < a.c) & (static_cast<unsigned>(id) < static_cast<unsigned>(a.di))
+                            & (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi))
+                            & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi));
+            const unsigned off = ok ? static_cast<unsigned>((c * s1 + id * s2 + ih * s3 + iw * s4)
+                                                            * static_cast<int>(sizeof(T)))
+                                    : K1_OUT_OF_RANGE;
+            win[e] = __builtin_bit_cast(T, k1BufferLoad<RawE>(xr, off));
+            col += CSTEP;
+            line += LSTEP;
+            if(col >= WCOLS)
+            {
+                col -= WCOLS;
+                ++line;
+            }
+        }
+        const T* wf = static_cast<const T*>(a.w) + static_cast<long long>(nb) * KP;
+        for(int e = tid; e < BN * KP; e += THREADS)
+        {
+            const int n = e / KP, kp = e % KP;
+            wl[kp * BNS + n] = K1Elem<T>::load(wf[e]);
+        }
+    }
+    __syncthreads();
+
+    const int g = tid % NG, run = tid / NG;
+    const int prow = run / (TW / FM), pcol = (run % (TW / FM)) * FM;
+    float acc[FM][FN];
+#pragma unroll
+    for(int p = 0; p < FM; ++p)
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+            acc[p][j] = 0.0f;
+    const T* xb = win + prow * SH * WCOLS + pcol * SW;
+    const float* wb = wl + g * FN;
+    for(int rho = 0; rho < ROWS; ++rho)
+    {
+        const int r = rho % R, ct = rho / R;
+        const int t = ct % KD, c = ct / KD;
+        const T* xr = xb + c * CS + t * TS + r * DH * WCOLS;
+#pragma unroll
+        for(int s = 0; s < S; ++s)
+        {
+            float wv[FN];
+            const float* wp = wb + (rho * SP + s) * BNS;
+#pragma unroll
+            for(int j = 0; j < FN; ++j)
+                wv[j] = wp[j];
+            float xv[FM];
+#pragma unroll
+            for(int p = 0; p < FM; ++p)
+                xv[p] = K1Elem<T>::load(xr[p * SW + s * DW]);
+#pragma unroll
+            for(int p = 0; p < FM; ++p)
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+                    acc[p][j] = __builtin_fmaf(xv[p], wv[j], acc[p][j]);
+        }
+    }
+
+    TO* y = static_cast<TO*>(a.y) + img * a.ys[0] + od * a.ys[2];
+    const int oh = oh0 + prow;
+    if(oh >= a.ho)
+        return;
+#pragma unroll
+    for(int j = 0; j < FN; ++j)
+    {
+        const int kk = nb + g * FN + j;
+        if(kk >= a.k)
+            continue;
+#pragma unroll
+        for(int p = 0; p < FM; ++p)
+        {
+            const int ow = ow0 + pcol + p;
+            if(ow < a.wo)
+                y[kk * a.ys[1] + oh * a.ys[3] + ow * a.ys[4]] = K1Elem<TO>::store(acc[p][j]);
+        }
+    }
+}

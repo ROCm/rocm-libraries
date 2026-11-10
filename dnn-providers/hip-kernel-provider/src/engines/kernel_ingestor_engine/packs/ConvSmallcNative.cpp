@@ -346,7 +346,8 @@ std::optional<Plan> planFor(const SmallcProblem& problem, const Config& config)
     args.tilesW = static_cast<int>(tilesW);
     plan.grid[0] = static_cast<unsigned int>(gridX);
     plan.grid[1] = static_cast<unsigned int>(columnBlocks);
-    plan.weightBytes = static_cast<size_t>(plan.weightElems) * problem.elementBytes;
+    plan.weightBytes
+        = static_cast<size_t>(plan.weightElems) * static_cast<size_t>(problem.elementBytes);
     return plan;
 }
 
@@ -426,8 +427,8 @@ struct Admitted
 std::optional<Admitted> admitted(const MatchContext& context, const KernelDefinition& kernel)
 {
     const auto config = conv_smallc::configOf(kernel);
-    const auto dtype = stringField(kernel, "dtype");
-    const auto direction = stringField(kernel, "direction");
+    const auto dtype = conv_smallc::stringField(kernel, "dtype");
+    const auto direction = conv_smallc::stringField(kernel, "direction");
     if(!config.has_value() || !dtype.has_value() || direction != "FWD")
     {
         return std::nullopt;
