@@ -16,7 +16,8 @@ Run the hip-kernel-provider unit tests with the `hipdnn-superbuild-test` skill (
 
 Every arch whose objects changed needs the forward GPU tests in `dnn-providers/hip-kernel-provider/src/integration_tests/asm_sdpa_engine/IntegrationGpuSdpaForward.cpp` to pass on a GPU of that arch: `IntegrationGpuSdpaFwdBf16` (instances `Smoke`, `SmokeFp8` and `SmokeStats`, built from the kernel registry) and `IntegrationGpuSdpaFwdShapeSweepBf16`. Filter on `*IntegrationGpuSdpaFwd*`.
 
-- The registry cases check every kept row numerically: batch-mode rows against the CPU reference, group-mode rows against the CPU ragged reference. They use only equal query and key-value head counts and FNUZ fp8 inputs.
+- The registry cases check every kept row numerically: batch-mode rows against the CPU reference, group-mode rows against the CPU ragged reference. They use only equal query and key-value head counts, FNUZ fp8 inputs and the attention scale 1/sqrt(hdim_q).
+- A numerical failure on a new kernel is not always a launch bug. Some kernels round intermediate values to bf16 where others keep fp32: the gfx950 hd256 kernels round Q × scale × log2(e) to bf16, so their error grows with the scale. Before changing launch code, emulate the kernel's rounding (read its disassembly) against the reference at the test's shape and scale.
 - A rule the diff added for a case the registry does not exercise, such as GQA, needs a shape-sweep case.
 
 Where to run them:

@@ -9,6 +9,8 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 
+#include <cmath>
+
 namespace asm_sdpa_engine
 {
 using namespace hipdnn_frontend;
@@ -102,6 +104,11 @@ std::string SdpaFwdTestCase::getName(const testing::TestParamInfo<SdpaFwdTestCas
 GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats)
 {
     auto tc = GraphTestCase{config, getConfigDescription(config), config.arch};
+    // Registry cases use the standard attention scale 1/sqrt(hdim_q), as AITER's own tests
+    // do. The gfx950 hd256 kernels multiply Q by scale * log2(e) and round the product to
+    // bf16 before QK^T, so their error grows with the scale: at scale 1.0 a few outputs
+    // exceed the bf16 tolerance, while at 1/sqrt(256) the error stays well inside it.
+    tc.attnScale = 1.0f / std::sqrt(static_cast<float>(config.hdim_q));
     // Group mode gives Q and K/V a token capacity of 512, twice the largest ts_qo of any
     // group row, so the per-batch lengths a test writes into the offset tables can span
     // two Q-tiles of every row while keeping every K/V length at least its Q length.
