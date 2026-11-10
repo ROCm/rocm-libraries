@@ -102,47 +102,63 @@ struct FmhaTdmSchedEvenlyInterleavedReadSchedule
     CK_TILE_HOST_DEVICE static constexpr void VisitQkRowHalf(Visitor&& visitor)
     {
         static_assert(Wmma >= 0 && Wmma < kQkWmmasPerStage);
-        constexpr auto row                 = MakeQkRows<Stage>().rows[Wmma];
-        constexpr auto kind                = Stage == kNumQkStages - 1 ? Kind::VRead : Kind::KRead;
-        constexpr bool pair_d64_n128_reads = Geometry::kM == 128 && Geometry::kN == 128 &&
-                                             Geometry::kHeadDimQK == 64 && Geometry::kDv == 64;
-        if constexpr(pair_d64_n128_reads && SecondHalf && Wmma % 2 == 0)
-        {
-            static_assert(Geometry::kKSuLoadCount == 8 && Geometry::kVStageLoadCount == 8 &&
-                          kQkWmmasPerStage == 8);
-            visitor(std::integral_constant<Kind, kind>{}, number<Wmma>{});
-            visitor(std::integral_constant<Kind, kind>{}, number<Wmma + 1>{});
-        }
-        else if constexpr(!(pair_d64_n128_reads && SecondHalf && Wmma % 2 == 1))
-        {
-            static_for<SecondHalf ? row.size / 2 : 0, SecondHalf ? row.size : row.size / 2, 1>{}(
-                [&](auto i) {
-                    visitor(std::integral_constant<Kind, kind>{}, number<row.accesses[i]>{});
-                });
-        }
+        constexpr auto row  = MakeQkRows<Stage>().rows[Wmma];
+        constexpr auto kind = Stage == kNumQkStages - 1 ? Kind::VRead : Kind::KRead;
+        static_for<SecondHalf ? row.size / 2 : 0, SecondHalf ? row.size : row.size / 2, 1>{}(
+            [&](auto i) {
+                visitor(std::integral_constant<Kind, kind>{}, number<row.accesses[i]>{});
+            });
     }
 
     template <index_t Stage, index_t Wmma, bool SecondHalf, typename Visitor>
     CK_TILE_HOST_DEVICE static constexpr void VisitPvRowHalf(Visitor&& visitor)
     {
         static_assert(Wmma >= 0 && Wmma < kPvWmmasPerStage);
-        constexpr auto row                 = MakePvRows<Stage>().rows[Wmma];
-        constexpr auto kind                = Stage == kNumPvStages - 1 ? Kind::KRead : Kind::VRead;
-        constexpr bool pair_d64_n128_reads = Geometry::kM == 128 && Geometry::kN == 128 &&
-                                             Geometry::kHeadDimQK == 64 && Geometry::kDv == 64;
-        if constexpr(pair_d64_n128_reads && SecondHalf && Wmma % 2 == 0)
+        constexpr auto row  = MakePvRows<Stage>().rows[Wmma];
+        constexpr auto kind = Stage == kNumPvStages - 1 ? Kind::KRead : Kind::VRead;
+        static_for<SecondHalf ? row.size / 2 : 0, SecondHalf ? row.size : row.size / 2, 1>{}(
+            [&](auto i) {
+                visitor(std::integral_constant<Kind, kind>{}, number<row.accesses[i]>{});
+            });
+    }
+};
+
+// M128 N128 D64 Dv64 (the page tile's D64 geometry): eight K or V loads per stage, one per WMMA.
+// The evenly interleaved schedule issues each WMMA's load in that WMMA's second half; this one
+// issues the loads of WMMAs w and w + 1 together in the second half of every even WMMA w.
+template <typename Geometry>
+struct FmhaTdmSchedPairedD64N128ReadSchedule : FmhaTdmSchedEvenlyInterleavedReadSchedule<Geometry>
+{
+    using Base = FmhaTdmSchedEvenlyInterleavedReadSchedule<Geometry>;
+    using Kind = FmhaTdmSchedLoadKind;
+    static_assert(Geometry::kKSuLoadCount == 8 && Geometry::kVStageLoadCount == 8 &&
+                  Base::kQkWmmasPerStage == 8 && Base::kPvWmmasPerStage == 8);
+
+    template <index_t Stage, index_t Wmma, bool SecondHalf, typename Visitor>
+    CK_TILE_HOST_DEVICE static constexpr void VisitQkRowHalf(Visitor&& visitor)
+    {
+        static_assert(Wmma >= 0 && Wmma < Base::kQkWmmasPerStage);
+        constexpr auto kind = Stage == Base::kNumQkStages - 1 ? Kind::VRead : Kind::KRead;
+        if constexpr(!SecondHalf)
+            Base::template VisitQkRowHalf<Stage, Wmma, false>(visitor);
+        else if constexpr(Wmma % 2 == 0)
         {
-            static_assert(Geometry::kKSuLoadCount == 8 && Geometry::kVStageLoadCount == 8 &&
-                          kPvWmmasPerStage == 8);
             visitor(std::integral_constant<Kind, kind>{}, number<Wmma>{});
             visitor(std::integral_constant<Kind, kind>{}, number<Wmma + 1>{});
         }
-        else if constexpr(!(pair_d64_n128_reads && SecondHalf && Wmma % 2 == 1))
+    }
+
+    template <index_t Stage, index_t Wmma, bool SecondHalf, typename Visitor>
+    CK_TILE_HOST_DEVICE static constexpr void VisitPvRowHalf(Visitor&& visitor)
+    {
+        static_assert(Wmma >= 0 && Wmma < Base::kPvWmmasPerStage);
+        constexpr auto kind = Stage == Base::kNumPvStages - 1 ? Kind::KRead : Kind::VRead;
+        if constexpr(!SecondHalf)
+            Base::template VisitPvRowHalf<Stage, Wmma, false>(visitor);
+        else if constexpr(Wmma % 2 == 0)
         {
-            static_for<SecondHalf ? row.size / 2 : 0, SecondHalf ? row.size : row.size / 2, 1>{}(
-                [&](auto i) {
-                    visitor(std::integral_constant<Kind, kind>{}, number<row.accesses[i]>{});
-                });
+            visitor(std::integral_constant<Kind, kind>{}, number<Wmma>{});
+            visitor(std::integral_constant<Kind, kind>{}, number<Wmma + 1>{});
         }
     }
 };
@@ -151,7 +167,10 @@ template <typename Geometry>
 using FmhaTdmSchedScheduleFor = std::conditional_t<
     std::is_same_v<Geometry, FmhaTdmSchedBf16D192N128Geometry>,
     FmhaTdmSchedExplicitRowReadSchedule<Geometry, FmhaTdmSchedGfx125Bf16D192ReadPlacement>,
-    FmhaTdmSchedEvenlyInterleavedReadSchedule<Geometry>>;
+    std::conditional_t<Geometry::kM == 128 && Geometry::kN == 128 && Geometry::kHeadDimQK == 64 &&
+                           Geometry::kDv == 64,
+                       FmhaTdmSchedPairedD64N128ReadSchedule<Geometry>,
+                       FmhaTdmSchedEvenlyInterleavedReadSchedule<Geometry>>>;
 
 // Resolve the output-rescale placement from the selected geometry and policy.
 template <typename Problem, typename Policy>
