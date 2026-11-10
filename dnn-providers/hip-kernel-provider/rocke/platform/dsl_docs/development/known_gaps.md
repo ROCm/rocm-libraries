@@ -329,6 +329,43 @@ cross-engine parity test and the representative golden above.
 
 ---
 
+## 9. gfx942 4-warp GQA attention body — Python-only kernel builder
+
+**Subsystem:** `library/kernels/gfx942/attention_tiled_2d.py`
+(`build_gfx942_4warp_gqa`, `_build_gfx942_4warp_gqa_lean`),
+`library/kernels/common/attention_unified.py` (`_gfx942_4warp_route`)
+
+The gfx942 4-warp GQA paged-attention body (the D192/D256 bf16 lean body and
+the D128 sliding-window head-fold) has **no C++ twin**. The C selector mirrors
+the cohort predicate (`d256_gfx942_fast` in
+`instances/common/attention_unified_selectors.cpp` picks tile size 32 for it),
+but `instances/gfx942/attention_tiled_2d*.cpp` builds only the default tiled 2D
+body; nothing in `platform/cpp/` emits the 4-warp V-transpose kernel.
+
+| What's missing | Where |
+|---|---|
+| A C builder for `build_gfx942_4warp_gqa` (lean D192/D256 body and D128 fold) | `cpp/instances/gfx942/` |
+| The `_gfx942_4warp_route` launch geometry (BLOCK_M 128, 256 threads) | the C selectors return a tile size only |
+
+**What is gated:** the Python IR of each body is pinned at every
+`GOLDEN_FLAVORS` flavor by
+`platform/tests/golden/rocke_representative_ir_sha256/attention_d256.json`
+(`attention_d256/gfx942/4warp_gqa`, `4warp_gqa_d192`) and
+`attention_d128_swa.json` (`attention_d128_swa/gfx942/4warp_gqa_fold`), and the
+C++ *lowerer* is checked byte-identical against the Python lowerer on the
+`attention_d256` family
+(`library/tests/test_attention_ir_cpp_parity.py::test_attention_ir_cpp_python_byte_identity`).
+A body fix therefore re-blesses those goldens and needs no C++ change; the
+row-bound, block-table and keyless-row fixes of #13115 are one such change.
+
+**Why deferred:** the same owner decision as §6 and §8 — per-family C++ builder
+mirrors are not maintained for attention bodies added after the port.
+
+**What closes it:** a decision to restore per-family C++ builder mirrors, or
+retiring the C engine.
+
+---
+
 ## Structural debt (not per-family gaps)
 
 These are codebase-level risks worth tracking independently of any single
