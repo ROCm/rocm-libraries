@@ -62,28 +62,34 @@ Every op above runs on the CPU reference executor. GPU engines today:
 | `matmul` (+bias/activation, MX FP8) | hipBLASLt provider |
 | `rmsnorm` | HIP MLops; FlyDSL `flydsl_rmsnorm` (RDNA, gfx90a/942/950) |
 | `sdpa` dense causal GQA | ASM SDPA, rocKE, FlyDSL. No shipped engine accepts paged KV or `seq_len_*` yet |
-| `pointwise` binary (FP16/FP32) | MIOpen provider |
-| `gather`, `rope`, `paged_cache_store`, `causal_conv1d`, `gdn`, `softmax`, `topk`, `moe_routing`, `moe_grouped_matmul`, paged/varlen `sdpa` | none yet |
+| `pointwise` binary (FP16/FP32) | MIOpen provider; FlyDSL `flydsl_pointwise` (unary and binary, bf16/f16/f32, gfx90a/942/950) |
+| `gather`, `rope`, `causal_conv1d`, `moe_routing` | FlyDSL `flydsl_<op>` (gfx90a/942/950) |
+| `paged_cache_store` | FlyDSL `flydsl_paged_cache_store` (gfx90a/942/950; FP8 containers on gfx942/950 only) |
+| `gdn` | FlyDSL `flydsl_gdn` (gfx90a/942/950): decode and token-recurrent prefill, no chunked prefill |
+| `softmax`, `topk` | FlyDSL `flydsl_<op>` (gfx90a/942/950), one workgroup per row |
+| `moe_grouped_matmul`, paged/varlen `sdpa` | none yet |
+
+GPU demo: Qwen3.8-27B on gfx942 (MI300X) prefills 24 tokens in 1.8 s and decodes at ~22 ms/token with every op on a GPU engine: `matmul` on hipBLASLt; `rmsnorm`, `sdpa` (`sdpa_cdna`), `gather`, `rope`, `causal_conv1d`, `gdn`, `pointwise` and `topk` on FlyDSL. The KV cache is dense, since FlyDSL SDPA declines paged KV.
 
 ## FlyDSL kernel coverage
 
-Sources: FlyDSL `v0.5.0` (`226cde8d`) and AITER `main` (`a9918248`, `aiter/ops/flydsl/`). The provider currently pins FlyDSL 0.3.4 (`dnn-providers/hip-kernel-provider/flydsl/generators/_flydsl_env.py`), so vendoring any of these kernels first needs the pin bumped and the shipped objects regenerated (`flydsl/REGEN.md`).
+Sources: FlyDSL `v0.5.0` (`226cde8d`) and AITER `main` (`a9918248`, `aiter/ops/flydsl/`). The provider pins FlyDSL 0.3.4 (`dnn-providers/hip-kernel-provider/flydsl/generators/_flydsl_env.py`); the shipped engines port these kernels to 0.3.4 or are written for it (`flydsl/REGEN.md`).
 
 | hipDNN op | Upstream kernel | Gap to hipDNN semantics | Archs (source evidence) | Effort |
 |---|---|---|---|---|
-| `causal_conv1d` | AITER `kernels/causal_conv1d_prefill.py`, `causal_conv1d_update.py` | Packed varlen, state pool and SiLU match; channels and width are compile-time | wave-size generic | vendor |
-| `gdn` | AITER `kernels/gdr_prefill/*` (fused and chunked prefill), `kernels/gdr_decode.py` | Fused prefill is gfx950 and head dim 128 only; gate is precomputed outside the fused kernel; state dtype | gfx942/gfx950 | adapt |
-| `rope` | FlyDSL `kernels/attention/fused_rope_cache_kernel.py` | No partial rotation (rejects `rotary_dim != head_dim`); takes cos/sin caches, not raw angles | generic | adapt |
-| `paged_cache_store` | write half of `fused_rope_cache_kernel.py` | Flash `[nb,bs,H,D]` and ATOM layouts only, not `[nb,H,bs,D]`; per-tensor FP8 scale | FP8 path gfx942+ | adapt |
+| `causal_conv1d` | AITER `kernels/causal_conv1d_prefill.py`, `causal_conv1d_update.py` | Packed varlen, state pool and SiLU match; channels and width are compile-time | wave-size generic | done: `flydsl_causal_conv1d`, gfx90a/942/950 |
+| `gdn` | AITER `kernels/gdr_prefill/*` (fused and chunked prefill), `kernels/gdr_decode.py` | Fused prefill is gfx950 and head dim 128 only; gate is precomputed outside the fused kernel; state dtype | gfx942/gfx950 | done: `flydsl_gdn`, gfx90a/942/950; decode + token-recurrent prefill, no chunked prefill |
+| `rope` | FlyDSL `kernels/attention/fused_rope_cache_kernel.py` | No partial rotation (rejects `rotary_dim != head_dim`); takes cos/sin caches, not raw angles | generic | done: `flydsl_rope`, gfx90a/942/950 |
+| `paged_cache_store` | write half of `fused_rope_cache_kernel.py` | Flash `[nb,bs,H,D]` and ATOM layouts only, not `[nb,H,bs,D]`; per-tensor FP8 scale | FP8 path gfx942+ | done: `flydsl_paged_cache_store`, gfx90a/942/950; FP8 on gfx942/950 only |
 | `sdpa` paged / varlen | vendored CDNA `flash_attn_generic.py` (has `cu_seqlens` + block table, unused today); `pa_decode_tile.py` | Page size tied to the KV tile; per-batch `seq_len` must be turned into cumulative offsets | CDNA; decode gfx942/gfx950 | adapt (CDNA), new (RDNA) |
-| `softmax` | FlyDSL `kernels/norm/softmax_kernel.py` | Row width is compile-time, so baked tiers are needed | generic | adapt |
+| `softmax` | FlyDSL `kernels/norm/softmax_kernel.py` | Row width is compile-time, so baked tiers are needed | generic | done: `flydsl_softmax`, gfx90a/942/950; one workgroup per row |
 | `softmax` + `topk` (router) | FlyDSL `kernels/moe/topk_gating_softmax_kernel.py` | Fused pattern only; `E / VPT` a power of two | generic | vendor as a fused engine |
-| `topk` | AITER `kernels/topk/*` | FP32 input, INT32 indices | generic | adapt |
-| `moe_routing` | FlyDSL `kernels/moe/moe_sorting_kernel.py` | Emits CK-style padded sorted ids, not `[E+1]` offsets plus row indices | generic | adapt |
+| `topk` | AITER `kernels/topk/*` | FP32 input, INT32 indices | generic | done: `flydsl_topk`, gfx90a/942/950; one workgroup per row |
+| `moe_routing` | FlyDSL `kernels/moe/moe_sorting_kernel.py` | Emits CK-style padded sorted ids, not `[E+1]` offsets plus row indices | generic | done: `flydsl_moe_routing`, gfx90a/942/950 |
 | `moe_grouped_matmul` | FlyDSL `kernels/moe/moe_gemm_2stage/*` | FP8/INT8/INT4 only; no bf16 on `first_token_offset` | CDNA | new |
-| `gather` | none (closest: AITER `moe_gather_reduce.py`) | Needs 64-bit row offsets for a 248320 × 5120 table | — | new |
+| `gather` | none (closest: AITER `moe_gather_reduce.py`) | Needs 64-bit row offsets for a 248320 × 5120 table | — | done: `flydsl_gather`, gfx90a/942/950 |
 | gated RMSNorm `rmsnorm(x)·silu(z)` | none (vendored `rmsnorm_kernel.py` has fused-add only) | — | — | adapt rmsnorm |
-| standalone pointwise | none (device helpers only in `kernels/common/act.py`) | — | — | new |
+| standalone pointwise | none (device helpers only in `kernels/common/act.py`) | — | — | done: `flydsl_pointwise`, gfx90a/942/950 |
 
 FP8 KV and FP8 GEMM paths need `cvt_pk_fp8_f32` / FP8 MFMA, which gfx90a and gfx11 lack. Their matchers must decline FP8 there.
 
