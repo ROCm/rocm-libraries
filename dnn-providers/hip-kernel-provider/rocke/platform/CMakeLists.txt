@@ -781,6 +781,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_mma_operand_roles.py"
         "tests/library/tests/test_wgrad_cached_candidate_filter.py"
         "tests/library/tests/test_conv_wgrad_prefetch_addr.py"
+        "tests/library/tests/test_conv_wgrad_prefetch_global_regs.py"
         "tests/library/tests/test_conv_dgrad_spec_policy.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
@@ -801,6 +802,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/dispatch/test_conv_winograd_dispatch.py"
         "tests/library/tests/dispatch/test_conv_winograd_aot_dispatch.py"
         "tests/library/tests/test_direct_kernel_cache.py"
+        "tests/library/tests/test_direct_wgrad_refusals.py"
+        "tests/library/tests/test_direct_depthwise_wgrad_cachepolicy.py"
+        "tests/library/tests/test_conv_tr_lane_map.py"
         "tests/library/tests/test_direct_depthwise_fwd_cpl.py"
         "tests/library/tests/test_conv_direct_grouped_backend_parity.py"
         "tests/library/tests/test_direct_wgrad_specs.py"
@@ -830,6 +834,72 @@ if(ROCKE_INSTALL_TESTS)
            "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
             "  TIMEOUT 180)\n")
+
+    # Library conv TF32 tests (no GPU required), as two entries:
+    #
+    #   rocke_library_conv_tf32_pytest: validation and rejections, kernel names,
+    #   the spec dicts, the register guard, the benchmark/AOT dtype plumbing,
+    #   the validate gate, and one or two builds and lowerings per kernel
+    #   family. Registered on every platform.
+    #
+    #   rocke_library_conv_tf32_lowering_pytest: the build-and-lower matrices
+    #   (every variant, atom and geometry on gfx942 and gfx950) and the comgr
+    #   ISA checks (skipped without comgr/llvm-objdump), the tests that
+    #   _ROCKE_LIBRARY_CONV_TF32_LOWERING_K names. Not registered on Windows:
+    #   every hipkernelprovider CI shard runs every entry, and the Windows
+    #   shards already run close to their step time limit. The lowering is the
+    #   same Python on every platform, so the Linux entry covers it; Windows
+    #   keeps the per-family builds and lowerings of the first entry.
+    #
+    # Both entries collect the same files and split them with one -k
+    # expression and its negation, so every test runs in exactly one of them; a
+    # test the expression does not name runs in the first. The GPU classes (all
+    # named *Gpu*) are deselected from both and run in the GPU list.
+    # test_conv_direct_grouped_backend_parity.py runs in
+    # rocke_library_conv_pytest, not here. Their own entries rather than part
+    # of rocke_library_conv_pytest: the build-and-lower matrices take tens of
+    # seconds, past that entry's per-test timeout. Both run in the quick and
+    # ffm-quick tiers (ROCKE_ENGINE_test_categories_external.yaml), and both
+    # bake in the quick label so `ctest -L quick` finds them without that
+    # file's labelling.
+    set(_ROCKE_LIBRARY_CONV_TF32_TEST_RELPATHS
+        "tests/library/tests/test_conv_fwd_tf32.py"
+        "tests/library/tests/test_conv_dgrad_tf32.py"
+        "tests/library/tests/test_conv_wgrad_tf32.py"
+        "tests/library/tests/test_conv_tf32_register_guard.py"
+        "tests/library/tests/test_conv_direct_tf32_mfma.py"
+        "tests/library/tests/test_conv_direct_tf32_scalar.py"
+        "tests/library/tests/test_conv_direct_nongrouped_tf32.py"
+        "tests/library/tests/test_benchmark_tf32_plumbing.py"
+        "tests/library/tests/test_direct_tf32_plumbing.py"
+        "tests/library/tests/test_conv_tf32_validate_gate.py")
+    # pytest -k matches case-insensitive substrings of the test, class and
+    # module names: "F32Isa" and "test_isa" are the ISA classes and tests.
+    set(_ROCKE_LIBRARY_CONV_TF32_LOWERING_K
+        "test_forward_variants or (TestConvFwdTf32Build and test_matrix) or (TestTf32BuildMatrix and test_matrix) or (TestTf32Lowering and test_grid) or test_build_and_lower_matrix or test_fp32_tf32_build_lower_same_ir or F32Isa or test_isa")
+    set(_ROCKE_LIBRARY_CONV_TF32_TESTS "")
+    foreach(_rocke_conv_tf32_test ${_ROCKE_LIBRARY_CONV_TF32_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_CONV_TF32_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv_tf32_test}\"")
+    endforeach()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_conv_tf32_pytest python -m pytest${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and not (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=60)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_conv_tf32_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 300)\n")
+    if(WIN32)
+      message(STATUS "rocKE: rocke_library_conv_tf32_lowering_pytest not registered on Windows (CI shard time; see comment above)")
+    else()
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_library_conv_tf32_lowering_pytest python -m pytest${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=120)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_library_conv_tf32_lowering_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+             "  TIMEOUT 600)\n")
+    endif()
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
     # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
@@ -1156,6 +1226,12 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_winograd_gemm_wmma.py"
         "tests/library/tests/test_conv_winograd_gen_gpu.py"
         "tests/library/tests/test_conv_winograd_dispatch_gpu.py"
+        "tests/library/tests/test_conv_direct_tf32_mfma.py::TestDirectTf32Gpu"
+        "tests/library/tests/test_conv_direct_tf32_scalar.py::TestGpuCorrectness"
+        # The sweep sampler (test_sweep_candidates) compiles exact-fp32 grid
+        # specs for minutes; it stays a manual run.
+        "tests/library/tests/test_conv_direct_nongrouped_tf32.py::TestNongroupedF32Gpu::test_cases"
+        "tests/library/tests/test_conv_direct_nongrouped_tf32.py::TestNongroupedF32Gpu::test_one_binary_serves_every_shape"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
         "tests/library/tests/test_attention_scalar_block_table_numeric.py"
         "tests/library/tests/test_attention_unified_lse_numeric.py"

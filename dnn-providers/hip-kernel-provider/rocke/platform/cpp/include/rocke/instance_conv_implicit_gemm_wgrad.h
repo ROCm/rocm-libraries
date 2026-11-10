@@ -113,6 +113,11 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
     const char* dtype_b; /* default "fp16" */
     const char* dtype_d; /* default "fp16" */
     const char* dtype_acc; /* default "fp32" */
+    /* ConvDataSpec.mma_dtype: NULL (Python None, the default) = the MMA
+     * consumes dtype_a / dtype_b as stored; "tf32" = fp32 storage in memory and
+     * LDS, each LDS fragment reinterpreted as vec<tf32xN> for the catalog's
+     * TF32 atom (native XF32 on gfx942, BF16x3 emulation on gfx950). */
+    const char* mma_dtype; /* default NULL */
 
     int tile_m; /* default 64 */
     int tile_n; /* default 64 */
@@ -217,6 +222,15 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * Default false: every existing config, including pipeline="compv3" +
      * prefetch_addr=true, emits byte-identical IR. */
     bool register_prefetch; /* default false */
+    /* prefetch_global_regs: the register-prefetch form of the plain single-buffer
+     * synchronous K loop (no carried offsets): tile k+1's global reads are
+     * issued right after the LDS-only barrier that publishes tile k, stay in
+     * VGPRs under tile k's MFMAs, and are written to LDS at the top of the next
+     * iteration. Rejected with async_dma, unroll_k, prefetch_addr, stream-K
+     * and on WMMA. Mirrors WgradConvSpec.prefetch_global_regs. Appended last so
+     * existing aggregate initialisers keep their layout.
+     * Default false: every existing config emits byte-identical IR. */
+    bool prefetch_global_regs; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
