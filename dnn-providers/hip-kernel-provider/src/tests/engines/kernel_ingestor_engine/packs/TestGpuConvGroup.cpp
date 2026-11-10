@@ -39,7 +39,7 @@
  *
  * Every config of the installed catalog that the kernel match admits on this device runs on
  * every case, forward and backward data, in fp32, fp16 and bf16: groups of 2, 4, 8 and 16
- * channels, both layouts (channels-first staged and, cf configs, in place), 2-D and 3-D (ResNeXt3D's 3x3x3 and 1x3x3 filters), stride 2 (backward
+ * channels and wide groups of 24 to 56 (padded to whole 16-channel blocks), both layouts (channels-first staged and, cf configs, in place), 2-D and 3-D (ResNeXt3D's 3x3x3 and 1x3x3 filters), stride 2 (backward
  * data by stride phases, depth included), asymmetric padding, extents that are not tile
  * multiples, several channel blocks, and true convolution (the expansion reflects the filter).
  */
@@ -291,6 +291,20 @@ std::vector<DeviceCase> deviceCases()
     strided.groups = 16;
     strided.stride = {2, 2};
     cases.push_back({"NhwcGroups4Stride2", strided});
+    // Wide groups (16 < cg <= 64): 32, 56 (padded to 64), 48 at stride 2, 24 in 3-D.
+    auto wide32 = dense(64, 64, {9, 21}, {3, 3}, {1, 1}, true);
+    wide32.groups = 2;
+    cases.push_back({"NhwcGroups32", wide32});
+    auto wide56 = dense(112, 112, {7, 19}, {3, 3}, {1, 1}, false);
+    wide56.groups = 2;
+    cases.push_back({"NchwGroups56", wide56});
+    auto wide48 = dense(96, 96, {11, 17}, {3, 3}, {1, 1}, false);
+    wide48.groups = 2;
+    wide48.stride = {2, 2};
+    cases.push_back({"NchwGroups48Stride2", wide48});
+    auto wide24 = dense(48, 48, {4, 6, 13}, {3, 3, 3}, {1, 1, 1}, true);
+    wide24.groups = 2;
+    cases.push_back({"NdhwcGroups24", wide24});
     // A dx one row high: no second row phase (the phase-fused configs decline).
     auto thin = dense(32, 32, {1, 21}, {3, 3}, {1, 1}, true);
     thin.groups = 8;
@@ -341,7 +355,13 @@ bool served(const ConvShape& shape, ConvDirection direction)
     {
         return false;
     }
-    // fp32 runs everywhere (the FMA configs where no fp32 16x16 atom exists).
+    // fp32 runs everywhere for small groups (the FMA configs where no fp32 16x16 atom exists);
+    // wide groups need the fp32 atom.
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName);
+    if(shape.dataType == DataType::FLOAT && shape.c / shape.groups > 16)
+    {
+        return conv_igemm::atomRunsOn("mfma16_f32", arch);
+    }
     return true;
 }
 
@@ -508,6 +528,27 @@ ConvShape resnext()
     return shape;
 }
 
+TEST(TestConvGroupProblem, ServesWideGroupsPaddedToWholeBlocks)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        auto shape = dense(112, 112, {12, 13}, {3, 3}, {1, 1}, true);
+        shape.groups = 2; // 56 channels a group
+        const auto problem = parsed(shape, direction);
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_EQ(problem->nbi, 4);
+        EXPECT_EQ(problem->phases.front().expand.nbi, 4);
+        EXPECT_EQ(problem->phases.front().args.cg, 56);
+        // Dense per group: 2 groups x 4 output blocks x 9 taps x 4 input blocks x 16 x 16.
+        EXPECT_EQ(conv_group::expandedElements(*problem), 2u * 4 * 9 * 4 * 256);
+        // Small groups keep the block-diagonal layout.
+        const auto small = parsed(resnext(), direction);
+        ASSERT_TRUE(small.has_value());
+        EXPECT_EQ(small->nbi, 0);
+        EXPECT_EQ(conv_group::expandedElements(*small), 4u * 9 * 256);
+    }
+}
+
 TEST(TestConvGroupProblem, ServesSmallGroupsBothDirections)
 {
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
@@ -649,17 +690,23 @@ TEST(TestConvGroupProblem, DeclinesEveryUnservedGraph)
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         SCOPED_TRACE(direction == ConvDirection::FORWARD ? "forward" : "backward data");
-        // Ungrouped, depthwise (1 channel a group), 32 channels a group, groups of 3 (16 not a
-        // multiple), and a channel multiplier (k != c).
+        // Ungrouped, depthwise (1 channel a group), 128, 72 and 20 channels a group, groups of 3
+        // (16 not a multiple), and a channel multiplier (k != c).
         auto ungrouped = resnext();
         ungrouped.groups = 1;
         EXPECT_FALSE(parsed(ungrouped, direction).has_value());
         auto depthwise = resnext();
         depthwise.groups = 64;
         EXPECT_FALSE(parsed(depthwise, direction).has_value());
-        auto wide = dense(64, 64, {12, 13}, {3, 3}, {1, 1}, true);
-        wide.groups = 2;
-        EXPECT_FALSE(parsed(wide, direction).has_value());
+        auto wider = dense(256, 256, {12, 13}, {3, 3}, {1, 1}, true);
+        wider.groups = 2; // 128 channels a group
+        EXPECT_FALSE(parsed(wider, direction).has_value());
+        auto wide72 = dense(144, 144, {12, 13}, {3, 3}, {1, 1}, true);
+        wide72.groups = 2; // 72 channels a group, past 64
+        EXPECT_FALSE(parsed(wide72, direction).has_value());
+        auto wide20 = dense(40, 40, {12, 13}, {3, 3}, {1, 1}, true);
+        wide20.groups = 2; // 20 channels a group, not whole 16-byte vectors
+        EXPECT_FALSE(parsed(wide20, direction).has_value());
         auto threes = dense(48, 48, {12, 13}, {3, 3}, {1, 1}, true);
         threes.groups = 16;
         EXPECT_FALSE(parsed(threes, direction).has_value());
@@ -747,6 +794,9 @@ TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
         // Phase-fused: only backward data at stride 2 (this graph is stride 1); 0 or 1.
         EXPECT_TRUE(declines("pf", int64_t{1}));
         EXPECT_TRUE(declines("pf", int64_t{2}));
+        // Wide-group knobs on a small-group graph.
+        EXPECT_TRUE(declines("nbi", int64_t{2}));
+        EXPECT_TRUE(declines("nbo", int64_t{1}));
         // Packed channels-first activations: the cf twin is admitted, with a smaller workspace
         // (nothing staged), and the staged config still is.
         auto first = resnext();
@@ -813,10 +863,76 @@ TEST(TestConvGroupCatalog, FmaKernelGatesGroupWidthChunkAndTile)
     }
 }
 
+TEST(TestConvGroupCatalog, WideKernelGatesBlocksTileAndForm)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        auto shape = dense(112, 112, {12, 13}, {3, 3}, {1, 1}, true);
+        shape.groups = 2; // 56 channels a group: 4 blocks
+        shape.dataType = DataType::HALF;
+        auto properties = testDeviceProperties();
+        properties.gcnArchName = "gfx942:sramecc+:xnack-";
+        const GraphFixture fixture(buildGraph(specFor(shape, direction)), properties);
+        const auto pack = packFor(direction);
+        const auto bound = matchesGraph(pack, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        const auto& kernels = catalog(direction);
+        const auto base = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+            return kernel.getStringMetadata("atom") == "mfma16_f16"
+                   && kernel.getIntMetadata("nbi") == 4 && kernel.getIntMetadata("nbo") == 4
+                   && kernel.getIntMetadata("t") == 1 && kernel.getIntMetadata("stride") == 1
+                   && kernel.getIntMetadata("cf") == 0 && kernel.getIntMetadata("th") == 4
+                   && kernel.getIntMetadata("wp") == 2;
+        });
+        ASSERT_NE(base, kernels.end());
+        EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));
+        const auto declines = [&](const char* field, const auto& value) {
+            auto kernel = *base;
+            kernel.metadata[field] = value;
+            return !matchesKernel(pack, fixture.context(), kernel, *bound);
+        };
+        EXPECT_TRUE(declines("nbi", int64_t{2})); // the groups span 4 blocks
+        EXPECT_TRUE(declines("nbi", int64_t{0})); // a small-group config
+        EXPECT_TRUE(declines("nbo", int64_t{3})); // not whole output tiles
+        EXPECT_TRUE(declines("nbo", int64_t{0}));
+        EXPECT_TRUE(declines("th", int64_t{2})); // not whole rows a wave
+        EXPECT_TRUE(declines("wp", int64_t{0}));
+        EXPECT_TRUE(declines("wp", int64_t{64})); // a halo past 64 KB
+        EXPECT_TRUE(declines("cb", int64_t{1}));
+        EXPECT_TRUE(declines("pf", int64_t{1}));
+        EXPECT_TRUE(declines("cf", int64_t{1})); // channels-last graph
+        EXPECT_TRUE(declines("cg", int64_t{56}));
+        EXPECT_TRUE(declines("atom", std::string("fma")));
+        EXPECT_TRUE(declines("atom", std::string("wmma11_f16")));
+        EXPECT_TRUE(declines("dtype", std::string("FLOAT")));
+        // A small-group config declines a wide graph.
+        const auto small = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+            return kernel.getStringMetadata("atom") == "mfma16_f16"
+                   && kernel.getIntMetadata("nbi") == 0 && kernel.getIntMetadata("t") == 1
+                   && kernel.getIntMetadata("stride") == 1;
+        });
+        ASSERT_NE(small, kernels.end());
+        EXPECT_FALSE(matchesKernel(pack, fixture.context(), *small, *bound));
+    }
+}
+
 TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
 {
-    static constexpr std::array<const char*, 13> KNOBS{
-        "atom", "t", "r", "s", "stride", "th", "wp", "cb", "cf", "cg", "oc", "px", "pf"};
+    static constexpr std::array<const char*, 15> KNOBS{"atom",
+                                                       "t",
+                                                       "r",
+                                                       "s",
+                                                       "stride",
+                                                       "th",
+                                                       "wp",
+                                                       "cb",
+                                                       "cf",
+                                                       "cg",
+                                                       "oc",
+                                                       "px",
+                                                       "pf",
+                                                       "nbi",
+                                                       "nbo"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -834,7 +950,14 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
             // Output columns a workgroup: 16 wp (matrix core), or the FMA kernel's 256 threads
             // in chunks of oc channels, th rows of px-column threads.
             const int th = static_cast<int>(kernel.getIntMetadata("th"));
-            const int cb = static_cast<int>(kernel.getIntMetadata("cb"));
+            // Wide-group configs stage nbi blocks of a group (no channel blocks).
+            const int nbi = static_cast<int>(kernel.getIntMetadata("nbi"));
+            const int cb = nbi != 0 ? nbi : static_cast<int>(kernel.getIntMetadata("cb"));
+            if(nbi != 0)
+            {
+                EXPECT_EQ(kernel.getIntMetadata("cb"), 0);
+                EXPECT_EQ(nbi % kernel.getIntMetadata("nbo"), 0);
+            }
             const bool fma = kernel.getStringMetadata("atom") == "fma";
             const int tw = fma ? static_cast<int>(256 * kernel.getIntMetadata("oc") / (16 * cb) / th
                                                   * kernel.getIntMetadata("px"))
