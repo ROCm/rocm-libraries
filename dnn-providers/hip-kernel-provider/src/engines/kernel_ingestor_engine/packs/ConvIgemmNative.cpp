@@ -221,24 +221,24 @@ constexpr std::array<std::string_view, 7> GFX11{
 constexpr std::array<std::string_view, 7> GFX12{"gfx1200", "gfx1201"};
 
 constexpr std::array<AtomEntry, 21> ATOMS{{
-    {{"mfma16_f16", "K1AtomMfmaF16", 64, false}, "f16", CDNA},
-    {{"mfma32_f16", "K1AtomMfma32F16", 64, false}, "f16", CDNA},
-    {{"mfma16_bf16", "K1AtomMfmaBf16", 64, false}, "bf16", CDNA_BF16_1K},
-    {{"mfma32_bf16", "K1AtomMfma32Bf16", 64, false}, "bf16", CDNA_BF16_1K},
+    {{"mfma16_f16", "K1AtomMfmaF16", 64, false, true}, "f16", CDNA},
+    {{"mfma32_f16", "K1AtomMfma32F16", 64, false, true}, "f16", CDNA},
+    {{"mfma16_bf16", "K1AtomMfmaBf16", 64, false, true}, "bf16", CDNA_BF16_1K},
+    {{"mfma32_bf16", "K1AtomMfma32Bf16", 64, false, true}, "bf16", CDNA_BF16_1K},
     {{"mfma16_bf16_908", "K1AtomMfmaBf16Gfx908", 64, false}, "bf16", GFX908},
     {{"mfma32_bf16_908", "K1AtomMfma32Bf16Gfx908", 64, false}, "bf16", GFX908},
     {{"mfma16_f32", "K1AtomMfmaF32", 64, false}, "f32", CDNA},
     {{"mfma32_f32", "K1AtomMfma32F32", 64, false}, "f32", CDNA},
     {{"mfma16_xf32", "K1AtomMfmaXf32", 64, true}, "f32", GFX942},
     {{"mfma32_xf32", "K1AtomMfma32Xf32", 64, true}, "f32", GFX942},
-    {{"mfma16x32_f16", "K1AtomMfmaF16X32", 64, false}, "f16", GFX950},
-    {{"mfma16x32_bf16", "K1AtomMfmaBf16X32", 64, false}, "bf16", GFX950},
-    {{"mfma32x16_f16", "K1AtomMfma32F16X16", 64, false}, "f16", GFX950},
-    {{"mfma32x16_bf16", "K1AtomMfma32Bf16X16", 64, false}, "bf16", GFX950},
-    {{"wmma11_f16", "K1AtomWmma11F16", 32, false}, "f16", GFX11},
-    {{"wmma11_bf16", "K1AtomWmma11Bf16", 32, false}, "bf16", GFX11},
-    {{"wmma12_f16", "K1AtomWmma12F16", 32, false}, "f16", GFX12},
-    {{"wmma12_bf16", "K1AtomWmma12Bf16", 32, false}, "bf16", GFX12},
+    {{"mfma16x32_f16", "K1AtomMfmaF16X32", 64, false, true}, "f16", GFX950},
+    {{"mfma16x32_bf16", "K1AtomMfmaBf16X32", 64, false, true}, "bf16", GFX950},
+    {{"mfma32x16_f16", "K1AtomMfma32F16X16", 64, false, true}, "f16", GFX950},
+    {{"mfma32x16_bf16", "K1AtomMfma32Bf16X16", 64, false, true}, "bf16", GFX950},
+    {{"wmma11_f16", "K1AtomWmma11F16", 32, false, true}, "f16", GFX11},
+    {{"wmma11_bf16", "K1AtomWmma11Bf16", 32, false, true}, "bf16", GFX11},
+    {{"wmma12_f16", "K1AtomWmma12F16", 32, false, true}, "f16", GFX12},
+    {{"wmma12_bf16", "K1AtomWmma12Bf16", 32, false, true}, "bf16", GFX12},
     {{"fma", "", 0, false}, "any", {}},
     // Unused slots keep the table's size fixed while atoms are added.
     {{"", "", 0, false}, "", {}},
@@ -779,6 +779,7 @@ struct Tile
     int64_t wdirect = 0; ///< backward data reads the K T R S C/g filter directly
     int64_t pack = 0; ///< k-steps of whole taps
     int64_t cf = 0; ///< the output written packed channels-first from the epilogue
+    int64_t swz = 0; ///< XOR-swizzled LDS tiles read in 16-byte chunks
 
     int64_t blockThreads() const
     {
@@ -811,12 +812,18 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.wdirect = kernel.getIntMetadata("wdirect");
     tile.pack = kernel.getIntMetadata("pack");
     tile.cf = kernel.getIntMetadata("cf");
+    tile.swz = kernel.getIntMetadata("swz");
     if(tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1
        || (tile.xcd != 0 && tile.xcd != 1) || (tile.halo != 0 && tile.halo != 1)
        || (tile.halo != 0 && (tile.info.wave == 0 || tile.stages != 1))
        || (tile.wdirect != 0 && tile.wdirect != 1) || (tile.pack != 0 && tile.pack != 1)
        || (tile.pack != 0 && (tile.halo != 0 || tile.wdirect != 0))
-       || (tile.cf != 0 && tile.cf != 1) || (tile.cf != 0 && tile.info.wave == 0))
+       || (tile.cf != 0 && tile.cf != 1) || (tile.cf != 0 && tile.info.wave == 0)
+       || (tile.swz != 0 && tile.swz != 1)
+       || (tile.swz != 0
+           && (tile.info.wave == 0 || tile.split || tile.halo != 0 || tile.wdirect != 0
+               || tile.pack != 0 || tile.vec != 8
+               || (tile.bk != 16 && tile.bk != 32 && tile.bk != 64) || !tile.info.swizzles)))
     {
         return std::nullopt;
     }
@@ -831,7 +838,9 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
 /// the halo loop. A direct-filter config serves backward data whose filter is packed K T R S C/g
 /// with its input channels a multiple of the vector (16-bit: output channels even); a tap-packing
 /// config only reductions shorter than its k-step that divide it. A channels-first-output config
-/// serves outputs (forward y, backward data dx) that are packed channels-first.
+/// serves outputs (forward y, backward data dx) that are packed channels-first. A swizzled-tile
+/// config (16-bit atoms with 8-, 16- or 32-byte fragments, vector 8, no halo, direct filter or tap
+/// packing; checked in tileOf) serves whatever its plain twin serves.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -1109,6 +1118,7 @@ public:
         options.add("CONV_IGEMM_WD", std::to_string(tile->wdirect));
         options.add("CONV_IGEMM_PACK", std::to_string(tile->pack));
         options.add("CONV_IGEMM_CF", std::to_string(tile->cf));
+        options.add("CONV_IGEMM_SWZ", std::to_string(tile->swz));
         options.add("CONV_IGEMM_DIR",
                     std::string(*direction == ConvDirection::FORWARD ? "0" : "1"));
         // 32-bit buffer loads while a block's rows and the filter stay under 2^31 bytes.

@@ -70,6 +70,10 @@
     {
       "name": "cf",
       "type": "int"
+    },
+    {
+      "name": "swz",
+      "type": "int"
     }
   ]
 }

@@ -21,7 +21,8 @@
     "halo",
     "wdirect",
     "pack",
-    "cf"
+    "cf",
+    "swz"
   ],
   "behavior_notes": [
     "runtime_compilation"

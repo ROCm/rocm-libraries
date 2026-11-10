@@ -840,6 +840,28 @@ __device__ inline long long
 }
 
 // ---------------------------------------------------------------------------------------------
+// XOR-swizzled row-major LDS tiles (SWZ 1): rows of BK 16-bit elements, no padding, each row's
+// 16-byte chunks permuted by an XOR key that changes every 128 bytes of rows, so the eight lanes
+// a 16-byte LDS access serves at once (eight consecutive rows, one chunk) hit 32 distinct banks.
+// Element offset of (row, k): the chunk k / 8 moves to chunk (k / 8) ^ key(row).
+template <int BK>
+struct K1Swz
+{
+    static constexpr int CPR = BK / 8; // 16-byte chunks per row
+    static constexpr int RPL = CPR >= 8 ? 1 : 8 / CPR; // rows per 128 bytes
+    static_assert(CPR >= 2 && (CPR & (CPR - 1)) == 0 && CPR <= 8, "swizzled rows");
+    __device__ static int key(int row)
+    {
+        return (row / RPL) & (CPR - 1);
+    }
+    // Offset of the chunk holding k (a multiple of 8) of a row with key @p key.
+    __device__ static int at(int row, int key, int k)
+    {
+        return row * BK + (((k >> 3) ^ key) << 3);
+    }
+};
+
+// ---------------------------------------------------------------------------------------------
 // Global tile loads. A: VEC reduction channels of PASSES gathered rows, each row's origin decoded
 // once. B: VEC reduction channels of PASSES filter rows, contiguous along the reduction:
 //   forward w[g kg + n][tap][c] (K T R S C/g, as given);
@@ -1264,6 +1286,27 @@ struct K1Tiles
         }
     }
 
+    // Swizzled row-major LDS tiles (K1Swz): As[m][k], Bs[n][k], 16-bit, VEC 8.
+    __device__ void storeRowsSwz(T* As, T* Bs) const
+    {
+        typedef K1Swz<BK> Swz;
+        static_assert(VEC * sizeof(T) == 16 && !DIRECT && PACK == 0, "swizzled tiles");
+#pragma unroll
+        for(int p = 0; p < A_PASSES; ++p)
+            if(aRow(p))
+            {
+                const int r = row + p * ROWS_PER_PASS;
+                *reinterpret_cast<Raw*>(As + Swz::at(r, Swz::key(r), kv)) = ra[p];
+            }
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+            if(bRow(p))
+            {
+                const int r = row + p * ROWS_PER_PASS;
+                *reinterpret_cast<Raw*>(Bs + Swz::at(r, Swz::key(r), kv)) = rb[p];
+            }
+    }
+
     // Row-major LDS tiles: As[m][k], Bs[n][k], ld elements per row.
     __device__ void storeRows(T* As, T* Bs, int ld) const
     {
@@ -1487,6 +1530,9 @@ __device__ inline void k1XcdOrder(unsigned& bx, unsigned& by, unsigned& bz)
 // whole taps when the reduction channels per tap divide BK (K1Tiles; not with the halo loop).
 // CF 1: the output (forward y, backward data dx) is written packed channels-first straight from
 // the epilogue (and the split-K partials indexed alike), so it needs no staging transpose.
+// SWZ 1: XOR-swizzled, unpadded LDS tiles (K1Swz) read in whole 16-byte chunks, 8-byte fragments
+// two k-steps at a time: no LDS bank conflicts on the fragment reads (16-bit, VEC 8, no halo,
+// direct filter or tap packing).
 
 template <class T,
           class Atom,
@@ -1503,7 +1549,8 @@ template <class T,
           int HALO = 0,
           int WD = 0,
           int PACK = 0,
-          int CF = 0>
+          int CF = 0,
+          int SWZ = 0>
 __device__ void k1ConvMma(const K1Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -1511,7 +1558,7 @@ __device__ void k1ConvMma(const K1Args& a)
     constexpr bool SPLIT = MATH == K1_MATH_BF16X3;
     // Tiles of the multiply's element type: T, or bf16 planes (hi, lo) for three-bf16.
     typedef typename K1If<SPLIT, unsigned short, T>::type S;
-    constexpr int LD = BK + 16 / static_cast<int>(sizeof(S));
+    constexpr int LD = SWZ ? BK : BK + 16 / static_cast<int>(sizeof(S));
     constexpr int WTM = BM / WM, WTN = BN / WN;
     constexpr int DIM = Atom::DIM;
     constexpr int FM = WTM / DIM, FN = WTN / DIM;
@@ -1542,6 +1589,9 @@ __device__ void k1ConvMma(const K1Args& a)
     // STAGES 2 raced on gfx11 while backward data stored its B tile with transposed 2-byte LDS
     // writes (a barrier hid it, a fence did not); with vector row stores only it passes.
     static_assert(STAGES == 1 || STAGES == 2, "stages");
+    static_assert(
+        SWZ == 0 || (!SPLIT && HALO == 0 && WD == 0 && PACK == 0 && sizeof(T) == 2 && VEC == 8),
+        "swizzled tiles: 16-bit native, no halo, direct filter or tap packing");
 
     __shared__ __attribute__((aligned(16))) T lds[LDS];
 
@@ -1591,8 +1641,92 @@ __device__ void k1ConvMma(const K1Args& a)
     for(int i = 0; i < FM; ++i)
         arow[i] = wm * WTM + i * DIM + fragRow;
 
+    // Swizzled tiles: each fragment read is whole 16-byte chunks. 8-byte fragments are read in
+    // pairs (two k-steps per chunk; A and B permute k alike, so the products are unchanged).
+    typedef K1Swz<BK> Swz;
+    constexpr int FB = Atom::KPL * static_cast<int>(sizeof(T)); // fragment bytes
+    constexpr int PAIR = SWZ && FB == 8 ? 2 : 1;
+    int aKey[FM], bKey[FN];
+    if constexpr(SWZ != 0)
+    {
+#pragma unroll
+        for(int i = 0; i < FM; ++i)
+            aKey[i] = Swz::key(arow[i]);
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+            bKey[j] = Swz::key(wn * WTN + j * DIM + fragRow);
+    }
+    const int kbp = Atom::template kBase<Atom::KPL * PAIR>(lane);
+    auto multiplySwz = [&](const S* As, const S* Bs) {
+        if constexpr(SWZ != 0)
+        {
+            typedef typename K1Raw<16>::type Chunk;
+            static_assert(FB == 8 || FB == 16 || FB == 32, "fragment size");
+#pragma unroll
+            for(int kk = 0; kk < BK; kk += Atom::KA * PAIR)
+            {
+                typename Atom::frag af[FM][PAIR], bf[FN][PAIR];
+                auto read = [&](const S* base, int r, int key, typename Atom::frag* f) {
+                    if constexpr(FB == 32)
+                    {
+                        typedef unsigned Two __attribute__((ext_vector_type(8)));
+                        const Chunk c0
+                            = *reinterpret_cast<const Chunk*>(base + Swz::at(r, key, kk + kbp));
+                        const Chunk c1
+                            = *reinterpret_cast<const Chunk*>(base + Swz::at(r, key, kk + kbp + 8));
+                        Two t;
+#pragma unroll
+                        for(int e = 0; e < 4; ++e)
+                        {
+                            t[e] = c0[e];
+                            t[e + 4] = c1[e];
+                        }
+                        f[0] = __builtin_bit_cast(typename Atom::frag, t);
+                    }
+                    else if constexpr(FB == 16)
+                    {
+                        const Chunk c
+                            = *reinterpret_cast<const Chunk*>(base + Swz::at(r, key, kk + kbp));
+                        f[0] = __builtin_bit_cast(typename Atom::frag, c);
+                    }
+                    else
+                    {
+                        typedef typename K1Raw<8>::type Half;
+                        const Chunk c
+                            = *reinterpret_cast<const Chunk*>(base + Swz::at(r, key, kk + kbp));
+                        Half lo, hi;
+                        lo[0] = c[0];
+                        lo[1] = c[1];
+                        hi[0] = c[2];
+                        hi[1] = c[3];
+                        f[0] = __builtin_bit_cast(typename Atom::frag, lo);
+                        f[1] = __builtin_bit_cast(typename Atom::frag, hi);
+                    }
+                };
+#pragma unroll
+                for(int i = 0; i < FM; ++i)
+                    read(As, arow[i], aKey[i], af[i]);
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+                    read(Bs, wn * WTN + j * DIM + fragRow, bKey[j], bf[j]);
+#pragma unroll
+                for(int q = 0; q < PAIR; ++q)
+#pragma unroll
+                    for(int i = 0; i < FM; ++i)
+#pragma unroll
+                        for(int j = 0; j < FN; ++j)
+                            acc[i][j] = Atom::mma(af[i][q], bf[j][q], acc[i][j]);
+            }
+        }
+    };
+
     // A planes at As (hi) and As + APL (lo); B planes at Bs and Bs + BN * LD.
     auto multiply = [&](const S* As, const S* Bs) {
+        if constexpr(SWZ != 0)
+        {
+            multiplySwz(As, Bs);
+            return;
+        }
 #pragma unroll
         for(int kk = 0; kk < BK; kk += Atom::KA)
         {
@@ -1756,6 +1890,10 @@ __device__ void k1ConvMma(const K1Args& a)
             if constexpr(SPLIT)
             {
                 tiles.storeRowsSplit(base, base + 2 * BM * LD, LD, BM * LD, BN * LD);
+            }
+            else if constexpr(SWZ != 0)
+            {
+                tiles.storeRowsSwz(base, base + BM * LD);
             }
             else
             {

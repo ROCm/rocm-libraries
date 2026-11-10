@@ -527,7 +527,7 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its knob tuple: within one direction and
     // dtype (what one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 15> KNOBS{"atom",
+    static constexpr std::array<const char*, 16> KNOBS{"atom",
                                                        "math",
                                                        "bm",
                                                        "bn",
@@ -541,7 +541,8 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
                                                        "halo",
                                                        "wdirect",
                                                        "pack",
-                                                       "cf"};
+                                                       "cf",
+                                                       "swz"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -613,7 +614,7 @@ TEST(TestConvIgemmCatalog, DirectFilterConfigsAreBackwardDataOnlyAndPackingIsNot
 
 TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOutputTwin)
 {
-    static constexpr std::array<const char*, 14> SHAPE{"atom",
+    static constexpr std::array<const char*, 15> SHAPE{"atom",
                                                        "math",
                                                        "bm",
                                                        "bn",
@@ -626,7 +627,8 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
                                                        "xcd",
                                                        "halo",
                                                        "wdirect",
-                                                       "pack"};
+                                                       "pack",
+                                                       "swz"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         const auto& kernels = catalog(direction);
@@ -663,6 +665,81 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
         }
         EXPECT_GT(twins, 0);
     }
+}
+
+TEST(TestConvIgemmCatalog, SwizzledTileConfigsAreSixteenBitVectorEightPlainTiles)
+{
+    int swizzled = 0;
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(const auto& kernel : catalog(direction))
+        {
+            if(kernel.getIntMetadata("swz") == 0)
+            {
+                continue;
+            }
+            SCOPED_TRACE(kernel.name);
+            ++swizzled;
+            const auto info = conv_igemm::atomNamed(kernel.getStringMetadata("atom"));
+            ASSERT_TRUE(info.has_value());
+            EXPECT_TRUE(info->swizzles);
+            EXPECT_EQ(kernel.getStringMetadata("math"), "native");
+            EXPECT_EQ(kernel.getIntMetadata("vec"), 8);
+            EXPECT_EQ(kernel.getIntMetadata("halo"), 0);
+            EXPECT_EQ(kernel.getIntMetadata("wdirect"), 0);
+            EXPECT_EQ(kernel.getIntMetadata("pack"), 0);
+        }
+    }
+    EXPECT_GT(swizzled, 0);
+}
+
+TEST(TestConvIgemmCatalog, SwizzledTileKnobDeclinesEveryUnsupportedCombination)
+{
+    auto shape = dense(32, 48, {12, 13}, {3, 3}, {1, 1}, true);
+    shape.dataType = DataType::HALF;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_DATA)),
+                               deviceOf("gfx942:sramecc+:xnack-", 304));
+    const auto pack = packFor(ConvDirection::BACKWARD_DATA);
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto& kernels = catalog(ConvDirection::BACKWARD_DATA);
+    const auto base = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+        return kernel.getIntMetadata("swz") != 0 && kernel.getStringMetadata("dtype") == "HALF"
+               && kernel.getStringMetadata("atom") == "mfma32_f16"
+               && kernel.getIntMetadata("xcd") == 0 && kernel.getIntMetadata("cf") == 0;
+    });
+    ASSERT_NE(base, kernels.end());
+    EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));
+    const auto declines = [&](const char* field, const auto& value) {
+        auto kernel = *base;
+        kernel.metadata[field] = value;
+        return !matchesKernel(pack, fixture.context(), kernel, *bound);
+    };
+    EXPECT_TRUE(declines("swz", int64_t{2}));
+    EXPECT_TRUE(declines("vec", int64_t{4}));
+    EXPECT_TRUE(declines("bk", int64_t{128}));
+    EXPECT_TRUE(declines("halo", int64_t{1}));
+    EXPECT_TRUE(declines("wdirect", int64_t{1}));
+    EXPECT_TRUE(declines("pack", int64_t{1}));
+    EXPECT_TRUE(declines("math", std::string("bf16x3")));
+
+    // An atom whose fragments are not whole 8-, 16- or 32-byte runs: gfx908's bf16 (16x16x8).
+    shape.dataType = DataType::BFLOAT16;
+    const GraphFixture gfx908(buildGraph(specFor(shape, ConvDirection::BACKWARD_DATA)),
+                              deviceOf("gfx908", 120));
+    const auto bound908 = matchesGraph(pack, gfx908.context());
+    ASSERT_TRUE(bound908.has_value());
+    const auto plain908 = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+        return kernel.getStringMetadata("atom") == "mfma16_bf16_908"
+               && kernel.getIntMetadata("vec") == 8 && kernel.getIntMetadata("halo") == 0
+               && kernel.getIntMetadata("wdirect") == 0 && kernel.getIntMetadata("pack") == 0
+               && kernel.getIntMetadata("cf") == 0 && kernel.getIntMetadata("bk") == 32;
+    });
+    ASSERT_NE(plain908, kernels.end());
+    EXPECT_TRUE(matchesKernel(pack, gfx908.context(), *plain908, *bound908));
+    auto swizzled908 = *plain908;
+    swizzled908.metadata["swz"] = int64_t{1};
+    EXPECT_FALSE(matchesKernel(pack, gfx908.context(), swizzled908, *bound908));
 }
 
 TEST(TestConvIgemmCatalog, ChannelsFirstOutputIsTheTransposedOutputOfTheDirection)
