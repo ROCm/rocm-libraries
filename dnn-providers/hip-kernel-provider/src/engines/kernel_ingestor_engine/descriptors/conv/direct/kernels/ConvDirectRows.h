@@ -142,7 +142,7 @@ template <class T,
           int PP,
           int EPI,
           class TO = T>
-__device__ void k2ConvRows(const K2Args& a)
+__device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
 {
     constexpr int WAVE = 64;
     constexpr int DIM = 16;
@@ -443,58 +443,23 @@ __device__ void k2ConvRows(const K2Args& a)
         }
     };
 
-    // All chunks of tile tc starting in stage S0; prefetches chunk 0 of tn (when hasNext) during
-    // the last chunk.
-    auto tileRun
-        = [&](auto S0, const Tile& tc, const Tile& tn, bool hasNext) __attribute__((always_inline))
+    // The block's chunks as one stream over its tiles, two per iteration (stage 0, then stage
+    // 1), so the chunk body exists twice whatever the parity of the chunk count. A tile's last
+    // chunk prefetches the first chunk of the block's next tile, then the epilogue writes it.
+    if(tFirst >= tEnd)
+        return;
+    Tile tc = decode(tFirst);
+    int t = tFirst, cc = 0;
+    int nb = tc.kb * BN + wk * FN * DIM;
+    auto zero = [&]() __attribute__((always_inline))
     {
-        constexpr int s0 = decltype(S0)::value;
-        const int nb = tc.kb * BN + wk * FN * DIM;
 #pragma unroll
         for(int p = 0; p < PW; ++p)
 #pragma unroll
             for(int j = 0; j < FN; ++j)
                 acc[p][j] = typename Atom::acc{};
-        for(int cc = 0; cc < nCh; cc += 2)
-        {
-            {
-                const bool last = cc + 1 >= nCh;
-                chunk(K2Int<s0>{}, nb, cc, last ? tn : tc, last ? 0 : cc + 1, !last || hasNext);
-            }
-            if(cc + 1 < nCh)
-            {
-                const bool last = cc + 2 >= nCh;
-                chunk(K2Int<1 - s0>{},
-                      nb,
-                      cc + 1,
-                      last ? tn : tc,
-                      last ? 0 : cc + 2,
-                      !last || hasNext);
-            }
-        }
-        if constexpr(STAGED)
-        {
-            // 16-byte stores need whole granules of output channels.
-            if((a.k & (16 / static_cast<int>(sizeof(TO)) - 1)) == 0)
-            {
-                // The last chunk read stage (s0 + nCh - 1) % 2 and its end
-                // barrier passed, so that stage is free.
-                if(((s0 + nCh - 1) & 1) == 0)
-                    storeStaged(st0, tc, nb);
-                else
-                    storeStaged(st1, tc, nb);
-                k2rBarrier();
-            }
-            else
-                store(tc, nb);
-        }
-        else
-            store(tc, nb);
     };
-
-    if(tFirst >= tEnd)
-        return;
-    Tile tc = decode(tFirst);
+    zero();
     dma(st0, tc, 0, 0, IPW);
     __builtin_amdgcn_s_waitcnt(K2R_VMCNT0);
     k2rBarrier();
@@ -503,17 +468,47 @@ __device__ void k2ConvRows(const K2Args& a)
         if(wk == 1)
             k2rBarrier();
     }
-    int parity = 0;
-    for(int t = tFirst; t < tEnd; t += bpx)
+    // One chunk from stage SG; returns false when the block has no chunk left.
+    auto step = [&](auto SG) __attribute__((always_inline))
     {
+        constexpr int sc = decltype(SG)::value;
+        const bool last = cc + 1 >= nCh;
         const bool hasNext = t + bpx < tEnd;
-        const Tile tn = decode(hasNext ? t + bpx : t);
-        if(parity == 0)
-            tileRun(K2Int<0>{}, tc, tn, hasNext);
+        // The chunk to prefetch: the next of this tile, or the first of the next tile.
+        Tile dt = tc;
+        if(last && hasNext)
+            dt = decode(t + bpx);
+        chunk(SG, nb, cc, dt, last ? 0 : cc + 1, !last || hasNext);
+        if(!last)
+        {
+            ++cc;
+            return true;
+        }
+        if constexpr(STAGED)
+        {
+            // 16-byte stores need whole granules of output channels. The chunk just read
+            // stage sc and its end barrier passed, so that stage is free.
+            if((a.k & (16 / static_cast<int>(sizeof(TO)) - 1)) == 0)
+            {
+                storeStaged(sc ? st1 : st0, tc, nb);
+                k2rBarrier();
+            }
+            else
+                store(tc, nb);
+        }
         else
-            tileRun(K2Int<1>{}, tc, tn, hasNext);
-        parity ^= nCh & 1;
-        tc = tn;
+            store(tc, nb);
+        if(!hasNext)
+            return false;
+        t += bpx;
+        tc = dt;
+        cc = 0;
+        nb = tc.kb * BN + wk * FN * DIM;
+        zero();
+        return true;
+    };
+    while(step(K2Int<0>{}) && step(K2Int<1>{}))
+    {
     }
     if constexpr(PP == 1)
     {
