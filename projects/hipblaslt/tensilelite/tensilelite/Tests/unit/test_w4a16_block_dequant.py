@@ -388,32 +388,29 @@ FP16_UNSIGNED = {
 
 def test_fp16_unsigned_dequantizes_in_packed_fp16(toolchain):
     """An fp16 MAC type plus unsigned int4 nibbles takes the packed lowering:
-    half the VALU of the f32 one, with permutations to restore sequential order."""
+    half the VALU of the f32 one, each output pair lifted in order."""
     _, whole = _emit(toolchain, blockSize=128, depthU=64, zeroPoint=True,
                      problemType=dict(FP16_UNSIGNED))
     # Scope to the dequantize: the epilogue converts its f32 accumulators to
     # fp16 too, and that is not what this is about.
     src = whole[whole.index("w4a16: save packed int4 dword 0"):whole.index("ds_store")]
 
-    for i, (mask, magic) in enumerate((("0xf000f", "0x64006400"), ("0xf000f0", "0x54005400"))):
-        assert f"s_mov_b32 s[sgprScaleAPkMagic+{i}], {mask}" in whole
-        assert re.search(r"v_and_or_b32 \S+, \S+, s\[sgprScaleAPkMagic\+" + str(i) + r"\], " + magic, src)
+    assert "s_mov_b32 s[sgprScaleAPkMagic+0], 0xf0000f" in whole
+    assert len(re.findall(r"v_and_or_b32 \S+, \S+, s\[sgprScaleAPkMagic\+0\], 0x54006400", src)) == 4
     assert src.rindex("v_pk_add_f16") < src.index("v_pk_fma_f16")
     assert len(re.findall(r"v_pk_fma_f16 [^\n]*, 0(?: +//|\n)", src)) == 4
     assert not re.search(r"v_cvt_f16_f32 ", src)
 
 
 def test_fp16_unsigned_lifts_nibbles_in_place(toolchain):
-    """Two of the four nibble pairs are lifted where they already lie, by
-    choosing the magic to match the nibble's position rather than shifting it
-    to bit 0. The other two need mantissa bits 8-11, which are the exponent, so
-    one shift per dword remains -- but only one, not three."""
+    """Each output pair (nibbles 2j, 2j+1) is lifted from byte j copied into bytes 0
+    and 2 by one v_perm: no shift of the dword, and no permutation afterwards."""
     _, whole = _emit(toolchain, blockSize=128, depthU=64, zeroPoint=True,
                      problemType=dict(FP16_UNSIGNED))
     body = whole[whole.index("w4a16: save packed int4 dword 0"):whole.index("ds_store")]
-    shifts = re.findall(r"v_lshrrev_b32 ", body)
-    assert len(shifts) == 1, (
-        "expected a single shift per dword, found %d" % len(shifts))
+    assert not re.findall(r"v_lshrrev_b32 ", body)
+    sels = re.findall(r"v_perm_b32 \S+, (\S+), \1, (0x[0-9a-f]+)", body)
+    assert [int(x, 16) for _, x in sels] == [0x0C000C00 | (j << 16) | j for j in range(4)]
 
 
 def test_fp16_unsigned_packed_is_half_the_valu(toolchain):
@@ -737,7 +734,7 @@ def test_fp16_mac_type_is_valid(toolchain, encoding):
 def test_signed_fp16_uses_biased_packed_arithmetic(toolchain):
     _, src = _emit(toolchain, problemType=dict(_FP16))
     assert "0x88888888" in src
-    assert "0xe408e408" in src and "0xd480d480" in src
+    assert "0xd480e408" in src  # {-(64 + 8) : -(1024 + 8)}
     assert "v_pk_add_f16" in src and "v_pk_mul_f16" in src
     assert "scaleA: duplicate fp16 scale" in src
     assert "w4a16: f32 -> fp16" not in src
@@ -921,16 +918,20 @@ def test_zero_point_byte_offsets_are_hoisted(toolchain, block_size):
 
 @pytest.mark.parametrize("zero_point", [False, True])
 def test_unsigned_fp16_restores_consecutive_pairs(toolchain, zero_point):
+    """The pairs come out in output order: the scale step writes each output dword
+    (G2L, which the source may share) after every lift has read the source."""
     _, src = _emit(toolchain, blockSize=32, depthU=64, zeroPoint=zero_point,
                    problemType=dict(FP16_UNSIGNED))
     body = src[src.index("w4a16: save packed int4 dword 0"):src.index("ds_store")]
     assert body.count("v_perm_b32 ") == 4
-    assert "0x5040100" in src and "0x7060302" in src
+    assert "0x5040100" not in body and "0x7060302" not in body
     # Each four-instruction stage completes before the next begins.
+    assert body.rindex("v_perm_b32") < body.index("v_and_or_b32")
     assert body.rindex("v_and_or_b32") < body.index("v_pk_add_f16")
     scale_op = "v_pk_fma_f16" if zero_point else "v_pk_mul_f16"
     assert body.rindex("v_pk_add_f16") < body.index(scale_op)
-    assert body.rindex(scale_op) < body.index("v_perm_b32")
+    outs = re.findall(scale_op + r" v\[vgprG2LA\+(\d+)\+(\d+)\]", body)
+    assert [int(o) for _, o in outs] == [0, 1, 2, 3]
 
 
 @needs_logic
@@ -1015,7 +1016,7 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
                 assert "G2LScaleZeroA" not in src
                 if kernel["ProblemType"]["MacDataTypeA"].isHalf():
                     assert "v_pk_fma_f16" not in src
-                    assert "0xe408e408" in src and "0xd480d480" in src
+                    assert "0xd480e408" in src  # {-(64 + 8) : -(1024 + 8)}
             seen.add(kernel["BaseName"])
     assert len(seen) == 20
 

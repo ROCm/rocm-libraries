@@ -10237,9 +10237,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                      "ScaleAInc", "ScaleAKCnt"):
           self.defineSgpr(name, 1)
       if blockDequantPackedFp16A(kernel["ProblemType"]):
-        # Two nibble masks and two symmetric packed biases.
-        # Zero-point kernels take the biases from a VGPR, so only the masks.
-        self.defineSgpr("ScaleAPkMagic", 2 if kernel["ProblemType"]["ScaleZeroPointA"] else 4)
+        # The nibble-pair mask and the symmetric packed subtrahend.
+        # Zero-point kernels take the subtrahend from a VGPR, so only the mask.
+        self.defineSgpr("ScaleAPkMagic", 1 if kernel["ProblemType"]["ScaleZeroPointA"] else 2)
       elif kernel["ProblemType"]["MacDataTypeA"].isBFloat16():
         # bf16 lift: the f32 exponents that put each nibble position's lsb at
         # 1.0, and the 0x8000 rounding bias (see blockScaleADequantBf16).
