@@ -260,7 +260,7 @@ build their own fixed-width variants, about 80).
 | `build_timeout_s` | `180`, native kernels only | limit for each codegen, compile and link step of a kernel's build in the search; when given, it applies to every kernel. Without it, a round that builds a fixed-vector-width kernel keeps the build function's limits, as a full run does (300 s per step, 1200 s to compile a fixed-width kernel). A kernel whose step times out is a `compile_error`. See "Build timeout" below |
 | `warm_start.pairs_file`, `top_k` | none, `5` | a `--pairs` file (e.g. from `select_kernels.py --out_pairs`): the first `top_k` listed kernels of a problem are tried first |
 | `warm_start.ranked_csv`, `use_prior` | none, `false` | `select_kernels.py --out_ranked` predictions as a prior (`tpe`, `gp`, `portfolio` only); give both or neither |
-| `warm_start.cover` | none | a candidate field, e.g. `"pipeline"`: one kernel per value of that field is tried first, after the `pairs_file` picks and not limited by `top_k` (values a pick already has are skipped; each value's kernel is drawn with the problem's seed). Needs no `pairs_file`. The picks are trials like any other: they count toward `trials_per_problem` and `new_builds_per_run`, and a problem whose warm picks would use all of its `trials_per_problem` ends the run with an error before any work, so cover a field with few values (`pipeline`: at most 4 on gfx1250). With `hill` the picks replace its stratified start probe (it starts from the best of them); `tpe` and `gp` count them in their startup trials. Not for `random` or `exhaustive`, which take no warm start (an error); a problem with fewer candidates than `trials_per_problem` is measured exhaustively anyway. `run.json` lists the picks per problem under `warm_cover`; a field that no candidate of a problem has ends the run with an error |
+| `warm_start.cover` | none | a candidate field, e.g. `"pipeline"`: one kernel per value of that field is tried first, after the `pairs_file` picks and not limited by `top_k` (values a pick already has are skipped; each value's kernel is drawn independently from the problem's seed, field and value, so identical groups share a pick regardless of other groups). Needs no `pairs_file`. The picks are trials like any other: they count toward `trials_per_problem` and `new_builds_per_run`, and a problem whose warm picks would use all of its `trials_per_problem` ends the run with an error before any work, so cover a field with few values (the number of pipelines depends on the config and problem, not just the arch). With `hill` the picks replace its stratified start probe (it starts from the best of them); `tpe` and `gp` count them in their startup trials. Not for `random` or `exhaustive`, which take no warm start (an error); a problem with fewer candidates than `trials_per_problem` is measured exhaustively anyway. `run.json` lists the picks per problem under `warm_cover`; a field that no candidate of a problem has ends the run with an error |
 | `confirm.finalists`, `confirm.fresh_calls` | `2`, `3` | the winner is the lowest median among the finalists whose fresh calls all verified |
 | `measurement_policy` | `full` | the only value |
 | `host_cache.dir`, `max_entry_gib`, `max_total_gib` | system temp dir, `4`, a quarter of its free space | the run's cache of verification inputs and references, in a new directory under `dir` (keep it on a local filesystem) that is removed when the run ends. An entry larger than `max_entry_gib`, one past `max_total_gib` in all, or one that would leave the filesystem less than 10% free is not stored, and its calls compute as without the cache: on a filesystem already over 90% full nothing is stored, and the run warns. Both limits count the entries still being written, so they hold with any number of workers. `max_total_gib` `0` turns it off. See "Host cache" and "Host cache space" below |
@@ -674,6 +674,35 @@ it builds those variants, or leave `build_timeout_s` out (the build
 function's own limits then apply to them). There is no heuristic warm start on
 gfx1250 (the models are gfx950 only); an earlier run's `winners.json` can be
 the `pairs_file` next to `cover`.
+
+To sample at most 20 kernels **per pipeline and problem**, use the pipeline
+metadata in `--list-pairs`, then pass the sampled pairs to a plain run.
+`--max-kernels 20` alone is a global limit, not a per-pipeline sample:
+
+```bash
+python gemm_full_benchmark.py $RUN --list-pairs calibration-candidates.json
+python - <<'PY'
+import json
+import random
+from collections import defaultdict
+from pathlib import Path
+
+data = json.loads(Path("calibration-candidates.json").read_text())
+rng = random.Random(0)
+picks = {}
+for problem, names in data["pairs"].items():
+    groups = defaultdict(list)
+    for name in names:
+        groups[data["kernels"][name]["pipeline"]].append(name)
+    picks[problem] = [
+        name for group in groups.values()
+        for name in rng.sample(group, min(20, len(group)))
+    ]
+Path("calibration-pairs.json").write_text(json.dumps(picks, indent=2) + "\n")
+PY
+python gemm_full_benchmark.py $RUN --pairs calibration-pairs.json \
+    --devices 0, --workers 16 --verify --build-timeout 1200
+```
 
 `trials_per_problem` 100 is not exhaustive (the TDM config has 459 to 1618
 candidates per problem). The exhaustive reference for a search is a plain run

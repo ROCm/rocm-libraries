@@ -608,7 +608,7 @@ def repeat_plan(measured, top_k):
     return plan
 
 
-def run_repeats(plan, count, problems, built_kernels, devices, run_args):
+def run_repeats(plan, count, problems, built_kernels, devices, run_args, extra=None):
     """Re-time each planned (problem, kernel) ``count`` times, one subprocess per
     launch, rep-major so repeats of one kernel are spread over the run.
 
@@ -639,7 +639,13 @@ def run_repeats(plan, count, problems, built_kernels, devices, run_args):
                 return
             fails = []
             rows, _, n_fail, n_skip = _run_batch_on_device(
-                device_id, unit, rargs, worker_path, base_env, failures=fails,
+                device_id,
+                unit,
+                rargs,
+                worker_path,
+                base_env,
+                extra,
+                failures=fails,
                 workers=workers,
             )
             if workers.cancelled:
@@ -1345,6 +1351,7 @@ def main():
         hooks["measured"] = measured
     # The workers' fp8/bf8 host format (OCP or FNUZ) follows the arch the
     # kernels were built for, not the local GPU's detection, which can fail.
+    worker_extra = {"arch": arch}
     stats = benchmark_on_devices(
         problems,
         pairs,
@@ -1354,7 +1361,7 @@ def main():
         worker_path,
         base_env,
         csv_path,
-        {"arch": arch},
+        worker_extra,
         **hooks,
     )
 
@@ -1374,7 +1381,13 @@ def main():
             rwriter.writeheader()
             run_args = (args, worker_path, base_env, rwriter, rfh, threading.Lock())
             repeat_result = run_repeats(
-                plan, args.repeat_count, problems, built_kernels, devices, run_args
+                plan,
+                args.repeat_count,
+                problems,
+                built_kernels,
+                devices,
+                run_args,
+                worker_extra,
             )
         stats["failures"] += repeat_result[1]
     if fail_file:

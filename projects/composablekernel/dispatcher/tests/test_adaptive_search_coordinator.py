@@ -1368,6 +1368,29 @@ def test_warm_start_cover_alone_one_kernel_per_value(tmp_path):
     assert runs[0] == runs[1] and len({tuple(r) for r in runs}) > 2
 
 
+@pytest.mark.parametrize("leading", ["", "ADG"])
+def test_warm_start_cover_shared_groups_ignore_other_groups(tmp_path, leading):
+    # Odd-K problems can lose comp_async while retaining identical TDM groups.
+    # Removing or resizing that leading group must not cost extra shared builds.
+    shared = "BCEFHIKL"
+    calls = []
+    run(
+        tmp_path,
+        PipeAdapter({"P1": list("ADGJ" + shared), "P2": list(leading + shared)}),
+        {},
+        calls=calls,
+        strategy="tpe",
+        seed=2,
+        warm_start={"cover": "pipeline"},
+    )
+    assert len(calls) == 2 and calls[0]["seed"] == calls[1]["seed"]
+    picks = [{r["pipeline"]: r for r in c["warm"]} for c in calls]
+    assert list(picks[0]) == list(PIPES)
+    assert list(picks[1]) == list(PIPES if leading else PIPES[1:])
+    for pipeline in PIPES[1:]:
+        assert picks[0][pipeline] == picks[1][pipeline]
+
+
 def test_warm_start_cover_is_not_truncated_by_top_k(tmp_path):
     # top_k limits the pairs_file picks only; cover adds the values they lack.
     picks = tmp_path / "picks.json"

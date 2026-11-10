@@ -961,13 +961,15 @@ class SearchCoordinator:
     def _cover(self, p: _Problem, name: str, picks) -> List[Candidate]:
         """One candidate per value of the record field ``name`` that no pick
         has, values in candidate order; each value's candidate is drawn with
-        the problem's seed, so a run is reproducible and seeds differ."""
+        its own seeded RNG, so unrelated groups cannot change shared picks."""
         groups: Dict[Any, List[Candidate]] = {}
         for c in p.cands:
             if name in c.record:
                 groups.setdefault(c.record[name], []).append(c)
-        rng = random.Random(f"cover:{p.seed}")
-        drawn = {v: rng.choice(cands) for v, cands in groups.items()}
+        drawn = {
+            v: random.Random(repr(("cover", p.seed, name, v))).choice(cands)
+            for v, cands in groups.items()
+        }
         have = {c.record.get(name) for c in picks}
         out = [c for v, c in drawn.items() if v not in have]
         p.cover = {str(c.record[name]): c.kernel_name for c in out}
