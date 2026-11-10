@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <random>
@@ -249,18 +250,31 @@ inline std::vector<uint8_t> run_reference(MxTdmV4Dtype a_dtype,
     return d;
 }
 
-/// The first element whose bits differ, or "" if D matches bit for bit.
+/// The first element whose bits differ, or "" if D matches bit for bit (any FP8 NaN code
+/// matching any other).
 inline std::string first_mismatch(const std::vector<uint8_t>& got,
                                   const std::vector<uint8_t>& want,
                                   MxTdmV4OutDtype out,
                                   index_t N)
 {
     const index_t bytes = v4::out_bytes(out);
+    // The bits as well as the value: NaNs of different bits all print as nan.
+    const auto hex = [&](const std::vector<uint8_t>& d, std::size_t i) {
+        uint32_t bits = 0;
+        std::memcpy(&bits, d.data() + i * bytes, bytes);
+        char text[16];
+        std::snprintf(text, sizeof(text), " (0x%0*X)", static_cast<int>(bytes * 2), bits);
+        return std::string(text);
+    };
+    // FP8 NaN is 0x7F or 0xFF; the sign of a NaN out of arithmetic is unspecified (the device
+    // gives a NaN read from C sign 1, the reference keeps sign 0), so the two codes match.
+    const auto fp8_nan = [](uint8_t b) { return (b & 0x7F) == 0x7F; };
     for(std::size_t i = 0; i < got.size() / bytes; ++i)
-        if(std::memcmp(got.data() + i * bytes, want.data() + i * bytes, bytes) != 0)
+        if(std::memcmp(got.data() + i * bytes, want.data() + i * bytes, bytes) != 0 &&
+           !(out == MxTdmV4OutDtype::Fp8E4M3 && fp8_nan(got[i]) && fp8_nan(want[i])))
             return "D(" + std::to_string(i / N) + ", " + std::to_string(i % N) + "): got " +
-                   std::to_string(v4::load_out(out, got.data(), i)) + ", want " +
-                   std::to_string(v4::load_out(out, want.data(), i));
+                   std::to_string(v4::load_out(out, got.data(), i)) + hex(got, i) + ", want " +
+                   std::to_string(v4::load_out(out, want.data(), i)) + hex(want, i);
     return "";
 }
 
