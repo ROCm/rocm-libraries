@@ -4,7 +4,8 @@
 // The backward-weights kernels (CONV_WRW, K3), compiled by HIPRTC per catalog config. The pack
 // defines:
 //   CONV_K3_T        element type: float, _Float16, or unsigned short (bf16 bits)
-//   CONV_K3_LOOP     0 output rows (any stride); 1 row ring (height stride 1); 2 row ring with
+//   CONV_K3_LOOP     0 output rows (any stride); 1 row ring (height stride 1, or one ring per
+//                    height-stride phase); 2 row ring with
 //                    LDS DMA (gfx950, width stride 1); 3 row ring on FMA (exact fp32 without
 //                    an fp32 matrix core: RDNA); 4 output rows on FMA (any stride, vec 1 for
 //                    rows that are not a whole number of vectors); 5 direct (ConvWrwDirect.h:

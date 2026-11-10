@@ -331,7 +331,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 487
+      "priority": 455
     },
     {
       "version": "1.0",
@@ -367,7 +367,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 486
+      "priority": 454
     },
     {
       "version": "1.0",
@@ -403,7 +403,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 485
+      "priority": 453
     },
     {
       "version": "1.0",
@@ -439,7 +439,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 484
+      "priority": 452
     },
     {
       "version": "1.0",
@@ -475,7 +475,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 483
+      "priority": 451
     },
     {
       "version": "1.0",
@@ -511,7 +511,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 482
+      "priority": 450
     },
     {
       "version": "1.0",
@@ -547,7 +547,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 481
+      "priority": 449
     },
     {
       "version": "1.0",
@@ -583,7 +583,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 480
+      "priority": 448
     },
     {
       "version": "1.0",
@@ -619,7 +619,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 479
+      "priority": 447
     },
     {
       "version": "1.0",
@@ -655,7 +655,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 478
+      "priority": 446
     },
     {
       "version": "1.0",
@@ -691,7 +691,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 477
+      "priority": 445
     },
     {
       "version": "1.0",
@@ -727,7 +727,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 476
+      "priority": 444
     },
     {
       "version": "1.0",
@@ -763,7 +763,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 475
+      "priority": 443
     },
     {
       "version": "1.0",
@@ -799,7 +799,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 474
+      "priority": 442
     },
     {
       "version": "1.0",
@@ -835,7 +835,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 473
+      "priority": 441
     },
     {
       "version": "1.0",
@@ -871,7 +871,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 472
+      "priority": 440
     },
     {
       "version": "1.0",
@@ -907,7 +907,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 471
+      "priority": 439
     },
     {
       "version": "1.0",
@@ -943,7 +943,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 470
+      "priority": 438
     },
     {
       "version": "1.0",
@@ -979,7 +979,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 469
+      "priority": 437
     },
     {
       "version": "1.0",
@@ -1015,7 +1015,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 468
+      "priority": 436
     },
     {
       "version": "1.0",
@@ -1051,7 +1051,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 467
+      "priority": 435
     },
     {
       "version": "1.0",
@@ -1087,7 +1087,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 466
+      "priority": 434
     },
     {
       "version": "1.0",
@@ -1123,7 +1123,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 465
+      "priority": 433
     },
     {
       "version": "1.0",
@@ -1159,7 +1159,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 464
+      "priority": 432
     },
     {
       "version": "1.0",
@@ -1195,7 +1195,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 463
+      "priority": 431
     },
     {
       "version": "1.0",
@@ -1231,7 +1231,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 462
+      "priority": 430
     },
     {
       "version": "1.0",
@@ -1267,7 +1267,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 461
+      "priority": 429
     },
     {
       "version": "1.0",
@@ -1303,7 +1303,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 460
+      "priority": 428
     },
     {
       "version": "1.0",
@@ -1339,7 +1339,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 459
+      "priority": 427
     },
     {
       "version": "1.0",
@@ -1375,7 +1375,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 458
+      "priority": 426
     },
     {
       "version": "1.0",
@@ -1411,7 +1411,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 457
+      "priority": 425
     },
     {
       "version": "1.0",
@@ -1447,7 +1447,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 456
+      "priority": 424
     },
     {
       "version": "1.0",
@@ -1483,7 +1483,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 455
+      "priority": 423
     },
     {
       "version": "1.0",
@@ -1519,7 +1519,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 454
+      "priority": 422
     },
     {
       "version": "1.0",
@@ -1555,7 +1555,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 453
+      "priority": 421
     },
     {
       "version": "1.0",
@@ -1591,7 +1591,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 452
+      "priority": 420
     },
     {
       "version": "1.0",
@@ -1627,7 +1627,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 451
+      "priority": 419
     },
     {
       "version": "1.0",
@@ -1663,7 +1663,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 450
+      "priority": 418
     },
     {
       "version": "1.0",
@@ -1699,7 +1699,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 449
+      "priority": 417
     },
     {
       "version": "1.0",
@@ -1735,7 +1735,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 448
+      "priority": 416
     },
     {
       "version": "1.0",
@@ -1771,7 +1771,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 447
+      "priority": 415
     },
     {
       "version": "1.0",
@@ -1807,7 +1807,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 446
+      "priority": 414
     },
     {
       "version": "1.0",
@@ -1843,7 +1843,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 445
+      "priority": 413
     },
     {
       "version": "1.0",
@@ -1879,7 +1879,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 444
+      "priority": 412
     },
     {
       "version": "1.0",
@@ -1915,7 +1915,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 443
+      "priority": 411
     },
     {
       "version": "1.0",
@@ -1951,7 +1951,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 442
+      "priority": 410
     },
     {
       "version": "1.0",
@@ -1987,7 +1987,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 441
+      "priority": 409
     },
     {
       "version": "1.0",
@@ -2023,7 +2023,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 440
+      "priority": 408
     },
     {
       "version": "1.0",
@@ -2059,7 +2059,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 439
+      "priority": 407
     },
     {
       "version": "1.0",
@@ -2095,7 +2095,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 438
+      "priority": 406
     },
     {
       "version": "1.0",
@@ -2131,7 +2131,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 437
+      "priority": 405
     },
     {
       "version": "1.0",
@@ -2167,7 +2167,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 436
+      "priority": 404
     },
     {
       "version": "1.0",
@@ -2203,7 +2203,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 435
+      "priority": 403
     },
     {
       "version": "1.0",
@@ -2239,7 +2239,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 434
+      "priority": 402
     },
     {
       "version": "1.0",
@@ -2275,7 +2275,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 433
+      "priority": 401
     },
     {
       "version": "1.0",
@@ -2311,7 +2311,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 432
+      "priority": 400
     },
     {
       "version": "1.0",
@@ -2347,7 +2347,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 431
+      "priority": 399
     },
     {
       "version": "1.0",
@@ -2383,7 +2383,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 430
+      "priority": 398
     },
     {
       "version": "1.0",
@@ -2419,7 +2419,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 429
+      "priority": 397
     },
     {
       "version": "1.0",
@@ -2455,7 +2455,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 428
+      "priority": 396
     },
     {
       "version": "1.0",
@@ -2491,7 +2491,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 427
+      "priority": 395
     },
     {
       "version": "1.0",
@@ -2527,7 +2527,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 426
+      "priority": 394
     },
     {
       "version": "1.0",
@@ -2563,7 +2563,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 425
+      "priority": 393
     },
     {
       "version": "1.0",
@@ -2599,7 +2599,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 424
+      "priority": 392
     },
     {
       "version": "1.0",
@@ -2635,7 +2635,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 423
+      "priority": 391
     },
     {
       "version": "1.0",
@@ -2671,7 +2671,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 422
+      "priority": 390
     },
     {
       "version": "1.0",
@@ -2707,7 +2707,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 421
+      "priority": 389
     },
     {
       "version": "1.0",
@@ -2743,7 +2743,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 420
+      "priority": 388
     },
     {
       "version": "1.0",
@@ -2779,7 +2779,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 419
+      "priority": 387
     },
     {
       "version": "1.0",
@@ -2815,7 +2815,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 418
+      "priority": 386
     },
     {
       "version": "1.0",
@@ -2851,7 +2851,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 417
+      "priority": 385
     },
     {
       "version": "1.0",
@@ -2887,7 +2887,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 416
+      "priority": 384
     },
     {
       "version": "1.0",
@@ -2923,7 +2923,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 415
+      "priority": 383
     },
     {
       "version": "1.0",
@@ -2959,7 +2959,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 414
+      "priority": 382
     },
     {
       "version": "1.0",
@@ -2995,7 +2995,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 413
+      "priority": 381
     },
     {
       "version": "1.0",
@@ -3031,7 +3031,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 412
+      "priority": 380
     },
     {
       "version": "1.0",
@@ -3067,7 +3067,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 411
+      "priority": 379
     },
     {
       "version": "1.0",
@@ -3103,7 +3103,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 410
+      "priority": 378
     },
     {
       "version": "1.0",
@@ -3139,7 +3139,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 409
+      "priority": 377
     },
     {
       "version": "1.0",
@@ -3175,7 +3175,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 408
+      "priority": 376
     },
     {
       "version": "1.0",
@@ -3211,7 +3211,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 407
+      "priority": 375
     },
     {
       "version": "1.0",
@@ -3247,7 +3247,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 406
+      "priority": 374
     },
     {
       "version": "1.0",
@@ -3283,7 +3283,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 405
+      "priority": 373
     },
     {
       "version": "1.0",
@@ -3319,7 +3319,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 404
+      "priority": 372
     },
     {
       "version": "1.0",
@@ -3355,7 +3355,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 403
+      "priority": 371
     },
     {
       "version": "1.0",
@@ -3391,7 +3391,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 402
+      "priority": 370
     },
     {
       "version": "1.0",
@@ -3427,7 +3427,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 401
+      "priority": 369
     },
     {
       "version": "1.0",
@@ -3463,7 +3463,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 400
+      "priority": 368
     },
     {
       "version": "1.0",
@@ -3499,7 +3499,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 399
+      "priority": 367
     },
     {
       "version": "1.0",
@@ -3535,7 +3535,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 398
+      "priority": 366
     },
     {
       "version": "1.0",
@@ -3571,7 +3571,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 397
+      "priority": 365
     },
     {
       "version": "1.0",
@@ -3607,7 +3607,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 396
+      "priority": 364
     },
     {
       "version": "1.0",
@@ -3643,7 +3643,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 395
+      "priority": 363
     },
     {
       "version": "1.0",
@@ -3679,7 +3679,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 394
+      "priority": 362
     },
     {
       "version": "1.0",
@@ -3715,7 +3715,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 393
+      "priority": 361
     },
     {
       "version": "1.0",
@@ -3751,7 +3751,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 392
+      "priority": 360
     },
     {
       "version": "1.0",
@@ -3787,7 +3787,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 391
+      "priority": 359
     },
     {
       "version": "1.0",
@@ -3823,7 +3823,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 390
+      "priority": 358
     },
     {
       "version": "1.0",
@@ -3859,7 +3859,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 389
+      "priority": 357
     },
     {
       "version": "1.0",
@@ -3895,7 +3895,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 388
+      "priority": 356
     },
     {
       "version": "1.0",
@@ -3931,7 +3931,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 387
+      "priority": 355
     },
     {
       "version": "1.0",
@@ -3967,7 +3967,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 386
+      "priority": 354
     },
     {
       "version": "1.0",
@@ -4003,7 +4003,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 385
+      "priority": 353
     },
     {
       "version": "1.0",
@@ -4039,7 +4039,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 384
+      "priority": 352
     },
     {
       "version": "1.0",
@@ -4075,7 +4075,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 383
+      "priority": 351
     },
     {
       "version": "1.0",
@@ -4111,7 +4111,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 382
+      "priority": 350
     },
     {
       "version": "1.0",
@@ -4147,7 +4147,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 381
+      "priority": 349
     },
     {
       "version": "1.0",
@@ -4183,7 +4183,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 380
+      "priority": 348
     },
     {
       "version": "1.0",
@@ -4219,7 +4219,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 379
+      "priority": 347
     },
     {
       "version": "1.0",
@@ -4255,7 +4255,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 378
+      "priority": 346
     },
     {
       "version": "1.0",
@@ -4291,7 +4291,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 377
+      "priority": 345
     },
     {
       "version": "1.0",
@@ -4327,7 +4327,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 376
+      "priority": 344
     },
     {
       "version": "1.0",
@@ -4363,7 +4363,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 375
+      "priority": 343
     },
     {
       "version": "1.0",
@@ -4399,7 +4399,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 374
+      "priority": 342
     },
     {
       "version": "1.0",
@@ -4435,7 +4435,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 373
+      "priority": 341
     },
     {
       "version": "1.0",
@@ -4471,7 +4471,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 372
+      "priority": 340
     },
     {
       "version": "1.0",
@@ -4507,7 +4507,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 371
+      "priority": 339
     },
     {
       "version": "1.0",
@@ -4543,7 +4543,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 370
+      "priority": 338
     },
     {
       "version": "1.0",
@@ -4579,7 +4579,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 369
+      "priority": 337
     },
     {
       "version": "1.0",
@@ -4615,7 +4615,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 368
+      "priority": 336
     },
     {
       "version": "1.0",
@@ -4651,7 +4651,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 367
+      "priority": 335
     },
     {
       "version": "1.0",
@@ -4687,7 +4687,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 366
+      "priority": 334
     },
     {
       "version": "1.0",
@@ -4723,7 +4723,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 365
+      "priority": 333
     },
     {
       "version": "1.0",
@@ -4759,7 +4759,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 364
+      "priority": 332
     },
     {
       "version": "1.0",
@@ -4795,7 +4795,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 363
+      "priority": 331
     },
     {
       "version": "1.0",
@@ -4831,7 +4831,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 362
+      "priority": 330
     },
     {
       "version": "1.0",
@@ -4867,7 +4867,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 361
+      "priority": 329
     },
     {
       "version": "1.0",
@@ -4903,7 +4903,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 360
+      "priority": 328
     },
     {
       "version": "1.0",
@@ -4939,7 +4939,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 359
+      "priority": 327
     },
     {
       "version": "1.0",
@@ -4975,7 +4975,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 358
+      "priority": 326
     },
     {
       "version": "1.0",
@@ -5011,7 +5011,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 357
+      "priority": 325
     },
     {
       "version": "1.0",
@@ -5047,7 +5047,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 356
+      "priority": 324
     },
     {
       "version": "1.0",
@@ -5083,7 +5083,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 355
+      "priority": 323
     },
     {
       "version": "1.0",
@@ -5119,7 +5119,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 354
+      "priority": 322
     },
     {
       "version": "1.0",
@@ -5155,7 +5155,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 353
+      "priority": 321
     },
     {
       "version": "1.0",
@@ -5191,7 +5191,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 352
+      "priority": 320
     },
     {
       "version": "1.0",
@@ -5227,7 +5227,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 351
+      "priority": 319
     },
     {
       "version": "1.0",
@@ -5263,7 +5263,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 350
+      "priority": 318
     },
     {
       "version": "1.0",
@@ -5299,7 +5299,295 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 349
+      "priority": 317
+    },
+    {
+      "version": "1.0",
+      "id": "8a0c8ea2-f3cc-587f-bda2-9da737b2953f",
+      "name": "conv_wrw.bf16.wmma11_bf16.l1.nchw.64x32x32.w4x2.fr2s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "atom_id": 13,
+        "loop": 1,
+        "layout": 0,
+        "bk": 64,
+        "bc": 32,
+        "bq": 32,
+        "fr": 2,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 316
+    },
+    {
+      "version": "1.0",
+      "id": "da27da7e-ab19-592e-8080-f7f716189d2d",
+      "name": "conv_wrw.bf16.wmma11_bf16.l1.nhwc.64x32x32.w4x2.fr2s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "atom_id": 13,
+        "loop": 1,
+        "layout": 1,
+        "bk": 64,
+        "bc": 32,
+        "bq": 32,
+        "fr": 2,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 315
+    },
+    {
+      "version": "1.0",
+      "id": "95728894-3003-5a0f-8dc1-b5740d922b0b",
+      "name": "conv_wrw.bf16.wmma11_bf16.l1.nchw.64x64x32.w4x2.fr2s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "atom_id": 13,
+        "loop": 1,
+        "layout": 0,
+        "bk": 64,
+        "bc": 64,
+        "bq": 32,
+        "fr": 2,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 314
+    },
+    {
+      "version": "1.0",
+      "id": "f3a890fa-2651-542c-868b-ecb07ccfabed",
+      "name": "conv_wrw.bf16.wmma11_bf16.l1.nhwc.64x64x32.w4x2.fr2s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "atom_id": 13,
+        "loop": 1,
+        "layout": 1,
+        "bk": 64,
+        "bc": 64,
+        "bq": 32,
+        "fr": 2,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 313
+    },
+    {
+      "version": "1.0",
+      "id": "7d075a14-12f5-5c56-aa75-49959e9ee71a",
+      "name": "conv_wrw.bf16.wmma11_bf16.l1.nchw.64x32x32.w4x2.fr1s2sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "atom_id": 13,
+        "loop": 1,
+        "layout": 0,
+        "bk": 64,
+        "bc": 32,
+        "bq": 32,
+        "fr": 1,
+        "s": 2,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 312
+    },
+    {
+      "version": "1.0",
+      "id": "ceb7d700-939f-5948-8e20-be22d5763dc9",
+      "name": "conv_wrw.bf16.wmma11_bf16.l1.nhwc.64x32x32.w4x2.fr1s2sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "atom_id": 13,
+        "loop": 1,
+        "layout": 1,
+        "bk": 64,
+        "bc": 32,
+        "bq": 32,
+        "fr": 1,
+        "s": 2,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 311
+    },
+    {
+      "version": "1.0",
+      "id": "b6059e6f-1e7d-505c-b2fd-cc0a3145a9ca",
+      "name": "conv_wrw.bf16.wmma11_bf16.l1.nchw.64x64x32.w4x2.fr1s2sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "atom_id": 13,
+        "loop": 1,
+        "layout": 0,
+        "bk": 64,
+        "bc": 64,
+        "bq": 32,
+        "fr": 1,
+        "s": 2,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 310
+    },
+    {
+      "version": "1.0",
+      "id": "3a147bfb-98b9-56f3-9d2c-4efc1e6a47a7",
+      "name": "conv_wrw.bf16.wmma11_bf16.l1.nhwc.64x64x32.w4x2.fr1s2sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "atom_id": 13,
+        "loop": 1,
+        "layout": 1,
+        "bk": 64,
+        "bc": 64,
+        "bq": 32,
+        "fr": 1,
+        "s": 2,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 309
     },
     {
       "version": "1.0",
@@ -5335,7 +5623,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 348
+      "priority": 308
     },
     {
       "version": "1.0",
@@ -5371,7 +5659,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 347
+      "priority": 307
     },
     {
       "version": "1.0",
@@ -5407,7 +5695,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 346
+      "priority": 306
     },
     {
       "version": "1.0",
@@ -5443,7 +5731,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 345
+      "priority": 305
     },
     {
       "version": "1.0",
@@ -5479,7 +5767,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 344
+      "priority": 304
     },
     {
       "version": "1.0",
@@ -5515,7 +5803,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 343
+      "priority": 303
     },
     {
       "version": "1.0",
@@ -5551,7 +5839,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 342
+      "priority": 302
     },
     {
       "version": "1.0",
@@ -5587,7 +5875,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 341
+      "priority": 301
     },
     {
       "version": "1.0",
@@ -5623,7 +5911,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 340
+      "priority": 300
     },
     {
       "version": "1.0",
@@ -5659,7 +5947,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 339
+      "priority": 299
     },
     {
       "version": "1.0",
@@ -5695,7 +5983,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 338
+      "priority": 298
     },
     {
       "version": "1.0",
@@ -5731,7 +6019,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 337
+      "priority": 297
     },
     {
       "version": "1.0",
@@ -5767,7 +6055,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 336
+      "priority": 296
     },
     {
       "version": "1.0",
@@ -5803,7 +6091,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 335
+      "priority": 295
     },
     {
       "version": "1.0",
@@ -5839,7 +6127,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 334
+      "priority": 294
     },
     {
       "version": "1.0",
@@ -5875,7 +6163,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 333
+      "priority": 293
     },
     {
       "version": "1.0",
@@ -5911,7 +6199,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 332
+      "priority": 292
     },
     {
       "version": "1.0",
@@ -5947,7 +6235,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 331
+      "priority": 291
     },
     {
       "version": "1.0",
@@ -5983,7 +6271,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 330
+      "priority": 290
     },
     {
       "version": "1.0",
@@ -6019,7 +6307,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 329
+      "priority": 289
     },
     {
       "version": "1.0",
@@ -6055,7 +6343,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 328
+      "priority": 288
     },
     {
       "version": "1.0",
@@ -6091,7 +6379,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 327
+      "priority": 287
     },
     {
       "version": "1.0",
@@ -6127,7 +6415,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 326
+      "priority": 286
     },
     {
       "version": "1.0",
@@ -6163,7 +6451,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 325
+      "priority": 285
     },
     {
       "version": "1.0",
@@ -6199,7 +6487,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 324
+      "priority": 284
     },
     {
       "version": "1.0",
@@ -6235,7 +6523,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 323
+      "priority": 283
     },
     {
       "version": "1.0",
@@ -6271,7 +6559,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 322
+      "priority": 282
     },
     {
       "version": "1.0",
@@ -6307,7 +6595,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 321
+      "priority": 281
     },
     {
       "version": "1.0",
@@ -6343,7 +6631,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 320
+      "priority": 280
     },
     {
       "version": "1.0",
@@ -6379,7 +6667,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 319
+      "priority": 279
     },
     {
       "version": "1.0",
@@ -6415,7 +6703,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 318
+      "priority": 278
     },
     {
       "version": "1.0",
@@ -6451,7 +6739,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 317
+      "priority": 277
     },
     {
       "version": "1.0",
@@ -6487,7 +6775,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 316
+      "priority": 276
     },
     {
       "version": "1.0",
@@ -6523,7 +6811,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 315
+      "priority": 275
     },
     {
       "version": "1.0",
@@ -6559,7 +6847,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 314
+      "priority": 274
     },
     {
       "version": "1.0",
@@ -6595,7 +6883,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 313
+      "priority": 273
     },
     {
       "version": "1.0",
@@ -6631,7 +6919,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 312
+      "priority": 272
     },
     {
       "version": "1.0",
@@ -6667,7 +6955,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 311
+      "priority": 271
     },
     {
       "version": "1.0",
@@ -6703,7 +6991,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 310
+      "priority": 270
     },
     {
       "version": "1.0",
@@ -6739,7 +7027,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 309
+      "priority": 269
     },
     {
       "version": "1.0",
@@ -6775,7 +7063,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 308
+      "priority": 268
     },
     {
       "version": "1.0",
@@ -6811,7 +7099,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 307
+      "priority": 267
     },
     {
       "version": "1.0",
@@ -6847,7 +7135,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 306
+      "priority": 266
     },
     {
       "version": "1.0",
@@ -6883,7 +7171,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 305
+      "priority": 265
     },
     {
       "version": "1.0",
@@ -6919,7 +7207,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 304
+      "priority": 264
     },
     {
       "version": "1.0",
@@ -6955,7 +7243,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 303
+      "priority": 263
     },
     {
       "version": "1.0",
@@ -6991,7 +7279,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 302
+      "priority": 262
     },
     {
       "version": "1.0",
@@ -7027,7 +7315,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 301
+      "priority": 261
     },
     {
       "version": "1.0",
@@ -7063,7 +7351,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 300
+      "priority": 260
     },
     {
       "version": "1.0",
@@ -7099,7 +7387,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 299
+      "priority": 259
     },
     {
       "version": "1.0",
@@ -7135,7 +7423,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 298
+      "priority": 258
     },
     {
       "version": "1.0",
@@ -7171,7 +7459,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 297
+      "priority": 257
     },
     {
       "version": "1.0",
@@ -7207,7 +7495,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 296
+      "priority": 256
     },
     {
       "version": "1.0",
@@ -7243,7 +7531,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 295
+      "priority": 255
     },
     {
       "version": "1.0",
@@ -7279,7 +7567,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 294
+      "priority": 254
     },
     {
       "version": "1.0",
@@ -7315,7 +7603,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 293
+      "priority": 253
     },
     {
       "version": "1.0",
@@ -7351,7 +7639,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 292
+      "priority": 252
     },
     {
       "version": "1.0",
@@ -7387,7 +7675,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 291
+      "priority": 251
     },
     {
       "version": "1.0",
@@ -7423,7 +7711,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 290
+      "priority": 250
     },
     {
       "version": "1.0",
@@ -7459,7 +7747,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 289
+      "priority": 249
     },
     {
       "version": "1.0",
@@ -7495,7 +7783,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 288
+      "priority": 248
     },
     {
       "version": "1.0",
@@ -7531,7 +7819,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 287
+      "priority": 247
     },
     {
       "version": "1.0",
@@ -7567,7 +7855,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 286
+      "priority": 246
     },
     {
       "version": "1.0",
@@ -7603,7 +7891,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 285
+      "priority": 245
     },
     {
       "version": "1.0",
@@ -7639,7 +7927,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 284
+      "priority": 244
     },
     {
       "version": "1.0",
@@ -7675,7 +7963,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 283
+      "priority": 243
     },
     {
       "version": "1.0",
@@ -7711,7 +7999,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 282
+      "priority": 242
     },
     {
       "version": "1.0",
@@ -7747,7 +8035,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 281
+      "priority": 241
     },
     {
       "version": "1.0",
@@ -7783,7 +8071,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 280
+      "priority": 240
     },
     {
       "version": "1.0",
@@ -7819,7 +8107,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 279
+      "priority": 239
     },
     {
       "version": "1.0",
@@ -7855,7 +8143,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 278
+      "priority": 238
     },
     {
       "version": "1.0",
@@ -7891,7 +8179,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 277
+      "priority": 237
     },
     {
       "version": "1.0",
@@ -7927,7 +8215,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 276
+      "priority": 236
     },
     {
       "version": "1.0",
@@ -7963,7 +8251,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 275
+      "priority": 235
     },
     {
       "version": "1.0",
@@ -7999,7 +8287,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 274
+      "priority": 234
     },
     {
       "version": "1.0",
@@ -8035,7 +8323,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 273
+      "priority": 233
     },
     {
       "version": "1.0",
@@ -8071,7 +8359,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 272
+      "priority": 232
     },
     {
       "version": "1.0",
@@ -8107,7 +8395,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 271
+      "priority": 231
     },
     {
       "version": "1.0",
@@ -8143,7 +8431,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 270
+      "priority": 230
     },
     {
       "version": "1.0",
@@ -8179,7 +8467,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 269
+      "priority": 229
     },
     {
       "version": "1.0",
@@ -8215,7 +8503,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 268
+      "priority": 228
     },
     {
       "version": "1.0",
@@ -8251,7 +8539,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 267
+      "priority": 227
     },
     {
       "version": "1.0",
@@ -8287,7 +8575,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 266
+      "priority": 226
     },
     {
       "version": "1.0",
@@ -8323,7 +8611,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 265
+      "priority": 225
     },
     {
       "version": "1.0",
@@ -8359,7 +8647,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 264
+      "priority": 224
     },
     {
       "version": "1.0",
@@ -8395,7 +8683,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 263
+      "priority": 223
     },
     {
       "version": "1.0",
@@ -8431,7 +8719,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 262
+      "priority": 222
     },
     {
       "version": "1.0",
@@ -8467,7 +8755,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 261
+      "priority": 221
     },
     {
       "version": "1.0",
@@ -8503,7 +8791,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 260
+      "priority": 220
     },
     {
       "version": "1.0",
@@ -8539,7 +8827,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 259
+      "priority": 219
     },
     {
       "version": "1.0",
@@ -8575,7 +8863,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 258
+      "priority": 218
     },
     {
       "version": "1.0",
@@ -8611,7 +8899,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 257
+      "priority": 217
     },
     {
       "version": "1.0",
@@ -8647,7 +8935,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 256
+      "priority": 216
     },
     {
       "version": "1.0",
@@ -8683,7 +8971,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 255
+      "priority": 215
     },
     {
       "version": "1.0",
@@ -8719,7 +9007,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 254
+      "priority": 214
     },
     {
       "version": "1.0",
@@ -8755,7 +9043,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 253
+      "priority": 213
     },
     {
       "version": "1.0",
@@ -8791,7 +9079,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 252
+      "priority": 212
     },
     {
       "version": "1.0",
@@ -8827,7 +9115,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 251
+      "priority": 211
     },
     {
       "version": "1.0",
@@ -8863,7 +9151,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 250
+      "priority": 210
     },
     {
       "version": "1.0",
@@ -8899,7 +9187,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 249
+      "priority": 209
     },
     {
       "version": "1.0",
@@ -8935,7 +9223,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 248
+      "priority": 208
     },
     {
       "version": "1.0",
@@ -8971,7 +9259,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 247
+      "priority": 207
     },
     {
       "version": "1.0",
@@ -9007,7 +9295,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 246
+      "priority": 206
     },
     {
       "version": "1.0",
@@ -9043,7 +9331,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 245
+      "priority": 205
     },
     {
       "version": "1.0",
@@ -9079,7 +9367,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 244
+      "priority": 204
     },
     {
       "version": "1.0",
@@ -9115,7 +9403,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 243
+      "priority": 203
     },
     {
       "version": "1.0",
@@ -9151,7 +9439,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 242
+      "priority": 202
     },
     {
       "version": "1.0",
@@ -9187,7 +9475,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 241
+      "priority": 201
     },
     {
       "version": "1.0",
@@ -9223,7 +9511,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 240
+      "priority": 200
     },
     {
       "version": "1.0",
@@ -9259,7 +9547,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 239
+      "priority": 199
     },
     {
       "version": "1.0",
@@ -9295,7 +9583,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 238
+      "priority": 198
     },
     {
       "version": "1.0",
@@ -9331,7 +9619,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 237
+      "priority": 197
     },
     {
       "version": "1.0",
@@ -9367,7 +9655,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 236
+      "priority": 196
     },
     {
       "version": "1.0",
@@ -9403,7 +9691,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 235
+      "priority": 195
     },
     {
       "version": "1.0",
@@ -9439,7 +9727,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 234
+      "priority": 194
     },
     {
       "version": "1.0",
@@ -9475,7 +9763,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 233
+      "priority": 193
     },
     {
       "version": "1.0",
@@ -9511,7 +9799,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 232
+      "priority": 192
     },
     {
       "version": "1.0",
@@ -9547,7 +9835,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 231
+      "priority": 191
     },
     {
       "version": "1.0",
@@ -9583,7 +9871,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 230
+      "priority": 190
     },
     {
       "version": "1.0",
@@ -9619,7 +9907,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 229
+      "priority": 189
     },
     {
       "version": "1.0",
@@ -9655,7 +9943,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 228
+      "priority": 188
     },
     {
       "version": "1.0",
@@ -9691,7 +9979,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 227
+      "priority": 187
     },
     {
       "version": "1.0",
@@ -9727,7 +10015,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 226
+      "priority": 186
     },
     {
       "version": "1.0",
@@ -9763,7 +10051,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 225
+      "priority": 185
     },
     {
       "version": "1.0",
@@ -9799,7 +10087,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 224
+      "priority": 184
     },
     {
       "version": "1.0",
@@ -9835,7 +10123,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 223
+      "priority": 183
     },
     {
       "version": "1.0",
@@ -9871,7 +10159,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 222
+      "priority": 182
     },
     {
       "version": "1.0",
@@ -9907,7 +10195,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 221
+      "priority": 181
     },
     {
       "version": "1.0",
@@ -9943,7 +10231,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 220
+      "priority": 180
     },
     {
       "version": "1.0",
@@ -9979,7 +10267,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 219
+      "priority": 179
     },
     {
       "version": "1.0",
@@ -10015,7 +10303,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 218
+      "priority": 178
     },
     {
       "version": "1.0",
@@ -10051,7 +10339,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 217
+      "priority": 177
     },
     {
       "version": "1.0",
@@ -10087,7 +10375,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 216
+      "priority": 176
     },
     {
       "version": "1.0",
@@ -10123,7 +10411,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 215
+      "priority": 175
     },
     {
       "version": "1.0",
@@ -10159,7 +10447,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 214
+      "priority": 174
     },
     {
       "version": "1.0",
@@ -10195,7 +10483,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 213
+      "priority": 173
     },
     {
       "version": "1.0",
@@ -10231,7 +10519,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 212
+      "priority": 172
     },
     {
       "version": "1.0",
@@ -10267,7 +10555,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 211
+      "priority": 171
     },
     {
       "version": "1.0",
@@ -10303,7 +10591,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 210
+      "priority": 170
     },
     {
       "version": "1.0",
@@ -10339,7 +10627,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 209
+      "priority": 169
     },
     {
       "version": "1.0",
@@ -10375,7 +10663,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 208
+      "priority": 168
     },
     {
       "version": "1.0",
@@ -10411,7 +10699,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 207
+      "priority": 167
     },
     {
       "version": "1.0",
@@ -10447,7 +10735,295 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 206
+      "priority": 166
+    },
+    {
+      "version": "1.0",
+      "id": "e38944b6-269c-5acc-80d5-e699d8abe24f",
+      "name": "conv_wrw.bf16.wmma12_bf16.l1.nchw.64x32x32.w4x2.fr2s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "atom_id": 15,
+        "loop": 1,
+        "layout": 0,
+        "bk": 64,
+        "bc": 32,
+        "bq": 32,
+        "fr": 2,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 165
+    },
+    {
+      "version": "1.0",
+      "id": "b4288fcc-ef32-56ee-8eff-41f1a7be60f9",
+      "name": "conv_wrw.bf16.wmma12_bf16.l1.nhwc.64x32x32.w4x2.fr2s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "atom_id": 15,
+        "loop": 1,
+        "layout": 1,
+        "bk": 64,
+        "bc": 32,
+        "bq": 32,
+        "fr": 2,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 164
+    },
+    {
+      "version": "1.0",
+      "id": "3f61f07a-8738-5470-b7aa-0f6612b04731",
+      "name": "conv_wrw.bf16.wmma12_bf16.l1.nchw.64x64x32.w4x2.fr2s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "atom_id": 15,
+        "loop": 1,
+        "layout": 0,
+        "bk": 64,
+        "bc": 64,
+        "bq": 32,
+        "fr": 2,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 163
+    },
+    {
+      "version": "1.0",
+      "id": "a096db00-fdbd-51eb-a4ea-cbb03ce905e1",
+      "name": "conv_wrw.bf16.wmma12_bf16.l1.nhwc.64x64x32.w4x2.fr2s3sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "atom_id": 15,
+        "loop": 1,
+        "layout": 1,
+        "bk": 64,
+        "bc": 64,
+        "bq": 32,
+        "fr": 2,
+        "s": 3,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 162
+    },
+    {
+      "version": "1.0",
+      "id": "eb539cf2-e6d2-5e99-aa0a-487807f8f321",
+      "name": "conv_wrw.bf16.wmma12_bf16.l1.nchw.64x32x32.w4x2.fr1s2sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "atom_id": 15,
+        "loop": 1,
+        "layout": 0,
+        "bk": 64,
+        "bc": 32,
+        "bq": 32,
+        "fr": 1,
+        "s": 2,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 161
+    },
+    {
+      "version": "1.0",
+      "id": "345d3f33-f42e-5bd6-8972-c1d368dcc8cf",
+      "name": "conv_wrw.bf16.wmma12_bf16.l1.nhwc.64x32x32.w4x2.fr1s2sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "atom_id": 15,
+        "loop": 1,
+        "layout": 1,
+        "bk": 64,
+        "bc": 32,
+        "bq": 32,
+        "fr": 1,
+        "s": 2,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 160
+    },
+    {
+      "version": "1.0",
+      "id": "c561ff9a-962e-5467-b34d-419b200a50ec",
+      "name": "conv_wrw.bf16.wmma12_bf16.l1.nchw.64x64x32.w4x2.fr1s2sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "atom_id": 15,
+        "loop": 1,
+        "layout": 0,
+        "bk": 64,
+        "bc": 64,
+        "bq": 32,
+        "fr": 1,
+        "s": 2,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 159
+    },
+    {
+      "version": "1.0",
+      "id": "674ad284-ef38-50b9-bb82-3964198f5062",
+      "name": "conv_wrw.bf16.wmma12_bf16.l1.nhwc.64x64x32.w4x2.fr1s2sw2dw1.v8.x0a0n0b2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWrw.cpp",
+        "entry_point": "ConvWrw"
+      },
+      "metadata": {
+        "direction": "WRW",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "atom_id": 15,
+        "loop": 1,
+        "layout": 1,
+        "bk": 64,
+        "bc": 64,
+        "bq": 32,
+        "fr": 1,
+        "s": 2,
+        "sw": 2,
+        "dw": 1,
+        "wk": 4,
+        "wc": 2,
+        "tk": 0,
+        "tc": 0,
+        "vec": 8,
+        "xcd": 0,
+        "align": 0,
+        "ns": 0,
+        "bpu": 2,
+        "wq": 0
+      },
+      "priority": 158
     },
     {
       "version": "1.0",
@@ -10483,7 +11059,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 205
+      "priority": 157
     },
     {
       "version": "1.0",
@@ -10519,7 +11095,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 204
+      "priority": 156
     },
     {
       "version": "1.0",
@@ -10555,7 +11131,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 203
+      "priority": 155
     },
     {
       "version": "1.0",
@@ -10591,7 +11167,7 @@
         "bpu": 2,
         "wq": 0
       },
-      "priority": 202
+      "priority": 154
     }
   ]
 }

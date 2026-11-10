@@ -73,7 +73,7 @@ AtomShape atomShapeOf(std::string_view atom);
 
 /// The kernel's loops (CONV_K3_LOOP).
 inline constexpr int64_t LOOP_ROWS = 0; ///< output rows, any stride
-inline constexpr int64_t LOOP_RING = 1; ///< row ring, height stride 1
+inline constexpr int64_t LOOP_RING = 1; ///< row ring (height strides > 1 as phases)
 inline constexpr int64_t LOOP_RING_DMA = 2; ///< row ring with LDS DMA (gfx950)
 inline constexpr int64_t LOOP_RING_FMA = 3; ///< row ring on FMA (exact fp32)
 inline constexpr int64_t LOOP_ROWS_FMA = 4; ///< output rows on FMA (exact fp32, any stride)
@@ -241,7 +241,9 @@ DirectPlan directPlanFor(int64_t tiles,
  *
  * Reads and gates every field of @p config: the atom (known, its atom_id, running on the
  * device, taking the graph's element type; "fma" exactly for loop 3, on fp32 graphs); the loop
- * (0 any stride; 1 to 3 height stride 1 with fr the filter height; 2 gfx950 and width stride 1;
+ * (0 any stride; 1 to 3 height stride 1 with fr the filter height, or 1 at height stride sh > 1
+ * and unit height dilation with fr = ceil(filter height / sh), one grid row per height phase;
+ * 2 gfx950 and width stride 1;
  * 3 width stride 1, rows of x and dy whole vectors); the layout, one the graph's x and dy are
  * packed in (channels-last: channels per group whole vectors; 2: gfx950, 16-bit, an atom whose
  * lanes hold 8 positions, not loop 3; loop 2 takes 0 or 2); the tile against the atom (bk, bc

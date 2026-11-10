@@ -913,7 +913,9 @@ __device__ inline void k3StorePartials(const K3Args& a,
                                        int wk,
                                        int wc,
                                        int lane,
-                                       unsigned split)
+                                       unsigned split,
+                                       int rowStep = 1,
+                                       int rowEnd = 0x7fffffff)
 {
     constexpr int DIM = Atom::DIM;
     const int kg = a.k / a.groups, cg = a.c / a.groups;
@@ -923,12 +925,14 @@ __device__ inline void k3StorePartials(const K3Args& a,
 #pragma unroll
     for(int f = 0; f < FR; ++f)
     {
-        if(tapRow0 + f >= frows)
+        // Filter row tapRow0 + f rowStep (the ring's height phases step by the stride).
+        const int row = tapRow0 + f * rowStep;
+        if(row >= frows || row >= rowEnd)
             continue;
 #pragma unroll
         for(int s = 0; s < S; ++s)
         {
-            float* o = out + static_cast<long long>((tapRow0 + f) * S + s) * kc;
+            float* o = out + static_cast<long long>(row * S + s) * kc;
 #pragma unroll
             for(int x = 0; x < FK; ++x)
 #pragma unroll
@@ -1165,8 +1169,22 @@ __device__ void k3WrwRing(const K3Args& a)
     const int kTiles = (kg + BK - 1) / BK;
     const int k0 = (bx % kTiles) * BK;
     const int c0 = (bx / kTiles) * BC;
-    const int g = by / a.ft;
-    const int t = by % a.ft;
+    // Height stride sh > 1 (unit height dilation): grid rows (g, t, phase p). Phase p takes the
+    // x rows ih = sh j + p and the filter rows r0, r0 + sh, ... (r0 = (p + ph) mod sh) as a
+    // stride-1 ring: step m pairs x row sh (m - q0) + p with dy row m (ring position i holds
+    // dy row m - i, filter row r0 + sh i), q0 = (p + ph - r0) / sh.
+    const int sh = a.sh;
+    const int phases = sh > 1 ? sh : 1;
+    const int p = static_cast<int>(by % phases);
+    const int g = static_cast<int>(by / phases) / a.ft;
+    const int t = static_cast<int>(by / phases) % a.ft;
+    const int r0 = sh > 1 ? (p + a.ph) % sh : 0;
+    const int q0 = sh > 1 ? (p + a.ph - r0) / sh : 0;
+    // Ring positions whose filter row exists (all, at height stride 1).
+    unsigned phaseRows = 0;
+#pragma unroll
+    for(int i = 0; i < R; ++i)
+        phaseRows |= (r0 + phases * i < a.fr) ? 1u << i : 0u;
     const long long begin = bz * a.stepsPerSplit;
     const long long end = begin + a.stepsPerSplit < a.steps ? begin + a.stepsPerSplit : a.steps;
     const int M = a.trackLen;
@@ -1217,7 +1235,7 @@ __device__ void k3WrwRing(const K3Args& a)
         constexpr int P = decltype(pc)::value;
         const int oh = rho + m * a.dh;
         const int id = od * a.sd + t * a.dd - a.pd;
-        const int ih = rho - a.ph + m * a.dh;
+        const int ih = sh > 1 ? sh * (m - q0) + p : rho - a.ph + m * a.dh;
         const bool xOk[1]
             = {live && math && id >= 0 && id < a.di && ih >= 0 && ih < a.hi && n < a.n};
         const int xRow[1] = {id * xs2 + ih * xs3};
@@ -1266,7 +1284,8 @@ __device__ void k3WrwRing(const K3Args& a)
         // A new track starts with an empty ring; else the ring moves down one row. The cursor
         // is still on the computed step: its tap rows with a dy row in the image.
         const bool trackStart = mc == 0;
-        const unsigned rows = k3RowsOf(m, rho < a.ho ? (a.ho - rho + a.dh - 1) / a.dh : 0, R);
+        const unsigned rows
+            = k3RowsOf(m, rho < a.ho ? (a.ho - rho + a.dh - 1) / a.dh : 0, R) & phaseRows;
         mc = mc + 1 == M ? 0 : mc + 1;
         advance();
         issue(K3Int<0>{}, it + 1 < end, it + 1 >= begin);
@@ -1324,8 +1343,9 @@ __device__ void k3WrwRing(const K3Args& a)
         body(K3Int<1>{});
     }
     k3WaitLoads<0>();
+    // Filter rows of this phase: t fr + r0 + phases i (the ring's rows of filter depth t).
     k3StorePartials<Atom, R, S, FK, FC, WTK, WTC>(
-        a, acc, g, t * R, a.ft * R, k0, c0, wk, wc, lane, bz);
+        a, acc, g, t * a.fr + r0, a.ft * a.fr, k0, c0, wk, wc, lane, bz, phases, (t + 1) * a.fr);
 }
 
 // ---------------------------------------------------------------------------------------------

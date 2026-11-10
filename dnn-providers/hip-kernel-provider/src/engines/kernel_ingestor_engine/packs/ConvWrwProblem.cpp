@@ -546,8 +546,11 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    // The row rings: height stride 1, the whole filter height per block.
-    if(!rows && (a.stride[1] != 1 || config.fr != a.filter[1]))
+    // The row rings: height stride 1, the whole filter height per block; or (the matrix ring,
+    // loop 1) height stride sh > 1 at unit height dilation, phases of ceil(fr / sh) rows.
+    const bool phased = config.loop == LOOP_RING && a.stride[1] > 1 && a.dilation[1] == 1
+                        && config.fr == divUp(a.filter[1], a.stride[1]);
+    if(!rows && !phased && (a.stride[1] != 1 || config.fr != a.filter[1]))
     {
         return std::nullopt;
     }
@@ -684,9 +687,12 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         gridX = divUp(kg, config.bk) * divUp(cg, config.bc);
         const int64_t frows = a.filter[0] * a.filter[1];
-        gridY = a.groups * (rows ? divUp(frows, config.fr) : a.filter[0]);
+        // A phased ring runs one grid row per height phase; its tracks walk the dy rows.
+        gridY = a.groups
+                * (rows ? divUp(frows, config.fr) : a.filter[0] * (phased ? a.stride[1] : 1));
         chunks = divUp(a.outSpatial[2], config.bq);
-        trackLen = divUp(a.outSpatial[1], a.dilation[1]) + a.filter[1] - 1;
+        trackLen = phased ? a.outSpatial[1] + config.fr - 1
+                          : divUp(a.outSpatial[1], a.dilation[1]) + a.filter[1] - 1;
         steps = rows
                     ? pack_features::checkedProduct({a.n, a.outSpatial[0], a.outSpatial[1], chunks})
                     : pack_features::checkedProduct(

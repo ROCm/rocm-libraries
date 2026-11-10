@@ -1055,6 +1055,34 @@ TEST(TestConvWrwKernelMatch, TheBaseConfigsServeTheBaseProblem)
     EXPECT_TRUE(admits(directFields(), "gfx950", channelsLastShape()));
 }
 
+TEST(TestConvWrwKernelMatch, TheRingRunsHeightStridesAsPhases)
+{
+    // 3x3 at height stride 2: the matrix ring with ceil(3 / 2) = 2 filter rows per phase.
+    auto f = ConfigFields{};
+    f.fr = 2;
+    EXPECT_TRUE(admits(f, "gfx942", heightStride2Shape()));
+    for(const int64_t fr : {1, 3})
+    {
+        f.fr = fr;
+        EXPECT_FALSE(admits(f, "gfx942", heightStride2Shape())) << fr;
+    }
+    // Not with a height dilation, and not on the DMA ring.
+    f.fr = 2;
+    auto dilated = heightStride2Shape();
+    dilated.dilation = {2, 1};
+    dilated.prePadding = {2, 1};
+    dilated.postPadding = {2, 1};
+    EXPECT_FALSE(admits(f, "gfx942", dilated));
+    auto dma = dmaFields();
+    dma.fr = 2;
+    EXPECT_FALSE(admits(dma, "gfx950", heightStride2Shape()));
+    // One grid row per phase; tracks walk the dy rows plus the ring's warm-up.
+    const auto launch = launchOf(f, heightStride2Shape(), "gfx942", 304);
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_EQ(launch->gridY, 2u);
+    EXPECT_EQ(launch->args.trackLen, launch->args.ho + 1);
+}
+
 TEST(TestConvWrwKernelMatch, UnalignedDyUnitsOnlyWhereOutputChannelsAreNotVectors)
 {
     // Align 2 serves 3 output channels and declines 40 (whole vectors: the aligned configs).
