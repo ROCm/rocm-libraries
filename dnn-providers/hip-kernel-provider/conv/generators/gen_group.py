@@ -30,6 +30,8 @@ FIELDS = [
     "oc",
     "px",
     "pf",
+    "nbi",
+    "nbo",
 ]
 KNOBS = [f for f in FIELDS if f not in ("direction", "dtype")]
 STRINGS = {"direction", "dtype", "atom"}
@@ -70,6 +72,16 @@ def lds_pf(eb, r, s, th, tw, cb, cf):
     halo = (th + r) * (tw + s) * pitch
     tile = 2 * th * 16 * cb * (2 * tw + 1) if cf else 4 * th * tw * pitch
     return (halo + tile) * eb
+
+
+# Wide groups (16 < cg <= 64, k4ConvMmaWide): nbi 16-channel blocks a group (ceil(cg / 16)),
+# (th, wp, nbo) output rows, 16-column fragments and output blocks a workgroup; every tile also
+# ships channels-first in place.
+WIDE_TILES = {
+    2: [(8, 1, 2), (4, 1, 2), (4, 2, 2)],
+    3: [(8, 1, 3), (4, 1, 3), (4, 2, 3)],
+    4: [(4, 2, 4), (8, 2, 4), (8, 1, 4), (4, 1, 4)],
+}
 
 
 # (t, r, s): filter depth, rows and columns (depth 1 serves 2-D graphs too).
@@ -200,6 +212,8 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             oc=0,
                             px=0,
                             pf=pf,
+                            nbi=0,
+                            nbo=0,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.t{th}x{wp}x{cb}"
@@ -223,6 +237,70 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             }
                         )
                         i += 1
+    # Wide-group configs: every matrix-core atom.
+    for dtype, atoms in ATOMS.items():
+        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
+        i = 0
+        for atom in atoms:
+            for t, r, s in FILTERS:
+                for st in strides:
+                    for nbi, tiles in WIDE_TILES.items():
+                        for th, wp, nbo in tiles:
+                            for cf in (0, 1):
+                                kr, ks, kst = (
+                                    (r, s, st)
+                                    if tag == "fwd"
+                                    else (-(-r // st), -(-s // st), 1)
+                                )
+                                halo = lds(EB[dtype], kr, ks, kst, th, 16 * wp, nbi)
+                                if halo > 64 * 1024:
+                                    continue
+                                if (
+                                    cf
+                                    and th * 16 * nbo * (16 * wp + 1) * EB[dtype] > halo
+                                ):
+                                    continue
+                                c = dict(
+                                    atom=atom,
+                                    t=t,
+                                    r=r,
+                                    s=s,
+                                    stride=st,
+                                    th=th,
+                                    wp=wp,
+                                    cb=0,
+                                    cf=cf,
+                                    cg=0,
+                                    oc=0,
+                                    px=0,
+                                    pf=0,
+                                    nbi=nbi,
+                                    nbo=nbo,
+                                )
+                                f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
+                                name = (
+                                    f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.w{nbi}"
+                                    f".t{th}x{wp}x{nbo}" + (".cf" if cf else "")
+                                )
+                                kernels.append(
+                                    {
+                                        "version": "1.0",
+                                        "id": U(name),
+                                        "name": name,
+                                        "kernel_source": {
+                                            "kind": "embedded_source",
+                                            "source_file": "kernels/ConvGroup.cpp",
+                                            "entry_point": "ConvGroup",
+                                        },
+                                        "metadata": {
+                                            "direction": direction,
+                                            "dtype": dtype,
+                                            **c,
+                                        },
+                                        "priority": 700 - i,
+                                    }
+                                )
+                                i += 1
     # FMA configs, fp32.
     i = 0
     for t, r, s in FILTERS:
@@ -254,6 +332,8 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             oc=oc,
                             px=px,
                             pf=0,
+                            nbi=0,
+                            nbo=0,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = (

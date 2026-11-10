@@ -58,5 +58,8 @@ struct K4ExpandArgs
     int swap;
     int reflect;
     int elementBytes;
-    int padding0;
+    // Wide groups (16 < cg <= 64): the input (and output) 16-channel blocks a group spans,
+    // padded; the expansion is then dense per group: w16[group][out block][tap][in block][n][k],
+    // zero past cg. 0: the block-diagonal layout above.
+    int nbi;
 };

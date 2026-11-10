@@ -631,10 +631,287 @@ __device__ void k4ConvFma(const K4Args& a)
     }
 }
 
+// The wide-group expansion (a.nbi > 0): w16[group][out block][tap][in block][n][k], n and k the
+// group-local output and input channels (ob 16 + n, ib 16 + k) of the gather, zero past cg.
+__device__ inline void k4ExpandWide(const K4ExpandArgs& a, int taps)
+{
+    const int nb = a.nbi;
+    const long long total = static_cast<long long>(a.c / a.cg) * nb * taps * nb * 256;
+    const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
+    for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
+        i += step)
+    {
+        const int kk = static_cast<int>(i % 16);
+        const int nn = static_cast<int>((i / 16) % 16);
+        const int ib = static_cast<int>((i / 256) % nb);
+        const int tap = static_cast<int>((i / (256LL * nb)) % taps);
+        const int ob = static_cast<int>((i / (256LL * nb * taps)) % nb);
+        const int g = static_cast<int>(i / (256LL * nb * taps * nb));
+        const int n = ob * 16 + nn, k = ib * 16 + kk;
+        const int v = tap / (a.rc * a.sc), q = (tap / a.sc) % a.rc, u = tap % a.sc;
+        int ft = a.tBase + a.tStep * v, fr = a.rBase + a.rStep * q, fs = a.sBase + a.sStep * u;
+        const bool inside = ft >= 0 && ft < a.t && fr >= 0 && fr < a.r && fs >= 0 && fs < a.s
+                            && n < a.cg && k < a.cg;
+        if(a.reflect)
+        {
+            ft = a.t - 1 - ft;
+            fr = a.r - 1 - fr;
+            fs = a.s - 1 - fs;
+        }
+        // The graph filter's output channel and its group-local input channel.
+        const int oc = g * a.cg + (a.swap ? k : n), ic = a.swap ? n : k;
+        const long long src
+            = inside ? oc * a.sK + ic * a.sC + ft * a.sT + fr * a.sR + fs * a.sS : 0;
+        if(a.elementBytes == 4)
+            static_cast<unsigned*>(a.dst)[i]
+                = inside ? static_cast<const unsigned*>(a.src)[src] : 0u;
+        else
+            static_cast<unsigned short*>(a.dst)[i]
+                = inside ? static_cast<const unsigned short*>(a.src)[src]
+                         : static_cast<unsigned short>(0);
+    }
+}
+
+// Wide-group matrix-core kernel (16 < cg <= 64): each group's cg channels padded to NBI 16-channel
+// blocks. A workgroup of 4 waves owns TH output rows x 16 WP columns x NBO of a group's output
+// blocks; it stages the group's input halo (NBI blocks) in LDS per depth tap and each wave
+// accumulates its (row, output block) items over every tap and input block, B fragments from the
+// dense per-group expansion. Grid: (groups x output-block tiles) x column tiles x row tiles x
+// output planes x images. Channels need not be multiples of 16; cg is a multiple of the 16-byte
+// vector (a.cg runtime).
+template <class T,
+          class Atom,
+          int FT,
+          int R,
+          int S,
+          int ST,
+          int TH,
+          int WP,
+          int NBI,
+          int NBO,
+          int CF = 0>
+__device__ void k4ConvMmaWide(const K4Args& a)
+{
+    constexpr int WAVE = Atom::WAVE;
+    constexpr int THREADS = 4 * WAVE;
+    constexpr int TW = 16 * WP;
+    constexpr int CH = 16 * NBI; // the group's padded input channels
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    constexpr int VP = CH / VEC;
+    constexpr int PITCH = CH + VEC;
+    constexpr int HR = (TH - 1) * ST + R, HC = (TW - 1) * ST + S;
+    constexpr int TAPS = FT * R * S;
+    constexpr int KC = 16 / Atom::KA;
+    constexpr int RPW = TH / 4; // output rows a wave
+    constexpr int OCH = 16 * NBO; // output channels a workgroup
+    static_assert(Atom::DIM == 16 && 16 % Atom::KA == 0, "16x16 atoms with k-steps dividing 16");
+    static_assert(TH % 4 == 0 && NBI % NBO == 0, "whole rows a wave, whole tiles a group");
+    static_assert(CF == 0 || TH * OCH * (TW + 1) <= HR * HC * PITCH, "output tile fits the halo");
+    typedef typename K1Raw<16>::type Raw;
+    __shared__ __attribute__((aligned(16))) T halo[HR * HC * PITCH];
+
+    const int groups = a.c / a.cg;
+    constexpr int OT = NBI / NBO; // output tiles a group
+    long long b = blockIdx.x;
+    const int ot = static_cast<int>(b % OT);
+    b /= OT;
+    const int g = static_cast<int>(b % groups);
+    b /= groups;
+    const int tws = (a.wo + TW - 1) / TW;
+    const int twi = static_cast<int>(b % tws);
+    b /= tws;
+    const int ths = (a.ho + TH - 1) / TH;
+    const int thi = static_cast<int>(b % ths);
+    b /= ths;
+    const int od = static_cast<int>(b % a.dout);
+    const long long img = b / a.dout;
+    const int oh0 = thi * TH, ow0 = twi * TW;
+    const int ih0 = oh0 * ST - a.ph, iw0 = ow0 * ST - a.pw;
+    const T* in = static_cast<const T*>(a.in);
+    const T* w = static_cast<const T*>(a.w)
+                 + static_cast<long long>(g * NBI + ot * NBO) * TAPS * NBI * 256;
+    T* out = static_cast<T*>(a.out);
+    const int tid = threadIdx.x;
+    const int lane = tid % WAVE, wave = tid / WAVE;
+    const int row = lane % 16;
+    const int kb = Atom::template kBase<Atom::KPL>(lane);
+    const int c0 = g * a.cg; // the group's first channel
+
+    // A wave's register tile: RPW rows x WP 16-column fragments x NBO output blocks; each A
+    // fragment serves NBO multiplies, each B fragment RPW x WP.
+    typename Atom::acc acc[RPW][WP][NBO];
+#pragma unroll
+    for(int rr = 0; rr < RPW; ++rr)
+#pragma unroll
+        for(int p = 0; p < WP; ++p)
+#pragma unroll
+            for(int ob = 0; ob < NBO; ++ob)
+                acc[rr][p][ob] = typename Atom::acc{};
+
+    for(int ft = 0; ft < FT; ++ft)
+    {
+        const int id = od * a.sd - a.pd + ft;
+        if(static_cast<unsigned>(id) >= static_cast<unsigned>(a.di))
+            continue;
+        if(ft > 0)
+            __syncthreads();
+        for(int i = tid; i < HR * HC * VP; i += THREADS)
+        {
+            int v, hc, hr;
+            if constexpr(CF != 0)
+            {
+                hc = i % HC;
+                hr = (i / HC) % HR;
+                v = i / (HC * HR);
+            }
+            else
+            {
+                v = i % VP;
+                const int p = i / VP;
+                hc = p % HC;
+                hr = p / HC;
+            }
+            const int ih = ih0 + hr, iw = iw0 + hc;
+            const bool ok = static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)
+                            && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)
+                            && v * VEC < a.cg;
+            const int sih = ok ? ih : 0, siw = ok ? iw : 0, sv = ok ? v : 0;
+            Raw val;
+            if constexpr(CF != 0)
+            {
+                // VEC channel planes of one pixel, one load each (channels past cg read as 0).
+                const long long planes = static_cast<long long>(a.di) * a.hi * a.wi;
+                const T* at = in + (img * a.c + c0 + sv * VEC) * planes
+                              + (static_cast<long long>(id) * a.hi + sih) * a.wi + siw;
+                union
+                {
+                    Raw raw;
+                    T e[VEC];
+                } u;
+#pragma unroll
+                for(int j = 0; j < VEC; ++j)
+                    u.e[j] = sv * VEC + j < a.cg ? at[j * planes] : T{};
+                val = u.raw;
+            }
+            else
+            {
+                val = *reinterpret_cast<const Raw*>(
+                    in + (((img * a.di + id) * a.hi + sih) * a.wi + siw) * a.c + c0 + sv * VEC);
+            }
+            if(!ok)
+                val = Raw{};
+            *reinterpret_cast<Raw*>(halo + (hr * HC + k4HaloColumn<ST, HC>(hc)) * PITCH + v * VEC)
+                = val;
+        }
+        __syncthreads();
+#pragma unroll
+        for(int fr = 0; fr < R; ++fr)
+#pragma unroll
+            for(int fs = 0; fs < S; ++fs)
+            {
+                const int tap = (ft * R + fr) * S + fs;
+#pragma unroll
+                for(int ib = 0; ib < NBI; ++ib)
+                {
+                    typename Atom::frag bf[NBO][KC];
+#pragma unroll
+                    for(int ob = 0; ob < NBO; ++ob)
+#pragma unroll
+                        for(int q = 0; q < KC; ++q)
+                            bf[ob][q] = k1Frag<Atom>(
+                                w
+                                + (((static_cast<long long>(ob) * TAPS + tap) * NBI + ib) * 16
+                                   + row)
+                                      * 16
+                                + q * Atom::KA + kb);
+#pragma unroll
+                    for(int rr = 0; rr < RPW; ++rr)
+                    {
+                        const int r = wave + 4 * rr;
+#pragma unroll
+                        for(int p = 0; p < WP; ++p)
+                        {
+                            const int hc = (p * 16 + row) * ST + fs, hr = r * ST + fr;
+                            const T* src = halo + (hr * HC + k4HaloColumn<ST, HC>(hc)) * PITCH
+                                           + ib * 16 + kb;
+#pragma unroll
+                            for(int q = 0; q < KC; ++q)
+                            {
+                                const auto af = k1Frag<Atom>(src + q * Atom::KA);
+#pragma unroll
+                                for(int ob = 0; ob < NBO; ++ob)
+                                    acc[rr][p][ob] = Atom::mma(af, bf[ob][q], acc[rr][p][ob]);
+                            }
+                        }
+                    }
+                }
+            }
+    }
+
+    const long long outPlane = img * a.outD + od * a.osd + a.ood;
+    if constexpr(CF != 0)
+    {
+        constexpr int OP = TW + 1;
+        __syncthreads();
+#pragma unroll
+        for(int rr = 0; rr < RPW; ++rr)
+#pragma unroll
+            for(int ob = 0; ob < NBO; ++ob)
+#pragma unroll
+                for(int p = 0; p < WP; ++p)
+#pragma unroll
+                    for(int e = 0; e < Atom::ACC; ++e)
+                        halo[((wave + 4 * rr) * OCH + ob * 16 + lane % 16) * OP + p * 16
+                             + Atom::dRow(lane, e)]
+                            = K1Elem<T>::store(acc[rr][p][ob][e]);
+        __syncthreads();
+        const long long outPlanes = static_cast<long long>(a.outD) * a.outH * a.outW;
+        for(int i = tid; i < TH * OCH * TW; i += THREADS)
+        {
+            const int ow = i % TW, ch = (i / TW) % OCH, r = i / (TW * OCH);
+            const int oh = oh0 + r, gch = ot * OCH + ch;
+            if(oh < a.ho && ow0 + ow < a.wo && gch < a.cg)
+                out[(img * a.c + c0 + gch) * outPlanes
+                    + (static_cast<long long>(od * a.osd + a.ood) * a.outH + oh * a.osh + a.ooh)
+                          * a.outW
+                    + (ow0 + ow) * a.osw + a.oow]
+                    = halo[(r * OCH + ch) * OP + ow];
+        }
+        return;
+    }
+#pragma unroll
+    for(int rr = 0; rr < RPW; ++rr)
+#pragma unroll
+        for(int ob = 0; ob < NBO; ++ob)
+        {
+            const int oh = oh0 + wave + 4 * rr;
+            const int gch = (ot * NBO + ob) * 16 + lane % 16;
+            if(oh >= a.ho || gch >= a.cg)
+                continue;
+#pragma unroll
+            for(int p = 0; p < WP; ++p)
+#pragma unroll
+                for(int e = 0; e < Atom::ACC; ++e)
+                {
+                    const int ow = ow0 + p * 16 + Atom::dRow(lane, e);
+                    if(ow < a.wo)
+                        out[((outPlane * a.outH + oh * a.osh + a.ooh) * a.outW + ow * a.osw + a.oow)
+                                * a.c
+                            + c0 + gch]
+                            = K1Elem<T>::store(acc[rr][p][ob][e]);
+                }
+        }
+}
+
 // The filter expansion (K4ExpandArgs), one element per thread, grid-strided.
 __device__ inline void k4Expand(const K4ExpandArgs& a)
 {
     const int taps = a.tc * a.rc * a.sc;
+    if(a.nbi > 0)
+    {
+        k4ExpandWide(a, taps);
+        return;
+    }
     const long long total = static_cast<long long>(a.c / 16) * taps * 256;
     const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
     for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;

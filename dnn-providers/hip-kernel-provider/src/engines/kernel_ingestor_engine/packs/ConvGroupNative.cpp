@@ -86,6 +86,21 @@ long long groupLdsBytes(int elementBytes, int r, int s, int stride, int th, int 
     return rows * cols * (16LL * cb + vec) * elementBytes;
 }
 
+std::optional<unsigned int> phaseBlocksWide(const K4Args& a, int th, int tw, int nbi, int nbo)
+{
+    if(th < 1 || tw < 1 || nbo < 1 || nbi % nbo != 0 || a.cg < 1 || a.c % a.cg != 0)
+    {
+        return std::nullopt;
+    }
+    const long long blocks = static_cast<long long>(a.n) * a.dout * divUp(a.ho, th)
+                             * divUp(a.wo, tw) * (a.c / a.cg) * (nbi / nbo);
+    if(blocks < 1 || blocks > MAX_GRID)
+    {
+        return std::nullopt;
+    }
+    return static_cast<unsigned int>(blocks);
+}
+
 std::optional<unsigned int> phaseBlocks(const K4Args& a, int th, int tw, int cb)
 {
     if(th < 1 || tw < 1 || cb < 1 || a.c % (16 * cb) != 0)
@@ -99,6 +114,15 @@ std::optional<unsigned int> phaseBlocks(const K4Args& a, int th, int tw, int cb)
         return std::nullopt;
     }
     return static_cast<unsigned int>(blocks);
+}
+
+size_t expandedElements(const GroupProblem& problem)
+{
+    const auto& a = problem.igemm.args;
+    const size_t taps = static_cast<size_t>(problem.kernelT * problem.kernelR * problem.kernelS);
+    const size_t nbi = static_cast<size_t>(problem.nbi);
+    return problem.nbi > 0 ? static_cast<size_t>(a.groups) * nbi * nbi * taps * 256
+                           : static_cast<size_t>(a.c / 16) * taps * 256;
 }
 
 namespace
@@ -118,10 +142,7 @@ void layOutWorkspace(GroupProblem& problem)
             offset = alignUp(offset + staging->bytes);
         }
     }
-    const size_t expandBytes
-        = static_cast<size_t>(igemm.args.c / 16)
-          * static_cast<size_t>(problem.kernelT * problem.kernelR * problem.kernelS) * 256
-          * static_cast<size_t>(igemm.elementBytes);
+    const size_t expandBytes = expandedElements(problem) * static_cast<size_t>(igemm.elementBytes);
     for(auto& phase : problem.phases)
     {
         phase.expandOffset = offset;
@@ -164,13 +185,17 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
     const auto& k = igemm->args;
     const auto& base = igemm->base.args;
     const bool forward = direction == ConvDirection::FORWARD;
-    // Small groups, the same each way, whole 16-channel blocks.
-    if(k.groups < 2 || k.c != k.k || k.c % 16 != 0)
+    // Groups the same each way: small (2 to 16 channels, dividing 16, whole 16-channel blocks)
+    // or wide (17 to 64 channels, whole 16-byte vectors: a multiple of 8, each group padded to
+    // ceil(cg / 16) blocks).
+    if(k.groups < 2 || k.c != k.k || k.c % k.groups != 0)
     {
         return std::nullopt;
     }
     const int cg = k.c / k.groups;
-    if(cg < 2 || cg > 16 || 16 % cg != 0)
+    const bool small = cg >= 2 && cg <= 16 && 16 % cg == 0 && k.c % 16 == 0;
+    const bool wide = cg > 16 && cg <= 64 && cg % 8 == 0;
+    if(!small && !wide)
     {
         return std::nullopt;
     }
@@ -181,6 +206,7 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
         return std::nullopt;
     }
     GroupProblem problem;
+    problem.nbi = wide ? (cg + 15) / 16 : 0;
     problem.filterT = k.ft;
     problem.filterR = k.fr;
     problem.filterS = k.fs;
@@ -200,6 +226,7 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
     expand.s = k.fs;
     expand.reflect = base.flipFilter != 0 ? 1 : 0;
     expand.elementBytes = igemm->elementBytes;
+    expand.nbi = problem.nbi;
     K4Args args{};
     args.n = k.n;
     args.c = k.c;
@@ -302,7 +329,9 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
     for(const auto& phase : problem.phases)
     {
         // The smallest tile's grid within the launch limits.
-        if(!phaseBlocks(phase.args, 1, 16, 1).has_value())
+        if(!(wide ? phaseBlocksWide(phase.args, 1, 16, problem.nbi, problem.nbi)
+                  : phaseBlocks(phase.args, 1, 16, 1))
+                .has_value())
         {
             return std::nullopt;
         }
@@ -461,6 +490,9 @@ struct Tile
     int64_t t = 0, r = 0, s = 0, stride = 0, th = 0, wp = 0, cb = 0, cf = 0;
     int64_t cg = 0, oc = 0, px = 0;
     int64_t pf = 0; ///< phase-fused backward data at stride 2
+    /// Wide groups: the 16-channel blocks a group spans (the graph's ceil(cg / 16)) and the
+    /// output blocks a workgroup; 0 for small-group configs.
+    int64_t nbi = 0, nbo = 0;
     bool fma = false;
     int64_t tw = 0; ///< output columns a workgroup
 };
@@ -490,8 +522,27 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.oc = kernel.getIntMetadata("oc");
     tile.px = kernel.getIntMetadata("px");
     tile.pf = kernel.getIntMetadata("pf");
-    if(tile.t < 1 || tile.r < 1 || tile.s < 1 || tile.stride < 1 || tile.th < 1 || tile.cb < 1
-       || tile.cb > 16 || (tile.cf != 0 && tile.cf != 1) || (tile.pf != 0 && tile.pf != 1))
+    tile.nbi = kernel.getIntMetadata("nbi");
+    tile.nbo = kernel.getIntMetadata("nbo");
+    if(tile.t < 1 || tile.r < 1 || tile.s < 1 || tile.stride < 1 || tile.th < 1
+       || (tile.cf != 0 && tile.cf != 1) || (tile.pf != 0 && tile.pf != 1))
+    {
+        return std::nullopt;
+    }
+    if(tile.nbi != 0)
+    {
+        // Wide groups: a matrix-core atom, 4 waves of whole rows, whole output-block tiles, no
+        // channel blocks, phase fusion or FMA knobs.
+        if(tile.fma || info->wave == 0 || tile.nbi < 2 || tile.nbi > 4 || tile.nbo < 1
+           || tile.nbi % tile.nbo != 0 || tile.th % 4 != 0 || tile.wp < 1 || tile.cb != 0
+           || tile.pf != 0 || tile.cg != 0 || tile.oc != 0 || tile.px != 0)
+        {
+            return std::nullopt;
+        }
+        tile.tw = 16 * tile.wp;
+        return tile;
+    }
+    if(tile.nbo != 0 || tile.cb < 1 || tile.cb > 16)
     {
         return std::nullopt;
     }
@@ -520,6 +571,15 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     }
     tile.tw = pixels / tile.th * tile.px;
     return tile;
+}
+
+/// A launch's workgroups for a config's tile.
+std::optional<unsigned int> blocksFor(const K4Args& args, const Tile& tile)
+{
+    const auto th = static_cast<int>(tile.th), tw = static_cast<int>(tile.tw);
+    return tile.nbi != 0 ? conv_group::phaseBlocksWide(
+                               args, th, tw, static_cast<int>(tile.nbi), static_cast<int>(tile.nbo))
+                         : conv_group::phaseBlocks(args, th, tw, static_cast<int>(tile.cb));
 }
 
 /// The problem a config runs: a channels-first config reads and writes the graph's packed
@@ -562,8 +622,9 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    // An FMA config is compiled for the graph's channels a group.
-    if(tile->fma && tile->cg != problem->phases.front().args.cg)
+    // An FMA config is compiled for the graph's channels a group; a wide-group config for the
+    // blocks its groups span (small-group configs for small groups).
+    if((tile->fma && tile->cg != problem->phases.front().args.cg) || tile->nbi != problem->nbi)
     {
         return false;
     }
@@ -583,7 +644,8 @@ bool kernelMatches(const MatchContext& context,
     // adds its output tile.
     const int bytes = problem->igemm.elementBytes;
     const auto th = static_cast<int>(tile->th), tw = static_cast<int>(tile->tw);
-    const auto cb = static_cast<int>(tile->cb);
+    // Wide groups stage nbi blocks of a group's channels (cb's role).
+    const auto cb = static_cast<int>(tile->nbi != 0 ? tile->nbi : tile->cb);
     const long long lds
         = tile->pf != 0
               ? conv_group::groupPhasedLdsBytes(
@@ -594,8 +656,14 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // A wide channels-first config parks its output tile in the halo.
+    if(tile->nbi != 0 && tile->cf != 0
+       && static_cast<long long>(th) * 16 * tile->nbo * (tw + 1) * bytes > lds)
+    {
+        return false;
+    }
     return std::all_of(launches->begin(), launches->end(), [&](const auto& launch) {
-        return conv_group::phaseBlocks(launch.args, th, tw, cb).has_value();
+        return blocksFor(launch.args, *tile).has_value();
     });
 }
 
@@ -744,10 +812,7 @@ public:
         std::vector<unsigned int> blocks;
         for(const auto& launch : *launches)
         {
-            const auto phaseGrid = conv_group::phaseBlocks(launch.args,
-                                                           static_cast<int>(tile->th),
-                                                           static_cast<int>(tile->tw),
-                                                           static_cast<int>(tile->cb));
+            const auto phaseGrid = blocksFor(launch.args, *tile);
             if(!phaseGrid.has_value())
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -765,6 +830,14 @@ public:
             options.add("CONV_GROUP_CG", std::to_string(tile->cg));
             options.add("CONV_GROUP_OC", std::to_string(tile->oc));
             options.add("CONV_GROUP_PX", std::to_string(tile->px));
+        }
+        else if(tile->nbi != 0)
+        {
+            options.add("CONV_GROUP_WIDE", std::string("1"));
+            options.add("CONV_GROUP_ATOM", std::string(tile->info.kernelType));
+            options.add("CONV_GROUP_WP", std::to_string(tile->wp));
+            options.add("CONV_GROUP_NBI", std::to_string(tile->nbi));
+            options.add("CONV_GROUP_NBO", std::to_string(tile->nbo));
         }
         else
         {
@@ -794,9 +867,7 @@ public:
                                               expandKernel,
                                               options,
                                               signatureOf<K4ExpandArgs>());
-        const long long expandElems = static_cast<long long>(problem->igemm.args.c / 16)
-                                      * problem->kernelT * problem->kernelR * problem->kernelS
-                                      * 256;
+        const auto expandElems = static_cast<long long>(conv_group::expandedElements(*problem));
         expand.setBlockSize(COPY_BLOCK, 1, 1);
         expand.setGridSize(static_cast<unsigned int>(std::clamp<long long>(
                                (expandElems + COPY_BLOCK - 1) / COPY_BLOCK, 1, COPY_MAX_BLOCKS)),

@@ -36,14 +36,16 @@ struct GroupProblem
     int stride = 1; ///< the graph's row and column stride
     /// The kernel's compile-time filter extent and gather stride: forward the graph's;
     /// backward data the taps a stride phase reaches (ceil(F / stride)) at unit stride.
+    /// Wide groups (16 < cg <= 64): the 16-channel blocks a group spans; 0 for small groups.
+    int nbi = 0;
     int kernelT = 1, kernelR = 0, kernelS = 0, kernelStride = 1;
     size_t workspaceBytes = 0; ///< staged activations and the expanded filters
 };
 
 /// The convolution @p context's graph describes in @p direction, or nullopt when the K4 kernels
 /// do not serve it. Everything parseIgemmProblem gates, plus: groups of cg channels each way with
-/// 2 <= cg <= 16 and cg dividing 16 (not depthwise: those are the depthwise engines'), channels a
-/// multiple of 16, unit dilation, equal row and column strides (backward data: row, column and
+/// 2 <= cg <= 16, cg dividing 16 and channels a multiple of 16 (not depthwise: those are the
+/// depthwise engines'), or 16 < cg <= 64 with cg a multiple of 8 (wide groups), unit dilation, equal row and column strides (backward data: row, column and
 /// depth strides 1 or 2), and grids within the launch limits for the smallest tile. 2-D or 3-D.
 std::optional<GroupProblem>
     parseGroupProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
@@ -74,6 +76,14 @@ std::optional<GroupProblem> channelsFirstInPlace(const GroupProblem& problem);
 /// Workgroups of a th x tw output tile over cb channel blocks for one launch: images x output
 /// planes x row tiles x column tiles x channel tiles, or nullopt past the launch limit.
 std::optional<unsigned int> phaseBlocks(const K4Args& args, int th, int tw, int cb);
+
+/// Workgroups of a wide-group launch: images x output planes x row tiles x column tiles x groups
+/// x (nbi / nbo) output-block tiles, or nullopt past the launch limit.
+std::optional<unsigned int> phaseBlocksWide(const K4Args& args, int th, int tw, int nbi, int nbo);
+
+/// Elements of one phase's expanded filter: block-diagonal per 16-channel block (small groups)
+/// or dense per group, padded to nbi blocks each way (wide groups).
+size_t expandedElements(const GroupProblem& problem);
 
 /// LDS bytes of the input halo a config stages for a th x tw output tile (the kernel's static
 /// array).

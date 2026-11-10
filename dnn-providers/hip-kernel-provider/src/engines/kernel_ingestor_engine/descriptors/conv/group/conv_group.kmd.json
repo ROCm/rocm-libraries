@@ -62,6 +62,14 @@
     {
       "name": "pf",
       "type": "int"
+    },
+    {
+      "name": "nbi",
+      "type": "int"
+    },
+    {
+      "name": "nbo",
+      "type": "int"
     }
   ]
 }

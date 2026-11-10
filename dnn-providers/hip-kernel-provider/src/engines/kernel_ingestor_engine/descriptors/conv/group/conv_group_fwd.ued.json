@@ -19,7 +19,9 @@
     "cg",
     "oc",
     "px",
-    "pf"
+    "pf",
+    "nbi",
+    "nbo"
   ],
   "behavior_notes": [
     "runtime_compilation"
