@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "id": "2be90569-5cee-5bb9-9858-391010ae4578",
+  "name": "hipkernel:flydsl_softmax",
+  "graph_match": {
+    "native": "hipkernel.flydsl_softmax.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "9e1b6a64-b472-5015-97f7-dbcde0527f60"
+  },
+  "predict_engine": {
+    "default": "46093552-ea1a-549c-a1b3-0ade3076850b"
+  },
+  "metadata": "6fba9133-c91d-5e92-bb6d-89b674af349f",
+  "knobs": [
+    "block_threads",
+    "threads_per_row",
+    "unroll"
+  ]
+}

@@ -90,6 +90,10 @@ void resetFlydslSdpaCdnaDecodeModuleCache();
 void registerFlydslRopeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslRopeModuleCache();
 
+/// @see packs/FlydslSoftmaxNative.cpp
+void registerFlydslSoftmaxSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSoftmaxModuleCache();
+
 /// @see packs/Gfx950AttentionDenseNative.cpp
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();

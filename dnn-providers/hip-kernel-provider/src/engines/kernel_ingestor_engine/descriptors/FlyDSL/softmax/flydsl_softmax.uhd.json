@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "9e1b6a64-b472-5015-97f7-dbcde0527f60",
+  "name": "flydsl softmax selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_softmax.score"
+  }
+}

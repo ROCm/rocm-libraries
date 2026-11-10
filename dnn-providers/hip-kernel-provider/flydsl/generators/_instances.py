@@ -113,6 +113,10 @@ _ABBREV = {
     "store_rstd": "rstd",
     "n_max": "nmax",
     "reduce_symbol": "",
+    "out_dtype": "out",
+    "n_align": "align",
+    "threads_per_row": "tpr",
+    "unroll": "u",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -1489,6 +1493,108 @@ def rope_instances() -> list[Instance]:
     return instances
 
 
+# --- Softmax ------------------------------------------------------------------
+
+# kernels_src/kernels/softmax/softmax_kernel.py (FlyDSL v0.5.0's softmax, ported to
+# 0.3.4): softmax over the last dim of a packed [M, N] view, every row independent.
+# The row count, the stats switch and the stats scale (1 or 1/ln 2) are runtime
+# arguments, so one object serves stats or none, natural or log2. Baked: p's dtype,
+# s's dtype (`out_dtype`, any of the three beside any p: the CPU reference's mixed
+# forms), the launch geometry, and either the row width N or nothing:
+#
+# - the **runtime tier** (N None) reads N from p's descriptor and streams the row
+#   twice (an online max and sum, then the normalize), so any width is served with
+#   constant registers -- up to a 248320-wide vocabulary. `n_align` 8 (16-bit p) or
+#   4 (f32 p) objects move 128 bits per copy and need N % n_align == 0; the
+#   `n_align` 1 objects copy one element and serve every N.
+# - the **baked tier** (N = 512, Qwen3.8's router: E = 512 experts) is upstream's
+#   register-buffered path: p read once, four rows per 256-thread block.
+#
+# `n_max` bounds the widths an object serves (0: unbounded), so priority acts as a
+# size rule until a trained ranker exists: a narrow row runs on a wave, or a quarter
+# wave, per row; a wider one on a 256-thread block; a very wide one on 1024 threads.
+# Measured on gfx90a (MI210), bf16, M x N = 32 Mi elements (vocab: M = 1 to 256):
+#   - 16 threads per row, one load per iteration: 1.8-3.8x the 64-thread form at
+#     N <= 256, behind it from 512;
+#   - 64 threads per row, one load per iteration: ahead of the 256-thread block up to
+#     N = 2048 (3x at 1024), behind it from 4096;
+#   - the 256-thread block ahead of the 1024 one up to N = 12288 (1.6x at 8192, 1.1-1.25x
+#     at 12288), even with it at 16384 (within 8% either way); the 1024-thread block
+#     ahead from 32768 (1.2x) and at the vocab width for M <= 32 (1.5-1.8x), 5% behind at
+#     the vocab width and M = 256;
+#   - the baked 512 object at 1.4x the best runtime object at N = 512.
+SOFTMAX_DTYPES = ("bf16", "f16", "f32")
+SOFTMAX_TARGETS = ("gfx90a", "gfx942", "gfx950")
+SOFTMAX_BAKED_N = (512,)
+SOFTMAX_VECTOR_ELEMS = {"bf16": 8, "f16": 8, "f32": 4}
+PRIORITY_SOFTMAX_BAKED = PRIORITY_SPECIALIZED
+# (n_max, block_threads, threads_per_row, unroll, priority) per runtime tier; the
+# narrowest that serves a width ranks first. The per-element objects rank below every
+# vector object, which serve every width they admit.
+SOFTMAX_VECTOR_TIERS = (
+    (256, 256, 16, 1, 40),
+    (2048, 256, 64, 1, 30),
+    (16384, 256, 256, 4, 20),
+    (0, 1024, 1024, 4, 15),
+)
+SOFTMAX_ELEMENT_TIERS = (
+    (2048, 256, 64, 1, 12),
+    (0, 256, 256, 4, 10),
+)
+
+
+def softmax_instances() -> list[Instance]:
+    """The softmax table: every p x s dtype pair, each runtime tier and the baked N."""
+    instances: list[Instance] = []
+    for dtype in SOFTMAX_DTYPES:
+        vec = SOFTMAX_VECTOR_ELEMS[dtype]
+        for out_dtype in SOFTMAX_DTYPES:
+            tiers = [
+                (n_max, bt, tpr, unroll, prio, vec)
+                for n_max, bt, tpr, unroll, prio in SOFTMAX_VECTOR_TIERS
+            ]
+            tiers += [
+                (n_max, bt, tpr, unroll, prio, 1)
+                for n_max, bt, tpr, unroll, prio in SOFTMAX_ELEMENT_TIERS
+            ]
+            for n_max, bt, tpr, unroll, prio, n_align in tiers:
+                instances.append(
+                    Instance(
+                        op="softmax",
+                        dtype=dtype,
+                        priority=prio,
+                        knobs={
+                            "out_dtype": out_dtype,
+                            "N": None,
+                            "n_max": n_max,
+                            "n_align": n_align,
+                            "block_threads": bt,
+                            "threads_per_row": tpr,
+                            "unroll": unroll,
+                        },
+                    )
+                )
+            for n in SOFTMAX_BAKED_N:
+                instances.append(
+                    Instance(
+                        op="softmax",
+                        dtype=dtype,
+                        priority=PRIORITY_SOFTMAX_BAKED,
+                        knobs={
+                            "out_dtype": out_dtype,
+                            "N": n,
+                            "n_max": n,
+                            "n_align": vec,
+                            "block_threads": 256,
+                            "threads_per_row": 64,
+                            "unroll": 1,
+                        },
+                    )
+                )
+    _assert_unique(instances)
+    return instances
+
+
 OPS = {
     "rmsnorm": rmsnorm_instances,
     "rmsnorm_bwd": rmsnorm_bwd_instances,
@@ -1499,6 +1605,7 @@ OPS = {
     "sdpa_cdna_decode": sdpa_cdna_decode_instances,
     "sdpa_aiw": sdpa_aiw_instances,
     "rope": rope_instances,
+    "softmax": softmax_instances,
 }
 # Ops whose table differs by target and so takes the arch.
 _PER_TARGET_OPS = {"sdpa_cdna", "sdpa_cdna_dualwave", "sdpa_cdna_decode", "sdpa_aiw"}

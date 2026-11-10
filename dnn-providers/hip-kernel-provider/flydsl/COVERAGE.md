@@ -1082,3 +1082,96 @@ through graph_match, kernel_match, prepare and launch against `CpuFpReferenceRop
 prefill BSHD with angles to 4000 rad, per-batch freqs, cuDNN's trailing default with a scale,
 full rotation in place, a middle segment at rank 3, D = 1000, and a strided head dim), and
 the census `TestFlydslRopePacks`.
+
+---
+
+## Softmax — `hipkernel:flydsl_softmax`
+
+63 objects per arch, built for **gfx90a, gfx942 and gfx950**: buffer loads and stores, f32
+arithmetic, and warp (DPP) and block reductions -- nothing gfx94x-only. RDNA is not built:
+the 16- and 64-thread rows assume a 64-lane wave. Kernel:
+[`kernels_src/kernels/softmax/softmax_kernel.py`](kernels_src/kernels/softmax/softmax_kernel.py),
+FlyDSL v0.5.0's `kernels/norm/softmax_kernel.py` (commit `226cde8d`) ported to flydsl 0.3.4
+(the header lists the modifications; it is newer than the pinned FlyDSL commit, so
+`tools/diff_upstream.py` does not compare it); native half:
+[`FlydslSoftmaxNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSoftmaxNative.cpp),
+with the graph reading the matcher, the dispatch and the tests share in
+[`FlydslSoftmaxCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSoftmaxCommon.hpp).
+
+It computes the schema's softmax (`softmax_attributes.fbs`, `CpuFpReferenceSoftmax`) over the
+last dim in f32: `s = exp(p - max) / sum(exp(p - max))` and, when the graph has a stats
+tensor, `stats = max + ln(sum)` (divided by ln 2 with `stats_use_log2`). **A fully masked row**
+(every element -inf) gives s = 0 across the row and stats = -inf, not NaN: the exponent is
+taken against 0 instead of -inf and the reciprocal sum is 0. **A NaN** anywhere in a row
+makes its s and stats NaN (the max reductions propagate NaN), and a +inf makes them NaN too,
+as in the reference. No fast-math flag that assumes away NaN or infinity is used.
+
+**Baked:** p's dtype and s's (`dtype`, `out_dtype`: each bf16, f16 or f32 -- all nine
+pairs), and the tier. **Runtime:** the row count, whether stats are written (an i32), their
+scale (1 or 1/ln 2, an f32), and every row width the runtime tiers serve. Per pair:
+
+| Tier | `N` | `n_max` | `n_align` | Block / threads per row | Priority |
+|---|---|---|---|---|---|
+| Router (register-buffered, p read once) | 512 | 512 | 8 (4 for f32 p) | 256 / 64 | 100 |
+| Quarter wave per row | runtime | 256 | 8 (4) | 256 / 16 | 40 |
+| Wave per row | runtime | 2048 | 8 (4) | 256 / 64 | 30 |
+| Block per row | runtime | 16384 | 8 (4) | 256 / 256 | 20 |
+| Wide block per row | runtime | any | 8 (4) | 1024 / 1024 | 15 |
+| Wave per row, per element | runtime | 2048 | 1 | 256 / 64 | 12 |
+| Block per row, per element | runtime | any | 1 | 256 / 256 | 10 |
+
+The runtime tiers read N from p's descriptor and stream the row twice -- an online max and
+sum, then the normalize -- so registers do not grow with the width. `n_align` > 1 objects move
+128 bits of p per copy (s in pieces of up to 128 bits), and serve widths and row pitches that
+are multiples of it with 16-byte aligned bases; the per-element objects serve every other
+graph. Priority orders the survivors (`flydslSoftmaxScore` returns it), so the bounds act as a
+size rule. Chosen by measurement on gfx90a (MI210, bf16, 32 Mi elements per shape; the
+vocabulary at M = 1 to 256): the quarter wave is 1.8-3.8x the wave at N <= 256, the wave up
+to 3x the 256-thread block up to 2048, the 256-thread block 1.6x the 1024-thread one at 8192
+and 1.1-1.25x at 12288 (even at 16384), and the 1024-thread block 1.2x the 256-thread one at
+32768 and 1.5-1.8x at the vocabulary width for M <= 32 (5% behind at M = 256); the router
+object is 1.4x the best runtime object at N = 512.
+
+| Graph-scoped (`flydslSoftmaxGraphMatches`) | Accepted | Declined |
+|---|---|---|
+| Nodes | exactly one `SoftmaxAttributes` node | anything else; override-shape graphs |
+| Operands | p, s and (when named) stats real device tensors | virtual, pass-by-value or ragged |
+| Dtypes | p and s each BFLOAT16, HALF or FLOAT; stats FLOAT; compute type UNSET, FLOAT, HALF or BFLOAT16 (computed in f32) | any other p or s dtype; non-f32 stats; DOUBLE compute |
+| Shapes | s of p's dims, any rank >= 1; stats of p's dims with the last 1 | anything else; a zero extent |
+| p, s layout | a unit-stride last axis (any stride at width 1); leading axes that collapse to one row index with one row pitch of at least the width, each operand its own pitch; any stride on a unit axis | a strided last axis; overlapping, broadcast or non-collapsible rows |
+| stats layout | packed over the rows (unit axes exempt) | otherwise |
+| Alignment | p and s declare their element size, stats 4 bytes | less |
+| Extents | one row of p and of s within 2^31 - 1 bytes; at most 2^31 - 1 rows | larger |
+
+A graph larger than one launch addresses (2^31 - 1 bytes of p or s, the kernel's 32-bit buffer
+offsets) runs as several launches, each over a slice of whole rows -- 4096 f32 vocabulary
+rows (4 GB) run as two.
+
+| Kernel-scoped (`flydslSoftmaxKernelMatches`) | |
+|---|---|
+| `dtype`, `out_dtype` | equal p's and s's dtypes |
+| `n_align` | divides the width and both row pitches; above 1, p and s declare 16-byte aligned bases |
+| `N` | the width exactly when baked; any when 0 |
+| `n_max` | at least the width; 0 for any |
+
+**At launch:** s may be p itself (same address, dtype and row pitch) -- each element is read
+before it is written, and a row is written only after every read of it -- but any other
+overlap of p and s, or of stats with either, throws `HIPDNN_PLUGIN_STATUS_INVALID_VALUE`:
+one row's writes would clobber another's reads.
+
+**Performance (gfx90a, MI210).** Memory-bound at width >= 512 and many rows (about 1.1-1.3
+TB/s of the 1.6 TB/s peak counting two reads and a write; the router object reads once).
+**Deferred:** a single vocabulary row runs on one workgroup -- 68 us for one bf16 row of
+248320, latency-bound on one CU. A split-row form (partial max and sum per row slice across
+workgroups, then a combine and normalize) would spread it across the GPU; it is a second
+launch and a workspace, so a family of its own.
+
+**Checked by:** `TestFlydslSoftmaxEngine` (every row of both tables, the problem a launch
+gets, the row slicing past one launch, the tier each width ranks first, binding, score;
+host-only), `TestGpuFlydslSoftmaxObjects` (every staged object through graph_match,
+kernel_match, prepare and launch against `CpuFpReferenceSoftmax` in f64 at each width it
+serves -- one vector or element, odd and mid widths, its `n_max`, the router's 512 and the
+248320 vocabulary -- with fully masked, partly masked, NaN and wide-range rows, a row count
+that leaves the last multi-row block part-empty, stats off, natural and log2, padded and
+differing row pitches, and in place; plus a 2.2 GB f32 graph run as two launches, and the
+overlap refusal), and the census `TestFlydslSoftmaxPacks`.

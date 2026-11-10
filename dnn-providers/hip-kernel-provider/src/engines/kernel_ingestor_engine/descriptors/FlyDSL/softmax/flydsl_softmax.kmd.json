@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "id": "6fba9133-c91d-5e92-bb6d-89b674af349f",
+  "name": "flydsl softmax variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "out_dtype",
+      "type": "string"
+    },
+    {
+      "name": "N",
+      "type": "int"
+    },
+    {
+      "name": "n_max",
+      "type": "int"
+    },
+    {
+      "name": "n_align",
+      "type": "int"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "threads_per_row",
+      "type": "int"
+    },
+    {
+      "name": "unroll",
+      "type": "int"
+    }
+  ]
+}

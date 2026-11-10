@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "1a108b5e-3530-550c-a3e7-93c1461e1189",
+  "name": "flydsl softmax dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_softmax.dispatch"
+}

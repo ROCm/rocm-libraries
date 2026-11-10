@@ -171,6 +171,19 @@ trailing default), output_scale and every stride of x, freqs and y (BSHD, BHSD, 
 freqs) are kernel arguments. In place (y aliasing x) is safe
 ([COVERAGE.md, RoPE](COVERAGE.md)).
 
+**Softmax** (`hipkernel:flydsl_softmax`, **gfx90a**, **gfx942** and **gfx950**, 63 objects
+each): softmax over the last dim, `s = exp(p - max) / sum`, with the optional log-sum-exp
+stats (f32, natural or log2 units), for every pairing of bf16, f16 and f32 p and s, computed
+in f32. A fully masked row (all -inf) gives s = 0 and stats = -inf, and a NaN makes its row
+NaN, as the CPU reference does. The leading axes collapse to rows (padded row pitches,
+different for p and s, and an in-place s included); the row count, the stats switch and
+their units are kernel arguments. Per dtype pair, six runtime-width objects -- a quarter
+wave, a wave, a 256- or a 1024-thread block per row, ranked narrowest first by width bounds,
+with 128-bit copies or, for widths off the vector grid, per-element ones -- serve every width
+up to Qwen3.8's 248320-wide vocabulary, and a baked object serves its router's 512 experts
+with the row held in registers. Ported to FlyDSL 0.3.4 from FlyDSL v0.5.0's
+`softmax_kernel.py` ([COVERAGE.md, Softmax](COVERAGE.md)).
+
 ## How it reaches hipDNN
 
 The objects and their descriptors are a **bundle of the provider's production
@@ -281,7 +294,7 @@ provider tree; everything else is relative to this directory.
 | `generators/_codeobject.py` | reads and verifies a compiled object (target, ELF generic machine), shared by every generator |
 | `generators/arch_families.json`, `_arch_families.py` | the generic targets and their member arches; read by the generators and `CMakeLists.txt` |
 | `generators/_generic_targets.py` | the FlyDSL 0.3.4 shim that lets MLIR lower for a generic target |
-| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode` |
+| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode`, `gen_softmax` |
 | `generators/_parallel.py` | compiles a generator's objects in a pool of worker processes (`FLYDSL_GEN_JOBS`) |
 | `generators/_sdpa_rdna_build.py`, `_sdpa_cdna_build.py` | what each architecture's SDPA generators share |
 | `gen_descriptors.py` | derives descriptors from the objects and binds the trained models installed under `heuristics/`; `--check` re-verifies |
@@ -352,7 +365,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 309/309 gfx11-generic, 381/381 gfx12-generic, 256/256 gfx950, 258/258 gfx942, 258/258 gfx90a
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 309/309 gfx11-generic, 381/381 gfx12-generic, 319/319 gfx950, 321/321 gfx942, 321/321 gfx90a
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (KDPs of inline hsaco UKDs)

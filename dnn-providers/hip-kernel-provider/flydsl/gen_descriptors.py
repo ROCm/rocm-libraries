@@ -146,6 +146,10 @@ GRAPH_DETERMINED_FIELDS = {
     "has_sink",
     "merge_symbol",
     "kernel",
+    "out_dtype",
+    # Softmax (`out_dtype` above is s's dtype): the width an object's copies need N
+    # to be a multiple of.
+    "n_align",
 }
 
 # Fields that say when an object is preferred rather than how it was built: the
@@ -170,6 +174,9 @@ TUNING_FIELDS = {
     "k_prefetch_dist",
     "v_prefetch_dist",
     "kv_addr_hoist",
+    # Softmax: the threads that serve one row, and loads per thread per iteration.
+    "threads_per_row",
+    "unroll",
 }
 
 # Every engine carries an engine estimate (RFC 0019 §3.1 `predict_engine`, L1): the
