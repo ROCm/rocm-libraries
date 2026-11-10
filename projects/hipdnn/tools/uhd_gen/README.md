@@ -886,12 +886,13 @@ MIOpen loading its CK grouped-convolution library takes about 11 s of a ~17 s gr
 gfx1151. `--bench-batch N` hands the bench N graphs at a time as a `--graph-list` (one
 path per line); one process and one handle measure them in turn, each graph with its own
 graph, plan and buffers, and write one JSON line per graph naming it as `graph_path`. A
-batch gets `--bench-timeout` seconds per graph. Graphs a batch leaves unanswered -- it
-crashed or timed out on one of them -- are measured again one per process, so a failure
-still lands on the graph that caused it. `--plugin-dir` may name the engine's plugin
-library rather than a directory, so the bench loads only that plugin and no other
-provider's setup. Catalog sweeps (L2) are not batched: a sweep already measures every
-candidate of its graph in one process.
+batch is killed once it goes `--bench-timeout` seconds without finishing a graph. Graphs a
+batch leaves unanswered (it crashed or stalled on one of them) or answers with a failure
+(an earlier graph may have left the device or handle broken) are measured again one per
+process, so a graph is recorded as failed only when it fails on its own. `--plugin-dir`
+may name the engine's plugin library rather than a directory, so the bench loads only that
+plugin and no other provider's setup. Catalog sweeps (L2) are not batched: a sweep already
+measures every candidate of its graph in one process.
 
 ```bash
 hipdnn_bench --graph-list graphs.txt --engine-name MIOPEN_ENGINE \

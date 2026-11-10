@@ -12,30 +12,42 @@ import pytest
 pytest.importorskip("pandas")
 
 # One immediate response per graph, as hipdnn_bench --collect-immediate writes it. A graph
-# whose id names "crash" kills a --graph-list process when reached; one naming "bad" fails on
-# its own. Every process start is appended to calls.txt beside the script.
+# whose id names "crash" kills a --graph-list process when reached; one naming "stall" holds
+# a --graph-list process for STALL_SECONDS before it answers; one naming "poison" is measured
+# but fails every graph a --graph-list process measures after it, as a broken device or
+# handle would; one naming "bad" fails on its own. Every process start is appended to
+# calls.txt beside the script.
 _BENCH = r"""
-import json, os, sys
+import json, os, sys, time
 from pathlib import Path
 
+STALL_SECONDS = 6
 argv = sys.argv[1:]
 here = Path(__file__).parent
 with open(here / "calls.txt", "a", encoding="utf-8") as calls:
     calls.write(("list" if "--graph-list" in argv else "single") + "\n")
 metric = argv[argv.index("--ranking-metric") + 1]
+poisoned = False
 
 
 def answer(path, listed):
+    global poisoned
     graph = json.loads(Path(path).read_text(encoding="utf-8"))
     if "crash" in graph["id"] and listed:
         sys.stdout.flush()
         os._exit(3)
+    if "stall" in graph["id"] and listed:
+        time.sleep(STALL_SECONDS)
+    reason = "hipErrorIllegalAddress" if poisoned else None
+    poisoned = poisoned or ("poison" in graph["id"] and listed)
     if "bad" in graph["id"]:
-        line = {"engine_id": 7, "is_valid": False, "skip_reason": "no plan for this graph"}
+        reason = "no plan for this graph"
+    if reason:
+        line = {"engine_id": 7, "is_valid": False, "skip_reason": reason}
         if listed:
             line["graph_path"] = path
         print(json.dumps(line), flush=True)
-        print("Engine query/collection failed: no plan for this graph", file=sys.stderr)
+        print(f"Engine query/collection failed: {reason}", file=sys.stderr)
         return False
     average = 1.0 + graph["size"] / 10
     line = {
@@ -167,6 +179,41 @@ def test_a_batch_that_crashes_is_finished_one_graph_per_process(tmp_path, monkey
         "02.json"
     ]
     assert "no plan for this graph" in manifest["failed_graphs"][0]["error"]
+
+
+def test_graphs_a_poisoned_batch_fails_are_measured_alone(tmp_path, monkeypatch):
+    """A batch whose device or handle breaks fails every later graph; measured alone, they
+    succeed, so none of them is recorded as failed."""
+    monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
+    world = _world(tmp_path, ["g0", "poison1", "g2", "g3"])
+
+    assert _collect(world, tmp_path / "out", 4) == 0
+
+    assert (
+        world["calls"].read_text(encoding="utf-8").split() == ["list"] + ["single"] * 2
+    )
+    assert set(_rows(tmp_path / "out")) == {"g0", "poison1", "g2", "g3"}
+    manifest = json.loads(
+        (tmp_path / "out" / "collection_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["failed_graphs"] == []
+
+
+def test_a_batch_that_stalls_on_a_graph_is_cut_at_the_per_graph_timeout(
+    tmp_path, monkeypatch
+):
+    """--bench-timeout bounds each graph of a batch, not the batch: a graph that stalls for
+    3x the limit (well inside 8x, the whole batch's share) gets the batch killed, and the
+    graphs it left are measured alone."""
+    monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
+    world = _world(tmp_path, ["g0", "stall1", *(f"g{i}" for i in range(2, 8))])
+
+    assert _collect(world, tmp_path / "out", 8, "--bench-timeout", "2") == 0
+
+    calls = world["calls"].read_text(encoding="utf-8").split()
+    assert calls[0] == "list"
+    assert calls[1:] and set(calls[1:]) == {"single"}
+    assert len(_rows(tmp_path / "out")) == 8
 
 
 def test_a_catalog_sweep_is_not_batched(tmp_path, caplog):
