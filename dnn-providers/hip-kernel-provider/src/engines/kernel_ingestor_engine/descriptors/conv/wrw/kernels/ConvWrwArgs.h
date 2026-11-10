@@ -65,9 +65,10 @@ struct K3ReduceArgs
     long long wk;
     long long wc;
     long long wtap;
-    /// Nonzero: dw is K C T R S (wc = taps, wtap = 1) and a block writes the contiguous run of
-    /// K3_REDUCE_ROW_CHANNELS channels' taps of one output channel (transposed in LDS); zero:
-    /// quads of channels, one tap and output channel each.
+    /// Nonzero: the launch runs ConvWrwReduceRows (dw K C T R S, at most 2 splits), whose block
+    /// writes the contiguous run of K3_REDUCE_ROW_CHANNELS channels' taps of one output channel;
+    /// zero: ConvWrwReduce, quads of channels of one tap and output channel. A record of the
+    /// host's choice; the kernels do not read it.
     int rows;
     int padding0; ///< keeps the struct size a multiple of 8 on host and device alike
 };

@@ -66,8 +66,10 @@ namespace
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.conv_wrw.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.conv_wrw.kernel_match";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_wrw.dispatch";
-/// The reduce kernel: the same source as ConvWrw, under another entry point.
+/// The reduce kernels: the same source as ConvWrw, under other entry points; the launch says
+/// which (the row reduce for K C T R S at few splits).
 constexpr std::string_view REDUCE_ENTRY_POINT = "ConvWrwReduce";
+constexpr std::string_view REDUCE_ROWS_ENTRY_POINT = "ConvWrwReduceRows";
 
 // Tokens the graph match binds.
 constexpr std::string_view X_TOKEN = "conv_wrw.x.uid";
@@ -287,7 +289,8 @@ public:
             _kernelCompiler, _kpackLoader, context, kernel, options, wrwSignature());
         KernelDefinition reduceKernel = kernel;
         // The reduce is the same source under another entry point.
-        reduceKernel.source.entryPoint = std::string(REDUCE_ENTRY_POINT);
+        reduceKernel.source.entryPoint
+            = std::string(launch->reduce.rows != 0 ? REDUCE_ROWS_ENTRY_POINT : REDUCE_ENTRY_POINT);
         auto reduce = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, reduceKernel, options, reduceSignature());
         wrw.setBlockSize(launch->block, 1, 1);

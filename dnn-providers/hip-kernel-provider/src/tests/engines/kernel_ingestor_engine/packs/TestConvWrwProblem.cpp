@@ -1662,9 +1662,10 @@ TEST(TestConvWrwLaunch, TheRingFillsTracksStepsSplitsAndTheWorkspace)
     EXPECT_EQ(a.partialElems, 9 * 40 * 24);
     EXPECT_EQ(launch->workspaceBytes, size_t{6} * 9 * 40 * 24 * 4);
     EXPECT_EQ(launch->kernelType, "K1AtomMfma32F16");
-    // The reduce: K C R S, so row blocks: 40 k x one run of up to 64 channels' 9 taps.
-    EXPECT_EQ(launch->reduceGrid, 40u);
-    EXPECT_EQ(launch->reduce.rows, 1);
+    // The reduce: 6 splits, so quads (the row reduce takes at most 2): 9 taps x 40 k x 6
+    // quads of c, 64 per block.
+    EXPECT_EQ(launch->reduceGrid, (9u * 40 * 6 + 63) / 64);
+    EXPECT_EQ(launch->reduce.rows, 0);
     EXPECT_EQ(launch->reduceBlock, 256u);
     EXPECT_EQ(launch->reduce.elems, 40 * 24 * 9);
     EXPECT_EQ(launch->reduce.partialElems, a.partialElems);
@@ -1764,17 +1765,24 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     EXPECT_EQ(krsc->reduce.wk, 24 * 9);
     EXPECT_EQ(krsc->reduce.wc, 1);
     EXPECT_EQ(krsc->reduce.wtap, 24);
-    // K C T R S of 2 to 64 taps reduces by rows (a run of channels' taps, contiguous in dw);
-    // K T R S C, one tap, or more than 64 taps by quads of channels.
-    EXPECT_EQ(kcrs->reduce.rows, 1);
-    EXPECT_EQ(kcrs->reduceGrid, 40u); // 40 output channels x one run of 24 channels
+    // K C T R S of 2 to 64 taps at most 2 splits reduces by rows (a run of channels' taps,
+    // contiguous in dw); more splits, K T R S C, one tap, or more than 64 taps by quads of
+    // channels. 304 units give the base 6 splits; one unit gives it 2.
+    EXPECT_EQ(kcrs->reduce.splits, 6);
+    EXPECT_EQ(kcrs->reduce.rows, 0);
     EXPECT_EQ(krsc->reduce.rows, 0);
     EXPECT_EQ(krsc->reduceGrid, (9u * 40 * 6 + 63) / 64); // 9 taps x 40 k x 6 quads, 64 a block
+    const auto twoSplits = launchOf(ConfigFields{}, baseShape(), "gfx942", 1);
+    ASSERT_TRUE(twoSplits.has_value());
+    EXPECT_EQ(twoSplits->reduce.splits, 2);
+    EXPECT_EQ(twoSplits->reduce.rows, 1);
+    EXPECT_EQ(twoSplits->reduceGrid, 40u); // 40 output channels x one run of 24 channels
     auto wide = baseShape();
     wide.c = 136; // three runs of 64 channels
     wide.k = 8;
-    const auto runs = launchOf(rowsFields(), wide);
+    const auto runs = launchOf(rowsFields(), wide, "gfx942", 1);
     ASSERT_TRUE(runs.has_value());
+    EXPECT_LE(runs->reduce.splits, 2);
     EXPECT_EQ(runs->reduce.rows, 1);
     EXPECT_EQ(runs->reduceGrid, 8u * 3);
     auto many = baseShape();
@@ -1784,8 +1792,10 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     auto f81 = rowsFields();
     f81.s = 9;
     f81.fr = 1;
-    const auto quadsOnly = launchOf(f81, many);
+    // Each refusal below at one unit (at most 2 splits), so only its own gate declines rows.
+    const auto quadsOnly = launchOf(f81, many, "gfx942", 1);
     ASSERT_TRUE(quadsOnly.has_value());
+    EXPECT_LE(quadsOnly->reduce.splits, 2);
     EXPECT_EQ(quadsOnly->reduce.rows, 0);
     auto pointwise = baseShape();
     pointwise.filter = {1, 1};
@@ -1793,9 +1803,15 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     auto f1 = rowsFields();
     f1.s = 1;
     f1.fr = 1;
-    const auto oneTap = launchOf(f1, pointwise);
+    const auto oneTap = launchOf(f1, pointwise, "gfx942", 1);
     ASSERT_TRUE(oneTap.has_value());
+    EXPECT_LE(oneTap->reduce.splits, 2);
     EXPECT_EQ(oneTap->reduce.rows, 0);
+    const auto krscFew
+        = conv_wrw::wrwLaunchFor(*problem, configOf(ConfigFields{}), deviceOf("gfx942", 1));
+    ASSERT_TRUE(krscFew.has_value());
+    EXPECT_EQ(krscFew->reduce.splits, 2);
+    EXPECT_EQ(krscFew->reduce.rows, 0);
 
     auto convolution = baseShape();
     convolution.mode = ConvMode::CONVOLUTION;

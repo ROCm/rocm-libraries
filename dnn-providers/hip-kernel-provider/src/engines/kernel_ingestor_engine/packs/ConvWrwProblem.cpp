@@ -40,6 +40,9 @@ constexpr int64_t MAX_PASSES = 32;
 constexpr int64_t CHUNK_MARGIN = 512;
 /// The reduce: 256 threads, 64 four-channel quads of dw per block.
 constexpr int64_t REDUCE_QUADS_PER_BLOCK = 64;
+/// The most splits the row reduce takes (measured on gfx942: rows win at 1 and 2 splits, tie
+/// at 3 and 4, lose from 8).
+constexpr int64_t REDUCE_ROWS_MAX_SPLITS = 2;
 
 int64_t divUp(int64_t value, int64_t divisor)
 {
@@ -739,10 +742,14 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const auto workspace
         = pack_features::checkedProduct({splits, *partialElems, int64_t{sizeof(float)}});
     const int64_t quads = a.groups * problem.taps * kg * divUp(cg, 4);
-    // K C T R S filters of several taps (up to the row reduce's LDS): row blocks, one output
-    // channel's run of channels by every tap each, written contiguously.
-    const bool reduceRows
-        = !problem.filterChannelsLast && problem.taps > 1 && problem.taps <= K3_REDUCE_ROW_MAX_TAPS;
+    // K C T R S filters of several taps (up to the row reduce's LDS) and at most 2 splits: row
+    // blocks, one output channel's run of channels by every tap each, written contiguously
+    // (FCN-32s on gfx906: 16 of 23 ms went to the quad blocks' scattered writes). With more
+    // splits, the quad blocks' split groups read faster (gfx942: 38 splits 224 against 263 us,
+    // 8 splits 66 against 82).
+    const bool reduceRows = !problem.filterChannelsLast && problem.taps > 1
+                            && problem.taps <= K3_REDUCE_ROW_MAX_TAPS
+                            && splits <= REDUCE_ROWS_MAX_SPLITS;
     const int64_t reduceGrid = reduceRows
                                    ? a.groups * kg * divUp(cg, int64_t{K3_REDUCE_ROW_CHANNELS})
                                    : divUp(quads, REDUCE_QUADS_PER_BLOCK);

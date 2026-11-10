@@ -3045,16 +3045,13 @@ __device__ void k3WrwRingDmaTr(const K3Args& a)
         a, acc, g, t * R, a.ft * R, k0, c0, wk, wc, lane, bz);
 }
 
-/// Adds the splits' partials into dw (its element type and layout) in a fixed order: a block's
-/// 256 threads are 64 four-channel quads of dw by 4 split groups; group j adds splits j, j + 4,
-/// j + 8, ... in order, and the four group sums are added in group order through LDS. The
-/// association depends only on the split count, so the result is bitwise reproducible.
-///
-/// K C T R S filters (a.rows): a block is one output channel's run of K3_REDUCE_ROW_CHANNELS
-/// channels by all taps, contiguous in dw. Each element sums its splits in split order (reads:
-/// consecutive threads take consecutive channels of one tap), the sums are transposed in LDS,
-/// and the run is written contiguously; the quad blocks would write it a channel apart, taps
-/// elements between neighbours.
+/// The row reduce (ConvWrwReduceRows; K C T R S filters of 2 to K3_REDUCE_ROW_MAX_TAPS taps and at
+/// most 2 splits): a block is one output channel's run of K3_REDUCE_ROW_CHANNELS channels by all
+/// taps, contiguous in dw. Each element sums its splits in split order (reads: consecutive
+/// threads take consecutive channels of one tap), the sums are transposed in LDS, and the run is
+/// written contiguously; the quad blocks write it a channel apart, taps elements between
+/// neighbours. With more splits the quad blocks' split groups win: each element's splits here
+/// run in one thread.
 template <class T>
 __device__ inline void k3ReduceRows(const K3ReduceArgs& a)
 {
@@ -3088,14 +3085,15 @@ __device__ inline void k3ReduceRows(const K3ReduceArgs& a)
     }
 }
 
+/// Adds the splits' partials into dw (its element type and layout) in a fixed order: a block's
+/// 256 threads are 64 four-channel quads of dw by 4 split groups; group j adds splits j, j + 4,
+/// j + 8, ... in order, and the four group sums are added in group order through LDS. The
+/// association depends only on the split count, so the result is bitwise reproducible. (A
+/// separate entry from the row reduce: sharing one kernel would give this one the row tile's
+/// LDS and cut its occupancy.)
 template <class T>
 __device__ inline void k3Reduce(const K3ReduceArgs& a)
 {
-    if(a.rows)
-    {
-        k3ReduceRows<T>(a);
-        return;
-    }
     typedef float f4 __attribute__((ext_vector_type(4)));
     __shared__ f4 part[3][64];
     T* dw = static_cast<T*>(a.dw);
