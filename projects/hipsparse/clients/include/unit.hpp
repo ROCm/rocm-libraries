@@ -47,6 +47,13 @@
 template <typename T>
 void unit_check_general(int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU);
 
+// Throws, including the expression and source location, so a failed check
+// unwinds the test instead of returning from this helper.
+void throw_if_condition_failed(bool condition, const char* expression, const char* file, int line);
+
+#define unit_check_condition(condition) \
+    throw_if_condition_failed(static_cast<bool>(condition), #condition, __FILE__, __LINE__)
+
 // Element-wise "approximately equal" check:
 // |hCPU - hGPU| <= max(atol, rtol * |hCPU|)
 //
@@ -54,7 +61,5 @@ void unit_check_general(int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU);
 template <typename T>
 void unit_check_near(
     int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU, double rtol = -1.0, double atol = -1.0);
-
-void unit_check_condition(bool cond);
 
 #endif // UNIT_HPP

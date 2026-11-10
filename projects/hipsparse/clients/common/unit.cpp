@@ -29,6 +29,8 @@
 #include <hipsparse-float16.h>
 #include <hipsparse.h>
 #include <limits>
+#include <sstream>
+#include <stdexcept>
 
 #ifdef GOOGLE_TEST
 #include <gtest/gtest.h>
@@ -410,11 +412,14 @@ void unit_check_near(int64_t           M,
     }
 }
 
-void unit_check_condition(bool cond)
+void throw_if_condition_failed(bool condition, const char* expression, const char* file, int line)
 {
-#ifdef GOOGLE_TEST
-    ASSERT_TRUE(cond);
-#else
-    assert(cond);
-#endif
+    if(condition)
+    {
+        return;
+    }
+
+    std::ostringstream message;
+    message << file << ":" << line << ": condition failed: " << expression;
+    throw std::runtime_error(message.str());
 }
