@@ -1000,7 +1000,7 @@ resident-fragment estimate `mfma_frag_vgprs()` within
 `DW_DGRAD_MFMA_MAX_FRAG_VGPRS`, and `mfma_lds_bytes()` within
 `DW_DGRAD_MFMA_LDS_BUDGET`.
 
-**Forward pass (`fwd=True`, MFMA form only).** The kernel reads the filter
+**Forward pass (`fwd=True`, Toeplitz form only).** The kernel reads the filter
 rotated by 180 degrees (`W[k, KH-1-r, s]` instead of `W[k, r, KW-1-s]`), which
 makes it the stride-1 depthwise *forward* convolution of the transposed
 problem: dY is the forward input, dX the forward output and `PAD` is
@@ -1048,11 +1048,14 @@ the target's wave size and records it in the cache entry
 the record and the run-side guard `direct_entry_wave_reason`); the VALU form
 keeps its logical wave64. On gfx1250 the wave64 MFMA form is refused with the
 hint `set wave_size=32`. The non-finite semantics are those of the MFMA form.
-The forward mode is wave64 only: the one Toeplitz builder loads the grouped
-form's dense A row as one 8-channel K chunk per lane, which does not fit the
-WMMA's two chunks per lane, and the depthwise forward is validated only at
-wave64. Both engines reject `fwd` (and so `out_stride=2` and the grouped
-form) at `wave_size=32`.
+At `wave_size=32` the forward mode runs the depthwise forward at stride 1
+only: the Toeplitz builder loads the grouped form's dense A row as one
+8-channel K chunk per lane, which does not fit the WMMA's two chunks per lane,
+and the stride-2 output is validated only at wave64. Both engines reject the
+grouped form and `out_stride=2` at `wave_size=32`. The depthwise forward at
+wave32 is what serves the gfx1250 depthwise forward (`DwFwdWmmaSpec`, below).
+In `fwd` the window columns are offset by the row padding, so the forward
+`PAD` applies to both axes of a rectangular filter.
 
 AOT cache image (`library/kernels/conv/direct_aot_jobs.py`): the square
 filters `_DEPTHWISE_FILTERS` with every padding; for the VALU form the `(block_w, block_h)` tiles of
@@ -1464,9 +1467,11 @@ per group. The AOT grid is `FWD_GSTREAM_KNOBS` over cpg 8 / 16 / 32 / 64 and
 ### Depthwise (`DwFwdWmmaSpec`)
 
 `library/kernels/common/conv_direct_dw_fwd_wmma.py` (C++ twin
-`instance_conv_direct_dw_fwd_wmma.h`) is the Toeplitz WMMA depthwise forward,
-the forward twin of the windowed depthwise dgrad's matrix form (stride 1,
-`cpg = kpg = 1`, `groups` a multiple of 8). Each wave owns 8 channels; one
+`instance_conv_direct_dw_fwd_wmma.h`) is the Toeplitz WMMA depthwise forward
+(stride 1, `cpg = kpg = 1`, `groups` a multiple of 8). It owns the spec, the
+kernel name and the limits; the kernel is the windowed depthwise dgrad's
+Toeplitz builder in its wave32 `fwd` form over the transposed problem
+(`dw_fwd_wmma_win_spec`). Each wave owns 8 channels; one
 16x16x32 WMMA multiplies one-hot weights (A) by 4 window columns x 8 channels
 of an input row (B) into 32 output columns x 8 channels (D), so a filter row
 of `KW` taps takes `ceil((KW + 1) / 4)` passes. Input rows stream through the
@@ -1479,6 +1484,9 @@ Knobs: `block_waves` (8 channels each, up to 16), `block_h` output rows per
 block, `w_fold` images folded into the 32 tile columns (1, 2 or 4) and
 `prefetch_rows` (1..4). The validator bounds the register-resident fragments
 (tighter for 16-wave blocks), the unrolled WMMA count and the LDS staging.
+These limits are wider than the windowed spec's (16 waves, 1024 unrolled
+WMMAs), so the family validates with its own rules and calls the Toeplitz
+builder directly.
 Runtime: N, H, W, Ho, Wo, groups and the strides; baked: KH, KW, PAD and the
 knobs. The AOT grid is `DW_FWD_WMMA_*` over "same" 3x3 / 5x5 / 7x7 and "valid"
 7x7 (variant `direct_dw_fwd_wmma`).

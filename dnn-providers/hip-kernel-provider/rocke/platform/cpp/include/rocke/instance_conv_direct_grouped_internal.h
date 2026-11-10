@@ -1170,8 +1170,9 @@ rocke_kernel_def_t* rocke_dconv_dwcol_col_loop(rocke_dconv_dwcol_ctx_t* ctx);
 /* ===================================================================== *
  *  Windowed depthwise helpers (conv_direct_grouped_build_depthwise_dgrad_win.cpp)
  *
- *  Shared by the windowed depthwise dgrad and the Toeplitz WMMA depthwise
- *  forward (conv_direct_dw_fwd_wmma.cpp), as their Python builders share them:
+ *  The spec helpers (passes, tile width, loads, LDS bytes, w_fold) are also
+ *  read by the gfx1250 depthwise forward's spec (conv_direct_dw_fwd_wmma.cpp),
+ *  which builds through the windowed Toeplitz builder:
  *
  *    Python (conv_direct_grouped.py)        C++ (here)
  *    ------------------------------------   ---------------------------------
@@ -1214,12 +1215,10 @@ long rocke_dw_mfma_lds_bytes(int in_passes, int threads, int block_ch, int w_fol
 
 /* Byte strides of the A-slot and D-slot tensors from the element-stride
  * kernargs: out = (a_img, a_row, a_px, d_img, d_row, d_px) (dY / dX in the
- * dgrad, X / Y in the forward). c2 is the caller's i32 constant 2, made here
- * when NULL. */
+ * dgrad, X / Y in the forward). */
 void rocke_dw_win_byte_strides(rocke_ir_builder_t* b,
                                const rocke_dconv_params_t* prm,
-                               rocke_value_t* out[6],
-                               rocke_value_t* c2);
+                               rocke_value_t* out[6]);
 
 /* (image_tile, h0) of this block: block z is image_tile * h_tiles + h_tile
  * with h_tiles = ceil(p_Hi / rows). */

@@ -249,7 +249,7 @@ From `helpers/README.md`:
 | conv_direct_dgrad_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `ds_read_tr16_b128` |
 | conv_direct_fwd_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, split barriers, `permlane16` |
 | conv_fwd_small_wmma (smallc / smallk) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds` |
-| conv_direct_dw_fwd_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), buffer loads / stores with sentinel offsets |
+| conv_direct_dw_fwd_wmma | - | - | - | - | - | yes | - | the windowed depthwise Toeplitz builder of `conv_direct_grouped` (wave32 `fwd` form): `emit_direct_params` (AOT kernargs), buffer loads / stores with sentinel offsets |
 | conv_direct_fwd_gstream_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` halo ring, `s_setprio` |
 | conv_direct_fwd_tapouter_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `s_setprio` |
 | conv_winograd (fwd / fwd_rt / gemm_wmma / gen / fused_1d_wmma) | yes (buffer) | - | - | - | - | yes | - | TDM `tensor_load_to_lds` / `tensor_store_from_lds` (K3), `chiplet_transform_chunked_runtime` (`helpers.grid`), `global_load_async_to_lds`, `ds_read_tr16_b128` (fused 1-D) |

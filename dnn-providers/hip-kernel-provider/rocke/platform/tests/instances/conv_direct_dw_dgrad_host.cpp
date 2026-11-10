@@ -542,20 +542,33 @@ static void test_toeplitz_wmma_refusals(void)
     CHECK(strcmp(reason, "mfma needs one of ('gfx950',) (got gfx942)") == 0,
           "gfx942 reason: %s",
           reason);
-    /* 71 / 72: fwd at stride 1 and 2; the forward mode is wave64 only. */
+    /* 71 / 72: fwd at stride 1 is the wave32 depthwise forward; stride 2 is a
+     * wave64 mode. */
     s = win_wmma(3, 1, "fp16");
     s.fwd = true;
-    check_win_refused(
-        "fwd at wave32", &s, "gfx1250", "fwd needs the wave64 MFMA form (got wave_size=32)");
+    CHECK(rocke_direct_depthwise_dgrad_win_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "the wave32 depthwise forward refused on gfx1250: %s",
+          reason);
     s.problem.dtype = "bf16";
     s.out_stride = 2;
     check_win_refused(
-        "fwd s2 at wave32", &s, "gfx1250", "fwd needs the wave64 MFMA form (got wave_size=32)");
+        "fwd s2 at wave32", &s, "gfx1250", "fwd at wave_size=32 needs out_stride=1 (got 2)");
     /* The same forward spec at wave64 stays valid on gfx950. */
     s.wave_size = 64;
     CHECK(rocke_direct_depthwise_dgrad_win_is_valid_spec(&s, "gfx950", reason, sizeof(reason)),
           "the wave64 forward form refused on gfx950: %s",
           reason);
+    /* The grouped forward form stays a wave64 mode. */
+    s = win_wmma(3, 1, "fp16");
+    s.fwd = true;
+    s.problem.groups = 10;
+    s.problem.cpg = 8;
+    s.problem.kpg = 8;
+    s.block_h = 8;
+    check_win_refused("grouped fwd at wave32",
+                      &s,
+                      "gfx1250",
+                      "the grouped fwd form needs the wave64 MFMA (got wave_size=32)");
 }
 
 /* The validator tail (rocke_wmma_fwd_limits_ok) refuses an unknown scheduler

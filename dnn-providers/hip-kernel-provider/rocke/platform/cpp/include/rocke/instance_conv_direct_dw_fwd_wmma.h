@@ -6,9 +6,10 @@
  *
  * Stride-1 depthwise forward (cpg = kpg = 1) on the gfx1250 wave32
  * 16x16x32 WMMA: one-hot weights (A) times 4 window columns x 8 channels of an
- * input row (B) into 32 output columns x 8 channels (D). Input rows stream
- * through LDS (double buffered) into KH circular accumulator tiles; finished
- * output rows drain through LDS as 16-byte stores.
+ * input row (B) into 32 output columns x 8 channels (D). The kernel is the
+ * wave32 fwd form of the windowed depthwise Toeplitz builder
+ * (rocke_build_direct_depthwise_dgrad_win); this header owns the spec, the
+ * name and the limits.
  *
  *   Python (conv_direct_dw_fwd_wmma.py)      C (this header)
  *   ------------------------------------     ---------------------------------------
@@ -19,6 +20,7 @@
  *     .kernel_name()                         rocke_direct_dw_fwd_wmma_kernel_name
  *   dw_fwd_wmma_reason / is_valid_dw_fwd_wmma_spec
  *                                            rocke_direct_dw_fwd_wmma_is_valid_spec
+ *   dw_fwd_wmma_win_spec(spec)               rocke_direct_dw_fwd_wmma_win_spec
  *   build_dw_fwd_wmma(spec, arch)            rocke_build_direct_dw_fwd_wmma(_new)
  *   (+ convenience: build -> lower .ll)      rocke_direct_dw_fwd_wmma_lower_to_llvm
  *
@@ -96,7 +98,14 @@ bool rocke_direct_dw_fwd_wmma_is_valid_spec(const rocke_direct_dw_fwd_wmma_spec_
                                             char* reason,
                                             size_t reason_cap);
 
-/* build_dw_fwd_wmma(spec, arch) into an already-initialised builder. */
+/* dw_fwd_wmma_win_spec(spec): the windowed Toeplitz spec whose wave32 fwd form
+ * is spec's kernel (the transposed problem: H = Ho, W = Wo, PAD = KH - 1 - PAD;
+ * the same knobs). */
+rocke_direct_depthwise_dgrad_win_spec_t
+    rocke_direct_dw_fwd_wmma_win_spec(const rocke_direct_dw_fwd_wmma_spec_t* spec);
+
+/* build_dw_fwd_wmma(spec, arch) into an already-initialised builder (no
+ * validation: the windowed builder's fwd form under the caller's name). */
 rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
                                                    const rocke_direct_dw_fwd_wmma_spec_t* spec,
                                                    const char* arch);
