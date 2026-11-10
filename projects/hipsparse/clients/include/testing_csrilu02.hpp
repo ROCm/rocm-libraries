@@ -298,12 +298,7 @@ void testing_csrilu02(Arguments argus)
         unit_check_general(1, 1, 1, &position_gold, &hposition_1);
         unit_check_general(1, 1, 1, &position_gold, &hposition_2);
 
-        if(hposition_1 != -1)
-        {
-            return;
-        }
-
-        if(hposition_2 != -1)
+        if(hposition_1 != -1 || hposition_2 != -1)
         {
             return;
         }
