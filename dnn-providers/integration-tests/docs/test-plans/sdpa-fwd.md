@@ -906,6 +906,14 @@ that the engine is correct for it. Examples:
 - ALMIOPEN-3043: every case with an attention scale that is zero, negative or
   subnormal.
 
+ALMIOPEN-3123 and ALMIOPEN-3124 are an exception to this rule: their entries
+cover the cases observed to fail, not every case with the trigger. Most
+trigger cases pass or the engine declines them, and the uncovered cases keep
+running so they still exercise the engine. ALMIOPEN-3123 has 2,292 trigger
+cases with no entry; 156 of them ran, 153 passing on gfx942 and gfx950 and 3
+passing on gfx942 but declined on gfx950, the rest declined on both.
+ALMIOPEN-3124 has 297 trigger cases with no entry, all declined on both.
+
 Use a list of exact names from measured failures only for a defect that has no
 known trigger. For example, the ALMIOPEN-3212 entry names the one case that
 showed the defect.
