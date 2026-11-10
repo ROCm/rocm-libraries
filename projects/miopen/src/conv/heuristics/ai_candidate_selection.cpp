@@ -1670,6 +1670,15 @@ SelectBestVocabCandidate(const std::string& arch,
                          const std::map<std::string, float>& features,
                          const std::function<bool(const std::string&, int)>& is_args_supported)
 {
+    // MIOPEN_DEBUG_LGBM_ONLY turns the two-tower model off; the lazy path is that model, so bypass
+    // it here (mirrors ModelSelectBestCandidate) -> caller falls to the solver's non-AI default.
+    if(common::LgbmOnly())
+    {
+        MIOPEN_LOG_I2("Lazy-applicability selection bypassed via MIOPEN_DEBUG_LGBM_ONLY for "
+                      << solver << " on " << arch);
+        return std::nullopt;
+    }
+
     // Parse the "+<split_k>" a split-k solver appends after the closing '>' of the GetTypeString.
     // The base kernel string itself can contain '+' (e.g. "<256l+256m, ...>"), so search only after
     // the final '>'. No suffix (non-split-k solvers) -> split_k 1.
@@ -1696,7 +1705,7 @@ SelectBestVocabCandidate(const std::string& arch,
 
         const auto& vocab = GetConfigEmbeddingVocab(arch, solver);
         if(vocab.empty())
-            return std::nullopt; // no v3 table -> caller uses the FillValidKernels path
+            return std::nullopt; // no v3 table -> caller (RunAIHeuristics) fails closed to non-AI
 
         // Rank the whole vocabulary best-first using the stored config embeddings (no fdeep config
         // encoder, no FillValidKernels).

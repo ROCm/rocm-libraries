@@ -447,7 +447,10 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
             if(lazy)
             {
                 const std::string& kid = lazy->first;
-                const int split_k      = lazy->second;
+                // Non-split solvers leave split_k 0 on the enumeration path (Reset); match that so
+                // the two paths produce identical configs (split_k_of returns 1 for ids without
+                // '+').
+                const int split_k = solver_cfg.uses_split_k ? lazy->second : 0;
                 // Recover the base GetTypeString (strip the "+<split_k>" after the final '>').
                 std::string base = kid;
                 const auto gt    = kid.rfind('>');
@@ -461,6 +464,13 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                              << state.kernel_id);
                 return true;
             }
+            // Item 3: a lazy miss -- vocab present but nothing applicable, the table absent, or the
+            // LGBM-only/kill switch -- goes straight to the solver's non-AI default. The
+            // enumeration path below re-checks the same CK instances (just rejected by the lazy
+            // walk through the same large-tensor filter) and, with the config encoders removed,
+            // cannot yield an AI pick; it would only waste a second FillValidKernels. Fail-closed
+            // is the miss policy.
+            return false;
         }
 
         // Fill valid kernels with TF32 fallback support
