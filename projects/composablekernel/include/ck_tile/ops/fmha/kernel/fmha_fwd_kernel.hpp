@@ -581,6 +581,9 @@ struct FmhaFwdKernel
         // Optional per-sequence and cumulative logical (excluding padding) sequence length arrays
         const int32_t* cu_seqlen_q_ptr = nullptr;
         const int32_t* cu_seqlen_k_ptr = nullptr;
+
+        // the batches' query and key lengths are about equal (see HasUniformSequenceLengths)
+        bool uniform_seqlens = false;
     };
 
     using Kargs = std::conditional_t<kIsGroupMode, FmhaFwdGroupModeKargs, FmhaFwdBatchModeKargs>;
@@ -1706,11 +1709,22 @@ struct FmhaFwdKernel
     }
 
     // Uniform sequence lengths allow locality-oriented XCD partitioning. Causal
-    // tiles within one sequence still have different amounts of work.
+    // tiles within one sequence still have different amounts of work. Group mode
+    // has per-batch lengths, so whole-batch XCD segments could leave the XCDs
+    // unbalanced; it takes the partitioning only when the caller vouches for
+    // about equal lengths (uniform_seqlens). There the round-robin would spread
+    // the m-tiles of a (batch, head) over the XCDs, and each XCD's L2 would fetch
+    // their K/V again (gfx1250, 2 heads x 1152 batches of 128 queries over ~772
+    // keys, d64 on 64-row tiles: -19% with the partitioning). The caller decides,
+    // not the kernel: checking the lengths here (seqstart against the longest)
+    // cost every workgroup two scalar loads ahead of its tile index, +2% on such
+    // 15-60 us kernels.
     CK_TILE_DEVICE static bool HasUniformSequenceLengths([[maybe_unused]] const Kargs& kargs)
     {
         if constexpr(kIsGroupMode)
-            return false;
+            return kargs.uniform_seqlens && kargs.seqlen_q_ptr == nullptr &&
+                   kargs.seqlen_k_ptr == nullptr && kargs.cu_seqlen_q_ptr == nullptr &&
+                   kargs.cu_seqlen_k_ptr == nullptr;
         else
             return kargs.cu_seqlen_q_ptr == nullptr && kargs.cu_seqlen_k_ptr == nullptr;
     }

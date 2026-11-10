@@ -1646,6 +1646,14 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     // Cumulative lengths not used in group mode
                     args.cu_seqlen_q_ptr = nullptr;
                     args.cu_seqlen_k_ptr = nullptr;
+                    // XCD-locality hint: the longest lengths within 1/8 of the means, as the
+                    // Python varlen API sets it
+                    const auto near_mean = [&](const std::vector<ck_tile::index_t>& lens) {
+                        const int64_t longest = *std::max_element(lens.begin(), lens.end());
+                        const int64_t total = std::accumulate(lens.begin(), lens.end(), int64_t{0});
+                        return 8 * longest * static_cast<int64_t>(lens.size()) <= 9 * total;
+                    };
+                    args.uniform_seqlens = near_mean(seqlen_qs) && near_mean(seqlen_ks);
                 }
                 else // mode == mode_enum::batch
                 {
