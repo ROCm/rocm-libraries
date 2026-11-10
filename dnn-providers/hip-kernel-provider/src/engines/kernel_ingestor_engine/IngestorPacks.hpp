@@ -98,6 +98,10 @@ void resetFlydslPagedCacheStoreModuleCache();
 void registerFlydslRopeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslRopeModuleCache();
 
+/// @see packs/FlydslPointwiseNative.cpp
+void registerFlydslPointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslPointwiseModuleCache();
+
 /// @see packs/FlydslGdnNative.cpp
 void registerFlydslGdnSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslGdnModuleCache();

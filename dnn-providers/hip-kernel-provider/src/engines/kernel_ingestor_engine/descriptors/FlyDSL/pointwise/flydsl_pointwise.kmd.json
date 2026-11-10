@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "id": "8b8d53ae-0658-546b-988a-776dbb3a38de",
+  "name": "flydsl pointwise variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "operation",
+      "type": "string"
+    },
+    {
+      "name": "in1_dtype",
+      "type": "string"
+    },
+    {
+      "name": "out_dtype",
+      "type": "string"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "vec_elems",
+      "type": "int"
+    }
+  ]
+}

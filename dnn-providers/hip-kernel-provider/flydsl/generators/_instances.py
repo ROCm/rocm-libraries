@@ -119,6 +119,8 @@ _ABBREV = {
     "index_dtype": "idx",
     "vec_bytes": "vec",
     "cache_dtype": "cache",
+    "operation": "",
+    "in1_dtype": "in1",
     "out_dtype": "out",
     "state_strided": "sstr",
     "n_align": "align",
@@ -168,6 +170,10 @@ _NAME_OMITTED_WHEN = {
     # MoE routing: symbols, not choices -- every object carries the same three kernels.
     "prefix_symbol": lambda knobs: True,
     "scatter_symbol": lambda knobs: True,
+    # Pointwise: a unary object has no second input, and the vector width follows from
+    # the dtypes the name already spells.
+    "in1_dtype": lambda knobs: knobs["in1_dtype"] == "none",
+    "vec_elems": lambda knobs: True,
     # GDN: the K-contiguous state objects are the default form.
     "state_strided": lambda knobs: knobs["state_strided"] == 0,
 }
@@ -1594,6 +1600,65 @@ def paged_cache_store_instances(arch: str) -> list[Instance]:
     return instances
 
 
+# --- Pointwise ---------------------------------------------------------------
+
+# kernels_src/kernels/pointwise/pointwise_kernel.py: one elementwise op over runtime
+# extents and element strides (the host collapses the output to at most four axes and
+# gives each operand a stride per axis, 0 where it broadcasts), so an object serves every
+# shape, layout and broadcast of its class. Baked: the operation and each operand's
+# storage type, which are its load and store widths. Every combination of bf16, f16 and
+# f32 is built, so a dtype cast (identity) and a mixed-type product such as a bf16 row
+# times f32 routing weights each have their object.
+POINTWISE_UNARY_OPERATIONS = ("sigmoid", "swish", "exp", "softplus", "neg", "identity")
+POINTWISE_BINARY_OPERATIONS = ("add", "sub", "mul", "div")
+POINTWISE_DTYPES = ("bf16", "f16", "f32")
+POINTWISE_ELEM_BYTES = {"bf16": 2, "f16": 2, "f32": 4}
+POINTWISE_BLOCK_THREADS = 256
+
+
+def pointwise_vec_elems(*dtypes: str) -> int:
+    """Elements per thread on the dense path: one 16-byte access of the widest operand.
+
+    Mirrors `vector_width` in the kernel source, which this table cannot import; the
+    generator asserts the two agree for every object."""
+    return 16 // max(POINTWISE_ELEM_BYTES[dtype] for dtype in dtypes)
+
+
+def pointwise_instances() -> list[Instance]:
+    """The pointwise table: every operation x every storage-type combination."""
+    rows = [
+        (operation, in0, "none", out)
+        for operation in POINTWISE_UNARY_OPERATIONS
+        for in0 in POINTWISE_DTYPES
+        for out in POINTWISE_DTYPES
+    ] + [
+        (operation, in0, in1, out)
+        for operation in POINTWISE_BINARY_OPERATIONS
+        for in0 in POINTWISE_DTYPES
+        for in1 in POINTWISE_DTYPES
+        for out in POINTWISE_DTYPES
+    ]
+    instances = [
+        Instance(
+            op="pointwise",
+            dtype=in0,
+            priority=PRIORITY_SPECIALIZED,
+            knobs={
+                "operation": operation,
+                "in1_dtype": in1,
+                "out_dtype": out,
+                "block_threads": POINTWISE_BLOCK_THREADS,
+                "vec_elems": pointwise_vec_elems(
+                    *(d for d in (in0, in1, out) if d != "none")
+                ),
+            },
+        )
+        for operation, in0, in1, out in rows
+    ]
+    _assert_unique(instances)
+    return instances
+
+
 # --- Gated DeltaNet ------------------------------------------------------------
 
 # kernels_src/kernels/gdn/gdn_recurrent_kernel.py: one workgroup per (sequence, output
@@ -1867,6 +1932,7 @@ OPS = {
     "gather": gather_instances,
     "rope": rope_instances,
     "paged_cache_store": paged_cache_store_instances,
+    "pointwise": pointwise_instances,
     "gdn": gdn_instances,
     "softmax": softmax_instances,
     "topk": topk_instances,

@@ -459,6 +459,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheTwentyTwoSlotSignature
         )
     endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_pointwise)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_pointwise}
+            SUITES TestFlydslPointwisePacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsOneObjectPerOperationAndTypeCombination
+                EveryKernelDeclaresTheTwentyOneSlotSignature
+        )
+    endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_topk)
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests

@@ -1139,6 +1139,68 @@ prefill BSHD with angles to 4000 rad, per-batch freqs, cuDNN's trailing default 
 full rotation in place, a middle segment at rank 3, D = 1000, and a strided head dim), and
 the census `TestFlydslRopePacks`.
 
+## Pointwise — `hipkernel:flydsl_pointwise`
+
+162 objects per arch, built for **gfx90a, gfx942 and gfx950**: the kernel is global loads
+and stores, f32 arithmetic and OCML `exp`/`log1p`, nothing gfx94x-only. RDNA is not built
+(the kernel would compile for it; no object has been validated there). Kernel:
+[`kernels_src/kernels/pointwise/pointwise_kernel.py`](kernels_src/kernels/pointwise/pointwise_kernel.py),
+written for this provider against flydsl 0.3.4; upstream FlyDSL has no standalone pointwise
+kernel, only the v0.5 activation helpers fused into its MoE epilogues
+(`kernels/common/act.py`). Native half:
+[`FlydslPointwiseNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslPointwiseNative.cpp),
+the shape collapse in
+[`FlydslPointwiseCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslPointwiseCommon.hpp).
+
+It computes cuDNN's pointwise semantics, in f32 with one rounding to the output type:
+`sigmoid` 1 / (1 + e^-a), `swish` a / (1 + e^(-βa)), `exp`, `softplus`
+(max(z, 0) + log1p(e^-|z|)) / β with z = βa (the stable form of log(1 + e^(βa)) / β), `neg`,
+`identity` (a dtype cast when the types differ), and `add`, `sub`, `mul`, `div`. β is the
+node's `swish_beta` / `softplus_beta`, 1 when unset, and a kernel argument. Broadcasting is
+the CPU reference's: shapes align at the innermost axis, an input's extent of 1 (or a
+missing leading axis) broadcasts, any other extent equals the output's.
+
+**Baked:** the operation and the three storage types (in0, in1, out; every combination of
+bf16, f16 and f32: 6 unary operations x 9 + 4 binary x 27). **Runtime:** every extent and
+every stride. prepare() drops the output's unit axes and merges each pair of axes every
+operand steps across as one run, leaving at most four (any packed layout becomes one axis;
+`[1,T,k,H] * [1,T,k,1]` becomes `[T*k, H]` with the weights' stride `(1, 0)`), and passes
+each operand's 64-bit element stride per axis, 0 where it broadcasts. A graph whose three
+operands are one dense run takes the vector path: 16 bytes of the widest operand per
+thread (8 elements, or 4 with any f32 operand), the last partial vector element by element.
+Every other graph runs one element per thread. Each output element is read and written by
+one thread only, so **the output may alias an input of the same layout**.
+
+| Graph-scoped (`flydslPointwiseGraphMatches`) | Accepted | Declined |
+|---|---|---|
+| Nodes | exactly one `PointwiseAttributes` node | anything else; override-shape graphs |
+| Operation | `SIGMOID_FWD`, `SWISH_FWD`, `EXP`, `SOFTPLUS_FWD`, `NEG`, `IDENTITY` (in_0 only); `ADD`, `SUB`, `MUL`, `DIV` (in_0 and in_1) | every other mode (ReLU, tanh, GELU, the backward modes, comparisons, `BINARY_SELECT`, ...); a missing or extra input; any in_2 |
+| β | swish: any finite β; softplus: finite β > 0 | non-finite, or a softplus β <= 0 |
+| Operands | real device tensors | virtual, pass-by-value (scalar constants) or ragged |
+| Dtypes | each operand bf16, f16 or f32, independently; compute type unset, FLOAT, HALF or BFLOAT16 (computed in f32) | any other dtype (FP8, integers, double) or compute type |
+| Shapes | inputs broadcastable to the output (rank <= the output's) | any other extent; an extent <= 0 |
+| Strides | any non-negative input strides; output strides of any non-overlapping layout (BSHD views included) | a negative input stride on a stepped axis; an output that steps an axis by 0 or overlaps itself |
+| Collapse | at most four axes after merging | more |
+| Extents | at most 2^31 - 2^16 - 1 output elements; every operand's furthest element < 2^62 | larger |
+
+| Kernel-scoped (`flydslPointwiseKernelMatches`) | |
+|---|---|
+| `operation` | the node's mode, in the kernel's spelling (`sigmoid` ... `div`) |
+| `dtype`, `in1_dtype`, `out_dtype` | in0's, in1's (`none` for a unary operation) and the output's |
+
+Exactly one object admits each accepted graph; `score` is its descriptor priority.
+
+**Checked by:** `TestFlydslPointwiseEngine` (every accept and decline row, the collapse, the
+binding, kernel match, score; host-only), `TestGpuFlydslPointwiseDispatch` (selection as the
+engine does it, then a launch against hipDNN's CPU pointwise reference, double-precision
+formulas for `EXP` and `SOFTPLUS_FWD`, which that reference lacks: every operation in each
+dtype, `[1,T,H] + [1,T,H]`, `[1,T,k,H] * [1,T,k,1]` with bf16 and f32 weights,
+`[T,H] * [T,H]`, `[T,k] / [T,1]`, a broadcast first input, a lower-rank input, both inputs
+broadcast, a BSHD output view, every dtype cast, the betas, one element),
+`TestGpuFlydslPointwiseObjects` (each staged object by name over a dense, a broadcast and a
+strided problem; `OnePerForm` pre-merge, `Full/...Every` all 162), and the census
+`TestFlydslPointwisePacks`.
+
 ---
 
 ## Paged KV-cache store — `hipkernel:flydsl_paged_cache_store`

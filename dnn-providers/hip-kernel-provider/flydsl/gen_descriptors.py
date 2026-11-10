@@ -152,6 +152,10 @@ GRAPH_DETERMINED_FIELDS = {
     "vec_bytes",
     # Paged cache store: the container's element type, x's own or an FP8 format.
     "cache_dtype",
+    # Pointwise: the operation, and the second input's and the output's element types
+    # beside the first's `dtype` ("none" for the unary operations' second input).
+    "operation",
+    "in1_dtype",
     "out_dtype",
     # Softmax (`out_dtype` above is s's dtype): the width an object's copies need N
     # to be a multiple of.
@@ -194,6 +198,8 @@ TUNING_FIELDS = {
     "k_prefetch_dist",
     "v_prefetch_dist",
     "kv_addr_hoist",
+    # Pointwise: elements per thread on the dense path.
+    "vec_elems",
     # Softmax: the threads that serve one row, and loads per thread per iteration.
     "threads_per_row",
     "unroll",

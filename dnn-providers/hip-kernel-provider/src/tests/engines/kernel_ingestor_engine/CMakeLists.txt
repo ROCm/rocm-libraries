@@ -131,6 +131,8 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslGatherObjects.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslPagedCacheStoreEngine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslPagedCacheStoreObjects.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslPointwiseEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslPointwiseObjects.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslTopkEngine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslTopkObjects.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslMoeRoutingEngine.cpp
@@ -149,7 +151,7 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     # every other, so the test asks at run time whether the device's shard is staged.
     foreach(_flydsl_op rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode
                        sdpa_rdna sdpa_rdna_decode sdpa_aiw rope gather
-                       paged_cache_store topk moe_routing gdn softmax
+                       paged_cache_store pointwise topk moe_routing gdn softmax
                        causal_conv1d)
         string(REPLACE ";" "," _flydsl_archs
                        "${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_flydsl_op}}")
@@ -167,6 +169,7 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRopePacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslGatherPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslPagedCacheStorePacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslPointwisePacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslTopkPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslMoeRoutingPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslGdnPacks.cpp

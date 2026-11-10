@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "id": "9403cdf9-4e83-5c68-bd2c-8a69bfea5cd4",
+  "name": "hipkernel:flydsl_pointwise",
+  "graph_match": {
+    "native": "hipkernel.flydsl_pointwise.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "0d1a46d7-958c-5912-ae48-cffa9d4139b2"
+  },
+  "predict_engine": {
+    "default": "b68d5a2e-b535-5dbd-b2a2-c5748009f29f"
+  },
+  "metadata": "8b8d53ae-0658-546b-988a-776dbb3a38de",
+  "knobs": [
+    "block_threads",
+    "vec_elems"
+  ]
+}

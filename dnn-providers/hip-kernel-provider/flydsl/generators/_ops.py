@@ -28,6 +28,7 @@ OP_KERNEL_DIRS = {
     "gather": ("gather",),
     "rope": ("rope",),
     "paged_cache_store": ("paged_cache",),
+    "pointwise": ("pointwise",),
     "gdn": ("gdn",),
     "softmax": ("softmax",),
     "causal_conv1d": ("causal_conv1d",),

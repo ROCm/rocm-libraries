@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "0d1a46d7-958c-5912-ae48-cffa9d4139b2",
+  "name": "flydsl pointwise selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_pointwise.score"
+  }
+}

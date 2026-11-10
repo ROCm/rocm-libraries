@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "b68d5a2e-b535-5dbd-b2a2-c5748009f29f",
+  "name": "flydsl pointwise engine estimate",
+  "provenance": "Default slot for the engine estimate: a trained model installed under heuristics/ for an arch takes precedence there. No scorer is registered under this symbol, so on any other arch the loader disables the estimate and keeps the engine.",
+  "adapter": "native",
+  "objective": "max",
+  "score": {
+    "metric": "tflops"
+  },
+  "native": {
+    "symbol": "hipkernel.flydsl_pointwise.engine_estimate"
+  }
+}

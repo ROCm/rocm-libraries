@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "557d1d99-fc55-592f-afe4-6045fa237d24",
+  "name": "flydsl pointwise: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_pointwise.kernel_match"
+}

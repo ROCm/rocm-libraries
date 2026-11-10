@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "c062413d-385b-568a-9199-d1fb70f3135f",
+  "name": "flydsl pointwise dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_pointwise.dispatch"
+}
