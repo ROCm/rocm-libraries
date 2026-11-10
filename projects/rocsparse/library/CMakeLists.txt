@@ -141,8 +141,8 @@ endif()
 if(BUILD_CODE_COVERAGE)
   # Instrument host code only. -Xarch_host keeps the instrumentation off the
   # device image, which avoids the HIP runtime abort while dumping a device
-  # profile (AISPARSE-778). ccache 4.9 drops -Xarch_* arguments, so the
-  # launcher is cleared on this target.
+  # profile (AISPARSE-778). ccache < 4.12.1 drops -Xarch_* arguments
+  # (ccache/ccache#1632), so the launcher is cleared on this target.
   target_compile_options(rocsparse PRIVATE
     "SHELL:-Xarch_host -fprofile-instr-generate"
     "SHELL:-Xarch_host -fcoverage-mapping")
