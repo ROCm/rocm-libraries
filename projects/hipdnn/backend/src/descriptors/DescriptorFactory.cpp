@@ -9,6 +9,7 @@
 #include "BatchnormOperationDescriptor.hpp"
 #include "BlockScaleDequantizeOperationDescriptor.hpp"
 #include "BlockScaleQuantizeOperationDescriptor.hpp"
+#include "CausalConv1dOperationDescriptor.hpp"
 #include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
 #include "ConvolutionWrwOperationDescriptor.hpp"
@@ -128,6 +129,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_PAGED_CACHE_STORE_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<PagedCacheStoreOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_CAUSAL_CONV1D_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<CausalConv1dOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR:
         privateDesc = std::make_shared<RopeOperationDescriptor>();

@@ -1116,3 +1116,30 @@ TEST(TestTypes, MoeGroupedMatmulModeUnknownValueReturnsError)
     EXPECT_EQ(mode, MoeGroupedMatmulMode::NOT_SET);
     EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
+
+TEST(TestTypes, CausalConv1dActivationRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(const auto activation : {CausalConv1dActivation::IDENTITY, CausalConv1dActivation::SILU})
+    {
+        const auto backendActivation = toBackendCausalConv1dActivation(activation);
+        const auto [roundTripped, error] = fromHipdnnCausalConv1dActivation(backendActivation);
+        EXPECT_TRUE(error.is_good());
+        EXPECT_EQ(roundTripped, activation);
+    }
+    EXPECT_EQ(toBackendCausalConv1dActivation(CausalConv1dActivation::IDENTITY),
+              HIPDNN_CAUSAL_CONV1D_ACTIVATION_IDENTITY_EXT);
+    EXPECT_EQ(toBackendCausalConv1dActivation(CausalConv1dActivation::SILU),
+              HIPDNN_CAUSAL_CONV1D_ACTIVATION_SILU_EXT);
+}
+
+TEST(TestTypes, CausalConv1dActivationUnknownValueReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    const auto [activation, error]
+        = fromHipdnnCausalConv1dActivation(static_cast<hipdnnCausalConv1dActivation_t>(9999));
+    EXPECT_EQ(activation, CausalConv1dActivation::IDENTITY);
+    EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}

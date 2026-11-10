@@ -12,6 +12,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/BlockScaleDequantizeAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/BlockScaleQuantizeAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/CausalConv1dAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Common.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/ConvolutionBwdAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/ConvolutionFwdAttributes.hpp>
@@ -71,6 +72,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::MoeGroupedMatmulBwdAttributes, "MoeGroupedMatmulBwdAttributes"},
      {NodeAttributes::SoftmaxAttributes, "SoftmaxAttributes"},
      {NodeAttributes::PagedCacheStoreAttributes, "PagedCacheStoreAttributes"},
+     {NodeAttributes::CausalConv1dAttributes, "CausalConv1dAttributes"},
      {NodeAttributes::GatherAttributes, "GatherAttributes"},
      {NodeAttributes::TopkAttributes, "TopkAttributes"},
      {NodeAttributes::GdnAttributes, "GdnAttributes"},
@@ -166,6 +168,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::PagedCacheStoreAttributes:
         nodeJson = *node.attributes_as_PagedCacheStoreAttributes();
+        break;
+    case data_objects::NodeAttributes::CausalConv1dAttributes:
+        nodeJson = *node.attributes_as_CausalConv1dAttributes();
         break;
     case data_objects::NodeAttributes::GatherAttributes:
         nodeJson = *node.attributes_as_GatherAttributes();
@@ -281,6 +286,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::SoftmaxAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::PagedCacheStoreAttributes:
             return to<data_objects::PagedCacheStoreAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::CausalConv1dAttributes:
+            return to<data_objects::CausalConv1dAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::GatherAttributes:
             return to<data_objects::GatherAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::TopkAttributes:

@@ -454,6 +454,21 @@ inline std::optional<double>
     return perElement(tensor(graph, op.x_tensor_uid()), 1.0);
 }
 
+// Causal conv1d: one multiply-add per kernel tap for every output element, `2 * W * y.numel`
+// with W = weight.dims[-1]. Bias and activation are not counted.
+inline std::optional<double>
+    nodeFlops(const Graph& graph,
+              const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes& op)
+{
+    const auto* weight = tensor(graph, op.weight_tensor_uid());
+    if(!shaped(weight, 2))
+    {
+        return std::nullopt;
+    }
+    const auto width = weight->dims()->Get(weight->dims()->size() - 1);
+    return perElement(tensor(graph, op.y_tensor_uid()), 2.0 * static_cast<double>(width));
+}
+
 template <typename TAttributes>
 std::optional<double> flopsOf(const Graph& graph, const TAttributes* op)
 {
@@ -552,6 +567,8 @@ inline std::optional<double> logicalFlops(const Graph& graph, const Node& node, 
         return flopsOf(graph, node.attributes_as_SoftmaxAttributes());
     case NodeAttributes::TopkAttributes:
         return flopsOf(graph, node.attributes_as_TopkAttributes());
+    case NodeAttributes::CausalConv1dAttributes:
+        return flopsOf(graph, node.attributes_as_CausalConv1dAttributes());
     // A type this build predates. A member of this build's NodeAttributes reaching here has
     // neither a case nor a NO_COUNTING_CONVENTION entry, which TestEngineFeatures rejects.
     default:

@@ -11,6 +11,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormTrainPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BlockScaleDequantizePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BlockScaleQuantizePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/CausalConv1dPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/GatherPlan.hpp>

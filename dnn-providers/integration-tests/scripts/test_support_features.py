@@ -36,6 +36,7 @@ from support_features import (
     batchnorm_training,
     block_scale_dequantize,
     block_scale_quantize,
+    causal_conv1d,
     convolution,
     convolution_bwd,
     convolution_fwd,
@@ -783,6 +784,7 @@ class TestFeatureMatrixNames:
             "Attention",
             "Batchnorm",
             "Block scale",
+            "CausalConv1d",
             "Convolution",
             "CustomOp",
             "Gather",
@@ -7466,6 +7468,133 @@ class TestPagedCacheStoreExtract:
         node["outputs"]["container_tensor_uid"] = None
         with pytest.raises(FeatureError, match="container_tensor_uid is not bound"):
             paged_cache_store.extract(node, tensors)
+
+
+def _causal_conv1d(
+    x_dims=(6, 4),
+    weight_dims=(4, 3),
+    cu_dims=(3,),
+    dtype="float",
+    cu_dtype="int32",
+    bias=False,
+    initial_state=None,
+    state_indices=None,
+    final_state=None,
+    activation="identity",
+) -> tuple[dict, dict]:
+    tensors = {
+        1: {"uid": 1, "dims": list(x_dims), "data_type": dtype},
+        2: {"uid": 2, "dims": list(weight_dims), "data_type": dtype},
+        3: {"uid": 3, "dims": list(cu_dims), "data_type": cu_dtype},
+        4: {"uid": 4, "dims": list(x_dims), "data_type": dtype},
+    }
+    node = {
+        "inputs": {
+            "x_tensor_uid": 1,
+            "weight_tensor_uid": 2,
+            "cu_seqlens_tensor_uid": 3,
+            "bias_tensor_uid": None,
+            "initial_state_tensor_uid": None,
+            "state_indices_tensor_uid": None,
+        },
+        "outputs": {"y_tensor_uid": 4, "final_state_tensor_uid": None},
+        "attributes": {"activation": activation},
+    }
+    if bias:
+        tensors[5] = {"uid": 5, "dims": [x_dims[1]], "data_type": dtype}
+        node["inputs"]["bias_tensor_uid"] = 5
+    if initial_state is not None:
+        tensors[6] = {"uid": 6, "dims": list(initial_state), "data_type": dtype}
+        node["inputs"]["initial_state_tensor_uid"] = 6
+    if state_indices is not None:
+        dims, index_dtype = state_indices
+        tensors[7] = {"uid": 7, "dims": list(dims), "data_type": index_dtype}
+        node["inputs"]["state_indices_tensor_uid"] = 7
+    if final_state is not None:
+        tensors[8] = {"uid": 8, "dims": list(final_state), "data_type": dtype}
+        node["outputs"]["final_state_tensor_uid"] = 8
+    return node, tensors
+
+
+class TestCausalConv1dExtract:
+    PLAIN = {
+        "dtype:fp32",
+        "cu_seqlens_dtype:int32",
+        "bias:absent",
+        "state:zero",
+        "final_state:absent",
+        "activation:identity",
+    }
+
+    def test_builder_names_every_schema_field(self) -> None:
+        node, _ = _causal_conv1d()
+        written = set(node["inputs"]) | set(node["outputs"]) | set(node["attributes"])
+        assert written == table_fields(
+            causal_conv1d.SCHEMA_FILE, causal_conv1d.SCHEMA_TABLE
+        )
+
+    def test_registry_maps_the_node_type_here(self) -> None:
+        assert registry.op_module("CausalConv1dAttributes") is causal_conv1d
+
+    def test_plain_graph(self) -> None:
+        assert causal_conv1d.extract(*_causal_conv1d()) == self.PLAIN
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = causal_conv1d.extract(*_causal_conv1d())
+        for kwargs in (
+            {
+                "dtype": "half",
+                "cu_dtype": "int64",
+                "bias": True,
+                "initial_state": (2, 4, 2),
+                "final_state": (2, 4, 2),
+                "activation": "silu",
+            },
+            {
+                "dtype": "bfloat16",
+                "initial_state": (5, 4, 2),
+                "state_indices": ((2,), "int64"),
+                "final_state": (5, 4, 2),
+            },
+        ):
+            reached |= causal_conv1d.extract(*_causal_conv1d(**kwargs))
+        assert reached == {f.id for f in causal_conv1d.FEATURES}
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            ({"x_dims": (1, 6, 4)}, "are not \\[T, C\\]"),
+            ({"weight_dims": (4, 1)}, "weight_tensor_uid dims"),
+            ({"weight_dims": (3, 3)}, "weight_tensor_uid dims"),
+            ({"cu_dims": (1,)}, "cu_seqlens_tensor_uid dims"),
+            ({"cu_dtype": "float"}, "is not int32 or int64"),
+            ({"state_indices": ((2,), "int32")}, "requires initial_state_tensor_uid"),
+            (
+                {"initial_state": (5, 4, 2), "state_indices": ((3,), "int32")},
+                "state_indices_tensor_uid dims",
+            ),
+            ({"initial_state": (3, 4, 2)}, "initial_state_tensor_uid dims"),
+            ({"final_state": (2, 4, 3)}, "final_state_tensor_uid dims"),
+            (
+                {
+                    "initial_state": (5, 4, 2),
+                    "state_indices": ((2,), "int32"),
+                    "final_state": (4, 4, 2),
+                },
+                "pool rows differ",
+            ),
+            ({"activation": "relu"}, "is not identity or silu"),
+        ],
+    )
+    def test_rejects(self, kwargs: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            causal_conv1d.extract(*_causal_conv1d(**kwargs))
+
+    def test_rejects_unbound_port(self) -> None:
+        node, tensors = _causal_conv1d()
+        node["outputs"]["y_tensor_uid"] = None
+        with pytest.raises(FeatureError, match="y_tensor_uid is not bound"):
+            causal_conv1d.extract(node, tensors)
 
 
 class TestCustomOpExtract:

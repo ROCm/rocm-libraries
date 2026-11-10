@@ -135,6 +135,8 @@ inline void hashAppend(Hasher& hasher, const BlockScaleQuantizeAttributes* value
 inline bool logicallyEqual(const BlockScaleQuantizeAttributes* a, const BlockScaleQuantizeAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const BoolValue* value, const UidCanon&);
 inline bool logicallyEqual(const BoolValue* a, const BoolValue* b, const UidCanon&, const UidCanon&);
+inline void hashAppend(Hasher& hasher, const CausalConv1dAttributes* value, const UidCanon& canon);
+inline bool logicallyEqual(const CausalConv1dAttributes* a, const CausalConv1dAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const ConvolutionBwdAttributes* value, const UidCanon& canon);
 inline bool logicallyEqual(const ConvolutionBwdAttributes* a, const ConvolutionBwdAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const ConvolutionFwdAttributes* value, const UidCanon& canon);
@@ -301,6 +303,9 @@ inline void hashAppend(Hasher& hasher, NodeAttributes type, const void* value, c
     case NodeAttributes::PagedCacheStoreAttributes:
         hashAppend(hasher, static_cast<const PagedCacheStoreAttributes*>(value), canon);
         break;
+    case NodeAttributes::CausalConv1dAttributes:
+        hashAppend(hasher, static_cast<const CausalConv1dAttributes*>(value), canon);
+        break;
     default:
         break;
     }
@@ -374,6 +379,8 @@ inline bool logicallyEqual(NodeAttributes aType, const void* a, NodeAttributes b
         return logicallyEqual(static_cast<const GatherAttributes*>(a), static_cast<const GatherAttributes*>(b), aCanon, bCanon);
     case NodeAttributes::PagedCacheStoreAttributes:
         return logicallyEqual(static_cast<const PagedCacheStoreAttributes*>(a), static_cast<const PagedCacheStoreAttributes*>(b), aCanon, bCanon);
+    case NodeAttributes::CausalConv1dAttributes:
+        return logicallyEqual(static_cast<const CausalConv1dAttributes*>(a), static_cast<const CausalConv1dAttributes*>(b), aCanon, bCanon);
     default:
         return true;
     }
@@ -1072,6 +1079,134 @@ inline bool logicallyEqual(const BoolValue* a, const BoolValue* b, const UidCano
         return false;
     }
     if(a->value() != b->value())
+    {
+        return false;
+    }
+    return true;
+}
+
+inline void hashAppend(Hasher& hasher, const CausalConv1dAttributes* value, const UidCanon& canon)
+{
+    if(value == nullptr)
+    {
+        hasher.tag(0);
+        return;
+    }
+    hasher.tag(1);
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->weight_tensor_uid()));
+    hashAppend(hasher, canon(value->cu_seqlens_tensor_uid()));
+    hashAppend(hasher, canon(value->y_tensor_uid()));
+    {
+        const auto optional = value->bias_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->initial_state_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->state_indices_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->final_state_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    hasher.raw(static_cast<int64_t>(value->activation()));
+}
+
+inline bool logicallyEqual(const CausalConv1dAttributes* a, const CausalConv1dAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
+{
+    if(a == b)
+    {
+        return true;
+    }
+    if(a == nullptr || b == nullptr)
+    {
+        return false;
+    }
+    if(aCanon(a->x_tensor_uid()) != bCanon(b->x_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->weight_tensor_uid()) != bCanon(b->weight_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->cu_seqlens_tensor_uid()) != bCanon(b->cu_seqlens_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->y_tensor_uid()) != bCanon(b->y_tensor_uid()))
+    {
+        return false;
+    }
+    {
+        const auto aUid = a->bias_tensor_uid();
+        const auto bUid = b->bias_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->initial_state_tensor_uid();
+        const auto bUid = b->initial_state_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->state_indices_tensor_uid();
+        const auto bUid = b->state_indices_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->final_state_tensor_uid();
+        const auto bUid = b->final_state_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    if(a->activation() != b->activation())
     {
         return false;
     }

@@ -85,6 +85,7 @@
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
+#include <hipdnn_frontend/attributes/CausalConv1dAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
@@ -130,6 +131,7 @@
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
 #include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
+#include <hipdnn_frontend/node/CausalConv1dNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
@@ -6244,6 +6246,87 @@ public:
         _sub_nodes.emplace_back(
             std::make_shared<MoeGroupedMatmulNode>(std::move(attributes), graph_attributes));
         return output;
+    }
+
+    /**
+     * @brief Performs a depthwise causal 1-D convolution with a carried state.
+     *
+     * Inputs are token-packed: `x` [T, C] holds N sequences whose offsets are
+     * `cuSeqlens` [N + 1] (INT32 or INT64). For sequence n and channel c, let xs be the
+     * W - 1 state columns followed by the sequence's tokens; then
+     * `y[t, c] = act(bias[c] + sum_{j < W} weight[c, j] * xs[t + j, c])` and the final
+     * state is the last W - 1 entries of xs. `weight[c, W - 1]` multiplies the current
+     * token. Optional inputs are set on `attributes`: bias [C], initial_state
+     * [N, C, W - 1] (absent: zeros) and state_indices [N] (requires initial_state; both
+     * states then form a pool [P, C, W - 1] addressed per sequence). Decoding one token
+     * per sequence is T = N with `cuSeqlens` = [0, 1, ..., N].
+     *
+     * @param x Token-packed input [T, C].
+     * @param weight Depthwise kernel [C, W], W >= 2.
+     * @param cuSeqlens Sequence offsets [N + 1].
+     * @param attributes Optional inputs, activation, and output_final_state.
+     * @return {y [T, C], final_state [N or P, C, W - 1]}; final_state is `nullptr` unless
+     *         `attributes.set_output_final_state(true)`. It may be bound to the same device
+     *         buffer as initial_state for an in-place state update.
+     *
+     * @see hipdnn_frontend::graph::CausalConv1dAttributes
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 2>
+        causal_conv1d(std::shared_ptr<TensorAttributes> x,
+                      std::shared_ptr<TensorAttributes> weight,
+                      std::shared_ptr<TensorAttributes> cuSeqlens,
+                      CausalConv1dAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("CausalConv1d_" + std::to_string(_sub_nodes.size()));
+        }
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        if(weight->get_name().empty())
+        {
+            weight->set_name(attributes.get_name() + "::WEIGHT");
+        }
+        if(cuSeqlens->get_name().empty())
+        {
+            cuSeqlens->set_name(attributes.get_name() + "::CU_SEQLENS");
+        }
+        const auto bias = attributes.get_bias();
+        if(bias && bias->get_name().empty())
+        {
+            bias->set_name(attributes.get_name() + "::BIAS");
+        }
+        const auto initialState = attributes.get_initial_state();
+        if(initialState && initialState->get_name().empty())
+        {
+            initialState->set_name(attributes.get_name() + "::INITIAL_STATE");
+        }
+        const auto stateIndices = attributes.get_state_indices();
+        if(stateIndices && stateIndices->get_name().empty())
+        {
+            stateIndices->set_name(attributes.get_name() + "::STATE_INDICES");
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+        std::shared_ptr<TensorAttributes> finalState;
+        if(attributes.get_output_final_state())
+        {
+            finalState = outputTensor(attributes.get_name() + "::FINAL_STATE");
+        }
+
+        attributes.set_x(std::move(x));
+        attributes.set_weight(std::move(weight));
+        attributes.set_cu_seqlens(std::move(cuSeqlens));
+        attributes.set_y(y);
+        attributes.set_final_state(finalState);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<CausalConv1dNode>(std::move(attributes), graph_attributes));
+        return {y, finalState};
     }
 
     /**

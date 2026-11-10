@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
+#include <hipdnn_frontend/attributes/CausalConv1dAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
@@ -900,6 +901,44 @@ void attributesBindings(nb::module_& m)
         .def("get_slot_mapping", &graph::PagedCacheStoreAttributes::get_slot_mapping)
         .def("get_container", &graph::PagedCacheStoreAttributes::get_container)
         .def("get_scale", &graph::PagedCacheStoreAttributes::get_scale);
+    // CausalConv1dAttributes
+    nb::class_<graph::CausalConv1dAttributes>(m, "CausalConv1dAttributes")
+        .def(nb::init<>())
+        .def(
+            "set_name", &graph::CausalConv1dAttributes::set_name, nb::rv_policy::reference_internal)
+        .def("get_name", &graph::CausalConv1dAttributes::get_name)
+        .def("set_compute_data_type",
+             &graph::CausalConv1dAttributes::set_compute_data_type,
+             nb::rv_policy::reference_internal)
+        .def("get_compute_data_type", &graph::CausalConv1dAttributes::get_compute_data_type)
+        .def("set_bias",
+             static_cast<TensorSetter<graph::CausalConv1dAttributes>>(
+                 &graph::CausalConv1dAttributes::set_bias),
+             nb::rv_policy::reference_internal)
+        .def("set_initial_state",
+             static_cast<TensorSetter<graph::CausalConv1dAttributes>>(
+                 &graph::CausalConv1dAttributes::set_initial_state),
+             nb::rv_policy::reference_internal)
+        .def("set_state_indices",
+             static_cast<TensorSetter<graph::CausalConv1dAttributes>>(
+                 &graph::CausalConv1dAttributes::set_state_indices),
+             nb::rv_policy::reference_internal)
+        .def("set_activation",
+             &graph::CausalConv1dAttributes::set_activation,
+             nb::rv_policy::reference_internal)
+        .def("set_output_final_state",
+             &graph::CausalConv1dAttributes::set_output_final_state,
+             nb::rv_policy::reference_internal)
+        .def("get_x", &graph::CausalConv1dAttributes::get_x)
+        .def("get_weight", &graph::CausalConv1dAttributes::get_weight)
+        .def("get_cu_seqlens", &graph::CausalConv1dAttributes::get_cu_seqlens)
+        .def("get_y", &graph::CausalConv1dAttributes::get_y)
+        .def("get_bias", &graph::CausalConv1dAttributes::get_bias)
+        .def("get_initial_state", &graph::CausalConv1dAttributes::get_initial_state)
+        .def("get_state_indices", &graph::CausalConv1dAttributes::get_state_indices)
+        .def("get_final_state", &graph::CausalConv1dAttributes::get_final_state)
+        .def("get_activation", &graph::CausalConv1dAttributes::get_activation)
+        .def("get_output_final_state", &graph::CausalConv1dAttributes::get_output_final_state);
     // PointwiseAttributes
     nb::class_<graph::PointwiseAttributes>(m, "PointwiseAttributes")
         .def(nb::init<>())

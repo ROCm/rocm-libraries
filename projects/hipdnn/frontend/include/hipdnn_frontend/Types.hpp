@@ -34,6 +34,7 @@
 #include <HipdnnAttentionImplementation.h>
 #include <HipdnnBackendBehaviorNote.h>
 #include <HipdnnBackendHeuristicType.h>
+#include <HipdnnCausalConv1dActivation.h>
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
 #include <HipdnnDiagonalAlignment.h>
@@ -290,6 +291,16 @@ enum class MoeGroupedMatmulMode
     SCATTER = 3 ///< Scatter grouped-matmul output to source token order.
 };
 typedef MoeGroupedMatmulMode MoeGroupedMatmulMode_t; ///< @brief MoE routing mode alias
+
+/**
+ * @enum CausalConv1dActivation
+ * @brief Activation applied to the output of causal conv1d
+ */
+enum class CausalConv1dActivation
+{
+    IDENTITY = 0, ///< No activation
+    SILU = 1 ///< SiLU activation, x * sigmoid(x)
+};
 
 /**
  * @enum HeuristicMode
@@ -598,6 +609,25 @@ inline std::optional<hipdnnMoeGroupedMatmulMode_t>
 }
 
 /**
+ * @brief Convert frontend CausalConv1dActivation to backend hipdnnCausalConv1dActivation_t
+ *
+ * @param activation The frontend CausalConv1dActivation value
+ * @return The corresponding hipdnnCausalConv1dActivation_t value
+ */
+inline hipdnnCausalConv1dActivation_t
+    toBackendCausalConv1dActivation(const CausalConv1dActivation& activation)
+{
+    switch(activation)
+    {
+    case CausalConv1dActivation::SILU:
+        return HIPDNN_CAUSAL_CONV1D_ACTIVATION_SILU_EXT;
+    case CausalConv1dActivation::IDENTITY:
+    default:
+        return HIPDNN_CAUSAL_CONV1D_ACTIVATION_IDENTITY_EXT;
+    }
+}
+
+/**
  * @brief Convert backend hipdnnDiagonalAlignment_t to frontend DiagonalAlignment
  *
  * Maps the backend C API diagonal alignment enum to the frontend DiagonalAlignment enum.
@@ -666,6 +696,29 @@ inline std::pair<MoeGroupedMatmulMode, Error>
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
                  "Unknown hipdnnMoeGroupedMatmulMode_t value: "
                      + std::to_string(static_cast<int>(mode))}};
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnCausalConv1dActivation_t to frontend CausalConv1dActivation
+ *
+ * @param activation The backend hipdnnCausalConv1dActivation_t value
+ * @return A pair of CausalConv1dActivation and Error; error is set for unknown values
+ */
+inline std::pair<CausalConv1dActivation, Error>
+    fromHipdnnCausalConv1dActivation(hipdnnCausalConv1dActivation_t activation)
+{
+    switch(activation)
+    {
+    case HIPDNN_CAUSAL_CONV1D_ACTIVATION_IDENTITY_EXT:
+        return {CausalConv1dActivation::IDENTITY, {}};
+    case HIPDNN_CAUSAL_CONV1D_ACTIVATION_SILU_EXT:
+        return {CausalConv1dActivation::SILU, {}};
+    default:
+        return {CausalConv1dActivation::IDENTITY,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnCausalConv1dActivation_t value: "
+                     + std::to_string(static_cast<int>(activation))}};
     }
 }
 

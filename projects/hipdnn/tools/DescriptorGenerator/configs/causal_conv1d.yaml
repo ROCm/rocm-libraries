@@ -1,0 +1,169 @@
+operation:
+  name: "CausalConv1d"
+  class_name: "CausalConv1dOperationDescriptor"
+  fbs_table: "CausalConv1dAttributes"
+  fbs_generated_header: "causal_conv1d_attributes_generated.h"
+
+  # cuDNN exposes causal conv1d only as the Python op cudnn.ops.causal_conv1d
+  # (docs/operations/CausalConv1d.md), with no backend descriptor or graph
+  # node, so every backend name carries the _EXT suffix.
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_CAUSAL_CONV1D_DESCRIPTOR_EXT"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_CAUSAL_CONV1D"
+
+  error_label: "causal conv1d"
+  packer_operation_label: "causal conv1d"
+  packer_finalize_label: "causal conv1d"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_CAUSAL_CONV1D_EXT"
+
+  frontend:
+    packer_function: "createCausalConv1dOperation"
+    unpacker_function: "unpackCausalConv1dOperation"
+    node_class: "CausalConv1dNode"
+    attributes_class: "CausalConv1dAttributes"
+
+    inputs:
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+      - name: "weight"
+        enum_name: "WEIGHT"
+        required: true
+        getter_name: "get_weight"
+        setter_name: "set_weight"
+      - name: "cu_seqlens"
+        enum_name: "CU_SEQLENS"
+        required: true
+        getter_name: "get_cu_seqlens"
+        setter_name: "set_cu_seqlens"
+      - name: "bias"
+        enum_name: "BIAS"
+        required: false
+        getter_name: "get_bias"
+        setter_name: "set_bias"
+      - name: "initial_state"
+        enum_name: "INITIAL_STATE"
+        required: false
+        getter_name: "get_initial_state"
+        setter_name: "set_initial_state"
+      - name: "state_indices"
+        enum_name: "STATE_INDICES"
+        required: false
+        getter_name: "get_state_indices"
+        setter_name: "set_state_indices"
+    outputs:
+      - name: "y"
+        enum_name: "Y"
+        required: true
+        getter_name: "get_y"
+        setter_name: "set_y"
+      - name: "final_state"
+        enum_name: "FINAL_STATE"
+        required: false
+        getter_name: "get_final_state"
+        setter_name: "set_final_state"
+    graph_method_name: "causal_conv1d"
+    graph_method_params:
+      - name: "x"
+        tensor_name: "x"
+      - name: "weight"
+        tensor_name: "weight"
+      - name: "cuSeqlens"
+        tensor_name: "cu_seqlens"
+    graph_return_type: "array"
+    graph_return_outputs:
+      - "y"
+      - "final_state"
+    node_type_enum: "NodeType::CAUSAL_CONV1D"
+    node_attributes_union_type: "CausalConv1dAttributes"
+
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X_EXT"
+      required: true
+    - name: "weight"
+      fbs_field: "weight_tensor_uid"
+      attr_suffix: "WEIGHT_EXT"
+      required: true
+    - name: "cu_seqlens"
+      fbs_field: "cu_seqlens_tensor_uid"
+      attr_suffix: "CU_SEQLENS_EXT"
+      required: true
+    - name: "y"
+      fbs_field: "y_tensor_uid"
+      attr_suffix: "Y_EXT"
+      required: true
+    - name: "bias"
+      fbs_field: "bias_tensor_uid"
+      attr_suffix: "BIAS_EXT"
+      required: false
+    - name: "initial_state"
+      fbs_field: "initial_state_tensor_uid"
+      attr_suffix: "INITIAL_STATE_EXT"
+      required: false
+    - name: "state_indices"
+      fbs_field: "state_indices_tensor_uid"
+      attr_suffix: "STATE_INDICES_EXT"
+      required: false
+    - name: "final_state"
+      fbs_field: "final_state_tensor_uid"
+      attr_suffix: "FINAL_STATE_EXT"
+      required: false
+
+  data_fields:
+    - name: "activation"
+      fbs_field: "activation"
+      attr_name: "HIPDNN_ATTR_OPERATION_CAUSAL_CONV1D_ACTIVATION_EXT"
+      type: "mode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::CausalConv1dActivation"
+      frontend_type: "CausalConv1dActivation"
+      default_value: "CausalConv1dActivation::IDENTITY"
+      required: false
+      mode_sentinel: "none"
+      frontend_getter: "get_activation()"
+      backend_setter: "setCausalConv1dActivation"
+      backend_getter: "getCausalConv1dActivation"
+      backend_converter: "toBackendCausalConv1dActivation"
+      frontend_inverse_converter: "fromHipdnnCausalConv1dActivation"
+      backend_type_name: "HIPDNN_TYPE_CAUSAL_CONV1D_ACTIVATION_EXT"
+      test_enum_value: "SILU"
+      test_alt_enum_value: "IDENTITY"
+      test_backend_value: "HIPDNN_CAUSAL_CONV1D_ACTIVATION_SILU_EXT"
+      test_c_type: "hipdnnCausalConv1dActivation_t"
+      test_default_value: "HIPDNN_CAUSAL_CONV1D_ACTIVATION_IDENTITY_EXT"
+      enum_def:
+        backend_header: "HipdnnCausalConv1dActivation.h"
+        backend_prefix: "HIPDNN_CAUSAL_CONV1D_ACTIVATION_"
+        values:
+          - { name: "IDENTITY_EXT", value: 0, sdk_name: "IDENTITY", frontend_name: "IDENTITY", description: "No activation" }
+          - { name: "SILU_EXT", value: 1, sdk_name: "SILU", frontend_name: "SILU", description: "SiLU activation, x * sigmoid(x)" }
+
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_CAUSAL_CONV1D_COMP_TYPE_EXT"
+
+  test_data:
+    tensor_const_prefix: "K_CAUSAL_CONV1D_"
+    tensor_uids:
+      x: 9600
+      weight: 9601
+      cu_seqlens: 9602
+      y: 9603
+      bias: 9604
+      initial_state: 9605
+      state_indices: 9606
+      final_state: 9607
+    tensor_configs:
+      x: { dims: [8, 4], strides: [4, 1] }
+      weight: { dims: [4, 4], strides: [4, 1] }
+      cu_seqlens: { dims: [3], strides: [1], data_type: INT32 }
+      y: { dims: [8, 4], strides: [4, 1] }
+      bias: { dims: [4], strides: [1] }
+      initial_state: { dims: [2, 4, 3], strides: [12, 3, 1] }
+      state_indices: { dims: [2], strides: [1], data_type: INT32 }
+      final_state: { dims: [2, 4, 3], strides: [12, 3, 1] }

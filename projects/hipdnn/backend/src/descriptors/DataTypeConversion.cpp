@@ -634,4 +634,38 @@ hipdnnMoeGroupedMatmulMode_t
                               "Unsupported SDK MoeGroupedMatmulMode value");
     }
 }
+
+hipdnn_flatbuffers_sdk::data_objects::CausalConv1dActivation
+    toSdkCausalConv1dActivation(hipdnnCausalConv1dActivation_t mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::CausalConv1dActivation;
+
+    switch(mode)
+    {
+    case HIPDNN_CAUSAL_CONV1D_ACTIVATION_IDENTITY_EXT:
+        return CausalConv1dActivation::IDENTITY;
+    case HIPDNN_CAUSAL_CONV1D_ACTIVATION_SILU_EXT:
+        return CausalConv1dActivation::SILU;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Unsupported hipdnnCausalConv1dActivation_t value");
+    }
+}
+
+hipdnnCausalConv1dActivation_t
+    fromSdkCausalConv1dActivation(hipdnn_flatbuffers_sdk::data_objects::CausalConv1dActivation mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::CausalConv1dActivation;
+
+    switch(mode)
+    {
+    case CausalConv1dActivation::IDENTITY:
+        return HIPDNN_CAUSAL_CONV1D_ACTIVATION_IDENTITY_EXT;
+    case CausalConv1dActivation::SILU:
+        return HIPDNN_CAUSAL_CONV1D_ACTIVATION_SILU_EXT;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Unsupported SDK CausalConv1dActivation value");
+    }
+}
 } // namespace hipdnn_backend

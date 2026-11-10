@@ -252,6 +252,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid gather graph)";
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::CausalConv1dAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidCausalConv1dGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid causal conv1d graph)";
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::TopkAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidTopkGraph();
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
@@ -488,6 +493,47 @@ TEST(TestJson, PagedCacheStoreRoundTrip)
     EXPECT_EQ(outputs.at("container_tensor_uid").get<int64_t>(), 3);
 
     toJsonAndBackTestSuite(graph, "(paged cache store)");
+}
+
+TEST(TestJson, CausalConv1dRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidCausalConv1dGraph();
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    const auto& nodeJson = graphJson.at("nodes").at(0);
+
+    EXPECT_EQ(nodeJson.at("type").get<std::string>(), "CausalConv1dAttributes");
+    EXPECT_EQ(nodeJson.at("inputs").at("state_indices_tensor_uid").get<int64_t>(), 7);
+    EXPECT_EQ(nodeJson.at("outputs").at("final_state_tensor_uid").get<int64_t>(), 8);
+    EXPECT_EQ(nodeJson.at("attributes").at("activation").get<std::string>(), "silu");
+
+    toJsonAndBackTestSuite(graph, "(causal conv1d)");
+}
+
+TEST(TestJson, CausalConv1dWithoutStateRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidCausalConv1dGraph(false);
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    EXPECT_TRUE(graphJson.at("nodes").at(0).at("inputs").at("initial_state_tensor_uid").is_null());
+
+    toJsonAndBackTestSuite(graph, "(causal conv1d without state)");
+}
+
+TEST(TestJson, CausalConv1dRejectsUnknownActivation)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidCausalConv1dGraph();
+    const nlohmann::json validJson = *GetGraph(graphBuilder.GetBufferPointer());
+    for(const nlohmann::json& activation :
+        {nlohmann::json("SILU"), nlohmann::json("relu"), nlohmann::json(1)})
+    {
+        nlohmann::json graphJson = validJson;
+        graphJson.at("nodes").at(0).at("attributes")["activation"] = activation;
+        flatbuffers::FlatBufferBuilder builder;
+        EXPECT_THROW((void)hipdnn_flatbuffers_sdk::json::to<Graph>(builder, graphJson),
+                     std::runtime_error)
+            << activation.dump();
+    }
 }
 
 // GraphToJsonAndBack covers one graph per node type; these cover the second

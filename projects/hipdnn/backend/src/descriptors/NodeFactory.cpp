@@ -29,6 +29,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return BlockScaleDequantizeOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::BlockScaleQuantizeAttributes:
         return BlockScaleQuantizeOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::CausalConv1dAttributes:
+        return CausalConv1dOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::ConvolutionBwdAttributes:
         return ConvolutionBwdOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::ConvolutionFwdAttributes:

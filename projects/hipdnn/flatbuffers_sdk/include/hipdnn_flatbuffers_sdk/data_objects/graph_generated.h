@@ -19,6 +19,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "batchnorm_inference_attributes_variance_ext_generated.h"
 #include "block_scale_dequantize_attributes_generated.h"
 #include "block_scale_quantize_attributes_generated.h"
+#include "causal_conv1d_attributes_generated.h"
 #include "convolution_bwd_attributes_generated.h"
 #include "convolution_fwd_attributes_generated.h"
 #include "convolution_wrw_attributes_generated.h"
@@ -102,11 +103,12 @@ enum class NodeAttributes : uint8_t {
   TopkAttributes = 28,
   GatherAttributes = 29,
   PagedCacheStoreAttributes = 30,
+  CausalConv1dAttributes = 31,
   MIN = NONE,
-  MAX = PagedCacheStoreAttributes
+  MAX = CausalConv1dAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[31] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[32] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -138,13 +140,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[31] {
     NodeAttributes::SoftmaxAttributes,
     NodeAttributes::TopkAttributes,
     NodeAttributes::GatherAttributes,
-    NodeAttributes::PagedCacheStoreAttributes
+    NodeAttributes::PagedCacheStoreAttributes,
+    NodeAttributes::CausalConv1dAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[32] = {
+  static const char * const names[33] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -176,13 +179,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "TopkAttributes",
     "GatherAttributes",
     "PagedCacheStoreAttributes",
+    "CausalConv1dAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::PagedCacheStoreAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::CausalConv1dAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -311,6 +315,10 @@ template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::Pag
   static const NodeAttributes enum_value = NodeAttributes::PagedCacheStoreAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::CausalConv1dAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -433,6 +441,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects
 
 template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::PagedCacheStoreAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::CausalConv1dAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -705,6 +717,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::PagedCacheStoreAttributes ?
       reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributesT *>(value) : nullptr;
   }
+  hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *AsCausalConv1dAttributes() {
+    return type == NodeAttributes::CausalConv1dAttributes ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *AsCausalConv1dAttributes() const {
+    return type == NodeAttributes::CausalConv1dAttributes ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -833,6 +853,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::PagedCacheStoreAttributes: {
       return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::CausalConv1dAttributes: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -1052,6 +1076,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributes *attributes_as_PagedCacheStoreAttributes() const {
     return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PagedCacheStoreAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes *attributes_as_CausalConv1dAttributes() const {
+    return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::CausalConv1dAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -1188,6 +1215,10 @@ template<> inline const hipdnn_flatbuffers_sdk::data_objects::GatherAttributes *
 
 template<> inline const hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributes>() const {
   return attributes_as_PagedCacheStoreAttributes();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes>() const {
+  return attributes_as_CausalConv1dAttributes();
 }
 
 struct NodeBuilder {
@@ -1742,6 +1773,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::CausalConv1dAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -1881,6 +1916,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::CausalConv1dAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -2008,6 +2047,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributesT *>(value);
       return CreatePagedCacheStoreAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::CausalConv1dAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(value);
+      return CreateCausalConv1dAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -2132,6 +2175,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::PagedCacheStoreAttributes: {
       value = new hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::CausalConv1dAttributes: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(u.value));
       break;
     }
     default:
@@ -2288,6 +2335,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::PagedCacheStoreAttributes: {
       auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::CausalConv1dAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(value);
       delete ptr;
       break;
     }

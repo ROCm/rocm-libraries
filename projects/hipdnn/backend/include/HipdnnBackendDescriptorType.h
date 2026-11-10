@@ -385,6 +385,14 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_GATHER_DESCRIPTOR_EXT = 42,
 
     /**
+     * @brief Causal conv1d operation descriptor (extension)
+     *
+     * Depthwise causal 1-D convolution over token-packed sequences with an
+     * optional carried state, as used by Mamba and Gated DeltaNet layers.
+     */
+    HIPDNN_BACKEND_OPERATION_CAUSAL_CONV1D_DESCRIPTOR_EXT = 44,
+
+    /**
      * @brief RoPE forward operation descriptor
      *
      * Applies rotate-half rotary position embedding to a segment of the last

@@ -767,3 +767,13 @@ The checked-in `finalize()` delegates routing validation to
 `MoeGroupedMatmulValidation.hpp` so the backend and CPU reference share one
 contract. Regenerating the backend descriptor emits the template's original
 routing switch; preserve the checked-in `finalize()` during integration.
+
+**Causal conv1d** — generated except for `CausalConv1dOperationDescriptor::finalize()`
+(adds "STATE_INDICES_EXT requires INITIAL_STATE_EXT"), the frontend-only
+`output_final_state` flag in `CausalConv1dAttributes.hpp` and its unpacker line,
+`CausalConv1dNode.hpp` (shape inference and validation), the
+`Graph::causal_conv1d` method (returns `{y, final_state}`, final_state only when
+requested), and `TestGraphCausalConv1d.cpp` plus
+`IntegrationCausalConv1dDescriptorLowering.cpp` (the generator neither calls an
+`array` graph method nor binds its optional second output). Preserve these during
+integration.

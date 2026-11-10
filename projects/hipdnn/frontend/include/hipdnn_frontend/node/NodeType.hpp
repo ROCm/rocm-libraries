@@ -40,6 +40,7 @@ enum class NodeType
     TOPK = 26,
     GATHER = 27,
     ROPE = 24,
+    CAUSAL_CONV1D = 29,
 };
 
 } // namespace hipdnn_frontend::graph
