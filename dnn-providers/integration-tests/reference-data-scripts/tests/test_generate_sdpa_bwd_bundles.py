@@ -302,6 +302,7 @@ def test_plan_items_are_traceable(cases):
         "G-D",
         "G-E",
         "G-F",
+        "HF",
     }
     known = set(P.FEATURES) | item_ids | shapes | tags
     covered = set()
@@ -326,22 +327,38 @@ def test_plan_items_are_traceable(cases):
 
 def test_ceilings_hold(written):
     for c in written:
-        assert P.budget_seconds(c["est_s"], c["est_s_alt"]) <= P.CEIL_S[c["level"]], c[
-            "case_id"
-        ]
+        assert c["est_s_gpu"] <= P.CEIL_S[c["level"]], c["case_id"]
         cap = P.CEIL_BYTES[c["level"]]
         assert cap is None or c["record"]["bytes"] <= cap, c["case_id"]
 
 
-def test_cumulative_budgets_hold(written):
-    total = 0.0
+def test_cumulative_budgets_hold(cases):
+    """Every level with a budget holds its cases inside the 5 % reserve, less
+    the reserved gates."""
+    cum, lim = G.cumulative_seconds(cases), G.budget_limits(cases)
     for lv in P.LEVELS:
-        total += sum(
-            P.budget_seconds(c["est_s"], c["est_s_alt"])
-            for c in written
-            if c["level"] == lv
-        )
-        assert total <= P.CUM_S[lv], (lv, total)
+        assert cum[lv] <= lim[lv], (lv, cum[lv], lim[lv])
+
+
+def test_hf_cases_fill_pr_and_nightly_in_priority_order(cases):
+    """An HF case in full fits no lower level next to the cases placed before it:
+    PR and nightly are filled in priority order, and every runnable HF case
+    lands in PR, nightly or full."""
+    hf = [c for c in cases if c.get("hf") and c["runnable_now"]]
+    assert hf and {c["level"] for c in hf} <= {"pr", "nightly", "full"}
+    lim = G.budget_limits(cases)
+    cum = G.cumulative_seconds(cases)
+    for c in hf:
+        if c["level"] != "full":
+            continue
+        for lv in P.HF_LEVELS:
+            cap = P.CEIL_BYTES[lv]
+            fits_case = c["est_s_gpu"] <= P.CEIL_S[lv] and (
+                cap is None or c["record"]["bytes"] <= cap
+            )
+            span = P.LEVELS[P.LEVELS.index(lv) : P.LEVELS.index(P.HF_LEVELS[-1]) + 1]
+            room = all(cum[L] + c["est_s_gpu"] <= lim[L] for L in span)
+            assert not (fits_case and room), (c["case_id"], lv)
 
 
 # --------------------------------------------------------------------------

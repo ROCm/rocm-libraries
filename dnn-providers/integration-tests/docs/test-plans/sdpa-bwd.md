@@ -4,7 +4,7 @@
 > follows [RFC 0022](../../../../projects/hipdnn/docs/rfcs/0022_PerOpTestPlans.md) (#13937, merged 2026-10-30). The RFC's methodology guide and
 > test-plans index do not exist yet, so this plan links the RFC's sections directly. The generator
 > is the source of truth for counts and budgets: `generate_sdpa_bwd_bundles.py --dry-run --report`
-> declares 580 cases, 503 written (quick 56, PR 152, nightly 220, full 75) and 77 gated. The engine defects DEF-01 to DEF-08
+> declares 5,080 cases, 4,955 written (quick 56, PR 1,205, nightly 944, full 2,750; 4,452 of them from the Hugging Face census, §3.6) and 125 gated. The engine defects DEF-01 to DEF-08
 > (§4.2) are tracked under ALMIOPEN-3035: DEF-01 is ALMIOPEN-3036, DEF-02 ALMIOPEN-3037,
 > DEF-03 ALMIOPEN-3046, DEF-04 ALMIOPEN-3039, DEF-05 and DEF-08 ALMIOPEN-3038, DEF-06
 > ALMIOPEN-3043 and DEF-07 ALMIOPEN-3044.
@@ -397,42 +397,48 @@ of IVP3 (explicit gradient dims); the rest is to file.
 
 ## 3. Shape catalog
 
-The sweep draws its shapes from five sets: **S** small shapes that change one feature from the
+The sweep draws its shapes from six sets: **S** small shapes that change one feature from the
 default; **L** the same features at medium size; **M** real models and the dnn-benchmarking corpus;
-**H** hazard breakpoints; **X** stress. A shape is written `B H Sq×Skv D`, with H as `Hq/Hk/Hv` and D
-as `Dqk/Dv` when they differ. The CPU reference sets the cost of a case on the baseline, so the
-ceilings are wall times and FLOP follows from them.
+**HF** the Hugging Face model census (§3.6, size class M); **H** hazard breakpoints; **X** stress. A
+shape is written `B H Sq×Skv D`, with H as `Hq/Hk/Hv` and D as `Dqk/Dv` when they differ. The
+GPU-era cost model sets the cost of a case, so the ceilings are wall times and FLOP follows from them.
 
-| Level | RFC start | Wall per case | FLOP (implied) | MiB (fp32-eq.) | Cumulative budget | Sets |
-|---|---|---|---|---|---|---|
-| quick | ≤ 20 MFLOP, ≤ 1 MB | ≤ 1.5 s | ≤ 100 M | ≤ 4 | 20 s | S; H for regressions and two cheap probes |
-| PR | ≤ 200 MFLOP, ≤ 16 MB | ≤ 5 s | ≤ 350 M | ≤ 16 | 120 s | S, H, six M |
-| nightly | ≤ 8 GFLOP, ≤ 64 MB | ≤ 75 s | ≤ 5.5 G | ≤ 64 | 480 s | S, L, M, H |
-| full | none | ≤ 5 min | ≤ 22 G | none; X states host memory | 1800 s | all, with X |
+| Level | RFC start | Wall per case | MiB (fp32-eq.) | Cumulative budget | Sets |
+|---|---|---|---|---|---|
+| quick | ≤ 20 MFLOP, ≤ 1 MB | ≤ 1.5 s | ≤ 4 | 20 s | S; H for regressions and two cheap probes |
+| PR | ≤ 200 MFLOP, ≤ 16 MB | ≤ 5 s | ≤ 16 | 120 s | S, H, six M, HF |
+| nightly | ≤ 8 GFLOP, ≤ 64 MB | ≤ 75 s | ≤ 64 | 480 s | S, L, M, H, HF |
+| full | none | ≤ 5 min | none; X states host memory | none (RFC 0022 §8.2) | all, with X and the HF overflow |
 
-- **Binding cost.** A case costs max(pilot model, alt model), where the alt model multiplies the
-  reference term by 1.10 for fp16. The same cost decides the per-case fit and the cumulative budgets
-  (§4.4). The budgets are the SdpaBackward share of the gfx942 lane.
+- **Binding cost.** A case costs the GPU-era model below. The same cost decides the per-case fit and
+  the cumulative budgets (§4.4). The quick, PR and nightly budgets are the SdpaBackward share of the
+  gfx942 lane. Full has no budget: the HF cases that do not fit nightly land there (§3.6).
 - **Why the RFC values change.** The RFC quick ceiling is below every inherited quick case (37–126
   MFLOP counting live pairs) and the default shape (66 MFLOP). Memory grows as S·D and work as S²·D,
-  so memory never binds below full; 4 MiB fp32-equivalent is about 2 MiB in bf16, the golden limit.
+  so memory binds only the HF cases below full; 4 MiB fp32-equivalent is about 2 MiB in bf16, the
+  golden limit.
 
-**Cost model.** T = B·Hq·Sq·Skv counts every score position and U the live pairs. The binding model
-is the gfx942 pilot fit of fill, CPU forward derivation, three engine launches, CPU backward
-reference and compare:
+**Cost model.** T = B·Hq·Sq·Skv counts every score position and U the live pairs. With the device
+fill (the CI default), the fill derives O and Stats with the GPU reference's forward (ALMIOPEN-2855)
+and the GPU reference checks the gradients; each of its threads recomputes the scores it needs. The
+binding model is the fit of the gfx942 timing run (§4.5, RFC 0022 I9):
+
+    t_gpu = 3.92e-13·T·(Dqk + Dv) + 4.82e-13·U·(2·Dqk·(Dqk + Dv) + Dqk·Dv) + 0.0127 s
+
+Over the 616 cases ASM_SDPA_ENGINE executed, the median error is 13 % and the 90th percentile 25 %.
+The first case of each HipRTC-compiled type combination in a process also pays about 3.5 s once; the
+model leaves that to the reserve. The gfx950 run of the census on the FlyDSL engines fits the same
+form within 20 % (4.75e-13, 4.37e-13, 0.018 s). GQA gets no discount.
+
+The CPU reference model stays for lanes that force `--verification-mode=cpu` (about 10 % slower
+since #14358) and for the size targets of the M reductions (§3.3). It is the gfx942 pilot fit of fill,
+CPU forward derivation, three engine launches, CPU backward reference and compare:
 
     t_pilot = 4.6e-8·Dv·T + 8.7e-8·((3·Dqk + Dv)/4)·U + 0.14 s
     t_alt   = 27.9 ns·f·[U·(3·Dqk + Dv) + T·Dv] + 1.0e-8·((Dqk + Dv)/2)·T + 0.08 s,   f = 1.10 for fp16
 
 On the 62 pilot cases above 1 s, measured/pilot is 0.94–1.08 and measured/alt 0.81–1.22. The CPU
-backward reference is 90 % of a case, and it computes dP for every key: a W = 32 window at Skv = 2048
-has 1.6 % of the dense FLOP and 36 % of the time. GQA gets no discount. Backward FLOP =
-2·(3·Dqk + 2·Dv) per live pair per query head. Since #14358 the GPU reference comes first, so a case
-costs the fill, the #14312 CPU forward (0.4–1.7 µs per pair at D 128), the GPU reference and the
-engine: at least 1.0e-8·D·T + 0.08 s. The measured run (§4.5) is far below the CPU-reference
-budgets. A GPU-reference timing run (RFC 0022 I9) then re-derives the FLOP and MiB ceilings and
-re-sizes L and M; the wall ceilings and budgets stay. #14358's CPU reference
-is about 10 % slower, so lanes that force `--verification-mode=cpu` scale by 1.1.
+backward reference is 90 % of such a case, and it computes dP for every key.
 
 **Default shape.** B 2, Hq = Hk = Hv 3, 72 × 120, D 128, no mask, `attn_scale_value` 1/√Dqk, packed
 BHSD on the eight IO tensors, packed FLOAT [B,Hq,Sq,1] Stats, declared alignment 16, Q, K, V, dO in
@@ -566,13 +572,52 @@ Limits, placed in full; each shape states what its oracle needs.
 | X14 | dims narrowed to 32 bits (Dqk = 2³² + 128) | descriptor only | unit test |
 | X15 | O and dO byte span ≥ 2³² (the ODO kernel forms b·batch-stride in 32 bits; DEF-07) | B2 1 128² D128, O and dO batch stride 2³¹ + 2¹⁴ elements | gated: decline-only probe mode (HG22) |
 
+### 3.6 Hugging Face census (HF)
+
+The real attention geometries of the most-used public models, as training runs them. Source: the
+Hugging Face Hub API rankings by likes (top 2,000), downloads (top 2,000) and trending (top 1,000),
+fetched 2026-11-09: 3,879 models, 3,175 with an architecture config (619 through a quantized repo's
+`base_model`), 4,699 attention sites in 2,712 models. A **geometry** is one real attention call (Hq,
+Hkv, Dqk, Dv, mask, bias, scale) with the lengths its models use; its popularity is
+log2(1 + models) plus 3 (a model in the top 100) or 1.5 (top 500). `sdpa_bwd_hf_census.json` holds
+the 361 geometries and 4,500 cases from 347 of them; `sdpa_bwd_plan.py` reads it, and the census run's
+case id is kept in each record. Nobody edits the file by hand.
+
+Each case is one **variant** of a geometry, in placement order: R real length, one KV group (MHA
+keeps 2 heads); F the real head counts; T the real length ±1 and ±63, 65, 127, 129 (tile tails at the
+real head dims); P packed QKV (layout `qkvpk`: Q, K, V and their gradients are views of one
+[B, S, Hq + Hk + Hv, D] buffer); V GPT-NeoX/BLOOM interleaved V (`bshd_vneox`: head stride 3D); H
+BHSD; D fp16; M Sq ≠ Skv (context-parallel steps, BR) and windows just past W; B batch > 1; X the
+model's bias forms (padding bias, learned bias with dBias, ALiBi); U a U(−1, 1) twin of a long
+case. Cases longer than 2,048 keys draw Q and K from U(−3, 3), the logit spread of trained attention.
+Everything else is BSHD in bf16.
+
+**Placement.** The generator places the cases after every other case and the all-pairs cases: the
+n-th variant of every geometry before the (n+1)-th, the most popular geometry first. A case goes to
+the lowest of PR and nightly whose per-case ceilings it fits and whose cumulative budget, and every
+one above it up to nightly, keeps room for it inside the 5 % reserve; otherwise to full. The
+all-pairs cases depend on the placement, so placement repeats until they settle. Quick holds no HF
+case (RFC 0022 §7: quick is S shapes).
+
+| Level | HF cases | Geometries | s (GPU-era model) | Variants |
+|---|---:|---:|---:|---|
+| PR | 1,053 | 189 | 50.1 | R 215, F 221, T 515, P 46, H 23, D 17, V 9, B 4, X 3 |
+| nightly | 724 | 199 | 399.6 | R 163, F 233, T 294, P 16, D 5, H 5, B 4, U 3, V 1 |
+| full | 2,675 | 262 | 3,031 | every variant; M 263, U 150 and most B, D, H, X |
+| not run | 48 | — | — | 44 wait for HG6 (no class holds both the guard and the margin: IBM Granite 4 layers, whose 1/D scale leaves every gradient tiny, Falcon-7B 71/1 and DeepSeek-V4-Pro 128/1 D512); 4 ALiBi wait for the derivation extension |
+
+285 of the 347 geometries have a case in PR or nightly. 346 HF cases are claims (MHA, D 128 or 192,
+no bias); the rest are probes (§4.2). Tolerance classes: P 1,583, U 1,204, D 1,175, DL 461, S 29;
+256 cases scale dO. The magnitude estimate of a case over `ESTIMATE_CAP` runs on one KV group, in
+blocks of query rows (§6.1), so every HF case gets an estimated class and the kernel-model margin.
+
 ---
 
 ## 4. Building the sweep
 
 `sdpa_bwd_plan.py` holds one record per case (geometry, per-tensor dims, strides and dtypes, bounds,
 scale, attributes, value domains, level, topology, purpose, plan items, class, oracle, gate, cost):
-580 cases: 503 written on the baseline and 77 gated (§4.1). **Core axes:** dtype
+5,080 cases: 4,955 written on the baseline and 125 gated (§4.1); 4,500 of them are the HF census (§3.6). **Core axes:** dtype
 {BF16, FP16} × Sq:Skv {<, =, >} × mask {none, causal, window} × alignment {TL, BR} where it changes
 the mask: 13 cells per dtype. The mask and the Sq:Skv relation choose the kernel's code path (dead
 rows, unattended keys, the window anchor, the masked-tile skip); the dtype selects the kernel and the
@@ -685,7 +730,7 @@ Each level answers one question (RFC 0022 §8.2); a case sits in the lowest leve
 | Bias | REG-07a–c | H75, H76; dBias PRB-B11–B14, PRB-B16 | PRB-B01–B07, H77, H78, H101, H102 | — |
 | Sequence hazards | H08, H11, PRB-G01 | S13, S57, H02–H04, H07, H09, H10, H12, H17–H22, H28, H31, H97 | S14, H05, H06, H23 | H94, H95 |
 | Values and accumulation | REG-18c | H86, H88, H89, H92, PRB-E04t, PRB-E05t, DEF-03 (entry) | H29, H30, PRB-E06a | X06, X07 |
-| Model | — | M01, M20, M41, M44, M45 (`.pr`) | 24 variants, M07.pr included | M01.fc, M15.fc, M41.fc, M26.f and seven `.n` |
+| Model | — | M01, M20, M41, M44, M45 (`.pr`); 1,053 HF (§3.6) | 24 variants, M07.pr included; 724 HF | M01.fc, M15.fc, M41.fc, M26.f, seven `.n` and 2,675 HF |
 | All-pairs, fused, stress | — | — | AP001–AP041; PRB-X01 | X06, X07, X08, X11, X13 |
 | Rejection probes | PRB-M01 | 16 | 3 | 1 |
 | Golden (§5) | GL-01 | GL-02–GL-08, GL-10–GL-14, GL-17, GL-18 | GL-19–GL-21 | — |
@@ -702,12 +747,13 @@ Cases generated (own level / cumulative):
 | Level | `Default` | Other topologies | Own | Cumulative | Claim | Probe | Regression | Distinct geometries |
 |---|---|---|---|---|---|---|---|---|
 | quick | 53 | 3 | **56** | 56 | 38 | 2 | 16 | 21 |
-| PR | 134 | 18 | **152** | 208 | 69 | 80 | 3 | 81 |
-| nightly | 173 | 47 | **220** | 428 | 109 | 111 | 0 | 102 |
-| full | 75 | 0 | **75** | 503 | 45 | 30 | 0 | 28 |
+| PR | 1,184 | 21 | **1,205** | 1,261 | 162 | 1,040 | 3 | 841 |
+| nightly | 897 | 47 | **944** | 2,205 | 161 | 783 | 0 | 479 |
+| full | 2,673 | 77 | **2,750** | 4,955 | 247 | 2,503 | 0 | 1,393 |
 
-Probes include the rejection probes (1, 16, 3, 1). By size class: quick S 31, H 25; PR S 38, M 5,
-H 109; nightly S 125, L 36, M 26, H 33; full S 54, M 11, H 4, X 6. 204 distinct geometries in all.
+Probes include the rejection probes (1, 16, 3, 1). By size class: quick S 31, H 25; PR S 38, M 1,058,
+H 109; nightly S 125, L 36, M 750, H 33; full S 54, M 2,686, H 4, X 6 (M includes the HF cases).
+2,474 distinct geometries in all.
 `--report` prints these counts; the measured run (§4.5) fixes them.
 
 **Gated cases** have level `notrun`, a target level and a gate, and are written when it opens.
@@ -722,6 +768,7 @@ H 109; nightly S 125, L 36, M 26, H 33; full S 54, M 11, H 4, X 6. 204 distinct 
 | nightly | PRB-P06; M40.n | I6 + HG20; I6 + HG4 | 42.2 / 6.46 |
 | nightly (reserved) | H96 | HG6 | 0.44 / 0.10 |
 | full | X10; X05, X09 | I6; HG6 | 133 / 11.0 |
+| full | 44 HF cases (Granite 4, Falcon-7B, DeepSeek-V4-Pro geometries); 4 HF ALiBi cases | HG6; I6 | — |
 | out of the levels | 23 model layers with X01, X02, X04; 20 layers with X12; M40.f; X03, X15 | GPU forward; timing run; I6 + HG4; HG22 | — |
 | never (listed) | H62; PRB-R03; X14; PRB-M02, PRB-M02f | HG17; no oracle; unit test; frontend unit test of R14 | — |
 
@@ -847,33 +894,38 @@ Each product left out is a decision. Rejection probes are never here and are nev
 
 | Estimate | Value |
 |---|---|
-| FLOP per case | quick ≤ 59 M, PR ≤ 101 M, nightly ≤ 354 M, full ≤ 10.7 G (M01.fc) |
-| Seconds per case | largest quick 0.96 s (GL-01), PR 2.12 s (DEF-02a, three runs), nightly 6.4 s (M41.n), full 201 s (M01.fc); no case exceeds its ceiling under either model |
-| Memory | X08 needs 2 GiB fp32-equivalent; X15 needs two 4 GiB device allocations, so its case sets `minimum_vram_mb` |
+| Seconds per case (GPU-era model) | largest quick 0.02 s (GL-01), PR 0.48 s (HF321T2), nightly 4.8 s (HF301R3), full 21.2 s (HF226T6); no case exceeds its ceiling |
+| FLOP per case | quick ≤ 59 M (GL-01), PR ≤ 33 G (HF011R3), nightly ≤ 187 G (HF002R2), full ≤ 215 G (HF185T8) |
+| Memory | PR and nightly HF cases reach their 16 and 64 MiB ceilings; X08 needs 2 GiB fp32-equivalent; X15 needs two 4 GiB device allocations, so its case sets `minimum_vram_mb` |
 
-Every case is costed as accepted, with the binding model of §3 (a repeated case costs repeat × its
-time; golden cases at the live CPU reference). The reserve holds every gated case whose gate is a harness
-item, on the CPU reference: PRB-R01 (quick, 0.2 s), S46, S47, H87, H91, H93 (PR, 3.2 s) and H96
-(nightly, 0.4 s).
-The build fails when a level crosses 95 % of its budget with the reserve.
+Every case is costed as accepted, with the binding GPU-era model of §3 (a repeated case costs
+repeat × its time). Each budget keeps 5 % in reserve, less the gated cases whose gate is a harness
+item (PRB-R01 in quick; S46, S47, H87, H91, H93 in PR; H96 in nightly). `test_cumulative_budgets_hold`
+fails when a level crosses its limit; the HF placement (§3.6) fills PR and nightly up to it.
 
-| Level | s, own | s, cumulative | + reserved gates | Budget less 5 % | GPU-reference era, cumulative |
+| Level | s, own | s, cumulative | Limit (budget less 5 % and gates) | of which HF | CPU-reference model, cumulative |
 |---|---|---|---|---|---|
-| quick | 18.2 | 18.2 | 18.4 | 19.0 | 5.5 |
-| PR | 91.1 | 109.3 | 112.8 | 114.0 | 24.0 |
-| nightly | 338.7 | 448.0 | 451.9 | 456.0 | 74.7 |
-| full | 1251.0 | 1699.0 | 1702.9 | 1710.0 | 194.4 |
+| quick | 0.7 | 0.7 | 19.0 | 0 | 18.1 |
+| PR | 52.2 | 52.9 | 113.9 | 50.1 | 26,050 |
+| nightly | 402.9 | 455.9 | 455.9 | 399.6 | 244,306 |
+| full | 3,034 | 3,490 | none | 3,031 | 1,596,093 |
 
-- The GPU-reference column is the model's estimate. The measured run (§4.5) is lower still, because
-  a declined case costs almost nothing.
-- **Trim rule.** When a level crosses its reserve, move probes that are not rejection probes, DEF
-  cases or L cases to the next level, largest first; then shrink M variants by one reduction step.
-  This plan applied it twice. First, M09.pr, M28.pr and M31.pr (6.6 s) moved from PR to nightly
-  and M03.n, M12.n, M20.n, M36.n and M43.n (25.4 s) from nightly to full. When the dBias probes and
-  GL-14 entered PR, M07.pr (1.7 s) moved to nightly and M26.n (4.5 s) to full (register R-M6).
+- PR stops at 53 s because every PR case also counts against nightly's cumulative budget, and
+  nightly is full; the remaining PR room only fits cases nightly no longer has room for.
+- The CPU-reference column is what the lanes that force `--verification-mode=cpu` would take; they
+  cannot run the HF cases.
+- The measured run (§4.5) is lower still, because a declined case costs almost nothing.
+- **Trim rule** (before the GPU-era model). When a level crossed its reserve, probes that are not
+  rejection probes, DEF cases or L cases moved to the next level, largest first; then M variants shrank
+  by one reduction step. This plan applied it twice. First, M09.pr, M28.pr and M31.pr (6.6 s) moved
+  from PR to nightly and M03.n, M12.n, M20.n, M36.n and M43.n (25.4 s) from nightly to full. When the
+  dBias probes and GL-14 entered PR, M07.pr (1.7 s) moved to nightly and M26.n (4.5 s) to full
+  (register R-M6). The HF placement now spends what the GPU-era model frees.
 - **Shards.** Each level lane runs two GTest shards in a 30-minute step; cases are ordered by
-  descending cost so heavy ones alternate. In TheRock prerelease the full lane shares each step with other suites (HIP_MLOPS
-  took 631–641 s per shard on 2026-10-25); the lane owner signs off on that share.
+  descending cost so heavy ones alternate. In TheRock prerelease the full lane shares each step with
+  other suites (HIP_MLOPS took 631–641 s per shard on 2026-10-25). With every HF case accepted, full
+  alone models at 3,490 s, about 29 min per shard on two shards; the lane owner signs off on that
+  share. Today ASM_SDPA_ENGINE declines most HF cases, so the measured full level is 153 s (§4.5).
 
 ### 4.5 Measured run
 
@@ -889,6 +941,15 @@ quarantine, one process instead of two shards. All 553 SdpaBackward tests ran in
 expected rejections were rejected, 226 were declined and 23 hit the DEF skips; no test failed and no
 claim broke. An MI355X (gfx950) run had no failure: ASM_SDPA_ENGINE declines every backward graph
 there.
+
+*Non-normative, 2026-11-10,* the HF census PR: two MI300X GPUs (gfx942) of one node, two GTest
+shards, otherwise configured as above, with the O and Stats derivation on the GPU forward. The 4,954
+SdpaBackward tests outside the quarantine ran in 1 min 45 s of wall time (200 s of test time): quick
+0.4 s, PR 6.4 s, nightly 40.1 s, full 152.8 s. 625 executed and passed (346 of them HF cases), 15
+expected rejections were rejected and 4,314 were declined or hit the DEF skips; no test failed and no
+claim broke. The six quarantined probes fail as before. The cases ASM executed fit the GPU-era model
+of §3 (the timing run, RFC 0022 I9). The 366 claim cases among them, 346 HF, are harvested as
+gfx942 claims. An MI355X (gfx950) run had no failure.
 
 ---
 
@@ -1021,7 +1082,14 @@ shipped bf16 1e-2 is vacuous for 50 of 111 bf16 cases. rtol is 2 ulps at the bot
   fails at its largest element (the negative control). **Margin.** The same-precision kernel model
   (FP32 accumulation, P and dS rounded to the IO dtype) passes the class with margin ≥ 2.5, or the
   generator moves the case to the next class whose guard holds, or scales the dO range by 2^k (exact),
-  or stops. X05, X09 and H96 fit no class and wait for HG6.
+  or stops. X05, X09, H96 and 44 HF cases fit no class and wait for HG6.
+- **Estimate size.** A large case is estimated on two batches. A case over 2·10⁷ scores
+  (`ESTIMATE_CAP`) keeps one KV group (its head counts divided by gcd(Hk, Hv)), since magnitudes are
+  per group, and the estimator walks query rows in blocks of 2·10⁷ scores, so memory stays bounded and
+  a case within one block computes what the unblocked estimator did. A case over 6·10⁸ scores
+  (`ESTIMATE_LIMIT`) gets the provisional class D; the kernel model runs up to 4·10¹⁰ scores × D.
+  `--calibrate --jobs N` computes the estimates on N processes (the census needs about 20 minutes on
+  64 CPUs).
 - **Never loosen a class to make an engine pass.** A failing engine has a defect (DEF) or a probe
   without a claim; fp16 cases at Skv ≤ 2 are probes until DEF-03 is fixed.
 - **Rows.** The generator owns 12 anchored `[[tolerance_overrides]]` rows,
@@ -1106,7 +1174,7 @@ what the tool reads, in `sdpa_bwd_plan.py`, the module the bundle generator read
 | Axes | `AXES` (the all-pairs axes of §4), widened | B 1–65,537; Hq 1–128 with Hk and Hv divisors of Hq chosen independently; Sq, Skv 1–65,537 with residues mod 8, 16, 64, 128, 192 and 2^k ± 1; Dqk, Dv 1–513, independent; W ∈ {unset, 1 … Skv + 1}, R ∈ {unset, −1, 0 … Skv}, TL or BR, deprecated flags; per-tensor (B,H,S) permutations, gaps, row pitch D + k, innermost stride ≠ 1; Stats strides and rank 3; every scale kind; bias rank 1–4 in every broadcast class and dtype, with dBias; dropout masks; per-batch lengths and THD offsets; BF16, FP16, FP32; declared alignment 1–256 |
 | Legality | `legal()`, `layer()` | F, F_R13, F_R13R14, WF, EXT, U (§2.8); WF and EXT expect a typed rejection or a correct accept, U a typed rejection, and an illegal graph is a frontend unit test |
 | Oracle readiness | `ORACLE` | a graph whose oracle is not ready (§6.4) is recorded as not run |
-| Size budget | `COST` | per graph, the nightly wall ceiling (75 s on the CPU reference) and 64 MiB host memory; with the GPU reference, the timing run sets it |
+| Size budget | `COST` | per graph, the nightly wall ceiling (75 s on the GPU-era model of §3, the timing run's fit) and 64 MiB host memory |
 | Value domains | `VALUE_DOMAINS` | the domains of §6.2; structured −inf rows and columns, NaN, Inf and subnormals once I4 lands |
 | Pass criteria | `TOLERANCE_CLASSES` | the classes, guard and dO scaling of §6.1; a graph with no class waits for HG6 |
 | Return path | — | minimized reproducers become `regression` cases written by the generator; oracle disagreements become G-B golden candidates |
