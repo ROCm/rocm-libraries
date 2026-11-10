@@ -217,6 +217,7 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.group_m = 0;
     s.trait.k_stagger = 0;
     s.trait.k_stagger_step = 1;
+    s.trait.lds_db_allow_1wg = false;
 
     /* DataSpec defaults. */
     s.data.dtype_a = "fp16"; /* default "fp16" */
@@ -264,7 +265,8 @@ void rocke_gemm_universal_spec_finalize(rocke_gemm_universal_spec_t* spec)
  *                 "erf": tdm_early_refill, "lsam": lds_store_after_mma,
  *                 f"gm{group_m}": group_m > 0,
  *                 f"kst{k_stagger}x{k_stagger_step}": k_stagger > 0,
- *                 f"c{dtype_c}": dtype_c != dtype_a})
+ *                 f"c{dtype_c}": dtype_c != dtype_a,
+ *                 "db1wg": lds_db_allow_1wg})
  *
  *  Flag iteration order matters (CPython 3.7+ dict insertion order); we pass the
  *  same fixed order to rocke_kernel_name_join.
@@ -285,8 +287,8 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     char part_c[32];
     char part_gm[32];
     char part_kst[48];
-    const char* flag_names[18];
-    int flag_on[18];
+    const char* flag_names[19];
+    int flag_on[19];
     const rocke_gemm_tile_spec_t* t;
     const rocke_gemm_trait_spec_t* tr;
 
@@ -346,6 +348,7 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
      * from A's (the fp8/bf8 path), so every other kernel keeps its name. */
     snprintf(part_c, sizeof(part_c), "c%s", spec->data.dtype_c ? spec->data.dtype_c : "");
     flag_names[17] = part_c;
+    flag_names[18] = "db1wg";
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -368,9 +371,10 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
                    && strcmp(spec->data.dtype_c, spec->data.dtype_a) != 0)
                       ? 1
                       : 0;
+    flag_on[18] = tr->lds_db_allow_1wg ? 1 : 0;
 
     return rocke_kernel_name_join(
-        spec->name, parts, 5, flag_names, flag_on, 18, out, out_cap, NULL);
+        spec->name, parts, 5, flag_names, flag_on, 19, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -667,7 +671,7 @@ static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
     int ab_single;
     int lds_pad;
     long lds_cap;
-    bool db_fits_2wg;
+    bool db_fits;
     bool db;
 
     /* The LDS row is tile_k + lds_k_pad elements wide, not tile_k: the pad is
@@ -680,10 +684,11 @@ static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
     lds_pad = spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad;
     ab_single = (t->tile_m + t->tile_n) * (t->tile_k + lds_pad) * rocke_gemm_elem_bytes(spec);
     lds_cap = (target != NULL) ? (long)target->lds_capacity_bytes : 0;
-    db_fits_2wg = ((long)(2 * ab_single) * 2) <= lds_cap;
+    const int resident_wgs = spec->trait.lds_db_allow_1wg ? 1 : 2;
+    db_fits = ((long)(2 * ab_single) * resident_wgs) <= lds_cap;
     db = (strcmp(spec->trait.pipeline, "compv4") == 0)
          && (strcmp(spec->trait.epilogue, "cshuffle") != 0) && (!spec->trait.direct_to_lds)
-         && db_fits_2wg;
+         && db_fits;
 
     if(out_ab_single != NULL)
     {
@@ -1066,6 +1071,10 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         bool is_wmma = strcmp(family, "wmma") == 0;
 
         ck_gemm_ab_lds_plan(spec, target, NULL, &knob_db, NULL);
+        if(spec->trait.lds_db_allow_1wg && !(strcmp(arch, "gfx1201") == 0 && is_wmma && knob_db))
+        {
+            CK_GEMM_REJECT("lds_db_allow_1wg needs the gfx1201 WMMA compv4 double-buffered K loop");
+        }
         if(spec->trait.lds_store_after_mma && !(is_wmma && knob_db))
         {
             CK_GEMM_REJECT("lds_store_after_mma needs the WMMA compv4 double-buffered K loop");

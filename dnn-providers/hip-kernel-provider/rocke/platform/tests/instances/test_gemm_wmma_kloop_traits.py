@@ -267,5 +267,129 @@ class TestKloopTraitsCppEngine(unittest.TestCase):
                 self.assertEqual(tuple(cpp), tuple(is_valid_spec(spec, arch=arch)))
 
 
+_DB1WG_TILES = (
+    (128, 128, 64, 2, 4),
+    (256, 128, 32, 4, 2),
+    (128, 256, 32, 2, 4),
+)
+_DB1WG_REASON = "lds_db_allow_1wg needs the gfx1201 WMMA compv4 double-buffered K loop"
+
+
+def _db1wg_spec(tile=_DB1WG_TILES[0], **traits):
+    from rocke.instances.common.gemm_universal import TileSpec
+
+    return replace(
+        _spec(**{"lds_db_allow_1wg": True, **traits}),
+        tile=TileSpec(*tile, 1, 16, 16, 16),
+        block_size=0,
+    )
+
+
+def _db1wg_gate_cases():
+    yield "64 KiB", _db1wg_spec(), ARCH
+    yield "48 KiB wide M", _db1wg_spec(_DB1WG_TILES[1]), ARCH
+    yield "48 KiB wide N", _db1wg_spec(_DB1WG_TILES[2]), ARCH
+    yield "padded overflow", _db1wg_spec(lds_k_pad=8), ARCH
+    yield "bare overflow", _db1wg_spec((256, 128, 64, 4, 2)), ARCH
+    yield "mem", _db1wg_spec(pipeline="mem"), ARCH
+    yield "cshuffle", _db1wg_spec(epilogue="cshuffle"), ARCH
+    yield "direct to LDS", _db1wg_spec(direct_to_lds=True), ARCH
+    yield "other WMMA", _spec(
+        pipeline="mem", lds_swizzle=False, lds_db_allow_1wg=True
+    ), "gfx1151"
+    other = _spec(pipeline="mem", lds_swizzle=False, lds_db_allow_1wg=True)
+    yield "gfx1250 WMMA", replace(
+        other, tile=replace(other.tile, warp_tile_k=32)
+    ), "gfx1250"
+    yield "MFMA", _mfma_spec(lds_db_allow_1wg=True), "gfx950"
+
+
+@arch_specific((ARCH,), reason="the one-workgroup LDS policy targets gfx1201")
+class TestOneWorkgroupLdsPolicy(unittest.TestCase):
+    def test_enlarged_tiles_fit_without_exceeding_capacity(self):
+        from rocke.instances.common.gemm_universal import _ab_lds_plan, is_valid_spec
+
+        for tile, expected_bytes in zip(_DB1WG_TILES, (65536, 49152, 49152)):
+            for dtype in ("fp16", "bf16"):
+                spec = _db1wg_spec(tile, **_ON)
+                spec = replace(
+                    spec,
+                    data=replace(
+                        spec.data, dtype_a=dtype, dtype_b=dtype, dtype_c=dtype
+                    ),
+                )
+                with self.subTest(tile=tile, dtype=dtype):
+                    self.assertEqual(is_valid_spec(spec, arch=ARCH), (True, "ok"))
+                    single, db, two_buf = _ab_lds_plan(spec, ARCH)
+                    self.assertEqual(
+                        (single * 2, db, two_buf), (expected_bytes, True, True)
+                    )
+                    off = replace(
+                        spec, trait=replace(spec.trait, lds_db_allow_1wg=False)
+                    )
+                    self.assertFalse(_ab_lds_plan(off, ARCH)[1])
+                    self.assertFalse(is_valid_spec(off, arch=ARCH)[0])
+
+    def test_padding_is_charged_without_rejecting_a_fitting_double_buffer(self):
+        from rocke.instances.common.gemm_universal import _ab_lds_plan, is_valid_spec
+
+        spec = _db1wg_spec(_DB1WG_TILES[1], lds_k_pad=8)
+        self.assertEqual(is_valid_spec(spec, arch=ARCH), (True, "ok"))
+        self.assertEqual(_ab_lds_plan(spec, ARCH), (30720, True, True))
+
+    def test_oversize_and_wrong_paths_reject_without_single_buffer_fallback(self):
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        # Earlier architecture/path validators keep their existing precedence.
+        for label, spec, arch in _db1wg_gate_cases():
+            if label in ("64 KiB", "48 KiB wide M", "48 KiB wide N"):
+                continue
+            with self.subTest(label):
+                ok, why = is_valid_spec(spec, arch=arch)
+                self.assertFalse(ok)
+                if label not in ("cshuffle", "direct to LDS"):
+                    self.assertEqual(why, _DB1WG_REASON)
+
+    def test_opt_in_is_allowed_when_two_workgroups_already_fit(self):
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        self.assertEqual(
+            is_valid_spec(_spec(lds_db_allow_1wg=True), arch=ARCH), (True, "ok")
+        )
+
+    def test_default_preserves_name_and_ir(self):
+        implicit = _spec()
+        explicit = _spec(lds_db_allow_1wg=False)
+        self.assertEqual(implicit.kernel_name(), explicit.kernel_name())
+        self.assertEqual(_lower(implicit), _lower(explicit))
+        # The policy alone does not change the loop of an already fitting tile.
+        on = _spec(lds_db_allow_1wg=True)
+        self.assertTrue(on.kernel_name().endswith("_db1wg"))
+        self.assertEqual(
+            _lower(on).replace(on.kernel_name(), implicit.kernel_name()),
+            _lower(implicit),
+        )
+
+    def test_native_validity_and_ir_agree(self):
+        try:
+            import rocke_engine
+        except ImportError as e:
+            self.skipTest(f"rocke_engine C++ binding not importable: {e}")
+        from rocke.core.backend import universal_gemm_spec_to_dict
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        for label, spec, arch in _db1wg_gate_cases():
+            with self.subTest(label):
+                payload = universal_gemm_spec_to_dict(spec)
+                valid = is_valid_spec(spec, arch=arch)
+                self.assertEqual(
+                    tuple(rocke_engine.gemm_is_valid(payload, arch)), valid
+                )
+                if valid[0]:
+                    self.assertEqual(
+                        rocke_engine.gemm_lower_llvm(payload, arch), _lower(spec, arch)
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()

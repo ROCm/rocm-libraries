@@ -164,6 +164,9 @@ typedef struct rocke_gemm_trait_spec
      * k_stagger_step. */
     int k_stagger; /* default 0 */
     int k_stagger_step; /* default 1 */
+    /* Permit one resident workgroup for the gfx1201 WMMA compv4 double
+     * buffer. False retains the two-workgroup LDS budget. */
+    bool lds_db_allow_1wg; /* default false */
 } rocke_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */

@@ -1296,31 +1296,28 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
          * arithmetic, ported inline to mirror gemm_universal.py:_ab_lds_plan:
          *
          *   ab_single   = (tile_m + tile_n) * (tile_k + lds_pad) * elem_bytes
-         *   db_fits_2wg = (2*ab_single)*2 <= lds_capacity_bytes
+         *   db_fits     = (2*ab_single)*resident_wgs <= lds_capacity_bytes
          *   db          = compv4 && epilogue!=cshuffle && !direct_to_lds
-         *                 && db_fits_2wg
+         *                 && db_fits
          *   two_buf     = dtl_prefetch || db
          *
-         * The previous parity stub omitted the db_fits_2wg LDS-capacity gate,
-         * so wide compv4/default tiles whose doubled AB LDS overflows the
-         * 2 WG/CU budget (e.g. 256x256x64) were incorrectly double-buffered:
-         * smem [512x64] + a fully-unrolled prefetch prologue that Python never
-         * emits. Apply the same arithmetic the validity gate and the load-path
-         * helper (instance_gemm_build_load.c) use. */
+         * The default reserves two resident workgroups; the gfx1201 WMMA
+         * opt-in reserves one. Charge the padded row bytes in either case,
+         * matching the validity planner in gemm_spec.cpp. */
         long lds_pad = spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad;
         long ab_single
             = ((long)t->tile_m + t->tile_n) * (t->tile_k + lds_pad) * rocke_gemm_elem_bytes(spec);
-        bool db_fits_2wg = false;
+        const int resident_wgs = spec->trait.lds_db_allow_1wg ? 1 : 2;
+        bool db_fits = false;
         bool db = false;
         bool two_buf = false;
         if(ctx.target != NULL)
         {
-            /* (2*ab_single)*2 <= lds_capacity_bytes */
-            db_fits_2wg = rocke_archtarget_fits_lds(ctx.target, (2 * ab_single) * 2);
+            db_fits = rocke_archtarget_fits_lds(ctx.target, (2 * ab_single) * resident_wgs);
         }
         db = spec->trait.pipeline != NULL && strcmp(spec->trait.pipeline, "compv4") == 0
              && spec->trait.epilogue != NULL && strcmp(spec->trait.epilogue, "cshuffle") != 0
-             && !spec->trait.direct_to_lds && db_fits_2wg;
+             && !spec->trait.direct_to_lds && db_fits;
         two_buf = (spec->trait.dtl_prefetch ? true : false) || db
                   || rocke_gemm_tdm_pipelined(&spec->trait);
         ctx.db = db;

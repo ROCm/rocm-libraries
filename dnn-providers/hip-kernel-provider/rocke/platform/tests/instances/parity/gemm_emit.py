@@ -844,6 +844,30 @@ def _spec(idx: int) -> UniversalGemmSpec:
             ),
             "gfx1201",
         )
+    if idx in _GFX1201_DB1WG_CONFIGS:
+        tm, tn, tk, wm, wn = _GFX1201_DB1WG_CONFIGS[idx]
+        return (
+            UniversalGemmSpec(
+                name=f"test_gfx1201_compv4_db1wg_{tm}x{tn}x{tk}",
+                tile=TileSpec(tm, tn, tk, wm, wn, 1, 16, 16, 16),
+                trait=TraitSpec(
+                    pipeline="compv4",
+                    scheduler="intrawave",
+                    epilogue="default",
+                    lds_swizzle=True,
+                    lds_store_after_mma=True,
+                    group_m=4,
+                    k_stagger=8,
+                    k_stagger_step=4,
+                    lds_db_allow_1wg=True,
+                ),
+                data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
+                wave_size=32,
+                block_size=32 * wm * wn,
+                batched=False,
+            ),
+            "gfx1201",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -888,12 +912,19 @@ _GFX1201_COMPV4_CONFIGS = {
     37: ("test_gfx1201_compv4_kloop_traits", 128, 64, 2, 1, True, True, 8, 3, 2),
 }
 
+# idx -> (tile_m, tile_n, tile_k, warp_m, warp_n). Explicit one-WG LDS budget.
+_GFX1201_DB1WG_CONFIGS = {
+    38: (128, 128, 64, 2, 4),
+    39: (256, 128, 32, 4, 2),
+    40: (128, 256, 32, 2, 4),
+}
+
 
 def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..37>\n",
+        usage="usage: gemm_emit.py <config_index 0..40>\n",
     )
 
 

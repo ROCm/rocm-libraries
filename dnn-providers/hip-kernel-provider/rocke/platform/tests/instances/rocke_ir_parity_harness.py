@@ -2035,6 +2035,43 @@ def cases():
                 **knobs,
             ),
         )
+    # Explicit one-workgroup LDS budgets; the default two-workgroup policy
+    # cannot double-buffer these tiles. Keep each distinct tile/wave layout.
+    for tm, tn, tk, wm, wn in (
+        (128, 128, 64, 2, 4),
+        (256, 128, 32, 4, 2),
+        (128, 256, 32, 2, 4),
+    ):
+        tag = f"t{tm}x{tn}x{tk}_compv4_swz_db1wg"
+        add(
+            "gemm",
+            f"gemm/gfx1201/{tag}",
+            "gfx1201",
+            build_gemm(
+                f"irhash_gemm_1201_{tag}",
+                "gfx1201",
+                tm,
+                tn,
+                tk,
+                wm,
+                wn,
+                16,
+                16,
+                16,
+                "compv4",
+                "default",
+                32,
+                lds_swizzle=True,
+                lds_db_allow_1wg=True,
+                lds_store_after_mma=True,
+                group_m=4,
+                k_stagger=8,
+                k_stagger_step=4,
+                pad_m=False,
+                pad_n=False,
+                pad_k=False,
+            ),
+        )
     # Every other member of gfx11-generic / gfx12-generic has a row of its own
     # that points at its generic's facts; one case each, the gfx1151 / gfx1201
     # t32x32x16 configuration, shows it lowers under its own name.

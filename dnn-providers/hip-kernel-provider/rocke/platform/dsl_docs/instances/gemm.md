@@ -195,6 +195,22 @@ B_smem: <f16, [tile_n, tile_k + lds_k_pad]>
 
 For `pipeline="compv4"` (double-buffer), two slabs are allocated and indexed with a ping-pong slot. `lds_k_pad` defaults to `+8` on sync paths (avoid ds_read bank conflicts) and `0` on async paths (lane-contiguous LDS requirement).
 
+The register-staged compv4 double buffer normally reserves enough LDS for two
+resident workgroups per CU. `TraitSpec(lds_db_allow_1wg=True)` explicitly relaxes
+that reservation to one workgroup, only on the gfx1201 WMMA compv4 path with a
+default epilogue and without DirectToLDS. The allocation still charges both A/B
+slabs using the actual padded row width:
+`2 * (tile_m + tile_n) * (tile_k + lds_k_pad) * element_bytes <= 65536`.
+The fp16/bf16 layouts `128x128x64` (2x4 waves), `256x128x32` (4x2 waves), and
+`128x256x32` (2x4 waves) fit this policy with zero row padding; adding padding
+to the first exceeds the capacity and is rejected rather than silently falling
+back to a single buffer. The flag is also allowed when the tile already fits
+two workgroups. It is default-off on every architecture: existing kernel names
+and IR are unchanged. Opted-in names append `db1wg` after every other flag,
+including the C dtype. Combine it with `lds_store_after_mma`, `group_m`, and
+`k_stagger` only under those traits' existing validity rules.
+
+
 LDS allocations are part of the algorithm. They control:
 
 - coalesced writes from global / buffer loads;
