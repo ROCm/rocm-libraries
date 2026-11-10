@@ -195,7 +195,7 @@ def _result_tuple(base, res, canonical):
 
 
 def _emit_in_process(kwa, kernel, splitGSU, canonical):
-    from tensilelite.TensileCreateLibrary.Run import processKernelSource
+    from tensilelite.create_library.run import processKernelSource
 
     ri = _init_rocisa_for(kernel)
     base = _prepare_kernel(kernel, splitGSU)
@@ -207,7 +207,7 @@ def _emit_native_batch(kwa, kernels, splitGSU, canonical):
     """Emit these non-gfx1250 kernels on one native-rocisa worker pool."""
     import functools
 
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.create_library.run import (
         _mapKernelsByBackend,
         processKernelSourceNativeInit,
     )
@@ -257,7 +257,7 @@ def run_where_backend_matches_isa(isa, fn, *args):
         return fn(*args)
 
     from tensilelite.Common.Parallel import ParallelMap2
-    from tensilelite.TensileCreateLibrary.Run import _native_rocisa_workers
+    from tensilelite.create_library.run import _native_rocisa_workers
 
     def _invoke(_unused):
         return fn(*args)
@@ -285,7 +285,7 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=No
     name) — used to draw a few representative kernels from very large tuned
     logic files (e.g. the StreamK corpus) without emitting thousands.
     """
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
@@ -321,7 +321,7 @@ def emit_helpers_from_logic(logic_path):
     MMA scheduler state) but we still key the golden on identity + return code
     for consistency with the asm suites.
     """
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.create_library.run import (
         generateKernelObjectsFromSolutions,
         generateKernelHelperObjects,
     )

@@ -519,7 +519,7 @@ suites:
     kind: static_check
     mode: default
     oracle: "Rules on chip IDs, matrix instructions, work-group shapes, XCC mapping, custom kernels, and cross-file corpus invariants"
-    source: projects/hipblaslt/tensilelite/tensilelite/TensileLogic/
+    source: projects/hipblaslt/tensilelite/tensilelite/logic/
     current:
       - system: build
         lane: "CMake step ahead of TensileCreateLibrary"
