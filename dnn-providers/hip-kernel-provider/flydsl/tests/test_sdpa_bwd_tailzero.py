@@ -12,6 +12,7 @@ Host-only: no FlyDSL install and no compiled object is needed (the object itself
 from __future__ import annotations
 
 import ast
+import collections
 import hashlib
 import importlib.util
 import itertools
@@ -292,6 +293,33 @@ def test_a_vector_is_sixteen_bytes() -> None:
     assert (addr.vec_of(2), addr.vec_of(4)) == (8, 4)
 
 
+def _modelled_functions() -> frozenset[str]:
+    """The helper functions `written_elements` calls to model a kernel: derived from its body, so a function
+    the model starts to evaluate is held to the kernels at once."""
+    tree = ast.parse((CDNA / HELPER).read_text(encoding="utf-8"))
+    functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    return frozenset(
+        node.func.id
+        for node in ast.walk(functions["written_elements"])
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in functions
+        and node.func.id != "written_elements"
+    )
+
+
+MODELLED_FUNCTIONS = _modelled_functions()
+
+
+def _is_addr_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "addr"
+    )
+
+
 def _helper_uses(path: Path) -> set[str]:
     """The names a kernel reads off the helper module (`addr.<name>`), without importing FlyDSL."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -304,38 +332,89 @@ def _helper_uses(path: Path) -> set[str]:
     }
 
 
-# The helper functions `written_elements` evaluates to model a kernel: each kernel must call every one.
-MODELLED_FUNCTIONS = frozenset(
-    {
-        "vec_of",
-        "heads_total",
-        "batch_of",
-        "units_per_row",
-        "units_of",
-        "row_of_unit",
-        "element_offset",
-        "grid_blocks",
-    }
-)
+def _helper_calls(path: Path) -> dict[str, collections.Counter]:
+    """Per module builder (`build_*_module_primary`), the helper calls (`addr.<name>(...)`) that run when the
+    kernel is built, traced or launched: `(role, name)` with role `build` (the builder's own body), `kernel`
+    (its `@flyc.kernel` function) or `jit` (its `@flyc.jit` launch). A call inside any other nested function
+    is not counted: nothing runs it."""
+
+    def role(node: ast.FunctionDef) -> str | None:
+        decorators = " ".join(ast.unparse(d) for d in node.decorator_list)
+        return (
+            "kernel"
+            if "kernel" in decorators
+            else "jit" if "jit" in decorators else None
+        )
+
+    def count(node: ast.AST, current: str | None, found: collections.Counter) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef):
+                count(child, role(child), found)
+                continue
+            if current is not None and _is_addr_call(child):
+                found[(current, child.func.attr)] += 1
+            count(child, current, found)
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    builders = {}
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("build_"):
+            found: collections.Counter = collections.Counter()
+            count(node, "build", found)
+            builders["hv" if "_hv_" in node.name else "plain"] = found
+    return builders
 
 
 def test_both_arches_kernels_take_their_addressing_from_the_one_helper() -> None:
     """Every `addr.<name>` a kernel evaluates is a function or constant the helper defines (the one
-    `written_elements` models), each kernel calls every function the model evaluates (so inline arithmetic
-    in place of one is caught), the two kernels evaluate the same helper functions, and neither defines a
-    function of the helper's names itself."""
+    `written_elements` models); each kernel variant (plain and V-head) of each arch calls every function the
+    model evaluates, from the code that runs (the builder, its kernel or its launch), so inline arithmetic or a
+    reference that is never called is caught; the two arches call each function the same number of times; the
+    helper is the module `addr` names; and neither kernel file defines a function of the helper's names.
+    """
     helper = {n for n in vars(addr) if not n.startswith("_")}
     functions = {n for n in helper if callable(getattr(addr, n))}
+    assert MODELLED_FUNCTIONS and MODELLED_FUNCTIONS <= functions
     used = {arch: _helper_uses(path) for arch, path in KERNEL_FILES.items()}
     for arch, names in used.items():
         assert names, arch
         assert names <= helper, (arch, sorted(names - helper))
-        assert MODELLED_FUNCTIONS <= names, (arch, sorted(MODELLED_FUNCTIONS - names))
+    calls = {arch: _helper_calls(path) for arch, path in KERNEL_FILES.items()}
+    for arch, variants in calls.items():
+        assert sorted(variants) == ["hv", "plain"], arch
+        for variant, found in variants.items():
+            called = {name for _, name in found}
+            assert MODELLED_FUNCTIONS <= called, (
+                arch,
+                variant,
+                sorted(MODELLED_FUNCTIONS - called),
+            )
+    assert calls["gfx950"] == calls["gfx11-generic"]
     assert {a: n & functions for a, n in used.items()}["gfx950"] == {
         a: n & functions for a, n in used.items()
     }["gfx11-generic"]
+    helper_import = ast.ImportFrom(
+        module=f"kernels.{CDNA.name}",
+        names=[ast.alias(name=Path(HELPER).stem, asname="addr")],
+        level=0,
+    )
     for arch, path in KERNEL_FILES.items():
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        imports = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.Import, ast.ImportFrom))
+            and any((alias.asname or alias.name) == "addr" for alias in n.names)
+        ]
+        assigned = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Name)
+            and n.id == "addr"
+            and isinstance(n.ctx, ast.Store)
+        ]
+        assert [ast.dump(n) for n in imports] == [ast.dump(helper_import)], arch
+        assert not assigned, arch
         own = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
         assert not own & functions, (arch, sorted(own & functions))
 
