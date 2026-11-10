@@ -434,15 +434,17 @@ jobs:
           done
           rc=0
           for p in "${pids[@]}"; do wait "$p" || rc=1; done
-          # 96 does not divide the test's 180 tiles, so it reaches the remainder path.
+          # 360 = 2 x the test's 180 tiles: uniform summation order (on by default) keeps it
+          # (a grid below the tile count snaps up to 180), and every tile is split across two
+          # workgroups that hand off through a flag.
           if [ -z "$GTEST_FILTER_ARG" ] || in_filter "$SK_DEADLOCK" "$GTEST_FILTER_ARG"; then
             L="$OUT/hipblaslt_test_shard_streamk.log"
-            ( export TENSILE_PERSISTENT_FIXED_GRID=96
+            ( export TENSILE_PERSISTENT_FIXED_GRID=360
               run_tests "$(basename "$L")" --gtest_filter="$SK_DEADLOCK" ) || rc=1
             if grep -q '^\[==========\] Running 0 tests' "$L"; then
               echo "::error::$SK_DEADLOCK matches no test; update SK_DEADLOCK"; rc=1
             elif grep -q "^\[  SKIPPED \] $SK_DEADLOCK" "$L"; then
-              echo "::warning::$SK_DEADLOCK skipped at TENSILE_PERSISTENT_FIXED_GRID=96: $(grep -m1 'remainder path' "$L")"
+              echo "::warning::$SK_DEADLOCK skipped at TENSILE_PERSISTENT_FIXED_GRID=360: $(grep -m1 'remainder path' "$L")"
             fi
           fi
           # The large tests this run selects, by group: the names gtest lists for the run's
