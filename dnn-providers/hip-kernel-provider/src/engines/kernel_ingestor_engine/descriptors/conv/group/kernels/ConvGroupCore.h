@@ -9,6 +9,99 @@
 #include "ConvGroupArgs.h"
 #include "ConvIgemmCore.h"
 
+// Stages depth plane id's input halo of a workgroup in LDS: HR x HC pixels from (ih0, iw0), CH
+// channels from channel tile cbt, each pixel PITCH elements, zero outside the input. Channels-last
+// (CF 0): 16-byte loads along the channels. Channels-first (CF 1): a thread gathers 16 bytes of
+// channels of one pixel (one load a channel, consecutive threads consecutive columns, so each
+// load is a coalesced row segment) and stores them as one vector.
+template <class T, int CF, int HR, int HC, int CH, int PITCH, int THREADS>
+__device__ __forceinline__ void k4StageHalo(const K4Args& a,
+                                            const T* in,
+                                            T* halo,
+                                            long long img,
+                                            int id,
+                                            int cbt,
+                                            int ih0,
+                                            int iw0,
+                                            int tid)
+{
+    typedef typename K1Raw<16>::type Raw;
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    constexpr int VP = CH / VEC; // vectors a staged pixel takes
+    if constexpr(CF != 0)
+    {
+        const long long planes = static_cast<long long>(a.di) * a.hi * a.wi;
+        const T* src = in + (img * a.c + static_cast<long long>(cbt) * CH) * planes
+                       + static_cast<long long>(id) * a.hi * a.wi;
+        for(int i = tid; i < VP * HR * HC; i += THREADS)
+        {
+            const int hc = i % HC, hr = (i / HC) % HR, v = i / (HC * HR);
+            const int ih = ih0 + hr, iw = iw0 + hc;
+            const bool ok = static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)
+                            && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi);
+            const T* at = src + v * VEC * planes + (ok ? ih : 0) * a.wi + (ok ? iw : 0);
+            union
+            {
+                Raw raw;
+                T e[VEC];
+            } val;
+#pragma unroll
+            for(int j = 0; j < VEC; ++j)
+                val.e[j] = at[j * planes];
+            if(!ok)
+                val.raw = Raw{};
+            *reinterpret_cast<Raw*>(halo + (hr * HC + hc) * PITCH + v * VEC) = val.raw;
+        }
+    }
+    else
+    {
+        const long long plane = img * a.di + id;
+        for(int i = tid; i < HR * HC * VP; i += THREADS)
+        {
+            const int v = i % VP, p = i / VP, hc = p % HC, hr = p / HC;
+            const int ih = ih0 + hr, iw = iw0 + hc;
+            // Clamped address, then zero: no per-load branch.
+            const bool ok = static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)
+                            && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi);
+            const long long at = ((plane * a.hi + (ok ? ih : 0)) * a.wi + (ok ? iw : 0)) * a.c
+                                 + static_cast<long long>(cbt) * CH + v * VEC;
+            Raw val = *reinterpret_cast<const Raw*>(in + at);
+            if(!ok)
+                val = Raw{};
+            *reinterpret_cast<Raw*>(halo + p * PITCH + v * VEC) = val;
+        }
+    }
+}
+
+// Writes a workgroup's output tile, staged in LDS as [row][channel][column] (rows of TW + 1), to
+// packed channels-first out: one row of output columns at a time, consecutive threads
+// consecutive columns.
+template <class T, int TH, int TW, int CH, int THREADS>
+__device__ __forceinline__ void k4StoreTileChannelsFirst(const K4Args& a,
+                                                         T* out,
+                                                         const T* tile,
+                                                         long long img,
+                                                         int od,
+                                                         int cbt,
+                                                         int oh0,
+                                                         int ow0,
+                                                         int tid)
+{
+    constexpr int OP = TW + 1;
+    const long long outPlanes = static_cast<long long>(a.outD) * a.outH * a.outW;
+    T* dst = out + (img * a.c + static_cast<long long>(cbt) * CH) * outPlanes
+             + static_cast<long long>(od * a.osd + a.ood) * a.outH * a.outW;
+    for(int i = tid; i < TH * CH * TW; i += THREADS)
+    {
+        const int ow = i % TW, ch = (i / TW) % CH, r = i / (TW * CH);
+        const int oh = oh0 + r;
+        if(oh < a.ho && ow0 + ow < a.wo)
+            dst[ch * outPlanes + static_cast<long long>(oh * a.osh + a.ooh) * a.outW
+                + (ow0 + ow) * a.osw + a.oow]
+                = tile[(r * CH + ch) * OP + ow];
+    }
+}
+
 // Matrix-core kernel. A workgroup of 4 waves owns TH output rows x 16 WP output columns x CB
 // channel blocks of one output plane. Per depth tap it stages that input plane's halo in LDS
 // (16-byte loads along the channels; pixels padded by 16 bytes so the 16 lanes of a fragment read
@@ -212,6 +305,147 @@ __device__ void k4ConvMma(const K4Args& a)
                         + cb * 16 + lane % 16]
                         = K1Elem<T>::store(acc[it][p][e]);
             }
+    }
+}
+
+// FMA kernel (no matrix cores: fp32 on RDNA, and any element type anywhere): the same grid,
+// halo and expanded filter as the matrix-core kernel, without the block-diagonal zeros. 256
+// threads own TH output rows x TW columns x CB channel blocks of one output plane. A thread owns
+// OC output channels of one group (chunk q of the tile's CH / OC) at PX consecutive output
+// columns of one row; output pixels run fastest across threads, so a wave shares one chunk and
+// reads its group-diagonal filter with wave-uniform (scalar) loads. Per depth tap the workgroup
+// stages the plane's halo in LDS; per (row, column) tap a thread holds its OC x CG filter values
+// and accumulates its PX pixels' CG group inputs. CG is the graph's channels a group.
+template <class T, int FT, int R, int S, int ST, int CG, int OC, int TH, int PX, int CB, int CF = 0>
+__device__ void k4ConvFma(const K4Args& a)
+{
+    constexpr int THREADS = 256;
+    constexpr int CH = 16 * CB;
+    constexpr int NQ = CH / OC; // channel chunks a workgroup
+    constexpr int NPIX = THREADS / NQ; // pixel groups (a chunk's threads)
+    constexpr int CGS = NPIX / TH; // column groups a row
+    constexpr int TW = CGS * PX;
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    constexpr int PITCH = CH + VEC;
+    constexpr int HR = (TH - 1) * ST + R, HC = (TW - 1) * ST + S;
+    constexpr int TAPS = FT * R * S;
+    // A chunk's output channels: GS of one group, NSB such sub-blocks (several groups when
+    // OC > CG).
+    constexpr int GS = OC <= CG ? OC : CG;
+    constexpr int NSB = OC / GS;
+    static_assert(16 % CG == 0 && 16 % OC == 0 && (CG % OC == 0 || OC % CG == 0), "whole groups");
+    static_assert(NPIX % 64 == 0 && NPIX % TH == 0, "a wave within one chunk, whole rows");
+    static_assert(TH * CH * (TW + 1) <= HR * HC * PITCH, "the output tile fits the halo");
+    __shared__ __attribute__((aligned(16))) T halo[HR * HC * PITCH];
+
+    const int blocks = a.c / CH;
+    long long b = blockIdx.x;
+    const int cbt = static_cast<int>(b % blocks);
+    b /= blocks;
+    const int tws = (a.wo + TW - 1) / TW;
+    const int twi = static_cast<int>(b % tws);
+    b /= tws;
+    const int ths = (a.ho + TH - 1) / TH;
+    const int thi = static_cast<int>(b % ths);
+    b /= ths;
+    const int od = static_cast<int>(b % a.dout);
+    const long long img = b / a.dout;
+    const int oh0 = thi * TH, ow0 = twi * TW;
+    const int ih0 = oh0 * ST - a.ph, iw0 = ow0 * ST - a.pw;
+    const T* in = static_cast<const T*>(a.in);
+    const T* w = static_cast<const T*>(a.w);
+    T* out = static_cast<T*>(a.out);
+    const int tid = threadIdx.x;
+    // The chunk is wave-uniform (NPIX is a multiple of every wave size).
+    const int q = __builtin_amdgcn_readfirstlane(tid / NPIX);
+    const int pg = tid % NPIX;
+    const int r = pg / CGS, col0 = (pg % CGS) * PX;
+    const int ch0 = q * OC; // the thread's first output channel in the tile
+    const int n0 = ch0 % 16; // ... in its 16-channel block
+    // The chunk's block of the expanded filter: w16[block][tap][n][k].
+    const T* wq = w + static_cast<long long>(cbt * CB + ch0 / 16) * TAPS * 256;
+
+    float acc[PX][OC];
+#pragma unroll
+    for(int p = 0; p < PX; ++p)
+#pragma unroll
+        for(int o = 0; o < OC; ++o)
+            acc[p][o] = 0.0f;
+
+    for(int ft = 0; ft < FT; ++ft)
+    {
+        const int id = od * a.sd - a.pd + ft;
+        if(static_cast<unsigned>(id) >= static_cast<unsigned>(a.di))
+            continue;
+        if(ft > 0)
+            __syncthreads();
+        k4StageHalo<T, CF, HR, HC, CH, PITCH, THREADS>(a, in, halo, img, id, cbt, ih0, iw0, tid);
+        __syncthreads();
+#pragma unroll
+        for(int fr = 0; fr < R; ++fr)
+#pragma unroll
+            for(int fs = 0; fs < S; ++fs)
+            {
+                const T* wt = wq + ((ft * R + fr) * S + fs) * 256 + n0 * 16;
+                // wr[o][i]: output o's weight of its group's input i.
+                float wr[OC][CG];
+#pragma unroll
+                for(int o = 0; o < OC; ++o)
+#pragma unroll
+                    for(int i = 0; i < CG; ++i)
+                        wr[o][i] = K1Elem<T>::load(wt[o * 16 + (n0 + o) / CG * CG + i]);
+#pragma unroll
+                for(int p = 0; p < PX; ++p)
+                {
+                    const int hr = r * ST + fr, hc = (col0 + p) * ST + fs;
+#pragma unroll
+                    for(int sb = 0; sb < NSB; ++sb)
+                    {
+                        const T* src = halo + (hr * HC + hc) * PITCH + (ch0 + sb * GS) / CG * CG;
+#pragma unroll
+                        for(int i = 0; i < CG; ++i)
+                        {
+                            const float x = K1Elem<T>::load(src[i]);
+#pragma unroll
+                            for(int o = 0; o < GS; ++o)
+                                acc[p][sb * GS + o]
+                                    = fmaf(x, wr[sb * GS + o][i], acc[p][sb * GS + o]);
+                        }
+                    }
+                }
+            }
+    }
+
+    const int oh = oh0 + r;
+    if constexpr(CF != 0)
+    {
+        constexpr int OP = TW + 1;
+        __syncthreads();
+#pragma unroll
+        for(int p = 0; p < PX; ++p)
+#pragma unroll
+            for(int o = 0; o < OC; ++o)
+                halo[(r * CH + ch0 + o) * OP + col0 + p] = K1Elem<T>::store(acc[p][o]);
+        __syncthreads();
+        k4StoreTileChannelsFirst<T, TH, TW, CH, THREADS>(a, out, halo, img, od, cbt, oh0, ow0, tid);
+        return;
+    }
+    if(oh >= a.ho)
+        return;
+    const long long outRow
+        = (img * a.outD + od * a.osd + a.ood) * a.outH + static_cast<long long>(oh) * a.osh + a.ooh;
+#pragma unroll
+    for(int p = 0; p < PX; ++p)
+    {
+        const int ow = ow0 + col0 + p;
+        if(ow < a.wo)
+        {
+            T* dst = out + (outRow * a.outW + ow * a.osw + a.oow) * a.c
+                     + static_cast<long long>(cbt) * CH + ch0;
+#pragma unroll
+            for(int o = 0; o < OC; ++o)
+                dst[o] = K1Elem<T>::store(acc[p][o]);
+        }
     }
 }
 

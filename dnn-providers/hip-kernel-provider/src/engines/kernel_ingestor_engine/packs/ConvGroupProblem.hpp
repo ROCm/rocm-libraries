@@ -53,11 +53,12 @@ std::optional<GroupProblem>
 /// nullopt unless x and y are both packed channels-first (both staged by transposes).
 std::optional<GroupProblem> channelsFirstInPlace(const GroupProblem& problem);
 
-/// Workgroups of a TH x (16 wp) output tile over cb channel blocks for one launch: images x
-/// output planes x row tiles x column tiles x channel tiles, or nullopt past the launch limit.
-std::optional<unsigned int> phaseBlocks(const K4Args& args, int th, int wp, int cb);
+/// Workgroups of a th x tw output tile over cb channel blocks for one launch: images x output
+/// planes x row tiles x column tiles x channel tiles, or nullopt past the launch limit.
+std::optional<unsigned int> phaseBlocks(const K4Args& args, int th, int tw, int cb);
 
-/// LDS bytes of the input halo a config stages (the kernel's static array).
-long long groupLdsBytes(int elementBytes, int r, int s, int stride, int th, int wp, int cb);
+/// LDS bytes of the input halo a config stages for a th x tw output tile (the kernel's static
+/// array).
+long long groupLdsBytes(int elementBytes, int r, int s, int stride, int th, int tw, int cb);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::conv_group

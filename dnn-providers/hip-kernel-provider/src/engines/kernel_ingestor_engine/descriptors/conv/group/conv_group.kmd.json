@@ -46,6 +46,18 @@
     {
       "name": "cf",
       "type": "int"
+    },
+    {
+      "name": "cg",
+      "type": "int"
+    },
+    {
+      "name": "oc",
+      "type": "int"
+    },
+    {
+      "name": "px",
+      "type": "int"
     }
   ]
 }
