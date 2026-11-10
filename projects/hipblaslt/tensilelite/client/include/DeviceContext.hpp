@@ -65,6 +65,9 @@ namespace TensileLite
             size_t                                      commFlagsBytes;
             void*                                       commFlags = nullptr;
             std::vector<std::shared_ptr<SdmaQueue>>     sdmaQueues;
+            // Gate table for TriggeredGateEpilogue launches (TriggeredGateValidator).
+            void*  gateTable      = nullptr;
+            size_t gateTableBytes = 0;
 
         private:
             void release();

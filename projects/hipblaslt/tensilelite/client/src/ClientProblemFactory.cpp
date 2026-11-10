@@ -105,6 +105,8 @@ namespace TensileLite
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
             , m_fusedGemmA2A(args["fused-gemm-a2a"].as<bool>())
+            , m_triggeredGateEpilogue(args.count("triggered-gate-epilogue")
+                                      && args["triggered-gate-epilogue"].as<bool>())
             , m_worlds(args.count("world") ? args["world"].as<std::vector<int>>()
                                            : std::vector<int>())
             , m_fusedA2AExtents(args.count("fused-a2a-extent")
@@ -509,6 +511,7 @@ namespace TensileLite
                                 rv.back().setSwizzleTensorA(m_swizzleTensorA);
                                 rv.back().setSwizzleTensorB(m_swizzleTensorB);
                                 rv.back().setFusedGemmA2A(m_fusedGemmA2A);
+                                rv.back().setTriggeredGateEpilogue(m_triggeredGateEpilogue);
                                 if(m_fusedGemmA2A)
                                 {
                                     if(static_cast<size_t>(m_fusedA2AExtents[i])

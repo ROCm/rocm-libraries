@@ -327,6 +327,7 @@ namespace TensileLite
                 iot::mapOptional(io, "swizzleTensorA", s.swizzleTensorA);
                 iot::mapOptional(io, "swizzleTensorB", s.swizzleTensorB);
                 iot::mapOptional(io, "fusedGemmA2A", s.fusedGemmA2A);
+                iot::mapOptional(io, "triggeredGateEpilogue", s.triggeredGateEpilogue);
                 iot::mapOptional(io, "stochasticRounding", s.stochasticRounding);
                 iot::mapOptional(io, "metadataLayout", s.metadataLayout);
                 // mxScaleFormat is mapped as optional so logic files that omit it

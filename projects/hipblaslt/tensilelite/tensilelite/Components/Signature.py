@@ -499,8 +499,8 @@ class SignatureDefault(Signature):
             # that base = fusedA2AKernArgBase + fusedA2AKernArgLayout()[X].
             writer.states.fusedA2AKernArgBase = fusedBase - userArgumentsInfo.commonArgsSize
 
-        # Triggered-gate tail: GateView at +0, GateTileBase at +8, relative to
-        # gateKernArgBase (rebased like fusedA2AKernArgBase).
+        # Triggered-gate tail (GateKernArg.hpp twins it): GateView at +0, GateTileBase at +8,
+        # relative to gateKernArgBase (rebased like fusedA2AKernArgBase).
         if kernel["ProblemType"].get("TriggeredGateEpilogue", False):
             writer.states.gateKernArgBase = signature.offset - userArgumentsInfo.commonArgsSize
             signature.addArg("GateView",     SVK.SIG_GLOBALBUFFER, "void", "generic")

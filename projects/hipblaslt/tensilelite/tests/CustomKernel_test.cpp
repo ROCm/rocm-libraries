@@ -34,6 +34,7 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/GateKernArg.hpp>
 #ifndef TENSILE_YAML
 #include <Tensile/msgpack/MessagePack.hpp>
 #endif
@@ -562,4 +563,38 @@ TEST(CustomKernelTest, FusedSegmentPacksEveryField)
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedWOffset), 2u);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedDrainOffset), FUSED_A2A_DRAIN_RECV);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedAMOffset), 256u);
+}
+
+TEST(CustomKernelTest, GateSemanticsPackViewThenTileBase)
+{
+    char const gateView = 0;
+
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::address, CustomArgSemantic::GateView});
+    solution.customKernel.args.push_back({CustomArgType::uint32, CustomArgSemantic::GateTileBase});
+
+    ContractionInputs inputs;
+    inputs.gateView     = &gateView;
+    inputs.gateTileBase = 24;
+    auto call           = solution.generateCustomCall<false>(
+        dummyProblem(), inputs, probeDevice(), StreamKSettings{});
+
+    ASSERT_EQ(call.args.size(), GATE_KERNARG_TILE_BASE_OFFSET + sizeof(uint32_t));
+    EXPECT_EQ(packedAt<void const*>(call.args, GATE_KERNARG_VIEW_OFFSET), &gateView);
+    EXPECT_EQ(packedAt<uint32_t>(call.args, GATE_KERNARG_TILE_BASE_OFFSET), 24u);
+}
+
+TEST(CustomKernelTest, AppendGateSegmentMatchesTheSignatureTail)
+{
+    // The non-custom solve() path appends the tail with appendGateSegment; start
+    // it after an odd-sized argument to show GateView is realigned and GateTileBase
+    // still lands at GateView + 8.
+    char const      gateView = 0;
+    KernelArguments args;
+    args.append<uint32_t>("lead", 7u);
+    appendGateSegment(args, &gateView, 40u);
+
+    ASSERT_EQ(args.size(), 8 + GATE_KERNARG_TILE_BASE_OFFSET + sizeof(uint32_t));
+    EXPECT_EQ(packedAt<void const*>(args, 8 + GATE_KERNARG_VIEW_OFFSET), &gateView);
+    EXPECT_EQ(packedAt<uint32_t>(args, 8 + GATE_KERNARG_TILE_BASE_OFFSET), 40u);
 }

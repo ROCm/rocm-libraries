@@ -1402,6 +1402,16 @@ namespace TensileLite
                    {1, nShard, nShard * tokens}};
         }
 
+        bool triggeredGateEpilogue() const
+        {
+            return m_triggeredGateEpilogue;
+        }
+
+        void setTriggeredGateEpilogue(bool value)
+        {
+            m_triggeredGateEpilogue = value;
+        }
+
         size_t mxBlockA() const
         {
             return m_mxBlockA;
@@ -1724,6 +1734,7 @@ namespace TensileLite
         bool             m_swizzleTensorB          = false;
         bool             m_fusedGemmA2A            = false;
         int64_t          m_fusedA2AExtent          = 0;
+        bool             m_triggeredGateEpilogue   = false;
         int              m_useBias                 = 0;
         bool             m_useGateResidual         = false;
         rocisa::DataType m_gateType               = rocisa::DataType::None;
@@ -1904,6 +1915,11 @@ namespace TensileLite
         uint32_t                        fusedA2AMyRank  = 0;
         uint32_t                        fusedA2ADrain   = 0;
         void*                           a2aBuf          = nullptr;
+
+        // TriggeredGateEpilogue: device pointer to the gate table and the index
+        // of this kernel's first band record.
+        void const* gateView     = nullptr;
+        uint32_t    gateTileBase = 0;
 
         // Workspace
         void* ws = nullptr;
