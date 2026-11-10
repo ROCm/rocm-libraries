@@ -132,7 +132,7 @@ bool checkNumericsImpl(
                        << " ptr=" << data << " zeros=" << abnormal_h.hasZero
                        << " nans=" << abnormal_h.hasNan << " infs=" << abnormal_h.hasInf << "  {"
                        << dDesc << "}");
-        if(computeStats != 0)
+        if(computeStats)
         {
             assert(numElements != 0);
             MIOPEN_LOG((isAbnormal ? miopen::LoggingLevel::Warning : miopen::LoggingLevel::Info),
