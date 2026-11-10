@@ -1721,8 +1721,8 @@ in fp32.
 
 | Spec / variant | Serves | AOT cache carries | Output |
 |---|---|---|---|
-| `DirectWgradWmmaSpec` / `direct_wgrad_wmma` | dense (`groups = 1`), stride 1, `PAD <= K - 1`, `C`, `K` multiples of 8 (runtime) | 3x3, `PAD` 0 and 1, TDM copies | cascade `buffer_atomic_fadd_f32` into the zeroed fp32 `dW` |
-| `GroupedWgradWmmaSpec` / `direct_wgrad_grouped_wmma` | grouped, `cpg = kpg` in (4, 8), 3x3, stride 1 | 3x3, `PAD` 0 and 1 | partial slots, folded by `DwWgradFoldSpec` |
+| `DirectWgradWmmaSpec` / `direct_wgrad_wmma` | dense (`groups = 1`), stride 1, `PAD <= K - 1`, one padding for both axes, `C`, `K` multiples of 8 (runtime) | 3x3, `PAD` 0 and 1, TDM copies | cascade `buffer_atomic_fadd_f32` into the zeroed fp32 `dW` |
+| `GroupedWgradWmmaSpec` / `direct_wgrad_grouped_wmma` | grouped, `cpg = kpg` in (4, 8), 3x3, stride 1, one padding for both axes | 3x3, `PAD` 0 and 1 | partial slots, folded by `DwWgradFoldSpec` |
 | `DwWgradWmmaSpec` / `direct_depthwise_wgrad_wmma` | depthwise (`cpg = kpg = 1`, `C % 8 == 0`), stride 1, any filter; the column padding may differ from the row padding (`PAD_W`) | 7x7 `PAD` 0 and 3; 1x31 `PAD` 0, `PAD_W` 15 | `ws_replicas` fp32 scratch slabs, folded by `direct_wgrad_reduce` |
 
 - **Dense, streamed rows.** A block owns a `block_k x block_c` dW tile for all
@@ -1741,7 +1741,8 @@ in fp32.
   partial slot, and `DwWgradFoldSpec` sums them with the fold shape
   `direct_wgrad_fold_knobs` picks (`cols`, `slices`, `unroll`: narrower blocks
   and deeper unrolling for few outputs over many partitions; the defaults keep
-  the original fold and its name).
+  the original fold and its name). `is_valid_dw_wgrad_fold_spec` requires each
+  knob to be at least 1 and `slices * cols <= 1024` threads.
 - **Toeplitz depthwise.** One WMMA contracts 4 dY pixels of 8 channels: A is
   one-hot dY (row `8 t + c'`), B the 8 channels of X at row `y + rb + j` and
   column `q + s0 + s`, so D lands on `dW[c'][rb + j - t][s0 + s]`. Items of
