@@ -103,10 +103,9 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *
 *  A matrix with zero nonzeros is an exception. For the conversions above that convert the
 *  values, its sparsity pattern is converted and \ref rocsparse_status_success is returned for
-*  any pair of data types. The CSR to CSC, CSC to CSR, CSR to BSR, CSR to ELL and BSR to CSR
-*  conversions only check the data types when the value arrays of both \p source and \p target
-*  are set, so they also convert a matrix with zero nonzeros and no value arrays for any pair of
-*  data types.
+*  any pair of data types. The CSR to CSC, CSC to CSR and BSR to CSR conversions only check the
+*  data types when the value arrays of both \p source and \p target are set, so they also convert
+*  a matrix with zero nonzeros and no value arrays for any pair of data types.
 *
 *  \note
 *  This routine does not support batched computation.
