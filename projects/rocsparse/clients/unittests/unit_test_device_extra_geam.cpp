@@ -386,9 +386,14 @@ TEST_F(ExtraGeam, spgeam_empty_operands)
                 if(HasFatalFailure())
                     return;
             }
-            // Device pointer mode used to memset a null nnz. C is omitted.
-            empty_spgeam<float>(handle, d.m, d.n, split, false, rocsparse_pointer_mode_device);
-            if(HasFatalFailure())
-                return;
+            // Device pointer mode: C omitted used to memset a null nnz, and C
+            // supplied used to memset the host nnz field of the descriptor.
+            for(bool supply_c : {false, true})
+            {
+                empty_spgeam<float>(
+                    handle, d.m, d.n, split, supply_c, rocsparse_pointer_mode_device);
+                if(HasFatalFailure())
+                    return;
+            }
         }
 }

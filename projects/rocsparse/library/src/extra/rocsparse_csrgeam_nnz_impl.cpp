@@ -535,7 +535,8 @@ namespace rocsparse
 
             if(nnz_C != nullptr)
             {
-                if(handle->pointer_mode == rocsparse_pointer_mode_host)
+                // spgeam passes &mat_C->nnz, a host field, even in device pointer mode.
+                if(handle->pointer_mode == rocsparse_pointer_mode_host || called_from_spgeam)
                 {
                     *nnz_C = 0;
                 }
@@ -554,8 +555,8 @@ namespace rocsparse
             else if(csr_row_ptr_C == nullptr && called_from_spgeam && descr != nullptr
                     && descr->csr_row_ptr_C != nullptr)
             {
-                // The descriptor row pointer is base 0. Fill it so a later compute
-                // copies a valid empty pattern into C.
+                // The descriptor row pointer is base 0. Fill it so a later
+                // symbolic or numeric compute copies a valid empty pattern into C.
                 switch(descr->indextype)
                 {
                 case rocsparse_indextype_i32:
