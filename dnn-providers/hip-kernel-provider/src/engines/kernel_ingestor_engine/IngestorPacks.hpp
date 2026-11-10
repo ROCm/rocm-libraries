@@ -66,6 +66,9 @@ void registerConvIgemmNchwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handl
 void resetConvIgemmNchwModuleCache();
 void registerConvWrwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvWrwModuleCache();
+/// @see packs/ConvStemBwdNative.cpp
+void registerConvStemBwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvStemBwdModuleCache();
 void registerConvWinogradSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvWinogradModuleCache();
 void registerConvDirectSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
