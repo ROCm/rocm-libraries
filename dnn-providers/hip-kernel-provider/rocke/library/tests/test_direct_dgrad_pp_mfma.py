@@ -223,6 +223,13 @@ def test_variant_wiring():
         )[0]
         is None
     )
+    # Dilated dgrads are not offered: the transposition carries the dilation
+    # so the forward validator refuses it.
+    for dil in ({"dil_h": 2}, {"dil_w": 2}):
+        got, why = direct_spec_for_problem(
+            _VARIANT, replace(p, **dil), {"block_k": 128}, "gfx950"
+        )
+        assert got is None and "dilation" in why, (dil, why)
     # Mostly-empty tiles are not offered (a 4x4 image in a 16x16 tile).
     got, why = direct_spec_for_problem(
         _VARIANT, replace(p, H=4, W=4), {"block_k": 128}, "gfx950"
