@@ -5733,6 +5733,57 @@ def cases():
             build_dw_fwd_wmma_case(_dtype, _K, _PAD, **_over),
         )
 
+    # --- conv_direct_dw_wgrad_wmma: Toeplitz WMMA depthwise wgrad (gfx1250) ---
+    # One-hot dY operands, buffer loads staged in LDS, wave32 16x16x32 WMMA,
+    # cascade atomics into a replicated scratch. The C++ twin is gated by
+    # library/tests/parity/conv_direct_dw_wgrad_wmma_emit.*.
+    def build_dw_wgrad_wmma_case(dtype, KH, KW, PAD, pad_w, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_dw_wgrad_wmma import (
+                DwWgradWmmaSpec,
+                build_dw_wgrad_wmma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            p = DirectConvProblem(
+                N=2,
+                H=20,
+                W=37,
+                groups=64,
+                cpg=1,
+                kpg=1,
+                KH=KH,
+                KW=KW,
+                PAD=PAD,
+                pad_w=pad_w,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_dw_wgrad_wmma(
+                DwWgradWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _KH, _KW, _PAD, _pad_w, _over in (
+        ("bf16_k7_default", "bf16", 7, 7, 3, -1, {}),
+        (
+            "fp16_1x31_pw15_wv2_q16_nopf",
+            "fp16",
+            1,
+            31,
+            0,
+            15,
+            dict(waves=2, tile_q=16, rows=2, target_blocks=512, prefetch=False),
+        ),
+    ):
+        add(
+            "conv_direct_dw_wgrad_wmma",
+            f"conv_direct_dw_wgrad_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_dw_wgrad_wmma_case(_dtype, _KH, _KW, _PAD, _pad_w, **_over),
+        )
+
     # --- conv_direct_dgrad_wmma: wave32 WMMA direct dgrad (gfx1250) ---
     # 3-D TDM halo and weight staging, transpose-on-read weights, TDM epilogue.
     # Every case needs llvm23 (TDM), so the other flavors record them as

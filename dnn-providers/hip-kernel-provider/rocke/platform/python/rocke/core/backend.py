@@ -1106,6 +1106,22 @@ def conv_direct_dw_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     )
 
 
+def conv_direct_dw_wgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DwWgradWmmaSpec` -> flat dict (problem nested, dtype and pad_w
+    included)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        wave_size=spec.wave_size,
+        waves=spec.waves,
+        tile_q=spec.tile_q,
+        rows=spec.rows,
+        target_blocks=spec.target_blocks,
+        ws_replicas=spec.ws_replicas,
+        prefetch=spec.prefetch,
+    )
+
+
 def conv_direct_fwd_gstream_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`FwdGstreamWmmaSpec` -> flat dict (problem nested, dtype included).
     ``sched`` is forwarded as-is; ``None`` means the backend default."""
@@ -2080,6 +2096,43 @@ def lower_conv_direct_dw_fwd_wmma(
         py_fn,
         lambda: eng.conv_direct_dw_fwd_wmma_lower_llvm(sd, arch=arch),
         lambda: eng.conv_direct_dw_fwd_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_dw_wgrad_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DwWgradWmmaSpec` (the gfx1250 Toeplitz WMMA depthwise wgrad)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_dw_wgrad_wmma import build_dw_wgrad_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_dw_wgrad_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_dw_wgrad_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_dw_wgrad_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_dw_wgrad_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_dw_wgrad_wmma_serialize_ir(sd, arch=arch),
         _name_of(spec),
     )
 
