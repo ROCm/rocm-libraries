@@ -71,9 +71,9 @@ def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
 
     gfx950 wave64 MI16 paired stores use permlane16 by default. MT320x256 is
     the exception: its serial store (plain NLL / post-loop / Lend fused) has
-    only ``s_nop 0`` between ``buffer_store_dwordx4`` (reads ``vPack``) and the
-    next pair's ``v_cvt_pk``, which is not a reliable WAR fence. Keep
-    ``ds_bpermute`` + ``s_waitcnt`` on those arms.
+    only ``s_nop 1`` between ``buffer_store_dwordx4`` (reads ``vPack``) and the
+    next pair's ``v_cvt_pk``, which the serial-store arms do not rely on as the
+    sole WAR fence. Keep ``ds_bpermute`` + ``s_waitcnt`` on those arms.
 
     Fused PLSIN Weave is eligible: last-K MFMAs sit in the pair gaps, so the
     next convert cannot overwrite ``vPack`` until the store has latched.
@@ -4571,9 +4571,9 @@ class GlobalWriteBatchWriter:
                                pair without over-waiting on unrelated operand ds_reads.
       * 2x v_permlane16_swap_b32 (gfx950) or v_permlane32_swap_b32 (fallback)
       * buffer_store_dwordx4     : write 8 16bit values (2-aligned src)
-      * s_nop 0                  : load-bearing WAR fence — the next pair's Phase 1
-                                   cvt must not overwrite vPack before the store has
-                                   latched its source VGPRs.
+      * s_nop 1                  : load-bearing WAR fence (2 wait states, gfx940+) — the
+                                   next pair's Phase 1 cvt must not overwrite vPack before
+                                   the >8B store has latched its source VGPRs.
 
     Consumes the vPack / vgprAddrScratch / align8-mask state produced by Phase 1.
     """
@@ -4669,7 +4669,13 @@ class GlobalWriteBatchWriter:
               and self.batchElements[i0][0] == blockIdxN
               and self.batchElements[i1][0] == blockIdxN)
     pairIdx = tt0 // 2
-    isCoalesceFirstPair  = canCoalesce and (pairIdx % 2 == 0) and _samePair(elementIdx + 1, elementIdx + 2, tt0 + 1)
+    # firstPair must validate BOTH the partner pair (forward, elementIdx+1/+2) AND its own
+    # deferred pair (elementIdx-1/elementIdx) share blockIdxN -- symmetric with secondPair's
+    # backward check. Without the own-pair check a pair straddling an N-group would defer but
+    # never coalesce (secondPair's backward check fails), silently dropping the deferred store.
+    isCoalesceFirstPair  = (canCoalesce and (pairIdx % 2 == 0)
+                            and _samePair(elementIdx + 1, elementIdx + 2, tt0 + 1)
+                            and _samePair(elementIdx - 1, elementIdx, tt0 - 1))
     isCoalesceSecondPair = canCoalesce and (pairIdx % 2 == 1) and _samePair(elementIdx - 3, elementIdx - 2, tt0 - 3)
     return isCoalesceFirstPair, isCoalesceSecondPair
 

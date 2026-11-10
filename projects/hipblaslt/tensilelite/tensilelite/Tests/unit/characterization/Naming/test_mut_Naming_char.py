@@ -212,18 +212,28 @@ def test_tdmfuse_is_named_only_when_nonzero(make_state):
     assert len(set(names.values())) == 4
 
 
-def test_dpp_store_fold_is_named_only_when_true(make_state):
-    # DPPStoreFold uses the same conditional-token pattern as TDMFuse: the default
-    # (False) is the arrangement every shipped kernel already has, so it carries no
-    # token (names unchanged); only the opt-in prints DPPSF.
-    names = {
+def test_dpp_store_fold_is_named_only_when_eligible(make_state, monkeypatch):
+    # DPPStoreFold defaults to True but only changes codegen on the gfx950 MXF4->bf16
+    # subtile coalesce path. On an INELIGIBLE kernel a True value is byte-identical, so it
+    # carries no DPPSF token and does not rename the kernel; only the eligible opt-in
+    # (gfx950 + MXF4 subtile) prints DPPSF1.
+    ineligible = {
         value: N.getKernelNameMin(make_state(DPPStoreFold=value), splitGSU=False)
         for value in (False, True)
     }
+    assert "DPPSF" not in ineligible[True]
+    assert ineligible[False] == ineligible[True]
 
-    assert "DPPSF" not in names[False]
-    assert "DPPSF1" in names[True]
-    assert names[False] != names[True]
+    # Eligible: gfx950 ISA + MXF4 subtile (isMxf4SubtilePath stubbed so this pins the
+    # naming gate, not the data-type classifier, which has its own tests).
+    monkeypatch.setattr(N, "isMxf4SubtilePath", lambda state: True)
+    eligible = {
+        value: N.getKernelNameMin(make_state(DPPStoreFold=value, ISA=(9, 5, 0)), splitGSU=False)
+        for value in (False, True)
+    }
+    assert "DPPSF" not in eligible[False]
+    assert "DPPSF1" in eligible[True]
+    assert eligible[False] != eligible[True]
 
 
 def test_register_allocation_is_named_only_off_the_default(make_state):
