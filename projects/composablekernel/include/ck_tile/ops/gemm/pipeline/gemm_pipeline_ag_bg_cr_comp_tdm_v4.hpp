@@ -795,10 +795,12 @@ struct GemmPipelineAgBgCrCompTDMV4
                                            index_t row,
                                            index_t lane_k) const
         {
+            const uint32_t urow = static_cast<uint32_t>(row);
             const index_t base =
                 buffer +
-                (is_a ? mx_tdm_v4_row_offset<index_t>(kLayout.a, kLayout.row_bytes, row)
-                      : mx_tdm_v4_row_offset<index_t>(kLayout.b, kLayout.row_bytes, row)) +
+                static_cast<index_t>(
+                    is_a ? mx_tdm_v4_row_offset<uint32_t>(kLayout.a, kLayout.row_bytes, urow)
+                         : mx_tdm_v4_row_offset<uint32_t>(kLayout.b, kLayout.row_bytes, urow)) +
                 lane_k;
             const int32x4_t c0 = Load4(base + kSpec.chunk_offset(0));
             const int32x4_t c1 = Load4(base + kSpec.chunk_offset(1));
@@ -885,12 +887,16 @@ struct GemmPipelineAgBgCrCompTDMV4
         {
             Head h;
             const index_t a_lane = kMma32 ? c.lane : c.lane_col;
-            ScaleWords<kRm>(h.as,
-                            buffer + mx_tdm_v4_scale_offset<index_t>(
-                                         kLayout.a_scale, step, MRow(c, 0, a_lane)));
-            ScaleWords<kRn>(h.bs,
-                            buffer + mx_tdm_v4_scale_offset<index_t>(
-                                         kLayout.b_scale, step, NRow(c, 0, c.lane_col)));
+            const uint32_t ustep = static_cast<uint32_t>(step);
+            ScaleWords<kRm>(
+                h.as,
+                buffer + static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
+                             kLayout.a_scale, ustep, static_cast<uint32_t>(MRow(c, 0, a_lane)))));
+            ScaleWords<kRn>(
+                h.bs,
+                buffer +
+                    static_cast<index_t>(mx_tdm_v4_scale_offset<uint32_t>(
+                        kLayout.b_scale, ustep, static_cast<uint32_t>(NRow(c, 0, c.lane_col)))));
             static_for<0, kRm, 1>{}([&](auto rm) { h.a[rm] = AFragment(buffer, rm, step); });
             return h;
         }
