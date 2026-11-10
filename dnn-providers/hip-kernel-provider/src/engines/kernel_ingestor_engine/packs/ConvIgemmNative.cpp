@@ -577,6 +577,14 @@ bool packFits(const IgemmProblem& problem, int64_t bk)
     return reduction < bk && bk % reduction == 0;
 }
 
+bool flatFits(const IgemmProblem& problem, int64_t bk)
+{
+    const auto& a = problem.args;
+    const long long reduction
+        = problem.direction == ConvDirection::FORWARD ? a.c / a.groups : a.k / a.groups;
+    return reduction % bk != 0;
+}
+
 bool haloFits(const IgemmProblem& problem, int64_t bm)
 {
     const auto& a = problem.args;
@@ -643,7 +651,7 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bn,
                        int64_t bk,
                        const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
-                       bool packTaps)
+                       int64_t pack)
 {
     // Blocks per dispatch unit below which the grid splits, and k-iterations each split keeps.
     // gfx9: 2 per CU, 2 iterations. gfx10+ (units are WGPs): 1 per WGP, 64 iterations -- there a
@@ -668,8 +676,9 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     const long long reduction = forward ? a.c / a.groups : a.k / a.groups;
     const long long taps = static_cast<long long>(a.ft) * a.fr * a.fs;
     const long long phaseTaps = std::max<long long>(1, divUp(taps, problem.phases));
-    const long long iterations = packTaps && reduction < bk ? divUp(phaseTaps, bk / reduction)
-                                                            : phaseTaps * divUp(reduction, bk);
+    const long long iterations = pack == 1 && reduction < bk ? divUp(phaseTaps, bk / reduction)
+                                 : pack == 2                 ? divUp(phaseTaps * reduction, bk)
+                                                             : phaseTaps * divUp(reduction, bk);
     const long long wanted = device_units::dispatchUnits(device) * blocksPerUnit;
     long long splits
         = tiles >= wanted
@@ -777,7 +786,7 @@ struct Tile
     int64_t xcd = 0; ///< XCD-contiguous block order
     int64_t halo = 0; ///< the halo A loop
     int64_t wdirect = 0; ///< backward data reads the K T R S C/g filter directly
-    int64_t pack = 0; ///< k-steps of whole taps
+    int64_t pack = 0; ///< 1 k-steps of whole taps, 2 the flat reduction
     int64_t cf = 0; ///< the output written packed channels-first from the epilogue
     int64_t swz = 0; ///< XOR-swizzled LDS tiles read in 16-byte chunks
 
@@ -816,7 +825,7 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     if(tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1
        || (tile.xcd != 0 && tile.xcd != 1) || (tile.halo != 0 && tile.halo != 1)
        || (tile.halo != 0 && (tile.info.wave == 0 || tile.stages != 1))
-       || (tile.wdirect != 0 && tile.wdirect != 1) || (tile.pack != 0 && tile.pack != 1)
+       || (tile.wdirect != 0 && tile.wdirect != 1) || tile.pack < 0 || tile.pack > 2
        || (tile.pack != 0 && (tile.halo != 0 || tile.wdirect != 0))
        || (tile.cf != 0 && tile.cf != 1) || (tile.cf != 0 && tile.info.wave == 0)
        || (tile.swz != 0 && tile.swz != 1)
@@ -838,7 +847,8 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
 /// several XCDs (elsewhere it is its plain twin), a halo config only where the problem fits
 /// the halo loop. A direct-filter config serves backward data whose filter is packed K T R S C/g
 /// with its input channels a multiple of the vector (16-bit: output channels even); a tap-packing
-/// config only reductions shorter than its k-step that divide it. A channels-first-output config
+/// config only reductions shorter than its k-step that divide it, a flat-reduction config (pack
+/// 2) only reductions its k-step does not divide. A channels-first-output config
 /// serves outputs (forward y, backward data dx) that are packed channels-first. A swizzled-tile
 /// config (16-bit atoms with 8-, 16- or 32-byte fragments and a k-step the chunked reads divide,
 /// vector 8, no halo, direct filter or tap packing; checked in tileOf) serves whatever its plain
@@ -898,7 +908,11 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    if(tile->pack != 0 && !conv_igemm::packFits(*problem, tile->bk))
+    if(tile->pack == 1 && !conv_igemm::packFits(*problem, tile->bk))
+    {
+        return false;
+    }
+    if(tile->pack == 2 && !conv_igemm::flatFits(*problem, tile->bk))
     {
         return false;
     }
@@ -1061,12 +1075,8 @@ public:
         {
             return 0;
         }
-        return conv_igemm::splitPlanFor(*problem,
-                                        tile->bm,
-                                        tile->bn,
-                                        tile->bk,
-                                        context.deviceProperties,
-                                        tile->pack != 0)
+        return conv_igemm::splitPlanFor(
+                   *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack)
             .workspaceBytes;
     }
 
@@ -1131,7 +1141,7 @@ public:
         options.add("K1_BUFFER", std::string(buffer ? "1" : "0"));
 
         const auto plan = conv_igemm::splitPlanFor(
-            *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack != 0);
+            *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack);
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, convSignature());
         conv.setBlockSize(static_cast<unsigned int>(tile->blockThreads()), 1, 1);

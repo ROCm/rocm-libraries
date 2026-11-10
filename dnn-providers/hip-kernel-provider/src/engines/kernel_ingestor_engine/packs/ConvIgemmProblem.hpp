@@ -148,17 +148,23 @@ struct SplitPlan
 /// splits, and the partials under 1 GiB. Under-filled is fewer than two blocks per CU on gfx9,
 /// keeping at least two k-iterations per split; fewer than one block per WGP on gfx10+
 /// (device_units), keeping at least 64. A device that reports no units gets no split (the
-/// kernel match declines it). @p packTaps: the config's k-steps span whole taps (tap packing),
-/// so a k-step covers bk / (reduction channels) taps.
+/// kernel match declines it). @p pack: 1 the config's k-steps span whole taps (tap packing), so
+/// a k-step covers bk / (reduction channels) taps; 2 the reduction runs flat (taps x channels in
+/// k-steps of bk).
 SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bm,
                        int64_t bn,
                        int64_t bk,
                        const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
-                       bool packTaps = false);
+                       int64_t pack = 0);
 
 /// Whether tap packing serves @p problem with a @p bk k-step: the reduction channels per tap
 /// are fewer than bk and divide it.
 bool packFits(const IgemmProblem& problem, int64_t bk);
+
+/// Whether the flat reduction (pack 2) serves @p problem with a @p bk k-step: whole taps of
+/// reduction channels would pad (bk does not divide them), so running the taps end to end saves
+/// k-steps. The channel vector dividing the reduction channels is the kernel match's own check.
+bool flatFits(const IgemmProblem& problem, int64_t bk);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::conv_igemm

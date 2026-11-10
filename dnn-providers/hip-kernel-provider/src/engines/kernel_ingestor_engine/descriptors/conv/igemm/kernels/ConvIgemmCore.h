@@ -877,6 +877,9 @@ struct K1Swz
 // PACK 1: a k-step spans BK / cgroup taps when the reduction channels per tap (cgroup) divide BK,
 // instead of padding each tap to BK. A thread's VEC channels sit in sub-tap kv / cgroup at
 // channel kv % cgroup, so its tap cursor is its own.
+// PACK 2 (flat): the reduction is the taps' channels end to end (taps x cgroup, cgroup a multiple
+// of VEC), cut into k-steps of BK whatever cgroup is, so no tap pads to a whole k-step; each
+// thread's cursor is its own (tap, channel), stepped BK channels on per k-step.
 
 template <class T, int BM, int BN, int BK, int VEC, int THREADS, int DIR, int WD = 0, int PACK = 0>
 struct K1Tiles
@@ -1052,12 +1055,16 @@ struct K1Tiles
                                      + static_cast<long long>(n) * rowStride;
             }
         }
-        if constexpr(PACK != 0)
+        if constexpr(PACK == 1)
         {
             // Whole taps per k-step (the launcher checks cgroup divides BK).
             packTaps = BK / gather.cgroup;
             packSub = kv / gather.cgroup;
             packChan = kv - packSub * gather.cgroup;
+            cChunks = 1;
+        }
+        else if constexpr(PACK == 2)
+        {
             cChunks = 1;
         }
 #if K1_BUFFER
@@ -1071,9 +1078,13 @@ struct K1Tiles
 
     __device__ int iterations() const
     {
-        if constexpr(PACK != 0)
+        if constexpr(PACK == 1)
         {
             return (nTaps + packTaps - 1) / packTaps;
+        }
+        else if constexpr(PACK == 2)
+        {
+            return static_cast<int>((static_cast<long long>(nTaps) * gather.cgroup + BK - 1) / BK);
         }
         return nTaps * cChunks;
     }
@@ -1081,6 +1092,20 @@ struct K1Tiles
     /// Loads start at iteration @p first; those at or past @p end read zeros.
     __device__ void cursorInit(int first, int end)
     {
+        if constexpr(PACK == 2)
+        {
+            // This thread's flat reduction index, as (tap, channel).
+            const long long f = static_cast<long long>(first) * BK + kv;
+            const int q = static_cast<int>(f / gather.cgroup);
+            packChan = static_cast<int>(f - static_cast<long long>(q) * gather.cgroup);
+            curIt = first;
+            endIt = end;
+            curC = 0;
+            curQs = q % gather.taps[2];
+            curQr = (q / gather.taps[2]) % gather.taps[1];
+            curQt = q / (gather.taps[2] * gather.taps[1]);
+            return;
+        }
         const int q = PACK != 0 ? first * packTaps + packSub : first / cChunks;
         curIt = first;
         endIt = end;
@@ -1096,8 +1121,27 @@ struct K1Tiles
         const int it = curIt;
         const int c0 = curC * BK;
         const int qs = curQs, qr = curQr, qt = curQt;
+        const int chan = packChan;
         ++curIt;
-        if constexpr(PACK != 0)
+        if constexpr(PACK == 2)
+        {
+            // BK channels on, carried through the taps (several when cgroup < BK).
+            packChan += BK;
+            while(packChan >= gather.cgroup)
+            {
+                packChan -= gather.cgroup;
+                if(++curQs == gather.taps[2])
+                {
+                    curQs = 0;
+                    if(++curQr == gather.taps[1])
+                    {
+                        curQr = 0;
+                        ++curQt;
+                    }
+                }
+            }
+        }
+        else if constexpr(PACK != 0)
         {
             // packTaps taps on, carried through the tap extents.
             curQs += packTaps;
@@ -1128,7 +1172,7 @@ struct K1Tiles
         const long long delta
             = ((static_cast<long long>(td) * gather.in[1] + th) * gather.in[2] + tw) * gather.chans;
         // PACK: this thread's channel in its own tap, valid while the tap is.
-        const int c = PACK != 0 ? packChan : c0 + kv;
+        const int c = PACK != 0 ? chan : c0 + kv;
         const bool cOk = (PACK != 0 ? qt < gather.taps[0] : c < gather.cgroup) && it < endIt;
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)

@@ -669,6 +669,92 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
     }
 }
 
+TEST(TestConvIgemmCatalog, EveryPlainNativeConfigHasAFlatReductionTwin)
+{
+    static constexpr std::array<const char*, 12> SHAPE{
+        "atom", "math", "bm", "bn", "bk", "wm", "wn", "threads", "vec", "stages", "xcd", "cf"};
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const auto& kernels = catalog(direction);
+        const auto tupleOf = [](const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel) {
+            std::string tuple = kernel.getStringMetadata("dtype");
+            for(const char* knob : SHAPE)
+            {
+                const std::string name(knob);
+                tuple += "|"
+                         + (name == "atom" || name == "math"
+                                ? kernel.getStringMetadata(name)
+                                : std::to_string(kernel.getIntMetadata(name)));
+            }
+            return tuple;
+        };
+        int flat = 0;
+        for(const auto& kernel : kernels)
+        {
+            SCOPED_TRACE(kernel.name);
+            const bool plain
+                = kernel.getIntMetadata("halo") == 0 && kernel.getIntMetadata("wdirect") == 0
+                  && kernel.getIntMetadata("swz") == 0 && kernel.getIntMetadata("cf") == 0
+                  && kernel.getStringMetadata("math") == "native";
+            if(kernel.getIntMetadata("pack") == 2)
+            {
+                EXPECT_TRUE(plain);
+                ++flat;
+                continue;
+            }
+            if(kernel.getIntMetadata("pack") != 0 || !plain)
+            {
+                continue;
+            }
+            const auto tuple = tupleOf(kernel);
+            EXPECT_EQ(std::count_if(kernels.begin(),
+                                    kernels.end(),
+                                    [&](const auto& other) {
+                                        return other.getIntMetadata("pack") == 2
+                                               && tupleOf(other) == tuple;
+                                    }),
+                      1);
+        }
+        EXPECT_GT(flat, 0);
+    }
+}
+
+TEST(TestConvIgemmCatalog, FlatReductionServesOnlyChannelsItsKStepDoesNotDivide)
+{
+    // c 32 (forward reduction) is whole 32-wide k-steps; k 48 (backward data) is not.
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        auto shape = dense(32, 48, {12, 13}, {3, 3}, {1, 1}, true);
+        shape.dataType = DataType::HALF;
+        const GraphFixture fixture(buildGraph(specFor(shape, direction)),
+                                   deviceOf("gfx942:sramecc+:xnack-", 304));
+        const auto pack = packFor(direction);
+        const auto bound = matchesGraph(pack, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        const auto& kernels = catalog(direction);
+        const auto flat = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+            return kernel.getIntMetadata("pack") == 2 && kernel.getStringMetadata("dtype") == "HALF"
+                   && kernel.getStringMetadata("atom") == "mfma32_f16"
+                   && kernel.getIntMetadata("bk") == 32 && kernel.getIntMetadata("xcd") == 0;
+        });
+        ASSERT_NE(flat, kernels.end());
+        const bool forward = direction == ConvDirection::FORWARD;
+        EXPECT_EQ(matchesKernel(pack, fixture.context(), *flat, *bound), !forward);
+        auto unknown = *flat;
+        unknown.metadata["pack"] = int64_t{3};
+        EXPECT_FALSE(matchesKernel(pack, fixture.context(), unknown, *bound));
+    }
+    conv_igemm::IgemmProblem problem;
+    problem.direction = ConvDirection::FORWARD;
+    problem.args.c = 224;
+    problem.args.k = 224;
+    problem.args.groups = 4; // 56 channels per group
+    EXPECT_TRUE(conv_igemm::flatFits(problem, 32));
+    problem.args.groups = 7; // 32
+    EXPECT_FALSE(conv_igemm::flatFits(problem, 32));
+    EXPECT_TRUE(conv_igemm::flatFits(problem, 64));
+}
+
 TEST(TestConvIgemmCatalog, SwizzledTileConfigsAreSixteenBitVectorEightPlainTiles)
 {
     int swizzled = 0;
@@ -963,6 +1049,16 @@ TEST(TestConvIgemmSplitPlan, Gfx9SplitsBelowTwoBlocksPerComputeUnit)
     const auto shallow
         = parsedProblem(dense(32, 128, {8, 8}, {3, 3}, {1, 1}, true), ConvDirection::FORWARD);
     EXPECT_EQ(splitsOf(shallow, "gfx942", 304), 4);
+}
+
+TEST(TestConvIgemmSplitPlan, FlatReductionCountsKStepsOverTheTapsEndToEnd)
+{
+    // 24 channels x 9 taps: padded per tap 9 k-steps of 32, flat ceil(216 / 32) = 7.
+    const auto problem
+        = parsedProblem(dense(24, 128, {8, 8}, {3, 3}, {1, 1}, true), ConvDirection::FORWARD);
+    const auto device = deviceOf("gfx942", 304);
+    EXPECT_EQ(conv_igemm::splitPlanFor(problem, 128, 128, 32, device).splits, 4);
+    EXPECT_EQ(conv_igemm::splitPlanFor(problem, 128, 128, 32, device, 2).splits, 3);
 }
 
 TEST(TestConvIgemmSplitPlan, RdnaSplitsOnlyBelowOneBlockPerWgpAndKeepsSixtyFourKSteps)
