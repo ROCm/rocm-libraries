@@ -90,8 +90,12 @@
 #         compv3 + prefetch_addr with register_prefetch left at its default
 #         False, so it is NOT this loop): split-K packed fp16 atomic on the
 #         K-outer cshuffle base, and two-stage
-#   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
-#    loader has no elem_dtype, so no other case loads bf16 operands: the
+#   73-88 -- TF32 compute (ConvDataSpec(mma_dtype="tf32")), fp32 storage, on
+#         both atoms of gfx950 (BF16x3) and gfx942 (native XF32): 2-D / 3-D,
+#         mem / compv4 / basic / unroll_k, default / cshuffle, split-K atomic,
+#         two-stage, stream-K (grouped dp_sk, persistent atomic), lds_k_pad,
+#         and the K-outer / async_dma refusals (see _tf32_spec)
+#   (Grouped wgrad reaches the C++ engine only through stream-K. The
 #    async loop's copy carries no element type, only its zero-fill does. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
 #    rejected with stream-K, and so is prefetch_addr.)
@@ -112,7 +116,7 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     build_implicit_gemm_conv_wgrad,
 )
-from kernels.common._conv_implicit_gemm_common import ConvProblem
+from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
 from _emit_common import run_emit
 
 
@@ -977,7 +981,81 @@ def _spec(idx: int):
             108: (dict(streamk_reduction="atomic", data=ConvDataSpec()), arch),
         }[idx]
         return replace(base, **bad[0]), bad[1]
+    if 73 <= idx <= 88:
+        return _tf32_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
+
+
+# TF32 compute: fp32 dY / X / dW, each LDS fragment bitcast to vec<tf32xN> for
+# the arch's TF32 atom -- BF16x3 emulation on gfx950 (32x32x16, 16x16x32),
+# native XF32 on gfx942 (32x32x4, 16x16x8). 64x64x32 tile, 2x2 warps. Keep in
+# lockstep with make_cfg_tf32() in conv_implicit_gemm_wgrad_emit.c.
+#   73: gfx950 32x32x16, 2-D, mem/default
+#   74: gfx950 16x16x32, 2-D, compv4/cshuffle (the scheduling-hint counts)
+#   75: gfx942 32x32x4, 2-D, compv4/default
+#   76: gfx942 16x16x8, 2-D, mem/cshuffle
+#   77: gfx950 32x32x16, 3-D, mem/default
+#   78: gfx942 16x16x8, 3-D, compv4/default
+#   79: gfx950 16x16x32, split-K=4 (scalar fp32 atomic)
+#   80: gfx942 32x32x4, split-K=4, cshuffle atomic epilogue
+#   81: gfx950 32x32x16, split-K=4 two-stage
+#   82: gfx942 16x16x8, split-K=4 two-stage
+#   83: gfx950 16x16x32, stream-K dp_sk linear, groups=3 (partial M tile)
+#   84: gfx942 32x32x4, stream-K persistent, atomic reduction
+#   85: gfx950 32x32x16, pipeline="basic", lds_k_pad=4 (16 B row stride)
+#   86: gfx942 16x16x8, compv4 unroll_k
+#   87: gfx950 lds_k_outer: rejected by both engines
+#   88: gfx950 async_dma: rejected by both engines
+_TF32 = ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
+_TF32_P2 = ConvProblem(N=2, Hi=12, Wi=12, C=32, K=96, Y=3, X=3, pH=1, pW=1)
+_TF32_P3 = ConvProblem(
+    N=1, Di=5, Hi=6, Wi=6, C=16, K=32, Z=3, Y=3, X=3, pD=1, sD=1, dD=1, pH=1, pW=1
+)
+_TF32_PG = ConvProblem(N=2, Hi=10, Wi=10, C=48, K=120, Y=3, X=3, pH=1, pW=1, groups=3)
+
+
+def _tf32_spec(idx: int):
+    p2, p3, pg = _TF32_P2, _TF32_P3, _TF32_PG
+    arch, edge, k, problem, kw = {
+        73: ("gfx950", 32, 16, p2, {}),
+        74: ("gfx950", 16, 32, p2, dict(pipeline="compv4", epilogue="cshuffle")),
+        75: ("gfx942", 32, 4, p2, dict(pipeline="compv4")),
+        76: ("gfx942", 16, 8, p2, dict(epilogue="cshuffle")),
+        77: ("gfx950", 32, 16, p3, {}),
+        78: ("gfx942", 16, 8, p3, dict(pipeline="compv4")),
+        79: ("gfx950", 16, 32, p2, dict(split_k=4)),
+        80: ("gfx942", 32, 4, p2, dict(split_k=4, epilogue="cshuffle")),
+        81: ("gfx950", 32, 16, p2, dict(split_k=4, two_stage=True)),
+        82: ("gfx942", 16, 8, p2, dict(split_k=4, two_stage=True)),
+        83: ("gfx950", 16, 32, pg, dict(streamk="dp_sk", streamk_ctas=6)),
+        84: (
+            "gfx942",
+            32,
+            4,
+            p2,
+            dict(streamk="persistent", streamk_ctas=6, streamk_reduction="atomic"),
+        ),
+        85: ("gfx950", 32, 16, p2, dict(pipeline="basic", lds_k_pad=4)),
+        86: ("gfx942", 16, 8, p2, dict(pipeline="compv4", unroll_k=True)),
+        87: ("gfx950", 32, 16, p2, dict(lds_k_outer=True)),
+        88: ("gfx950", 32, 16, p2, dict(async_dma=True)),
+    }[idx]
+    return (
+        WgradConvSpec(
+            problem=problem,
+            data=_TF32,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=edge,
+            warp_tile_n=edge,
+            warp_tile_k=k,
+            **kw,
+        ),
+        arch,
+    )
 
 
 # (problem kwargs, data dtypes (a/b, d), atom edge, streamk, reduction, ctas, arch)
