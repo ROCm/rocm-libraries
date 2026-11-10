@@ -6,7 +6,6 @@
 #
 ################################################################################
 
-import copy
 import re
 from contextlib import contextmanager
 from copy import deepcopy
@@ -35,6 +34,8 @@ from tensilelite.SolutionStructs.Solution import (
     _disableUnsupportedRuntimeStaggerU,
     validateParameterTypes,
 )
+
+from emit_test_helpers import assert_every_vector_preload_barriers, emit_asm
 
 pytestmark = pytest.mark.unit
 
@@ -1359,10 +1360,6 @@ def test_rap_lets_the_next_tile_prefetch_fetch_a_when_a_changes():
 # PrefetchAcrossPersistent against the non-default TDM descriptor groupings.
 
 
-# Snapshot defaultSolution at import so construction is not order-dependent.
-_PRISTINE_TDMFUSE_SOLUTION = copy.deepcopy(dict(defaultSolution))
-
-
 # MIWaveGroup [2,2] -> NumWaves 4 (TDMFuse=2's split; TDMFuse=1 needs >= 2 waves).
 _MI_W4 = [16, 16, 128, 1, 1, 2, 4, 2, 2]
 
@@ -1450,25 +1447,6 @@ def test_every_grouping_row_answers_without_a_new_branch(row, shares):
 # Solution level: real gfx1250 caps + assembler, assignDerivedParameters
 # end-to-end. Mirrors test_halfplr_streamk_rejects.py's harness.
 # ---------------------------------------------------------------------------
-@pytest.fixture(scope="module")
-def _gp_gfx1250(gfx1250_iim):
-    from tensilelite.Common.GlobalParameters import assignGlobalParameters
-
-    saved_gp = copy.deepcopy(dict(globalParameters))
-    saved_vp = copy.deepcopy(dict(validParameters))
-    saved_ds = copy.deepcopy(dict(defaultSolution))
-    defaultSolution.clear()
-    defaultSolution.update(copy.deepcopy(_PRISTINE_TDMFUSE_SOLUTION))
-    assignGlobalParameters({}, gfx1250_iim)
-    yield
-    globalParameters.clear()
-    globalParameters.update(saved_gp)
-    validParameters.clear()
-    validParameters.update(saved_vp)
-    defaultSolution.clear()
-    defaultSolution.update(saved_ds)
-
-
 def _make_params(gfx1250_iim, mi=None, **overrides):
     """Smallest PAP+TDM shape: TN MXF8F4 StreamK=3, StreamKForceDPOnly=1."""
     from tensilelite.Common.Architectures import gfxToIsa
@@ -1517,7 +1495,7 @@ def _derive(gfx1250_iim, assembler, capsys, **overrides):
     return sol, capsys.readouterr().out
 
 
-def test_pap_on_the_default_grouping_is_accepted(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+def test_pap_on_the_default_grouping_is_accepted(gp_gfx1250, gfx1250_iim, assembler, capsys):
     """Default grouping accepts PAP."""
     sol, out = _derive(gfx1250_iim, assembler, capsys, PrefetchAcrossPersistent=1)
     assert sol.get("Valid") is True, "expected accept, rejected with: %r" % out
@@ -1528,7 +1506,7 @@ def test_pap_on_the_default_grouping_is_accepted(_gp_gfx1250, gfx1250_iim, assem
 
 
 @pytest.mark.parametrize("fuse", [1, 2])
-def test_pap_with_a_shared_scale_set_is_accepted(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+def test_pap_with_a_shared_scale_set_is_accepted(gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     sol, out = _derive(gfx1250_iim, assembler, capsys,
                        PrefetchAcrossPersistent=1, TDMFuse=fuse)
     assert sol.get("Valid") is True, "TDMFuse=%d + PAP was rejected: %r" % (fuse, out)
@@ -1538,7 +1516,7 @@ def test_pap_with_a_shared_scale_set_is_accepted(_gp_gfx1250, gfx1250_iim, assem
 
 
 @pytest.mark.parametrize("fuse", [1, 2])
-def test_the_same_grouping_without_pap_is_still_accepted(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+def test_the_same_grouping_without_pap_is_still_accepted(gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     """The rejection is about PAP, not about the grouping."""
     sol, out = _derive(gfx1250_iim, assembler, capsys,
                        PrefetchAcrossPersistent=0, TDMFuse=fuse)
@@ -1546,7 +1524,7 @@ def test_the_same_grouping_without_pap_is_still_accepted(_gp_gfx1250, gfx1250_ii
     assert _PAP_GROUPING_MSG not in out
 
 
-def test_tdmfuse_own_guards_keep_precedence(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+def test_tdmfuse_own_guards_keep_precedence(gp_gfx1250, gfx1250_iim, assembler, capsys):
     sol, out = _derive(gfx1250_iim, assembler, capsys, PrefetchAcrossPersistent=1,
                        TDMFuse=2, mi=[16, 16, 128, 1, 1, 2, 4, 2, 4])
     assert sol.get("Valid") is False
@@ -1604,44 +1582,12 @@ def _resolve_sets(asm):
     return out, phys
 
 
-def _emit_asm(gfx1250_iim, assembler, **overrides):
-    """(solution, assembly text or None). CPU-only; no GPU is touched."""
-    import shutil
-    import rocisa
-    from tensilelite.Common.Types import DebugConfig
-    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-    from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.create_library.run import (generateKernelObjectsFromSolutions,
-                                                  processKernelSource)
-    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
-
-    sol = Solution(_make_params(gfx1250_iim, **overrides), False, True, False,
-                   assembler, gfx1250_iim)
-    if not sol.get("Valid"):
-        return sol, None
-    with preserve_rocisa_kernel_state():
-        kwa = KernelWriterAssembly(assembler, DebugConfig())
-        pieces = []
-        for kernel in generateKernelObjectsFromSolutions([sol]):
-            ri = rocisa.rocIsa.getInstance()
-            ri.init(tuple(kernel["ISA"]),
-                    shutil.which("amdclang++") or "/usr/bin/amdclang++")
-            ri.setKernel(tuple(kernel["ISA"]), kernel["WavefrontSize"])
-            kernel.duplicate = False
-            kernel["BaseName"] = getKernelFileBase(False, kernel)
-            res = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(), False, kernel)
-            src = res.src
-            if isinstance(src, (bytes, bytearray)):
-                src = src.decode(errors="replace")
-            pieces.append(src or "")
-    return sol, "\n".join(pieces)
-
-
 @pytest.mark.parametrize("fuse", [0, 1, 2, 3])
 def test_pap_shifts_each_descriptor_lds_bank_exactly_once(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+        gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     """Every non-idempotent bank shift lands on its own physical register."""
-    sol, asm = _emit_asm(gfx1250_iim, assembler, PrefetchAcrossPersistent=1, TDMFuse=fuse)
+    sol, asm = emit_asm(gfx1250_iim, assembler,
+                        _make_params(gfx1250_iim, PrefetchAcrossPersistent=1, TDMFuse=fuse))
     capsys.readouterr()
     if asm is None:
         pytest.skip("TDMFuse=%d + PAP is refused, nothing to emit" % fuse)
@@ -1675,9 +1621,10 @@ def test_pap_shifts_each_descriptor_lds_bank_exactly_once(
 
 @pytest.mark.parametrize("fuse", [0, 1, 2, 3])
 def test_pap_never_names_an_unallocated_tdm_increment(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+        gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     """Every tdm*Incs the kernel reads has a defineSgpr behind it."""
-    sol, asm = _emit_asm(gfx1250_iim, assembler, PrefetchAcrossPersistent=1, TDMFuse=fuse)
+    sol, asm = emit_asm(gfx1250_iim, assembler,
+                        _make_params(gfx1250_iim, PrefetchAcrossPersistent=1, TDMFuse=fuse))
     capsys.readouterr()
     if asm is None:
         pytest.skip("TDMFuse=%d + PAP is refused, nothing to emit" % fuse)
@@ -1698,7 +1645,7 @@ _BF16_VECTOR_MI = [16, 16, 32, 1, 1, 8, 8, 2, 2]
 @pytest.mark.parametrize("pap", [0, 1])
 @pytest.mark.parametrize("bias,sav", [(0, 0), (1, 0), (0, 1), (1, 1)])
 def test_persistent_vector_scratch_is_separate_only_with_pap(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, pap, bias, sav):
+        gp_gfx1250, gfx1250_iim, assembler, capsys, pap, bias, sav):
     common = dict(mi=_BF16_VECTOR_MI, DepthU=128,
                   PrefetchAcrossPersistent=pap, SuppressNoLoadLoop=False)
     baseline, reason = _derive(gfx1250_iim, assembler, capsys,
@@ -1740,12 +1687,13 @@ def _assert_lds_sync_at_barrier(asm, comment):
 
 @pytest.mark.parametrize("pap,sia", [(0, 0), (0, 4), (1, 0), (1, 4)])
 def test_vector_lds_wait_is_late_and_does_not_drain_pap(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, pap, sia):
-    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2],
-                        DepthU=128, ScheduleIterAlg=sia,
-                        PrefetchAcrossPersistent=pap, SuppressNoLoadLoop=False,
-                        ProblemType=dict(_BF16_VECTOR_EPILOGUE,
-                                         UseBias=1, UseScaleAlphaVec=1))
+        gp_gfx1250, gfx1250_iim, assembler, capsys, pap, sia):
+    sol, asm = emit_asm(gfx1250_iim, assembler,
+                        _make_params(gfx1250_iim, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2],
+                                     DepthU=128, ScheduleIterAlg=sia,
+                                     PrefetchAcrossPersistent=pap, SuppressNoLoadLoop=False,
+                                     ProblemType=dict(_BF16_VECTOR_EPILOGUE,
+                                                      UseBias=1, UseScaleAlphaVec=1)))
     assert sol.get("Valid"), capsys.readouterr().out
     assert asm
     start = asm.index("label_PersistentLoopStart:")
@@ -1778,7 +1726,7 @@ def test_vector_lds_wait_is_late_and_does_not_drain_pap(
 
 
 def test_nonpersistent_vector_epilogue_keeps_its_existing_lds_layout(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys):
+        gp_gfx1250, gfx1250_iim, assembler, capsys):
     common = dict(mi=_BF16_VECTOR_MI, DepthU=128, StreamK=0, StreamKForceDPOnly=0)
     baseline, reason = _derive(gfx1250_iim, assembler, capsys,
                               ProblemType=_BF16_VECTOR_EPILOGUE, **common)
@@ -1790,6 +1738,19 @@ def test_nonpersistent_vector_epilogue_keeps_its_existing_lds_layout(
     assert not sol["_SeparateEpilogueLds"]
     assert sol["LdsOffsetBias"] == 0
     assert sol["LdsNumBytes"] == baseline["LdsNumBytes"]
+
+
+def test_factor_dim_3_vector_preload_barriers_both_factor_dims(
+        gp_gfx1250, gfx1250_iim, assembler, capsys):
+    # TDMStoreInst takes the vectors only along M, so this kernel keeps them over main-loop LDS buffer 0.
+    sol, asm = emit_asm(gfx1250_iim, assembler,
+                        _make_params(gfx1250_iim, mi=_BF16_VECTOR_MI, DepthU=64, StreamK=0,
+                                     StreamKForceDPOnly=0,
+                                     ProblemType=dict(_BF16_VECTOR_EPILOGUE, UseBias=3, UseScaleAlphaVec=3)))
+    assert sol.get("Valid"), capsys.readouterr().out
+    assert sol["LdsOffsetBias"] == 0
+    assert "label_Load_FactorDim_1" in asm
+    assert_every_vector_preload_barriers(asm)
 
 
 # PAP and RAP on TDMFuse 1-3.
@@ -1956,7 +1917,7 @@ def test_rap_keeps_wave_parity_on_the_default_grouping():
 
 @pytest.mark.parametrize("fuse, mi", _PAP_MX_BOTH_CELLS)
 def test_pap_accepts_scales_on_both_tensors_on_tdmfuse_1_3(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, mi):
+        gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, mi):
     sol, out = _derive(gfx1250_iim, assembler, capsys, PrefetchAcrossPersistent=1, TDMFuse=fuse, mi=mi)
     assert sol.get("Valid") is True, "TDMFuse=%d + PAP was rejected: %r" % (fuse, out)
     assert sol.get("PrefetchAcrossPersistent") == 1
@@ -1966,7 +1927,7 @@ def test_pap_accepts_scales_on_both_tensors_on_tdmfuse_1_3(
 @pytest.mark.parametrize("fuse", [1, 2, 3])
 @pytest.mark.parametrize("pap, rap", [(1, 0), (0, 1), (1, 1)])
 def test_pap_and_rap_accept_tdmfuse_1_3_without_scales(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, pap, rap):
+        gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, pap, rap):
     # RAP needs NoTailLoop; PAP alone keeps the K tail so the tail reset is emitted.
     overrides = dict(_NO_MX_COMMON, PrefetchAcrossPersistent=pap, ReuseAcrossPersistent=rap,
                      AssertSummationElementMultiple=128 if rap else 1)
@@ -1998,9 +1959,10 @@ _PAP_EMIT_CELLS = ([dict(TDMFuse=fuse, mi=mi) for fuse, mi in _PAP_MX_BOTH_CELLS
 @pytest.mark.parametrize("cell", _PAP_EMIT_CELLS,
                          ids=lambda c: "f%d_%s_%s" % (c["TDMFuse"], "bf16" if "ProblemType" in c else "mx",
                                                       "w2" if c.get("mi") == _MI_W2 else "w4"))
-def test_pap_moves_each_descriptor_set_once(_gp_gfx1250, gfx1250_iim, assembler, capsys, cell):
+def test_pap_moves_each_descriptor_set_once(gp_gfx1250, gfx1250_iim, assembler, capsys, cell):
     """The PAP bank restore, refresh and tail offset reach every live set, each the same number of times."""
-    sol, asm = _emit_asm(gfx1250_iim, assembler, PrefetchAcrossPersistent=1, **cell)
+    sol, asm = emit_asm(gfx1250_iim, assembler,
+                        _make_params(gfx1250_iim, PrefetchAcrossPersistent=1, **cell))
     out = capsys.readouterr().out
     assert asm, "rejected or not emitted: %r" % out
     resolved, phys = _resolve_sets(asm)
@@ -2069,12 +2031,12 @@ def _assertReuseCopyOwnsItsShadowInit(text):
     assert set(re.findall(r"\blabel_ShadowInitStart\w*", reuse)) == {"label_ShadowInitStart_RAPIterN"}
 
 
-def test_rap_with_shadow_init_emits_each_label_once(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+def test_rap_with_shadow_init_emits_each_label_once(gp_gfx1250, gfx1250_iim, assembler, capsys):
     """TDMFuse=0 and RAP with shadow init at its default. The reuse copy re-emits the shadow-init block,
     whose labels were built from literals, so each was defined twice and StinkyTofu's CFG builder
     aborted the process; they now go through rapLabel."""
     with _stinkyTofuInputs() as inputs:
-        sol, asm = _emit_asm(gfx1250_iim, assembler, TDMFuse=0, **_RAP_NO_MX)
+        sol, asm = emit_asm(gfx1250_iim, assembler, _make_params(gfx1250_iim, TDMFuse=0, **_RAP_NO_MX))
     out = capsys.readouterr().out
     assert [_labelsDefinedTwice(text) for text in inputs] == [[]]
     assert asm, "rejected or not emitted: %r" % out
@@ -2085,7 +2047,7 @@ def test_rap_with_shadow_init_emits_each_label_once(_gp_gfx1250, gfx1250_iim, as
 
 
 @pytest.mark.parametrize("fuse", [1, 2, 3])
-def test_rap_without_scales_silences_a_on_every_wave(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+def test_rap_without_scales_silences_a_on_every_wave(gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     """Without MX scales A has its own set on every wave, so keeping A resident nulls that set on
     every wave; the reuse copy keeps its own shadow-init labels here too.
 
@@ -2094,8 +2056,8 @@ def test_rap_without_scales_silences_a_on_every_wave(_gp_gfx1250, gfx1250_iim, a
     runs out of VGPRs and codegen emits nothing, which would assert nothing about the null.
     """
     with _stinkyTofuInputs() as inputs:
-        _, asm = _emit_asm(gfx1250_iim, assembler, TDMFuse=fuse,
-                           PrefetchAcrossPersistent=1, **_RAP_NO_MX)
+        _, asm = emit_asm(gfx1250_iim, assembler,
+                          _make_params(gfx1250_iim, TDMFuse=fuse, PrefetchAcrossPersistent=1, **_RAP_NO_MX))
     out = capsys.readouterr().out
     assert [_labelsDefinedTwice(text) for text in inputs] == [[]]
     assert asm, "rejected or not emitted: %r" % out
@@ -2107,7 +2069,7 @@ def test_rap_without_scales_silences_a_on_every_wave(_gp_gfx1250, gfx1250_iim, a
 
 @pytest.mark.parametrize("pap", [0, 1], ids=["rap", "paprap"])
 @pytest.mark.parametrize("fuse", [2, 3])
-def test_rap_rejects_a_shared_scale_set(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, pap):
+def test_rap_rejects_a_shared_scale_set(gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, pap):
     """RAP silences one descriptor set per owner, which the shared-scale rows outgrow.
 
     TDMFuse 2/3 with both scales put A and a scale on one owner's set, so the single
@@ -2122,7 +2084,7 @@ def test_rap_rejects_a_shared_scale_set(_gp_gfx1250, gfx1250_iim, assembler, cap
 
 
 @pytest.mark.parametrize("fuse", [1, 2, 3])
-def test_rap_accepts_the_every_wave_pair(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+def test_rap_accepts_the_every_wave_pair(gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     """Without MX scales TDMFuse 1-3 give A and B a set each on every wave, which RAP can silence."""
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, mi=_MI_W2,
                        ReuseAcrossPersistent=1, AssertSummationElementMultiple=256,
@@ -2133,12 +2095,12 @@ def test_rap_accepts_the_every_wave_pair(_gp_gfx1250, gfx1250_iim, assembler, ca
 
 @pytest.mark.parametrize("pap,sia", [(0, 0), (0, 4), (1, 0), (1, 4)])
 def test_persistent_tdm_fences_final_lds_reads_before_next_tile(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, pap, sia):
+        gp_gfx1250, gfx1250_iim, assembler, capsys, pap, sia):
     """The next tile may overwrite either bank before slower waves finish NLL."""
-    sol, asm = _emit_asm(gfx1250_iim, assembler,
-                        mi=[16, 16, 128, 1, 1, 1, 1, 2, 2], DepthU=256,
-                        ScheduleIterAlg=sia, PrefetchAcrossPersistent=pap,
-                        TDMLoadWaveSync=False, SuppressNoLoadLoop=False)
+    sol, asm = emit_asm(gfx1250_iim, assembler,
+                        _make_params(gfx1250_iim, mi=[16, 16, 128, 1, 1, 1, 1, 2, 2], DepthU=256,
+                                     ScheduleIterAlg=sia, PrefetchAcrossPersistent=pap,
+                                     TDMLoadWaveSync=False, SuppressNoLoadLoop=False))
     assert sol.get("Valid"), capsys.readouterr().out
     assert asm
     close = asm.index("label_PersistentLoopClose:")
@@ -2161,18 +2123,18 @@ def test_persistent_tdm_fences_final_lds_reads_before_next_tile(
 
 @pytest.mark.parametrize("vector", [False, True])
 def test_tdm_assignment_close_fences_each_backedge(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, vector):
+        gp_gfx1250, gfx1250_iim, assembler, capsys, vector):
     # TDM PAP currently requires StaticGrid. Queue and Hybrid still need to
     # finish the old tile's LDS reads before their next tile's first prefetch.
     options = dict(mi=[16, 16, 128, 1, 1, 1, 1, 2, 2], DepthU=256)
     if vector:
         options.update(mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], DepthU=128,
                        ProblemType=dict(_BF16_VECTOR_EPILOGUE, UseBias=1, UseScaleAlphaVec=1))
-    sol, asm = _emit_asm(gfx1250_iim, assembler,
-                        **options,
-                        StreamK=5, StreamKForceDPOnly=0, ScheduleIterAlg=4,
-                        PrefetchAcrossPersistent=0, ForceDisableShadowInit=True,
-                        ClusterLocalRead=0, SuppressNoLoadLoop=False)
+    sol, asm = emit_asm(gfx1250_iim, assembler,
+                        _make_params(gfx1250_iim, **options,
+                                     StreamK=5, StreamKForceDPOnly=0, ScheduleIterAlg=4,
+                                     PrefetchAcrossPersistent=0, ForceDisableShadowInit=True,
+                                     ClusterLocalRead=0, SuppressNoLoadLoop=False))
     assert sol.get("Valid") and asm, capsys.readouterr().out
     close = asm.split("label_PersistentLoopClose:", 1)[1].split("label_KernelEnd:", 1)[0]
     # Hybrid exercises both concrete assignment closes, including any common fence.
@@ -2203,7 +2165,7 @@ def test_tdm_assignment_close_fences_each_backedge(
     pytest.param(True, False, True, id="single-wave-debug"),
 ])
 def test_cluster_close_handoff_covers_only_reachable_backedges(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, debug, vector, single_wave):
+        gp_gfx1250, gfx1250_iim, assembler, capsys, debug, vector, single_wave):
     options = dict(mi=[16, 16, 128, 1, 1, 1, 1, 2, 2], DepthU=256)
     if vector:
         options.update(mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], DepthU=128,
@@ -2211,12 +2173,12 @@ def test_cluster_close_handoff_covers_only_reachable_backedges(
     elif single_wave:
         options.update(mi=[16, 16, 32, 1, 1, 4, 4, 1, 1], DepthU=128,
                        ProblemType=_BF16_VECTOR_EPILOGUE)
-    sol, asm = _emit_asm(gfx1250_iim, assembler,
-                        **options,
-                        ClusterDim=[2, 2], ScheduleIterAlg=4,
-                        PrefetchAcrossPersistent=0, ForceDisableShadowInit=True,
-                        ClusterLocalRead=0, SuppressNoLoadLoop=False,
-                        DebugPersistentKernelLoopForever=debug)
+    sol, asm = emit_asm(gfx1250_iim, assembler,
+                        _make_params(gfx1250_iim, **options,
+                                     ClusterDim=[2, 2], ScheduleIterAlg=4,
+                                     PrefetchAcrossPersistent=0, ForceDisableShadowInit=True,
+                                     ClusterLocalRead=0, SuppressNoLoadLoop=False,
+                                     DebugPersistentKernelLoopForever=debug))
     assert sol.get("Valid") and asm, capsys.readouterr().out
     assert (sol["NumThreads"] == sol["WavefrontSize"]) == single_wave
     close = asm.split("label_PersistentLoopClose:", 1)[1].split("label_KernelEnd:", 1)[0]
