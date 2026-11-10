@@ -95,6 +95,7 @@ rocke_dgrad_conv_spec_t rocke_dgrad_conv_spec_default(void)
     s.dtype_b = "fp16";
     s.dtype_d = "fp16";
     s.dtype_acc = "fp32";
+    s.mma_dtype = NULL;
     s.tile_m = 64;
     s.tile_n = 64;
     s.tile_k = 64;
@@ -311,7 +312,7 @@ rocke_status_t
         n += w_;                                                      \
     } while(0)
     /* Flag order must match Python's kernel_name_join flags dict:
-     * async, kouter, spk, ukd, kp, tapk, noxcd, halo, hprio, hkp, hwo. C previously emitted spk before async, which only
+     * async, kouter, spk, ukd, kp, tapk, noxcd, halo, hprio, hkp, hwo, tf32. C previously emitted spk before async, which only
      * diverged for a spec setting both -- none exists -- but the K-outer flag
      * sits between them, so the order is now load-bearing. */
     if(s->async_dma)
@@ -343,8 +344,49 @@ rocke_status_t
         ROCKE_DGRAD_NAME_APPEND("_hkp%d", s->dy_halo_kouter_pad);
     if(s->halo_max_wo > 0)
         ROCKE_DGRAD_NAME_APPEND("_hwo%d", s->halo_max_wo);
+    /* The name carries no dtype, and on gfx950 a TF32 atom shares its shape
+     * with the bf16 one, so the cache would otherwise collide an fp32-storage
+     * TF32 kernel with a 16-bit one (Python flag "tf32"). */
+    if(rocke_conv_data_is_tf32(s->mma_dtype))
+        ROCKE_DGRAD_NAME_APPEND("_tf32");
 #undef ROCKE_DGRAD_NAME_APPEND
     return ROCKE_OK;
+}
+
+/* Python _mma_dtype_conflict(spec, arch=None): the shared TF32 gate
+ * (rocke_conv_tf32_conv_spec_reason) for dgrad. validate() calls it arch-free
+ * (arch NULL); is_valid_dgrad_spec with the arch. Returns true and writes the
+ * reason when the spec cannot build. */
+static bool _dgrad_mma_dtype_conflict(const rocke_dgrad_conv_spec_t* s,
+                                      const char* arch,
+                                      char* reason,
+                                      size_t reason_cap)
+{
+    rocke_conv_tf32_spec_view_t v;
+    memset(&v, 0, sizeof(v));
+    v.dtype_a = s->dtype_a;
+    v.dtype_b = s->dtype_b;
+    v.dtype_d = s->dtype_d;
+    v.mma_dtype = s->mma_dtype;
+    v.wave_size = s->wave_size;
+    v.tile_m = s->tile_m;
+    v.tile_n = s->tile_n;
+    v.warp_m = s->warp_m;
+    v.warp_n = s->warp_n;
+    v.warp_tile_m = s->warp_tile_m;
+    v.warp_tile_n = s->warp_tile_n;
+    v.warp_tile_k = s->warp_tile_k;
+    v.lds_k_outer = s->lds_k_outer;
+    v.async_dma = s->async_dma;
+    /* effective_lds_layout() (with its layout.validate()): the row stride, or
+     * the ValueError text _tf32_mfma_reason returns. */
+    rocke_conv_lds_layout_t layout = _dgrad_effective_lds_layout(s);
+    char layout_err[256];
+    if(rocke_conv_lds_layout_validate(&layout, layout_err, sizeof(layout_err)))
+        v.lds_row_stride = layout.row_stride;
+    else
+        v.lds_layout_error = layout_err;
+    return rocke_conv_tf32_conv_spec_reason(&v, arch, false, reason, reason_cap);
 }
 
 /* Python _dy_halo_conflict: false + reason when the dY halo knobs cannot be
@@ -485,6 +527,10 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
     if(p->is_3d)
     {
         snprintf(reason, reason_cap, "dgrad only supports 2-D convolution currently");
+        return false;
+    }
+    if(_dgrad_mma_dtype_conflict(s, arch, reason, reason_cap))
+    {
         return false;
     }
 
@@ -656,20 +702,20 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         }
     }
 
-    /* MMA shape availability (Python: target.mma.has_shape). */
-    if(!rocke_mma_catalog_has_shape(&tgt->mma,
-                                    family,
-                                    s->dtype_a,
-                                    s->dtype_b,
-                                    "fp32",
-                                    s->warp_tile_m,
-                                    s->warp_tile_n,
-                                    s->warp_tile_k))
+    /* MMA shape availability (Python: target.mma.has_shape), asked for the
+     * MMA dtypes: a TF32 spec stores fp32 and issues its (tf32, tf32, fp32)
+     * atom. */
+    const char* mma_a = rocke_conv_data_mma_operand(s->dtype_a, s->mma_dtype);
+    const char* mma_b = rocke_conv_data_mma_operand(s->dtype_b, s->mma_dtype);
+    if(!rocke_mma_catalog_has_shape(
+           &tgt->mma, family, mma_a, mma_b, "fp32", s->warp_tile_m, s->warp_tile_n, s->warp_tile_k))
     {
+        /* f"unsupported {spec.data.mma_a} warp_tile {atom} on {arch}", atom a
+         * (m, n, k) tuple. */
         snprintf(reason,
                  reason_cap,
-                 "unsupported %s warp_tile %dx%dx%d on %s",
-                 s->dtype_a,
+                 "unsupported %s warp_tile (%d, %d, %d) on %s",
+                 mma_a,
                  s->warp_tile_m,
                  s->warp_tile_n,
                  s->warp_tile_k,
@@ -998,8 +1044,8 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             const rocke_archtarget_t* kt = rocke_archtarget_from_gfx(arch);
             const rocke_mmaop_t* kop = kt ? rocke_archtarget_op_for_shape(kt,
                                                                           _dgrad_mma_family(arch),
-                                                                          s->dtype_a,
-                                                                          s->dtype_b,
+                                                                          mma_a,
+                                                                          mma_b,
                                                                           "fp32",
                                                                           s->warp_tile_m,
                                                                           s->warp_tile_n,
@@ -1385,15 +1431,16 @@ static const rocke_mmaop_t*
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "dgrad: unknown arch '%s'", arch);
         return NULL;
     }
-    const rocke_mmaop_t* op = rocke_archtarget_op_for_shape(target,
-                                                            _dgrad_mma_family(arch),
-                                                            spec->dtype_a,
-                                                            spec->dtype_b,
-                                                            "fp32",
-                                                            spec->warp_tile_m,
-                                                            spec->warp_tile_n,
-                                                            spec->warp_tile_k,
-                                                            nullptr);
+    const rocke_mmaop_t* op
+        = rocke_archtarget_op_for_shape(target,
+                                        _dgrad_mma_family(arch),
+                                        rocke_conv_data_mma_operand(spec->dtype_a, spec->mma_dtype),
+                                        rocke_conv_data_mma_operand(spec->dtype_b, spec->mma_dtype),
+                                        "fp32",
+                                        spec->warp_tile_m,
+                                        spec->warp_tile_n,
+                                        spec->warp_tile_k,
+                                        nullptr);
     if(!op)
     {
         rocke_i_set_err(b,
@@ -1475,8 +1522,10 @@ static void _emit_dgrad_direct_epilogue(rocke_ir_builder_t* b,
     addr_ctx.c_group_base = c_group_base;
 
     rocke_direct_epilogue_t epi;
-    epi.atom
-        = rocke_mfma_atom(spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+    epi.atom = rocke_mfma_atom(rocke_conv_data_mma_operand(spec->dtype_a, spec->mma_dtype),
+                               spec->warp_tile_m,
+                               spec->warp_tile_n,
+                               spec->warp_tile_k);
     epi.grid = *grid;
     epi.out_dtype = spec->dtype_d;
 
@@ -1512,7 +1561,10 @@ static void _emit_dgrad_cshuffle_epilogue(rocke_ir_builder_t* b,
     int max_store_vec = _dgrad_store_vec(spec);
 
     const rocke_mfma_atom_t* atom
-        = rocke_mfma_atom(spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+        = rocke_mfma_atom(rocke_conv_data_mma_operand(spec->dtype_a, spec->mma_dtype),
+                          spec->warp_tile_m,
+                          spec->warp_tile_n,
+                          spec->warp_tile_k);
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
     epi.out_dtype = spec->dtype_d;
 
@@ -2703,6 +2755,8 @@ static rocke_kernel_def_t*
 
     // ---- params ----
     const rocke_type_t* ab_ir = _dtype_to_ir(spec->dtype_a);
+    /* ir_dtype_b: the W tensor, its LDS tile and loader (ab_ir is ir_dtype_a). */
+    const rocke_type_t* b_ir = _dtype_to_ir(spec->dtype_b);
     const rocke_type_t* d_ir = _dtype_to_ir(spec->dtype_d);
     const rocke_type_t* ab_global = rocke_ptr_type(b, ab_ir, "global");
     const rocke_type_t* d_global = rocke_ptr_type(b, d_ir, "global");
@@ -2826,11 +2880,30 @@ static rocke_kernel_def_t*
     bool is_wmma = (op->family && strcmp(op->family, "wmma") == 0);
     const rocke_mfma_atom_t* atom
         = is_wmma ? NULL
-                  : rocke_mfma_atom(
-                        spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+                  : rocke_mfma_atom(rocke_conv_data_mma_operand(spec->dtype_a, spec->mma_dtype),
+                                    spec->warp_tile_m,
+                                    spec->warp_tile_n,
+                                    spec->warp_tile_k);
     int a_per_lane = op->srcs[0].frag_len;
     int b_per_lane = op->srcs[1].frag_len;
+    /* LDS element type follows STORAGE: a TF32 kernel holds fp32 tiles and
+     * reinterprets each fragment after the read (_to_mma_operand). */
+    const rocke_type_t* smem_dtype = rocke_conv_smem_dtype_for(spec->dtype_a);
+    const bool is_tf32 = rocke_conv_data_is_tf32(spec->mma_dtype);
     int c_per_lane = op->dst.frag_len;
+    /* Scheduling-hint group sizes. Only TF32 departs from one ds_read and one
+     * MFMA per fragment / atom: _load_mma_operand reads its fp32 fragment in
+     * loads of at most 4 elements (two ds_read_b128 for the 8-wide gfx950
+     * fragment) and the gfx950 BF16x3 emulation issues three physical MFMAs
+     * per logical atom. */
+    int ds_reads_per_frag = 1;
+    int mfma_issues_per_atom = 1;
+    if(is_tf32)
+    {
+        ds_reads_per_frag
+            = (a_per_lane + ROCKE_CONV_TF32_LDS_LOAD_MAX - 1) / ROCKE_CONV_TF32_LDS_LOAD_MAX;
+        mfma_issues_per_atom = rocke_conv_mfma_issues_per_mma(op);
+    }
 
     // ---- 1D grid: block_id_x covers all sub-GEMMs' tiles ----
     rocke_value_t* flat_block_id = rocke_b_block_id_x(b);
@@ -3140,10 +3213,10 @@ static rocke_kernel_def_t*
         b_shape_arr[1] = block_n + _dgrad_kouter_b_pad(spec);
     }
     rocke_value_t* A_smem = rocke_b_smem_alloc(b, ab_ir, a_shape, 2, "A_smem");
-    rocke_value_t* B_smem = rocke_b_smem_alloc(b, ab_ir, b_shape_arr, 2, "B_smem");
+    rocke_value_t* B_smem = rocke_b_smem_alloc(b, b_ir, b_shape_arr, 2, "B_smem");
     /* dy_halo=2: the second B buffer of the per-tap double buffer. */
     rocke_value_t* B_smem2
-        = spec->dy_halo == 2 ? rocke_b_smem_alloc(b, ab_ir, b_shape_arr, 2, "B_smem2") : NULL;
+        = spec->dy_halo == 2 ? rocke_b_smem_alloc(b, b_ir, b_shape_arr, 2, "B_smem2") : NULL;
 
     // ---- MFMA tile counts ----
     int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
@@ -3291,6 +3364,7 @@ static rocke_kernel_def_t*
     a_sync_loader.has_inner_dim = false;
     a_sync_loader.inner_dim = 0;
     a_sync_loader.has_col_xor = false;
+    a_sync_loader.elem_dtype = ab_ir; /* elem_dtype=ir_dtype_a */
 
     rocke_coalesced_tile_loader_t b_sync_loader;
     b_sync_loader.tile_rows = spec->lds_k_outer ? block_k : block_n;
@@ -3303,6 +3377,7 @@ static rocke_kernel_def_t*
     b_sync_loader.has_inner_dim = false;
     b_sync_loader.inner_dim = 0;
     b_sync_loader.has_col_xor = false;
+    b_sync_loader.elem_dtype = b_ir; /* elem_dtype=ir_dtype_b */
 
     // ---- wavelet loaders (pipeline="wavelet" only) ----
     rocke_coalesced_tile_loader_t a_wavelet_loader;
@@ -3323,6 +3398,8 @@ static rocke_kernel_def_t*
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "dgrad: wavelet tile loader from_tile failed");
             return NULL;
         }
+        a_wavelet_loader.elem_dtype = ab_ir;
+        b_wavelet_loader.elem_dtype = b_ir;
         int n_math_warps = spec->warp_m * spec->warp_n;
         rocke_value_t* c_nmath = rocke_b_const_i32(b, n_math_warps);
         rocke_value_t* warp_id_s = rocke_b_readfirstlane(b, warp_id);
@@ -3439,8 +3516,14 @@ static rocke_kernel_def_t*
             {
                 rocke_value_t* atom_row
                     = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * spec->warp_tile_m));
-                a_rows[mi] = rocke_conv_emit_frag_smem_load(
-                    b, A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, a_per_lane);
+                a_rows[mi] = rocke_conv_emit_frag_smem_load(b,
+                                                            A_src,
+                                                            a_row_in_atom,
+                                                            a_k_in_atom,
+                                                            atom_row,
+                                                            k_tile_base,
+                                                            a_per_lane,
+                                                            smem_dtype);
             }
             for(int ni = 0; ni < mfmas_n; ni++)
             {
@@ -3467,8 +3550,14 @@ static rocke_kernel_def_t*
                                                         tr_dtype);
                     continue;
                 }
-                b_wma_cols[ni] = rocke_conv_emit_frag_smem_load(
-                    b, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, b_per_lane);
+                b_wma_cols[ni] = rocke_conv_emit_frag_smem_load(b,
+                                                                B_src,
+                                                                b_col_in_atom,
+                                                                b_k_in_atom,
+                                                                atom_row,
+                                                                k_tile_base,
+                                                                b_per_lane,
+                                                                smem_dtype);
             }
             int flat2 = 0;
             for(int mi = 0; mi < mfmas_m; mi++)
@@ -3767,7 +3856,8 @@ static rocke_kernel_def_t*
                     /* Python a_row_map (the dY halo loop). */
                     if(a_row_map)
                         a_row = (*a_row_map)(a_row);
-                    a_rows[mi] = rocke_conv_emit_smem_load(b, A_smem, a_row, col_base, a_per_lane);
+                    a_rows[mi] = rocke_conv_load_mma_operand(
+                        b, A_smem, a_row, col_base, a_per_lane, smem_dtype, is_tf32);
                 }
 
                 rocke_value_t* b_cols[ROCKE_CONV_MAX_ACCS];
@@ -3799,7 +3889,8 @@ static rocke_kernel_def_t*
                         b,
                         warp_n_off,
                         rocke_b_add(b, rocke_b_const_i32(b, ni * spec->warp_tile_n), n_in_atom));
-                    b_cols[ni] = rocke_conv_emit_smem_load(b, B_src, b_row, col_base, b_per_lane);
+                    b_cols[ni] = rocke_conv_load_mma_operand(
+                        b, B_src, b_row, col_base, b_per_lane, smem_dtype, is_tf32);
                 }
 
                 int flat = 0;
@@ -3813,8 +3904,11 @@ static rocke_kernel_def_t*
                     }
                 }
 
-                rocke_schedule_policy_emit_after_mfma_step(
-                    &schedule, b, mfmas_m + mfmas_n, mfmas_m * mfmas_n);
+                rocke_schedule_policy_emit_after_mfma_step(&schedule,
+                                                           b,
+                                                           (mfmas_m + mfmas_n) * ds_reads_per_frag,
+                                                           mfmas_m * mfmas_n
+                                                               * mfma_issues_per_atom);
             }
         }
         else if(is_wmma)
@@ -4333,7 +4427,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_dgrad(rocke_ir_builder_t* b,
                                                          const rocke_dgrad_conv_spec_t* spec,
                                                          const char* arch)
 {
-    char reason[256];
+    char reason[512];
 
     if(!b || !spec)
         return NULL;
@@ -4349,7 +4443,14 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_dgrad(rocke_ir_builder_t* b,
         b->kernel->name = rocke_arena_strdup(&b->arena, name);
     }
 
-    // Validate
+    // Validate. spec.validate() opens with the arch-free TF32 gate (the rest of
+    // validate() is folded into is_valid_dgrad_spec), raised as its bare
+    // ValueError before is_valid_dgrad_spec runs.
+    if(_dgrad_mma_dtype_conflict(spec, NULL, reason, sizeof(reason)))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
+        return NULL;
+    }
     if(!rocke_dgrad_conv_is_valid_spec(spec, arch, reason, sizeof(reason)))
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "invalid dgrad spec for %s: %s", arch, reason);
