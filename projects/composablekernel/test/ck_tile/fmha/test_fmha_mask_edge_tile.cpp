@@ -1,7 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host test of SimplifiedGenericAttentionMask::IsEdgeTileForValidRows.
+// Host tests of SimplifiedGenericAttentionMask::IsEdgeTileForValidRows and
+// SimplifiedGenericAttentionMask::IsOutOfBoundUnsignedStoredRow.
 
 #include <algorithm>
 #include <cstddef>
@@ -57,6 +58,31 @@ TEST(FmhaMask, EdgeTileForValidRows)
                         }
                     }
     EXPECT_GT(narrowed, 0u) << "the partial-tile case was not exercised";
+}
+
+// IsOutOfBoundUnsignedStoredRow must equal IsOutOfBound on every row that is written out
+// (row < y_total; other rows are unspecified). The columns extend past both ends of the key
+// range: the unsigned compare also has to reject the columns left of the window.
+TEST(FmhaMask, OutOfBoundUnsignedStoredRow)
+{
+    using Mask = ck_tile::SimplifiedGenericAttentionMask<true>;
+    using ck_tile::index_t;
+    for(index_t y_total = 1; y_total <= 40; y_total += 3)
+        for(index_t x_total = 1; x_total <= 48; x_total += 5)
+            for(index_t left : {-1, 0, 3, 17})
+                for(index_t right : {-1, 0, 5})
+                    for(bool top_left : {true, false})
+                    {
+                        const auto mask = ck_tile::make_generic_attention_mask_from_lr_window<Mask>(
+                            left, right, 0, y_total, x_total, top_left);
+                        for(index_t r = 0; r < y_total; ++r)
+                            for(index_t c = -8; c < x_total + 8; ++c)
+                                ASSERT_EQ(mask.IsOutOfBoundUnsignedStoredRow(r, c),
+                                          mask.IsOutOfBound(r, c))
+                                    << "y_total=" << y_total << " x_total=" << x_total
+                                    << " left=" << left << " right=" << right << " r=" << r
+                                    << " c=" << c;
+                    }
 }
 
 } // namespace
