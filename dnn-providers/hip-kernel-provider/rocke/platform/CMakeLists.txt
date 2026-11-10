@@ -791,6 +791,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_direct_fwd_gstream_wmma.py"
         "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
         "tests/library/tests/test_direct_dgrad_wmma.py"
+        "tests/library/tests/test_direct_wgrad_wmma.py"
         "tests/library/tests/test_direct_fwd_wmma.py"
         "tests/library/tests/test_conv_fwd_split_k.py"
         "tests/library/tests/test_conv_winograd_fwd_cpu.py"

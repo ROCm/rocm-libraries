@@ -5896,6 +5896,66 @@ def cases():
             build_grouped_wgrad_wmma_case(_dtype, _cpg, _pad, **_over),
         )
 
+    # --- conv_direct_wgrad_wmma: wave32 WMMA dense direct wgrad (gfx1250) ---
+    # Row-streamed X / dY rows in an LDS ring (per-lane async copies or TDM),
+    # transpose-on-read fragments, a dY register ring, cascade atomics into
+    # dW. The TDM case needs llvm23, so the older flavors record it as an
+    # expected failure. The C++ twin is gated (every knob) by
+    # library/tests/parity/conv_direct_wgrad_wmma_emit.*.
+    def build_direct_wgrad_wmma_case(dtype, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+            from kernels.common.conv_direct_wgrad_wmma import (
+                DirectWgradWmmaSpec,
+                build_direct_wgrad_wmma,
+            )
+
+            p = DirectConvProblem(
+                N=2,
+                H=12,
+                W=40,
+                groups=1,
+                cpg=64,
+                kpg=96,
+                KH=3,
+                KW=3,
+                PAD=1,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_direct_wgrad_wmma(
+                DirectWgradWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _over in (
+        (
+            "bf16_aot_w4x2_tdm",
+            "bf16",
+            dict(
+                waves_k=4,
+                waves_c=2,
+                tiles_k=2,
+                tiles_c=2,
+                stages=4,
+                rows=2,
+                prefetch=True,
+                sched=True,
+                pad=16,
+                xcd=8,
+                tdm=True,
+            ),
+        ),
+        ("fp16_default_copies", "fp16", {}),
+    ):
+        add(
+            "conv_direct_wgrad_wmma",
+            f"conv_direct_wgrad_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_direct_wgrad_wmma_case(_dtype, **_over),
+        )
+
     # --- conv_direct_fwd_wmma: wave32 WMMA direct forward (gfx1250) ---
     # 3-D TDM halo and weight staging, shifted halo reads per tap, TDM
     # epilogue. Every case needs llvm23 (TDM), so the other flavors record
