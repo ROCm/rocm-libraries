@@ -31,7 +31,7 @@ Tests:
 - name: check_spmat_empty_csr
   category: quick
   function: check_spmat
-  indextype: *i32
+  indextype: *i32i32_i64i32_i64i64
   precision: *double_only_precisions
   M_N:
     - { M: 0, N: 4 }

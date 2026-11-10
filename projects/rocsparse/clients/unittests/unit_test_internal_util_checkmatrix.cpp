@@ -143,7 +143,7 @@ class CheckMatrixCsr : public HandleTest
 // (0, n) and (0, 0) with nnz = 0 are valid. nnz != 0 cannot match that entry.
 TEST_F(CheckMatrixCsr, empty_dimensions)
 {
-    device_vector<int32_t> row_ptr{std::vector<int32_t>{0}};
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0}};
     ASSERT_TRUE(row_ptr.ptr);
 
     const rocsparse_int          shapes[][2] = {{0, 4}, {0, 0}};
@@ -196,8 +196,8 @@ TEST_F(CheckMatrixCsr, empty_dimensions)
     }
 
     // nnz != 0 does not match the single row-pointer entry.
-    device_vector<double>  val{std::vector<double>{1.0}};
-    device_vector<int32_t> col{std::vector<int32_t>{0}};
+    device_vector<double>         val{std::vector<double>{1.0}};
+    device_vector<rocsparse_int> col{std::vector<rocsparse_int>{0}};
     ASSERT_TRUE(val.ptr && col.ptr);
     size_t buffer_size = 0;
     ASSERT_EQ(rocsparse_dcheck_matrix_csr_buffer_size(
