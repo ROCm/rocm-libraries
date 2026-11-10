@@ -19,7 +19,9 @@ import pytest
 from tensilelite.CustomKernels import _metadataArgToCustomArg, readCustomKernelConfig
 from tensilelite.RocRollerWgm import (
     WGM_ROLE_ORDER,
+    branchfree_divisor,
     classify_wgm_expression,
+    evaluate_branchfree_tree,
     evaluate_wgm,
     magic_div_s32,
     magic_multiple_s32,
@@ -28,6 +30,7 @@ from tensilelite.RocRollerWgm import (
     magic_shift_and_sign_s32,
     magic_shift_and_sign_s64,
     magic_shifts_u32,
+    num_tiles_s64,
     s32,
 )
 
@@ -198,3 +201,82 @@ def test_wgm_expression_classifier_reads_the_tree_not_the_suffix():
         ".expression": {"type": "MagicMultiple", "arg": wgm},
     }
     assert _metadataArgToCustomArg(meta) == {"type": "int32", "semantic": "RR_MagicMultipleWgm"}
+
+
+def _lit(value, kind="Int64"):
+    return {"type": "LiteralValue." + kind, "dataType": kind, "value": value}
+
+
+def _hoisted_num_tiles(size_name, tile, magic=None, sign=0):
+    """The branchfree s64 ceil(size / tile) tree a non-power-of-two macrotile hoists.
+
+    Spelled as gfx950's 256x192 MXFP4 WGM kernel spells BitwiseXor_18: the
+    size read through its kernel argument, the 1 and the shift as UInt32.
+    """
+    shift = magic_shift_and_sign_s64(tile) & 0x3F
+    magic = magic_multiple_s64(tile) if magic is None else magic
+    size = {
+        "type": "Kernel Argument",
+        "name": size_name + "_4",
+        "expression": {"type": "CommandArgument", "name": size_name},
+    }
+    x = {
+        "type": "Subtract",
+        "lhs": {"type": "Add", "lhs": size, "rhs": _lit(tile)},
+        "rhs": _lit(1, "UInt32"),
+    }
+    u = {"type": "Add", "lhs": {"type": "MultiplyHigh", "lhs": x, "rhs": _lit(magic)}, "rhs": x}
+    corr = {
+        "type": "BitwiseAnd",
+        "lhs": {"type": "ArithmeticShiftR", "lhs": u, "rhs": _lit(63)},
+        "rhs": _lit(1 << shift),
+    }
+    q = {
+        "type": "ArithmeticShiftR",
+        "lhs": {"type": "Add", "lhs": u, "rhs": corr},
+        "rhs": _lit(shift, "UInt32"),
+    }
+    return {"type": "BitwiseXor", "lhs": q, "rhs": _lit(sign)}
+
+
+@pytest.mark.parametrize("tile", [96, 128, 160, 192, 256, 320])
+def test_num_tiles_s64_is_ceil_div_without_int32_truncation(tile):
+    for size in (0, 1, tile - 1, tile, tile + 1, 4096, (1 << 31) + 5, (1 << 40) + 3):
+        assert num_tiles_s64(size, tile) == (size + tile - 1) // tile
+    with pytest.raises(ValueError):
+        num_tiles_s64(128, 0)
+
+
+@pytest.mark.parametrize("tile", [96, 160, 192, 320])
+def test_branchfree_tree_with_libdivide_magic_is_the_ceil_div(tile):
+    magic = magic_multiple_s64(tile)
+    shift = magic_shift_and_sign_s64(tile) & 0x3F
+    for size in list(range(0, 4 * tile)) + [1 << 20, (1 << 31) - 1, 1 << 31, (1 << 52) - 1]:
+        assert evaluate_branchfree_tree(size, tile, magic, shift, 1 << shift) == num_tiles_s64(size, tile)
+
+
+def test_hoisted_tile_counts_classify_by_the_size_they_read():
+    # The magic that kernel carries for 192.
+    assert magic_multiple_s64(192) == -6148914691236517205
+    assert branchfree_divisor(_hoisted_num_tiles("Tensor_0_size_0", 192)) == (192, "Tensor_0_size_0")
+    assert classify_wgm_expression(_hoisted_num_tiles("Tensor_0_size_0", 192)) == "RR_NumTilesM"
+    assert classify_wgm_expression(_hoisted_num_tiles("Tensor_2_size_1", 192)) == "RR_NumTilesN"
+    meta = {
+        ".name": "BitwiseXor_7",
+        ".size": 8,
+        ".value_kind": "by_value",
+        ".variableType": {"dataType": "Int64"},
+        ".expression": _hoisted_num_tiles("Tensor_2_size_1", 192),
+    }
+    assert _metadataArgToCustomArg(meta) == {"type": "int64", "semantic": "RR_NumTilesN"}
+
+
+def test_hoisted_tile_count_decode_rejects_other_divisions():
+    # A K tile count is not a launch semantic.
+    assert classify_wgm_expression(_hoisted_num_tiles("Tensor_0_size_1", 192)) is None
+    # A negative divisor's sign term.
+    assert branchfree_divisor(_hoisted_num_tiles("Tensor_0_size_0", 192, sign=-1)) is None
+    # 160's magic does not divide by 192.
+    wrong = _hoisted_num_tiles("Tensor_0_size_0", 192, magic=magic_multiple_s64(160))
+    assert branchfree_divisor(wrong) is None
+    assert classify_wgm_expression(wrong) is None
