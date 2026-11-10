@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Build the rocKE gfx950 backward-data conv AOT instance lists the hipkernel pack ships.
+"""Build the rocKE backward-data conv AOT instance lists a hipkernel dgrad pack ships.
 
-The dgrad sibling of ``enumerate_conv_aot_instances.py``. The catalog is rocKE's own
-registered instance list (``dispatch/grouped_convolution_instances/gfx950_dgrad.json``,
-read with :func:`read_rocke_catalog`) -- rocKE is the only source of "what instances
-exist"; this tool mirrors nothing by hand. :data:`EXCLUDES` (optional; empty when
+One tool for both dgrad engines, chosen by ``--arch`` (gfx950 by default, or
+gfx1250). The dgrad sibling of ``enumerate_conv_aot_instances.py``. The catalog is
+rocKE's own registered instance list of the architecture
+(``dispatch/grouped_convolution_instances/<arch>_dgrad.json``, read with
+:func:`read_rocke_catalog`) -- rocKE is the only source of "what instances exist";
+this tool mirrors nothing by hand. :data:`EXCLUDES` (optional; empty when
 absent) names instances rocKE registers that the pack must not ship (for example a
 rocKE kernel known to compute wrong results), each with a reason -- the one
 legitimate thing hand curation used to do beyond mirroring rocKE.
 Implicit-GEMM entries must be identities of the dgrad AOT sweep
 (``benchmarks/common/kernel_sweep.py``) and direct entries dgrad identities of the
-direct sweep (``benchmarks/common/direct_kernel_sweep.py``), for gfx950, fp16 or bf16.
+direct sweep (``benchmarks/common/direct_kernel_sweep.py``), for the architecture, fp16
+or bf16.
 Every entry must also convert (``make_conv_dgrad_aot_config.py``); nothing is dropped
 silently.
 
-The MFMA direct pipelines (``direct_variants.DIRECT_MFMA_DGRAD``) launch weight-transform
+gfx950's MFMA direct pipelines (``direct_variants.DIRECT_MFMA_DGRAD``) launch weight-transform
 helper kernels the labels do not name: the transpose always, the reorganize (keyed on
 ``fold_k32``) when the entry splits K over waves or walks it at run time. The rocKE side
 decides which, in launch order, in ``direct_dgrad_weight_transforms()``; this tool asks it
@@ -32,6 +35,8 @@ per line, ordered by family (implicit GEMM, direct, helpers), then ``stable_hash
 
     ROCKE_LLVM_FLAVOR=llvm22 python tools/enumerate_conv_dgrad_aot_instances.py \\
         --rocke-root "$ROCKE" --output-dir configs
+    ROCKE_LLVM_FLAVOR=llvm24 python tools/enumerate_conv_dgrad_aot_instances.py \\
+        --arch gfx1250 --rocke-root "$ROCKE" --output-dir configs
 """
 
 from __future__ import annotations
@@ -49,21 +54,22 @@ if str(_HERE) not in sys.path:
 
 import enumerate_conv_aot_instances as _fwd  # noqa: E402
 
+#: The architectures with a dgrad engine, and the default one.
+ARCHES = ("gfx950", "gfx1250")
 ARCH = _fwd.ARCH
 DTYPES = _fwd.DTYPES
 
-#: File name of one dtype's instance list.
-INSTANCE_LIST = "gfx950_conv_dgrad_aot_{dtype}.instances.json"
+#: File name of one architecture's and dtype's instance list.
+INSTANCE_LIST = "{arch}_conv_dgrad_aot_{dtype}.instances.json"
 DEFAULT_OUTPUT_DIR = _fwd.DEFAULT_OUTPUT_DIR
-#: Known-bug exclusions: instances rocKE registers that this pack must not ship,
-#: each with a reason. JSON list of ``{"label": ..., "reason": ...}``; absent
-#: file means no exclusions.
-EXCLUDES = DEFAULT_OUTPUT_DIR / "gfx950_conv_dgrad_aot.excludes.json"
+#: Known-bug exclusions of an architecture: instances rocKE registers that its pack
+#: must not ship, each with a reason. JSON list of ``{"label": ..., "reason": ...}``;
+#: absent file means no exclusions.
+EXCLUDES = str(DEFAULT_OUTPUT_DIR / "{arch}_conv_dgrad_aot.excludes.json")
 #: The family order of the written lists.
 FAMILIES = ("implicit", "direct", "helper")
 
 _bind_rocke = _fwd._bind_rocke
-read_rocke_catalog = _fwd.read_rocke_catalog
 read_excludes = _fwd.read_excludes
 stable_hash = _fwd.stable_hash
 compact_identity = _fwd.compact_identity
@@ -110,21 +116,47 @@ def check_flavor(identities: list) -> int:
     return 0
 
 
-def sweep_hashes(dtype: str, jobs: int) -> set:
+def read_rocke_catalog(arch: str = ARCH) -> list:
+    """rocKE's own registered dgrad instances of ``arch``, as dicts. rocKE must
+    already be bound (:func:`_bind_rocke`)."""
+    from dispatch.grouped_convolution import (
+        _INSTANCE_DIR,
+        _INSTANCE_LISTS,
+        load_instance_list,
+    )
+
+    path = _INSTANCE_DIR / _INSTANCE_LISTS[(arch, "dgrad")]
+    return [i.to_dict() for i in load_instance_list(path).identities]
+
+
+def sweep_hashes(dtype: str, jobs: int, arch: str = ARCH) -> set:
     """``stable_hash`` of every valid dgrad identity of rocKE's implicit-GEMM AOT grid
-    and of its direct grid (helpers included), for ``dtype``."""
+    and of its direct grid (helpers included) for ``arch``, for ``dtype``, under this
+    process's LLVM flavor.
+
+    The direct grid's pool workers name their identities for the flavor *they*
+    resolve, which a reused worker pool (``forkserver``) may have fixed under another
+    ``ROCKE_LLVM_FLAVOR``; each identity is restamped with this process's flavor so
+    the answer does not depend on the pool."""
+    from dataclasses import replace
+
     from benchmarks.common import kernel_sweep
     from benchmarks.common.direct_kernel_sweep import enumerate_direct_jobs
+    from kernels.conv.kernel_identity import current_llvm_flavor
     from rocke.core.arch import ArchTarget
 
-    target = ArchTarget.from_gfx(ARCH)
+    target = ArchTarget.from_gfx(arch)
     implicit = kernel_sweep.enumerate_jobs(
-        arch=ARCH, dtype=dtype, target=target, directions=("dgrad",), jobs=jobs
+        arch=arch, dtype=dtype, target=target, directions=("dgrad",), jobs=jobs
     )
     direct = enumerate_direct_jobs(
-        arch=ARCH, target=target, directions=("dgrad",), dtype=dtype, jobs=jobs
+        arch=arch, target=target, directions=("dgrad",), dtype=dtype, jobs=jobs
     )
-    return {job.identity.stable_hash() for job in [*implicit, *direct]}
+    flavor = current_llvm_flavor()
+    return {
+        replace(job.identity, llvm_flavor=flavor).stable_hash()
+        for job in [*implicit, *direct]
+    }
 
 
 def helper_identities(identity: dict) -> list:
@@ -199,18 +231,25 @@ def main(argv=None) -> int:
         help="rocKE tree (platform/, library/).",
     )
     parser.add_argument(
+        "--arch",
+        choices=ARCHES,
+        default=ARCH,
+        help="The engine's architecture (default: %(default)s).",
+    )
+    parser.add_argument(
         "--excludes",
         type=Path,
-        default=EXCLUDES,
+        default=None,
         help="Known-bug exclusions from rocKE's catalog, JSON "
-        '[{"label":..., "reason":...}, ...] (default: %(default)s; absent '
-        "file means none).",
+        '[{"label":..., "reason":...}, ...] (default: '
+        f"{EXCLUDES}; absent file means none).",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
-        help=f"Folder for the per-dtype lists ({INSTANCE_LIST}; default: %(default)s).",
+        help=f"Folder for the per-dtype lists ({INSTANCE_LIST}; default: "
+        "%(default)s).",
     )
     parser.add_argument(
         "--jobs",
@@ -219,15 +258,18 @@ def main(argv=None) -> int:
         help="Worker processes (default: %(default)s).",
     )
     args = parser.parse_args(argv)
+    arch = args.arch
+    if args.excludes is None:
+        args.excludes = Path(EXCLUDES.format(arch=arch))
     _bind_rocke(args.rocke_root)
 
-    rocke_catalog = read_rocke_catalog("dgrad")
+    rocke_catalog = read_rocke_catalog(arch)
     excludes = read_excludes(args.excludes)
     rocke_labels = {identity_label(i) for i in rocke_catalog}
     stale = set(excludes) - rocke_labels
     if stale:
         print(
-            f"{args.excludes}: exclude(s) not in rocKE's gfx950 dgrad catalog: "
+            f"{args.excludes}: exclude(s) not in rocKE's {arch} dgrad catalog: "
             f"{sorted(stale)}",
             file=sys.stderr,
         )
@@ -239,14 +281,14 @@ def main(argv=None) -> int:
     others = sorted({i["dtype_a"] for i in listed} - set(DTYPES))
     if others:
         print(
-            f"rocKE's gfx950 dgrad catalog: dtype(s) {others} are not packaged",
+            f"rocKE's {arch} dgrad catalog: dtype(s) {others} are not packaged",
             file=sys.stderr,
         )
         return 1
     helpers_listed = [i for i in listed if family(i) == "helper"]
     if helpers_listed:
         print(
-            f"rocKE's gfx950 dgrad catalog: helper kernels are derived, not "
+            f"rocKE's {arch} dgrad catalog: helper kernels are derived, not "
             f"registered: {identity_label(helpers_listed[0])}",
             file=sys.stderr,
         )
@@ -256,11 +298,11 @@ def main(argv=None) -> int:
     print(f"{'dtype':6s} {'implicit':>8s} {'direct':>6s} {'helper':>6s}")
     for dtype in sorted(DTYPES):
         identities = with_helpers([i for i in listed if i["dtype_a"] == dtype])
-        swept = sweep_hashes(dtype, args.jobs)
+        swept = sweep_hashes(dtype, args.jobs, arch)
         for identity in identities:
             if stable_hash(identity) not in swept:
                 print(
-                    f"not a {ARCH} dgrad sweep identity: {identity_label(identity)}",
+                    f"not a {arch} dgrad sweep identity: {identity_label(identity)}",
                     file=sys.stderr,
                 )
                 failed = True
@@ -280,7 +322,7 @@ def main(argv=None) -> int:
         return 1
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for dtype, identities in lists.items():
-        path = args.output_dir / INSTANCE_LIST.format(dtype=dtype)
+        path = args.output_dir / INSTANCE_LIST.format(arch=arch, dtype=dtype)
         write_instances(path, identities)
         print(f"{len(identities)} instance(s) written to {path}")
     return 0

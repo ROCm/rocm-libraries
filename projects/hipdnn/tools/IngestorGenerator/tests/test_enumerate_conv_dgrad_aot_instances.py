@@ -37,14 +37,14 @@ def _rocke_on_path():
 @pytest.fixture(scope="module")
 def catalog():
     """rocKE's own registered gfx950 dgrad catalog, in rocKE's on-disk order."""
-    return tool.read_rocke_catalog("dgrad")
+    return tool.read_rocke_catalog("gfx950")
 
 
 @pytest.fixture(scope="module")
 def committed():
     """The committed per-dtype instance lists."""
     paths = {
-        dtype: _CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)
+        dtype: _CONFIGS / tool.INSTANCE_LIST.format(arch="gfx950", dtype=dtype)
         for dtype in tool.DTYPES
     }
     missing = sorted(str(p) for p in paths.values() if not p.exists())
@@ -151,7 +151,7 @@ def test_the_lists_are_ordered_by_family_then_hash(committed):
 def test_main_refuses_a_listed_helper(tmp_path, committed, monkeypatch, capsys):
     helper = next(e for e in committed["fp16"] if tool.family(e) == "helper")
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", helper["llvm_flavor"])
-    monkeypatch.setattr(tool, "read_rocke_catalog", lambda direction: [helper])
+    monkeypatch.setattr(tool, "read_rocke_catalog", lambda arch: [helper])
     argv = ["--rocke-root", str(_ROCKE)]
     assert tool.main(argv + ["--output-dir", str(tmp_path / "out")]) == 1
     assert "derived, not registered" in capsys.readouterr().err
@@ -165,7 +165,7 @@ def test_main_refuses_a_forward_kernel(tmp_path, monkeypatch, capsys):
         i for i in fwd.read_rocke_catalog("fwd") if i["algorithm"] == "implicit_gemm"
     )
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", forward["llvm_flavor"])
-    monkeypatch.setattr(tool, "read_rocke_catalog", lambda direction: [forward])
+    monkeypatch.setattr(tool, "read_rocke_catalog", lambda arch: [forward])
     argv = ["--rocke-root", str(_ROCKE), "--jobs", "4"]
     assert tool.main(argv + ["--output-dir", str(tmp_path / "out")]) == 1
     err = capsys.readouterr().err
@@ -187,5 +187,49 @@ def test_committed_instance_lists_are_what_the_tool_enumerates(
     argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", str(_JOBS)]
     assert tool.main(argv) == 0
     for dtype in tool.DTYPES:
-        name = tool.INSTANCE_LIST.format(dtype=dtype)
+        name = tool.INSTANCE_LIST.format(arch="gfx950", dtype=dtype)
+        assert (out / name).read_bytes() == (_CONFIGS / name).read_bytes(), dtype
+
+
+@pytest.fixture(scope="module")
+def committed_gfx1250():
+    """The committed gfx1250 per-dtype instance lists."""
+    paths = {
+        dtype: _CONFIGS / tool.INSTANCE_LIST.format(arch="gfx1250", dtype=dtype)
+        for dtype in tool.DTYPES
+    }
+    missing = sorted(str(p) for p in paths.values() if not p.exists())
+    if missing:
+        pytest.skip(
+            "DVC-tracked instance list(s) not pulled, run `dvc pull` in "
+            f"{_CONFIGS}: {missing}"
+        )
+    return {dtype: json.loads(path.read_text()) for dtype, path in paths.items()}
+
+
+def test_the_gfx1250_lists_are_rockes_gfx1250_catalog(committed_gfx1250):
+    """gfx1250 has no MFMA pipeline, so no helper is derived: the lists together are
+    exactly rocKE's registered gfx1250 instances."""
+    listed = set()
+    for entries in committed_gfx1250.values():
+        assert {e["arch"] for e in entries} == {"gfx1250"}
+        assert not [e for e in entries if tool.family(e) == "helper"]
+        listed |= {tool.stable_hash(e) for e in entries}
+    catalog = tool.read_rocke_catalog("gfx1250")
+    assert listed == {tool.stable_hash(i) for i in catalog}
+
+
+def test_committed_gfx1250_lists_are_what_the_tool_enumerates(
+    tmp_path, committed_gfx1250, monkeypatch
+):
+    """As test_committed_instance_lists_are_what_the_tool_enumerates, for --arch
+    gfx1250."""
+    flavor = committed_gfx1250["fp16"][0]["llvm_flavor"]
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+    out = tmp_path / "lists"
+    argv = ["--arch", "gfx1250", "--rocke-root", str(_ROCKE)]
+    argv += ["--output-dir", str(out), "--jobs", str(_JOBS)]
+    assert tool.main(argv) == 0
+    for dtype in tool.DTYPES:
+        name = tool.INSTANCE_LIST.format(arch="gfx1250", dtype=dtype)
         assert (out / name).read_bytes() == (_CONFIGS / name).read_bytes(), dtype

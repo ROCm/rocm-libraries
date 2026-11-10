@@ -146,7 +146,7 @@ def test_the_shipped_bundle_is_its_catalog_with_instance_derived_ids(specs, ship
             else tool._DIRECT_VARIANT_NAMES[spec.direct_variant]
         )
         assert kernel["name"] == template.format(
-            dtype=spec.dtype, instance_id=spec.instance_id
+            arch=spec.ARCH, dtype=spec.dtype, instance_id=spec.instance_id
         )
 
 
@@ -378,7 +378,7 @@ def test_the_census_names_every_pack_and_kernel(shipped):
     [
         ({"direction": "fwd"}, "dgrad implicit-GEMM"),
         ({"direction": "wgrad"}, "dgrad implicit-GEMM"),
-        ({"arch": "gfx942"}, "dgrad implicit-GEMM"),
+        ({"arch": "gfx942"}, "no packaged dgrad engine"),
         ({"dtype_d": "fp32"}, "mixed operand dtypes"),
         ({"split_k": 2}, "split_k"),
         # Padding stays runtime-only: the tilde records carry it, and nothing bakes it.
