@@ -659,7 +659,9 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
 
     // Every optional feature the kernels as built do not implement, declined explicitly.
     if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
+       || attributes.seq_len_kv_tensor_uid().has_value()
+       || attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
     {
         return std::nullopt;
     }

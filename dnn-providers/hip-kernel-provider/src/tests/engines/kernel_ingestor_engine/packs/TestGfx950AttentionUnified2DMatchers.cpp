@@ -387,6 +387,8 @@ TEST(TestGfx950AttentionUnified2DMatchers, DeclinesEveryOptionalFeatureTheKernel
     withExtra("scale tensor", [](auto& b) { b.add_scale_tensor_uid(EXTRA_UID); });
     withExtra("seq_len_q tensor", [](auto& b) { b.add_seq_len_q_tensor_uid(EXTRA_UID); });
     withExtra("seq_len_kv tensor", [](auto& b) { b.add_seq_len_kv_tensor_uid(EXTRA_UID); });
+    withExtra("cu_seq_len_q tensor", [](auto& b) { b.add_cu_seq_len_q_tensor_uid(EXTRA_UID); });
+    withExtra("cu_seq_len_kv tensor", [](auto& b) { b.add_cu_seq_len_kv_tensor_uid(EXTRA_UID); });
     withExtra("seed tensor", [](auto& b) { b.add_seed_tensor_uid(EXTRA_UID); });
     withExtra("offset tensor", [](auto& b) { b.add_offset_tensor_uid(EXTRA_UID); });
     withExtra("dropout mask", [](auto& b) { b.add_dropout_mask_tensor_uid(EXTRA_UID); });

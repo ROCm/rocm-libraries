@@ -569,11 +569,13 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
         return std::nullopt;
     }
     if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
+       || attributes.seq_len_kv_tensor_uid().has_value()
+       || attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"varlen"}
-                               << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
-                                  "not implemented in v1");
+                               << "variable sequence lengths (seq_len_q/seq_len_kv or "
+                                  "cu_seq_len_q/cu_seq_len_kv tensors) are not implemented in v1");
         return std::nullopt;
     }
     if(attributes.seed_tensor_uid().has_value() || attributes.offset_tensor_uid().has_value()

@@ -677,6 +677,8 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
     // Optional tensors naming features the kernels do not implement.
     field("SeqLenQ", [](Builder& b) { b.add_seq_len_q_tensor_uid(AUX); });
     field("SeqLenKv", [](Builder& b) { b.add_seq_len_kv_tensor_uid(AUX); });
+    field("CuSeqLenQ", [](Builder& b) { b.add_cu_seq_len_q_tensor_uid(AUX); });
+    field("CuSeqLenKv", [](Builder& b) { b.add_cu_seq_len_kv_tensor_uid(AUX); });
     field("DropoutSeed", [](Builder& b) { b.add_seed_tensor_uid(AUX); });
     field("DropoutOffset", [](Builder& b) { b.add_offset_tensor_uid(AUX); });
     field("DropoutMask", [](Builder& b) { b.add_dropout_mask_tensor_uid(AUX); });

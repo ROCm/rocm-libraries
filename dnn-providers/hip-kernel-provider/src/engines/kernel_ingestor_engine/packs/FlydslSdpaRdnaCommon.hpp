@@ -522,9 +522,11 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
         }
         biasUid = attributes.attn_mask_tensor_uid().value();
     }
-    // varlen, both spellings.
+    // varlen: per-batch lengths (seq_len_*) and cumulative lengths (cu_seq_len_*).
     if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
+       || attributes.seq_len_kv_tensor_uid().has_value()
+       || attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
     {
         return std::nullopt;
     }
