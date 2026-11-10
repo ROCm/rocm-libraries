@@ -1038,16 +1038,15 @@ class LogicalScheduler:
                         else:
                             yield inst
 
-    def _scaleShadowCandidate(self) -> bool:
-        """Whether the C0-entry scales move to the preloop and C1 tail.
+    def _prepareScaleShadowPlan(self):
+        """Derive the C0-entry scales that move to the preloop and C1 tail."""
+        if self._scaleShadowPlan is not None:
+            return self._scaleShadowPlan
 
-        Before emit the kernel is unknown, and its ISA is not checked.
-        """
         cfg = self.config
         first = self._partition_tile_range(0)
-        return (
-            (self._kernel is None
-             or tuple(self._kernel.get("ISA", (9, 5, 0))) == (9, 5, 0))
+        candidate = (
+            tuple(self._kernel.get("ISA", (9, 5, 0))) == (9, 5, 0)
             and cfg.dualPeriodScale
             and cfg.scaleReuse == 2
             and cfg.pgr == 2
@@ -1063,17 +1062,9 @@ class LogicalScheduler:
             and (first['B'][1] - first['B'][0]) % cfg.lrSB.mn == 0
             and cfg.lrSA.mn == 2
             and cfg.lrSB.mn == 2
-            and getattr(self, "unroll_factor", None) == 2
+            and self.unroll_factor == 2
         )
-
-    def _prepareScaleShadowPlan(self):
-        """Derive the C0-entry scales that move to the preloop and C1 tail."""
-        if self._scaleShadowPlan is not None:
-            return self._scaleShadowPlan
-
-        cfg = self.config
-        first = self._partition_tile_range(0)
-        if not self._scaleShadowCandidate():
+        if not candidate:
             self._scaleShadowPlan = []
             self._lateScalePrefetch = []
             return self._scaleShadowPlan
@@ -2342,48 +2333,13 @@ class LogicalScheduler:
                         partition=pi,
                         unrollId=uid))
 
-    def _half_disjoint_load_gaps(self, mfmas):
-        """Direct-to-LDS loads each partition's MFMA gaps take without reads.
-
-        A partition's head gap holds the barrier of a half's first partition
-        and the local-read drain of the others.  An MXFP8 data tile is two
-        ds_reads, and a gap holds as many as the cell's data-read cap.  The
-        scale shadow moves the C0-entry scale reads from partition zero to
-        the C1 tail of the last partition, whose gaps stay free of loads.
-        The load run cap leaves one gap in every run cap plus one free gaps
-        without a load.  Every partition takes at least one load.
-        """
-        from .InstructionScheduler import _MXFP8_DATA_DS_READS, _MXFP8_MAX_DTL_RUN
-        cfg = self.config
-        numP = cfg.numPartitions
-        shadow = self._scaleShadowCandidate()
-        first = self._partition_tile_range(0)
-        reads = [0] * numP
-        for pi, slots in enumerate(self._partitions):
-            for slot in slots:
-                for lr in slot.lrs:
-                    if lr.tensor in ('A', 'B'):
-                        reads[pi] += (2 * len(lr.tiles.tileId_list)
-                                      * len(lr.tiles.subIterK_list))
-                    elif (shadow and lr.tiles.tileId_end
-                            <= first['A' if lr.tensor == 'SA' else 'B'][1]):
-                        reads[numP - 1] += 1
-                    else:
-                        reads[pi] += 1
-        free = [mfmas[pi] - 2 - math.ceil(reads[pi] / _MXFP8_DATA_DS_READS)
-                for pi in range(numP)]
-        return [max(1, gaps - gaps // (_MXFP8_MAX_DTL_RUN + 1)) for gaps in free]
-
     def _distribute_grs_half_disjoint(self, gr_list, unrollId=0):
         """Place each GR atom in its planned half.
 
         Scale atoms lead the second half: they overwrite the scale buffer
         the first half reads.  A half's atoms then spread over its
-        partitions in proportion to the loads their read-free gaps take, in
-        buffer loads, keeping the epoch's tensor and tile order.  A half
-        whose loads do not all fit there, or whose partitions take one load
-        each, spreads by MFMA count.  Consecutive atoms in one partition
-        remerge.
+        partitions by MFMA count, in buffer loads, keeping the epoch's
+        tensor and tile order.  Consecutive atoms in one partition remerge.
         """
         cfg = self.config
         numP = cfg.numPartitions
@@ -2392,7 +2348,6 @@ class LogicalScheduler:
         for pi in range(numP):
             piM, piN = cfg.partition_coords(pi)
             mfmas.append(cfg.partitionSizesM[piM] * cfg.partitionSizesN[piN])
-        freeGaps = self._half_disjoint_load_gaps(mfmas)
 
         streams = {0: [], 1: []}
         for tensor, mt_val, t_start, t_end, k_start, k_end, gr_gran in gr_list:
@@ -2409,18 +2364,15 @@ class LogicalScheduler:
             weights = [max(1, int(cfg.grLoadsPerAtom.get(a[0], 1)))
                        for a in atoms]
             totalLoads = sum(weights)
-            fits = (totalLoads <= sum(freeGaps[pi] for pi in parts)
-                    and not all(freeGaps[pi] == 1 for pi in parts))
-            room = {pi: freeGaps[pi] if fits else mfmas[pi] for pi in parts}
-            totalRoom = sum(room.values())
+            totalMfmas = sum(mfmas[pi] for pi in parts)
             bounds = []
             acc = 0
             for pi in parts:
-                acc += room[pi]
+                acc += mfmas[pi]
                 bounds.append(acc)
             issued = 0
             for atom, weight in zip(atoms, weights):
-                center = (2 * issued + weight) * totalRoom
+                center = (2 * issued + weight) * totalMfmas
                 rel = next(i for i, b in enumerate(bounds)
                            if center < 2 * b * totalLoads or i == len(bounds) - 1)
                 issued += weight
