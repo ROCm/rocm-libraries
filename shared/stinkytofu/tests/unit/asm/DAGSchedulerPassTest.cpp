@@ -2677,6 +2677,7 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_LoopHeaderFillsTheQueueFirst) {
     pfc.loopConfig.unrollGemm = true;
     pfc.dagFeatures.dsReadQueueDepth = 16;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.queueFillSafetyMarginCycles = 32;
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
     const std::string shape = wdShape(mnemonicSequence(*bb));
@@ -2698,6 +2699,7 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_CloseDsConsumerUsesBaselineOrder
     pfc.loopConfig.unrollGemm = true;
     pfc.dagFeatures.dsReadQueueDepth = 16;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.queueFillSafetyMarginCycles = 32;
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
     const std::string shape = wdShape(mnemonicSequence(*bb));
@@ -2737,6 +2739,7 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_EachResetDecidesIndependently) {
     pfc.loopConfig.unrollGemm = true;
     pfc.dagFeatures.dsReadQueueDepth = 16;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.queueFillSafetyMarginCycles = 32;
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
 
@@ -3044,7 +3047,7 @@ TEST_F(DAGSchedulerPassTest, ParentValuUnlocksEarlierBlockedWmmaBeforeLaterReady
 }
 
 // MX128 splat v_perm per WMMA: each parent issues no earlier than the WMMA two
-// before its consumer (kSplatLeadWmmas): one window of lead still delays the
+// before its consumer (kWmmaParentValuLeadWindows): one window of lead still delays the
 // consumer; two hide that without holding the splat VGPR longer.
 TEST_F(DAGSchedulerPassTest, ParentValuWaitsForWmmaTwoBeforeConsumer) {
     StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
