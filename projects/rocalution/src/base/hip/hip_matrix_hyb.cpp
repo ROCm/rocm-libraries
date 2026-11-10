@@ -750,12 +750,12 @@ namespace rocalution
 
         if(this->ell_nnz_ > 0 && this->ell_spmv_.IsAnalysed() == false)
         {
-            this->ell_spmv_.Analyse(handle, rocsparse_spmv_alg_ell, this->ell_spmat_descr_);
+            this->ell_spmv_.Analyse(handle, rocsparse_spmv_alg_default, this->ell_spmat_descr_);
         }
 
         if(this->coo_nnz_ > 0 && this->coo_spmv_.IsAnalysed() == false)
         {
-            this->coo_spmv_.Analyse(handle, rocsparse_spmv_alg_coo, this->coo_spmat_descr_);
+            this->coo_spmv_.Analyse(handle, rocsparse_spmv_alg_default, this->coo_spmat_descr_);
         }
     }
 
@@ -780,13 +780,13 @@ namespace rocalution
         if(ell_lazy)
         {
             this->ell_spmv_.Analyse(
-                handle, rocsparse_spmv_alg_ell, this->ell_spmat_descr_, alpha, x, beta, y);
+                handle, rocsparse_spmv_alg_default, this->ell_spmat_descr_, alpha, x, beta, y);
         }
 
         if(coo_lazy)
         {
             this->coo_spmv_.Analyse(
-                handle, rocsparse_spmv_alg_coo, this->coo_spmat_descr_, alpha, x, beta, y);
+                handle, rocsparse_spmv_alg_default, this->coo_spmat_descr_, alpha, x, beta, y);
         }
     }
 

@@ -653,7 +653,7 @@ namespace rocalution
         if(this->nnz_ > 0 && this->spmv_.IsAnalysed() == false)
         {
             this->spmv_.Analyse(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                                rocsparse_spmv_alg_coo,
+                                rocsparse_spmv_alg_default,
                                 this->spmat_descr_);
         }
     }
@@ -671,7 +671,7 @@ namespace rocalution
                              "lazily, call ApplyAnalyse() beforehand to avoid this");
 
             this->spmv_.Analyse(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                                rocsparse_spmv_alg_coo,
+                                rocsparse_spmv_alg_default,
                                 this->spmat_descr_,
                                 alpha,
                                 x,
