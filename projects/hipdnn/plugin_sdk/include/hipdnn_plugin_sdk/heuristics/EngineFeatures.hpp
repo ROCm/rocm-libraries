@@ -473,6 +473,8 @@ inline constexpr std::array NO_COUNTING_CONVENTION{
     // Rows per expert follow the routing offsets' contents, not the shapes.
     NodeAttributes::MoeGroupedMatmulAttributes,
     NodeAttributes::MoeGroupedMatmulBwdAttributes,
+    // Data movement, no arithmetic.
+    NodeAttributes::GatherAttributes,
     // Linear-attention recurrences with no agreed count of their logical work yet.
     NodeAttributes::GdnAttributes,
     NodeAttributes::KdaAttributes,

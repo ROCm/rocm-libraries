@@ -546,6 +546,24 @@ def build_moe_grouped_matmul_graph():
     return graph, token, weight, first_token_offset, token_index, token_ks, output
 
 
+def build_gather_graph():
+    """Build an embedding-lookup gather graph (table [32, 16], ids [2, 4] INT32, axis 0).
+
+    Returns (graph, table, ids, y).
+    """
+    graph = create_float_graph()
+    table = hipdnn.Tensor.create([32, 16], hipdnn.DataType.FLOAT)
+    table.set_name("x")
+    ids = hipdnn.Tensor.create([2, 4], hipdnn.DataType.INT32)
+    ids.set_name("indices")
+
+    y = graph.gather(table, ids, hipdnn.GatherAttributes().set_axis(0))
+    y.set_name("y")
+    y.set_output(True)
+
+    return graph, table, ids, y
+
+
 def build_rope_graph():
     """Build a Qwen-style partial RoPE graph (x [2, 4, 16, 8], freqs [1, 1, 16, 4], rope_dim 4,
     leading segment).

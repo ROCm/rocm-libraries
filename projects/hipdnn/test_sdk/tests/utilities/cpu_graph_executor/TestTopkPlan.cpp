@@ -154,6 +154,12 @@ TEST(TestTopkPlanBuilder, IsApplicable)
     const GraphWrapper noValuesWrap(noValuesBuilder.GetBufferPointer(), noValuesBuilder.GetSize());
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(noValuesWrap.getNode(0), noValuesWrap.getTensorMap()));
+
+    // Incompatible node type.
+    auto otherBuilder = createValidGatherGraph();
+    const GraphWrapper otherGraphWrap(otherBuilder.GetBufferPointer(), otherBuilder.GetSize());
+    EXPECT_FALSE(
+        floatPlanBuilder.isApplicable(otherGraphWrap.getNode(0), otherGraphWrap.getTensorMap()));
 }
 
 TEST(TestTopkPlanBuilder, BuildNodePlan)
@@ -165,6 +171,11 @@ TEST(TestTopkPlanBuilder, BuildNodePlan)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
     ASSERT_NE((dynamic_cast<TopkPlan<float, int32_t>*>(builtPlan.get())), nullptr);
     EXPECT_EQ(builtPlan->getOutputTensorIds(), (std::vector<int64_t>{2, 3}));
+
+    auto otherBuilder = createValidGatherGraph();
+    const GraphWrapper otherGraphWrap(otherBuilder.GetBufferPointer(), otherBuilder.GetSize());
+    EXPECT_THROW(patient.buildNodePlan(otherGraphWrap, otherGraphWrap.getNode(0)),
+                 std::runtime_error);
 }
 
 TEST(TestTopkPlan, CpuReferenceGraphExecutorRunsTopkGraph)

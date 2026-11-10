@@ -66,6 +66,9 @@ add_executable(
     descriptors/TestTopkOperationDescriptor.cpp
     descriptors/TestTopkOperationFromNode.cpp
     descriptors/TestGraphDescriptorTopk.cpp
+    descriptors/TestGatherOperationDescriptor.cpp
+    descriptors/TestGatherOperationFromNode.cpp
+    descriptors/TestGraphDescriptorGather.cpp
     descriptors/TestRopeOperationDescriptor.cpp
     descriptors/TestRopeOperationFromNode.cpp
     descriptors/TestGraphDescriptorRope.cpp

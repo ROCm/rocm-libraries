@@ -14,6 +14,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionWrwPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/GatherSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormBpropSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormFpropSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>
@@ -280,6 +281,8 @@ private:
             return detail::MoeGroupedMatmulBwdSignatureKey(node, tensorMap, computeType);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SoftmaxAttributes:
             return detail::SoftmaxSignatureKey(node, tensorMap, computeType);
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GatherAttributes:
+            return detail::GatherSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::TopkAttributes:
             return detail::TopkSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RopeAttributes:

@@ -151,6 +151,8 @@ inline void hashAppend(Hasher& hasher, const Float64Value* value, const UidCanon
 inline bool logicallyEqual(const Float64Value* a, const Float64Value* b, const UidCanon&, const UidCanon&);
 inline void hashAppend(Hasher& hasher, const Float8Value* value, const UidCanon&);
 inline bool logicallyEqual(const Float8Value* a, const Float8Value* b, const UidCanon&, const UidCanon&);
+inline void hashAppend(Hasher& hasher, const GatherAttributes* value, const UidCanon& canon);
+inline bool logicallyEqual(const GatherAttributes* a, const GatherAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const GdnAttributes* value, const UidCanon& canon);
 inline bool logicallyEqual(const GdnAttributes* a, const GdnAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const Graph* value, const UidCanon& canon);
@@ -291,6 +293,9 @@ inline void hashAppend(Hasher& hasher, NodeAttributes type, const void* value, c
     case NodeAttributes::TopkAttributes:
         hashAppend(hasher, static_cast<const TopkAttributes*>(value), canon);
         break;
+    case NodeAttributes::GatherAttributes:
+        hashAppend(hasher, static_cast<const GatherAttributes*>(value), canon);
+        break;
     default:
         break;
     }
@@ -360,6 +365,8 @@ inline bool logicallyEqual(NodeAttributes aType, const void* a, NodeAttributes b
         return logicallyEqual(static_cast<const SoftmaxAttributes*>(a), static_cast<const SoftmaxAttributes*>(b), aCanon, bCanon);
     case NodeAttributes::TopkAttributes:
         return logicallyEqual(static_cast<const TopkAttributes*>(a), static_cast<const TopkAttributes*>(b), aCanon, bCanon);
+    case NodeAttributes::GatherAttributes:
+        return logicallyEqual(static_cast<const GatherAttributes*>(a), static_cast<const GatherAttributes*>(b), aCanon, bCanon);
     default:
         return true;
     }
@@ -1762,6 +1769,49 @@ inline bool logicallyEqual(const Float8Value* a, const Float8Value* b, const Uid
         return false;
     }
     if(a->value() != b->value())
+    {
+        return false;
+    }
+    return true;
+}
+
+inline void hashAppend(Hasher& hasher, const GatherAttributes* value, const UidCanon& canon)
+{
+    if(value == nullptr)
+    {
+        hasher.tag(0);
+        return;
+    }
+    hasher.tag(1);
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->indices_tensor_uid()));
+    hashAppend(hasher, canon(value->y_tensor_uid()));
+    hasher.raw(value->axis());
+}
+
+inline bool logicallyEqual(const GatherAttributes* a, const GatherAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
+{
+    if(a == b)
+    {
+        return true;
+    }
+    if(a == nullptr || b == nullptr)
+    {
+        return false;
+    }
+    if(aCanon(a->x_tensor_uid()) != bCanon(b->x_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->indices_tensor_uid()) != bCanon(b->indices_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->y_tensor_uid()) != bCanon(b->y_tensor_uid()))
+    {
+        return false;
+    }
+    if(a->axis() != b->axis())
     {
         return false;
     }

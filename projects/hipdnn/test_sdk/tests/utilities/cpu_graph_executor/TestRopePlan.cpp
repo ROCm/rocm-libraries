@@ -136,6 +136,12 @@ TEST(TestRopePlanBuilder, IsApplicable)
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(2);
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
+
+    // Incompatible node type.
+    auto otherBuilder = createValidGatherGraph();
+    const GraphWrapper otherGraphWrap(otherBuilder.GetBufferPointer(), otherBuilder.GetSize());
+    EXPECT_FALSE(
+        floatPlanBuilder.isApplicable(otherGraphWrap.getNode(0), otherGraphWrap.getTensorMap()));
 }
 
 TEST(TestRopePlanBuilder, BuildNodePlan)
@@ -146,6 +152,11 @@ TEST(TestRopePlanBuilder, BuildNodePlan)
     const GraphWrapper graphWrap(builder.GetBufferPointer(), builder.GetSize());
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
     EXPECT_NE(dynamic_cast<RopePlan<float>*>(builtPlan.get()), nullptr);
+
+    auto otherBuilder = createValidGatherGraph();
+    const GraphWrapper otherGraphWrap(otherBuilder.GetBufferPointer(), otherBuilder.GetSize());
+    EXPECT_THROW(patient.buildNodePlan(otherGraphWrap, otherGraphWrap.getNode(0)),
+                 std::runtime_error);
 }
 
 TEST(TestRopePlan, CpuReferenceGraphExecutorRunsLeadingSegmentGraph)

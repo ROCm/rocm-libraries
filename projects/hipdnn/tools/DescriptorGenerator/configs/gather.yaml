@@ -1,0 +1,89 @@
+operation:
+  name: "Gather"
+  class_name: "GatherOperationDescriptor"
+  fbs_table: "GatherAttributes"
+  fbs_generated_header: "gather_attributes_generated.h"
+
+  # cuDNN has no gather node (cudnn-frontend include/cudnn_frontend/node/ has no
+  # gather/index_select/embedding header), so every name carries _EXT.
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_GATHER_DESCRIPTOR_EXT"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_GATHER"
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_GATHER_EXT"
+
+  frontend:
+    packer_function: "createGatherOperation"
+    unpacker_function: "unpackGatherOperation"
+    node_class: "GatherNode"
+    attributes_class: "GatherAttributes"
+
+    inputs:
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+      - name: "indices"
+        enum_name: "INDICES"
+        required: true
+        getter_name: "get_indices"
+        setter_name: "set_indices"
+    outputs:
+      - name: "y"
+        enum_name: "Y"
+        required: true
+        getter_name: "get_y"
+        setter_name: "set_y"
+    graph_method_name: "gather"
+    graph_method_params:
+      - name: "x"
+        tensor_name: "x"
+      - name: "indices"
+        tensor_name: "indices"
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "y"
+    node_type_enum: "NodeType::GATHER"
+    node_attributes_union_type: "GatherAttributes"
+
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "XDESC_EXT"
+      required: true
+    - name: "indices"
+      fbs_field: "indices_tensor_uid"
+      attr_suffix: "INDICES_DESC_EXT"
+      required: true
+    - name: "y"
+      fbs_field: "y_tensor_uid"
+      attr_suffix: "YDESC_EXT"
+      required: true
+
+  data_fields:
+    - name: "axis"
+      fbs_field: "axis"
+      attr_name: "HIPDNN_ATTR_OPERATION_GATHER_AXIS_EXT"
+      type: "scalar_int64"
+      default_value: "0"
+      required: true
+      frontend_getter: "get_axis()"
+
+  tensor_array_fields: []
+
+  has_compute_data_type: false
+
+  test_data:
+    tensor_const_prefix: "K_GATHER_"
+    tensor_uids:
+      x: 9400
+      indices: 9401
+      y: 9402
+    tensor_configs:
+      x: { dims: [16, 8], strides: [8, 1] }
+      indices: { dims: [2, 3], strides: [3, 1], data_type: INT32 }
+      y: { dims: [2, 3, 8], strides: [24, 8, 1] }
+    field_values:
+      axis: 0

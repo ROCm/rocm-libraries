@@ -56,6 +56,15 @@ TEST(TestRopeSignatureKey, CreateFromNodeAndTensorMap)
     EXPECT_TRUE(keyFromNode == RopeSignatureKey{DataType::FLOAT});
 }
 
+TEST(TestRopeSignatureKey, CreateFromWrongNodeTypeThrows)
+{
+    auto builder = createValidGatherGraph();
+    const GraphWrapper graphWrap(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_THROW(RopeSignatureKey(graphWrap.getNode(0), graphWrap.getTensorMap()),
+                 std::runtime_error);
+}
+
 TEST(TestRopeSignatureKey, PlanBuildersCoverFloatingTypes)
 {
     const auto builders = RopeSignatureKey::getPlanBuilders();

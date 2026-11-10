@@ -1,0 +1,21 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+// Gather (index_select / take) along one axis. cuDNN has no equivalent, so the backend names
+// carry the _EXT suffix. With indices of rank m:
+//   y[a_0..a_{axis-1}, i_0..i_{m-1}, b_...] = x[a_0..a_{axis-1}, indices[i_0..i_{m-1}], b_...]
+// so y.dims = x.dims[:axis] ++ indices.dims ++ x.dims[axis + 1:]. Indices are INT32 or INT64
+// in [0, x.dims[axis]); other values are an error. Embedding lookup is axis = 0 with x the
+// table [V, H] and indices the token ids.
+table GatherAttributes {
+    x_tensor_uid:       long (cache_uid);
+    indices_tensor_uid: long (cache_uid);
+    y_tensor_uid:       long (cache_uid);
+
+    axis: long = 0;
+}

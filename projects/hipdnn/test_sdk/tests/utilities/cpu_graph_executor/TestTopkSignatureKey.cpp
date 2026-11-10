@@ -60,6 +60,15 @@ TEST(TestTopkSignatureKey, CreateFromNodeAndTensorMap)
     EXPECT_TRUE(keyFromNode == (TopkSignatureKey{DataType::FLOAT, DataType::INT32}));
 }
 
+TEST(TestTopkSignatureKey, CreateFromWrongNodeTypeThrows)
+{
+    auto builder = createValidGatherGraph();
+    const GraphWrapper graphWrap(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_THROW(TopkSignatureKey(graphWrap.getNode(0), graphWrap.getTensorMap()),
+                 std::runtime_error);
+}
+
 TEST(TestTopkSignatureKey, PlanBuildersCoverFloatingTypesAndBothIndexTypes)
 {
     const auto builders = TopkSignatureKey::getPlanBuilders();

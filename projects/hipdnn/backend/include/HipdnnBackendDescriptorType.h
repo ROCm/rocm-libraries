@@ -369,6 +369,14 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_TOPK_DESCRIPTOR_EXT = 41,
 
     /**
+     * @brief Gather operation descriptor (extension)
+     *
+     * Gathers slices of X along one axis at the positions given by an INT32/INT64
+     * INDICES tensor (index_select / embedding lookup), producing Y.
+     */
+    HIPDNN_BACKEND_OPERATION_GATHER_DESCRIPTOR_EXT = 42,
+
+    /**
      * @brief RoPE forward operation descriptor
      *
      * Applies rotate-half rotary position embedding to a segment of the last
