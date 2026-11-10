@@ -353,7 +353,7 @@ next minor versions: `1.2.0` runtime pass-by-value (RFC 0016), `1.3.0`
 ragged tensors and non-default tensor alignment, `1.4.0` ragged offset
 multiplier. `1.5.0` adds the optional UHD prediction exports; it adds no graph requirement.
 `1.6.0` (`K_CU_SEQ_LEN_MIN_API_VERSION`) is the floor for SDPA forward graphs carrying
-`cu_seq_len_q` / `cu_seq_len_kv` (cumulative sequence lengths, ALMIOPEN-2935). A plugin that
+`cu_seq_len_q` / `cu_seq_len_kv` (cumulative sequence lengths). A plugin that
 reports `1.6.0` or newer must honor those fields or decline the graph in its applicability
 check; plugins below it are filtered out before they see the graph, because they would ignore the
 fields and run full-length attention. Phase 2 has no version assigned.
