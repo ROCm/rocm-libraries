@@ -15,6 +15,7 @@
 
 #include "miopen_impl.h"
 
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_frontend.hpp>
 
 #include <algorithm>
@@ -64,8 +65,8 @@ constexpr size_t kIdxMean  = 4; // saved, running or estimated mean, by kind
 constexpr size_t kIdxVar   = 5; // the matching variance or inverse variance
 constexpr size_t kIdxDx    = 6; // backward only
 
-// MIOpen and the hipDNN reference both default to this epsilon, and the MIOpen
-// provider uses it whenever backward has to recompute the statistics.
+// MIOpen's default epsilon. Backward compares against the provider's own
+// default, hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON.
 constexpr double kDefaultEpsilon = 1e-5;
 
 struct BnProblem
@@ -1031,9 +1032,10 @@ miopenStatus_t Backward(miopenHandle_t handle,
         variantPack[kUidSavedInvVar] = const_cast<void*>(savedInvVariance);
         return RunProblem(handle, problem, variantPack);
     }
-    // hipDNN's backward recomputes the statistics with epsilon 1e-5, which is
-    // all plain backward needs at that epsilon.
-    if(problem.kind == GraphKind::BnBackward && epsilon == kDefaultEpsilon)
+    // hipDNN's backward recomputes the statistics with its default epsilon,
+    // which is all plain backward needs at that epsilon.
+    if(problem.kind == GraphKind::BnBackward &&
+       epsilon == hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON)
         return RunProblem(handle, problem, variantPack);
     return BackwardFromComputedStats(handle, problem, epsilon, x, scale, bias, variantPack);
 }
