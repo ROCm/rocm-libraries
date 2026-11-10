@@ -417,9 +417,17 @@ reference, and on the host for a CPU reference or golden data.
 needs a device even for golden or CPU-reference comparisons. Only the pass/fail
 decision moves. The host always builds the failure reports. A
 `[[validator_overrides]]` entry that uses `allclose_matching_infinities` has a
-host validator only. A comparison that resolves to the device therefore fails
-that tensor
-([details](file-formats.md#per-engine-test-config--configengine_nametoml)). The
+host validator only in a C++ graph test. A comparison that resolves to the
+device therefore fails that tensor
+([details](file-formats.md#per-engine-test-config--configengine_nametoml)). In a
+bundle test, the `allclose` comparison of a floating-point output treats two
+infinities of the same sign as equal on the host; on the device this applies
+only to `FLOAT`, `HALF`, `BFLOAT16` and `DOUBLE` (an FP8 output is graded
+host-only, same as a C++ graph test), and a `DOUBLE` output that fails the
+device check only on double-precision drift is re-graded by the host's float
+arithmetic, as it already is at the host site. The
+comparison of a ragged output, or of an output with `live_rows`, runs on the
+host under `auto` and `cpu`. The
 `hipdnn_golden_data_tests` binary replaces the retired `golden-check` mode.
 
 **SDPA Philox dropout.** No reference can reproduce an engine's random stream, so a
