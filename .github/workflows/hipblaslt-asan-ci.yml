@@ -73,26 +73,26 @@ jobs:
               "components": ["hipBLASLt", "hipSPARSELt"]
             }
           }'
-          # Timeouts are set to ~1.5x observed runtimes.
+          # Timeouts are set to at least 1.5x observed runtimes.
           timeouts='{
             "gfx942": {
               "hipblaslt": {
-                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 65},
-                "standard": {"command_timeout": "140m", "step_timeout_minutes": 150, "job_timeout_minutes": 180}
+                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 45},
+                "standard": {"command_timeout": "140m", "step_timeout_minutes": 150, "job_timeout_minutes": 160}
               },
               "hipsparselt": {
-                "quick":    {"command_timeout": "15m",  "step_timeout_minutes": 25,  "job_timeout_minutes": 55},
-                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 235}
+                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 45},
+                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 215}
               }
             },
             "gfx950": {
               "hipblaslt": {
-                "quick":    {"command_timeout": "10m",  "step_timeout_minutes": 20,  "job_timeout_minutes": 50},
-                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 235}
+                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 45},
+                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 215}
               },
               "hipsparselt": {
-                "quick":    {"command_timeout": "10m",  "step_timeout_minutes": 20,  "job_timeout_minutes": 50},
-                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 235}
+                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 45},
+                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 215}
               }
             }
           }'
@@ -278,7 +278,7 @@ jobs:
         run: pip install --constraint build_tools/packaging/linux/requirements.txt boto3 pyzstd
 
       - name: Download and install TheRock artifacts
-        timeout-minutes: 30
+        timeout-minutes: 5
         run: |
           # Require fresh destinations: artifact_manager treats existing archives as cached.
           mkdir "${OUTPUT_ARTIFACTS_DIR}"
