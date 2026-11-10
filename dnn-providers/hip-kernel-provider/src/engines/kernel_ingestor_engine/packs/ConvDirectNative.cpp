@@ -538,8 +538,9 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     else
     {
         const int step = atomReductionStep(config.atom);
-        if(step == 0 || config.bm < 1 || config.bn < 1 || config.wm < 1 || config.wn < 1
-           || config.bc % step != 0)
+        // A rows config's waves are wp x wq x wk (checked above), not wm x wn.
+        if(step == 0 || config.bm < 1 || config.bn < 1
+           || (!config.rows && (config.wm < 1 || config.wn < 1)) || config.bc % step != 0)
         {
             return std::nullopt;
         }
