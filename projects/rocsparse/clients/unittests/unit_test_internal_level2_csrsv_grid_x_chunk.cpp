@@ -54,6 +54,7 @@
 
 #include "unit_test_utils.hpp"
 
+#include "../include/rocsparse_memory_check.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_mat_info.hpp"
 #include "rocsparse_trm_info.hpp"
@@ -798,50 +799,78 @@ TEST(internal_level2_csrsv_grid_x_chunk, sptrsv_batched_small_grids)
 // The real dispatch limit, without a forced clamp: one row block more than
 // grid.x can hold, 134,217,697 rows on wave32 devices and 67,108,849 on wave64
 // devices. Before the clamp the analysis launch was rejected at this size.
-// Every row at the start of a 32-row group couples to the row before, so
-// dependencies cross every row block and chunk boundary while the chain stays
-// two rows long. It needs about 6 GB of device memory and skips without it.
+// Every row at the start of a 16-row group couples to the row before. A row
+// block is 32 rows on wave32 devices and 16 on wave64 devices, so dependencies
+// cross every row block and chunk boundary while the chain stays two rows long.
+// On wave32 devices it needs about 6 GB of device memory and 1.7 GB of host
+// memory and skips without twice that. It runs in about 5 seconds on gfx1201.
 TEST(internal_level2_csrsv_grid_x_chunk, real_dispatch_limit)
 {
     handle_guard handle;
     ASSERT_EQ(rocsparse_create_handle(&handle.obj), rocsparse_status_success);
     const int64_t       rows = 1024 / handle->wavefront_size;
     const rocsparse_int m    = static_cast<rocsparse_int>(4194303 * rows + 1);
+    const size_t        n    = static_cast<size_t>(m);
+    const size_t        nnz  = n + (n - 1) / 16;
 
-    size_t free_bytes  = 0;
-    size_t total_bytes = 0;
-    ASSERT_EQ(hipMemGetInfo(&free_bytes, &total_bytes), hipSuccess);
-    if(free_bytes < static_cast<size_t>(m) * 48)
+    // The device holds the matrix, x and y, and about 24 bytes per row for the
+    // analysis buffer, diag_ind and the row map. The host holds the matrix
+    // while it is uploaded.
+    const size_t matrix_bytes
+        = sizeof(rocsparse_int) * (n + 1) + (sizeof(rocsparse_int) + sizeof(float)) * nnz;
+    const size_t device_need = matrix_bytes + 2 * sizeof(float) * n + 24 * n;
+    const size_t host_need   = matrix_bytes;
+    size_t       free_bytes  = 0;
+    size_t       total_bytes = 0;
+    if(hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess || free_bytes < 2 * device_need)
     {
-        GTEST_SKIP() << "Insufficient device memory: need about " << static_cast<size_t>(m) * 48
-                     << " bytes";
+        GTEST_SKIP() << "Insufficient device memory: need about " << device_need << " bytes";
+    }
+    if((rocsparse_memory_check::get_available_host_memory_gb() << 30) < 2 * host_need)
+    {
+        GTEST_SKIP() << "Insufficient host memory: need about " << host_need << " bytes";
     }
 
-    std::vector<rocsparse_int> row_ptr(static_cast<size_t>(m) + 1);
-    std::vector<rocsparse_int> col_ind;
-    std::vector<float>         val;
-    col_ind.reserve(static_cast<size_t>(m) + m / 32 + 1);
-    val.reserve(static_cast<size_t>(m) + m / 32 + 1);
-    row_ptr[0] = 0;
-    for(rocsparse_int i = 0; i < m; ++i)
+    rocsparse_ut::device_vector<rocsparse_int> d_row_ptr(n + 1);
+    rocsparse_ut::device_vector<rocsparse_int> d_col_ind(nnz);
+    rocsparse_ut::device_vector<float>         d_val(nnz);
     {
-        if(i > 0 && i % 32 == 0)
+        std::vector<rocsparse_int> row_ptr(n + 1);
+        std::vector<rocsparse_int> col_ind;
+        std::vector<float>         val;
+        col_ind.reserve(nnz);
+        val.reserve(nnz);
+        row_ptr[0] = 0;
+        for(rocsparse_int i = 0; i < m; ++i)
         {
-            col_ind.push_back(i - 1);
-            val.push_back(-0.5f);
+            if(i > 0 && i % 16 == 0)
+            {
+                col_ind.push_back(i - 1);
+                val.push_back(-0.5f);
+            }
+            col_ind.push_back(i);
+            val.push_back(2.0f);
+            row_ptr[i + 1] = static_cast<rocsparse_int>(col_ind.size());
         }
-        col_ind.push_back(i);
-        val.push_back(2.0f);
-        row_ptr[i + 1] = static_cast<rocsparse_int>(col_ind.size());
-    }
-    const rocsparse_int nnz = static_cast<rocsparse_int>(col_ind.size());
+        ASSERT_EQ(col_ind.size(), nnz);
 
-    rocsparse_ut::device_vector<rocsparse_int> d_row_ptr(row_ptr);
-    rocsparse_ut::device_vector<rocsparse_int> d_col_ind(col_ind);
-    rocsparse_ut::device_vector<float>         d_val(val);
-    rocsparse_ut::device_vector<float>         d_x(std::vector<float>(m, 1.0f));
-    rocsparse_ut::device_vector<float>         d_y(
-        std::vector<float>(m, std::numeric_limits<float>::quiet_NaN()));
+        ASSERT_EQ(hipMemcpy(d_row_ptr.ptr,
+                            row_ptr.data(),
+                            sizeof(rocsparse_int) * row_ptr.size(),
+                            hipMemcpyHostToDevice),
+                  hipSuccess);
+        ASSERT_EQ(hipMemcpy(d_col_ind.ptr,
+                            col_ind.data(),
+                            sizeof(rocsparse_int) * col_ind.size(),
+                            hipMemcpyHostToDevice),
+                  hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(d_val.ptr, val.data(), sizeof(float) * val.size(), hipMemcpyHostToDevice),
+            hipSuccess);
+    }
+    rocsparse_ut::device_vector<float> d_x(std::vector<float>(n, 1.0f));
+    rocsparse_ut::device_vector<float> d_y(
+        std::vector<float>(n, std::numeric_limits<float>::quiet_NaN()));
 
     mat_descr_guard descr;
     mat_info_guard  info;
@@ -853,7 +882,7 @@ TEST(internal_level2_csrsv_grid_x_chunk, real_dispatch_limit)
     ASSERT_EQ(rocsparse_scsrsv_buffer_size(handle,
                                            trans,
                                            m,
-                                           nnz,
+                                           static_cast<rocsparse_int>(nnz),
                                            descr,
                                            d_val.ptr,
                                            d_row_ptr.ptr,
@@ -866,7 +895,7 @@ TEST(internal_level2_csrsv_grid_x_chunk, real_dispatch_limit)
     ASSERT_EQ(rocsparse_scsrsv_analysis(handle,
                                         trans,
                                         m,
-                                        nnz,
+                                        static_cast<rocsparse_int>(nnz),
                                         descr,
                                         d_val.ptr,
                                         d_row_ptr.ptr,
@@ -877,11 +906,15 @@ TEST(internal_level2_csrsv_grid_x_chunk, real_dispatch_limit)
                                         d_buffer.ptr),
               rocsparse_status_success);
 
+    const rocsparse::trm_info_t* trm = info->get_csrsv_info(trans, rocsparse_fill_mode_lower);
+    ASSERT_NE(trm, nullptr);
+    EXPECT_EQ(trm->get_max_nnz(), 2);
+
     const float alpha = 1.0f;
     ASSERT_EQ(rocsparse_scsrsv_solve(handle,
                                      trans,
                                      m,
-                                     nnz,
+                                     static_cast<rocsparse_int>(nnz),
                                      &alpha,
                                      descr,
                                      d_val.ptr,
@@ -904,7 +937,7 @@ TEST(internal_level2_csrsv_grid_x_chunk, real_dispatch_limit)
     const std::vector<float> y = rocsparse_ut::to_host(d_y);
     for(rocsparse_int i = 0; i < m; ++i)
     {
-        const float want = (i > 0 && i % 32 == 0) ? 0.625f : 0.5f;
+        const float want = (i > 0 && i % 16 == 0) ? 0.625f : 0.5f;
         ASSERT_EQ(y[i], want) << "row " << i << " of " << m;
     }
 }
