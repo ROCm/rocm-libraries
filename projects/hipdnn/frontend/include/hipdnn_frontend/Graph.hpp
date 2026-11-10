@@ -6194,7 +6194,13 @@ public:
      *
      * @param token Token activations.
      * @param weight Per-expert weight matrices, shaped `[experts, K, N]`.
-     * @param firstTokenOffset First routed-token offset for every batch/expert pair.
+     * @param firstTokenOffset Group offsets, shaped `[L, 1, 1]` INT32. `L` a multiple of the
+     *        expert count `E` lists group starts (`[batch][expert]`; the last group ends at the
+     *        routed capacity). For `E > 1`, `L % E == 1` lists `L` explicit boundaries of
+     *        `L - 1` groups starting at 0 (cuDNN's current layout, as `moe_routing`
+     *        produces); routed rows at or past the final boundary are not touched. Group `g`
+     *        uses expert `g % E`. `E == 1` always uses group starts (cuDNN would read
+     *        explicit boundaries).
      * @param tokenIndex Source-token index, or `nullptr` for `NONE`.
      * @param tokenKs Expert index for each routed token, or `nullptr` unless `SCATTER`.
      * @param attributes Routing configuration including mode and top_k.
@@ -6334,12 +6340,15 @@ public:
      *
      * Computes `dweight` from `dOutput`, `token`, and `firstTokenOffset`. NONE-mode
      * routing only — there is no mode/top_k/token-index/token-ks support. `dweight` is
-     * shaped `[firstTokenOffset.dim[0], token.dim[2], dOutput.dim[2]]`; leaving its
-     * dimensions unset infers that shape, and supplying them validates against it.
+     * shaped `[E, token.dim[2], dOutput.dim[2]]`; leaving its dimensions unset infers
+     * `E = firstTokenOffset.dim[0]` (group starts), and supplying them validates against it,
+     * except that a supplied `E > 1` with `firstTokenOffset.dim[0] == E + 1` reads the
+     * offsets as explicit boundaries (token rows past the final boundary are unused).
      *
      * @param dOutput Output gradient, shaped `[1, tokens, N]`.
      * @param token Token activations, shaped `[1, tokens, K]`.
-     * @param firstTokenOffset First routed-token offset for every expert, shaped `[experts, 1, 1]`.
+     * @param firstTokenOffset Per-expert group starts `[E, 1, 1]`, or explicit boundaries
+     *        `[E + 1, 1, 1]` (E > 1, dweight dims supplied).
      * @param attributes Operation configuration.
      * @return Weight gradient tensor.
      */

@@ -275,10 +275,10 @@ TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, ExpertCountMismatchThrows)
     setValues(doutput, {1.0F, 2.0F});
     auto token = createTensor<float>({1, 2, 1});
     setValues(token, {1.0F, 2.0F});
-    // 3 offset rows but dweight only describes 2 experts -- backward requires
-    // an exact match (no batching), unlike forward's "multiple of" rule.
-    auto offsets = createTensor<int32_t>({3, 1, 1});
-    setValues(offsets, {0, 1, 2});
+    // 4 offset rows but dweight only describes 2 experts -- backward accepts exactly
+    // E group starts or E + 1 explicit boundaries (no batching), unlike forward.
+    auto offsets = createTensor<int32_t>({4, 1, 1});
+    setValues(offsets, {0, 1, 2, 2});
     auto dweight = createTensor<float>({2, 1, 1});
 
     expectRejectedWith(
@@ -452,4 +452,56 @@ TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, LargeRandomMatchesNaiveLoop)
     const float tolerance = matmul::getTolerance<float>();
     const CpuFpReferenceValidation<float> validator(tolerance, tolerance);
     EXPECT_TRUE(validator.allClose(naiveDweight, dweight));
+}
+
+/* ======================= Explicit group boundaries (E + 1 offsets) ======================= */
+
+TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, ExplicitBoundariesSkipRowsPastFinalBoundary)
+{
+    auto doutput = createTensor<float>({1, 4, 1});
+    setValues(doutput, {1.0F, 2.0F, 3.0F, 4.0F});
+    auto token = createTensor<float>({1, 4, 1});
+    setValues(token, {10.0F, 20.0F, 30.0F, 40.0F});
+    // Boundaries {0, 1, 3}: expert 0 owns row 0, expert 1 owns rows 1-2; row 3 is unused.
+    auto offsets = createTensor<int32_t>({3, 1, 1});
+    setValues(offsets, {0, 1, 3});
+    auto dweight = createTensor<float>({2, 1, 1});
+
+    CpuFpReferenceMoeGroupedMatmulBwd::backward<float, float, float, float>(
+        doutput, token, offsets, dweight);
+
+    // expert 0: 1*10 = 10; expert 1: 2*20 + 3*30 = 130 (row 3 would add 160).
+    expectTensorValues(dweight, {10.0F, 130.0F});
+}
+
+TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, ExplicitFinalBoundaryOutOfRangeThrows)
+{
+    auto doutput = createTensor<float>({1, 2, 1});
+    auto token = createTensor<float>({1, 2, 1});
+    auto offsets = createTensor<int32_t>({3, 1, 1});
+    setValues(offsets, {0, 1, 3});
+    auto dweight = createTensor<float>({2, 1, 1});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceMoeGroupedMatmulBwd::backward<float, float, float, float>(
+                doutput, token, offsets, dweight);
+        },
+        "final FirstTokenOffset boundary");
+}
+
+TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, SingleExpertStaysImplicit)
+{
+    auto doutput = createTensor<float>({1, 2, 1});
+    auto token = createTensor<float>({1, 2, 1});
+    auto offsets = createTensor<int32_t>({2, 1, 1});
+    setValues(offsets, {0, 2});
+    auto dweight = createTensor<float>({1, 1, 1});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceMoeGroupedMatmulBwd::backward<float, float, float, float>(
+                doutput, token, offsets, dweight);
+        },
+        "must equal the expert count");
 }

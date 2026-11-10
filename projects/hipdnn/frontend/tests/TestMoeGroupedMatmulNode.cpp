@@ -166,10 +166,41 @@ TEST(TestMoeGroupedMatmulNode, RequiredTensorShapesAndTypesMustBeConsistent)
     EXPECT_EQ(MoeGroupedMatmulNode(std::move(attrs), graphAttrs).pre_validate_node().code,
               ErrorCode::INVALID_VALUE);
 
+    // Three experts: 5 % 3 == 2 is neither group starts nor explicit boundaries.
     attrs = createValidAttributes();
-    attrs.get_first_token_offset()->set_dim({3, 1, 1});
+    attrs.get_weight()->set_dim({3, 16, 32});
+    attrs.get_first_token_offset()->set_dim({5, 1, 1});
     EXPECT_EQ(MoeGroupedMatmulNode(std::move(attrs), graphAttrs).pre_validate_node().code,
               ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulNode, OffsetLengthSelectsImplicitOrExplicitBoundaries)
+{
+    const GraphAttributes graphAttrs;
+
+    // Two experts, three entries: explicit boundaries of two groups.
+    auto attrs = createValidAttributes();
+    attrs.get_first_token_offset()->set_dim({3, 1, 1});
+    EXPECT_EQ(MoeGroupedMatmulNode(std::move(attrs), graphAttrs).pre_validate_node().code,
+              ErrorCode::OK);
+
+    // Three experts: 3 (starts), 6 (batched starts) and 4, 7 (boundaries) are accepted.
+    for(const int64_t offsetCount : {3, 4, 6, 7})
+    {
+        attrs = createValidAttributes();
+        attrs.get_weight()->set_dim({3, 16, 32});
+        attrs.get_first_token_offset()->set_dim({offsetCount, 1, 1});
+        EXPECT_EQ(MoeGroupedMatmulNode(std::move(attrs), graphAttrs).pre_validate_node().code,
+                  ErrorCode::OK)
+            << "offsetCount=" << offsetCount;
+    }
+
+    // One expert stays implicit: any length is a multiple of 1.
+    attrs = createValidAttributes();
+    attrs.get_weight()->set_dim({1, 16, 32});
+    attrs.get_first_token_offset()->set_dim({2, 1, 1});
+    EXPECT_EQ(MoeGroupedMatmulNode(std::move(attrs), graphAttrs).pre_validate_node().code,
+              ErrorCode::OK);
 }
 
 TEST(TestMoeGroupedMatmulNode, GatherRequiresInt32TokenIndex)

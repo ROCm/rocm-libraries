@@ -6714,11 +6714,24 @@ class TestMoeGroupedMatmulExtract:
             node, tensors, r"token_tensor_uid dims .* are not \[1, tokens, 16\]"
         )
 
-    @pytest.mark.parametrize("dims", [[2, 2, 1], [2, 1, 2], [3, 1, 1], [1, 1, 1]])
+    @pytest.mark.parametrize("dims", [[2, 2, 1], [2, 1, 2], [1, 1, 1]])
     def test_an_offset_not_a_multiple_of_experts_raises(self, dims) -> None:
         node, tensors = _moe()
         tensors[3]["dims"] = dims
         self._raises(node, tensors, "first_token_offset_tensor_uid dims .* 2 experts")
+
+    def test_an_offset_neither_starts_nor_boundaries_raises(self) -> None:
+        # 3 experts: 5 % 3 == 2 is neither a multiple nor one more.
+        node, tensors = _moe(experts=3)
+        tensors[3]["dims"] = [5, 1, 1]
+        self._raises(node, tensors, "first_token_offset_tensor_uid dims .* 3 experts")
+
+    @pytest.mark.parametrize("experts", [2, 3])
+    def test_explicit_boundaries_are_one_batch(self, experts: int) -> None:
+        # E + 1 boundaries, as MoE routing produces: one group per expert.
+        node, tensors = _moe(experts=experts)
+        tensors[3]["dims"] = [experts + 1, 1, 1]
+        assert moe_grouped_matmul.extract(node, tensors) == self.PLAIN
 
     @pytest.mark.parametrize("dtype", ["int64", "float", None])
     def test_an_offset_not_int32_raises(self, dtype) -> None:
@@ -7018,6 +7031,12 @@ class TestMoeGroupedMatmulBwdExtract:
         node, tensors = _moe_bwd()
         tensors[3]["dims"] = [4, 1, 1]
         self._raises(node, tensors, r"dweight_tensor_uid dims .* are not \[4, 16, 32\]")
+
+    def test_explicit_boundaries_with_dweight_of_e_experts(self) -> None:
+        # E + 1 explicit boundaries (E > 1): dweight names the E experts.
+        node, tensors = _moe_bwd()
+        tensors[3]["dims"] = [3, 1, 1]
+        assert moe_grouped_matmul_bwd.extract(node, tensors) == self.PLAIN
 
     def test_uid_zero_is_a_binding(self) -> None:
         node, tensors = _moe_bwd()

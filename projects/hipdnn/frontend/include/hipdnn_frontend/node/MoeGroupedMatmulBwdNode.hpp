@@ -168,10 +168,17 @@ public:
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
-        // dweight = [experts, K, N], where the expert count comes from first_token_offset dim[0],
-        // K from token dim[2], and N from doutput dim[2].
+        // dweight = [experts, K, N], K from token dim[2] and N from doutput dim[2]. The
+        // expert count comes from first_token_offset dim[0] (L implicit group starts), or,
+        // when the caller sets dweight to E = L - 1 > 1 experts, the offsets are L explicit
+        // group boundaries (cuDNN's current layout, as MoE routing produces). Leaving dweight
+        // unset always infers the implicit layout.
+        const auto offsetCount = attributes.get_first_token_offset()->get_dim()[0];
+        const auto& suppliedDweightDims = attributes.get_dweight()->get_dim();
+        const bool explicitBoundaries = !suppliedDweightDims.empty() && suppliedDweightDims[0] > 1
+                                        && suppliedDweightDims[0] + 1 == offsetCount;
         const std::vector<int64_t> expectedDweightDims
-            = {attributes.get_first_token_offset()->get_dim()[0],
+            = {explicitBoundaries ? offsetCount - 1 : offsetCount,
                attributes.get_token()->get_dim()[2],
                attributes.get_doutput()->get_dim()[2]};
 

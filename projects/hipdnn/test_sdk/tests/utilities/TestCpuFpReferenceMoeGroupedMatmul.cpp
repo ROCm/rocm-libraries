@@ -430,7 +430,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, InvalidCoreShapesThrow)
         {"OutputLeadingDimension", {1, 2, 1}, {2, 1, 1}, {2, 2, 1}, "output must have"},
         {"FirstTokenOffsetShape", {1, 2, 1}, {2, 2, 1}, {1, 2, 1}, "first_token_offset"},
         {"OutputWidth", {1, 2, 1}, {2, 1, 1}, {1, 2, 2}, "output width"},
-        {"OffsetGroupCount", {1, 2, 1}, {3, 1, 1}, {1, 2, 1}, "multiple of the expert count"},
+        {"OffsetGroupCount", {1, 2, 1}, {1, 1, 1}, {1, 2, 1}, "multiple of the expert count"},
     };
 
     for(const auto& testCase : cases)
@@ -728,4 +728,91 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, LargeRandomGatherWithLeadingSourceGapMa
 
     const CpuFpReferenceValidation<float> validator(1e-5F, 1e-5F);
     EXPECT_TRUE(validator.allClose(naiveOutput, output));
+}
+
+/* ======================= Explicit group boundaries (L % E == 1) ======================= */
+
+TEST(TestCpuFpReferenceMoeGroupedMatmul, NoneModeExplicitBoundariesLeaveTrailingRowsUntouched)
+{
+    auto token = createTensor<float>({1, 4, 2});
+    setValues(token, {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
+    auto weight = makeIdentitySwapWeight<float>();
+    // E = 2, L = 3: boundaries {0, 1, 3} -> group 0 = row 0 (identity), group 1 = rows 1-2
+    // (swap); row 3 lies past the final boundary.
+    auto offsets = createTensor<int32_t>({3, 1, 1});
+    setValues(offsets, {0, 1, 3});
+    auto output = createTensor<float>({1, 4, 2});
+    setValues(output, {-1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -9.0F, -9.0F});
+
+    CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+        token, weight, offsets, output, Mode::NONE, 0);
+
+    expectTensorValues(output, {1.0F, 2.0F, 4.0F, 3.0F, 6.0F, 5.0F, -9.0F, -9.0F});
+}
+
+TEST(TestCpuFpReferenceMoeGroupedMatmul, GatherExplicitFinalBoundaryBelowCapacity)
+{
+    auto token = createTensor<float>({1, 3, 2});
+    setValues(token, {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F});
+    auto weight = makeIdentitySwapWeight<float>();
+    // Routed rows 0..2 are valid; row 3 holds a garbage source index that must never be read
+    // because the final boundary is 3 < capacity 4.
+    auto tokenIndex = createTensor<int32_t>({1, 4, 1});
+    setValues(tokenIndex, {2.0F, 0.0F, 1.0F, 99.0F});
+    auto offsets = createTensor<int32_t>({3, 1, 1});
+    setValues(offsets, {0, 1, 3});
+    auto output = createTensor<float>({1, 4, 2});
+    setValues(output, {-1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -9.0F, -9.0F});
+
+    CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+        token, weight, offsets, output, Mode::GATHER, 0, &tokenIndex);
+
+    expectTensorValues(output, {5.0F, 6.0F, 2.0F, 1.0F, 4.0F, 3.0F, -9.0F, -9.0F});
+}
+
+TEST(TestCpuFpReferenceMoeGroupedMatmul, ExplicitBoundariesMustStartAtZero)
+{
+    auto token = createTensor<float>({1, 4, 2});
+    auto weight = makeIdentitySwapWeight<float>();
+    auto offsets = createTensor<int32_t>({3, 1, 1});
+    setValues(offsets, {1, 1, 3});
+    auto output = createTensor<float>({1, 4, 2});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+                token, weight, offsets, output, Mode::NONE, 0);
+        },
+        "must start at 0");
+}
+
+TEST(TestCpuFpReferenceMoeGroupedMatmul, ExplicitFinalBoundaryPastCapacityThrows)
+{
+    auto token = createTensor<float>({1, 4, 2});
+    auto weight = makeIdentitySwapWeight<float>();
+    auto offsets = createTensor<int32_t>({3, 1, 1});
+    setValues(offsets, {0, 1, 5});
+    auto output = createTensor<float>({1, 4, 2});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+                token, weight, offsets, output, Mode::NONE, 0);
+        },
+        "out of range");
+}
+
+TEST(TestCpuFpReferenceMoeGroupedMatmul, OffsetLengthNeitherStartsNorBoundariesThrows)
+{
+    auto token = createTensor<float>({1, 4, 1});
+    auto weight = createTensor<float>({3, 1, 1});
+    auto offsets = createTensor<int32_t>({5, 1, 1});
+    auto output = createTensor<float>({1, 4, 1});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+                token, weight, offsets, output, Mode::NONE, 0);
+        },
+        "multiple of the expert count");
 }

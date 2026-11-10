@@ -26,7 +26,8 @@ another. By group:
 
 The API and the CPU reference require all four tensors of rank 3, none
 ragged; ``doutput`` and ``token`` ``[1, rows, ...]`` of the same rows; the
-offset ``[E, 1, 1]`` and int32; and ``dweight`` ``[E, K, N]``, with ``K``
+offset ``[E, 1, 1]`` (group starts) or, for ``E`` above 1, ``[E + 1, 1, 1]``
+(explicit boundaries) and int32; and ``dweight`` ``[E, K, N]``, with ``K``
 that of ``token`` and ``N`` that of ``doutput``. A graph that breaks these
 raises. The offsets' values (where the groups start) are data the graph
 does not carry.
@@ -87,6 +88,9 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
     _, rows, k = token["dims"]
     n = doutput["dims"][2]
     experts = offset["dims"][0]
+    # E + 1 explicit boundaries (E > 1) when the caller's dweight names E experts.
+    if dweight["dims"][0] > 1 and dweight["dims"][0] + 1 == experts:
+        experts -= 1
     if token["dims"][0] != 1:
         raise FeatureError(f"{TOKEN} dims {token['dims']} are not [1, rows, K]")
     if doutput["dims"][:2] != [1, rows]:

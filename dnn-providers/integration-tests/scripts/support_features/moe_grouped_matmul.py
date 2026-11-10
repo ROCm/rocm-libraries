@@ -33,7 +33,8 @@ other fp32, in another. By group:
 The API, the backend's routing contract (``MoeGroupedMatmulValidation``)
 and the CPU reference require ``token``, ``weight``, ``first_token_offset``
 and ``output`` of rank 3; ``token`` and ``output`` ``[1, rows, ...]``, the
-offset ``[G, 1, 1]`` and int32, with ``G`` a multiple of ``E``; ``token``'s
+offset ``[G, 1, 1]`` and int32, with ``G`` a multiple of ``E`` (group starts)
+or, for ``E`` above 1, one more (explicit boundaries); ``token``'s
 ``K`` that of ``weight``; under ``none`` no index, no ks and ``top_k`` 0;
 under ``gather`` an index, no ks and ``top_k`` 0; under ``scatter`` both and
 ``top_k`` from 1 to ``E``; an index and a ks int32 and ``[1, rows, 1]``,
@@ -133,11 +134,16 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
     groups = offset["dims"][0]
     if token["dims"][0] != 1 or token["dims"][2] != k:
         raise FeatureError(f"{TOKEN} dims {token['dims']} are not [1, tokens, {k}]")
-    if offset["dims"][1:] != [1, 1] or groups % experts:
+    # G group starts (G % E == 0), or, with E > 1, G + 1 explicit boundaries
+    # (length % E == 1, cuDNN's current layout, as MoE routing produces).
+    explicit = experts > 1 and groups > 1 and groups % experts == 1
+    if offset["dims"][1:] != [1, 1] or (groups % experts and not explicit):
         raise FeatureError(
             f"{OFFSET} dims {offset['dims']} are not [G, 1, 1] with G a multiple of "
-            f"{experts} experts"
+            f"{experts} experts, or one more (explicit boundaries)"
         )
+    if explicit:
+        groups -= 1
     if offset.get("data_type") != ROUTING_DTYPE:
         raise FeatureError(f"{OFFSET} dtype {offset.get('data_type')!r} is not int32")
 
