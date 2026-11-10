@@ -348,7 +348,8 @@ def _shipped_rocke_checks():
     ``(source, builder, target, arch)`` the shipped descriptors pack.
 
     ``arch`` is each shard architecture the kernel is packed for: its own ``arch``
-    list when it narrows one, otherwise its pack's.
+    list when it narrows one, otherwise its pack's. A multi-launch kernel contributes
+    every entry of its ``sources`` map; a single-launch one its ``kernel_source``.
     """
     seen = {}
     for path in sorted(_DESCRIPTOR_TREE.rglob("*.kdp.json")):
@@ -385,6 +386,53 @@ def test_every_shipped_rocke_builder_passes_the_pack_time_predicate_check():
             )
         except HkpPackError as exc:
             pytest.fail(f"{source}:{builder} @ {arch} ({target}): {exc}")
+
+
+@pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
+def test_gfx942_reduce_tiled_builder_resolves_its_own_predicate():
+    """The real gfx942 reduce builder resolves its spec-first predicate by the
+    derived name, so the packer can validate (and therefore pack) it."""
+    module = import_module("kernels.gfx942.attention_tiled_3d")
+    name, fn = _resolve_support_predicate(
+        module, "build_unified_attention_reduce_tiled"
+    )
+    assert name == "supports_tiled_reduce_spec"
+    assert fn is module.supports_tiled_reduce_spec
+
+
+@pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
+def test_gfx942_3d_module_builder_resolves_and_runs_its_own_predicate():
+    """The gfx942 segment+reduce module builder takes the segment spec, resolves its
+    spec-first predicate by the derived name, and the packer's check accepts a
+    strided decode spec and refuses one whose segment overflows LDS."""
+    module = import_module("kernels.gfx942.attention_tiled_3d")
+    builder = "build_unified_attention_3d_tiled_module"
+    name, fn = _resolve_support_predicate(module, builder)
+    assert name == "supports_unified_attention_3d_tiled_module"
+    assert fn is module.supports_unified_attention_3d_tiled_module
+    spec_class = _resolve_spec_class(module, getattr(module, builder))
+    assert spec_class is module.UnifiedAttention3DTiledSpec
+    fields = {
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "num_segments": 16,
+        "tile_size_override": 32,
+        "kv_layout": "strided",
+        "use_decode_grid": True,
+        "kv_cache_policy": "stream",
+    }
+    _check_support_predicate(module, builder, build_spec(spec_class, fields), "gfx942")
+    fields["tile_size_override"] = None
+    with pytest.raises(HkpPackError, match="LDS"):
+        _check_support_predicate(
+            module, builder, build_spec(spec_class, fields), "gfx942"
+        )
 
 
 @pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")

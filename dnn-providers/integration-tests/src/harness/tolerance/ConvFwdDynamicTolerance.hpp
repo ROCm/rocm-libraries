@@ -46,18 +46,24 @@ using InputMomentsLookup = std::function<std::optional<InputMoments>(int64_t uid
 
 /// Moments of a tensor filled from a recipe, without reading it: E[x^2] of a uniform draw on
 /// [lo, hi] is (lo^2 + lo*hi + hi^2) / 3. The fill rounds each draw to the element type, which
-/// changes the mean square by far less than the tolerance's margin.
-inline InputMoments recipeMoments(const FillRecipe& recipe)
+/// changes the mean square by far less than the tolerance's margin. nullopt for a VALUES recipe:
+/// its list is laid over the tensor in index order, so its mean square depends on the tensor's
+/// element count, which a recipe does not know.
+inline std::optional<InputMoments> recipeMoments(const FillRecipe& recipe)
 {
+    if(recipe.kind == FillRecipe::Kind::VALUES)
+    {
+        return std::nullopt;
+    }
     const auto maxAbs = static_cast<double>(recipe.maxMagnitude());
     if(recipe.kind == FillRecipe::Kind::FIXED)
     {
         const auto v = static_cast<double>(recipe.value);
-        return {v * v, maxAbs};
+        return InputMoments{v * v, maxAbs};
     }
     const auto lo = static_cast<double>(recipe.lo);
     const auto hi = static_cast<double>(recipe.hi);
-    return {(lo * lo + lo * hi + hi * hi) / 3.0, maxAbs};
+    return InputMoments{(lo * lo + lo * hi + hi * hi) / 3.0, maxAbs};
 }
 
 /// Moments of a tensor whose value is baked into the graph (a constant scalar, the way the
@@ -163,18 +169,19 @@ inline std::optional<InputMoments>
 /// whose one operand comes from the convolution and the other is a graph input contributes that
 /// operand's max |v| as an output scale; the scales of several multiplies multiply. The other
 /// pointwise modes are not examined: each is assumed to change an error by at most its slope,
-/// about 1, and so leaves it alone. The activations of the shipped bundles (relu with its clips,
-/// identity, sigmoid, tanh, softplus, elu, swish, both gelus, at the bundles' parameters) have a
-/// slope of at most about 1.13; a mode with another gain (DIV, RECIPROCAL) is not detected. Nodes
+/// about 1, and so leaves it alone. The activations the model was calibrated on (relu with its
+/// clips, identity, sigmoid, tanh, softplus, elu, swish, both gelus, at the parameters of the
+/// calibration bundles) have a slope of at most about 1.13; a mode with another gain (DIV,
+/// RECIPROCAL) is not detected. Nodes
 /// that are neither convolution nor pointwise are ignored. The scale is one value for the whole
 /// graph: it does not say which output a multiply sits on.
 ///
 /// The tolerance is sized by the convolution's output, not by the graph's. For half, behind an
 /// activation that bounds its output (sigmoid, tanh, a clipped relu) the atol can exceed the
-/// range of that output, and then no output can fail it: the full-tier fp16 sigmoid case
-/// L19_1d_i1024_n1c64k64_f1024_fp16_cl_sigmoid (K = 65,536) has atol 1.0014 against [0, 1], and
-/// 43 of the 268 shipped half bounded-activation cases have an atol above the fixed 0.1. bfloat16
-/// is not affected.
+/// range of that output, and then no output can fail it: a half sigmoid with K = 65,536 has
+/// atol 1.0014 against [0, 1]. The reductions of the bundles on develop are at most 432, where
+/// the half atol stays below the fixed 0.1. bfloat16 is not affected. docs/tolerances.md has the
+/// numbers.
 ///
 /// A graph input's moments are those of its baked value when it bakes one, else the lookup's. A
 /// moment that is not finite makes the inputs unavailable, whichever source it came from.

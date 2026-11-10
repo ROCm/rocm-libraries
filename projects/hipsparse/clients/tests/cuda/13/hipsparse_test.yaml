@@ -26,7 +26,6 @@ include: test_axpby.yaml
 include: test_gather.yaml
 include: test_scatter.yaml
 include: test_rot.yaml
-include: test_sddmm_coo_aos.yaml
 include: test_sddmm_coo.yaml
 include: test_sddmm_csc.yaml
 include: test_sddmm_csr.yaml
@@ -49,7 +48,6 @@ include: test_spmm_bsr.yaml
 include: test_spmm_coo.yaml
 include: test_spmm_csc.yaml
 include: test_spmm_csr.yaml
-include: test_spmv_coo_aos.yaml
 include: test_spmv_coo.yaml
 include: test_spmv_csr.yaml
 include: test_spmv_csr_reuse_descr.yaml

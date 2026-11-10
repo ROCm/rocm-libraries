@@ -72,7 +72,7 @@ constexpr int64_t ADD_OUT_UID = 7;
 enum class Topology
 {
     PLAIN, ///< conv -> y
-    VARIANT3, ///< conv -> mul(y, scale) -> add(bias) -> relu -> out, as the Variant3 bundles
+    VARIANT3, ///< conv -> mul(y, scale) -> add(bias) -> relu -> out (a test-plan Variant3)
 };
 
 enum class ScaleSource
@@ -433,8 +433,8 @@ TEST_F(TestConvFwdToleranceGradingFixture, GoldenBlobInputsAreScannedOnTheHost)
 
 // ── A fused multiply: baked constant or filled tensor ───────────────────────
 
-// The shipped Variant3 half and bfloat16 cases bake the scale as 0.5 and have no recipe for it:
-// the band narrows by that factor, not the default fill's 1.
+// The Variant3 half and bfloat16 cases of the conv-fwd test-plan bundles bake the scale as 0.5
+// and have no recipe for it: the band narrows by that factor, not the default fill's 1.
 TEST_F(TestConvFwdToleranceGradingFixture, BakedScaleBelowOneNarrowsTheTolerance)
 {
     for(const bool isHalf : {true, false})

@@ -31,6 +31,7 @@
 #include "../lib_env_var.hpp"
 #include "gtest_common.hpp"
 #include <miopen/readonlyramdb.hpp>
+#include <miopen/config.h>
 #include <miopen/env.hpp>
 #include <miopen/execution_context.hpp>
 
@@ -43,9 +44,15 @@
 #include <miopen/mt_queue.hpp>
 #include <miopen/filesystem.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <regex>
+#include <iterator>
 #include <exception>
+#include <fstream>
+#include <map>
+#include <sstream>
+#include <mutex>
 #include <thread>
 #include <unordered_set>
 
@@ -169,8 +176,17 @@ miopenDataType_t GetDataTypeFromString(const std::string& data_type)
 void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_desc)
 {
     std::string key = key_;
-    const auto opt  = SplitDelim(key, '_');
-    int group_cnt   = 1;
+    auto opt        = SplitDelim(key, '_');
+    // Serialize adds "_det" after the other optional parts when the deterministic attribute is set.
+    bool deterministic = false;
+    if(opt.size() >= 2)
+    {
+        const auto det = std::remove(std::next(opt.begin()), opt.end(), std::string{"det"});
+        deterministic  = det != opt.end();
+        opt.erase(det, opt.end());
+        key = opt[0];
+    }
+    int group_cnt = 1;
     conv::Direction dir;
     miopenTensorLayout_t in_layout, wei_layout, out_layout;
     size_t out_h, out_w, in_channels, out_channels, in_h, in_w, batchsize, fil_h, fil_w;
@@ -306,6 +322,8 @@ void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_des
         const auto math_type_ = use_tf32 ? miopenMathDefault : miopenMathPedantic;
         conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, static_cast<int>(math_type_));
     }
+    if(deterministic)
+        conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
     prob_desc = conv::ProblemDescription{in, wei, out, conv, dir};
 }
 
@@ -734,11 +752,85 @@ TEST(CPU_DBSync_NONE, DISABLED_DynamicFDBSync)
         << "Multi-threading error, work done is not equal to total work";
 }
 
+/// Workspace corrections found by MIOPEN_DBSYNC_CLEAN, applied after the worker threads finish.
+/// Each RamDb update rewrites the whole file under an exclusive lock, so updating from every
+/// thread makes the others time out on the lock ("Db lock has failed to lock"), and updating
+/// record by record takes tens of minutes for a large find-db. The file is rewritten once instead.
+struct WorkspaceFixes
+{
+    std::mutex mutex;
+    std::map<std::string, std::map<std::string, std::size_t>> by_key;
+
+    void Add(const std::string& key, const std::string& solver, std::size_t workspace)
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        by_key[key][solver] = workspace;
+    }
+
+    /// Rewrites the find-db text file, replacing only the workspace field ("time,workspace,algo")
+    /// of the corrected entries. Runs after the worker threads, so it sees any entries the other
+    /// clean-up steps removed.
+    void Apply(const fs::path& path)
+    {
+        if(by_key.empty())
+            return;
+        auto out_path = path;
+        out_path += ".workspace_fix";
+        std::size_t n_fixed = 0;
+        {
+            std::ifstream in{path};
+            std::ofstream out{out_path};
+            ASSERT_TRUE(in && out) << "Cannot rewrite " << path;
+            std::string line;
+            while(std::getline(in, line))
+            {
+                const auto eq = line.find('=');
+                const auto it =
+                    eq == std::string::npos ? by_key.end() : by_key.find(line.substr(0, eq));
+                if(it == by_key.end())
+                {
+                    out << line << '\n';
+                    continue;
+                }
+                out << line.substr(0, eq + 1);
+                std::stringstream items{line.substr(eq + 1)};
+                std::string item;
+                auto first = true;
+                while(std::getline(items, item, ';'))
+                {
+                    const auto colon = item.find(':');
+                    const auto fix   = colon == std::string::npos
+                                           ? it->second.end()
+                                           : it->second.find(item.substr(0, colon));
+                    out << (first ? "" : ";");
+                    first = false;
+                    const auto ws_begin =
+                        fix == it->second.end() ? std::string::npos : item.find(',', colon);
+                    const auto ws_end =
+                        ws_begin == std::string::npos ? ws_begin : item.find(',', ws_begin + 1);
+                    if(ws_end == std::string::npos)
+                    {
+                        out << item;
+                        continue;
+                    }
+                    out << item.substr(0, ws_begin + 1) << fix->second << item.substr(ws_end);
+                    ++n_fixed;
+                }
+                out << '\n';
+            }
+            ASSERT_TRUE(out.good()) << "Failed to write " << out_path;
+        }
+        fs::rename(out_path, path);
+        MIOPEN_LOG_W("Updated workspace in " << n_fixed << " find-db entries");
+    }
+};
+
 void CheckFDBEntry(size_t thread_index,
                    size_t total_threads,
                    std::vector<FDBLine>& data,
                    miopen::RamDb& find_db_rw,
                    miopen::RamDb& perf_db_rw,
+                   WorkspaceFixes& workspace_fixes,
                    const miopen::ExecutionContext& _ctx,
                    std::atomic<size_t>& counter)
 {
@@ -796,6 +888,43 @@ void CheckFDBEntry(size_t thread_index,
             auto db         = miopen::GetDb(ctx);
             const auto solv = id.GetSolver();
 
+            // The find-db workspace must be what Find() would record for this entry, i.e. the
+            // workspace of the solution built with the perf-db config.
+            const auto check_workspace = [&](const miopen::solver::ConvSolution& solution,
+                                             const std::string& perf_cfg) {
+                miopen::FindDbData fdb_data;
+                if(!fdb_data.Deserialize(val.vals))
+                {
+                    ADD_FAILURE() << '[' << (++failures) << "] " //
+                                  << "Ill-formed find-db value fdb-key:" << kinder.first
+                                  << ", Solver: " << val.solver_id << ":" << val.vals;
+                    return;
+                }
+#if !MIOPEN_USE_HIPBLASLT
+                // GemmWrwUniversal needs workspace only in hipBLASLt builds (stream-K
+                // scratch), so a find-db generated with hipBLASLt can't match here.
+                if(val.solver_id == "GemmWrwUniversal")
+                    return;
+#endif
+                if(fdb_data.workspace == solution.workspace_sz)
+                    return;
+                if(env::enabled(MIOPEN_DBSYNC_CLEAN))
+                {
+                    MIOPEN_LOG_W("Wrong workspace found fdb-key:"
+                                 << kinder.first << ", solver:" << val.solver_id << ", find-db "
+                                 << fdb_data.workspace << ", required " << solution.workspace_sz
+                                 << ", Updating entry in fdb");
+                    workspace_fixes.Add(kinder.first, id.ToString(), solution.workspace_sz);
+                }
+                else
+                {
+                    EXPECT_EQ(fdb_data.workspace, solution.workspace_sz)
+                        << '[' << (++failures) << "] " //
+                        << "Wrong workspace fdb-key:" << kinder.first
+                        << ", Solver: " << val.solver_id << " perf config:" << perf_cfg;
+                }
+            };
+
             // Skip MLIR
             if(miopen::StartsWith(id.ToString(), "ConvMlir"))
             {
@@ -804,7 +933,8 @@ void CheckFDBEntry(size_t thread_index,
                 continue;
             }
 
-            if(env::enabled(MIOPEN_DBSYNC_CLEAN) && not solv.IsApplicable(ctx, problem))
+            const auto is_applicable = solv.IsApplicable(ctx, problem);
+            if(env::enabled(MIOPEN_DBSYNC_CLEAN) && not is_applicable)
             {
                 MIOPEN_LOG_W("Inapplicable solver found fdb-key:"
                              << kinder.first << ", pdb-key:" << pdb_key << ", solver:"
@@ -819,8 +949,8 @@ void CheckFDBEntry(size_t thread_index,
             }
             else
             {
-                EXPECT_TRUE(solv.IsApplicable(ctx, problem)) //
-                    << '[' << (++failures) << "] "           //
+                EXPECT_TRUE(is_applicable)         //
+                    << '[' << (++failures) << "] " //
                     << "Solver is not applicable fdb-key:" << kinder.first
                     << " Solver: " << id.ToString();
             }
@@ -885,6 +1015,10 @@ void CheckFDBEntry(size_t thread_index,
                     << '[' << (++failures) << "] " //
                     << "Invalid solution fdb-key:" << kinder.first << " Solver: " << id.ToString()
                     << " perf config:" << perf_cfg;
+                // Without a perf-db entry the solution uses the default config, whose workspace
+                // may legitimately differ from the recorded one. That case is reported above.
+                if(sol.Succeeded() && pdb_entry_exists)
+                    check_workspace(sol, perf_cfg);
                 if(!SKIP_KDB_TESTING && fdb_idx == 0)
                 {
                     for(const auto& kern : sol.construction_params)
@@ -922,9 +1056,20 @@ void CheckFDBEntry(size_t thread_index,
                 }
             }
             else
+            {
                 EXPECT_TRUE(!pdb_entry_exists)
                     << '[' << (++failures) << "] " //
                     << "Non-Tunable solver found in PDB" << solv.GetSolverDbId();
+                if(is_applicable)
+                {
+                    sol = solv.FindSolution(ctx, problem, db, {}, "");
+                    EXPECT_TRUE(sol.Succeeded()) << '[' << (++failures) << "] " //
+                                                 << "Invalid solution fdb-key:" << kinder.first
+                                                 << " Solver: " << id.ToString();
+                    if(sol.Succeeded())
+                        check_workspace(sol, "");
+                }
+            }
             ++fdb_idx;
         }
         if(kidx % 100 == 0)
@@ -1030,6 +1175,7 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
         MIOPEN_DBSYNC_MAX_THREADS
             ? static_cast<int>(env::value(MIOPEN_DBSYNC_MAX_THREADS))
             : std::min(static_cast<int>(std::thread::hardware_concurrency()), 32);
+    WorkspaceFixes workspace_fixes;
     std::vector<std::thread> agents;
     agents.reserve(total_threads);
     for(auto idx = 0; idx < total_threads; ++idx)
@@ -1039,11 +1185,13 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
                             std::ref(fdb_data),
                             std::ref(find_db_rw),
                             std::ref(perf_db_rw),
+                            std::ref(workspace_fixes),
                             std::ref(_ctx),
                             std::ref(counter));
 
     for(auto idx = 0; idx < total_threads; ++idx)
         agents.at(idx).join();
+    workspace_fixes.Apply(fdb_file_path);
     EXPECT_TRUE(counter == fdb_data.size())
         << "Multi-threading error, work done is not equal to total work" << counter << " : "
         << fdb_data.size();

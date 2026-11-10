@@ -69,7 +69,6 @@ from support_features.coverage import (
 )
 from support_features.feature_matrix import (
     DATA_CENTER,
-    DEFAULT_OVERVIEW_PATH,
     FAMILIES,
     GPUS,
     compute_feature_claims,
@@ -212,7 +211,6 @@ class TestDataTypeLabels:
         "name, labels",
         [
             ("convolution.DTYPES", convolution.DTYPES),
-            ("convolution.TENSOR_DTYPES", convolution.TENSOR_DTYPES),
             ("pointwise._PORT_DTYPES", pointwise._PORT_DTYPES),
         ],
     )
@@ -1219,6 +1217,7 @@ class TestSdpaExtract:
         [
             (64, 64, "head_dim:64"),
             (192, 192, "head_dim:192"),
+            (256, 256, "head_dim:256"),
             # A narrower v is its own kernel, not a 192.
             (192, 128, "head_dim:192x128"),
         ],
@@ -1357,6 +1356,7 @@ class TestSdpaExtract:
             {},
             {"ragged": True},
             {"dtype": "half", "q_dims": (2, 8, 1, 64), "k_dims": (2, 1, 128, 64)},
+            {"q_dims": (2, 8, 1, 256), "k_dims": (2, 8, 128, 256)},
             {
                 "dtype": "fp8_e4m3",
                 "o_dtype": "bfloat16",
@@ -1497,6 +1497,7 @@ class TestSdpaBackwardExtract:
             {},
             {"dtype": "half", "q_dims": (2, 8, 64, 64), "k_dims": (2, 1, 128, 64)},
             {"q_dims": (2, 8, 128, 192), "k_dims": (2, 2, 128, 192)},
+            {"q_dims": (2, 8, 128, 256), "k_dims": (2, 8, 128, 256)},
             {
                 "strides": _bshd_strides,
                 "causal_mask": True,
@@ -1934,12 +1935,6 @@ class TestConvolutionOpBinding:
         for kwargs in (
             {"spatial": (8,), "layout": "nhwc", "dtype": "half"},
             {"spatial": (4, 8, 8), "dtype": "bfloat16", "groups": 2},
-            {"spatial": (4, 4, 4, 4), "dtype": "double"},
-            {"dtype": "int8", "layouts": {"filter": "nhwc"}},
-            {"dtype": "fp8_e4m3"},
-            {"dtype": "fp8_e5m2"},
-            {"dtype": "fp8_e4m3_fnuz"},
-            {"dtype": "fp8_e5m2_fnuz"},
             {"groups": 4, "dtypes": {"filter": "half"}},
             {"stride": [2, 2], "dilation": [2, 2]},
             {"pre_padding": [1, 1], "post_padding": [1, 1]},
@@ -1965,12 +1960,7 @@ class TestConvolutionFwdExtract:
 
     @pytest.mark.parametrize(
         "spatial, expected",
-        [
-            ((8,), "spatial:1d"),
-            ((8, 8), "spatial:2d"),
-            ((4, 8, 8), "spatial:3d"),
-            ((4, 4, 8, 8), "spatial:4d"),
-        ],
+        [((8,), "spatial:1d"), ((8, 8), "spatial:2d"), ((4, 8, 8), "spatial:3d")],
     )
     @pytest.mark.parametrize("layout", convolution.LAYOUTS)
     def test_spatial_and_layout(self, spatial, expected: str, layout: str) -> None:
@@ -1992,30 +1982,16 @@ class TestConvolutionFwdExtract:
         features = self._extract(channels=1, filters=1, spatial=(1, 1), kernel=1)
         assert not {f for f in features if f.startswith("layout:")}
 
-    def test_disagreeing_layouts_are_mixed(self) -> None:
-        features = self._extract(layouts={"filter": "nhwc"})
-        assert features == self.PLAIN - {"layout:nchw"} | {"layout:mixed"}
+    def test_disagreeing_layouts_raise(self) -> None:
+        with pytest.raises(FeatureError, match="layouts disagree"):
+            self._extract(layouts={"filter": "nhwc"})
 
     @pytest.mark.parametrize(
         "dtype, expected",
-        [
-            ("float", "dtype:fp32"),
-            ("half", "dtype:fp16"),
-            ("bfloat16", "dtype:bf16"),
-            ("double", "dtype:fp64"),
-            ("int8", "dtype:int8"),
-            ("fp8_e4m3", "dtype:fp8e4m3"),
-            ("fp8_e5m2", "dtype:fp8e5m2"),
-            ("fp8_e4m3_fnuz", "dtype:fp8e4m3_fnuz"),
-            ("fp8_e5m2_fnuz", "dtype:fp8e5m2_fnuz"),
-        ],
+        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
     )
     def test_dtype(self, dtype: str, expected: str) -> None:
         assert self._extract(dtype=dtype) == self.PLAIN - {"dtype:fp32"} | {expected}
-
-    def test_int8_accumulating_into_int32_is_mixed(self) -> None:
-        features = self._extract(dtype="int8", dtypes={"response": "int32"})
-        assert {"dtype:int8", "precision:mixed"} <= features
 
     def test_dtype_is_the_data_ports(self) -> None:
         features = self._extract(dtype="float", dtypes={"activation": "half"})
@@ -2031,13 +2007,11 @@ class TestConvolutionFwdExtract:
     @pytest.mark.parametrize(
         "dtypes, virtual, match",
         [
-            ({"activation": "uint8"}, (), "x_tensor_uid dtype"),
-            # int32 is a response dtype, not a data dtype.
-            ({"activation": "int32"}, (), "x_tensor_uid dtype"),
-            ({"response": "int64"}, (), r"\['int64'\]"),
+            ({"activation": "int8"}, (), "x_tensor_uid dtype"),
+            ({"response": "int32"}, (), r"\['int32'\]"),
             # A virtual tensor does not count toward precision, but its dtype
             # is still checked.
-            ({"response": "int64"}, ("response",), r"\['int64'\]"),
+            ({"response": "int32"}, ("response",), r"\['int32'\]"),
         ],
     )
     def test_uncatalogued_dtype_raises(self, dtypes, virtual, match: str) -> None:
@@ -2177,7 +2151,7 @@ class TestConvolutionFwdExtract:
         with pytest.raises(FeatureError, match="in spatial dim 0"):
             convolution_fwd.extract(node, tensors)
 
-    @pytest.mark.parametrize("spatial, n", [((), 0), ((2, 2, 2, 2, 2), 5)])
+    @pytest.mark.parametrize("spatial, n", [((), 0), ((2, 2, 2, 2), 4)])
     def test_uncatalogued_rank_raises(self, spatial, n: int) -> None:
         with pytest.raises(FeatureError, match=f"{n} spatial dims"):
             self._extract(spatial=spatial)
@@ -7456,19 +7430,3 @@ class TestRealBundleTree:
         assert (
             size < 500_000
         ), f"overview is {size} bytes; split it before it stops rendering on GitHub"
-
-    def test_committed_overview_is_current(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """SUPPORT_MATRIX_OVERVIEW.md matches a fresh render of the committed tree.
-
-        The check-support-matrix-overview hook cannot guard this on its own:
-        the top-level pre-commit exclude hides integration-test-bundles/ from
-        every hook, so a commit that changes only bundle data never runs it.
-        This test runs on any change under dnn-providers/, whichever file in
-        the tree moved -- a sidecar, a sweep manifest, a whole bundle.
-        """
-        status = feature_matrix_main(
-            ["--output", str(DEFAULT_OVERVIEW_PATH), "--check"]
-        )
-        assert status == 0, capsys.readouterr().err

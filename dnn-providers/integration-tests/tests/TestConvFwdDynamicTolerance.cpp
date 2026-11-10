@@ -456,9 +456,9 @@ TEST(TestConvFwdDynamicTolerance, FusedMultiplyOfANonVirtualConvolutionResultSti
     EXPECT_DOUBLE_EQ(scale->outputScale, 3.0);
 }
 
-// The shipped Variant3 half and bfloat16 graphs bake the scale into the graph. The lookup does
-// not know that tensor (the harness holds no recipe for it), so the value must come from the
-// graph.
+// The Variant3 half and bfloat16 graphs of the conv-fwd test-plan bundles bake the scale into
+// the graph. The lookup does not know that tensor (the harness holds no recipe for it), so the
+// value must come from the graph.
 TEST(TestConvFwdDynamicTolerance, BakedScaleIsReadFromTheGraphNotTheLookup)
 {
     GraphSpec spec;
@@ -618,23 +618,49 @@ TEST(TestConvFwdDynamicTolerance, TheOutputTypePredicateAgreesWithTheToleranceFu
 TEST(TestConvFwdDynamicTolerance, RecipeMomentsOfAUniformDraw)
 {
     const auto m = tol::recipeMoments(hipdnn_integration_tests::FillRecipe::free(-1.0f, 3.0f));
-    EXPECT_DOUBLE_EQ(m.meanSquare, 7.0 / 3.0);
-    EXPECT_DOUBLE_EQ(m.maxAbs, 3.0);
+    ASSERT_TRUE(m.has_value());
+    EXPECT_DOUBLE_EQ(m->meanSquare, 7.0 / 3.0);
+    EXPECT_DOUBLE_EQ(m->maxAbs, 3.0);
 }
 
 // The negative end is the larger one: the largest magnitude is |lo|, not |hi|.
 TEST(TestConvFwdDynamicTolerance, RecipeMomentsOfADrawWithTheLargerNegativeEnd)
 {
     const auto m = tol::recipeMoments(hipdnn_integration_tests::FillRecipe::free(-2.0f, 1.0f));
-    EXPECT_DOUBLE_EQ(m.meanSquare, 1.0);
-    EXPECT_DOUBLE_EQ(m.maxAbs, 2.0);
+    ASSERT_TRUE(m.has_value());
+    EXPECT_DOUBLE_EQ(m->meanSquare, 1.0);
+    EXPECT_DOUBLE_EQ(m->maxAbs, 2.0);
 }
 
 TEST(TestConvFwdDynamicTolerance, RecipeMomentsOfAFixedValue)
 {
     const auto m = tol::recipeMoments(hipdnn_integration_tests::FillRecipe::fixed(-0.5f));
-    EXPECT_DOUBLE_EQ(m.meanSquare, 0.25);
-    EXPECT_DOUBLE_EQ(m.maxAbs, 0.5);
+    ASSERT_TRUE(m.has_value());
+    EXPECT_DOUBLE_EQ(m->meanSquare, 0.25);
+    EXPECT_DOUBLE_EQ(m->maxAbs, 0.5);
+}
+
+// A values recipe lays its list over the tensor, so its mean square depends on the element
+// count: the recipe alone has no moments, and a graph with such an input keeps the fixed
+// default tolerance.
+TEST(TestConvFwdDynamicTolerance, RecipeMomentsOfAValuesRecipeAreAbsent)
+{
+    using hipdnn_integration_tests::FillRecipe;
+    EXPECT_FALSE(tol::recipeMoments(FillRecipe::values(std::vector<int64_t>{1, 2, 3})).has_value());
+    EXPECT_FALSE(
+        tol::recipeMoments(FillRecipe::values(std::vector<double>{0.5, -2.5}, false)).has_value());
+}
+
+TEST(TestConvFwdDynamicTolerance, GraphWithAValuesRecipeInputIsNotModeled)
+{
+    using hipdnn_integration_tests::FillRecipe;
+    flatbuffers::FlatBufferBuilder b;
+    const GraphSpec spec;
+    const auto lookup = [&](int64_t uid) -> std::optional<tol::InputMoments> {
+        return tol::recipeMoments(uid == X_UID ? FillRecipe::values(std::vector<int64_t>{1, -1})
+                                               : FillRecipe::free(-1.0f, 1.0f));
+    };
+    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), lookup).has_value());
 }
 
 // A ramp 1, 2, 3, 4 has mean square 7.5 and largest magnitude 4: neither equals a constant's,

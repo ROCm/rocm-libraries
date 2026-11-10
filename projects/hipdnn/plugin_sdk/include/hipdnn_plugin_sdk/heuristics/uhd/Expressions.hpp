@@ -63,6 +63,21 @@ public:
         }
     }
 
+    /// Binds @p name exactly as given (no sigil handling) and returns its mapped value, so a
+    /// caller that rebinds the same name per candidate can assign through the pointer instead
+    /// of hashing the name again. The pointer stays valid until the name is unbound or the
+    /// context is cleared: unordered_map elements do not move when the table rehashes.
+    ValueType* bindSlot(const std::string& name, ValueType value)
+    {
+        return &_bindings.insert_or_assign(name, std::move(value)).first->second;
+    }
+
+    /// Removes @p name, as given. Invalidates a pointer bindSlot returned for it.
+    void unbind(const std::string& name)
+    {
+        _bindings.erase(name);
+    }
+
     void clearNamespace(const std::string& ns)
     {
         const std::string prefix = ns + ".";

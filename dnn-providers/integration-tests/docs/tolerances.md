@@ -126,28 +126,36 @@ order) scales `sigma` by that input's largest magnitude, and the scales of
 several multiplies multiply; a `MUL` of anything else (the result with itself,
 two inputs) leaves the model. The other pointwise modes are not examined: each
 is assumed to change an error by at most its slope, about 1, so it leaves
-`sigma` unchanged. The shipped bundles use `ADD` and `MUL`, and as activations
+`sigma` unchanged. The calibration bundles use `ADD` and `MUL`, and as activations
 `RELU_FWD` (plain, with an upper or a lower clip, or leaky), `IDENTITY`,
 `SIGMOID_FWD`, `TANH_FWD`, `SOFTPLUS_FWD`, `ELU_FWD`, `SWISH_FWD`, `GELU_FWD`
-and `GELU_APPROX_TANH_FWD`: 506 of the 1,132 half and bfloat16
-`ConvolutionFwdPointwise` cases use an activation other than `RELU_FWD`. At the
-parameters the bundles set (softplus and swish beta 1, elu alpha 1) the largest
-slope among them is about 1.13 (gelu). A mode with another gain, such as `DIV`
+and `GELU_APPROX_TANH_FWD`: that is the set the model was calibrated on, the
+conv-fwd test-plan bundles proposed in #14424 (506 of their 1,132 half and
+bfloat16 `ConvolutionFwdPointwise` cases use an activation other than
+`RELU_FWD`). The bundles on `develop` use `ADD` and, as the activation,
+`RELU_FWD` only: plain, with an upper clip (6, or 0.5 with a lower clip of
+0.1), with a lower clip of 0, or leaky. At the parameters the calibration
+bundles set (softplus and swish beta 1, elu alpha 1) the largest slope among
+the activations is about 1.13 (gelu). A mode with another gain, such as `DIV`
 or `RECIPROCAL`, would be graded as if it had none. Nodes that are neither the
 convolution nor pointwise are ignored. The scale is one value for the whole
-graph, not one per output, and the shipped graphs have at most one multiply.
+graph, not one per output, and the graphs of the calibration bundles have at
+most one multiply (the bundles on `develop` have none).
 A graph outside what is described here, an input whose statistics are not
 available (a NaN or an infinity in golden data or in a fill recipe, an
 unreadable baked value) and every float output use the per-op default.
 
 A graph input's statistics come from, in this order:
 
-- the value baked into the graph, for a scalar constant (40 of the 48
-  Variant3 cases, 27 of the 33 in half and bfloat16, bake their scale as 0.5;
-  the `F27runtime` and `F27channel` cases fill it instead): `v^2` and `|v|`;
+- the value baked into the graph, for a scalar constant (in the calibration
+  bundles, 40 of the 48 Variant3 cases, 27 of the 33 in half and bfloat16, bake
+  their scale as 0.5; the `F27runtime` and `F27channel` cases fill it instead):
+  `v^2` and `|v|`;
 - the fill recipe, for a tensor the harness fills: `(lo^2 + lo*hi + hi^2) / 3`
   for a uniform draw on `[lo, hi]`, `v^2` for a fixed value, so no tensor is
-  read;
+  read. A recipe that lists its values has no statistics of its own (they
+  depend on how many elements the list is laid over), and the graph keeps the
+  per-op default;
 - a scan on the host, for an input loaded from golden blobs, which is
   already there.
 
@@ -157,7 +165,7 @@ fill, or uniform on `[0, a]`) the output is larger than `sigma` (the root mean
 square is 3, 25 and 190 times `sigma` for uniform on `[0, 1]` at `K` = 16,
 1,152 and 65,536), so `atol` is a smaller fraction of it and the `rtol` term,
 which scales with the output, carries the tolerance. The calibration covered
-the fills of the shipped bundles, which are mostly zero-mean.
+the fills of the bundles it used, which are mostly zero-mean.
 
 ### Where the tolerance can exceed the output
 
@@ -166,11 +174,20 @@ bound the graph's output, and then a half `atol` sized by `sigma` can be larger
 than the range of that output, so no value in the range fails it. bfloat16 is
 not affected: its `atol` stays below 0.011 in the same cases.
 
-Recomputed from the sweeps of the shipped bundles (nominal fill moments, the
-formula above), the 268 half cases with a bounded activation (sigmoid, tanh,
-relu clipped at 6, relu clipped to [0.1, 0.5]) have 43 with an `atol` above
-the fixed 0.1 that the dynamic tolerance replaces. In the sigmoid
-case `L19_1d_i1024_n1c64k64_f1024_fp16_cl_sigmoid` of the full level
+In the bundles on `develop` this does not happen: the longest reduction is
+`K` = 432, so the half `atol` is at most 0.081, below the fixed 0.1 it
+replaces, and the bounded activations are the clipped relus. Against the range
+of 6 of the relu clipped at 6 it is at most 1.4 %. Against the range of 0.4
+(0.1 to 0.5) of the other clipped relu it is up to 20 % of the range, and 48
+of its 72 half cases are at least a tenth of it: a half pass there is weaker
+evidence than elsewhere.
+
+Longer reductions make it worse. Recomputed from the sweeps of the conv-fwd
+test-plan bundles proposed in #14424 (nominal fill moments, the formula
+above), the 268 half cases with a bounded activation (sigmoid, tanh, relu
+clipped at 6, relu clipped to [0.1, 0.5]) have 43 with an `atol` above the
+fixed 0.1 that the dynamic tolerance replaces. In the sigmoid case
+`L19_1d_i1024_n1c64k64_f1024_fp16_cl_sigmoid` of the full level
 (`K` = 65,536, `sigma` about 85) the `atol` is 1.0014 against an output in
 [0, 1], so that case cannot fail on its values. For 17 of the 68 half sigmoid
 cases the `atol` is at least a tenth of the range, and the largest half tanh
@@ -181,9 +198,12 @@ a bounded activation as weak evidence for these long reductions.
 ### Calibration
 
 Data: every half and bfloat16 `ConvolutionFwd` and `ConvolutionFwdPointwise`
-bundle case that MIOpen runs, with outputs up to 4 M elements. Each output was
-compared with the harness reference and with a float64 recomputation from the
-same inputs.
+case of the conv-fwd test-plan bundles proposed in #14424 that MIOpen runs, with
+outputs up to 4 M elements and reductions as long as `K` = 65,536 (the
+bundles on `develop` stop at `K` = 432). Each output was compared with the
+harness reference and with a float64 recomputation from the same inputs.
+All the numbers in this section were measured on those bundles unless a
+paragraph says otherwise.
 
 - The fit used 3 input seeds on an MI308X (gfx942), 5,091 correct outputs.
   Outputs that fail even the fixed 0.1 are MIOpen defects, not data for the
@@ -209,7 +229,8 @@ largest-error elements (by absolute error and by rounding steps) and 48
 random elements of each output; the failure counts use every element.
 
 The C++ implementation was then run through the harness, on every half and
-bfloat16 conv-fwd case MIOpen runs, at all four levels. The MI325X runs and the
+bfloat16 conv-fwd case of the same bundles that MIOpen runs, at all four
+levels. The MI325X runs and the
 first three MI250 runs scanned the input tensors for their statistics. The
 recipe path that ships (see "What the harness feeds it") ran on a fourth
 MI250 run, which repeats one of its seed sets, and on the final revision on an
@@ -222,16 +243,17 @@ MI308X:
 | MI308X (gfx942) | 1 (the bundles' own seeds) | recipe, final revision | 0 |
 
 The MI308X run (filter `*_ConvolutionFwd*.*_bf16_*:*_ConvolutionFwd*.*_fp16_*-*.X3_*`,
-MIOpen engine) selected 2,826 cases: 1,803 passed, 7 failed and 1,016 were
+MIOpen engine, on the #14424 bundles) selected 2,826 cases: 1,803 passed, 7 failed and 1,016 were
 skipped (848 the engine does not rank, 168 quarantined in the TOML).
 
-The fused convolution graphs `ConvolutionFwdPointwise` Variant2 to Variant6
-(a bias or an activation, or both, after the convolution; only Variant3
-multiplies, by the scale) have no engine run in this table: on gfx942 the
-MIOpen engine ranks no engine for any of their half and bfloat16 cases, so the
-0.5 scale of Variant3 has been graded only in host unit tests with mocked
-engine output. The first engine and
-architecture that executes them should add the headroom of those outputs here.
+In those bundles the fused convolution graphs `ConvolutionFwdPointwise`
+Variant3 to Variant6 (a bias or an activation, or both, after the convolution;
+only Variant3 multiplies, by the scale) have no engine run in this table: on
+gfx942 the MIOpen engine ranks no engine for any of their half and bfloat16
+cases, so the 0.5 scale of Variant3 has been graded only in host unit tests
+with mocked engine output. The first engine and architecture that executes
+them should add the headroom of those outputs here. The bundles on `develop`
+have only `Default` and `Variant2`; their runs are below.
 
 On gfx942 every failure in those runs is an output MIOpen computes wrongly
 (values with the wrong sign), which also fails the fixed 0.1: the 3D
