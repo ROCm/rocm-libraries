@@ -4,8 +4,9 @@
 
 Checks that a FusedA2A: A2AGemm solution emits the shard loop, the enqueuer
 election, the SDMA ring instructions and the A2ASubRounds-dependent round
-count, flag-slot and sub-round instructions, and that the result assembles for
-gfx950.
+count, flag-slot and sub-round instructions, no tail loop, an LDS write-pointer
+reset in the round transition and, unless both A and B are DirectToLds, one
+barrier there, and that the result assembles for gfx950.
 """
 
 import math
@@ -60,8 +61,14 @@ def _sub_round_lines(subRounds):
     return lines
 
 
-def test_a2a_gemm_gfx950_emits_assembly():
-    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+def _transition(src):
+    start = src.index("/* A2A_TRANSITION begin */")
+    return src[start:src.index("label_A2ATransitionEnd:", start)]
+
+
+@pytest.mark.parametrize("group", [0, 1])
+def test_a2a_gemm_gfx950_emits_assembly(group):
+    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH, size_group_index=group)
     assert len(results) >= 1, f"Expected >=1 kernel, got {len(results)}"
     assert all(err == 0 for (_b, _s, err) in results), [
         (b, e) for (b, _s, e) in results if e != 0
@@ -76,14 +83,26 @@ def test_a2a_gemm_gfx950_emits_assembly():
         lines = src.splitlines()
         counts = {p: sum(1 for line in lines if re.fullmatch(p, line)) for p in expected}
         assert counts == expected, f"Kernel {base!r}: A2ASubRounds lines {counts} != {expected}"
+        assert "label_SkipTailLoopL:" not in src, f"Kernel {base!r}: tail loop emitted"
+        transition = _transition(src)
+        for tc in "AB":
+            reset = rf"^\w+ [sv]\[[sv]gprLocalWriteAddr{tc}\], .*$"
+            assert re.search(reset, transition, re.M), \
+                f"Kernel {base!r}: no LocalWriteAddr{tc} reset in the transition"
+        dtl = "/* DirectToLdsA=True */" in src and "/* DirectToLdsB=True */" in src
+        barriers = len(re.findall(r"^s_barrier\b", transition, re.M))
+        assert barriers == (0 if dtl else 1), \
+            f"Kernel {base!r}: {barriers} s_barrier in the transition, DirectToLds={dtl}"
 
 
-def test_a2a_gemm_gfx950_golden(snapshot):
+@pytest.mark.parametrize("group", [0, 1])
+def test_a2a_gemm_gfx950_golden(snapshot, group):
     """Order-invariant golden: pin {basename, err} for every emitted A2AGemm kernel."""
     digest = sorted(
         (
             {"basename": b, "err": e}
-            for (b, _s, e) in emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+            for (b, _s, e) in emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH,
+                                                       size_group_index=group)
         ),
         key=lambda d: d["basename"],
     )

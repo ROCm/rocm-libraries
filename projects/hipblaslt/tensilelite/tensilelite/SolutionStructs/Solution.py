@@ -4133,6 +4133,15 @@ class Solution(collections.abc.Mapping):
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockA"], state["AssertSummationElementMultiple"])
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockB"], state["AssertSummationElementMultiple"])
 
+    if state["ProblemType"]["FusedA2A"] == "A2AGemm":
+      asem = state["AssertSummationElementMultiple"]
+      if asem not in (1, state["DepthU"]):
+        reject(state, printRejectionReason,
+               "FusedA2A=A2AGemm requires AssertSummationElementMultiple 1 or DepthU (%u), got %u"
+               % (state["DepthU"], asem))
+        return
+      state["AssertSummationElementMultiple"] = state["DepthU"]
+
     # NoTailLoop parameter initialization.
     # If ASEM is multiple of DepthU TailLoop will not be used.
     # ASEM is final only from here on: depthUIteration raises it for DirectToVgpr

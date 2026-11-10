@@ -78,6 +78,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: {sizes: [3072, 2048, 1, 4096], world: 2}
           - Exact: {sizes: [3072, 2048, 1, 4096], world: 4}
+          - Exact: {sizes: [3072, 2048, 1, 4352], world: 4}
           - Exact: {sizes: [3072, 2000, 1, 4096], world: 2}
 
 LibraryLogic:

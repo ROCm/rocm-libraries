@@ -6689,27 +6689,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
     return pack
 
-  def tailReleaseMiscVgpr(self):
-    module = Module("tailReleaseMiscVgpr")
-    #add misc vgpr to vgprPool
-    self.vgprPool.add(self.states.startVgprMisc , \
-      self.states.startVgpr - self.states.startVgprMisc, "misc vgpr") # Add as available
-    module.addComment1("Tail: add MISC Vgpr [%u...%u) to pool" % \
-                      (self.states.startVgprMisc, self.states.startVgpr))
-    if self.states.a.startVgprLocalReadAddr > self.states.startVgpr:
-      # Not in the MISC. Release here.
-      self.vgprPool.add(self.states.a.startVgprLocalReadAddr , \
-        self.states.a.numVgprLocalReadAddr, "LocalReadAddrA vgpr") # Add as available
-      module.addComment1("Tail: add LocalReadAddrA Vgpr [%u...%u) to pool" % \
-                        (self.states.a.startVgprLocalReadAddr, self.states.a.startVgprLocalReadAddr + self.states.a.numVgprLocalReadAddr))
-    if self.states.b.startVgprLocalReadAddr > self.states.startVgpr:
-      # Not in the MISC. Release here.
-      self.vgprPool.add(self.states.b.startVgprLocalReadAddr , \
-        self.states.b.numVgprLocalReadAddr, "LocalReadAddrB vgpr") # Add as available
-      module.addComment1("Tail: add LocalReadAddrB Vgpr [%u...%u) to pool" % \
-                        (self.states.b.startVgprLocalReadAddr, self.states.b.startVgprLocalReadAddr + self.states.b.numVgprLocalReadAddr))
-    return module
-
   ##############################################################################
   # MXScaleVgprInterleave
   # v_wmma_scale costs one cycle when its two scale VGPRs share a VGPR bank (index % 8).
@@ -6994,7 +6973,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     self.removeSgprVarFromPool("SrdWS")
 
-    deferMiscVgprRelease = False
     if not kernel["NoTailLoop"]:
       ########################################
       # Tail Loop
@@ -7032,36 +7010,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       # Update local write pointers in case the upcoming global reads are writing directly to LDS:
       if kernel["PrefetchGlobalRead"]:
-        #TODO: TDM
-        module.addComment1("local write reset offsets a")
-        if not kernel["enableTDMA"]:
-          module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersA))
-          if kernel["ExpandPointerSwap"]:
-            # reset local write offset in asm code as well
-            module.add(self.localWriteResetOffsets(kernel, False, tensorParametersA))
-
-        module.addComment1("local write reset offsets b")
-        if not kernel["enableTDMB"]:
-          module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersB))
-          if kernel["ExpandPointerSwap"]:
-            # reset local write offset in asm code as well
-            module.add(self.localWriteResetOffsets(kernel, False, tensorParametersB))
-
-        if kernel["ProblemType"]["MXBlockA"]:
-          if not kernel["enableTDMA"]:
-            module.addComment1("local write reset offsets mxsa")
-            module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersA["MX"]))
-            if kernel["ExpandPointerSwap"]:
-              # reset local write offset in asm code as well
-              module.add(self.localWriteResetOffsets(kernel, False, tensorParametersA["MX"]))
-
-        if kernel["ProblemType"]["MXBlockB"]:
-          if not kernel["enableTDMA"]:
-            module.addComment1("local write reset offsets mxsb")
-            module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersB["MX"]))
-            if kernel["ExpandPointerSwap"]:
-              # reset local write offset in asm code as well
-              module.add(self.localWriteResetOffsets(kernel, False, tensorParametersB["MX"]))
+        module.add(self.localWriteResetOffsetsAB(kernel, tensorParametersA, tensorParametersB))
 
       # tail: global read
       # Check out VGPR for DTVA
@@ -7538,9 +7487,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       # FIXME: Add back.
       if mEnd == 1:
-        deferMiscVgprRelease = kernel["ProblemType"]["FusedA2A"] == "A2AGemm"
-        if not deferMiscVgprRelease:
-          module.add(self.tailReleaseMiscVgpr())
+        #add misc vgpr to vgprPool
+        self.vgprPool.add(self.states.startVgprMisc , \
+          self.states.startVgpr - self.states.startVgprMisc, "misc vgpr") # Add as available
+        module.addComment1("Tail: add MISC Vgpr [%u...%u) to pool" % \
+                          (self.states.startVgprMisc, self.states.startVgpr))
+        if self.states.a.startVgprLocalReadAddr > self.states.startVgpr:
+          # Not in the MISC. Release here.
+          self.vgprPool.add(self.states.a.startVgprLocalReadAddr , \
+            self.states.a.numVgprLocalReadAddr, "LocalReadAddrA vgpr") # Add as available
+          module.addComment1("Tail: add LocalReadAddrA Vgpr [%u...%u) to pool" % \
+                            (self.states.a.startVgprLocalReadAddr, self.states.a.startVgprLocalReadAddr + self.states.a.numVgprLocalReadAddr))
+        if self.states.b.startVgprLocalReadAddr > self.states.startVgpr:
+          # Not in the MISC. Release here.
+          self.vgprPool.add(self.states.b.startVgprLocalReadAddr , \
+            self.states.b.numVgprLocalReadAddr, "LocalReadAddrB vgpr") # Add as available
+          module.addComment1("Tail: add LocalReadAddrB Vgpr [%u...%u) to pool" % \
+                            (self.states.b.startVgprLocalReadAddr, self.states.b.startVgprLocalReadAddr + self.states.b.numVgprLocalReadAddr))
     elif self.states.tailloopInNll:
       # always emit the skip-tail-loop label for NoTailLoop + tailloopInNll
       module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, -1, None, emitEndLabelOnly=True))
@@ -7576,8 +7539,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     module.add(self.a2aTransitionPhase(kernel, tensorParametersA, tensorParametersB))
     module.add(self.closeA2AShardLoop(kernel))
-    if deferMiscVgprRelease:
-      module.add(self.tailReleaseMiscVgpr())
     module.add(self.a2aExitTally(kernel))
 
     # Drop GlobalReadIncs* from the free pool so endSummation's store-phase SRDs don't
@@ -11878,6 +11839,40 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   @abc.abstractmethod
   def localWriteResetOffsets(self, kernel, internalPointerSwap, tP):
     return ""
+
+  def localWriteResetOffsetsAB(self, kernel, tPA, tPB):
+    module = Module("localWriteResetOffsetsAB")
+    #TODO: TDM
+    module.addComment1("local write reset offsets a")
+    if not kernel["enableTDMA"]:
+      module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tPA))
+      if kernel["ExpandPointerSwap"]:
+        # reset local write offset in asm code as well
+        module.add(self.localWriteResetOffsets(kernel, False, tPA))
+
+    module.addComment1("local write reset offsets b")
+    if not kernel["enableTDMB"]:
+      module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tPB))
+      if kernel["ExpandPointerSwap"]:
+        # reset local write offset in asm code as well
+        module.add(self.localWriteResetOffsets(kernel, False, tPB))
+
+    if kernel["ProblemType"]["MXBlockA"]:
+      if not kernel["enableTDMA"]:
+        module.addComment1("local write reset offsets mxsa")
+        module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tPA["MX"]))
+        if kernel["ExpandPointerSwap"]:
+          # reset local write offset in asm code as well
+          module.add(self.localWriteResetOffsets(kernel, False, tPA["MX"]))
+
+    if kernel["ProblemType"]["MXBlockB"]:
+      if not kernel["enableTDMA"]:
+        module.addComment1("local write reset offsets mxsb")
+        module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tPB["MX"]))
+        if kernel["ExpandPointerSwap"]:
+          # reset local write offset in asm code as well
+          module.add(self.localWriteResetOffsets(kernel, False, tPB["MX"]))
+    return module
 
   ##############################################################################
   # Local Write in Prefetch Pass (PreLoop): Do It A/B

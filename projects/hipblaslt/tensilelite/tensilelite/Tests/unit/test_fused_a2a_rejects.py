@@ -251,6 +251,10 @@ _A2A_GEMM_GUARDS = [
     ({"WorkGroupMapping": -1}, "WorkGroupMapping >= 0", "gfx942"),
     ({"WorkGroupMappingXCC": 2}, "WorkGroupMappingXCC=1", "gfx942"),
     ({"SpaceFillingAlgo": [0]}, "SpaceFillingAlgo=[]", "gfx942"),
+    ({"AssertSummationElementMultiple": 16},
+     "AssertSummationElementMultiple 1 or DepthU (32), got 16", "gfx942"),
+    ({"AssertSummationElementMultiple": 64},
+     "AssertSummationElementMultiple 1 or DepthU (32), got 64", "gfx942"),
 ]
 
 
@@ -274,6 +278,15 @@ def test_a2a_gemm_rejects(_gp_gfx942, request, assembler, capsys, overrides, msg
     sol, out = _derive_a2a_gemm(request, assembler, capsys, arch=arch, **overrides)
     assert sol.get("Valid") is False
     assert "FusedA2A=A2AGemm requires " + msg in out
+
+
+@pytest.mark.parametrize("asem", [1, 32])
+def test_a2a_gemm_asem_set_to_depth_u(_gp_gfx942, request, assembler, capsys, asem):
+    sol, out = _derive_a2a_gemm(request, assembler, capsys,
+                                AssertSummationElementMultiple=asem)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol["AssertSummationElementMultiple"] == sol["DepthU"] == 32
+    assert sol["NoTailLoop"] is True
 
 
 def test_a2a_sub_rounds_accepted_with_a2a_gemm(_gp_gfx942, request, assembler, capsys):

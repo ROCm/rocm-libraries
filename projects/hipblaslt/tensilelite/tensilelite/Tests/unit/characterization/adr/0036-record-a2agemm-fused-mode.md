@@ -22,7 +22,7 @@ are gathered from the peers one shard at a time. Three changes in that PR reach 
 - The existing GemmA2A kernels' name suffix changes from `FusedA2A` to
   `GemmA2A`, which moves the two basenames in
   `test_fused_a2a_gfx950_char.ambr`; the new `test_a2a_gemm_loop_char.ambr`
-  pins the three A2AGemm kernels.
+  pins the four A2AGemm kernels, one golden per size group.
 
 Eight changed `.ambr` files exceed the threshold of three in
 `check_snapshot_diff.py` (AIHPBLAS-3876).

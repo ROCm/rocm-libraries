@@ -10278,6 +10278,9 @@ class KernelWriterAssembly(KernelWriter):
                          comment="feature shard - W, underflowing while below W"))
       module.add(SMinU32(dst=sgpr("A2AFeatIdx"), src0=sgpr("A2AFeatIdx"), src1=sgpr(rank),
                          comment="wrap the feature shard at W"))
+    if not (kernel["DirectToLdsA"] and kernel["DirectToLdsB"]):
+      module.add(self._syncThreads(kernel, "A2A round transition sync"))
+    module.add(self.localWriteResetOffsetsAB(kernel, tPA, tPB))
     for tP in (tPA, tPB):
       tc = tP["tensorChar"]
       module.add(self.localReadResetOffsets(kernel, tP))
