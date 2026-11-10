@@ -503,9 +503,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool wmmaQueueOn() const {
         return effectiveWmmaQueueDepth() > 1;
     }
-    unsigned dsReadPriority(const DAGNode* node) const {
-        return queueFillPolicyEnabled_ ? node->dsReadPriority : node->dsReadPriorityBaseline;
-    }
     // The refill line: cycles of queued WMMA work needed before a non-WMMA pick may issue.
     // Automatic (the option below 0): one WMMA short of a full queue, sized by the next WMMA's
     // latency, so a region that mixes WMMA latencies gets the line of the WMMA it refills for.
@@ -1905,13 +1902,13 @@ bool CDNA5ReadyQueue::issuableNow(DAGNode* node) const {
 // a queue fill. The best dsReadPriority wins, matching the load the phases would pick.
 bool CDNA5ReadyQueue::promoteDueLastDs() {
     // This promotion belongs to a region whose reset-time queue-fill policy was enabled. Without
-    // that policy, the baseline non-WMMA phase owns DS selection and priority.
+    // that policy, the normal non-WMMA phase owns DS selection.
     if (!queueFillPolicyEnabled_) return false;
     DAGNode* due = nullptr;
     for (DAGNode* n : localReadQueue) {
         if (!dsSpread_.due(n->id, wmmaIssuedCountThisRegion_)) continue;
         if (!dsWarClear(n) || !issuableNow(n) || dsReadInflight_.full()) continue;
-        if (!due || dsReadPriority(n) < dsReadPriority(due)) due = n;
+        if (!due || n->dsReadPriority < due->dsReadPriority) due = n;
     }
     if (!due) return false;
     promote(PromotePhase::NonWmmaFill, due, kLocalRead);
@@ -2001,7 +1998,7 @@ DAGNode* CDNA5ReadyQueue::bestDsRead() const {
         for (DAGNode* n : localReadQueue) {
             if (pass == 0 && spreadOn && !dsSpread_.released(n->id, wmmaIssuedCountThisRegion_))
                 continue;
-            if (!picked || dsReadPriority(n) < dsReadPriority(picked)) picked = n;
+            if (!picked || n->dsReadPriority < picked->dsReadPriority) picked = n;
         }
     }
     return picked;
@@ -3694,14 +3691,14 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         for (const auto& group : exclusiveBeforeGroups) clampPairHalf(group, /*waitHalf=*/false);
     }
 
-    // Install LockDsReadOrder only after the queue-fill gate selects the active DS priority plan.
-    // The requested constraints are merged into the DAG after onInitRegion returns.
+    // Install the single DS priority plan after the queue-fill gate. The requested constraints
+    // are merged into the DAG after onInitRegion returns.
     auto lockDsReadOrder = [&]() {
         if (!getPassContext().getPassFeatureConfig().dagFeatures.lockDsReadOrder) return;
         auto dsReadPriorityOf = [&](StinkyInstruction* inst) -> unsigned {
             auto it = deps.dag.instToId.find(inst);
             if (it == deps.dag.instToId.end()) return std::numeric_limits<unsigned>::max();
-            return dsReadPriority(&deps.dag.nodes[it->second]);
+            return deps.dag.nodes[it->second].dsReadPriority;
         };
         auto dagIdOf = [&](StinkyInstruction* inst) -> unsigned {
             auto it = deps.dag.instToId.find(inst);
@@ -3835,7 +3832,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         for (unsigned id = 0; id < deps.dag.nodes.size(); ++id)
             if (isDSRead(*deps.dag.nodes[id].inst)) dsOrder.push_back(id);
         std::stable_sort(dsOrder.begin(), dsOrder.end(), [&](unsigned a, unsigned b) {
-            return dsReadPriority(&deps.dag.nodes[a]) < dsReadPriority(&deps.dag.nodes[b]);
+            return deps.dag.nodes[a].dsReadPriority < deps.dag.nodes[b].dsReadPriority;
         });
         // The stage of a ds_load: opened by the barrier whose data it reads (the latest cut it
         // depends on), closed by the barrier it feeds (the earliest cut it must be drained
@@ -4073,7 +4070,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     planDsSpread();
     // Decide the reset-time queue fill only after the DS plan is complete. Promotion rules remain
     // pure decisions: they read this state and never disable or consume the pending fill. A
-    // rejected candidate restores the develop-compatible queue depth, DS priority, and stage plan.
+    // rejected candidate disables the fill and due-last-DS promotion, restores the unplanned
+    // barrier thresholds, and replans DS pacing. Hardware depth and DS priority do not change.
     if (wmmaQueueFillPending_ && !queueFillPolicy().has_value()) {
         if (queueFillHasConsumerDistance()) {
             setQueueFillPolicy(true);
