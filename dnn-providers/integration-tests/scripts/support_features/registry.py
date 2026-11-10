@@ -42,6 +42,7 @@ from support_features import (
     softmax,
     sdpa,
     sdpa_backward,
+    topk,
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
@@ -78,6 +79,7 @@ OPS: dict[str, ModuleType] = {
         softmax,
         sdpa,
         sdpa_backward,
+        topk,
     )
 }
 

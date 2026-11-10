@@ -47,5 +47,6 @@ typedef enum
     HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_EXT = 22, ///< Forward MoE grouped matmul
     HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_BWD_EXT = 23, ///< Backward MoE grouped matmul
     HIPDNN_OPERATION_TYPE_SOFTMAX_EXT = 25, ///< Softmax along the last dim
+    HIPDNN_OPERATION_TYPE_TOPK_EXT = 26, ///< Top-k selection along the last dim
     HIPDNN_OPERATION_TYPE_ROPE_FWD_EXT = 24, ///< Rotary position embedding forward
 } hipdnnOperationType_ext_t;

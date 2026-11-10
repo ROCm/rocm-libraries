@@ -26,6 +26,7 @@
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #include <hipdnn_frontend/attributes/RopeAttributes.hpp>
 #include <hipdnn_frontend/attributes/SoftmaxAttributes.hpp>
+#include <hipdnn_frontend/attributes/TopkAttributes.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
@@ -722,6 +723,13 @@ void graphBindings(nb::module_& m)
                 std::shared_ptr<graph::TensorAttributes> p,
                 graph::SoftmaxAttributes attributes) {
                  const auto outputs = graph.softmax(std::move(p), std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1]);
+             })
+        .def("topk",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> x,
+                graph::TopkAttributes attributes) {
+                 const auto outputs = graph.topk(std::move(x), std::move(attributes));
                  return nb::make_tuple(outputs[0], outputs[1]);
              })
         .def("custom_op", &graph::Graph::custom_op)

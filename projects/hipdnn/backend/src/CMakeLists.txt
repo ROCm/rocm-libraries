@@ -57,6 +57,7 @@ add_library(
     descriptors/RMSNormOperationDescriptor.cpp
     descriptors/SdpaBwdOperationDescriptor.cpp
     descriptors/SdpaFwdOperationDescriptor.cpp
+    descriptors/TopkOperationDescriptor.cpp
     descriptors/TensorDescriptor.cpp
     descriptors/NodeFactory.cpp
     descriptors/VariantDescriptor.cpp

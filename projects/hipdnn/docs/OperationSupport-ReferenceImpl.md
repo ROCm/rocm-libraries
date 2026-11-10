@@ -37,6 +37,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Matmul | FP16, BFP16, FP32 | Any rank >= 2 | CPU Reference | Batch dims broadcast; ragged tensors rejected |
 | MoE Grouped Matmul Forward | FP16, BFP16, FP32 | Op-defined | CPU Reference | Ragged tensors rejected |
 | MoE Grouped Matmul Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference |  |
+| Top-k | FP16, BFP16, FP32 x/values; INT32, INT64 indices | Any rank >= 1 | CPU Reference | Along the last dim; sorted best-first, ties keep the lower index; NaN compares greater than every number; values output optional; compares in FP32; ragged tensors rejected |
 | RoPE Forward | FP16, BFP16, FP32 x/y; FP32 freqs | Any rank >= 2 | CPU Reference | Rotate-half on `[o, o + rope_dim)` of the last dim (`o` = `rope_offset`, default `D - rope_dim`); freqs broadcast over non-last dims; computes in FP32; ragged tensors rejected |
 | Softmax | FP16, BFP16, FP32 p; same type or FP32 s; FP32 stats | Any rank >= 1 | CPU Reference | Along the last dim, max-subtracted in FP32; optional log-sum-exp stats (`stats_use_log2`: log2 units); a fully `-inf` row gives s = 0 and stats = -inf; NaN propagates within its row; ragged tensors rejected |
 | Layernorm Forward | FP16, BFP16, FP32 | All | CPU Reference | Normalizes the trailing `normalizedDimCount` dims; mean/inv-variance outputs optional |
@@ -96,6 +97,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Operation | Plan Builder | Signature Key | Description |
 |-----------|-------------|---------------|-------------|
 | Reduction | `ReductionPlanBuilder` | `ReductionSignatureKey` | Reduction over the dimensions where the output size is 1 |
+| Top-k | `TopkPlanBuilder` | `TopkSignatureKey` | Selects the k largest or smallest entries of each last-dim row, sorted best-first |
 | Resample Forward | `ResampleFwdPlanBuilder` | `ResampleFwdSignatureKey` | Pooling-style resampling |
 | Resample Backward | `ResampleBwdPlanBuilder` | `ResampleBwdSignatureKey` | Resampling gradient |
 | SDPA Forward (dense) | `SdpaFwdPlanBuilder` | `SdpaFwdSignatureKey` | Scaled dot-product attention forward pass |

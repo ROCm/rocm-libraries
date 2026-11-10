@@ -556,6 +556,15 @@ TEST(TestOperationUnpacker, CreateNodeForTypeCreatesSoftmaxNode)
     EXPECT_EQ(node->getNodeType(), NodeType::SOFTMAX);
 }
 
+TEST(TestOperationUnpacker, CreateNodeForTypeCreatesTopkNode)
+{
+    const GraphAttributes graphAttrs;
+    const auto [node, error] = createNodeForType(HIPDNN_OPERATION_TYPE_TOPK_EXT, graphAttrs);
+    EXPECT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getNodeType(), NodeType::TOPK);
+}
+
 TEST(TestOperationUnpacker, CreateNodeForTypeCreatesRopeNode)
 {
     const GraphAttributes graphAttrs;

@@ -239,6 +239,7 @@ The tool ships with validated configs for all current operations:
 | `resample_bwd.yaml` | Resample backward |
 | `moe_grouped_matmul.yaml` | MoE grouped matrix multiplication |
 | `moe_grouped_matmul_bwd.yaml` | MoE grouped matrix multiplication backward |
+| `topk.yaml` | Top-k selection along the last dim |
 | `rope.yaml` | Rotary position embedding (RoPE) forward |
 | `softmax.yaml` | Softmax over the last dim with optional log-sum-exp stats |
 | `sdpa.yaml` | Scaled dot-product attention |

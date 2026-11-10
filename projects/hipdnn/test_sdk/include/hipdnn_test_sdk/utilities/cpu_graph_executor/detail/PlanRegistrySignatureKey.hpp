@@ -33,6 +33,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaRaggedFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SoftmaxSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/TopkSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::detail
 {
@@ -63,6 +64,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               MoeGroupedMatmulSignatureKey,
                                               MoeGroupedMatmulBwdSignatureKey,
                                               SoftmaxSignatureKey,
+                                              TopkSignatureKey,
                                               RopeSignatureKey,
                                               PointwiseSignatureKey,
                                               RMSNormFwdSignatureKey,

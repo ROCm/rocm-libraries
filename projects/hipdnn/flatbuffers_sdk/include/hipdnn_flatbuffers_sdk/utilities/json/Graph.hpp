@@ -35,6 +35,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/SdpaBackwardAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/SoftmaxAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/TensorAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/TopkAttributes.hpp>
 #include <optional>
 
 namespace hipdnn_flatbuffers_sdk::data_objects
@@ -67,6 +68,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::MoeGroupedMatmulAttributes, "MoeGroupedMatmulAttributes"},
      {NodeAttributes::MoeGroupedMatmulBwdAttributes, "MoeGroupedMatmulBwdAttributes"},
      {NodeAttributes::SoftmaxAttributes, "SoftmaxAttributes"},
+     {NodeAttributes::TopkAttributes, "TopkAttributes"},
      {NodeAttributes::GdnAttributes, "GdnAttributes"},
      {NodeAttributes::KdaAttributes, "KdaAttributes"},
      {NodeAttributes::NONE, ""}})
@@ -157,6 +159,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::SoftmaxAttributes:
         nodeJson = *node.attributes_as_SoftmaxAttributes();
+        break;
+    case data_objects::NodeAttributes::TopkAttributes:
+        nodeJson = *node.attributes_as_TopkAttributes();
         break;
     case data_objects::NodeAttributes::GdnAttributes:
         nodeJson = *node.attributes_as_GdnAttributes();
@@ -264,6 +269,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::MoeGroupedMatmulBwdAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::SoftmaxAttributes:
             return to<data_objects::SoftmaxAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::TopkAttributes:
+            return to<data_objects::TopkAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::GdnAttributes:
             return to<data_objects::GdnAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::KdaAttributes:

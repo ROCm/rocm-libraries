@@ -1,0 +1,20 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+// Top-k selection along the last dim. cuDNN has no equivalent, so the backend names carry
+// the _EXT suffix. Writes the k largest (largest = true) or smallest entries of each row,
+// sorted best-first; equal values keep the lower index first, so the result is deterministic.
+// NaN compares greater than every number. k = 1 with largest = true is argmax.
+table TopkAttributes {
+    x_tensor_uid:       long (cache_uid);
+    indices_tensor_uid: long (cache_uid);         // INT32 or INT64; dims of x with last dim k
+    values_tensor_uid:  long = null (cache_uid);  // dims of x with last dim k
+
+    k:       long;
+    largest: bool = true;
+}

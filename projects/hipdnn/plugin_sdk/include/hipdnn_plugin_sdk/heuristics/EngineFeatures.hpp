@@ -447,6 +447,13 @@ inline std::optional<double>
     return perElement(tensor(graph, op.p_tensor_uid()), 5.0);
 }
 
+// Top-k: one comparison per input element.
+inline std::optional<double>
+    nodeFlops(const Graph& graph, const hipdnn_flatbuffers_sdk::data_objects::TopkAttributes& op)
+{
+    return perElement(tensor(graph, op.x_tensor_uid()), 1.0);
+}
+
 template <typename TAttributes>
 std::optional<double> flopsOf(const Graph& graph, const TAttributes* op)
 {
@@ -540,6 +547,8 @@ inline std::optional<double> logicalFlops(const Graph& graph, const Node& node, 
         return flopsOf(graph, node.attributes_as_RopeAttributes());
     case NodeAttributes::SoftmaxAttributes:
         return flopsOf(graph, node.attributes_as_SoftmaxAttributes());
+    case NodeAttributes::TopkAttributes:
+        return flopsOf(graph, node.attributes_as_TopkAttributes());
     // A type this build predates. A member of this build's NodeAttributes reaching here has
     // neither a case nor a NO_COUNTING_CONVENTION entry, which TestEngineFeatures rejects.
     default:

@@ -1501,6 +1501,29 @@ typedef enum
     /** @} */
 
     /**
+     * @name Top-k Operation Attributes (4100-4199)
+     * Attributes for HIPDNN_BACKEND_OPERATION_TOPK_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor; top-k is taken along its last dimension */
+    HIPDNN_ATTR_OPERATION_TOPK_XDESC_EXT = 4100,
+
+    /** @brief Output indices tensor (INT32 or INT64); x dims with last dim k */
+    HIPDNN_ATTR_OPERATION_TOPK_INDICES_DESC_EXT = 4101,
+
+    /** @brief Optional output values tensor; x dims with last dim k */
+    HIPDNN_ATTR_OPERATION_TOPK_VALUES_DESC_EXT = 4102,
+
+    /** @brief Number of entries selected per row (HIPDNN_TYPE_INT64) */
+    HIPDNN_ATTR_OPERATION_TOPK_K_EXT = 4103,
+
+    /** @brief Select the largest (true, default) or smallest entries (HIPDNN_TYPE_BOOLEAN) */
+    HIPDNN_ATTR_OPERATION_TOPK_LARGEST_EXT = 4104,
+
+    /** @} */
+
+    /**
      * @name RoPE Forward Operation Attributes (3900-3999)
      * Attributes for HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR
      * @{

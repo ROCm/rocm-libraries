@@ -27,6 +27,7 @@
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/SoftmaxAttributes.hpp>
+#include <hipdnn_frontend/attributes/TopkAttributes.hpp>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
@@ -814,6 +815,32 @@ void attributesBindings(nb::module_& m)
         .def("get_stats", &graph::SoftmaxAttributes::get_stats)
         .def("get_stats_use_log2", &graph::SoftmaxAttributes::get_stats_use_log2)
         .def("get_generate_stats", &graph::SoftmaxAttributes::get_generate_stats);
+
+    // TopkAttributes
+    nb::class_<graph::TopkAttributes>(m, "TopkAttributes")
+        .def(nb::init<>())
+        .def("set_name", &graph::TopkAttributes::set_name, nb::rv_policy::reference_internal)
+        .def("get_name", &graph::TopkAttributes::get_name)
+        .def("set_compute_data_type",
+             &graph::TopkAttributes::set_compute_data_type,
+             nb::rv_policy::reference_internal)
+        .def("get_compute_data_type", &graph::TopkAttributes::get_compute_data_type)
+        .def("set_x",
+             static_cast<TensorSetter<graph::TopkAttributes>>(&graph::TopkAttributes::set_x),
+             nb::rv_policy::reference_internal)
+        .def("set_values",
+             static_cast<TensorSetter<graph::TopkAttributes>>(&graph::TopkAttributes::set_values),
+             nb::rv_policy::reference_internal)
+        .def("set_indices",
+             static_cast<TensorSetter<graph::TopkAttributes>>(&graph::TopkAttributes::set_indices),
+             nb::rv_policy::reference_internal)
+        .def("set_k", &graph::TopkAttributes::set_k, nb::rv_policy::reference_internal)
+        .def("set_largest", &graph::TopkAttributes::set_largest, nb::rv_policy::reference_internal)
+        .def("get_x", &graph::TopkAttributes::get_x)
+        .def("get_values", &graph::TopkAttributes::get_values)
+        .def("get_indices", &graph::TopkAttributes::get_indices)
+        .def("get_k", &graph::TopkAttributes::get_k)
+        .def("get_largest", &graph::TopkAttributes::get_largest);
 
     // PointwiseAttributes
     nb::class_<graph::PointwiseAttributes>(m, "PointwiseAttributes")

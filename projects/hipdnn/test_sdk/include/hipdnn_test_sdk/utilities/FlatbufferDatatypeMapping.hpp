@@ -44,6 +44,10 @@ constexpr auto datatypeToNative()
     {
         return int32_t{};
     }
+    else if constexpr(DT == DataType::INT64)
+    {
+        return int64_t{};
+    }
     else if constexpr(DT == DataType::BOOLEAN)
     {
         return bool{};
@@ -178,6 +182,10 @@ constexpr hipdnn_flatbuffers_sdk::data_objects::DataType nativeTypeToDataType()
     else if constexpr(std::is_same_v<T, int32_t>)
     {
         return hipdnn_flatbuffers_sdk::data_objects::DataType::INT32;
+    }
+    else if constexpr(std::is_same_v<T, int64_t>)
+    {
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::INT64;
     }
     else if constexpr(std::is_same_v<T, bool>)
     {
