@@ -156,7 +156,9 @@ void RunSelfContainedKernel(miopen::Handle& h, const std::string& params)
 
 } // namespace
 
-TEST(CPU_HipRtcSelfContained_NONE, RtCompilesInlineKernelWithoutHostStl)
+using CPU_HipRtcSelfContained_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_HipRtcSelfContained_NONE, RtCompilesInlineKernelWithoutHostStl)
 {
     auto&& h = get_handle();
 
@@ -202,3 +204,5 @@ TEST(CPU_HipRtcSelfContained_NONE, RtCompilesInlineKernelWithoutHostStl)
         RunSelfContainedKernel(h, "");
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_HipRtcSelfContained_NONE, testing::Values(0));

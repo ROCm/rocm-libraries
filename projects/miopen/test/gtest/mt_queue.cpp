@@ -50,7 +50,9 @@ void producer(int thread_idx, data_t<T>& common_data, ThreadSafeQueue<T>& comp_q
     }
 }
 
-TEST(CPU_UtilMultiThreadQueue_NONE, Basic)
+using CPU_UtilMultiThreadQueue_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_UtilMultiThreadQueue_NONE, Basic)
 {
     ThreadSafeQueue<int> comp_queue;
     int num_cons = 0;
@@ -79,3 +81,5 @@ TEST(CPU_UtilMultiThreadQueue_NONE, Basic)
         std::cout << tmp << std::endl;
     EXPECT_EQ(num_prod, num_cons);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_UtilMultiThreadQueue_NONE, testing::Values(0));
