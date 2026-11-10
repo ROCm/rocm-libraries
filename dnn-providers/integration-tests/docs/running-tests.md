@@ -684,7 +684,9 @@ components that opt in to `workloads` in TheRock
 (`miopenprovider`, `hipblasltprovider`) run it. Pull requests, pushes and the
 nightly schedule never select it. TheRock accepts `workloads` only from
 the TheRock commit that adds it (ROCm/TheRock#9312); with an older TheRock pin
-the run stops in setup with `Unrecognized test_filter value`.
+the run stops in setup with `Unrecognized test_filter value`. A manual run
+shares a concurrency group with the push run for the same commit, so the later
+run cancels the earlier one. Start it after that commit's push run finishes.
 
 hipBLASLt matmul graphs verify on the GPU reference (`GpuMatmulPlan`). On gfx90a
 the 578 `hipblaslt_*` graphs took about 4 minutes. `HIPBLASLT_ENGINE.toml` skips
