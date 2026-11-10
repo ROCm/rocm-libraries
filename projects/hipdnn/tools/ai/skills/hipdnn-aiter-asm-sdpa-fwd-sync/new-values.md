@@ -20,17 +20,17 @@ Stats (LSE) output is declined with a mask and in group mode. Recheck both rules
 
 ## Where the backward engine reads CSV values
 
-The backward builder resolves one row per stage (odo, dqdkdv, and dq_convert for the A32 accumulator) with `findConfig` and `computeDispatchTuples` in `plans/SdpaBwdPlanBuilder.cpp`.
+The backward builder resolves one row per stage with `resolveStageConfig` in `plans/SdpaBwdPlanBuilder.cpp`. The stages are odo (`findOdoConfig`), dqdkdv (`findDqdkdvConfig`) and the post stage `postStage` picks: dq_convert for A32, or dq_shuffle on gfx950 for A16 at head dims other than 64 (both through `findPostConfig`). Head dims are padded first (`paddedHeadDims`).
 
 | Column | What reads it | What to check for a new value |
 |---|---|---|
-| `dtype` | `tryGetDataTypeIdentifier` and the dtype gates in `SdpaBwdPlanBuilder::isApplicable`; `findConfig` | Which hipDNN tensor types map to the string |
-| `hdim_q`, `hdim_v` | The head-dim gates in `isApplicable` and `isBatchShapeSupported`; `findConfig`; `dispatchLogIndex` (`K_NUM_HDIMS`) | AITER pads head dims (`get_padded_hdim()`) and sends only some of them to ASM per arch (`aiter/ops/mha.py`). A new head dim may need its own block size and grid (`fmha_v3_bwd()`; for example hd256 on gfx950 launches 512 threads and no post stage) |
+| `dtype` | `tryGetDataTypeIdentifier` and the dtype gates in `SdpaBwdPlanBuilder::isApplicable`; `findOdoConfig`, `findDqdkdvConfig` and `findPostConfig` | Which hipDNN tensor types map to the string |
+| `hdim_q`, `hdim_v` | The head-dim gates in `isApplicable` and `isBatchShapeSupported`; `paddedHeadDims`, then `findOdoConfig`, `findDqdkdvConfig` and `findPostConfig`; `dispatchLogIndex` (`K_NUM_HDIMS`) | AITER pads head dims (`get_padded_hdim()`) and sends only some of them to ASM per arch (`aiter/ops/mha.py`). A new head dim may need its own block size and grid (`fmha_v3_bwd()`; for example hd256 on gfx950 launches 512 threads and no post stage) |
 | `mask` | `dqdkdvMaskOrdinal` (per arch) on top of the shared `plan_utils::getMaskType`; `dqdkdvMaskCoordinates` in `plans/SdpaBwdPlan.cpp`; `dispatchLogIndex` (`K_NUM_MASKS`) | A new ordinal is mapped in the backward dispatch only; `MaskType` and `getMaskType` in `plans/SdpaPlanUtils.hpp` are shared with forward and keep their values. Window masks take arch-specific `mask_y`/`mask_x` arguments in `fmha_v3_bwd()` |
 | `atomic32` | The accumulator (`toAccumulatorMode`, from the accumulator knob) | It also picks the post stage: dq_convert for A32; on gfx950, dq_shuffle for A16 at head dims other than 64 |
-| `pssk`, `pddv` | `computeDispatchTuples` | AITER chooses them in `get_heuristic_kernel()` from the padded head dims, the sequence lengths and the tile size, and the unpadded (`pssk=0`, `pddv=0`) kernels also need the stride equalities of `can_impl_fmha_v3_bwd` in `aiter/ops/mha.py` |
+| `pssk`, `pddv` | `findDqdkdvConfig`, with `requestedPssk` (the sequence and tile condition), `psskOffStridesMatch` (the stride equalities of the `pssk=0` rows) and `psskOffOffsetsFitU32` (the `pssk=0` rows form some (batch, head) offsets in 32 bits) | AITER chooses them in `get_heuristic_kernel()` from the padded head dims, the sequence lengths and the tile size, and the unpadded (`pssk=0`, `pddv=0`) kernels also need the stride equalities of `can_impl_fmha_v3_bwd` in `aiter/ops/mha.py`. `psskOffOffsetsFitU32` records which pointers the current `pssk=0` objects offset in 32 bits, taken from their disassembly: re-check it for every new or changed `pssk=0` object |
 | `mode` | Batch versus group (ragged) mode: `getBatchMode` and `isApplicable` | Group-mode rows need seqstart pointers, a `max_seqlen` grid and group dq_acc layouts |
-| `bf16_cvt` | `findConfig` | AITER matches `bf16_cvt == 3` (any rounding) or the requested rounding (`get_heuristic_kernel()`) |
+| `bf16_cvt` | `servesBf16Cvt` | AITER matches `bf16_cvt == 3` (any rounding) or the requested rounding (`get_heuristic_kernel()`) |
 | `ts` | `KernelTiles` in `plans/SdpaBwdParams.hpp`: each stage's grid, the dqdkdv `Ts` argument and its range check | `ts_qo` is not read by the backward engine |
 | `knl_name`, `co_name` | `buildPlan`: the symbol to load, and the archive key through `getKernelTocKey` | Nothing per value |
 
@@ -55,8 +55,8 @@ These diffs come from the module's host-code commit, so they repeat in every pla
 For `fmha_v3_bwd` the report diffs `get_padded_hdim()`, `get_heuristic_kernel()` and `fmha_v3_bwd()` in `csrc/cpp_itfs/mha_bwd.cu`, and the Python gates in `aiter/ops/mha.py`: `can_impl_fmha_v3_bwd()`, and `_flash_attn_backward()` and `_flash_attn_varlen_backward()` with the per-arch gates nested in them. `mha_bwd()`, the CK path, is never read.
 
 - Every `return -1` in `fmha_v3_bwd()` is a case AITER sends to CK. For each one the diff adds, make `SdpaBwdPlanBuilder::isApplicable` decline the same case, with a reason in its `HIP_KERNEL_RETURN_FALSE_IF` message.
-- The Python gates run first: a case they route to CK never reaches `fmha_v3_bwd()`. Mirror each as a decline too. At AITER v0.1.29 they include the stride equalities of the unpadded kernels, the gfx950 head-dim set, and `seqlen_q > 16`.
-- A changed `get_heuristic_kernel()` or `get_padded_hdim()` means `findConfig` and `computeDispatchTuples` must change the same way: the per-stage lookup keys, the `bf16_cvt` match, and the pssk/pddv choice with its fallback.
+- The Python gates run first: a case they route to CK never reaches `fmha_v3_bwd()`. Decline each new condition the same way when it is a kernel limit. A condition that only states a routing preference needs no decline; agree with the user which it is. At AITER v0.1.29 the kernel limits include the stride equalities of the unpadded kernels and the gfx950 head-dim set. The routing preferences the engine deliberately does not follow are listed in [structural.md](structural.md).
+- A changed `get_heuristic_kernel()` or `get_padded_hdim()` means `paddedHeadDims`, the `find*Config` lookups, `servesBf16Cvt` and `requestedPssk` must change the same way: the per-stage lookup keys, the `bf16_cvt` match, and the pssk/pddv choice with its fallback.
 - A removed `return -1` or a widened Python gate widens what AITER sends to ASM. The engine may follow, but only with rows and GPU tests that cover the new case.
 
 ## Rows dropped or removed

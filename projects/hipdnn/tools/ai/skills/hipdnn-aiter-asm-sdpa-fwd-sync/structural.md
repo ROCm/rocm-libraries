@@ -45,10 +45,12 @@ When every `reference_changed` diff of a module is ported, run `mark-ported --mo
 
 ## Python dispatch gate (`reference_changed`, tier 3)
 
-AITER also decides in Python whether a call reaches the ASM forward kernels: `can_impl_fmha_v3_fwd` in `aiter/ops/mha.py`, with one copy for batch mode and one for varlen (group) mode. The report diffs both from `abi_commit`. A case the gate rejects goes to CK, so port each new kernel limit as a decline in `SdpaFwdPlanBuilder::isApplicable`, as [new-values.md](new-values.md) describes for `fmha_fwd_v3()`.
+AITER also decides in Python whether a call reaches the ASM kernels: `can_impl_fmha_v3_fwd` in `aiter/ops/mha.py` for forward, with one copy for batch mode and one for varlen (group) mode, and `can_impl_fmha_v3_bwd`, `_flash_attn_backward` and `_flash_attn_varlen_backward` (with the per-arch gates nested in them) for backward. The report diffs all of them from `abi_commit`. A case a gate rejects goes to CK, so port each new kernel limit as a decline in the builder's `isApplicable`, as [new-values.md](new-values.md) describes for `fmha_fwd_v3()` and `fmha_v3_bwd()`. A condition that only states a routing preference needs no decline. The bullets below record the engine's choice for each gate condition that needed one, including the routing preferences it deliberately does not follow; keep them when a gate diff touches them.
 
 - The engine mirrors the hd192x128 K/V row-extent decline (2^32 bytes) on gfx942 and gfx950. Both gate copies compute the extent in the helper `_fmha_kv_byte_extent_ge_u32`, which the report diffs too.
 - The engine does not port the fp8 rule that `nhead_q / nhead_k` be a power of two. The gfx950 fp8 rows are excluded, and the gfx942 fp8 objects divide by the GQA ratio in full. Port the rule before enabling the gfx950 fp8 rows.
+- The engine serves backward at `seqlen_q <= 16` on both archs, although `_flash_attn_backward` sends it to CK: AITER chooses CK there for speed (its CK backward has an optimization for short queries), not correctness. `IntegrationGpuSdpaBackward.cpp` covers Sq = 1 and 16.
+- The engine serves the gfx942 backward windows with left bound 0 and right bound 0 or -1. `can_impl_fmha_v3_bwd` does not count them as windows, so they fall out of every ASM family; that is a classification artifact, and the gfx942 window kernel computes them like any other window (`isBatchWindowSupported` in `plans/SdpaBwdPlanBuilder.cpp`).
 
 ## New arch (`new_arch`, `cmake_arch_missing`)
 

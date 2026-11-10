@@ -21,10 +21,6 @@ leaves that whole CSV out.
 
 None.
 
-## Rows and CSVs kept despite a rule
-
-- `fmha_bwd_dq_shuffle.csv`
-
 ## SHA256 manifest (142 files)
 
 ```

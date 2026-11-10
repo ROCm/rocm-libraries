@@ -1061,6 +1061,63 @@ def test_backward_first_update_keeps_the_vendored_csvs(sync, env, capsys):
     ]
 
 
+def test_included_csv_keeps_its_rows_despite_a_csv_rule(sync, env, capsys):
+    """--include of a whole CSV that a pinned csv rule leaves out keeps its rows
+    and objects, and verify accepts the result."""
+    aiter, tree, kernels, cache, report = env
+    bwd_key = "gfx942/fmha_v3_bwd"
+    abi = base_upstream(aiter)
+    bwd_upstream(aiter)
+    base = aiter.commit("v0.1.1")
+    module = kernels / bwd_key
+    module.mkdir(parents=True)
+    (module / "fmha_bwd_dqdkdv.csv").write_text(f"{BWD_HEADER}\n{ROW_BWD}\n")
+    (module / ROW_BWD.split(",")[-1]).write_bytes(kernel(ROW_BWD))
+    first = ("--direction", "bwd", "--baseline", f"bwd={base}")
+    assert plan(sync, env, "v0.1.1", *first, "--abi-baseline", f"bwd={abi}") == 0
+    assert apply(sync, env) == 0  # pins {"csv": ["fmha_bwd_dq_shuffle.csv"]}
+
+    include = ("--include", bwd_key, "fmha_bwd_dq_shuffle.csv")
+    assert plan(sync, env, "v0.1.1", "--direction", "bwd", *include) == 0
+    assert apply(sync, env) == 0
+    assert (module / "fmha_bwd_dq_shuffle.csv").read_text() == (
+        f"{BWD_HEADER}\n{ROW_SHUFFLE}\n"
+    )
+    assert (module / "bwd_shuffle.co").read_bytes() == kernel(ROW_SHUFFLE)
+    capsys.readouterr()
+    assert run(sync, env, "verify", "--direction", "bwd") == 0
+
+
+def test_pin_keeps_only_includes_that_override_a_pinned_rule(sync, env):
+    """An include that only countered the first update's baseline overrides no
+    pinned rule afterwards, so it is not pinned."""
+    aiter, tree, kernels, cache, report = env
+    bwd_key = "gfx942/fmha_v3_bwd"
+    abi = base_upstream(aiter)
+    bwd_upstream(aiter)
+    base = aiter.commit("v0.1.1")
+    module = kernels / bwd_key
+    module.mkdir(parents=True)
+    (module / "fmha_bwd_dqdkdv.csv").write_text(f"{BWD_HEADER}\n{ROW_BWD}\n")
+    (module / ROW_BWD.split(",")[-1]).write_bytes(kernel(ROW_BWD))
+    first = ("--direction", "bwd", "--baseline", f"bwd={base}")
+    first += ("--abi-baseline", f"bwd={abi}")
+    include = ("--include", bwd_key, "fmha_bwd_dq_shuffle.csv")
+    assert plan(sync, env, "v0.1.1", *first, *include) == 0
+    assert apply(sync, env) == 0
+    pin = json.loads((kernels / "aiter_pins.json").read_text())["modules"][bwd_key]
+    assert "include" not in pin
+    assert (module / "fmha_bwd_dq_shuffle.csv").read_text() == (
+        f"{BWD_HEADER}\n{ROW_SHUFFLE}\n"
+    )
+
+    rule = ("--exclude", bwd_key, "csv=fmha_bwd_dq_shuffle.csv", "unused")
+    assert plan(sync, env, "v0.1.1", "--direction", "bwd", *rule, *include) == 0
+    assert apply(sync, env) == 0
+    pin = json.loads((kernels / "aiter_pins.json").read_text())["modules"][bwd_key]
+    assert pin["include"] == ["fmha_bwd_dq_shuffle.csv"]
+
+
 def test_baseline_scope_must_name_a_planned_module(sync, env, capsys):
     aiter, tree, kernels, cache, report = env
     base = base_upstream(aiter)

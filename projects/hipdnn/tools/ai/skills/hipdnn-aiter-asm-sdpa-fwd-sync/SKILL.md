@@ -22,7 +22,7 @@ Run it on each new AITER release, or when a GPU arch needs kernels.
 
 ## Rules
 
-1. **ASM kernels only, never CK.** Port only the prebuilt objects and CSV tables under AITER's `hsa/<arch>/<module>/`. Never port a CK kernel, CK host code, FlyDSL or Triton code. When AITER's `fmha_fwd_v3()` or `fmha_v3_bwd()` returns -1 for a case, or its Python layer (`aiter/ops/mha.py`, including the `can_impl_fmha_v3_fwd` and `can_impl_fmha_v3_bwd` gates) routes the case to CK, the engine must decline that case, not look for another kernel. The script enforces the parts it can see: it fetches only allowlisted `hsa/` modules, rejects any object with a CK symbol, and never copies upstream source.
+1. **ASM kernels only, never CK.** Port only the prebuilt objects and CSV tables under AITER's `hsa/<arch>/<module>/`. Never port a CK kernel, CK host code, FlyDSL or Triton code. When AITER's `fmha_fwd_v3()` or `fmha_v3_bwd()` returns -1 for a case, or its Python layer (`aiter/ops/mha.py`, including the `can_impl_fmha_v3_fwd` and `can_impl_fmha_v3_bwd` gates) routes the case to CK because of a kernel limit, the engine must decline that case, not look for another kernel. A gate that only states a routing preference (AITER picks CK there for speed) needs no decline; agree with the user which it is. [structural.md](structural.md) lists the routing preferences the engine deliberately does not follow. The script enforces the parts it can see: it fetches only allowlisted `hsa/` modules, rejects any object with a CK symbol, and never copies upstream source.
 2. **Ask which GPU archs to update.** Before planning, run `archs`, show the user the archs AITER ships tracked ASM modules for, and ask which archs and directions to update. Never pick them for the user. If the request already names archs, check each against that list and confirm.
 3. **Nothing changes the checkout until the user approves the plan report.** `plan` only writes a report. Run `apply` only after the user has read the report and approved its scope.
 4. **One approved code edit at a time.** Tier 2 and tier 3 findings need engine changes. Propose each change, with the finding it answers, and wait for approval.
@@ -36,7 +36,7 @@ Run it on each new AITER release, or when a GPU arch needs kernels.
 - **AITER ref** (`<aiter-ref>`): a release tag such as `v0.1.29`, or a commit. Default: the newest release, from `latest`.
 - **GPU archs** (`<archs>`): comma-separated, such as `gfx942,gfx950,gfx1250`. Always asked for; see rule 2.
 - **Direction** (`<direction>`): `fwd`, `bwd` or `all`. Default `all`.
-- **Baselines**: needed only on the first update of a module that has no pin yet. Modules with a pin use the pinned commits and ignore `--baseline`; the gfx942 and gfx950 `fmha_v3_fwd` modules are pinned. See "Baselines for a first update".
+- **Baselines**: needed only on the first update of a module that has no pin yet. Modules with a pin use the pinned commits and ignore `--baseline`. Every module the tree holds is pinned (gfx942 and gfx950 `fmha_v3_fwd` and `fmha_v3_bwd`), so these options matter only for a module vendored without a pin. See "Baselines for a first update".
 
 ## Two pinned commits per module
 
@@ -51,16 +51,9 @@ While `abi_commit` lags `commit`, plans report `abi_unported` at tier 3.
 
 `plan --baseline [<scope>=]<baseline-commit>` names the AITER commit an unpinned module's vendored files came from. It also seeds the host-code commit, unless `--abi-baseline [<scope>=]<abi-commit>` names a different one. `<scope>` is `fwd`, `bwd` or `<arch>/<module-name>`; without a scope the commit applies to every planned module. Repeat either option for several scopes; the most specific scope wins.
 
-Take the commits from the provenance table in `asm/asm_kernels/README.md` and the provenance comments of the engine's argument structs, and confirm them with the user:
+Take the commits from that module's own provenance (its `SOURCE.md` or the provenance comments of the engine code that uses it) and confirm them with the user. When the host code the engine mirrors is older than the objects, pass it as `--abi-baseline`; the first plan then reports `abi_unported` and diffs every mirrored function from that commit.
 
-| Direction | `--baseline` (objects) | `--abi-baseline` (host code) |
-|---|---|---|
-| Forward, gfx942 and gfx950 | `17d4a33b6f9535e820353ebc6217769efc3766d6` | same |
-| Backward, gfx942 and gfx950 | `cdcfa833bdf554ca75594c90dde4316ea9b50199` (v0.1.13) | `17d4a33b6f9535e820353ebc6217769efc3766d6` |
-
-`asm/SdpaFwdKernelArgs.hpp`, `asm/SdpaBwdKernelArgs.hpp` and `asm/SgprPadding.hpp` name `9522048` instead: a commit on an AITER side branch whose argument and padding structs are identical to those at `17d4a33`. The engine's MI308 detection and backward packing follow `17d4a33`, so `17d4a33` is the right host-code baseline for both directions. Because the backward host-code baseline is older than its objects, the first backward plan reports `abi_unported` and diffs every mirrored function from `17d4a33`.
-
-On a module's first update, upstream rows that existed at the baseline but are not in the tree are excluded automatically, with the reason "not vendored at baseline". So is an upstream CSV that existed at the baseline but is not in the tree, such as the backward `fmha_bwd_dq_shuffle.csv`. That keeps the deliberate subset the tree already holds. Rows and CSVs that are new since the baseline are always surfaced for a decision. Keep an excluded row or CSV with `--include`.
+On a module's first update, upstream rows that existed at the baseline but are not in the tree are excluded automatically, with the reason "not vendored at baseline". So is an upstream CSV that existed at the baseline but is not in the tree. That keeps the deliberate subset the tree already holds. Rows and CSVs that are new since the baseline are always surfaced for a decision. Keep an excluded row or CSV with `--include`.
 
 ## Helper script
 
@@ -83,7 +76,7 @@ Run it from inside the rocm-libraries checkout to update, or pass `--repo-root` 
 
 - `--baseline` and `--abi-baseline`: see "Baselines for a first update".
 - `--exclude <module> <match> <reason>`: leave matching upstream rows out. `<module>` is `<arch>/<module-name>`, such as `gfx942/fmha_v3_fwd`. `<match>` is `column=v1,v2`, with `;` between columns, such as `bf16_cvt=1,2`. The column `csv` matches the CSV file by its path in the module; `csv=<file>.csv` alone leaves the whole file out, header included.
-- `--include <module> <name>`: keep a row (`<name>` is its `knl_name`) or a whole CSV (`<name>` is its path, ending in `.csv`) that a rule or the baseline would leave out.
+- `--include <module> <name>`: keep a row (`<name>` is its `knl_name`) or a whole CSV (`<name>` is its path, ending in `.csv`) that a rule or the baseline would leave out. The pin keeps an include only while it overrides a pinned rule.
 - `--drop-exclude <module> <match>`: remove the pinned rule whose match is exactly `<match>`.
 
 An `--exclude` with the same match as a pinned rule replaces it.
@@ -122,13 +115,10 @@ python3 <skill-directory>/scripts/aiter_fwd_sync.py verify
 python3 <skill-directory>/scripts/aiter_fwd_sync.py mark-ported --module <module>
 ```
 
-For example, the first backward update of gfx942 and gfx950, keeping gfx950's dq_shuffle table:
+For example, a routine update of the pinned backward modules of gfx942 and gfx950:
 
 ```bash
-python3 <skill-directory>/scripts/aiter_fwd_sync.py plan --ref v0.1.29 --arch gfx942,gfx950 --direction bwd \
-    --baseline bwd=cdcfa833bdf554ca75594c90dde4316ea9b50199 \
-    --abi-baseline bwd=17d4a33b6f9535e820353ebc6217769efc3766d6 \
-    --include gfx950/fmha_v3_bwd fmha_bwd_dq_shuffle.csv \
+python3 <skill-directory>/scripts/aiter_fwd_sync.py plan --ref v0.1.30 --arch gfx942,gfx950 --direction bwd \
     --report <report-dir>/plan.json
 ```
 
@@ -137,7 +127,7 @@ python3 <skill-directory>/scripts/aiter_fwd_sync.py plan --ref v0.1.29 --arch gf
 Run `verify`, optionally with `--arch <archs>` and `--direction <direction>`. Report each `FAIL` line.
 
 - Before a module's first update it has no pin, so `verify` reports it as unpinned; the first `update` fixes that.
-- Every object must be named by a CSV row. A CSV with only a header, such as gfx942's `fmha_bwd_dq_shuffle.csv`, is valid and names none.
+- Every object must be named by a CSV row. A CSV with only a header is valid and names no object.
 
 ## Completion and handoff
 

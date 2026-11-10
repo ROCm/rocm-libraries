@@ -22,8 +22,8 @@ leaves that whole CSV out.
 | Match | Reason |
 |---|---|
 | `dtype` in fp8bf16 | gfx950 fp8 kernels take OCP fp8; the engine maps only FNUZ fp8 to fp8bf16 |
-| `knl_name` in _ZN5aiter26fmha_fwd_hd128_bf16_causalE | not vendored at baseline 17d4a33b6f95 |
-| `knl_name` in _ZN5aiter32fmha_fwd_hd192_hd128_bf16_causalE | not vendored at baseline 17d4a33b6f95 |
+| `knl_name` in _ZN5aiter26fmha_fwd_hd128_bf16_causalE | gfx950 bf16 batch-mode causal forward has not run on a gfx950 GPU; AITER serves it with ASM and the engine would dispatch it, so it stays out until a gfx950 GPU run validates it |
+| `knl_name` in _ZN5aiter32fmha_fwd_hd192_hd128_bf16_causalE | gfx950 bf16 batch-mode causal forward has not run on a gfx950 GPU; AITER serves it with ASM and the engine would dispatch it, so it stays out until a gfx950 GPU run validates it |
 
 ## SHA256 manifest (9 files)
 

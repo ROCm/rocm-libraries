@@ -382,10 +382,7 @@
         "fmha_bwd_dq_shuffle.csv": "28384a5ba09425c6ca1ae153f11f857c9102c8739c8d4d891653e5245d9d6dbc",
         "fmha_bwd_dqdkdv.csv": "e04e0129309071436795903e9392b719a3e901a2ac8df6a1e6bc0cf5039842e2",
         "fmha_bwd_odo.csv": "4f5e1a15f36b1e5270be026fd467ba754522c4d00e41f37d51818d600b63a856"
-      },
-      "include": [
-        "fmha_bwd_dq_shuffle.csv"
-      ]
+      }
     },
     "gfx950/fmha_v3_fwd": {
       "tag": "v0.1.29",
@@ -407,7 +404,7 @@
               "_ZN5aiter26fmha_fwd_hd128_bf16_causalE"
             ]
           },
-          "reason": "not vendored at baseline 17d4a33b6f95"
+          "reason": "gfx950 bf16 batch-mode causal forward has not run on a gfx950 GPU; AITER serves it with ASM and the engine would dispatch it, so it stays out until a gfx950 GPU run validates it"
         },
         {
           "match": {
@@ -415,7 +412,7 @@
               "_ZN5aiter32fmha_fwd_hd192_hd128_bf16_causalE"
             ]
           },
-          "reason": "not vendored at baseline 17d4a33b6f95"
+          "reason": "gfx950 bf16 batch-mode causal forward has not run on a gfx950 GPU; AITER serves it with ASM and the engine would dispatch it, so it stays out until a gfx950 GPU run validates it"
         }
       ],
       "files": {

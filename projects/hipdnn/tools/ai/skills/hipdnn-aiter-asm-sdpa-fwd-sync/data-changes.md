@@ -13,7 +13,7 @@ All paths below are relative to `dnn-providers/hip-kernel-provider/src/`.
    - Backward: the builder reads `ts` from each stage's registry (`KernelTiles` in `plans/SdpaBwdParams.hpp`) for that stage's grid, the dqdkdv `Ts` argument and the `Ts` range check in `isApplicable`. It does not read `ts_qo`. `TestSdpaBwdPlanGridMath.cpp` hard-codes tile sizes per arch and head dim.
 
    Update hard-coded expected values from the new CSV, never from the old test.
-4. **Know the coverage tests.** `TestSdpaFwdPlanBuilder.IsApplicableAvailableKernels` builds a graph for every forward registry row of the device's arch and requires the builder to accept it. So on a GPU of that arch, a kept row the engine cannot serve fails the unit tests. It builds fp8 rows with FNUZ inputs on every arch, so it cannot tell whether a row's fp8 encoding matches the gate. That test runs only on a matching GPU; without one, check the gates by reading them. The backward suites `TestSdpaBwdRegistryLookup` and `TestSdpaBwdRegistryLookupFp16` check that the builder resolves the expected row for the cases they name, and only those.
+4. **Know the coverage tests.** `TestSdpaFwdPlanBuilder.IsApplicableAvailableKernels` builds a graph for every forward registry row of the device's arch and requires the builder to accept it. So on a GPU of that arch, a kept row the engine cannot serve fails the unit tests. It builds fp8 rows with FNUZ inputs on every arch, so it cannot tell whether a row's fp8 encoding matches the gate. That test runs only on a matching GPU; without one, check the gates by reading them. The backward suite `TestSdpaBwdRegistryLookup` checks that the builder resolves the expected row for the cases it names, and only those.
 
 ## Per finding
 

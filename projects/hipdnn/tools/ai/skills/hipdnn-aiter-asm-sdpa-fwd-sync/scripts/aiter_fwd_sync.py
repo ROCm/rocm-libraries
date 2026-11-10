@@ -28,11 +28,8 @@ Exit codes: 0 success or clean, 1 verify found problems, 2 cannot run.
 Examples:
     python3 <skill>/scripts/aiter_fwd_sync.py latest
     python3 <skill>/scripts/aiter_fwd_sync.py archs --ref v0.1.29
-    python3 <skill>/scripts/aiter_fwd_sync.py plan --ref v0.1.29 \\
-        --arch gfx942,gfx950 --direction bwd \\
-        --baseline cdcfa833bdf554ca75594c90dde4316ea9b50199 \\
-        --abi-baseline 17d4a33b6f9535e820353ebc6217769efc3766d6 \\
-        --report /tmp/aiter-plan.json
+    python3 <skill>/scripts/aiter_fwd_sync.py plan --ref v0.1.30 \\
+        --arch gfx942,gfx950 --direction bwd --report /tmp/aiter-plan.json
     python3 <skill>/scripts/aiter_fwd_sync.py apply --report /tmp/aiter-plan.json
     python3 <skill>/scripts/aiter_fwd_sync.py verify
 """
@@ -292,7 +289,7 @@ REFERENCES: dict[str, tuple[Ref, ...]] = {
             "can_impl_fmha_v3_bwd",
             3,
             "Python gate of batch-mode ASM backward (stride equalities per kernel "
-            "variant); every case it sends to CK is a decline",
+            "variant); decline what is a kernel limit",
         ),
         Ref(
             "aiter/ops/mha.py",
@@ -300,7 +297,7 @@ REFERENCES: dict[str, tuple[Ref, ...]] = {
             "_flash_attn_backward",
             3,
             "batch-mode ASM or CK routing: the nested per-arch gates and the "
-            "seqlen_q gate; every case it sends to CK is a decline",
+            "seqlen_q gate; decline what is a kernel limit",
         ),
         Ref(
             "aiter/ops/mha.py",
@@ -308,7 +305,7 @@ REFERENCES: dict[str, tuple[Ref, ...]] = {
             "_flash_attn_varlen_backward",
             3,
             "group-mode ASM or CK routing: the nested can_impl_fmha_v3_bwd gates; "
-            "every case it sends to CK is a decline",
+            "decline what is a kernel limit",
         ),
     ),
 }
@@ -828,7 +825,11 @@ def cmake_archs(text: str) -> set[str]:
 def excluded_reason(
     csv_name: str, row: dict[str, str], rules: list[dict]
 ) -> str | None:
+    """The reason of a rule that leaves this row out. A rule that matches only
+    the CSV leaves the whole file out; csv_excluded_reason handles it."""
     for rule in rules:
+        if set(rule["match"]) == {CSV_KEY}:
+            continue
         if all(
             (csv_name if column == CSV_KEY else row.get(column)) in values
             for column, values in rule["match"].items()
@@ -1001,6 +1002,9 @@ def plan_module(
     excluded: list[dict] = []
     auto_rules: list[dict] = []
     kept_rows: dict[str, int] = {}
+    # The includes that keep something a pinned rule would leave out; only these
+    # go into the pin.
+    used_includes: set[str] = set()
     for name in sorted(set(up.csvs) | set(local.csvs if local else {})):
         up_csv = up.csvs.get(name)
         local_csv = local.csvs.get(name) if local else None
@@ -1015,7 +1019,11 @@ def plan_module(
             row["knl_name"]: row for row in (local_csv.rows if local_csv else [])
         }
         infer = base is not None and baseline["infer_exclusions"]
-        file_reason = None if name in includes else csv_excluded_reason(name, rules)
+        file_reason = csv_excluded_reason(name, rules)
+        if name in includes:
+            if file_reason is not None:
+                used_includes.add(name)
+            file_reason = None
         if (
             file_reason is None
             and name not in includes
@@ -1063,7 +1071,11 @@ def plan_module(
         dropped: set[str] = set()
         for row in up_csv.rows:
             knl = row["knl_name"]
-            reason = None if knl in includes else excluded_reason(name, row, rules)
+            reason = excluded_reason(name, row, rules)
+            if knl in includes:
+                if reason is not None:
+                    used_includes.add(knl)
+                reason = None
             if (
                 reason is None
                 and knl not in includes
@@ -1211,7 +1223,7 @@ def plan_module(
         "abi_baseline": abi_baseline["commit"] if abi_baseline else None,
         "exclude": rules,
         "auto_exclude": auto_rules,
-        "include": sorted(includes),
+        "include": sorted(used_includes),
         "excluded_rows": excluded,
         "csv_headers": {name: up.csvs[name].header for name in sorted(kept_csvs)},
         "csv_rows": {
@@ -1949,7 +1961,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar=("MODULE", "NAME"),
         help="keep a row (NAME is its knl_name) or a whole CSV (NAME is its path in "
-        "the module, ending in .csv) that a rule or the baseline would exclude",
+        "the module, ending in .csv) that a rule or the baseline would exclude; the "
+        "pin keeps an include only while it overrides a pinned rule",
     )
     plan.add_argument(
         "--drop-exclude",

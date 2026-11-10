@@ -12,7 +12,7 @@ Run the hip-kernel-provider unit tests with the `hipdnn-superbuild-test` skill (
 
 - Every update: the `TestAsmKpack*`, `TestAsmKernelPath`, `TestSdpaModuleCache`, `TestSdpaKernargRanges` and `TestAsmSdpaEngine` suites.
 - Forward modules: the `TestSdpaFwd*` suites.
-- Backward modules: the `TestSdpaBwd*` suites, among them `TestSdpaBwdKernelArgs` (argument layout), `TestSdpaBwdRegistryLookup` (registry lookups per arch), `TestSdpaBwdPlanGridMath` and `TestSdpaBwdPlanBuilder`.
+- Backward modules: the `TestSdpaBwd*` suites, among them `TestSdpaBwdOdoKernelArgs`, `TestSdpaBwdDqdkdvKernelArgs` and `TestSdpaBwdPostKernelArgs` (argument layout), `TestSdpaBwdRegistryLookup` (registry lookups per arch), `TestSdpaBwdPostStage`, `TestSdpaBwdPsskOffStrides`, `TestSdpaBwdPaddedHeadDims`, `TestSdpaBwdPlanGridMath` and `TestSdpaBwdPlanBuilder`.
 
 `TestAsmKpackLoading` needs no GPU: it opens the built archive of every arch in `ASM_SDPA_GPU_ARCHS`, so it checks packing for all of them on any machine. `TestSdpaFwdPlanBuilder.IsApplicableAvailableKernels`, the backward builder tests that need a device, and the other device tests check only the device's own arch, or skip. Check the GPU with `rocminfo` before saying a machine has no AMD GPU.
 
@@ -30,10 +30,10 @@ Every arch whose objects changed needs the GPU tests of each updated direction t
 
 ### Backward
 
-`IntegrationGpuSdpaBackward.cpp`: `IntegrationGpuSdpaBwdBf16` and `IntegrationGpuSdpaBwdFp16` (instance `Smoke`), checked against a CPU backward reference. Filter on `*IntegrationGpuSdpaBwd*`.
+`IntegrationGpuSdpaBackward.cpp`: `IntegrationGpuSdpaBwdBf16` and `IntegrationGpuSdpaBwdFp16` (instances `Smoke` and `Comprehensive`), checked against a CPU backward reference. Filter on `*IntegrationGpuSdpaBwd*`.
 
-- The cases come from a fixed list (`getSdpaBwdTestCases`), not from the registry. A changed object is covered only where a case reaches it, and a new row, head dim, mask or accumulator is covered only after a case for it is added. List the kept rows no case reaches.
-- The verified matrix in `asm/asm_kernels/README.md` and the `verified` predicate in `plans/SdpaBwdPlanBuilder.cpp` record which (dtype, head dim) pairs were calibrated against the CPU reference. Change them together, and only for pairs that passed on that arch.
+- The cases come from fixed lists (`getSdpaBwdSmokeTestCases` and `getSdpaBwdComprehensiveTestCases`), not from the registry. A changed object is covered only where a case reaches it, and a new row, head dim, mask or accumulator is covered only after a case for it is added. List the kept rows no case reaches.
+- The Verified Kernel Matrix in `asm/asm_kernels/README.md` and `K_VERIFIED_KERNELS` in `plans/SdpaBwdPlanBuilder.cpp` record which DQDKDV rows were calibrated against the CPU reference, keyed by arch, dtype, row hdim_q and row hdim_v. `isVerifiedDispatch` counts only psskddv rows run at their own head dims. Change the table and the array together, and only for rows whose cases passed on that arch.
 - Group-mode (varlen) rows are not exercised by these cases. Say so in the report when no other check covers them.
 
 ### Where to run them
