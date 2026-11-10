@@ -720,8 +720,8 @@ not, and the `atomic`, `linear` and `tree` reductions), paired with the
 Stream-K rules of `gemm_vector_fallback.py`: a TDM pipeline runs any shape with
 the `tdm` epilogue, but with `cshuffle` N must be a multiple of `tile_n`;
 non-TDM pipelines get fixed-vector-width variants for misaligned problems as in
-`gemm_universal`. The kernels run in `run_one_streamk_gemm_kernel.py`, which is
-the GEMM worker (same payload, verification and search options), on the
+`gemm_universal`. The kernels run in the common `run_one_gemm_kernel.py`
+worker (same payload, verification and search options), on the
 Stream-K ctypes library. `--list-pairs`, `--pairs` and plain runs work as for
 `gemm_universal`.
 
@@ -765,8 +765,20 @@ TDM section above. The node caveats above hold here too. Atomic reduction
 rounds every partial update to the output type, so with many splits a bf16 or
 fp16 output can exceed the default `--verify-tol` (2e-2): such a kernel is a
 `numeric_fail`, which the search learns to avoid; pass a larger
-`--verify-tol` to keep it. `streamk_gemm_full_benchmark.py` stays the
-exhaustive Stream-K sweep (its `--budget-pct` takes the same list).
+`--verify-tol` only with an application-appropriate accuracy requirement.
+
+For an exhaustive reference, use the same `gemm_full_benchmark.py $RUN` without
+`--search-config`/`--search-output-dir` (and without `--pairs` or a kernel cap).
+The legacy `streamk_gemm_full_benchmark.py` also remains an exhaustive sweep:
+its `--budget-pct` accepts the same list, and its `--reduction-strategy` filter
+is specific to that CLI. Both drivers pass the selected architecture to the
+worker; the legacy driver and shared search also request library identity
+checks. The legacy CSV keeps plain kernel names and a separate `budget_pct`
+column. The shared driver encodes non-100 budgets in `<kernel>@budget<pct>`
+names instead, including in `--list-pairs`/`winners.json` files accepted by
+`--pairs`. These are distinct output contracts, not interchangeable CSVs.
+`run_one_streamk_gemm_kernel.py` remains a compatibility entrypoint to the
+common worker for existing callers.
 
 ### Multi-GPU parallelism
 

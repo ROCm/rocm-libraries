@@ -1565,6 +1565,37 @@ def test_warm_start_cover_list_must_leave_trials_to_the_strategy(tmp_path):
     assert "from cover ['pipeline', 'persistent'])" in s.error
 
 
+def test_warm_start_pairs_cover_values_in_every_field(tmp_path):
+    picks = tmp_path / "picks.json"
+    picks.write_text(json.dumps({"P1": ["D", "E", "F", "A"]}))
+    calls = []
+    run(
+        tmp_path,
+        PipePersistAdapter({"P1": list(KERNELS[:9])}),
+        {},
+        calls=calls,
+        strategy="tpe",
+        pair_loader=json_pairs,
+        trials_per_problem=6,
+        warm_start={
+            "pairs_file": str(picks),
+            "top_k": 3,
+            "cover": ["pipeline", "persistent"],
+        },
+    )
+    # D/E/F cover all pipelines and persistent=True; the second field must
+    # add False, not repeat True or let top_k truncate the cover.
+    warm = calls[0]["warm"]
+    assert [w["tile_m"] for w in warm[:3]] == [rec(n)["tile_m"] for n in "DEF"]
+    assert len(warm) == 4 and warm[-1]["persistent"] is False
+    meta = strict(tmp_path / "out" / "run.json")["problems"]["P1"]
+    assert meta["warm_start"][:3] == ["D", "E", "F"]
+    assert meta["warm_cover"] == {
+        "pipeline": {},
+        "persistent": {"False": meta["warm_start"][-1]},
+    }
+
+
 @pytest.mark.parametrize("name", ["hill", "tpe", "gp", "de", "portfolio"])
 def test_warm_start_cover_reaches_the_real_strategies(tmp_path, name):
     # Every pipeline is measured before the strategy's own picks, whatever the

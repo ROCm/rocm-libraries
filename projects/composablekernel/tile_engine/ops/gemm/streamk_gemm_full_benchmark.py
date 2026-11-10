@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Full Stream-K GEMM benchmark sweep driven through the Dispatcher bridge.
 
 Same 3-phase architecture as ``gemm_full_benchmark.py`` -- Stream-K is a
@@ -155,7 +158,13 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
         for _, cfg, lib in batch
     ]
     payload = json.dumps(
-        {"items": items, "verify": args.verify, "verify_tol": args.verify_tol}
+        {
+            "items": items,
+            "verify": args.verify,
+            "verify_tol": args.verify_tol,
+            "arch": args.arch,
+            "check_identity": True,
+        }
     )
 
     env = base_env.copy()

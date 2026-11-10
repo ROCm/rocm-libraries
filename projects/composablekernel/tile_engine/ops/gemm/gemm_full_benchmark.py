@@ -138,9 +138,6 @@ VARIANT_SUPPORTED_LAYOUTS = {
     "gemm_preshuffle": ("rcr",),
     "gemm_streamk": ("rcr", "rrr", "crr", "ccr"),
 }
-# The worker that runs a variant's kernels (default: run_one_gemm_kernel.py).
-VARIANT_WORKERS = {"gemm_streamk": "run_one_streamk_gemm_kernel.py"}
-
 # Fallback problem set if a variant ships no example_problems.json.
 DEFAULT_PROBLEMS = [
     {"M": 1024, "N": 1024, "K": 1024},
@@ -732,14 +729,14 @@ def unique_built_kernels(configs, lib_paths):
     return kernels, len(built) - len(kernels)
 
 
-def worker_setup(variant=DEFAULT_VARIANT):
-    """The worker script of ``variant`` and its environment: the driver's,
+def worker_setup():
+    """The common GEMM worker script and its environment: the driver's,
     plus GEMM_PYPATH so the worker finds the dispatcher's python modules."""
     base_env = os.environ.copy()
     base_env["GEMM_PYPATH"] = os.pathsep.join(
         [str(_DISPATCHER_ROOT / "python"), str(_THIS_DIR)]
     )
-    return _THIS_DIR / VARIANT_WORKERS.get(variant, "run_one_gemm_kernel.py"), base_env
+    return _THIS_DIR / "run_one_gemm_kernel.py", base_env
 
 
 def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_path,
@@ -1295,7 +1292,7 @@ def main():
         }
         return run_gemm_search(
             args, search_settings, hooks, problems=problems, configs=all_configs,
-            eligible=eligible, devices=devices, worker=worker_setup(args.variant),
+            eligible=eligible, devices=devices, worker=worker_setup(),
             context=context,
         )
     print(f"  Build workers: {args.workers}")
@@ -1410,7 +1407,7 @@ def main():
         fail_writer.writerows(fails)
         fail_file.flush()
 
-    worker_path, base_env = worker_setup(args.variant)
+    worker_path, base_env = worker_setup()
     csv_path = Path(args.csv)
     # The hooks are passed only when asked for, so the call is unchanged otherwise.
     hooks = {}

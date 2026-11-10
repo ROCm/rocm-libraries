@@ -12,7 +12,7 @@ combinations exit 2; a search run measures only verified single-kernel batches
 of the pairs a full run would measure, writes a winners.json the driver's
 --pairs accepts, and exits 0 only when every problem has a confirmed winner.
 The gemm_streamk variant searches Stream-K kernels and their workgroup budgets
-(launch variants that share their kernel's build) through the Stream-K worker.
+(launch variants that share their kernel's build) through the common GEMM worker.
 Also: get_arch_filter_data no longer grows sys.path on every call.
 
 No GPU or compiler needed: the build and the GPU batch runner are stubbed, the
@@ -679,7 +679,7 @@ def test_streamk_default_configs_and_budget_option(monkeypatch, capsys, tmp_path
 def test_streamk_plain_run_measures_every_budget_of_one_build(monkeypatch, capsys,
                                                               tmp_path):
     # Without a search: every kernel is built once and measured once per
-    # budget, by the Stream-K worker; a --pairs file of budget variants
+    # budget, by the common GEMM worker; a --pairs file of budget variants
     # (a search's winners.json) is re-measured with the same --budget-pct.
     rc, cap, built, calls = _main(monkeypatch, capsys, tmp_path, SK_CONFIG, *STREAMK,
                                   "--budget-pct", "100,50", "--max-kernels", "2",
@@ -689,7 +689,7 @@ def test_streamk_plain_run_measures_every_budget_of_one_build(monkeypatch, capsy
     assert len(built) == len(set(built)) == 2 and all(n == _kernel(n) for n in built)
     names = [n for c in calls for n in c["names"]]
     assert sorted(names) == sorted(n for k in built for n in (k, f"{k}@budget50"))
-    assert {c["worker"][0].name for c in calls} == {"run_one_streamk_gemm_kernel.py"}
+    _assert_worker(calls)
     with open(tmp_path / "out.csv", newline="") as f:
         assert sorted(r["kernel"] for r in csv.DictReader(f)) == sorted(names)
     pick = tmp_path / "pick.json"
@@ -705,7 +705,9 @@ def test_streamk_plain_run_measures_every_budget_of_one_build(monkeypatch, capsy
                           str(pick), problems=PROBLEMS[:1], fixed=SK_BF16)
     assert rc == 1 and "and --budget-pct?" in cap.out
     fails = tmp_path / "fails.csv"
-    noop_batch = lambda *a, **kw: ([], [], 0, 0)
+    def noop_batch(*a, **kw):
+        return [], [], 0, 0
+
     failed = []
     rc, cap = run_stub_driver(
         drv, monkeypatch, capsys, tmp_path, [MISALIGNED], *STREAMK,
@@ -756,7 +758,7 @@ def test_streamk_search_tries_every_pipeline_and_persistent_value(monkeypatch, c
     # The example settings (fewer trials) on the gfx1250 TDM Stream-K config
     # with six budgets, end to end with the build and the GPU stubbed: cover
     # tries every pipeline and both persistent values on every problem first;
-    # only kernels are built, each once; the Stream-K worker measures.
+    # only kernels are built, each once; the common GEMM worker measures.
     import adaptive_search as AS
 
     example = AS.SearchSettings.from_json(SK_SETTINGS)
@@ -776,7 +778,7 @@ def test_streamk_search_tries_every_pipeline_and_persistent_value(monkeypatch, c
     assert run["context"]["budget_pct"] == BUDGETS
     assert run["settings"]["warm_start"]["cover"] == ["pipeline", "persistent"]
     assert kws and all(k["build_timeout"] == 300 for k in kws)
-    assert {c["worker"][0].name for c in calls} == {"run_one_streamk_gemm_kernel.py"}
+    _assert_worker(calls)
     assert all(c["extra"]["arch"] == "gfx1250" and c["batch_size"] == 1 for c in calls)
     for key, prob in zip(KEYS, PROBLEMS):
         tried = [kernels[c["names"][0]] for c in calls if c["prob"] == prob]

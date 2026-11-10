@@ -49,6 +49,8 @@ import gemm_search as GS  # noqa: E402
 import host_cache as HC  # noqa: E402
 import gemm_utils  # noqa: E402
 import run_one_gemm_kernel as worker  # noqa: E402
+import streamk_gemm_full_benchmark as legacy_streamk  # noqa: E402
+from _gemm_driver_stubs import run_stub_driver  # noqa: E402
 from gemm_utils import GemmKernelConfig  # noqa: E402
 
 BASE = GemmKernelConfig(gfx_arch="gfx950")
@@ -1195,15 +1197,104 @@ def test_streamk_budgets_share_one_build_and_reach_the_launch(tmp_path, monkeypa
     assert set(got) == {k1, k2} and [b["names"] for b in tc.builds] == [[k1, k2]]
     art = tmp_path / "out" / "artifacts"
     assert sorted(p.name for p in art.iterdir()) == sorted([f"{k1}.so", f"{k2}.so"])
-    out = ad.measure_pairs([_req(K1, n, i) for i, n in enumerate(SK_NAMES)])
+    requests = [_req(K1, n, i) for i, n in enumerate(SK_NAMES)]
+    out = ad.measure_pairs(requests)
+    confirmed = ad.confirm(requests)
     assert [(o.request.kernel_name, o.status, o.latency_ms) for o in out] == [
         (n, "ok", 100.0 / c.budget_pct) for n, c in zip(SK_NAMES, SK)]
-    assert seen == [(k1, 100), (k1, 50), (k2, 100), (k2, 50)]
+    assert [(o.request.kernel_name, o.status, o.latency_ms) for o in confirmed] == [
+        (n, "ok", 100.0 / c.budget_pct) for n, c in zip(SK_NAMES, SK)]
+    assert seen == [(k1, 100), (k1, 50), (k2, 100), (k2, 50)] * 2
     items = [it for p in tc.payloads for it in p["items"]]
     assert [(it["kernel_name"], it["env"]) for it in items] == [
-        (k, {ENV: str(c.budget_pct)}) for k, c in zip(SK_KERNELS, SK)]
+        (k, {ENV: str(c.budget_pct)}) for k, c in zip(SK_KERNELS, SK)] * 2
     assert all(p["check_identity"] for p in tc.payloads) and ENV not in os.environ
-    assert tc.loaded == [art / f"{k}.so" for k in SK_KERNELS]
+    assert tc.loaded == [art / f"{k}.so" for k in SK_KERNELS] * 2
+
+
+@pytest.mark.parametrize("mislabel", [False, True])
+def test_legacy_streamk_launch_pins_arch_and_checks_identity(
+    tmp_path, monkeypatch, mislabel
+):
+    cfg = SK[0].kernel_config
+    tc = Toolchain(tmp_path, monkeypatch, mislabel={cfg.name: B} if mislabel else None)
+    (lib,) = tc.build([cfg])
+    launches = []
+
+    def popen(argv, **kwargs):
+        launches.append((argv, kwargs["env"]))
+        return _InProcess(tc)
+
+    monkeypatch.setattr(
+        legacy_streamk,
+        "subprocess",
+        SimpleNamespace(**{**vars(drv.subprocess), "Popen": popen}),
+    )
+    path = GEMM_TE_DIR / "run_one_streamk_gemm_kernel.py"
+    rows, _, failed = legacy_streamk._run_batch_on_device(
+        "2",
+        (0, P1, [(0, cfg, lib)], 50),
+        _args(verify=True, arch="gfx1250"),
+        path,
+        {"GEMM_PYPATH": "modules"},
+    )
+    assert tc.payloads[0]["arch"] == "gfx1250"
+    assert tc.payloads[0]["check_identity"] is True
+    assert tc.arches == ["gfx1250"]
+    assert launches == [
+        (
+            [sys.executable, str(path)],
+            {"GEMM_PYPATH": "modules", "HIP_VISIBLE_DEVICES": "2", ENV: "50"},
+        )
+    ]
+    if mislabel:
+        assert failed == 1 and not rows
+        assert "identity mismatch" in tc.outputs[0]["error"]
+    else:
+        assert failed == 0
+        assert rows[0]["kernel"] == cfg.name and rows[0]["budget_pct"] == 50
+        assert rows[0]["verified"] is True
+
+
+def test_streamk_plain_repeat_top_keeps_each_budget(tmp_path, monkeypatch, capsys):
+    tc = Toolchain(tmp_path, monkeypatch)
+    rc, cap = run_stub_driver(
+        drv,
+        monkeypatch,
+        capsys,
+        tmp_path,
+        [P1],
+        "--variant",
+        "gemm_streamk",
+        "--budget-pct",
+        "100,50",
+        "--max-kernels",
+        "1",
+        "--no-vector-fallback",
+        "--repeat-top",
+        "2",
+        "--repeat-count",
+        "2",
+        "--verify",
+        build=tc.build,
+        run_batch=drv._run_batch_on_device,
+    )
+    assert rc == 0, cap.out
+    (kernel,) = tc.builds[0]["names"]
+    discovery, *repeats = tc.payloads
+    assert discovery["arch"] == "gfx950" and discovery["verify"] is True
+    assert len(repeats) == 4 and all(p["verify"] is False for p in repeats)
+    for payloads in ([discovery], repeats[:2], repeats[2:]):
+        assert sorted(
+            (it["kernel_name"], it["env"][ENV]) for p in payloads for it in p["items"]
+        ) == [(kernel, "100"), (kernel, "50")]
+    with open(tmp_path / "out.repeats.csv", newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert sorted((r["kernel"], r["rep"], r["ok"]) for r in rows) == sorted(
+        (name, str(rep), "1")
+        for name in (kernel, f"{kernel}@budget50")
+        for rep in range(2)
+    )
 
 
 def test_worker_checks_the_library_identity_only_when_asked(monkeypatch, capsys):
