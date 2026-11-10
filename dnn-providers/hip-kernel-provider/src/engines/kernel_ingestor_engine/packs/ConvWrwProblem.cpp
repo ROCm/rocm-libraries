@@ -9,6 +9,7 @@
 #include "engines/kernel_ingestor_engine/descriptors/conv/wrw/kernels/ConvWrwGeom.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -351,8 +352,26 @@ int64_t splitsWanted(int64_t blocksXY,
                 std::max<int64_t>(blocksXY, 1));
     wanted = std::min({wanted, std::max<int64_t>(1, steps / 4), MAX_GRID_YZ});
     const int64_t splitBytes = std::max<int64_t>(partialElems, 1) * int64_t{sizeof(float)};
-    wanted = std::min(wanted, std::max<int64_t>(1, MAX_WORKSPACE_BYTES / splitBytes));
-    return std::max<int64_t>(wanted, 1);
+    wanted = std::max<int64_t>(1, std::min(wanted, MAX_WORKSPACE_BYTES / splitBytes));
+    // Whole rounds of blocks over the units: of wanted / 2 .. wanted splits, the one whose
+    // grid leaves the least of its last round idle (the most splits on a tie). 10 splits of 64
+    // blocks on 304 units run 3 rounds for 2.1 rounds of work; 9 run 2 for 1.9.
+    const int64_t units = std::max<int64_t>(dispatchUnits, 1);
+    const int64_t blocks = std::max<int64_t>(blocksXY, 1);
+    int64_t best = wanted;
+    double bestUse = -1;
+    for(int64_t s = wanted; s >= std::max({int64_t{1}, wanted / 2, wanted - 64}); --s)
+    {
+        const double work = static_cast<double>(blocks) * static_cast<double>(s);
+        const double rounds = std::ceil(work / static_cast<double>(units));
+        const double use = work / (rounds * static_cast<double>(units));
+        if(use > bestUse + 1e-9)
+        {
+            best = s;
+            bestUse = use;
+        }
+    }
+    return best;
 }
 
 DirectPlan directPlanFor(int64_t tiles,

@@ -191,7 +191,8 @@ inline constexpr int64_t MAX_WORKSPACE_BYTES = int64_t{1} << 30;
 /// @p blocksPerUnit blocks per dispatch unit of a device of @p dispatchUnits, for @p steps
 /// reduction steps and @p partialElems partials per split: ceil(units x blocksPerUnit /
 /// blocksXY), at most steps / 4, 65535, and as many as keep the workspace within
-/// MAX_WORKSPACE_BYTES; at least 1.
+/// MAX_WORKSPACE_BYTES; at least 1. Then, of that count down to half of it (64 counts at most),
+/// the one whose grid best fills its last round of dispatchUnits blocks (the most on a tie).
 int64_t splitsWanted(int64_t blocksXY,
                      int64_t blocksPerUnit,
                      int64_t steps,

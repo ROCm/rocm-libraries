@@ -1692,6 +1692,14 @@ TEST(TestConvWrwLaunch, TheSplitPlannerFillsTheDeviceWithinItsCaps)
     EXPECT_EQ(conv_wrw::splitsWanted(1, 2, 1 << 20, int64_t{1} << 29, 304), 1);
     // A grid that fills the device alone is not split.
     EXPECT_EQ(conv_wrw::splitsWanted(10000, 2, 1 << 20, 1000, 304), 1);
+    // Whole rounds: 64 blocks at 2 per unit want 10 splits, 640 blocks, 3 rounds of 304 for
+    // 2.1 of work; 9 splits run 576 blocks in 2.
+    EXPECT_EQ(conv_wrw::splitsWanted(64, 2, 1 << 20, 1000, 304), 9);
+    // At 4 per unit: 19 splits, 1216 blocks, exactly 4 rounds.
+    EXPECT_EQ(conv_wrw::splitsWanted(64, 4, 1 << 20, 1000, 304), 19);
+    // An even fill keeps the wanted count: 3 blocks on 6 units at 2 per unit want 4 splits,
+    // 12 blocks in 2 whole rounds.
+    EXPECT_EQ(conv_wrw::splitsWanted(3, 2, 1 << 20, 1000, 6), 4);
 }
 
 TEST(TestConvWrwLaunch, TheConfigsBpuSetsTheSplits)
