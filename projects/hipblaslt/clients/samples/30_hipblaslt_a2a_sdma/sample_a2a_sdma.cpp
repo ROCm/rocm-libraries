@@ -77,6 +77,7 @@ namespace
 
     constexpr size_t kWorkspaceSize   = 32ull * 1024 * 1024;
     constexpr int    kSocketTimeoutSec = 30;
+    constexpr int    kSdmaRotate       = -1;
 
     // Ordered worst-last: combining two verdicts is a max.
     constexpr char kGo   = 0;
@@ -578,11 +579,14 @@ namespace
             {
                 const uint32_t rank    = ctx.rankBase + slot;
                 const uint32_t srcNode = TensileLite::Client::sdmaNodeIdForDevice(int(rank));
+                size_t         remote  = 0;
                 for(uint32_t j = 0; j < kWorld; ++j)
                 {
                     const uint32_t dstNode = TensileLite::Client::sdmaNodeIdForDevice(int(j));
                     owned.push_back(std::make_unique<TensileLite::Client::SdmaQueue>(
-                        srcNode, TensileLite::Client::sdmaSelectCheckedEngine(srcNode, dstNode)));
+                        srcNode,
+                        TensileLite::Client::sdmaQueueEngine(
+                            srcNode, dstNode, j == rank ? 0 : remote++, kSdmaRotate)));
                     const HsaQueueResource& q  = owned.back()->queueResource();
                     ctx.ranks[slot].queues[j]  = {owned.back()->ringBase(),
                                                   (void*)q.Queue_read_ptr_aql,
