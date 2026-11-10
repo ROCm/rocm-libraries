@@ -439,7 +439,7 @@ batch when `seq_len_q/kv` are set).
   means and which engines serve it.
 - **cuDNN:** frontend 1.24 requires both seq_len tensors with `padding_mask` (SEM-008), ragged operands included
   (`node/sdpa_support_surface.h`). cuDNN 9.25 / frontend 1.25 spell the same form `cu_seq_len_q` (cumulative query
-  offsets) + `seq_len_kv`; hipDNN will map that spelling once it lands in hipDNN (#14560).
+  offsets) + `seq_len_kv`; hipDNN will map that spelling once its frontend accepts `cu_seq_len_q`.
 - **PyTorch / AOTriton:** varlen attention packs Q through `cu_seqlens_q` and K/V through `cu_seqlens_k`; `seqused_k`
   gives each sequence's used keys (at most its K slot) and there is no `seqused_q`. AOTriton reads Q's lengths from
   `cu_seqlens_q` and K's from `seqused_k` (its `varlen_seqused_k` bits). vLLM's non-paged call has dense or packed

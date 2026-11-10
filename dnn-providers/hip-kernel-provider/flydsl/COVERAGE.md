@@ -989,7 +989,7 @@ table, the sequence extent still the longest sequence.
   above without `seq_len_q`, against the per-sequence and CPU references),
   `MirrorsSequsedKAtKeyOriginsInAnyOrder` (the same with K's origins out of order) and the
   frontend lane's `PackedWithSeqLenKvAlone` and `RaggedOrigins/*`.
-- **Per-batch origins in any order** (#15080's ragged rules, SEM-026; RDNA modification 37,
+- **Per-batch origins in any order** (SEM-026's ragged layout rules; RDNA modification 37,
   CDNA modification 47): `TestGpuFlydsl*Dispatch.PacksSequencesAtOriginsInAnyOrder` (RDNA
   prefill, CDNA) and `...MirrorsSequsedKAtKeyOriginsInAnyOrder` (RDNA prefill, aiw, CDNA) put
   Q's and K's sequences out of order with gaps between them and a last table entry of 0; the
