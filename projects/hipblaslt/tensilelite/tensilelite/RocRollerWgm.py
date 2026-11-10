@@ -63,17 +63,25 @@ NON_POW2_TILE_ROLES = (
 # command argument, and the library passes this constant.
 DEFAULT_WGM = 2
 
-# Direct command arguments already used by the non-WGM rocRoller kernels.
+# Command arguments rocRoller kernels read directly. rocRoller sizes A {M, K},
+# B {K, N}, scale A {M, K / block} and scale B {K / block, N}, and a kernel
+# reads only the stride that is not 1: index 0 for a "T" operand, index 1 for
+# an "N" one. Either one is the leading dimension Tensile's Stride*0 carries.
 DIRECT_COMMAND_ARGUMENT = {
     "Tensor_0_stride_0": ("int64", "StrideA0"),
+    "Tensor_0_stride_1": ("int64", "StrideA0"),
     "Tensor_0_pointer": ("address", "AddressA"),
     "Tensor_0_size_0": ("int64", "SizeFree0"),
     "Tensor_0_size_1": ("int64", "SizeSum"),
+    "Tensor_2_stride_0": ("int64", "StrideB0"),
     "Tensor_2_stride_1": ("int64", "StrideB0"),
     "Tensor_2_pointer": ("address", "AddressB"),
     "Tensor_2_size_1": ("int64", "SizeFree1"),
     "Tensor_4_stride_0": ("int64", "StrideScaleA0"),
+    "Tensor_4_stride_1": ("int64", "StrideScaleA0"),
     "Tensor_4_pointer": ("address", "AddressMXScaleA"),
+    "Tensor_4_size_1": ("int64", "SizeSumScaleA"),
+    "Tensor_7_stride_0": ("int64", "StrideScaleB0"),
     "Tensor_7_stride_1": ("int64", "StrideScaleB0"),
     "Tensor_7_pointer": ("address", "AddressMXScaleB"),
     "Tensor_10_stride_1": ("int64", "StrideC0"),

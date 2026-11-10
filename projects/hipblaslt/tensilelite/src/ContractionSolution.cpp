@@ -3535,6 +3535,18 @@ namespace TensileLite
                             : 1,
                         arg.type);
                     break;
+                // rocRoller sizes A's scale tensor {M, K / block} and reads the
+                // second extent; the division truncates as it does there.
+                case CustomArgSemantic::SizeSumScaleA:
+                    if(problem.mxBlockA() == 0)
+                        throw std::runtime_error(
+                            "SizeSumScaleA needs an MX block size for A");
+                    rv.args.appendCustomType(
+                        "SizeSumScaleA",
+                        problem.problemSizes()[problem.problemSizes().size() - 1]
+                            / problem.mxBlockA(),
+                        arg.type);
+                    break;
                 case CustomArgSemantic::StrideA0:
                     rv.args.appendCustomType("StrideA0", descriptorA.strides()[descriptorStrideAB], arg.type);
                     break;

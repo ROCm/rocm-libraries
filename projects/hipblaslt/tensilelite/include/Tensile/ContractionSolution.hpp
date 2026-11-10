@@ -205,7 +205,9 @@ namespace TensileLite
         X_MACRO(RR_SKAddressFlags) \
         /* int64 ceil(size/tile) for a non-power-of-two macrotile. Other RR_* kernargs are 32-bit. */ \
         X_MACRO(RR_NumTilesM) \
-        X_MACRO(RR_NumTilesN)
+        X_MACRO(RR_NumTilesN) \
+        /* K / mxBlockA, truncated: the K extent of A's MX scale tensor. */ \
+        X_MACRO(SizeSumScaleA)
 
     enum class CustomArgSemantic
     {

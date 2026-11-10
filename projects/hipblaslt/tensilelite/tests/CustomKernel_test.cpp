@@ -502,6 +502,22 @@ TEST(CustomKernelTest, ScaleStrideIsCompactForEitherBoundDimension)
     EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem), 4);
 }
 
+// rocRoller's non-TN MX kernels read the K extent of A's scale tensor, which
+// does not depend on the layout.
+TEST(CustomKernelTest, SizeSumScaleAIsTheScaleBlockCountAlongK)
+{
+    for(bool transA : {true, false})
+    {
+        SCOPED_TRACE(::testing::Message() << "transA=" << transA);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::SizeSumScaleA,
+                                     mxScaleProblem(64, 64, 128, transA, false)),
+                  4);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::SizeSumScaleA,
+                                     mxScaleProblem(64, 64, 96, transA, true)),
+                  3);
+    }
+}
+
 namespace
 {
     // Grid x and ComputeUnits kernarg of a persistent probe kernel.
