@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -68,18 +68,24 @@ rocsparse_status rocsparse::coosv_solve(rocsparse_handle            handle, // 0
                        (descr->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
 
-    rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = info->get_sorted_coo2csr_info();
-    if(sorted_coo2csr_info == nullptr)
-    {
-        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-            rocsparse_status_internal_error,
-            "sorted_coo2csr_info is not available, it looks like the analysis phase of this "
-            "algorithm was not previously executed.");
-    }
-
     const bool                use_32 = A->nnz < std::numeric_limits<int32_t>::max();
     const rocsparse_indextype csr_row_ptr_indextype
         = (use_32) ? rocsparse_indextype_i32 : rocsparse_indextype_i64;
+
+    // The analysis may have been run on another sparse matrix descriptor of the
+    // same matrix (rocsparse_sptrsv keeps it in its own descriptor), so this
+    // descriptor may not hold the CSR row pointer yet.
+    rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = info->get_sorted_coo2csr_info();
+    if(sorted_coo2csr_info == nullptr)
+    {
+        sorted_coo2csr_info
+            = new rocsparse::sorted_coo2csr_info_t(A->rows, csr_row_ptr_indextype, handle->stream);
+
+        // Assign it first, so that it is released with the descriptor if calculate fails.
+        info->set_sorted_coo2csr_info(sorted_coo2csr_info);
+        RETURN_IF_ROCSPARSE_ERROR(sorted_coo2csr_info->calculate(
+            handle, A->nnz, A->const_row_data, A->row_type, descr->base));
+    }
     const void*   csr_row_ptr        = sorted_coo2csr_info->get_row_ptr();
     const int64_t csr_row_ptr_stride = (A->offsets_batch_stride == 0) ? 0 : (A->rows + 1);
 

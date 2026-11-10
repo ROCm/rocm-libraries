@@ -330,4 +330,117 @@ INSTANTIATE(int64_t, float);
 INSTANTIATE(int64_t, double);
 INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
-void testing_sptrsv_coo_extra(const Arguments& arg) {}
+
+void testing_sptrsv_coo_extra(const Arguments& arg)
+{
+    // The compute stage must accept a sparse matrix descriptor other than the one
+    // passed to the analysis stage, for example after it was destroyed and
+    // recreated for the same matrix.
+    rocsparse_local_handle handle(arg);
+
+    // Lower triangular 4 x 4 matrix, and b = A * [1 2 3 4].
+    const int32_t              M   = 4;
+    const int32_t              nnz = 8;
+    const std::vector<int32_t> row_ind{0, 1, 1, 2, 2, 3, 3, 3};
+    const std::vector<int32_t> col_ind{0, 0, 1, 1, 2, 0, 2, 3};
+    const std::vector<double>  val{2, 1, 3, 1, 4, 1, 2, 5};
+    const std::vector<double>  b{2, 7, 14, 27};
+    const rocsparse_fill_mode  uplo  = rocsparse_fill_mode_lower;
+    const rocsparse_operation  trans = rocsparse_operation_none;
+    const rocsparse_sptrsv_alg alg   = rocsparse_sptrsv_alg_default;
+    const rocsparse_datatype   ttype = rocsparse_datatype_f64_r;
+    const double               alpha = 1.0;
+
+    host_dense_vector<int32_t> hrow_ind(nnz);
+    host_dense_vector<int32_t> hcol_ind(nnz);
+    host_dense_vector<double>  hval(nnz);
+    host_dense_vector<double>  hb(M);
+    host_dense_vector<double>  hy(M);
+    for(int32_t i = 0; i < nnz; ++i)
+    {
+        hrow_ind[i] = row_ind[i];
+        hcol_ind[i] = col_ind[i];
+        hval[i]     = val[i];
+    }
+    for(int32_t i = 0; i < M; ++i)
+    {
+        hb[i] = b[i];
+        hy[i] = i + 1;
+    }
+
+    device_dense_vector<int32_t> drow_ind(hrow_ind);
+    device_dense_vector<int32_t> dcol_ind(hcol_ind);
+    device_dense_vector<double>  dval(hval);
+    device_dense_vector<double>  db(hb);
+
+    for(const rocsparse_analysis_policy apol :
+        {rocsparse_analysis_policy_force, rocsparse_analysis_policy_reuse})
+    {
+        device_dense_vector<double> dy(M);
+        rocsparse_local_dnvec       x(db);
+        rocsparse_local_dnvec       y(dy);
+
+        rocsparse_sptrsv_descr sptrsv_descr;
+        CHECK_ROCSPARSE_ERROR(rocsparse_create_sptrsv_descr(&sptrsv_descr));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+                                                         sptrsv_descr,
+                                                         rocsparse_sptrsv_input_operation,
+                                                         &trans,
+                                                         sizeof(trans),
+                                                         nullptr));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(
+            handle, sptrsv_descr, rocsparse_sptrsv_input_alg, &alg, sizeof(alg), nullptr));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+                                                         sptrsv_descr,
+                                                         rocsparse_sptrsv_input_scalar_datatype,
+                                                         &ttype,
+                                                         sizeof(ttype),
+                                                         nullptr));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+                                                         sptrsv_descr,
+                                                         rocsparse_sptrsv_input_compute_datatype,
+                                                         &ttype,
+                                                         sizeof(ttype),
+                                                         nullptr));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+                                                         sptrsv_descr,
+                                                         rocsparse_sptrsv_input_analysis_policy,
+                                                         &apol,
+                                                         sizeof(apol),
+                                                         nullptr));
+
+        {
+            rocsparse_local_spmat A(M,
+                                    M,
+                                    nnz,
+                                    drow_ind,
+                                    dcol_ind,
+                                    dval,
+                                    rocsparse_indextype_i32,
+                                    rocsparse_index_base_zero,
+                                    ttype);
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)));
+            rocsparse_clients::sptrsv_analysis(handle, sptrsv_descr, A, x, y, nullptr);
+        }
+
+        {
+            rocsparse_local_spmat A(M,
+                                    M,
+                                    nnz,
+                                    drow_ind,
+                                    dcol_ind,
+                                    dval,
+                                    rocsparse_indextype_i32,
+                                    rocsparse_index_base_zero,
+                                    ttype);
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)));
+            rocsparse_clients::sptrsv_compute(
+                handle, sptrsv_descr, A, x, y, rocsparse_pointer_mode_host, &alpha, nullptr);
+        }
+
+        hy.near_check(dy);
+        CHECK_ROCSPARSE_ERROR(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
+    }
+}
