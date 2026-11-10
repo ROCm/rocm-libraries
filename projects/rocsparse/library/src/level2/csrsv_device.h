@@ -58,14 +58,6 @@ namespace rocsparse
         }
     }
 
-    // Number of blocks of BLOCKSIZE / WF_SIZE rows, one row per wavefront, that
-    // cover m rows. At least one, so an empty matrix still launches a valid grid.
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE>
-    __device__ __host__ __forceinline__ int64_t csrsv_block_count(int64_t m)
-    {
-        return (m - 1) / (BLOCKSIZE / WF_SIZE) + 1;
-    }
-
     // Row block id. CHUNKED kernels walk the contiguous chunk of row blocks
     // grid_x_chunk gives them, not a grid stride, because rows spin on the done
     // flags of earlier rows. Their ids are 64-bit; the others use hipBlockIdx_x.
@@ -400,7 +392,7 @@ namespace rocsparse
         {
             int64_t first;
             int64_t last;
-            rocsparse::grid_x_chunk(rocsparse::csrsv_block_count<BLOCKSIZE, WF_SIZE>(m),
+            rocsparse::grid_x_chunk(rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
                                     hipGridDim_x,
                                     hipBlockIdx_x,
                                     first,
@@ -460,7 +452,7 @@ namespace rocsparse
         {
             int64_t first;
             int64_t last;
-            rocsparse::grid_x_chunk(rocsparse::csrsv_block_count<BLOCKSIZE, WF_SIZE>(m),
+            rocsparse::grid_x_chunk(rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
                                     hipGridDim_x,
                                     hipBlockIdx_x,
                                     first,

@@ -91,7 +91,7 @@ namespace rocsparse
         {
             int64_t first;
             int64_t last;
-            rocsparse::grid_x_chunk(rocsparse::csrsv_block_count<BLOCKSIZE, WF_SIZE>(m),
+            rocsparse::grid_x_chunk(rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
                                     hipGridDim_x,
                                     hipBlockIdx_x,
                                     first,
@@ -196,7 +196,7 @@ namespace rocsparse
         dim3 csrsv_threads(BLOCKSIZE);
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
             handle,
-            rocsparse::csrsv_block_count<BLOCKSIZE, WF_SIZE>(m),
+            rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
             BLOCKSIZE,
             [&](auto chunked, uint32_t grid) -> rocsparse_status {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -272,7 +272,7 @@ namespace rocsparse
         const int64_t csr_val_inc = static_cast<int64_t>(1);
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
             handle,
-            rocsparse::csrsv_block_count<BLOCKSIZE, WF_SIZE>(m),
+            rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
             BLOCKSIZE,
             [&](auto chunked, uint32_t grid) -> rocsparse_status {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(

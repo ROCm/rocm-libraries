@@ -46,7 +46,7 @@ rocsparse_status launch_csrsv_analysis_upper_kernel(rocsparse_handle    handle,
     dim3 csrsv_threads(BLOCKSIZE);
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
         handle,
-        rocsparse::csrsv_block_count<BLOCKSIZE, WF_SIZE>(m),
+        rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
         BLOCKSIZE,
         [&](auto chunked, uint32_t grid) -> rocsparse_status {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -90,7 +90,7 @@ rocsparse_status launch_csrsv_analysis_lower_kernel(rocsparse_handle    handle,
     dim3 csrsv_threads(BLOCKSIZE);
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
         handle,
-        rocsparse::csrsv_block_count<BLOCKSIZE, WF_SIZE>(m),
+        rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
         BLOCKSIZE,
         [&](auto chunked, uint32_t grid) -> rocsparse_status {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
