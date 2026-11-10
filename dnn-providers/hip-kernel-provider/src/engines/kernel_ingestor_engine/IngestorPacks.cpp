@@ -37,6 +37,7 @@ const std::vector<IngestorPack>& ingestorPacks()
          &registerConvIgemmNchwSymbols,
          &resetConvIgemmNchwModuleCache},
         {"hipkernel:CONV_WRW", &registerConvWrwSymbols, &resetConvWrwModuleCache},
+        {"hipkernel:CONV_STEM_BWD", &registerConvStemBwdSymbols, &resetConvStemBwdModuleCache},
         {"hipkernel:CONV_WINOGRAD", &registerConvWinogradSymbols, &resetConvWinogradModuleCache},
         {"hipkernel:CONV_DIRECT", &registerConvDirectSymbols, &resetConvDirectModuleCache},
         {"hipkernel:CONV_SMALLC", &registerConvSmallcSymbols, &resetConvSmallcModuleCache},
