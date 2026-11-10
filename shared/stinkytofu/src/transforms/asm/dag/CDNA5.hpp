@@ -717,6 +717,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::vector<int> pipeOpCount_;
     // Resolved distance per rule: table value, else arch policy, else derived.
     std::vector<int> pipeOpDistance_;
+    // With DsRefillGate, the WMMA position in this region of the first WMMA that reads each
+    // ds_load node's destination; -1 for other nodes and for loads no WMMA of the region reads.
+    std::vector<int> firstReaderWmma_;
 
     WMMAIssueConfig wmmaIssueConfig;
 
@@ -865,7 +868,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void touchOperands(const StinkyInstruction& inst);
     int getMaxSrcDataWait(DAGNode* node) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
+    int pipeOpGateLeft(DAGNode* node) const;
     bool pipeOpGateBlocks(DAGNode* node) const;
+    bool refillDueBeforeGateOpens(DAGNode* ds) const;
     bool warGateRelieved(DAGNode* ds) const;
     bool dsWarClear(DAGNode* ds) const;
     // dagFeatures.prefetchLeadWmmas for this basic block (StageWmmaCounter, set in onInit).
@@ -1364,10 +1369,25 @@ bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
 
 // mode2 WAR gate relief: a gated load may issue before its pipe-op distance closes when its stage
 // is behind its even line (DsSpreadPacer), or when the region's last WMMA has issued, since no
-// later WMMA can close the gap.
+// later WMMA can close the gap. With DsRefillGate a stage behind its line releases the load only
+// when holding it would make its data late.
 bool CDNA5ReadyQueue::warGateRelieved(DAGNode* ds) const {
     if (wmmaTotalThisRegion_ > 0 && wmmaIssuedCountThisRegion_ >= wmmaTotalThisRegion_) return true;
-    return dsSpreadOn() && dsSpread_.behind(ds->id, wmmaIssuedCountThisRegion_) > 0;
+    if (!dsSpreadOn() || dsSpread_.behind(ds->id, wmmaIssuedCountThisRegion_) <= 0) return false;
+    if (!getPassContext().getPassFeatureConfig().dagFeatures.dsRefillGate) return true;
+    return refillDueBeforeGateOpens(ds);
+}
+
+// True when \p ds, held until its gate opens, would issue later than its data is due: the LDS
+// return time before the first WMMA of the region that reads it. WMMAs keep their order under
+// DsSpread, so the WMMAs left before that reader are its position less the ones issued.
+bool CDNA5ReadyQueue::refillDueBeforeGateOpens(DAGNode* ds) const {
+    const int reader = ds->id < firstReaderWmma_.size() ? firstReaderWmma_[ds->id] : -1;
+    if (reader < 0) return false;
+    const int drain =
+        dsReadDrainLatency() > 0 ? dsReadDrainLatency() : static_cast<int>(ds->inst->latencyCycles);
+    const int lead = latencyBudgetWmmas(drain, wmmaIssueConfig.latency);
+    return reader - wmmaIssuedCountThisRegion_ - lead < pipeOpGateLeft(ds);
 }
 
 // May \p ds issue without overwriting a register a queued WMMA still reads? Two checks, one answer:
@@ -1379,15 +1399,16 @@ bool CDNA5ReadyQueue::dsWarClear(DAGNode* ds) const {
     return !destOverlapsActiveWmmaSrc(ds);
 }
 
-// PipeOps hazard lanes: true when node is a rule.isConsumer whose dest regs are still
-// inside the gap opened by a rule.isProducer read. The gap is measured in issued pipe ops
-// (what va_vdst encodes), so no amount of elapsed time closes it -- only issuing another
-// isPipeOp instruction does. That is why this reports a veto rather than joining the
-// cycles wait channel of getMaxSrcDataWait.
-bool CDNA5ReadyQueue::pipeOpGateBlocks(DAGNode* node) const {
+// PipeOps hazard lanes: the pipe ops still to issue before node, a rule.isConsumer, may write
+// every dest reg a rule.isProducer read opened a gap on; 0 when it is clear. The gap is
+// measured in issued pipe ops (what va_vdst encodes), so no amount of elapsed time closes it --
+// only issuing another isPipeOp instruction does. That is why this is a veto rather than
+// joining the cycles wait channel of getMaxSrcDataWait.
+int CDNA5ReadyQueue::pipeOpGateLeft(DAGNode* node) const {
     // Nothing to recover without va_vsrc tracking: the gate is pure cost there.
-    if (!getPassContext().getPassFeatureConfig().dagFeatures.enableESM2TrackValuVsrc) return false;
-    if (node == nullptr) return false;
+    if (!getPassContext().getPassFeatureConfig().dagFeatures.enableESM2TrackValuVsrc) return 0;
+    if (node == nullptr) return 0;
+    int left = 0;
     for (int ruleIdx = 0; ruleIdx < hw_.hazards.numRules; ++ruleIdx) {
         const HazardRule& rule = hw_.hazards.rules[ruleIdx];
         if (rule.unit != HazardUnit::PipeOps || rule.dir != HazardDir::ReadThenWrite) continue;
@@ -1400,12 +1421,16 @@ bool CDNA5ReadyQueue::pipeOpGateBlocks(DAGNode* node) const {
                 continue;
             for (unsigned off = 0; off < dstReg.reg.num; ++off) {
                 auto it = gate.find(regDepKey(dstReg.reg.type, dstReg.reg.idx + off));
-                if (it != gate.end() && (pipeOpCount_[ruleIdx] - it->second) < distance)
-                    return true;
+                if (it != gate.end())
+                    left = std::max(left, distance - (pipeOpCount_[ruleIdx] - it->second));
             }
         }
     }
-    return false;
+    return left;
+}
+
+bool CDNA5ReadyQueue::pipeOpGateBlocks(DAGNode* node) const {
+    return pipeOpGateLeft(node) > 0;
 }
 
 // Advance each PipeOps lane whose isPipeOp matches, and stamp the regs this instruction
@@ -3113,6 +3138,23 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     remainingDs_.clear();
     regionWmmaWindows_.clear();
     regionNodeId_.clear();
+
+    firstReaderWmma_.assign(deps.dag.nodes.size(), -1);
+    if (getPassContext().getPassFeatureConfig().dagFeatures.dsRefillGate) {
+        std::vector<unsigned> wmmaIds;
+        for (unsigned n = 0; n < deps.dag.nodes.size(); ++n)
+            if (isMatrixInstruction(*deps.dag.nodes[n].inst)) wmmaIds.push_back(n);
+        for (unsigned n = 0; n < deps.dag.nodes.size(); ++n) {
+            if (!isDSRead(*deps.dag.nodes[n].inst)) continue;
+            const auto loaded = collectDestVGPRs(*deps.dag.nodes[n].inst);
+            for (size_t w = 0; w < wmmaIds.size(); ++w) {
+                if (wmmaIds[w] > n && srcVGPRsOverlap(*deps.dag.nodes[wmmaIds[w]].inst, loaded)) {
+                    firstReaderWmma_[n] = static_cast<int>(w);
+                    break;
+                }
+            }
+        }
+    }
 
     // A VALU feeding a WMMA (splat v_perm) issues no earlier than the WMMA
     // kWmmaParentValuLeadWindows before its first consumer: a v_perm in the window right before
