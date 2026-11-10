@@ -351,6 +351,10 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"Nchw3x3Wide", depthwise(3, {37, 70}, {3, 3}, {1, 1}, false)});
     cases.push_back({"Nchw5x5", depthwise(11, {19, 37}, {5, 5}, {2, 2}, false)});
     cases.push_back({"Nchw7x7", depthwise(10, {18, 35}, {7, 7}, {3, 3}, false)});
+    // Rows narrower than the backward-weights register strip (8 columns), the filter wider
+    // than the row.
+    cases.push_back({"Nhwc7x7Narrow", depthwise(20, {9, 5}, {7, 7}, {3, 3}, true)});
+    cases.push_back({"Nchw7x7Narrow", depthwise(10, {9, 5}, {7, 7}, {3, 3}, false)});
     cases.push_back({"Ndhwc3x3x3", depthwise(11, {5, 9, 10}, {3, 3, 3}, {1, 1, 1}, true)});
     cases.push_back({"Ncdhw3x3x3", depthwise(7, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, false)});
     cases.push_back({"Nhwc1d", depthwise(13, {23}, {5}, {2}, true)});
