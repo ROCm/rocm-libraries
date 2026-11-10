@@ -54,7 +54,7 @@ COMPONENTS = {
     "hipblaslt_logic_corpus": [
         "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/**",
         "projects/hipblaslt/scripts/run_tensile_logic_check.py",
-        "projects/hipblaslt/tensilelite/tensilelite/TensileLogic/**",
+        "projects/hipblaslt/tensilelite/tensilelite/logic/**",
         "projects/hipblaslt/tensilelite/tensilelite/CustomYamlLoader.py",
         "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/logic_corpus.py",
         "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/"

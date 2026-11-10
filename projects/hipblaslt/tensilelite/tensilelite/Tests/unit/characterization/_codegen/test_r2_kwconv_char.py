@@ -59,7 +59,7 @@ def test_kwconv_gfx942_helpers_emit():
     """
     import shutil
 
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.create_library.run import (
         generateKernelHelperObjects,
         generateKernelObjectsFromSolutions,
     )
@@ -70,7 +70,7 @@ def test_kwconv_gfx942_helpers_emit():
 
     sols = solutions_from_config(_CONFIG, arch=_ARCH, limit_solutions=8)
     # generateKernelHelperObjects takes the kernel objects (dict-like solutions),
-    # not the Solution objects directly — use the same path Run.py uses.
+    # not the Solution objects directly — use the same path create_library/run.py uses.
     kernels = generateKernelObjectsFromSolutions(sols)
     khos = generateKernelHelperObjects(kernels, cxx, iim)
     assert khos, "Expected >=1 helper kernel object from GSU>1 BBS config"
