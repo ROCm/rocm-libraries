@@ -7,7 +7,6 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/filesystem_checker.hpp>
 #include <miopen/logger.hpp>
-#include <miopen/process.hpp>
 #include <miopen/tmp_dir.hpp>
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -19,9 +18,10 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <mutex>
-#include <sstream>
+#include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -76,7 +76,8 @@ protected:
 
 namespace {
 
-#if MIOPEN_ENABLE_SQLITE_KERN_CACHE && defined(MIOPEN_CACHE_DIR) && !MIOPEN_DISABLE_USERDB
+#if GTEST_HAS_DEATH_TEST && MIOPEN_ENABLE_SQLITE_KERN_CACHE && defined(MIOPEN_CACHE_DIR) && \
+    !MIOPEN_DISABLE_USERDB
 struct ExitKernelCache
 {
     const miopen::TargetProperties* target = nullptr;
@@ -104,6 +105,41 @@ ExitKernelCache& ExpectedExitKernelCache()
     }
     std::_Exit(EXIT_FAILURE);
 }
+
+class ScopedProcessEnvironment
+{
+    const char* name;
+    std::optional<std::string> previous;
+
+public:
+    ScopedProcessEnvironment(const char* name_, const std::string& value) : name{name_}
+    {
+        if(const auto* old = std::getenv(name))
+            previous = old;
+#ifdef _WIN32
+        const auto status = _putenv_s(name, value.c_str());
+#else
+        const auto status = setenv(name, value.c_str(), 1);
+#endif
+        if(status != 0)
+            MIOPEN_THROW("Failed to set process environment variable: " + std::string{name});
+    }
+
+    ScopedProcessEnvironment(const ScopedProcessEnvironment&)            = delete;
+    ScopedProcessEnvironment& operator=(const ScopedProcessEnvironment&) = delete;
+
+    ~ScopedProcessEnvironment()
+    {
+#ifdef _WIN32
+        _putenv_s(name, previous ? previous->c_str() : "");
+#else
+        if(previous)
+            setenv(name, previous->c_str(), 1);
+        else
+            unsetenv(name);
+#endif
+    }
+};
 #endif
 
 class ScopedPathWarningLogging
@@ -259,52 +295,52 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(CPU_CachePathLifetimeDeathTest_NONE, SQLiteCacheSurvivesLateExitCallback)
 {
-#if MIOPEN_ENABLE_SQLITE_KERN_CACHE && defined(MIOPEN_CACHE_DIR) && !MIOPEN_DISABLE_USERDB
+#if GTEST_HAS_DEATH_TEST && MIOPEN_ENABLE_SQLITE_KERN_CACHE && defined(MIOPEN_CACHE_DIR) && \
+    !MIOPEN_DISABLE_USERDB
     constexpr const char* child_directory_env = "MIOPEN_TEST_CACHE_LIFETIME_DIR";
-    if(std::getenv(child_directory_env) != nullptr)
-    {
-        miopen::TargetProperties target;
-        target.Init(nullptr); // The architecture override avoids requiring a GPU.
-        const std::vector<char> binary(128, 'k');
-        auto& expected  = ExpectedExitKernelCache();
-        expected.target = &target;
-        expected.binary = &binary;
+    const auto* inherited_directory           = std::getenv(child_directory_env);
+    std::optional<miopen::TmpDir> directory;
+    if(inherited_directory == nullptr)
+        directory.emplace("sqlite cache lifetime");
+    const auto root = directory ? directory->path : fs::path{inherited_directory};
 
-        // Register before the first SQLite cache access so destructible cached
-        // paths would be torn down before this callback loads the saved payload.
-        if(std::atexit(CheckKernelCacheAtExit) != 0)
-            std::_Exit(EXIT_FAILURE);
-        miopen::SaveBinary(binary, target, 1, "exit-cache", "");
-        if(miopen::LoadBinary(target, 1, "exit-cache", "") != binary)
-            std::_Exit(EXIT_FAILURE);
-        std::exit(EXIT_SUCCESS);
-    }
+    // Native environment inheritance and Google Test's re-exec avoid shell
+    // quoting. The parent owns the directory, whose name deliberately contains spaces.
+    ScopedProcessEnvironment directory_env{child_directory_env, root.string()};
+    ScopedProcessEnvironment cache_env{"MIOPEN_CUSTOM_CACHE_DIR", (root / "kernel-cache").string()};
+    ScopedProcessEnvironment system_env{"MIOPEN_SYSTEM_DB_PATH",
+                                        (root / "missing-system-db").string()};
+    ScopedProcessEnvironment architecture{"MIOPEN_DEVICE_ARCH", "gfx942"};
+    ScopedProcessEnvironment enable_cache{"MIOPEN_DISABLE_CACHE", "0"};
+    ScopedProcessEnvironment enable_user_db{"MIOPEN_DEBUG_DISABLE_USER_DB", "0"};
+    ScopedProcessEnvironment log_level{"MIOPEN_LOG_LEVEL", "2"};
+    ScopedProcessEnvironment log_buffer{"MIOPEN_LOG_BUFFER_SIZE", "0"};
 
-    // Re-exec for cold state. The parent owns the directory and removes it only
-    // after the child exits and closes its SQLite connections, including on Windows.
-    miopen::TmpDir directory{"sqlite_cache_lifetime"};
-    const auto& argv = testing::internal::GetArgvs();
-    ASSERT_FALSE(argv.empty());
-    const auto executable = fs::absolute(argv.front());
-    const auto* test      = testing::UnitTest::GetInstance()->current_test_info();
-    const auto args       = std::string{"--gtest_filter="} + test->test_suite_name() + "." +
-                      test->name() + " --reset-sharding";
-    std::ostringstream output;
-    const auto status = miopen::Process{executable}(
-        args,
-        directory.path,
-        &output,
-        {{child_directory_env, directory.path.string()},
-         {"MIOPEN_CUSTOM_CACHE_DIR", (directory.path / "kernel-cache").string()},
-         {"MIOPEN_SYSTEM_DB_PATH", (directory.path / "missing-system-db").string()},
-         {"MIOPEN_DEVICE_ARCH", "gfx942"},
-         {"MIOPEN_DISABLE_CACHE", "0"},
-         {"MIOPEN_DEBUG_DISABLE_USER_DB", "0"},
-         {"MIOPEN_LOG_LEVEL", "2"},
-         {"MIOPEN_LOG_BUFFER_SIZE", "0"}});
-    EXPECT_EQ(status, EXIT_SUCCESS) << output.str();
+    const auto previous_style = GTEST_FLAG_GET(death_test_style);
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    EXPECT_EXIT(
+        {
+            miopen::TargetProperties target;
+            target.Init(nullptr); // The architecture override avoids requiring a GPU.
+            const std::vector<char> binary(128, 'k');
+            auto& expected  = ExpectedExitKernelCache();
+            expected.target = &target;
+            expected.binary = &binary;
+
+            // Register before the first SQLite cache access so destructible cached
+            // paths would be torn down before this callback loads the saved payload.
+            if(std::atexit(CheckKernelCacheAtExit) != 0)
+                std::_Exit(EXIT_FAILURE);
+            miopen::SaveBinary(binary, target, 1, "exit-cache", "");
+            if(miopen::LoadBinary(target, 1, "exit-cache", "") != binary)
+                std::_Exit(EXIT_FAILURE);
+            std::exit(EXIT_SUCCESS);
+        },
+        testing::ExitedWithCode(EXIT_SUCCESS),
+        "");
+    GTEST_FLAG_SET(death_test_style, previous_style);
 #else
-    GTEST_SKIP() << "SQLite user kernel cache is disabled in this build";
+    GTEST_SKIP() << "Death tests or the SQLite user kernel cache are disabled in this build";
 #endif
 }
 

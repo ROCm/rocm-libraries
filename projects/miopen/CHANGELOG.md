@@ -10,6 +10,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   synchronized path state is retained until process termination.
 * [DB] Fixed filesystem detection for missing relative cache and database paths by checking
   the current working directory when no named ancestor exists.
+* [DB] Fixed the SQLite kernel-cache shutdown regression test for build and temporary directory
+  paths containing spaces.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
