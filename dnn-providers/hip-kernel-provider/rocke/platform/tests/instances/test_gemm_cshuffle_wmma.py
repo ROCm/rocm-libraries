@@ -158,7 +158,11 @@ class TestCshuffleWmma(unittest.TestCase):
                 shuf = replace(base, trait=replace(base.trait, epilogue="cshuffle"))
                 ok, why = is_valid_spec(shuf, arch=arch)
                 self.assertFalse(ok, f"cshuffle must stay gated on {arch}")
-                self.assertIn("epilogue", why)
+                self.assertEqual(
+                    why,
+                    f"WMMA path does not support the 'cshuffle' epilogue on {arch} "
+                    "(supported on: gfx1250)",
+                )
 
     def test_cshuffle_widens_the_global_c_stores(self):
         """The point of the LDS round-trip: scalar global stores become vectors.
