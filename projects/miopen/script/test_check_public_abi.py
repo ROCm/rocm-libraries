@@ -1491,7 +1491,8 @@ def test_check_fails_a_flag_off_dll_with_a_different_export_set(tmp_path, capsys
 def test_check_fails_a_flag_off_dll_that_exports_an_impl_symbol(tmp_path, capsys):
     dll, baseline = write_flag_off_dll(tmp_path, extra_exports=("miopenFoo_impl",))
     assert abi.main(["check", str(dll), "--baseline", str(baseline)]) == 1
-    assert "*_impl symbols (private rename leaked)" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "FAIL: flag-off MIOpen.dll exported *_impl symbols" in out
 
 
 def test_dump_symbols_prints_the_public_exports_of_a_dll(tmp_path, capsys):

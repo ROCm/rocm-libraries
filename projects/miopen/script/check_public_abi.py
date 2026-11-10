@@ -53,13 +53,13 @@ forwarding; a flag-off build has no forwarding, so they are in no baseline.
       committed baseline. Opt-in because it names ROCm soversions and the
       platform's loader, so it changes with routine ROCm updates.
 
-Both gates also read a Windows build's DLLs (MIOpen.dll, MIOpen_private.dll,
-hipdnn_backend.dll). The DLL name in the export table stands in for the SONAME
-and the import tables for DT_NEEDED, matched without regard to case as the
-Windows loader does. A DLL name carries no version, so co-versioning (8) instead
-requires the wrapper to import the private DLL under its own name and both
-version resources to record the same file version. The committed DT_NEEDED
-baseline names Linux libraries and does not apply.
+Both gates also read a Windows build's DLLs (MIOpen.dll and MIOpen_private.dll; the
+wrapper's import table must not name hipdnn_backend.dll). The DLL name in the export
+table stands in for the SONAME and the import tables for DT_NEEDED, matched without
+regard to case as the Windows loader does. A DLL name carries no version, so
+co-versioning (8) instead requires the wrapper to import the private DLL under its own
+name and both version resources to record the same file version. The committed
+DT_NEEDED baseline names Linux libraries and does not apply.
 
 ``check-installed-headers`` -- run on the staged include tree of a flag-on
 build. Fails if the private rename spelling (``miopenFoo_impl``) appears in any
@@ -159,6 +159,10 @@ class Naming:
 
     def same(self, a: str, b: str) -> bool:
         return a.lower() == b.lower() if self.ignore_case else a == b
+
+    def private_import(self, needed: list[str]) -> str:
+        """The first of `needed` that names the private library, or ""."""
+        return next((n for n in needed if self.has_prefix(n, self.private_prefix)), "")
 
 
 ELF_NAMING = Naming(
@@ -1279,7 +1283,7 @@ def check_no_impl(lib: Library, where: str) -> bool:
 def check_private_dep(lib: Library, expect_present: bool) -> bool:
     naming = lib.naming
     prefix = naming.private_prefix
-    present = any(naming.has_prefix(n, prefix) for n in lib.needed())
+    present = bool(naming.private_import(lib.needed()))
     if present == expect_present:
         print(
             f"PASS: {naming.needed_on} {prefix} is "
@@ -1419,10 +1423,7 @@ def check_coversioned(wrapper: Library, private: Library) -> bool:
         return check_dlls_coversioned(wrapper, private)
     wrapper_soname = wrapper.soname()
     private_soname = private.soname()
-    needed = next(
-        (n for n in wrapper.needed() if n.startswith(ELF_NAMING.private_prefix)),
-        "",
-    )
+    needed = wrapper.naming.private_import(wrapper.needed())
 
     wrapper_major = soname_major(wrapper_soname)
     private_major = soname_major(private_soname)
@@ -1453,14 +1454,7 @@ def check_dlls_coversioned(wrapper: Library, private: Library) -> bool:
     private DLL under its own name. Only the version resources say which release
     each half came from, so the two file versions must agree.
     """
-    imported = next(
-        (
-            n
-            for n in wrapper.needed()
-            if PE_NAMING.has_prefix(n, PE_NAMING.private_prefix)
-        ),
-        "",
-    )
+    imported = PE_NAMING.private_import(wrapper.needed())
     private_name = private.soname()
     wrapper_version = wrapper.file_version()
     private_version = private.file_version()
@@ -1776,7 +1770,7 @@ def cmd_check(args) -> int:
         "exported public API symbol set matches baseline",
         BASELINE_REMEDY,
     )
-    ok &= check_no_impl(lib, "flag-off libMIOpen.so")
+    ok &= check_no_impl(lib, f"flag-off {lib.path.name}")
     ok &= check_private_dep(lib, expect_present=False)
     if args.needed_baseline:
         ok &= check_needed_baseline(lib, args.needed_baseline)

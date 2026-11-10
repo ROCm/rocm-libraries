@@ -4,10 +4,10 @@
 """Gate the exported ABI of a hipDNN wrapper build.
 
 This is the command behind its own ctest entry, separate from the forwarding
-parity harness in run_forwarding_parity.py. It only reads the two built shared
-objects -- it never loads or executes them -- so unlike the parity harness it
-needs no GPU, and is registered wherever MIOPEN_ENABLE_HIPDNN_WRAPPER is on
-regardless of whether one is available.
+parity harness in run_forwarding_parity.py. It only reads the two built libraries
+-- it never loads or executes them -- so unlike the parity harness it needs no GPU,
+and is registered wherever MIOPEN_ENABLE_HIPDNN_WRAPPER is on regardless of whether
+one is available.
 
 Registered from both the build tree and an installed one, which differ only in
 where the two libraries and --public-header sit; the defaults below suit the
@@ -42,10 +42,10 @@ def main(argv=None, windows=ON_WINDOWS):
     )
     parser.add_argument(
         "--needed-baseline",
-        help="committed DT_NEEDED list the wrapper must match exactly. Off by "
-        "default because the list names ROCm soversions and the platform's "
-        "loader; the checks it matters for (libMIOpen_private linked, the hipDNN "
-        "backend not) run without it",
+        help="committed DT_NEEDED list the wrapper must match exactly (Linux only; "
+        "an error for a DLL). Off by default because the list names ROCm "
+        "soversions and the platform's loader; the checks it matters for "
+        "(libMIOpen_private linked, the hipDNN backend not) run without it",
     )
     parser.add_argument(
         "--public-header",
