@@ -116,10 +116,12 @@ _ACTIVATION_ARG_INDEX = {
 # solution; InternalSupportParams threads through to the kernel writer) and
 # would otherwise be popped because they're not tunable parameters.
 #
-# Provenance-only keys (Source, Version, Features) are deliberately NOT in this
-# set: getCustomKernelConfig drops them so they don't pollute the solution
-# dict, while validateCustomKernelMetadata still sees them via its independent
-# readCustomKernelConfig call.
+# Source, Version and Features are deliberately NOT in this set:
+# getCustomKernelConfig drops them so they don't pollute the solution dict, while
+# validateCustomKernelMetadata (its own readCustomKernelConfig call) and LibraryIO
+# (the raw config it passes to getCustomKernelConfig) still see them. Features SupportsBias, SupportsActivation and
+# SupportsScaleAlpha set to false make LibraryIO restrict that solution's
+# ProblemType so it rejects bias, activation and scale-alpha-vector problems.
 _PASSTHROUGH_KEYS = {"ProblemType", "InternalSupportParams", "KernelLanguage", "CustomKernelName"}
 
 def isCustomKernelConfig(config):
@@ -549,7 +551,7 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     }
 
 def getCustomKernelConfig(
-    kernelName: str, internalSupportParams: dict, directory: str = None
+    kernelName: str, internalSupportParams: dict, directory: str = None, kernelConfig: dict = None
 ) -> dict:
     """
     Retrieves and validates the configuration for a custom kernel.
@@ -559,6 +561,8 @@ def getCustomKernelConfig(
         internalSupportParams: A dictionary of internal support parameters to be merged with the kernel configuration.
         directory: Optional directory where custom kernel files are located.
             Defaults to bundled package resources.
+        kernelConfig: The custom.config already read with readCustomKernelConfig; it is modified in place.
+            Read from the kernel when None.
 
     Returns:
         dict: The validated configuration dictionary for the custom kernel.
@@ -566,7 +570,8 @@ def getCustomKernelConfig(
     Raises:
         RuntimeError: If the custom kernel configuration is missing required fields or if there is an error reading the configuration.
     """
-    kernelConfig = readCustomKernelConfig(kernelName, directory)
+    if kernelConfig is None:
+        kernelConfig = readCustomKernelConfig(kernelName, directory)
     if "InternalSupportParams" not in kernelConfig:
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'InternalSupportParams'")
 

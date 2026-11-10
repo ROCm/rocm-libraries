@@ -4,12 +4,13 @@
 // Numeric tests for the uniform summation order mode
 // (HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT).
 //
-// Every case builds a column-major fp32 NN GEMM whose A holds one identical
-// K-vector in every row, so D is mathematically row-invariant and any bitwise
-// difference between two rows of D is purely an artifact of the reduction order
-// the kernel used. Rows are compared bit for bit, never with a tolerance, and a
-// case only claims the guarantee for an algorithm shown, in that same run, to
-// produce differing rows with the mode off; otherwise it skips with a
+// Every case builds a column-major GEMM (fp32 NN unless the problem says
+// otherwise) whose A holds one identical K-vector in every row, so D is
+// mathematically row-invariant and any bitwise difference between two rows of
+// D is purely an artifact of the reduction order the kernel used. Rows are
+// compared bit for bit, never with a tolerance, and a case only claims the
+// guarantee for an algorithm shown, in that same run, to produce differing rows
+// with the mode off; otherwise it skips with a
 // diagnostic rather than reporting a green result it did not earn.
 //
 // The suite name carries the "pre_checkin" token on purpose:
@@ -19,6 +20,7 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_bfloat16.h>
+#include <hip/hip_fp8.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
@@ -57,6 +59,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <ios>
 #include <iterator>
 #include <map>
@@ -65,6 +68,53 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+// The cancelling fill for E4M3 A and B, whose maximum is 448: small values
+// in [2^-6, 2^-3) of either sign, plus one large product at k = 0 and its
+// exact negation at k / 2 in every column of B. The large values are
+// ldexp(1 + i / 8, 8), at most 448, so E4M3 holds them exactly.
+static void fillCancellingE4m3(std::mt19937&       rng,
+                               int64_t             k,
+                               int64_t             n,
+                               std::vector<float>& aVector,
+                               std::vector<float>& hostB)
+{
+    std::uniform_int_distribution<int32_t> exponentOf{-6, -4};
+    std::uniform_real_distribution<float>  mantissaOf{0.0f, 1.0f};
+    std::uniform_int_distribution<int32_t> signOf{0, 1};
+    std::uniform_int_distribution<int32_t> eighthsOf{0, 6};
+
+    std::function<float()> smallValue = [&] {
+        const float magnitude = std::ldexp(1.0f + mantissaOf(rng), exponentOf(rng));
+        return signOf(rng) ? magnitude : -magnitude;
+    };
+    std::function<float()> large = [&] {
+        return std::ldexp(1.0f + static_cast<float>(eighthsOf(rng)) / 8.0f, 8);
+    };
+
+    for(auto& value : aVector)
+        value = smallValue();
+    for(auto& value : hostB)
+        value = smallValue();
+    aVector[0] = aVector[static_cast<size_t>(k / 2)] = large();
+    for(int64_t col = 0; col < n; ++col)
+    {
+        const float value                           = large();
+        hostB[static_cast<size_t>(col * k)]         = value;
+        hostB[static_cast<size_t>(col * k + k / 2)] = -value;
+    }
+}
+
+// Scale bytes of one MXFP8 operand in the pre-swizzled 32-block E8M0 format,
+// padded as clients/common/include/hipblaslt_datatype2string.hpp
+// scaleBufferSize does: K blocks to a multiple of 8, the free extent to a
+// multiple of 32.
+static size_t mxScaleBytes(int64_t k, int64_t freeExtent)
+{
+    const size_t kBlocks = static_cast<size_t>((k + 31) / 32 + 7) / 8 * 8;
+    const size_t padded  = static_cast<size_t>((freeExtent + 31) / 32) * 32;
+    return kBlocks * padded;
+}
 
 namespace
 {
@@ -305,13 +355,23 @@ namespace
         // HIPBLAS_OP_T stores A as k x m (lda = k), the layout the gfx950
         // skinny custom kernels take.
         hipblasOperation_t transA = HIPBLAS_OP_N;
-        // The type of C and D. The skinny custom kernels write D in A's type.
+        // The type of C and D. The skinny bf16 and f16 custom kernels write D
+        // in A's type. HIP_R_8F_E4M3 for abType runs an MXFP8 GEMM with
+        // pre-swizzled E8M0 block scales and takes a 16-bit dType.
         hipDataType dType = HIP_R_32F;
     };
 
     size_t elementSizeOf(hipDataType type)
     {
-        return type == HIP_R_32F ? sizeof(float) : sizeof(uint16_t);
+        switch(type)
+        {
+        case HIP_R_32F:
+            return sizeof(float);
+        case HIP_R_8F_E4M3:
+            return sizeof(uint8_t);
+        default:
+            return sizeof(uint16_t);
+        }
     }
 
     // Rounds values in place to what the device will actually hold, then
@@ -319,15 +379,26 @@ namespace
     // reference below must see the same numbers the kernel does, or its
     // order-sensitivity self-check describes a different problem.
     //
-    // HIP_R_16BF uses hip_bfloat16 and HIP_R_16F _Float16. hipBLASLt leaves
-    // mxDataGenerator off on Windows, so this harness cannot depend on DGen
-    // headers.
+    // HIP_R_16BF uses hip_bfloat16, HIP_R_16F _Float16 and HIP_R_8F_E4M3 the OCP
+    // __hip_fp8_e4m3. hipBLASLt leaves mxDataGenerator off on Windows, so this
+    // harness cannot depend on DGen headers.
     std::vector<uint8_t> encodeOperand(std::vector<float>& values, hipDataType type)
     {
         std::vector<uint8_t> bytes(values.size() * elementSizeOf(type));
         if(type == HIP_R_32F)
         {
             std::memcpy(bytes.data(), values.data(), bytes.size());
+            return bytes;
+        }
+
+        if(type == HIP_R_8F_E4M3)
+        {
+            for(size_t idx = 0; idx < values.size(); ++idx)
+            {
+                const __hip_fp8_e4m3 packed{values[idx]};
+                bytes[idx]  = packed.__x;
+                values[idx] = static_cast<float>(packed);
+            }
             return bytes;
         }
 
@@ -369,6 +440,8 @@ namespace
             if(m_layoutA)
                 hipblasLtMatrixLayoutDestroy(m_layoutA);
             static_cast<void>(hipFree(m_deviceWorkspace));
+            static_cast<void>(hipFree(m_deviceScaleB));
+            static_cast<void>(hipFree(m_deviceScaleA));
             static_cast<void>(hipFree(m_deviceBias));
             static_cast<void>(hipFree(m_deviceD));
             static_cast<void>(hipFree(m_deviceB));
@@ -459,6 +532,9 @@ namespace
                 ADD_FAILURE() << "Setting SM_COUNT_TARGET must succeed";
                 return false;
             }
+
+            if(m_problem.abType == HIP_R_8F_E4M3 && !setUpMxScales(skipReason))
+                return false;
 
             if(m_problem.useBias)
             {
@@ -729,6 +805,50 @@ namespace
             }
         }
 
+        // Constant scales keep every row of A identical and make the swizzle
+        // layout irrelevant: each byte is 127, the E8M0 encoding of 1.0.
+        bool setUpMxScales(std::string& skipReason)
+        {
+            const size_t scaleABytes = mxScaleBytes(m_problem.k, m_problem.m);
+            const size_t scaleBBytes = mxScaleBytes(m_problem.k, m_problem.n);
+            if(hipMalloc(&m_deviceScaleA, scaleABytes) != hipSuccess
+               || hipMalloc(&m_deviceScaleB, scaleBBytes) != hipSuccess)
+            {
+                skipReason = "hipMalloc failed for the MX block scales";
+                return false;
+            }
+            if(hipMemset(m_deviceScaleA, 127, scaleABytes) != hipSuccess
+               || hipMemset(m_deviceScaleB, 127, scaleBBytes) != hipSuccess)
+            {
+                skipReason = "hipMemset of the MX block scales failed";
+                return false;
+            }
+
+            const hipblasLtMatmulMatrixScale_t mode
+                = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+            if(hipblasLtMatmulDescSetAttribute(
+                   m_desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &mode, sizeof(mode))
+                   != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatmulDescSetAttribute(
+                      m_desc, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &mode, sizeof(mode))
+                      != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatmulDescSetAttribute(m_desc,
+                                                  HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER,
+                                                  &m_deviceScaleA,
+                                                  sizeof(m_deviceScaleA))
+                      != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatmulDescSetAttribute(m_desc,
+                                                  HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER,
+                                                  &m_deviceScaleB,
+                                                  sizeof(m_deviceScaleB))
+                      != HIPBLAS_STATUS_SUCCESS)
+            {
+                ADD_FAILURE() << "Setting MX block scale attributes must succeed";
+                return false;
+            }
+            return true;
+        }
+
         bool uploadOperands(std::string& skipReason)
         {
             const int64_t m = m_problem.m;
@@ -739,7 +859,9 @@ namespace
 
             m_aVector.resize(static_cast<size_t>(k));
             m_hostB.resize(static_cast<size_t>(k * n));
-            if(m_problem.dType == HIP_R_32F)
+            if(m_problem.abType == HIP_R_8F_E4M3)
+                fillCancellingE4m3(rng, k, n, m_aVector, m_hostB);
+            else if(m_problem.dType == HIP_R_32F)
             {
                 for(auto& value : m_aVector)
                     value = wideRangeSample(rng);
@@ -832,6 +954,8 @@ namespace
         void*                   m_deviceB         = nullptr;
         void*                   m_deviceD         = nullptr;
         void*                   m_deviceBias      = nullptr;
+        void*                   m_deviceScaleA    = nullptr;
+        void*                   m_deviceScaleB    = nullptr;
         void*                   m_deviceWorkspace = nullptr;
         std::vector<float>      m_aVector;
         std::vector<float>      m_hostB;
@@ -1955,6 +2079,66 @@ namespace
         EXPECT_EQ(cMatmul(32768, 1.0f, algo), HIPBLAS_STATUS_INVALID_VALUE);
         EXPECT_EQ(cMatmul(kRegistered, 2.0f, algo), HIPBLAS_STATUS_INVALID_VALUE);
         EXPECT_TRUE(dUntouched()) << "a refused algo launched";
+    }
+
+    // The five gfx950 skinny MXFP8 TN kernels declare uniformSummationOrder.
+    // Each case is a shard key that routes to one of them, once per orientation
+    // the shard routes it in (the VALU kernel takes skinny n only); f8 E4M3 A
+    // and B, pre-swizzled E8M0 scales, bf16 D.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_1152x4x5120)
+    {
+        checkDefaultPicksUniform(
+            {1152, 4, 5120, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN1_LANES_K64_WAVES2_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_4x1152x5120)
+    {
+        checkDefaultPicksUniform(
+            {4, 1152, 5120, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN1_LANES_K64_WAVES2_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_16384x3x25600)
+    {
+        checkDefaultPicksUniform(
+            {16384, 3, 25600, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF3_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_2x32768x14336)
+    {
+        checkDefaultPicksUniform(
+            {2, 32768, 14336, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF3_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_10240x1x5120)
+    {
+        checkDefaultPicksUniform(
+            {10240, 1, 5120, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM1_TN1_LANES_K16_WAVES1_UP_ITERS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_4096x4x1280)
+    {
+        checkDefaultPicksUniform(
+            {4096, 4, 1280, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_4x4096x1280)
+    {
+        checkDefaultPicksUniform(
+            {4, 4096, 1280, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_3x16384x25600)
+    {
+        checkDefaultPicksUniform(
+            {3, 16384, 25600, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1");
     }
 
     // Measured non-uniform on gfx950 with the default heuristic path.
