@@ -118,9 +118,11 @@ extern "C" {
  *     mid-struct, and rocke_coalesced_tile_loader_t and
  *     rocke_async_tile_loader_t gained elem_dtype, which changes their layout
  *     and size.
- * 15: rocke_coalesced_tile_loader_t gained has_col_xor and col_xor[4] at its
+ * 15: rocke_direct_conv_wgrad_spec_t gained image_per_block through
+ *     uniform_wave at its end, which changes its size.
+ * 16: rocke_coalesced_tile_loader_t gained has_col_xor and col_xor[4] at its
  *     end (after elem_dtype), which changes its size. */
-#define ROCKE_ABI_VERSION 15
+#define ROCKE_ABI_VERSION 16
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.
