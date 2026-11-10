@@ -2,11 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 #include <array>
+#include <atomic>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "common.hpp"
@@ -248,6 +252,48 @@ TEST_CASE("NN: unload_model releases model info and payload", "[nn]") {
   options.nn_backend = origami::nn_backend_t::tilewright;
   options.nn_model   = handle;
   REQUIRE_THROWS_AS(origami::rank_configs(problem, hardware, configs, options), std::runtime_error);
+}
+
+TEST_CASE("NN: unload_model while ranking is in flight", "[nn][tilewright]") {
+  if (!tilewright_weights_available()) {
+    SUCCEED("tilewright weights not present; skipping.");
+    return;
+  }
+
+  const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
+                           "Bljk_Cijk_Dijk_ID75a0_gfx950";
+  const origami::nn::model_handle_t handle =
+      origami::nn::load_models_for_logic(logic_stem, "").tilewright;
+  REQUIRE(handle >= 0);
+
+  const auto hardware                    = make_hardware(950);
+  const auto problem                     = make_problem(1024, 3072, 2048);
+  std::vector<origami::config_t> configs = {make_config(128, 128, 128),
+                                            make_config(256, 256, 64)};
+
+  origami::rank_options_t options;
+  options.inference  = origami::inference_mode_t::nn_fallback;
+  options.nn_backend = origami::nn_backend_t::tilewright;
+  options.nn_model   = handle;
+
+  // Ranking holds a reference to the model, so a concurrent unload must not free it.
+  // Either result is valid: NN scores before the unload lands, analytical fallback after.
+  // Run under ASan/TSan to catch a regression.
+  std::atomic<bool> stop{false};
+  std::thread ranker([&] {
+    while (!stop.load()) {
+      const auto results = origami::rank_configs(problem, hardware, configs, options);
+      if (results.size() != configs.size()) std::abort();
+    }
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  origami::nn::unload_model(handle);
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  stop.store(true);
+  ranker.join();
+
+  REQUIRE(origami::nn::model_info(handle) == nullptr);
 }
 
 TEST_CASE("NN: rank_options force_cell overrides routing", "[nn][tilewright]") {

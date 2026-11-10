@@ -21,7 +21,8 @@ namespace origami::nn {
 namespace {
 
 std::mutex g_mutex;
-std::vector<std::unique_ptr<twrec::detail::LoadedModel>> g_models;
+// shared_ptr so a ranking call that obtained a payload keeps it alive across unload_model.
+std::vector<std::shared_ptr<const twrec::detail::LoadedModel>> g_models;
 std::unordered_map<std::string, model_handle_t> g_path_to_handle;
 std::unordered_map<model_handle_t, model_info_t> g_infos;
 model_handle_t g_default_tilewright = invalid_handle;
@@ -219,12 +220,12 @@ model_handle_t default_model(backend_id_t backend) {
 
 namespace detail {
 
-const twrec::detail::LoadedModel* model_payload(model_handle_t handle) {
+std::shared_ptr<const twrec::detail::LoadedModel> model_payload(model_handle_t handle) {
   if (handle < 0) return nullptr;
   std::lock_guard<std::mutex> lock(g_mutex);
   const auto idx = static_cast<std::size_t>(handle);
-  if (idx >= g_models.size() || g_models[idx] == nullptr) return nullptr;
-  return g_models[idx].get();
+  if (idx >= g_models.size()) return nullptr;
+  return g_models[idx];
 }
 
 }  // namespace detail

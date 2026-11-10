@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -32,7 +33,9 @@ bool any_scored(const std::vector<prediction_result_t>& results) {
 
 class TilewrightRecommender final : public IRecommender {
  public:
-  explicit TilewrightRecommender(model_handle_t handle) : handle_(handle) {}
+  TilewrightRecommender(model_handle_t handle,
+                        std::shared_ptr<const twrec::detail::LoadedModel> model)
+      : handle_(handle), model_(std::move(model)) {}
 
   model_info_t info() const override {
     if (const model_info_t* registered = nn::model_info(handle_)) {
@@ -47,11 +50,10 @@ class TilewrightRecommender final : public IRecommender {
                                         const hardware_t& hardware,
                                         const std::vector<config_t>& configs,
                                         const inference_options_t& options) override {
-    const twrec::detail::LoadedModel* model = model_payload(handle_);
-    if (model == nullptr) return {};
+    if (model_ == nullptr) return {};
 
     const std::vector<twrec::rank_entry_t> tw_results =
-        twrec::rank_configs(*model, problem, hardware, configs, options);
+        twrec::rank_configs(*model_, problem, hardware, configs, options);
 
     const double kNaN = std::numeric_limits<double>::quiet_NaN();
     std::vector<prediction_result_t> results;
@@ -65,6 +67,8 @@ class TilewrightRecommender final : public IRecommender {
 
  private:
   model_handle_t handle_;
+  // Held for the whole call so unload_model cannot free the model mid-rank.
+  std::shared_ptr<const twrec::detail::LoadedModel> model_;
 };
 
 }  // namespace
@@ -77,12 +81,13 @@ std::optional<std::vector<prediction_result_t>> try_rank_with_model(
     const inference_options_t& options) {
   if (handle < 0) return std::nullopt;
 
-  const model_info_t* info = nn::model_info(handle);
-  if (info == nullptr || info->backend != backend_id_t::tilewright_v1) {
-    return std::nullopt;
-  }
+  // One lookup, taken before ranking. The registry only stores tilewright payloads, so a
+  // non-null payload implies the tilewright backend. Avoids model_info(), whose pointer can
+  // dangle after a concurrent unload.
+  std::shared_ptr<const twrec::detail::LoadedModel> model = model_payload(handle);
+  if (model == nullptr) return std::nullopt;
 
-  TilewrightRecommender recommender(handle);
+  TilewrightRecommender recommender(handle, std::move(model));
   auto results = recommender.rank(problem, hardware, configs, options);
   if (!any_scored(results)) return std::nullopt;
   return results;
