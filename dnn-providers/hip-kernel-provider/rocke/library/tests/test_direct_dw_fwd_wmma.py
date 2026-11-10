@@ -103,9 +103,9 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
 
         import pytest
 
-        eng = pytest.importorskip("rocke_engine")
+        eng = pytest.importorskip("rocke_library_engine")
         from kernels.common.conv_direct_grouped import PROBLEM_DIMS
-        from rocke.core.backend import conv_direct_dw_fwd_wmma_spec_to_dict
+        from kernels.conv.engine_bridge import conv_direct_dw_fwd_wmma_spec_to_dict
 
         base = DwFwdWmmaSpec(problem=_problem())
         self.assertIsNone(dw_fwd_wmma_reason(base))
@@ -163,14 +163,14 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
         Python's over the AOT grid and a set of rejected specs."""
         import pytest
 
-        eng = pytest.importorskip("rocke_engine")
+        eng = pytest.importorskip("rocke_library_engine")
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
             probe_problem,
         )
         from kernels.conv.direct_variants import make_direct_spec
-        from rocke.core.backend import conv_direct_dw_fwd_wmma_spec_to_dict
+        from kernels.conv.engine_bridge import conv_direct_dw_fwd_wmma_spec_to_dict
 
         variant = "direct_dw_fwd_wmma"
         specs = []

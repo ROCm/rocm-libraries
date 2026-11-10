@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * bindings/winograd_glue.hpp -- helpers shared by the Winograd forward family
- * bindings (rocke_engine_winograd_*.cpp): dict readers, the ConvProblem
+ * library/cpp/bindings/winograd_glue.hpp -- helpers shared by the Winograd forward family
+ * bindings (rocke_library_engine_winograd_*.cpp): dict readers, the ConvProblem
  * filler and the lower / serialize / verify tails. Each Winograd family binds
  * in its own translation unit and registers through register_winograd_*().
  */

@@ -31,11 +31,12 @@
 #define REASON_CAP 512
 
 /* Layout canary for the public wgrad spec, like the MMA catalog ones in
- * tests/core/test_mma_catalog_lookup.cpp: a caller allocates
+ * platform/tests/core/test_mma_catalog_lookup.cpp: a caller allocates
  * rocke_direct_conv_wgrad_spec_t from its own header, so growing it must move
  * ROCKE_ABI_VERSION too. Editing the struct fails the build here; the fix is
- * to bump ROCKE_ABI_VERSION in rocke/abi.h and BINARY_ABI in
- * python/rocke/portable_ir/src/abi.py, then update this pin. 64-bit only. */
+ * to bump ROCKE_ABI_VERSION in platform/cpp/include/rocke/abi.h and BINARY_ABI
+ * in platform/python/rocke/portable_ir/src/abi.py, then update this pin.
+ * 64-bit only. */
 #if INTPTR_MAX == INT64_MAX
 static_assert(sizeof(rocke_direct_conv_wgrad_spec_t) == 160 && ROCKE_ABI_VERSION >= 15,
               "rocke_direct_conv_wgrad_spec_t changed size: bump ROCKE_ABI_VERSION in "

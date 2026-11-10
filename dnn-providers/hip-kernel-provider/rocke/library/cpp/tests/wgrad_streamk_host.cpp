@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * tests/instances/wgrad_streamk_host.cpp -- C parity for the stream-K wgrad
+ * library/cpp/tests/wgrad_streamk_host.cpp -- C parity for the stream-K wgrad
  * host helpers and validator gates of instance_conv_implicit_gemm_wgrad.h.
  *
  * The launch grid, workspace layout and auto CTA pool these helpers compute

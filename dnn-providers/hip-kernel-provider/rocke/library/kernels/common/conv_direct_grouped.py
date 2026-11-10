@@ -5940,7 +5940,7 @@ def _wgrad_small_c_reason(spec: "DirectConvWgradSpec") -> str:
 
 # The C++ engine stores the per-tap accumulators and the delta ring in
 # fixed-size arrays sized by ``ROCKE_DCONV_WGRAD_MAX_K{H,W}``
-# (``platform/cpp/include/rocke/instance_conv_direct_grouped.h``), so the cap is
+# (``library/cpp/include/rocke/instance_conv_direct_grouped.h``), so the cap is
 # part of the spec contract rather than a C-side implementation detail: both
 # engines reject above it, or a KH=9 spec would build here and fail there.
 _WGRAD_MAX_KH = 8
@@ -12039,7 +12039,7 @@ class DirectDepthwiseSpec:
 
 # The C++ engine holds the KH x KW depthwise weights (regular and spatial
 # forward) in fixed-size register tables sized by ``ROCKE_DCONV_DW_MAX_K{H,W}``
-# (``platform/cpp/include/rocke/instance_conv_direct_grouped.h``): both engines'
+# (``library/cpp/include/rocke/instance_conv_direct_grouped.h``): both engines'
 # validators reject above it, so a spec that validates builds in either.
 _DW_MAX_KH = 32
 _DW_MAX_KW = 32

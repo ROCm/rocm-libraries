@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * bindings/rocke_engine_winograd_gen.cpp -- bindings of the generalized
+ * library/cpp/bindings/rocke_library_engine_winograd_gen.cpp -- bindings of the generalized
  * Winograd forward transform kernels (conv_winograd_gen; see
  * winograd_glue.hpp). Registered via register_winograd_gen():
  *   conv_winograd_gen_lower_llvm(spec, arch) / _serialize_ir / _verify
@@ -81,7 +81,7 @@ std::string conv_winograd_gen_lower_llvm(const py::dict& d, const std::string& a
     err[0] = '\0';
     rocke_status_t rc = rocke_winograd_gen_lower_to_llvm(
         &s, st.c_str(), arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
-    return take_lowered(rc, ll, err, "rocke_engine.conv_winograd_gen_lower_llvm");
+    return take_lowered(rc, ll, err, "rocke_library_engine.conv_winograd_gen_lower_llvm");
 }
 
 std::string conv_winograd_gen_serialize_ir(const py::dict& d, const std::string& arch)
@@ -89,7 +89,7 @@ std::string conv_winograd_gen_serialize_ir(const py::dict& d, const std::string&
     require_arch(arch);
     std::string st = wgen_stage(d);
     ROCKE_FAMILY_SERIALIZE_BODY(
-        "rocke_engine.conv_winograd_gen_serialize_ir",
+        "rocke_library_engine.conv_winograd_gen_serialize_ir",
         rocke_winograd_gen_spec_t,
         wgen_build_spec,
         rocke_build_winograd_gen_stage_new(&b, &s, st.c_str(), arch.c_str()));
@@ -99,7 +99,7 @@ std::vector<std::string> conv_winograd_gen_verify(const py::dict& d, const std::
 {
     require_arch(arch);
     std::string st = wgen_stage(d);
-    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_winograd_gen_verify",
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.conv_winograd_gen_verify",
                              rocke_winograd_gen_spec_t,
                              wgen_build_spec,
                              rocke_build_winograd_gen_stage_new(&b, &s, st.c_str(), arch.c_str()));

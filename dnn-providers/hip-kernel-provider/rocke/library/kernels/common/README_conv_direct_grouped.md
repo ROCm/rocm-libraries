@@ -870,10 +870,10 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 ## Dual-Engine Parity
 
 Every kernel in this file exists in both the Python engine (this module) and
-the C++ engine (`cpp/instances/common/conv_direct_grouped_*.cpp`), for every
-dtype (`fp16`, `bf16`, `fp32` and `tf32`), and the two **must emit the same
-LLVM-IR bytes**. A change to any builder here has to be mirrored into its C++
-peer in the same change, and proven with:
+the C++ engine (`library/cpp/instances/common/conv_direct_grouped_*.cpp`), for
+every dtype (`fp16`, `bf16`, `fp32` and `tf32`), and the two **must emit the
+same LLVM-IR bytes**. A change to any builder here has to be mirrored into its
+C++ peer in the same change, and proven with:
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
