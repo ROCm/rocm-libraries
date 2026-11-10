@@ -3023,6 +3023,11 @@ TYPED_TEST(local_matrix, operations_on_a_matrix_without_entries_change_nothing)
     A->DiagonalMatrixMultL(*b);
     A->DiagonalMatrixMultR(*b);
 
+    auto E = empty_local_matrix<T>(this->backend());
+    E->CopyFromHostCSR(no_entries.data(), nullptr, nullptr, "E", 0, n, n);
+    A->MatrixAdd(*E, 2.0, 3.0, false);
+    A->MatrixAdd(*E, 2.0, 3.0, true);
+
     int niter = -1;
     A->ItILU0Factorize(rocalution::Default, 0, 10, 1e-8, &niter, nullptr);
     EXPECT_EQ(niter, -1);

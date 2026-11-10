@@ -3226,8 +3226,11 @@ namespace rocalution
         assert(this->nnz_ >= 0);
         assert(cast_mat->nnz_ >= 0);
 
-        // A matrix without arrays has no descriptor, both matrices are then 0 x 0
-        if(this->spmat_descr_ == NULL || cast_mat->spmat_descr_ == NULL)
+        // A matrix without arrays has no descriptor, both matrices are then 0 x 0. The sum
+        // of two empty matrices is empty, and rocsparse_spgeam does not accept empty
+        // operands without an output matrix in the analysis stage.
+        if(this->spmat_descr_ == NULL || cast_mat->spmat_descr_ == NULL
+           || (this->nnz_ == 0 && cast_mat->nnz_ == 0))
         {
             return true;
         }
