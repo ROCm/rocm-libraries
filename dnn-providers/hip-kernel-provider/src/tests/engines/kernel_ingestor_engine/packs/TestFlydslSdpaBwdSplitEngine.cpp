@@ -1716,6 +1716,22 @@ TEST(TestFlydslSdpaBwdSplitLaunch, HeadDimBelowTheTileSetsThePaddedFlag)
     EXPECT_EQ(valuesOf(Slot::DKDV, dumpOf(Slot::DKDV, baseSpec(), plainRow())).at("rt_flags"), 0U);
 }
 
+// The flag is set when either head dim is below the tile, not only when both are.
+TEST(TestFlydslSdpaBwdSplitLaunch, OneHeadDimBelowTheTileSetsThePaddedFlag)
+{
+    RowSpec padded = plainRow(128);
+    padded.padded = 1;
+    for(const auto& [qk, v] : {std::pair<int64_t, int64_t>{128, 100}, {100, 128}})
+    {
+        SCOPED_TRACE(std::to_string(qk) + "x" + std::to_string(v));
+        const auto spec = withHeadDims(baseSpec(), qk, v);
+        for(const Slot slot : {Slot::DKDV, Slot::DQ})
+        {
+            EXPECT_EQ(valuesOf(slot, dumpOf(slot, spec, padded)).at("rt_flags"), 1U);
+        }
+    }
+}
+
 TEST(TestFlydslSdpaBwdSplitLaunch, TheDqReduceRunsOnlyForABroadcastDbiasAndTheScratchIsItsBuffer)
 {
     const auto none = dumpOf(Slot::DQ, withBias(baseSpec(), false), biasRow());

@@ -1573,6 +1573,22 @@ TEST(TestFlydslSdpaBwdMergedKernarg, DropoutWithAPaddedHeadSetsBothRuntimeFlags)
     EXPECT_EQ(decode(dump.kernarg, mergedSlots()).at("rt_flags"), 3U);
 }
 
+// The flag is set when either head dim is below the tile, not only when both are.
+TEST(TestFlydslSdpaBwdMergedKernarg, OneHeadDimBelowTheTileSetsThePaddedFlag)
+{
+    RowSpec padded = plainRow(64);
+    padded.padded = 1;
+    for(const auto& [qk, v] : {std::pair<int64_t, int64_t>{64, 40}, {40, 64}})
+    {
+        SCOPED_TRACE(std::to_string(qk) + "x" + std::to_string(v));
+        Shape shape;
+        shape.headDimQk = qk;
+        shape.headDimV = v;
+        const auto dump = dumpOf(specOf(shape), padded);
+        EXPECT_EQ(decode(dump.kernarg, mergedSlots()).at("rt_flags"), 1U);
+    }
+}
+
 TEST(TestFlydslSdpaBwdMergedKernarg, ScaleValue)
 {
     const auto spec
@@ -2008,6 +2024,35 @@ TEST(TestFlydslSdpaBwdMergedReduce, ThePlainDispatchRefusesARowThatNamesAReduceK
     const auto broadcast = withBias(baseSpec(), true, {1, 8, 16, 16});
     const auto failure = prepareFailure(MERGED, broadcast, sourcesRow(biasRow()));
     EXPECT_TRUE(contains(failure, "merged_reduce handler")) << failure;
+}
+
+// prepare() re-matches the graph under the merged engine's own options (the matcher's defaults,
+// no fp32): a graph the split engine's options accept and the merged engine declined is refused
+// as no longer matching, not planned.
+TEST(TestFlydslSdpaBwdMergedPrepare, RefusesAGraphTheMergedMatchOptionsDecline)
+{
+    const GraphFixture accepted(buildSdpaBwdGraph(baseSpec()));
+    const auto bound = matchesGraph(MERGED, accepted.context());
+    ASSERT_TRUE(bound.has_value());
+
+    const auto fp32 = specOf({}, DataType::FLOAT);
+    ASSERT_FALSE(graphMatch(fp32).has_value());
+    ASSERT_TRUE(std::holds_alternative<SdpaBwdProblem>(
+        matchSdpaBwdSpec(fp32, flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS)));
+
+    const GraphFixture declined(buildSdpaBwdGraph(fp32));
+    std::string failure;
+    try
+    {
+        static_cast<void>(
+            dispatchHandler(MERGED).prepare(declined.context(), *bound, makeRow(plainRow())));
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << error.what();
+        failure = error.what();
+    }
+    EXPECT_TRUE(contains(failure, "no longer matches")) << failure;
 }
 
 // ---------------------------------------------------------------------------
