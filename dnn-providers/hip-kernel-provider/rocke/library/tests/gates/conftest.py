@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 from pathlib import Path
 from typing import NoReturn
 
@@ -20,7 +19,10 @@ from tests._attention_bwd_counted_cases import (
     selected_isa_arch,
 )
 from tests._attention_bwd_resources import is_identified_comgr_provenance
-from tests._explicit_gate_policy import selection_is_partial
+from tests._explicit_gate_policy import (
+    configured_selection_is_partial,
+    selection_is_partial,
+)
 from tests.gates import mark_preflight_loaded
 
 _COMPILER_GATE = "attention_bwd_counted_compiler_gate.py"
@@ -86,7 +88,6 @@ def _is_direct_gate_path(argument: str) -> bool:
 
 def _selection_requested(config) -> bool:
     arguments = list(map(str, config.invocation_params.args))
-    inherited_arguments = shlex.split(os.environ.get("PYTEST_ADDOPTS", ""))
     option = config.option
     configured = any(
         bool(getattr(option, name, False))
@@ -118,7 +119,12 @@ def _selection_requested(config) -> bool:
         configured
         or bool(selected_paths)
         or selection_is_partial(selection_arguments)
-        or selection_is_partial(inherited_arguments)
+        or configured_selection_is_partial(
+            override_ini=getattr(option, "override_ini", ()) or (),
+            plugins=getattr(option, "plugins", ()) or (),
+            inifilename=getattr(option, "inifilename", None),
+            environment_plugins=os.environ.get("PYTEST_PLUGINS"),
+        )
     )
 
 

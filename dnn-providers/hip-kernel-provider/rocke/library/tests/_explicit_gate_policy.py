@@ -4,7 +4,11 @@
 
 from __future__ import annotations
 
-__all__ = ["preflight_is_disabled", "selection_is_partial"]
+__all__ = [
+    "configured_selection_is_partial",
+    "preflight_is_disabled",
+    "selection_is_partial",
+]
 
 _ALLOWED_GATE_PLUGINS = frozenset({"pytest_timeout", "tests.gates.conftest"})
 _SELECTION_INI_KEYS = frozenset(
@@ -97,6 +101,27 @@ def selection_is_partial(arguments: list[str]) -> bool:
             for option in _SELECTION_ARGS
         )
     )
+
+
+def configured_selection_is_partial(
+    *,
+    override_ini: list[str] | tuple[str, ...] = (),
+    plugins: list[str] | tuple[str, ...] = (),
+    inifilename: str | None = None,
+    environment_plugins: str | None = None,
+) -> bool:
+    """Whether pytest's merged configuration can change complete-gate selection."""
+    configured_arguments = [
+        *(
+            argument
+            for value in override_ini
+            for argument in ("--override-ini", str(value))
+        ),
+        *(argument for plugin in plugins for argument in ("-p", str(plugin))),
+    ]
+    return bool(
+        inifilename or (environment_plugins or "").strip()
+    ) or selection_is_partial(configured_arguments)
 
 
 def preflight_is_disabled(arguments: list[str]) -> bool:

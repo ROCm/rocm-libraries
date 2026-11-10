@@ -30,7 +30,11 @@ from ._attention_bwd_counted_cases import (
     require_explicit_gate_entrypoint,
     selected_isa_arch,
 )
-from ._explicit_gate_policy import preflight_is_disabled, selection_is_partial
+from ._explicit_gate_policy import (
+    configured_selection_is_partial,
+    preflight_is_disabled,
+    selection_is_partial,
+)
 from .gates import conftest as gate_config
 from .run_all import EXPLICIT_GATES, _gate_environment, _has_stage_output, _run
 
@@ -103,6 +107,21 @@ def test_gate_selection_arguments_are_partial(arguments):
     assert not selection_is_partial(["--override-ini=console_output_style=classic"])
 
 
+def test_parsed_pytest_configuration_detects_selection_changes():
+    assert configured_selection_is_partial(
+        override_ini=["python_functions=test_selected_name"]
+    )
+    assert configured_selection_is_partial(
+        plugins=["tests.gates.conftest", "third_party_selector"]
+    )
+    assert configured_selection_is_partial(inifilename="custom.ini")
+    assert configured_selection_is_partial(environment_plugins="third_party_selector")
+    assert not configured_selection_is_partial(
+        override_ini=["console_output_style=classic"],
+        plugins=["tests.gates.conftest", "pytest_timeout", "no:cacheprovider"],
+    )
+
+
 @pytest.mark.parametrize("gate", tuple(_EXPECTED_GATES))
 @pytest.mark.parametrize("windows_path", (False, True))
 def test_direct_gate_file_is_not_treated_as_partial_selection(gate, windows_path):
@@ -120,7 +139,11 @@ def test_direct_gate_file_is_not_treated_as_partial_selection(gate, windows_path
                 "console_output_style=classic",
             )
         ),
-        option=SimpleNamespace(override_ini=["console_output_style=classic"]),
+        option=SimpleNamespace(
+            override_ini=["console_output_style=classic"],
+            plugins=["tests.gates.conftest", "pytest_timeout"],
+            inifilename=None,
+        ),
         args=[path],
     )
     selected_node = SimpleNamespace(
@@ -209,6 +232,79 @@ def test_inherited_pytest_addopts_cannot_filter_direct_gate(addopts, tmp_path):
         env=rocke_subprocess_env(environment),
         capture_output=True,
         text=True,
+    )
+    assert result.returncode != 0
+    assert (
+        "selection filters need explicit partial mode" in result.stdout + result.stderr
+    )
+
+
+@pytest.mark.worker_integration
+def test_inherited_config_file_cannot_filter_direct_gate(tmp_path):
+    gate = tmp_path / _EXPECTED_GATES["counted-structural"].name
+    gate.write_text(
+        "def test_selected_name():\n    pass\n\ndef test_other_name():\n    pass\n",
+        encoding="utf-8",
+    )
+    config = tmp_path / "gate.ini"
+    config.write_text(
+        "[pytest]\npython_functions = test_selected_name\n", encoding="utf-8"
+    )
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "PYTEST_ADDOPTS": f"--config-file={config}",
+            "ROCKE_EXPLICIT_GATE_RUN": "1",
+            "ROCKE_EXPLICIT_GATE_PARTIAL": "0",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        }
+    )
+    result = subprocess.run(
+        rocke_python_command(
+            "-m", "pytest", "-q", "-p", "tests.gates.conftest", str(gate)
+        ),
+        cwd=_GATE_DIR.parent.parent,
+        env=rocke_subprocess_env(environment),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert (
+        "selection filters need explicit partial mode" in result.stdout + result.stderr
+    )
+
+
+@pytest.mark.worker_integration
+def test_environment_plugin_cannot_filter_direct_gate(tmp_path):
+    gate = tmp_path / _EXPECTED_GATES["counted-structural"].name
+    gate.write_text(
+        "def test_selected_name():\n    pass\n\ndef test_other_name():\n    pass\n",
+        encoding="utf-8",
+    )
+    plugin = tmp_path / "gate_selector_plugin.py"
+    plugin.write_text(
+        "def pytest_collection_modifyitems(items):\n    items[:] = items[:1]\n",
+        encoding="utf-8",
+    )
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "PYTEST_PLUGINS": "gate_selector_plugin",
+            "ROCKE_EXPLICIT_GATE_RUN": "1",
+            "ROCKE_EXPLICIT_GATE_PARTIAL": "0",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        }
+    )
+    result = subprocess.run(
+        rocke_python_command(
+            "-m", "pytest", "-q", "-p", "tests.gates.conftest", str(gate)
+        ),
+        cwd=_GATE_DIR.parent.parent,
+        env=rocke_subprocess_env(environment, python_paths=(tmp_path,)),
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode != 0
     assert (
