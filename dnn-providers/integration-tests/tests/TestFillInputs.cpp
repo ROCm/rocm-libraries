@@ -1822,4 +1822,149 @@ TEST(TestFillInputs, PagedCacheStoreContainerIsUpdatedInPlace)
     EXPECT_EQ(inPlaceOutputUids(*g->graph.graph), (std::vector<int64_t>{3}));
 }
 
+namespace
+{
+
+// ── GDN ─────────────────────────────────────────────────────────────────────
+// q, k [T, 2, K]; v, o [T, 2, 4]; g, beta [T, 2]; cu_seqlens [N + 1] INT32. With a pool,
+// initial and final state [P, 2, 4, K] and state_indices [N] INT32. uids: q=1, k=2, v=3,
+// g=4, beta=5, cu_seqlens=6, o=7, initial_state=8, state_indices=9, final_state=10.
+struct GdnGraph
+{
+    GraphResult graph;
+    std::vector<int64_t> leafUids;
+    InputTensorMap inputs;
+};
+
+std::unique_ptr<GdnGraph> buildGdnGraph(int64_t tokens,
+                                        int64_t sequences,
+                                        int64_t keyDim,
+                                        bool qkL2norm,
+                                        std::optional<int64_t> poolRows)
+{
+    auto result = std::make_unique<GdnGraph>();
+    auto& b = result->graph.builder;
+    const std::vector<int64_t> qkDims = {tokens, 2, keyDim};
+    const std::vector<int64_t> qkStrides = {2 * keyDim, keyDim, 1};
+    const std::vector<int64_t> vDims = {tokens, 2, 4};
+    const std::vector<int64_t> vStrides = {8, 4, 1};
+    const std::vector<int64_t> gateDims = {tokens, 2};
+    const std::vector<int64_t> gateStrides = {2, 1};
+    const std::vector<int64_t> cuDims = {sequences + 1};
+    const std::vector<int64_t> indexDims = {sequences};
+    const std::vector<int64_t> unitStrides = {1};
+    const std::vector<int64_t> stateDims = {poolRows.value_or(sequences), 2, 4, keyDim};
+    const std::vector<int64_t> stateStrides = {8 * keyDim, 4 * keyDim, keyDim, 1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 1, "q", DataType::FLOAT, &qkStrides, &qkDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 2, "k", DataType::FLOAT, &qkStrides, &qkDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 3, "v", DataType::FLOAT, &vStrides, &vDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 4, "g", DataType::FLOAT, &gateStrides, &gateDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 5, "beta", DataType::FLOAT, &gateStrides, &gateDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 6, "cu_seqlens", DataType::INT32, &unitStrides, &cuDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 7, "o", DataType::FLOAT, &vStrides, &vDims));
+    flatbuffers::Optional<int64_t> initial = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> indices = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> finalState = flatbuffers::nullopt;
+    if(poolRows.has_value())
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 8, "initial_state", DataType::FLOAT, &stateStrides, &stateDims));
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 9, "state_indices", DataType::INT32, &unitStrides, &indexDims));
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 10, "final_state", DataType::FLOAT, &stateStrides, &stateDims));
+        initial = 8;
+        indices = 9;
+        finalState = 10;
+    }
+
+    auto gdn = CreateGdnAttributes(b,
+                                   1,
+                                   2,
+                                   3,
+                                   4,
+                                   5,
+                                   6,
+                                   initial,
+                                   flatbuffers::nullopt,
+                                   flatbuffers::nullopt,
+                                   indices,
+                                   7,
+                                   finalState,
+                                   flatbuffers::nullopt,
+                                   flatbuffers::nullopt,
+                                   /*output_final_state=*/poolRows.has_value(),
+                                   qkL2norm);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(
+        CreateNodeDirect(b, "gdn", DataType::FLOAT, NodeAttributes::GdnAttributes, gdn.Union()));
+    b.Finish(CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes));
+
+    result->graph.graph = GetGraph(b.GetBufferPointer());
+    result->leafUids = result->graph.leafInputUids({7, 10});
+    result->inputs = makeTensorsFromGraph(result->graph, result->leafUids);
+    return result;
+}
+
+} // namespace
+
+// Without the L2 norm, q and k are drawn so |k|^2 averages 1; the LOG gate is a log-decay
+// (<= 0) and beta a write strength in [0, 1]; cu_seqlens partitions the tokens.
+TEST(TestFillInputs, GdnOperandsKeepTheRecurrenceBounded)
+{
+    auto g = buildGdnGraph(/*tokens=*/12, /*sequences=*/3, /*keyDim=*/48, false, std::nullopt);
+    InputFillRecipes recipes;
+    const auto result = fillInputs(*g->graph.graph, g->inputs, g->leafUids, recipes, nullptr);
+    ASSERT_TRUE(result.filled) << result.reason;
+
+    const float range = std::sqrt(3.0f / 48.0f);
+    EXPECT_EQ(recipes.fill(1), FillRecipe::free(-range, range));
+    EXPECT_EQ(recipes.fill(2), FillRecipe::free(-range, range));
+    EXPECT_EQ(recipes.fill(4), FillRecipe::free(-0.5f, 0.0f));
+    EXPECT_EQ(recipes.fill(5), FillRecipe::free(0.0f, 1.0f));
+
+    const auto offsets = indexValues<int32_t>(g->inputs, 6);
+    ASSERT_EQ(offsets.size(), 4u);
+    EXPECT_EQ(offsets.front(), 0);
+    EXPECT_EQ(offsets.back(), 12);
+    EXPECT_TRUE(std::is_sorted(offsets.begin(), offsets.end()));
+}
+
+// With the L2 norm, q and k keep the default range: the norm removes their scale.
+TEST(TestFillInputs, GdnNormalizedQkKeepTheDefaultRange)
+{
+    auto g = buildGdnGraph(/*tokens=*/4, /*sequences=*/4, /*keyDim=*/48, true, std::nullopt);
+    InputFillRecipes recipes;
+    const auto result = fillInputs(*g->graph.graph, g->inputs, g->leafUids, recipes, nullptr);
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(recipes.fill(1), FillRecipe{});
+    EXPECT_EQ(indexValues<int32_t>(g->inputs, 6), (std::vector<int64_t>{0, 1, 2, 3, 4}));
+}
+
+// state_indices name distinct rows of the pool, and the pooled final_state is updated in
+// place, so the rows no sequence names compare equal.
+TEST(TestFillInputs, GdnStateIndicesAreDistinctPoolRowsUpdatedInPlace)
+{
+    auto g = buildGdnGraph(/*tokens=*/3, /*sequences=*/3, /*keyDim=*/8, true, /*poolRows=*/5);
+    EXPECT_EQ(inPlaceOutputUids(*g->graph.graph), (std::vector<int64_t>{10}));
+    InputFillRecipes recipes;
+    const auto result = fillInputs(*g->graph.graph, g->inputs, g->leafUids, recipes, nullptr);
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(recipes.fill(8), FillRecipe::free(-0.5f, 0.5f));
+
+    const auto rows = indexValues<int32_t>(g->inputs, 9);
+    const std::set<int64_t> distinct(rows.begin(), rows.end());
+    EXPECT_EQ(distinct.size(), 3u);
+    EXPECT_GE(*distinct.begin(), 0);
+    EXPECT_LT(*distinct.rbegin(), 5);
+}
+
 // NOLINTEND(readability-identifier-naming)

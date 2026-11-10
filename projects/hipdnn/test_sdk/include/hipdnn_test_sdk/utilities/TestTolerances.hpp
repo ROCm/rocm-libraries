@@ -642,4 +642,39 @@ constexpr float getTolerance()
 
 } // namespace moe_routing
 
+namespace gdn
+{
+
+// Tolerance for o and the f32 final_state. Engine and reference both run the recurrence in
+// f32 from the same rounded inputs: per token, two K-long dot products (S k, S q), the q/k L2
+// norms and the gate's exp/softplus. They differ only in summation order and in the device's
+// exp, log and rsqrt rounding, a few f32 ulp per token relative to the state's magnitude
+// (|S| of order 1 with unit k, beta <= 1 and decay <= 1), so a short sequence moves the
+// final state by well under 1e-6 (measured: at most 9e-8 at K = V = 128 and 256), under the
+// f32 bound. A half or bfloat16 o is that f32 value rounded once on each side, so the two
+// may land one output ulp apart: at most 2^-10 * |o| for half and 2^-7 * |o| for bfloat16,
+// which the comparison's rtol term covers under the bounds below.
+template <typename T>
+constexpr float getTolerance()
+{
+    if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 2e-3f;
+    }
+    else if constexpr(std::is_same_v<T, bfloat16>)
+    {
+        return 1e-2f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace gdn
+
 } // namespace hipdnn_test_sdk::utilities

@@ -1,0 +1,249 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "2_48_128_128_bfp16_nchw",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              48
+            ],
+            "strides": [
+              48,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              48,
+              128,
+              128
+            ],
+            "strides": [
+              786432,
+              16384,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              8,
+              48
+            ],
+            "strides": [
+              48,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              8,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              8,
+              48,
+              128
+            ],
+            "strides": [
+              6144,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              8,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              8,
+              48,
+              128
+            ],
+            "strides": [
+              6144,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "reference_source": "hand-authored GdnAttributes graph; verified against CpuFpReferenceGdn (CPU reference oracle)",
+        "seed": 1
+      }
+    },
+    {
+      "id": "2_4_64_64_fp16_nchw",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              4,
+              64,
+              64
+            ],
+            "strides": [
+              16384,
+              4096,
+              64,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              8,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              8,
+              2,
+              64
+            ],
+            "strides": [
+              128,
+              64,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              8,
+              4,
+              64
+            ],
+            "strides": [
+              256,
+              64,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              8,
+              2,
+              64
+            ],
+            "strides": [
+              128,
+              64,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              8,
+              4,
+              64
+            ],
+            "strides": [
+              256,
+              64,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "reference_source": "hand-authored GdnAttributes graph; verified against CpuFpReferenceGdn (CPU reference oracle)",
+        "seed": 1
+      }
+    }
+  ]
+}

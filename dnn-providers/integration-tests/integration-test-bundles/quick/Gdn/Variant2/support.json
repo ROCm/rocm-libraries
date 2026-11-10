@@ -1,0 +1,24 @@
+{
+  "claims": {
+    "hipkernel:flydsl_gdn": [
+      {
+        "cases": [
+          "2_48_128_128_bfp16_nchw",
+          "2_4_64_64_fp16_nchw"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

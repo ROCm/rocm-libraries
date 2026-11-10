@@ -1428,7 +1428,12 @@ kernel_match, prepare and launch against `CpuFpReferenceGdn`: a varlen prefill w
 sequence, a decode step, and carried-state equivalence -- a prefill, then a decode from its
 final state, matching one reference run over the whole sequences -- with K-major states for
 the strided objects; the K = V = 128 vector objects also at Qwen3.8's head counts and every
-flag and layout variant), and the census `TestFlydslGdnPacks`.
+flag and layout variant), and the census `TestFlydslGdnPacks`. Across providers, the
+`hip-kernel-provider-flydsl-gdn-<arch>-external-integration` lane runs the
+`integration-test-bundles/quick/Gdn/` bundles (Qwen3.8 decode with the safe gate and
+initial and final state, decode against a state pool, and a short varlen prefill with no
+initial state) on this engine against `CpuFpReferenceGdn`, claimed on gfx90a, gfx942 and
+gfx950.
 
 ## Softmax — `hipkernel:flydsl_softmax`
 

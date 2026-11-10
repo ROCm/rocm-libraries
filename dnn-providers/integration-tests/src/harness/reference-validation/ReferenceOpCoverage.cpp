@@ -40,6 +40,7 @@ const std::set<NodeAttributes>& cpuSupportedOps()
         NodeAttributes::GatherAttributes,
         NodeAttributes::PagedCacheStoreAttributes,
         NodeAttributes::MoeRoutingAttributes,
+        NodeAttributes::GdnAttributes,
     };
     return s_ops;
 }

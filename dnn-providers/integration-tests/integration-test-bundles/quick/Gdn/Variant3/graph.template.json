@@ -1,0 +1,170 @@
+{
+  "compute_data_type": "${case.compute_data_type}",
+  "intermediate_data_type": "${case.intermediate_data_type}",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "name": "GdnTest",
+  "nodes": [
+    {
+      "attributes": {
+        "scale": null,
+        "output_final_state": true,
+        "use_qk_l2norm": true,
+        "checkpoint_every_n_tokens": 0,
+        "use_beta_sigmoid": true,
+        "allow_neg_eigval": false,
+        "safe_gate": true,
+        "gate_domain": "log",
+        "batch_invariant": false,
+        "overwrite_initial_state": false
+      },
+      "compute_data_type": "float",
+      "inputs": {
+        "q_tensor_uid": 9,
+        "k_tensor_uid": 7,
+        "v_tensor_uid": 11,
+        "g_tensor_uid": 5,
+        "beta_tensor_uid": 1,
+        "cu_seqlens_tensor_uid": 2,
+        "initial_state_tensor_uid": 6,
+        "a_log_tensor_uid": 0,
+        "dt_bias_tensor_uid": 3,
+        "state_indices_tensor_uid": 10
+      },
+      "name": "Gdn_0",
+      "outputs": {
+        "o_tensor_uid": 8,
+        "final_state_tensor_uid": 4,
+        "state_checkpoints_tensor_uid": null
+      },
+      "type": "GdnAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Gdn_0::A_LOG",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Gdn_0::BETA",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Gdn_0::CU_SEQLENS",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Gdn_0::DT_BIAS",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Gdn_0::FINAL_STATE",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Gdn_0::G",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Gdn_0::INITIAL_STATE",
+      "strides": "${case.strides}",
+      "uid": 6,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Gdn_0::K",
+      "strides": "${case.strides}",
+      "uid": 7,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Gdn_0::O",
+      "strides": "${case.strides}",
+      "uid": 8,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Gdn_0::Q",
+      "strides": "${case.strides}",
+      "uid": 9,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Gdn_0::STATE_INDICES",
+      "strides": "${case.strides}",
+      "uid": 10,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Gdn_0::V",
+      "strides": "${case.strides}",
+      "uid": 11,
+      "virtual": false
+    }
+  ]
+}

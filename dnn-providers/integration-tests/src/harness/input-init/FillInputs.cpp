@@ -450,6 +450,81 @@ std::optional<std::string> assignPagedCacheStoreSlots(
     return std::nullopt;
 }
 
+// ── GDN ──────────────────────────────────────────────────────────────────────
+
+void setGdnInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+                        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                        InputFillRecipes& recipes)
+{
+    const auto* a = node.attributes_as_GdnAttributes();
+    if(a == nullptr)
+    {
+        return;
+    }
+
+    // Ranges where the recurrence S = alpha S (I - beta k k^T) + beta v k^T stays bounded,
+    // as in the engine's own object tests. Without the L2 norm, q and k are drawn so that
+    // |k|^2 averages 1 (uniform in +-sqrt(3 / K)), keeping I - beta k k^T contractive for
+    // beta in [0, 1]; with it, the default [-1, 1] is normalized away.
+    if(!a->use_qk_l2norm() && graph.tensors() != nullptr)
+    {
+        for(const auto* q : *graph.tensors())
+        {
+            if(q->uid() == a->q_tensor_uid() && q->dims() != nullptr && q->dims()->size() == 3
+               && q->dims()->Get(2) > 0)
+            {
+                const float range = std::sqrt(3.0f / static_cast<float>(q->dims()->Get(2)));
+                recipes.setDefault(a->q_tensor_uid(), FillRecipe::free(-range, range));
+                recipes.setDefault(a->k_tensor_uid(), FillRecipe::free(-range, range));
+                break;
+            }
+        }
+    }
+
+    // g: logits for the safe gate (alpha = exp(-exp(a_log) softplus(g + dt_bias))), the
+    // decay itself in (0, 1] for LINEAR, or its logarithm (<= 0) for LOG.
+    if(a->safe_gate())
+    {
+        recipes.setDefault(a->g_tensor_uid(), FillRecipe::free(-2.0f, 2.0f));
+    }
+    else if(a->gate_domain() == hipdnn_flatbuffers_sdk::data_objects::GateDomain::LINEAR)
+    {
+        recipes.setDefault(a->g_tensor_uid(), FillRecipe::free(0.5f, 1.0f));
+    }
+    else
+    {
+        recipes.setDefault(a->g_tensor_uid(), FillRecipe::free(-0.5f, 0.0f));
+    }
+
+    // beta: logits under the sigmoid; with allow_neg_eigval (2 * sigmoid) kept below 0 so
+    // the write strength stays under 1; otherwise the strength itself, in [0, 1].
+    if(a->allow_neg_eigval())
+    {
+        recipes.setDefault(a->beta_tensor_uid(), FillRecipe::free(-3.0f, 0.0f));
+    }
+    else if(a->use_beta_sigmoid())
+    {
+        recipes.setDefault(a->beta_tensor_uid(), FillRecipe::free(-2.0f, 2.0f));
+    }
+    else
+    {
+        recipes.setDefault(a->beta_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
+    }
+
+    if(a->a_log_tensor_uid().has_value())
+    {
+        recipes.setDefault(*a->a_log_tensor_uid(), FillRecipe::free(-1.0f, 0.5f));
+    }
+    if(a->dt_bias_tensor_uid().has_value())
+    {
+        recipes.setDefault(*a->dt_bias_tensor_uid(), FillRecipe::free(-1.0f, 1.0f));
+    }
+    if(a->initial_state_tensor_uid().has_value())
+    {
+        recipes.setDefault(*a->initial_state_tensor_uid(), FillRecipe::free(-0.5f, 0.5f));
+    }
+}
+
 // ── Varlen index operands: cu_seqlens and state_indices ──────────────────────
 // Neither can be drawn element by element: cu_seqlens is a partition of the tokens and
 // state_indices names distinct pool rows. Both are written after the generic fill
@@ -689,6 +764,39 @@ std::optional<std::string>
         graph, inputs, ownedUids, recipes, *a.state_indices_tensor_uid(), *poolRows);
 }
 
+// cu_seqlens over q's T tokens; state_indices over initial_state's P pool rows.
+std::optional<std::string>
+    deriveGdnIndices(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+                     const hipdnn_flatbuffers_sdk::data_objects::GdnAttributes& a,
+                     InputTensorMap& inputs,
+                     const std::vector<int64_t>& ownedUids,
+                     const InputFillRecipes& recipes)
+{
+    const auto tokens = graphTensorExtent(graph, a.q_tensor_uid(), 0);
+    if(!tokens)
+    {
+        return "q has no token axis";
+    }
+    if(auto why
+       = fillCuSeqlens(graph, inputs, ownedUids, recipes, a.cu_seqlens_tensor_uid(), *tokens))
+    {
+        return why;
+    }
+    if(!a.state_indices_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
+    const auto poolRows = a.initial_state_tensor_uid().has_value()
+                              ? graphTensorExtent(graph, *a.initial_state_tensor_uid(), 0)
+                              : std::nullopt;
+    if(!poolRows)
+    {
+        return "state_indices needs an initial_state pool [P, HO, V, K]";
+    }
+    return fillStateIndices(
+        graph, inputs, ownedUids, recipes, *a.state_indices_tensor_uid(), *poolRows);
+}
+
 // Writes every varlen index operand of the graph. Returns why one cannot be written.
 std::optional<std::string>
     deriveVarlenIndexOperands(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
@@ -703,6 +811,10 @@ std::optional<std::string>
         if(const auto* a = node.attributes_as_CausalConv1dAttributes())
         {
             why = deriveCausalConv1dIndices(graph, *a, inputs, ownedUids, recipes);
+        }
+        else if(const auto* gdn = node.attributes_as_GdnAttributes())
+        {
+            why = deriveGdnIndices(graph, *gdn, inputs, ownedUids, recipes);
         }
         if(why)
         {
@@ -771,6 +883,9 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
         return true;
     case NA::PagedCacheStoreAttributes:
         setPagedCacheStoreInitDefaults(node, recipes);
+        return true;
+    case NA::GdnAttributes:
+        setGdnInitDefaults(graph, node, recipes);
         return true;
     // x, weight, bias and the states take the [-1, 1] default; cu_seqlens and
     // state_indices are written after the fill (deriveVarlenIndexOperands()).
@@ -1141,6 +1256,21 @@ std::vector<int64_t> inPlaceOutputUids(const hipdnn_flatbuffers_sdk::data_object
             if(a->state_indices_tensor_uid().has_value() && a->final_state_tensor_uid().has_value())
             {
                 uids.push_back(*a->final_state_tensor_uid());
+            }
+            break;
+        }
+        // Likewise a GDN final_state pool; and state_checkpoints keeps the rows past the
+        // last one the sequences write.
+        case NA::GdnAttributes:
+        {
+            const auto* a = node->attributes_as_GdnAttributes();
+            if(a->state_indices_tensor_uid().has_value() && a->final_state_tensor_uid().has_value())
+            {
+                uids.push_back(*a->final_state_tensor_uid());
+            }
+            if(a->state_checkpoints_tensor_uid().has_value())
+            {
+                uids.push_back(*a->state_checkpoints_tensor_uid());
             }
             break;
         }
