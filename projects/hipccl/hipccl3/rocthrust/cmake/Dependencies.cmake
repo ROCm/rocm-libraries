@@ -4,7 +4,8 @@
 
 include(primlibs/dependencies/monorepo)
 
-# The option of using the SQLite provided by the system, instead of downloading a copy
+# Declared here so it appears in the cache and the configure summary even
+# when the sqlite3 module below is never included. option() is idempotent.
 option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" ON )
 
 if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
@@ -51,54 +52,17 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 
   # SQlite (for run-to-run bitwise-reproducibility tests)
   # Note: SQLite 3.51.3 to address CVE https://github.com/advisories/GHSA-p36r-6g67-869c
-  set(SQLITE_MIN_VERSION "3.45.1")
-  string(REPLACE "." "_" SQLITE_VER_UNDERSCORE ${SQLITE_MIN_VERSION})
-
+  #
+  # NOTE(hipccl3): the logic lives in the shared
+  # primlibs/dependencies/sqlite3.cmake module. Its sqlite3/ subdirectory
+  # removes leaked device flags for the embedded plain C target. The module
+  # provides the SQLite::SQLite3 target on both paths, so other hipccl3
+  # components can reuse it as-is.
+  include(primlibs/dependencies/sqlite3)
   if(SQLITE_USE_SYSTEM_PACKAGE)
-    find_package(SQLite3 ${SQLITE_MIN_VERSION} REQUIRED)
     list(APPEND static_depends PACKAGE SQLite3)
-    set(ROCTHRUST_SQLITE_LIB SQLite::SQLite3)
-  else()
-    message(STATUS "Force download local copy of SQLite on. Downloading and building SQLite.")
-    if(DEFINED ENV{SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL})
-      set(SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL_INIT $ENV{SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL})
-    else()
-      set(SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL_INIT https://sqlite.org/2026/sqlite-amalgamation-3510300.zip)
-    endif()
-    set(SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL ${SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
-    set(SQLITE_SRC_${SQLITE_VER_UNDERSCORE}_SHA3_256 ced02ff9738970f338c9c8e269897b554bcda73f6cf1029d49459e1324dbeaea CACHE STRING "SHA3-256 hash of SQLite source code")
-
-    # embed SQLite
-    if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
-      # use extract timestamp for fetched files instead of timestamps in the archive
-      cmake_policy(SET CMP0135 NEW)
-    endif()
-
-    FetchContent_Declare(sqlite_local
-      URL ${SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL}
-      URL_HASH SHA3_256=${SQLITE_SRC_${SQLITE_VER_UNDERSCORE}_SHA3_256}
-    )
-    FetchContent_MakeAvailable(sqlite_local)
-
-    add_library(sqlite3 OBJECT ${sqlite_local_SOURCE_DIR}/sqlite3.c)
-    target_include_directories(sqlite3 PUBLIC ${sqlite_local_SOURCE_DIR})
-    set_target_properties( sqlite3 PROPERTIES
-        C_VISIBILITY_PRESET "hidden"
-        VISIBILITY_INLINES_HIDDEN ON
-        POSITION_INDEPENDENT_CODE ON
-        LINKER_LANGUAGE CXX
-    )
-
-    # We don't need extensions, and omitting them from SQLite removes the
-    # need for dlopen/dlclose from within rocThrust.
-    # We also don't need the shared cache, and omitting it yields some performance improvements.
-    target_compile_options(
-        sqlite3
-        PRIVATE -DSQLITE_OMIT_LOAD_EXTENSION
-        PRIVATE -DSQLITE_OMIT_SHARED_CACHE
-    )
-    set(ROCTHRUST_SQLITE_LIB sqlite3)
   endif()
+  set(ROCTHRUST_SQLITE_LIB SQLite::SQLite3)
 endif()
 
 # Benchmark dependencies
