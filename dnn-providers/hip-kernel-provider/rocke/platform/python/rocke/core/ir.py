@@ -1453,12 +1453,15 @@ def _scf_for_carried_count_error(op: Op) -> str | None:
     """The refusal for the ``scf.for`` ``op`` when its counts of carried values
     disagree, or None when they agree.
 
-    The ``num_iter_args`` attr (0 when absent) gives the count; the init
-    operands (the operands after lower, upper and step), the ``iter_args``
-    metadata list (empty when absent) and the results each hold one entry per
-    carried value.
+    The ``num_iter_args`` attr (0 when absent) gives the count, and only a
+    plain int can give it (a bool, a float or a string is refused, as the C++
+    engine refuses any attr but an int one); the init operands (the operands after
+    lower, upper and step), the ``iter_args`` metadata list (empty when absent)
+    and the results each hold one entry per carried value.
     """
     count = op.attrs.get("num_iter_args", 0)
+    if not is_plain_int(count):
+        return "scf.for num_iter_args must be an integer count of carried values"
     metadata = op.attrs.get("iter_args", [])
     if not isinstance(metadata, list):
         return "scf.for iter_args metadata must be a list"

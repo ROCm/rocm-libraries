@@ -2954,14 +2954,20 @@ const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t
 
 /* Python core/ir.py::_scf_for_carried_count_error: the refusal for the scf.for
  * `op` when its counts of carried values disagree, written into `buf`, or NULL
- * when they agree. The num_iter_args attr (0 when absent) gives the count; the
- * init operands (the operands after lower, upper and step), the iter_args
- * metadata list (empty when absent) and the results each hold one entry per
- * carried value. */
+ * when they agree. The num_iter_args attr (0 when absent) gives the count, and
+ * only an int attr can give it (a bool, a float or a string is refused, as
+ * Python refuses anything but a plain int); the init operands (the operands
+ * after lower, upper and step), the iter_args metadata list (empty when
+ * absent) and the results each hold one entry per carried value. */
 static const char* scf_for_carried_count_error(const rocke_op_t* op, char* buf, size_t cap)
 {
-    int64_t count = 0;
-    rocke_attr_get_int(&op->attrs, "num_iter_args", &count);
+    const rocke_attr_value_t* declared = rocke_attr_get(&op->attrs, "num_iter_args");
+    if(declared && declared->kind != ROCKE_ATTR_INT)
+    {
+        snprintf(buf, cap, "scf.for num_iter_args must be an integer count of carried values");
+        return buf;
+    }
+    const int64_t count = declared ? declared->u.i : 0;
     const rocke_attr_value_t* metadata = rocke_attr_get(&op->attrs, "iter_args");
     if(metadata && !rocke_i_attr_is_list(metadata))
     {

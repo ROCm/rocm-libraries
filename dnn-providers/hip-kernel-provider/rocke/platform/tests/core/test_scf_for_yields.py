@@ -3,22 +3,22 @@
 
 """The carried values of an ``scf.for`` and the ``scf.yield`` that ends its body.
 
-A loop's ``num_iter_args``, init operands, ``iter_args`` metadata and results
-agree in count, each metadata entry names its carried value and that value's
-type (which the loop's result shares), and the loop takes its carried values
-from the one ``scf.yield`` that ends its body: the body yields only at its end,
-and ends in a yield of one value per carried value, of that value's type,
-whenever the loop carries any. A loop that carries none may end in an empty
-yield or in none. The verifier and the LLVM and HIP lowerings of both engines
-refuse any other loop with the same text and a ``ValueError``, also in an
-unrolled loop of zero trips, which the LLVM lowering does not lower; each loop
-is held to its own counts, and a loop or an if/else nested in a body keeps its
-own yields. A metadata entry that is not a map is the exception: the C++
-engine's parser refuses it before the loop rule runs, with its own text. An
-entry with no type name is refused by the C++ parser first too, with the text
-the loop rule shares. Each refusal runs the Python verifier and the Python
-lowerings everywhere, and the C++ lowerings where the ``rocke_engine`` binding
-is built.
+A loop's ``num_iter_args`` is an int that agrees in count with its init
+operands, ``iter_args`` metadata and results; each metadata entry names its
+carried value and that value's type (which the loop's result shares), and the
+loop takes its carried values from the one ``scf.yield`` that ends its body:
+the body yields only at its end, and ends in a yield of one value per carried
+value, of that value's type, whenever the loop carries any. A loop that carries
+none may end in an empty yield or in none. The verifier and the LLVM and HIP
+lowerings of both engines refuse any other loop with the same text and a
+``ValueError``, also in an unrolled loop of zero trips, which the LLVM lowering
+does not lower; each loop is held to its own counts, and a loop or an if/else
+nested in a body keeps its own yields. A metadata entry that is not a map is
+the exception: the C++ engine's parser refuses it before the loop rule runs,
+with its own text. An entry with no type name is refused by the C++ parser
+first too, with the text the loop rule shares. Each refusal runs the Python
+verifier and the Python lowerings everywhere, and the C++ lowerings where the
+``rocke_engine`` binding is built.
 ``tests/core/test_yield_rules.cpp`` covers the same rules in the C++ engine,
 its verifier included.
 """
@@ -61,6 +61,20 @@ def _loop_kernel_with_body(name, body, trips=LOOP_TRIPS, unroll=False):
     )
     with loop as (k, (acc,)):
         body(b, k, acc)
+    b.ret()
+    return b.kernel
+
+
+def _loop_kernel_carrying_the_lane(name):
+    """A kernel with one loop that carries the lane id and yields it."""
+    return _loop_kernel_with_body(name, lambda b, k, acc: b.scf_yield(acc))
+
+
+def _loop_kernel_carrying_nothing(name):
+    """A kernel with one loop that carries no value and has an empty body."""
+    b = IRBuilder(name)
+    with b.scf_for(b.const_i32(0), b.const_i32(LOOP_TRIPS), b.const_i32(1)):
+        pass
     b.ret()
     return b.kernel
 
@@ -172,11 +186,7 @@ def test_a_loop_without_exactly_one_body_region_is_refused(regions_text, count):
     """The lowerings read only a loop's first region, so serialized IR with no
     body or a second region (whose yield would be dropped unchecked) is
     refused, by the parser's output reaching the verifier and every lowering."""
-    b = IRBuilder("loop_regions")
-    with b.scf_for(b.const_i32(0), b.const_i32(LOOP_TRIPS), b.const_i32(1)):
-        pass
-    b.ret()
-    text = serialize(b.kernel)
+    text = serialize(_loop_kernel_carrying_nothing("loop_regions"))
     assert _EMPTY_BODY_TEXT in text
     kernel = parse(text.replace(_EMPTY_BODY_TEXT, regions_text))
     (loop,) = [op for op in kernel.body.ops if op.name == "scf.for"]
@@ -293,16 +303,44 @@ def test_a_loop_whose_carried_counts_disagree_is_refused(edit, message):
     list that disagrees with its init operands; the verifier and every
     lowering refuse it, the HIP lowering included, instead of reading the
     disagreeing count."""
-    kernel = _loop_kernel_with_body("loop_counts", lambda b, k, acc: b.scf_yield(acc))
+    kernel = _loop_kernel_carrying_the_lane("loop_counts")
     (loop,) = [op for op in kernel.body.ops if op.name == "scf.for"]
     edit(loop)
     _refused(kernel, message)
 
 
+NON_INTEGER_COUNT_MESSAGE = (
+    "scf.for num_iter_args must be an integer count of carried values"
+)
+
+
+@pytest.mark.parametrize(
+    "count,make_kernel",
+    [
+        pytest.param(
+            1.0, _loop_kernel_carrying_the_lane, id="float_equal_to_the_count"
+        ),
+        pytest.param(
+            True, _loop_kernel_carrying_the_lane, id="bool_equal_to_the_count"
+        ),
+        pytest.param("0", _loop_kernel_carrying_nothing, id="string_carrying_nothing"),
+    ],
+)
+def test_a_loop_whose_num_iter_args_is_not_an_integer_is_refused(count, make_kernel):
+    """Serialized IR can give a loop a ``num_iter_args`` that is not an int
+    attr; the verifier and every lowering of both engines refuse it, even when
+    it compares equal to the carried-value count or the loop carries nothing,
+    instead of each engine reading it its own way."""
+    kernel = make_kernel("loop_count_kind")
+    (loop,) = [op for op in kernel.body.ops if op.name == "scf.for"]
+    loop.attrs["num_iter_args"] = count
+    _refused(kernel, NON_INTEGER_COUNT_MESSAGE)
+
+
 def _loop_kernel_yielding_its_init(name):
     """A loop kernel whose body yields the loop's init value, so the body does
     not depend on the metadata naming the carried value."""
-    kernel = _loop_kernel_with_body(name, lambda b, k, acc: b.scf_yield(acc))
+    kernel = _loop_kernel_carrying_the_lane(name)
     (loop,) = [op for op in kernel.body.ops if op.name == "scf.for"]
     loop.regions[0].ops[-1].operands = loop.operands[3:]
     return kernel, loop
