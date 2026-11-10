@@ -34,6 +34,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import difflib
 import hashlib
@@ -75,8 +76,8 @@ NAME_COLUMNS = frozenset({"knl_name", "co_name"})
 DATA_COLUMNS = frozenset({"ts_qo", "ts_kv", "ts"})
 
 # A symbol from Composable Kernel. Any one of these in an object means it is
-# not one of AITER's ASM kernels.
-CK_SYMBOL = re.compile(r"ck_tile|^_ZN2ck|^_ZNK2ck|^_ZN7ck_tile|kentry")
+# not one of AITER's ASM kernels. "ck_tile" anywhere also covers _ZN7ck_tile.
+CK_SYMBOL = re.compile(r"ck_tile|^_ZN2ck|^_ZNK2ck|kentry")
 
 COMMENT_PREFIXES = ("#", "//", ";")
 
@@ -97,7 +98,9 @@ class Ref:
     """A region of upstream host source that the engine mirrors by hand."""
 
     path: str
-    kind: str  # "file", "struct" or "function"
+    kind: str  # "file", "struct", "function" (C++) or "pyfunction" (Python)
+    # The function or struct name; for "pyfunction" the dotted name of a function
+    # nested in others, such as "outer.inner".
     name: str | None
     tier: int
     what: str
@@ -122,7 +125,8 @@ _SHARED_REFS = tuple(
 
 # Upstream code read to detect ABI, dispatch and codegen changes; never copied.
 # In csrc/cpp_itfs/mha_fwd.cu only the ASM functions are listed: fmha_fwd_ck()
-# and the CK fallback in mha_fwd() are out of scope.
+# and the CK fallback in mha_fwd() are out of scope. aiter/ops/mha.py decides in
+# Python, before csrc/ is reached, which cases may use the ASM v3 kernels.
 REFERENCES: dict[str, tuple[Ref, ...]] = {
     "fmha_v3_fwd": _SHARED_REFS
     + (
@@ -176,6 +180,27 @@ REFERENCES: dict[str, tuple[Ref, ...]] = {
             3,
             "ASM dispatch conditions and block size; each early 'return -1' hands "
             "the case to CK, so the engine must decline it",
+        ),
+        *(
+            Ref(
+                "aiter/ops/mha.py",
+                "pyfunction",
+                f"{caller}.can_impl_fmha_v3_fwd",
+                3,
+                f"Python ASM v3 gate for {mode}; a case it rejects never reaches the "
+                "ASM kernels, so the engine must decline it if it is a kernel limit",
+            )
+            for caller, mode in (
+                ("_flash_attn_forward", "batch mode"),
+                ("_flash_attn_varlen_forward", "group (varlen) mode"),
+            )
+        ),
+        Ref(
+            "aiter/ops/mha.py",
+            "pyfunction",
+            "_fmha_kv_byte_extent_ge_u32",
+            3,
+            "K/V row byte-extent limit the Python ASM v3 gates apply",
         ),
     ),
     "fmha_fwd_bf16": _SHARED_REFS
@@ -289,6 +314,24 @@ def elf_symbols(data: bytes) -> set[str]:
             if st_name and end > st_name:
                 names.add(strtab[st_name:end].decode("utf-8", "replace"))
     return names
+
+
+def object_problems(data: bytes, knl: str) -> list[tuple[str, str]]:
+    """Why an object is not the ASM kernel knl, as (finding kind, message) pairs.
+    plan blocks apply on any of them and verify reports them, so both use this."""
+    try:
+        symbols = elf_symbols(data)
+    except NotElf as error:
+        return [("not_elf", str(error))]
+    problems = []
+    if knl not in symbols and f"{knl}.kd" not in symbols:
+        problems.append(("symbol_missing", f"does not define {knl}"))
+    ck = sorted(s for s in symbols if CK_SYMBOL.search(s))
+    if ck:
+        problems.append(
+            ("ck_symbol", f"CK symbols {ck[:3]}; only ASM kernels are ported")
+        )
+    return problems
 
 
 # --------------------------------------------------------------------------- #
@@ -493,13 +536,15 @@ class Upstream:
             raise SyncError(f"no vX.Y.Z release tags in {self.url}")
         return max(tags, key=version_key), "highest release tag"
 
-    def list_dir(self, commit: str, path: str) -> list[tuple[str, str]]:
+    def subdirs(self, commit: str, path: str) -> set[str]:
+        """The names of the directories directly under path at a commit."""
         out = run_git(self.repo, "ls-tree", commit, "--", f"{path.rstrip('/')}/")
-        entries = []
+        names = set()
         for line in out.splitlines():
             meta, _, name = line.partition("\t")
-            entries.append((meta.split()[1], PurePosixPath(name).name))
-        return entries
+            if meta.split()[1] == "tree":
+                names.add(PurePosixPath(name).name)
+        return names
 
     def materialize(
         self, commit: str, dirs: list[str], files: list[str]
@@ -550,9 +595,40 @@ def _brace_block(text: str, start: int) -> int | None:
     return None
 
 
+_PY_DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _python_def(node: ast.AST, name: str) -> ast.AST | None:
+    """The first function or class called name in the body of node, including the
+    blocks (if, try, with, ...) it opens; never inside another function or class."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, _PY_DEFS):
+            if child.name == name:
+                return child
+        elif (found := _python_def(child, name)) is not None:
+            return found
+    return None
+
+
+def _python_function(text: str, dotted: str) -> str | None:
+    """The source of a Python function by its dotted name, decorators included."""
+    try:
+        node: ast.AST | None = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    for part in dotted.split("."):
+        node = _python_def(node, part)
+        if node is None:
+            return None
+    first = min([node.lineno] + [d.lineno for d in node.decorator_list])
+    return "\n".join(text.split("\n")[first - 1 : node.end_lineno])
+
+
 def extract_region(text: str, ref: Ref) -> str | None:
     if ref.kind == "file":
         return text
+    if ref.kind == "pyfunction":
+        return _python_function(text, ref.name)
     if ref.kind == "struct":
         pattern = re.compile(
             rf"^[ \t]*struct\b[^;{{\n]*\b{re.escape(ref.name)}\b[^;\n]*$", re.M
@@ -767,7 +843,7 @@ def plan_module(
         )
 
     kept_csvs: dict[str, bytes] = {}
-    kept_objects: set[str] = set()
+    kept_objects: dict[str, str] = {}  # object path -> the kernel it must define
     excluded: list[dict] = []
     auto_rules: list[dict] = []
     for name in sorted(set(up.csvs) | set(local.csvs if local else {})):
@@ -819,15 +895,14 @@ def plan_module(
                     findings.add(2, "row_dropped_by_rule", f"{knl}: {reason}")
                 continue
             for root in sorted(up.object_roots()):
-                kept_objects.add(str(PurePosixPath(root) / row["co_name"]))
+                kept_objects[str(PurePosixPath(root) / row["co_name"])] = knl
             if local_csv is None:
                 continue
             if knl not in local_rows:
                 new = [
                     f"{c}={row[c]}"
-                    for c in up_csv.header
-                    if c not in NAME_COLUMNS | DATA_COLUMNS
-                    and row[c] not in known.get(c, set())
+                    for c in dispatch_columns
+                    if row[c] not in known.get(c, set())
                 ]
                 if new:
                     findings.add(
@@ -857,35 +932,15 @@ def plan_module(
         kept_csvs[name] = filtered_csv(up_csv, dropped)
 
     target: dict[str, bytes] = dict(kept_csvs)
-    knl_by_object: dict[str, str] = {}
-    for name, table in up.csvs.items():
-        for row in table.rows:
-            for root in up.object_roots():
-                knl_by_object[str(PurePosixPath(root) / row["co_name"])] = row[
-                    "knl_name"
-                ]
-    for path in sorted(kept_objects):
+    for path, knl in sorted(kept_objects.items()):
         data = up.objects.get(path)
         if data is None:
             findings.add(
                 3, "object_missing_upstream", f"{path} is named by a CSV row but absent"
             )
             continue
-        try:
-            symbols = elf_symbols(data)
-        except NotElf as error:
-            findings.add(3, "not_elf", f"{path}: {error}")
-            continue
-        ck = sorted(s for s in symbols if CK_SYMBOL.search(s))
-        if ck:
-            findings.add(
-                3,
-                "ck_symbol",
-                f"{path}: CK symbols {ck[:3]}; only ASM kernels are ported",
-            )
-        knl = knl_by_object[path]
-        if knl not in symbols and f"{knl}.kd" not in symbols:
-            findings.add(3, "symbol_missing", f"{path} does not define {knl}")
+        for kind, message in object_problems(data, knl):
+            findings.add(3, kind, f"{path}: {message}")
         target[path] = data
         if local is not None:
             if path in local.objects and local.objects[path] != data:
@@ -979,6 +1034,18 @@ def reference_files(modules: list[str]) -> list[str]:
     return sorted({ref.path for module in modules for ref in REFERENCES[module]})
 
 
+def forward_modules(entries: set[str]) -> tuple[list[str], list[str]]:
+    """Of the module directories under an AITER hsa/<arch>/, the tracked forward
+    ASM modules and the forward ones this tool does not port."""
+    tracked = [m for m in TRACKED_MODULES if m in entries]
+    untracked = sorted(
+        m
+        for m in entries
+        if m.startswith("fmha") and "fwd" in m and m not in TRACKED_MODULES
+    )
+    return tracked, untracked
+
+
 def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
     kernels = root / KERNELS_DIR
     archs = [a.strip() for a in args.arch.split(",") if a.strip()]
@@ -988,33 +1055,24 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
     available: dict[str, list[str]] = {}
     untracked: list[dict] = []
     for arch in archs:
-        entries = {
-            name
-            for kind, name in upstream.list_dir(commit, f"hsa/{arch}")
-            if kind == "tree"
-        }
+        entries = upstream.subdirs(commit, f"hsa/{arch}")
         if not entries:
             raise SyncError(f"AITER {args.ref} has no hsa/{arch}/")
-        available[arch] = [m for m in TRACKED_MODULES if m in entries]
+        available[arch], others = forward_modules(entries)
         if not available[arch]:
             raise SyncError(
                 f"AITER {args.ref} ships no tracked forward ASM module for {arch}"
             )
-        for name in sorted(entries):
-            if (
-                name.startswith("fmha")
-                and "fwd" in name
-                and name not in TRACKED_MODULES
-            ):
-                untracked.append(
-                    {
-                        "arch": arch,
-                        "module": name,
-                        "reason": UNTRACKED_MODULES.get(
-                            name, "unknown forward module: decide whether to track it"
-                        ),
-                    }
-                )
+        untracked += [
+            {
+                "arch": arch,
+                "module": name,
+                "reason": UNTRACKED_MODULES.get(
+                    name, "unknown forward module: decide whether to track it"
+                ),
+            }
+            for name in others
+        ]
     pins = load_pins(kernels)
     modules = [module_key(a, m) for a in archs for m in available[a]]
     rules_by_key: dict[str, list[dict]] = {k: [] for k in modules}
@@ -1024,32 +1082,28 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
         if entry:
             rules_by_key[key] = list(entry["exclude"])
             includes_by_key[key] = set(entry.get("include", []))
-    for key, spec in args.drop_exclude or []:
+
+    def planned(option: str, key: str) -> str:
         if key not in rules_by_key:
-            raise SyncError(
-                f"--drop-exclude {key}: not one of the planned modules {modules}"
-            )
+            raise SyncError(f"{option} {key}: not one of the planned modules {modules}")
+        return key
+
+    for key, spec in args.drop_exclude or []:
+        planned("--drop-exclude", key)
         match = parse_rule(spec, "-")["match"]
         kept = [rule for rule in rules_by_key[key] if rule["match"] != match]
         if len(kept) == len(rules_by_key[key]):
             raise SyncError(f"--drop-exclude {key}: no pinned rule matches {spec}")
         rules_by_key[key] = kept
     for key, spec, reason in args.exclude or []:
-        if key not in rules_by_key:
-            raise SyncError(
-                f"--exclude {key}: not one of the planned modules {modules}"
-            )
+        planned("--exclude", key)
         rule = parse_rule(spec, reason)
         rules_by_key[key] = [
             r for r in rules_by_key[key] if r["match"] != rule["match"]
         ]
         rules_by_key[key].append(rule)
     for key, knl in args.include or []:
-        if key not in includes_by_key:
-            raise SyncError(
-                f"--include {key}: not one of the planned modules {modules}"
-            )
-        includes_by_key[key].add(knl)
+        includes_by_key[planned("--include", key)].add(knl)
 
     module_dirs = [f"hsa/{k}" for k in modules]
     refs = reference_files([split_key(k)[1] for k in modules])
@@ -1311,8 +1365,13 @@ def cmd_apply(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
             if not any(directory.iterdir()):
                 directory.rmdir()
         # The host-code commit advances with the objects only when nothing in the
-        # mirrored upstream code changed; otherwise it stays until mark-ported.
-        abi_changed = any(f["kind"] == "reference_changed" for f in plan["findings"])
+        # mirrored upstream code changed or went missing; otherwise it stays until
+        # mark-ported. A region renamed upstream is missing under its old name, and
+        # keeping the old commit lets the next plan diff it under its new name.
+        abi_changed = any(
+            f["kind"] in ("reference_changed", "reference_missing")
+            for f in plan["findings"]
+        )
         abi = plan["abi_baseline"]
         entry = {
             "tag": report["tag"],
@@ -1349,7 +1408,7 @@ def cmd_mark_ported(args: argparse.Namespace, root: Path) -> int:
     for key in args.module:
         entry = pins["modules"].get(key)
         if entry is None:
-            raise SyncError(f"{key} is not pinned; run update first")
+            raise SyncError(f"{key} is not pinned; run plan and apply first")
         arch, module = split_key(key)
         entry["abi_commit"] = entry["commit"]
         (safe_module_dir(kernels, key) / SOURCE_MD).write_text(
@@ -1409,21 +1468,10 @@ def verify_module(kernels: Path, key: str, entry: dict) -> list[str]:
                         f"{key}/{name}: {row['knl_name']} names {path}, which is missing"
                     )
                     continue
-                try:
-                    symbols = elf_symbols(data)
-                except NotElf as error:
-                    problems.append(f"{key}/{path}: {error}")
-                    continue
-                if (
-                    row["knl_name"] not in symbols
-                    and f"{row['knl_name']}.kd" not in symbols
-                ):
-                    problems.append(f"{key}/{path}: does not define {row['knl_name']}")
-                ck = sorted(s for s in symbols if CK_SYMBOL.search(s))
-                if ck:
-                    problems.append(
-                        f"{key}/{path}: CK symbols {ck[:3]}; only ASM kernels belong here"
-                    )
+                problems += [
+                    f"{key}/{path}: {message}"
+                    for _, message in object_problems(data, row["knl_name"])
+                ]
     for path in sorted(set(tree.objects) - referenced):
         problems.append(f"{key}/{path}: no CSV row references it")
     return problems
@@ -1478,20 +1526,12 @@ def cmd_archs(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
     commit, tag = upstream.resolve(args.ref)
     kernels = root / KERNELS_DIR
     rows = []
-    for kind, arch in upstream.list_dir(commit, "hsa"):
-        if kind != "tree" or not arch.startswith("gfx"):
+    for arch in sorted(upstream.subdirs(commit, "hsa")):
+        if not arch.startswith("gfx"):
             continue
-        modules = {
-            name for k, name in upstream.list_dir(commit, f"hsa/{arch}") if k == "tree"
-        }
-        tracked = [m for m in TRACKED_MODULES if m in modules]
+        tracked, other = forward_modules(upstream.subdirs(commit, f"hsa/{arch}"))
         if not tracked:
             continue
-        other = sorted(
-            m
-            for m in modules
-            if m.startswith("fmha") and "fwd" in m and m not in TRACKED_MODULES
-        )
         local = [m for m in TRACKED_MODULES if (kernels / arch / m).is_dir()]
         rows.append(
             {"arch": arch, "tracked": tracked, "untracked": other, "local": local}

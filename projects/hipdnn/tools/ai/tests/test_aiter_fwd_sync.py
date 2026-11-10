@@ -8,6 +8,7 @@ minimal ELF files carrying only a symbol table, which is all the script reads.
 No test touches the network or the real checkout.
 """
 
+import dataclasses
 import importlib.util
 import json
 import struct
@@ -36,6 +37,7 @@ ROW_FP8 = "fp8bf16,128,128,0,0,1,256,64,_ZN5aiter6fwd_fp8E,fwd_fp8.co"
 ROW_HD256 = "bf16,256,256,0,0,0,128,32,_ZN5aiter8fwd_hd256E,fwd_hd256.co"
 ROW_HD128_GROUP = "bf16,128,128,0,1,0,256,32,_ZN5aiter10fwd_hd128gE,fwd_hd128g.co"
 ROW_FP8_GROUP = "fp8bf16,128,128,0,1,1,256,64,_ZN5aiter8fwd_fp8gE,fwd_fp8g.co"
+KEY = "gfx942/fmha_v3_fwd"
 
 HIP_COMMON_H = """\
 struct p3
@@ -100,6 +102,32 @@ float fmha_fwd_ck(mha_fwd_args a, const stream_config& s)
 }
 """
 
+# AITER's Python entry points each define their own can_impl_fmha_v3_fwd().
+MHA_PY = """\
+def _fmha_kv_byte_extent_ge_u32(max_seqlen_k, k, v):
+    return max_seqlen_k * k.stride(-3) >= (1 << 32)
+
+
+def _flash_attn_forward(q, k, v, hdim_q):
+    def can_impl_fmha_v3_fwd():
+        ret = hdim_q == 128
+        return ret
+
+    if can_impl_fmha_v3_fwd():
+        return fmha_v3_fwd(q, k, v)
+    return mha_fwd(q, k, v)
+
+
+def _flash_attn_varlen_forward(q, k, v, cu_seqlens_q):
+    def can_impl_fmha_v3_fwd():
+        ret = cu_seqlens_q is not None
+        return ret
+
+    if can_impl_fmha_v3_fwd():
+        return fmha_v3_varlen_fwd(q, k, v)
+    return mha_varlen_fwd(q, k, v)
+"""
+
 
 def elf(*symbols: str) -> bytes:
     """A 64-bit little-endian ELF holding a symbol table with the given names."""
@@ -135,9 +163,9 @@ def kernel(row: str, salt: str = "") -> bytes:
     return elf(knl, f"{knl}.kd") + salt.encode()
 
 
-def csv_text(*rows: str, crlf: bool = False) -> str:
+def csv_text(*rows: str, crlf: bool = False, header: str = HEADER) -> str:
     newline = "\r\n" if crlf else "\n"
-    return newline.join([HEADER, *rows]) + newline
+    return newline.join([header, *rows]) + newline
 
 
 @pytest.fixture(scope="module")
@@ -226,7 +254,8 @@ def env(tmp_path):
     return aiter, tree, kernels, cache, report
 
 
-def run(sync, tree: Path, aiter: Aiter, cache: Path, *args: str) -> int:
+def run(sync, env, *args: str) -> int:
+    aiter, tree, _, cache, _ = env
     return sync.main(
         [
             "--repo-root",
@@ -240,10 +269,22 @@ def run(sync, tree: Path, aiter: Aiter, cache: Path, *args: str) -> int:
     )
 
 
+def plan(sync, env, ref: str, *extra: str, arch: str = "gfx942") -> int:
+    report = env[4]
+    return run(
+        sync, env, "plan", "--ref", ref, "--arch", arch, *extra, "--report", str(report)
+    )
+
+
+def apply(sync, env) -> int:
+    return run(sync, env, "apply", "--report", str(env[4]))
+
+
 def base_upstream(aiter: Aiter) -> str:
     aiter.write("csrc/include/mha_fwd.h", MHA_FWD_H)
     aiter.write("csrc/include/aiter_hip_common.h", HIP_COMMON_H)
     aiter.write("csrc/cpp_itfs/mha_fwd.cu", MHA_FWD_CU)
+    aiter.write("aiter/ops/mha.py", MHA_PY)
     aiter.write("hsa/codegen.py", "# codegen\n")
     aiter.module(
         "gfx942", [ROW_HD128, ROW_HD128_RTNA, ROW_FP8], roots=("MI300", "MI308")
@@ -251,12 +292,24 @@ def base_upstream(aiter: Aiter) -> str:
     return aiter.commit("v0.1.0")
 
 
-def findings(report: Path, key: str) -> list[dict]:
-    return json.loads(report.read_text())["modules"][key]["findings"]
+def module_plan(report: Path, key: str = KEY) -> dict:
+    return json.loads(report.read_text())["modules"][key]
 
 
-def kinds(report: Path, key: str) -> set[str]:
+def findings(report: Path, key: str = KEY) -> list[dict]:
+    return module_plan(report, key)["findings"]
+
+
+def kinds(report: Path, key: str = KEY) -> set[str]:
     return {f["kind"] for f in findings(report, key)}
+
+
+def of_kind(report: Path, kind: str, key: str = KEY) -> list[dict]:
+    return [f for f in findings(report, key) if f["kind"] == kind]
+
+
+def pin(kernels: Path, key: str = KEY) -> dict:
+    return json.loads((kernels / "aiter_fwd_pins.json").read_text())["modules"][key]
 
 
 def test_round_trip_keeps_the_vendored_subset_and_verifies(sync, env, capsys):
@@ -273,40 +326,20 @@ def test_round_trip_keeps_the_vendored_subset_and_verifies(sync, env, capsys):
     )
     aiter.commit("v0.2.0")
 
-    assert (
-        run(sync, tree, aiter, cache, "verify") == 1
-    )  # unpinned before the first update
-    assert (
-        run(
-            sync,
-            tree,
-            aiter,
-            cache,
-            "plan",
-            "--ref",
-            "v0.2.0",
-            "--arch",
-            "gfx942",
-            "--baseline",
-            base,
-            "--report",
-            str(report),
-        )
-        == 0
-    )
-    plan = json.loads(report.read_text())["modules"]["gfx942/fmha_v3_fwd"]
-    assert plan["tier"] == 0, plan["findings"]
-    assert [r["knl_name"] for r in plan["excluded_rows"]] == [
+    assert run(sync, env, "verify") == 1  # unpinned before the first update
+    assert plan(sync, env, "v0.2.0", "--baseline", base) == 0
+    planned = module_plan(report)
+    assert planned["tier"] == 0, planned["findings"]
+    assert [r["knl_name"] for r in planned["excluded_rows"]] == [
         "_ZN5aiter13fwd_hd128_rtnaE"
     ]
 
-    assert run(sync, tree, aiter, cache, "apply", "--report", str(report)) == 0
-    assert run(sync, tree, aiter, cache, "verify") == 0
+    assert apply(sync, env) == 0
+    assert run(sync, env, "verify") == 0
     module = kernels / "gfx942/fmha_v3_fwd"
     assert not (module / "MI300/fwd_hd128_rtna.co").exists()
     assert (module / "fmha_fwd.csv").read_text() == csv_text(ROW_HD128, ROW_FP8)
-    pins = json.loads((kernels / "aiter_fwd_pins.json").read_text())
-    assert pins["modules"]["gfx942/fmha_v3_fwd"]["tag"] == "v0.2.0"
+    assert pin(kernels)["tag"] == "v0.2.0"
     assert "SHA256 manifest (5 files)" in (module / "SOURCE.md").read_text()
 
 
@@ -324,30 +357,93 @@ def test_new_rows_and_changed_objects_are_tiered(sync, env):
     )
     aiter.commit("v0.2.0")
 
-    run(
-        sync,
-        tree,
-        aiter,
-        cache,
-        "plan",
-        "--ref",
-        "v0.2.0",
-        "--arch",
-        "gfx942",
-        "--baseline",
-        base,
-        "--report",
-        str(report),
-    )
-    items = findings(report, "gfx942/fmha_v3_fwd")
-    added = [f for f in items if f["kind"] == "row_added_new_value"]
+    plan(sync, env, "v0.2.0", "--baseline", base)
+    added = of_kind(report, "row_added_new_value")
     assert len(added) == 1 and added[0]["tier"] == 2
     assert (
         "hdim_q=256" in added[0]["detail"]
         and "_ZN5aiter8fwd_hd256E" in added[0]["detail"]
     )
-    changed = [f for f in items if f["kind"] == "object_changed"]
+    changed = of_kind(report, "object_changed")
     assert [f["detail"] for f in changed] == ["MI300/fwd_hd128.co"]
+
+
+@pytest.mark.parametrize(
+    "changed_row, tier, columns",
+    [
+        (ROW_HD128.replace("128,0,0,0,", "128,1,0,0,"), 2, "mask"),
+        (ROW_HD128.replace("256,32,", "256,64,"), 1, "ts_kv"),
+    ],
+    ids=["dispatch-column", "tile-size-only"],
+)
+def test_row_change_tier_follows_the_columns_that_changed(
+    sync, env, changed_row, tier, columns
+):
+    """A dispatch column such as mask changes which graphs the kernel serves; a
+    tile size changes only how the engine launches it."""
+    aiter, tree, kernels, cache, report = env
+    base = base_upstream(aiter)
+    vendor(kernels, "gfx942", [ROW_HD128, ROW_FP8], roots=("MI300", "MI308"))
+    aiter.write(
+        "hsa/gfx942/fmha_v3_fwd/fmha_fwd.csv",
+        csv_text(changed_row, ROW_HD128_RTNA, ROW_FP8),
+    )
+    aiter.commit("v0.2.0")
+
+    plan(sync, env, "v0.2.0", "--baseline", base)
+    assert [(f["tier"], f["detail"]) for f in of_kind(report, "row_changed")] == [
+        (tier, f"_ZN5aiter8fwd_hd128E: {columns}")
+    ]
+
+
+def test_upstream_dropping_a_vendored_row_is_reported(sync, env):
+    """A kernel AITER stops shipping is lost ASM coverage the engine must decline."""
+    aiter, tree, kernels, cache, report = env
+    base = base_upstream(aiter)
+    vendor(kernels, "gfx942", [ROW_HD128, ROW_FP8], roots=("MI300", "MI308"))
+    aiter.write(
+        "hsa/gfx942/fmha_v3_fwd/fmha_fwd.csv", csv_text(ROW_HD128, ROW_HD128_RTNA)
+    )
+    aiter.commit("v0.2.0")
+
+    plan(sync, env, "v0.2.0", "--baseline", base)
+    removed = of_kind(report, "row_removed_upstream")
+    assert [(f["tier"], f["detail"].split(":")[0]) for f in removed] == [
+        (2, "_ZN5aiter6fwd_fp8E")
+    ]
+
+
+def test_vendored_header_change_is_structural(sync, env):
+    aiter, tree, kernels, cache, report = env
+    base = base_upstream(aiter)
+    vendor(kernels, "gfx942", [ROW_HD128, ROW_FP8], roots=("MI300", "MI308"))
+    aiter.write(
+        "hsa/gfx942/fmha_v3_fwd/fmha_fwd.csv",
+        csv_text(
+            ROW_HD128,
+            ROW_HD128_RTNA,
+            ROW_FP8,
+            header=HEADER.replace("bf16_cvt", "cvt"),
+        ),
+    )
+    aiter.commit("v0.2.0")
+
+    plan(sync, env, "v0.2.0", "--baseline", base)
+    assert [f["tier"] for f in of_kind(report, "header_changed")] == [3]
+
+
+def test_object_directory_change_is_structural(sync, env):
+    """The engine picks MI300/ or MI308/ objects per device; losing one is a
+    layout change, not a set of removed objects."""
+    aiter, tree, kernels, cache, report = env
+    base = base_upstream(aiter)
+    vendor(kernels, "gfx942", [ROW_HD128, ROW_FP8], roots=("MI300", "MI308"))
+    for row in (ROW_HD128, ROW_HD128_RTNA, ROW_FP8):
+        aiter.remove(f"hsa/gfx942/fmha_v3_fwd/MI308/{row.split(',')[-1]}")
+    aiter.commit("v0.2.0")
+
+    plan(sync, env, "v0.2.0", "--baseline", base)
+    assert [f["tier"] for f in of_kind(report, "layout_changed")] == [3]
 
 
 def test_exclude_rule_matches_every_column_it_names(sync, env):
@@ -355,28 +451,35 @@ def test_exclude_rule_matches_every_column_it_names(sync, env):
     which also carries bf16_cvt=1."""
     aiter, tree, kernels, cache, report = env
     base_upstream(aiter)
-    run(
+    plan(
         sync,
-        tree,
-        aiter,
-        cache,
-        "plan",
-        "--ref",
+        env,
         "v0.1.0",
-        "--arch",
-        "gfx942",
         "--exclude",
-        "gfx942/fmha_v3_fwd",
+        KEY,
         "dtype=bf16;bf16_cvt=1",
         "RTNE only",
-        "--report",
-        str(report),
     )
-    plan = json.loads(report.read_text())["modules"]["gfx942/fmha_v3_fwd"]
-    assert [r["knl_name"] for r in plan["excluded_rows"]] == [
+    planned = module_plan(report)
+    assert [r["knl_name"] for r in planned["excluded_rows"]] == [
         "_ZN5aiter13fwd_hd128_rtnaE"
     ]
-    assert "MI300/fwd_fp8.co" in plan["target"]
+    assert "MI300/fwd_fp8.co" in planned["target"]
+
+
+def test_apply_deletes_the_objects_of_a_row_a_new_rule_drops(sync, env):
+    aiter, tree, kernels, cache, report = env
+    base_upstream(aiter)
+    plan(sync, env, "v0.1.0")
+    apply(sync, env)
+
+    plan(sync, env, "v0.1.0", "--exclude", KEY, "dtype=fp8bf16", "no fp8")
+    assert [f["tier"] for f in of_kind(report, "row_dropped_by_rule")] == [2]
+    assert apply(sync, env) == 0
+    module = kernels / "gfx942/fmha_v3_fwd"
+    assert not (module / "MI300/fwd_fp8.co").exists()
+    assert not (module / "MI308/fwd_fp8.co").exists()
+    assert run(sync, env, "verify") == 0
 
 
 def test_upstream_abi_and_dispatch_changes_are_diffed(sync, env):
@@ -400,25 +503,10 @@ def test_upstream_abi_and_dispatch_changes_are_diffed(sync, env):
     )
     aiter.commit("v0.2.0")
 
-    run(
-        sync,
-        tree,
-        aiter,
-        cache,
-        "plan",
-        "--ref",
-        "v0.2.0",
-        "--arch",
-        "gfx942",
-        "--baseline",
-        base,
-        "--report",
-        str(report),
-    )
+    plan(sync, env, "v0.2.0", "--baseline", base)
     changed = {
         f["detail"].split(":")[0] + ":" + f["detail"].split(":")[2]: f
-        for f in findings(report, "gfx942/fmha_v3_fwd")
-        if f["kind"] == "reference_changed"
+        for f in of_kind(report, "reference_changed")
     }
     struct_change = changed["csrc/include/mha_fwd.h:fmha_fwd_v3_args"]
     dispatch_change = changed["csrc/cpp_itfs/mha_fwd.cu:fmha_fwd_v3"]
@@ -430,6 +518,86 @@ def test_upstream_abi_and_dispatch_changes_are_diffed(sync, env):
     assert len(changed) == 2  # the declaration and fmha_fwd_ck() are not compared
 
 
+@pytest.mark.parametrize(
+    "caller, gate_change, outside_change",
+    [
+        (
+            "_flash_attn_forward",
+            ("ret = hdim_q == 128", "ret = hdim_q in (128, 192)"),
+            ("return mha_fwd(", "return mha_fwd_ck("),
+        ),
+        (
+            "_flash_attn_varlen_forward",
+            ("ret = cu_seqlens_q is not None", "ret = cu_seqlens_q is None"),
+            ("return mha_varlen_fwd(", "return mha_varlen_fwd_ck("),
+        ),
+    ],
+    ids=["batch", "varlen"],
+)
+def test_python_gate_change_in_either_copy_is_reported(
+    sync, env, caller, gate_change, outside_change
+):
+    """The batch and varlen entry points each define can_impl_fmha_v3_fwd(); a
+    change to one is reported under its caller and the rest of the caller is not
+    compared."""
+    aiter, tree, kernels, cache, report = env
+    base = base_upstream(aiter)
+    vendor(kernels, "gfx942", [ROW_HD128, ROW_FP8], roots=("MI300", "MI308"))
+    aiter.write(
+        "aiter/ops/mha.py",
+        MHA_PY.replace(*gate_change).replace(*outside_change),
+    )
+    aiter.commit("v0.2.0")
+
+    plan(sync, env, "v0.2.0", "--baseline", base)
+    changed = of_kind(report, "reference_changed")
+    assert [(f["tier"], f["detail"].split(": ")[0]) for f in changed] == [
+        (3, f"aiter/ops/mha.py::{caller}.can_impl_fmha_v3_fwd")
+    ]
+    assert f"+        {gate_change[1]}" in changed[0]["diff"]
+    assert outside_change[1] not in changed[0]["diff"]
+
+
+def test_renamed_reference_keeps_the_host_code_baseline(sync, env, monkeypatch):
+    """A mirrored function renamed upstream is missing under its old name. apply
+    must keep the old host-code commit, so that once REFERENCES names the new
+    function the next plan still shows what changed in it."""
+    aiter, tree, kernels, cache, report = env
+    base = base_upstream(aiter)
+    vendor(kernels, "gfx942", [ROW_HD128, ROW_FP8], roots=("MI300", "MI308"))
+    aiter.write(
+        "csrc/cpp_itfs/mha_fwd.cu",
+        MHA_FWD_CU.replace("get_grid_dim(", "compute_grid(").replace(
+            "return {1, 1, 1};", "return {2, 1, 1};"
+        ),
+    )
+    aiter.commit("v0.2.0")
+
+    plan(sync, env, "v0.2.0", "--baseline", base)
+    assert [f["tier"] for f in of_kind(report, "reference_missing")] == [3]
+    assert apply(sync, env) == 0
+    assert pin(kernels)["abi_commit"] == base
+
+    monkeypatch.setitem(
+        sync.REFERENCES,
+        "fmha_v3_fwd",
+        tuple(
+            (
+                dataclasses.replace(ref, name="compute_grid")
+                if ref.name == "get_grid_dim"
+                else ref
+            )
+            for ref in sync.REFERENCES["fmha_v3_fwd"]
+        ),
+    )
+    plan(sync, env, "v0.2.0")
+    changed = of_kind(report, "reference_changed")
+    assert [f["detail"].split(": ")[0] for f in changed] == [
+        "csrc/cpp_itfs/mha_fwd.cu::compute_grid"
+    ]
+    assert "+    return {2, 1, 1};" in changed[0]["diff"]
+
+
 def test_ck_objects_block_apply(sync, env, capsys):
     aiter, tree, kernels, cache, report = env
     base_upstream(aiter)
@@ -437,21 +605,23 @@ def test_ck_objects_block_apply(sync, env, capsys):
         "gfx942", [ROW_HD128], roots=("MI300", "MI308"), ck={"_ZN5aiter8fwd_hd128E"}
     )
     aiter.commit("v0.2.0")
-    run(
-        sync,
-        tree,
-        aiter,
-        cache,
-        "plan",
-        "--ref",
-        "v0.2.0",
-        "--arch",
-        "gfx942",
-        "--report",
-        str(report),
-    )
-    assert "ck_symbol" in kinds(report, "gfx942/fmha_v3_fwd")
-    assert run(sync, tree, aiter, cache, "apply", "--report", str(report)) == 2
+    plan(sync, env, "v0.2.0")
+    assert "ck_symbol" in kinds(report)
+    assert apply(sync, env) == 2
+    assert "blocking findings" in capsys.readouterr().err
+    assert not (kernels / "gfx942").exists()
+
+
+def test_object_without_its_kernel_symbol_blocks_apply(sync, env, capsys):
+    aiter, tree, kernels, cache, report = env
+    base_upstream(aiter)
+    aiter.write("hsa/gfx942/fmha_v3_fwd/MI300/fwd_fp8.co", elf("_ZN5aiter5otherE"))
+    aiter.commit("v0.2.0")
+    plan(sync, env, "v0.2.0")
+    assert [f["detail"] for f in of_kind(report, "symbol_missing")] == [
+        "MI300/fwd_fp8.co: does not define _ZN5aiter6fwd_fp8E"
+    ]
+    assert apply(sync, env) == 2
     assert "blocking findings" in capsys.readouterr().err
     assert not (kernels / "gfx942").exists()
 
@@ -460,48 +630,20 @@ def test_apply_refuses_a_tree_changed_since_the_plan(sync, env, capsys):
     aiter, tree, kernels, cache, report = env
     base = base_upstream(aiter)
     vendor(kernels, "gfx942", [ROW_HD128], roots=("MI300", "MI308"))
-    run(
-        sync,
-        tree,
-        aiter,
-        cache,
-        "plan",
-        "--ref",
-        "v0.1.0",
-        "--arch",
-        "gfx942",
-        "--baseline",
-        base,
-        "--report",
-        str(report),
-    )
+    plan(sync, env, "v0.1.0", "--baseline", base)
     (kernels / "gfx942/fmha_v3_fwd/MI300/fwd_hd128.co").write_bytes(b"edited")
-    assert run(sync, tree, aiter, cache, "apply", "--report", str(report)) == 2
+    assert apply(sync, env) == 2
     assert "changed since the plan" in capsys.readouterr().err
 
 
 def test_apply_never_writes_outside_tracked_forward_modules(sync, env, capsys):
     aiter, tree, kernels, cache, report = env
     base_upstream(aiter)
-    run(
-        sync,
-        tree,
-        aiter,
-        cache,
-        "plan",
-        "--ref",
-        "v0.1.0",
-        "--arch",
-        "gfx942",
-        "--report",
-        str(report),
-    )
+    plan(sync, env, "v0.1.0")
     doctored = json.loads(report.read_text())
-    doctored["modules"]["gfx942/fmha_v3_bwd"] = doctored["modules"].pop(
-        "gfx942/fmha_v3_fwd"
-    )
+    doctored["modules"]["gfx942/fmha_v3_bwd"] = doctored["modules"].pop(KEY)
     report.write_text(json.dumps(doctored))
-    assert run(sync, tree, aiter, cache, "apply", "--report", str(report)) == 2
+    assert apply(sync, env) == 2
     assert "not a tracked forward ASM module" in capsys.readouterr().err
     assert not (kernels / "gfx942").exists()
 
@@ -509,32 +651,90 @@ def test_apply_never_writes_outside_tracked_forward_modules(sync, env, capsys):
 def test_verify_catches_tampering(sync, env, capsys):
     aiter, tree, kernels, cache, report = env
     base_upstream(aiter)
-    run(
-        sync,
-        tree,
-        aiter,
-        cache,
-        "plan",
-        "--ref",
-        "v0.1.0",
-        "--arch",
-        "gfx942",
-        "--report",
-        str(report),
-    )
-    run(sync, tree, aiter, cache, "apply", "--report", str(report))
+    plan(sync, env, "v0.1.0")
+    apply(sync, env)
     module = kernels / "gfx942/fmha_v3_fwd"
     (module / "MI308/fwd_fp8.co").write_bytes(kernel(ROW_FP8, "patched"))
     (module / "MI300/stray.co").write_bytes(kernel(ROW_HD256))
     source = module / "SOURCE.md"
     source.write_text(source.read_text().replace("v0.1.0", "v9.9.9"))
     capsys.readouterr()
-    assert run(sync, tree, aiter, cache, "verify") == 1
+    assert run(sync, env, "verify") == 1
     out = capsys.readouterr().out
     assert "MI308/fwd_fp8.co: SHA256 differs from the manifest" in out
     assert "MI300/stray.co: on disk, not in the manifest" in out
     assert "MI300/stray.co: no CSV row references it" in out
     assert "SOURCE.md: does not match the pin" in out
+
+
+FP8_KNL = ROW_FP8.split(",")[-2]
+
+
+def _plant_object(*symbols: str):
+    def plant(module: Path, kernels: Path) -> None:
+        (module / "MI308/fwd_fp8.co").write_bytes(elf(*symbols))
+
+    return plant
+
+
+def _delete_object(module: Path, kernels: Path) -> None:
+    (module / "MI308/fwd_fp8.co").unlink()
+
+
+def _exclude_a_kept_row(module: Path, kernels: Path) -> None:
+    path = kernels / "aiter_fwd_pins.json"
+    pins = json.loads(path.read_text())
+    pins["modules"][KEY]["exclude"].append(
+        {"match": {"dtype": ["fp8bf16"]}, "reason": "no fp8"}
+    )
+    path.write_text(json.dumps(pins))
+
+
+@pytest.mark.parametrize(
+    "plant, message",
+    [
+        (
+            _plant_object("_ZN5aiter5otherE"),
+            f"MI308/fwd_fp8.co: does not define {FP8_KNL}",
+        ),
+        *(
+            (
+                _plant_object(FP8_KNL, ck),
+                f"MI308/fwd_fp8.co: CK symbols ['{ck}']",
+            )
+            # One symbol per CK_SYMBOL alternative, each matching no other.
+            for ck in ("_ZN2ck6kernelE", "_ZNK2ck3runEv", "my_ck_tile_fn", "kentry")
+        ),
+        (
+            _delete_object,
+            f"fmha_fwd.csv: {FP8_KNL} names MI308/fwd_fp8.co, which is missing",
+        ),
+        (
+            _exclude_a_kept_row,
+            f"fmha_fwd.csv: {FP8_KNL} is kept but an exclusion matches it",
+        ),
+    ],
+    ids=[
+        "no-kernel-symbol",
+        "ck-namespace",
+        "ck-const-member",
+        "ck_tile",
+        "kentry",
+        "object-missing",
+        "excluded-row-kept",
+    ],
+)
+def test_verify_reports_each_defect_planted_after_apply(
+    sync, env, capsys, plant, message
+):
+    aiter, tree, kernels, cache, report = env
+    base_upstream(aiter)
+    plan(sync, env, "v0.1.0")
+    apply(sync, env)
+    plant(kernels / "gfx942/fmha_v3_fwd", kernels)
+    capsys.readouterr()
+    assert run(sync, env, "verify") == 1
+    assert f"FAIL {KEY}/{message}" in capsys.readouterr().out
 
 
 def test_new_arch_is_structural_and_archs_lists_only_ported_modules(sync, env, capsys):
@@ -552,25 +752,13 @@ def test_new_arch_is_structural_and_archs_lists_only_ported_modules(sync, env, c
     aiter.commit("v0.2.0")
 
     capsys.readouterr()
-    assert run(sync, tree, aiter, cache, "archs", "--ref", "v0.2.0", "--json") == 0
+    assert run(sync, env, "archs", "--ref", "v0.2.0", "--json") == 0
     listed = {a["arch"]: a for a in json.loads(capsys.readouterr().out)["archs"]}
     assert set(listed) == {"gfx942", "gfx1250"}
     assert listed["gfx1250"]["tracked"] == ["fmha_fwd_bf16"]
     assert listed["gfx1250"]["untracked"] == ["fmha_fwd_mxfp8"]
 
-    run(
-        sync,
-        tree,
-        aiter,
-        cache,
-        "plan",
-        "--ref",
-        "v0.2.0",
-        "--arch",
-        "gfx1250",
-        "--report",
-        str(report),
-    )
+    plan(sync, env, "v0.2.0", arch="gfx1250")
     assert {
         "new_arch",
         "new_module",
@@ -586,7 +774,7 @@ def test_latest_without_github_takes_the_highest_release_tag(sync, env, capsys):
     for tag in ("v0.1.9", "v0.1.10", "v0.1.10.post1", "v0.2.0rc1"):
         git(aiter.root, "tag", tag)
     capsys.readouterr()
-    assert run(sync, tree, aiter, cache, "latest") == 0
+    assert run(sync, env, "latest") == 0
     assert capsys.readouterr().out.startswith("v0.1.10.post1 ")
 
 
@@ -609,27 +797,19 @@ def test_host_code_baseline_lags_until_marked_ported(sync, env):
         HIP_COMMON_H.replace("_p0, _p1;", "_p0, _p1, _x;"),
     )
     target = aiter.commit("v0.2.0")
-    plan_args = ("plan", "--ref", "v0.2.0", "--arch", "gfx942", "--report", str(report))
 
-    run(sync, tree, aiter, cache, *plan_args, "--baseline", base)
-    run(sync, tree, aiter, cache, "apply", "--report", str(report))
-    pin = json.loads((kernels / "aiter_fwd_pins.json").read_text())["modules"]
-    assert pin["gfx942/fmha_v3_fwd"]["abi_commit"] == base
+    plan(sync, env, "v0.2.0", "--baseline", base)
+    apply(sync, env)
+    assert pin(kernels)["abi_commit"] == base
 
-    run(sync, tree, aiter, cache, *plan_args)
-    assert {"reference_changed", "abi_unported"} <= kinds(report, "gfx942/fmha_v3_fwd")
+    plan(sync, env, "v0.2.0")
+    assert {"reference_changed", "abi_unported"} <= kinds(report)
 
-    assert (
-        run(sync, tree, aiter, cache, "mark-ported", "--module", "gfx942/fmha_v3_fwd")
-        == 0
-    )
-    assert run(sync, tree, aiter, cache, "verify") == 0
-    run(sync, tree, aiter, cache, *plan_args)
-    assert not {"reference_changed", "abi_unported"} & kinds(
-        report, "gfx942/fmha_v3_fwd"
-    )
-    pin = json.loads((kernels / "aiter_fwd_pins.json").read_text())["modules"]
-    assert pin["gfx942/fmha_v3_fwd"]["abi_commit"] == target
+    assert run(sync, env, "mark-ported", "--module", KEY) == 0
+    assert run(sync, env, "verify") == 0
+    plan(sync, env, "v0.2.0")
+    assert not {"reference_changed", "abi_unported"} & kinds(report)
+    assert pin(kernels)["abi_commit"] == target
 
 
 def test_codegen_change_stays_reported_until_marked_ported(sync, env):
@@ -639,21 +819,20 @@ def test_codegen_change_stays_reported_until_marked_ported(sync, env):
     vendor(kernels, "gfx942", [ROW_HD128, ROW_FP8], roots=("MI300", "MI308"))
     aiter.write("hsa/codegen.py", "# codegen\nstrip_comments = True\n")
     aiter.commit("v0.2.0")
-    plan_args = ("plan", "--ref", "v0.2.0", "--arch", "gfx942", "--report", str(report))
 
-    run(sync, tree, aiter, cache, *plan_args, "--baseline", base)
-    run(sync, tree, aiter, cache, "apply", "--report", str(report))
-    run(sync, tree, aiter, cache, *plan_args)
+    plan(sync, env, "v0.2.0", "--baseline", base)
+    apply(sync, env)
+    plan(sync, env, "v0.2.0")
     codegen = [
         f
-        for f in findings(report, "gfx942/fmha_v3_fwd")
-        if f["kind"] == "reference_changed" and "hsa/codegen.py" in f["detail"]
+        for f in of_kind(report, "reference_changed")
+        if "hsa/codegen.py" in f["detail"]
     ]
     assert len(codegen) == 1 and "+strip_comments = True" in codegen[0]["diff"]
 
-    run(sync, tree, aiter, cache, "mark-ported", "--module", "gfx942/fmha_v3_fwd")
-    run(sync, tree, aiter, cache, *plan_args)
-    assert "reference_changed" not in kinds(report, "gfx942/fmha_v3_fwd")
+    run(sync, env, "mark-ported", "--module", KEY)
+    plan(sync, env, "v0.2.0")
+    assert "reference_changed" not in kinds(report)
 
 
 def test_header_change_on_one_arch_is_structural(sync, env):
@@ -674,26 +853,8 @@ def test_header_change_on_one_arch_is_structural(sync, env):
     )
     aiter.commit("v0.2.0")
 
-    run(
-        sync,
-        tree,
-        aiter,
-        cache,
-        "plan",
-        "--ref",
-        "v0.2.0",
-        "--arch",
-        "gfx950",
-        "--baseline",
-        base,
-        "--report",
-        str(report),
-    )
-    mismatch = [
-        f
-        for f in findings(report, "gfx950/fmha_v3_fwd")
-        if f["kind"] == "header_mismatch_across_archs"
-    ]
+    plan(sync, env, "v0.2.0", "--baseline", base, arch="gfx950")
+    mismatch = of_kind(report, "header_mismatch_across_archs", "gfx950/fmha_v3_fwd")
     assert [(f["tier"], "gfx942" in f["detail"]) for f in mismatch] == [(3, True)]
 
 
@@ -715,28 +876,12 @@ def test_csv_comments_are_parsed_like_upstream_and_not_vendored(sync, env, capsy
     )
     aiter.commit("v0.2.0")
 
-    run(
-        sync,
-        tree,
-        aiter,
-        cache,
-        "plan",
-        "--ref",
-        "v0.2.0",
-        "--arch",
-        "gfx942",
-        "--baseline",
-        base,
-        "--report",
-        str(report),
-    )
-    assert not {"row_changed", "row_added", "header_changed"} & kinds(
-        report, "gfx942/fmha_v3_fwd"
-    )
-    assert run(sync, tree, aiter, cache, "apply", "--report", str(report)) == 0
+    plan(sync, env, "v0.2.0", "--baseline", base)
+    assert not {"row_changed", "row_added", "header_changed"} & kinds(report)
+    assert apply(sync, env) == 0
     vendored = (kernels / "gfx942/fmha_v3_fwd/fmha_fwd.csv").read_text()
     assert vendored == csv_text(ROW_HD128, ROW_FP8)
-    assert run(sync, tree, aiter, cache, "verify") == 0
+    assert run(sync, env, "verify") == 0
 
 
 def test_known_values_in_a_new_combination_need_review(sync, env):
@@ -755,54 +900,25 @@ def test_known_values_in_a_new_combination_need_review(sync, env):
         roots=("MI300", "MI308"),
     )
     aiter.commit("v0.2.0")
-    run(
-        sync,
-        tree,
-        aiter,
-        cache,
-        "plan",
-        "--ref",
-        "v0.2.0",
-        "--arch",
-        "gfx942",
-        "--baseline",
-        base,
-        "--report",
-        str(report),
-    )
-    added = [
-        f for f in findings(report, "gfx942/fmha_v3_fwd") if "fwd_fp8g" in f["detail"]
-    ]
+    plan(sync, env, "v0.2.0", "--baseline", base)
+    added = [f for f in findings(report) if "fwd_fp8g" in f["detail"]]
     assert [(f["kind"], f["tier"]) for f in added] == [("row_added_new_combination", 2)]
 
 
 def test_pinned_exclusions_are_deduplicated_and_droppable(sync, env):
     aiter, tree, kernels, cache, report = env
     base_upstream(aiter)
-    rule = ("--exclude", "gfx942/fmha_v3_fwd", "dtype=bf16;bf16_cvt=1", "RTNE only")
-    plan_args = ("plan", "--ref", "v0.1.0", "--arch", "gfx942", "--report", str(report))
-    run(sync, tree, aiter, cache, *plan_args, *rule)
-    run(sync, tree, aiter, cache, "apply", "--report", str(report))
+    rule = ("--exclude", KEY, "dtype=bf16;bf16_cvt=1", "RTNE only")
+    plan(sync, env, "v0.1.0", *rule)
+    apply(sync, env)
 
-    run(sync, tree, aiter, cache, *plan_args, *rule)
-    assert (
-        len(json.loads(report.read_text())["modules"]["gfx942/fmha_v3_fwd"]["exclude"])
-        == 1
-    )
+    plan(sync, env, "v0.1.0", *rule)
+    assert len(module_plan(report)["exclude"]) == 1
 
-    run(
-        sync,
-        tree,
-        aiter,
-        cache,
-        *plan_args,
-        "--drop-exclude",
-        "gfx942/fmha_v3_fwd",
-        "dtype=bf16;bf16_cvt=1",
-    )
-    plan = json.loads(report.read_text())["modules"]["gfx942/fmha_v3_fwd"]
-    assert plan["exclude"] == [] and plan["excluded_rows"] == []
-    assert "MI300/fwd_hd128_rtna.co" in plan["target"]
+    plan(sync, env, "v0.1.0", "--drop-exclude", KEY, "dtype=bf16;bf16_cvt=1")
+    planned = module_plan(report)
+    assert planned["exclude"] == [] and planned["excluded_rows"] == []
+    assert "MI300/fwd_hd128_rtna.co" in planned["target"]
 
 
 def test_symbol_table_past_the_end_is_reported_not_crashed_on(sync, env):
@@ -813,26 +929,8 @@ def test_symbol_table_past_the_end_is_reported_not_crashed_on(sync, env):
     struct.pack_into("<Q", broken, symtab_header + 32, 1 << 20)  # sh_size
     aiter.write("hsa/gfx942/fmha_v3_fwd/MI300/fwd_fp8.co", bytes(broken))
     aiter.commit("v0.2.0")
-    assert (
-        run(
-            sync,
-            tree,
-            aiter,
-            cache,
-            "plan",
-            "--ref",
-            "v0.2.0",
-            "--arch",
-            "gfx942",
-            "--report",
-            str(report),
-        )
-        == 0
-    )
-    not_elf = [
-        f for f in findings(report, "gfx942/fmha_v3_fwd") if f["kind"] == "not_elf"
-    ]
-    assert [f["detail"] for f in not_elf] == [
+    assert plan(sync, env, "v0.2.0") == 0
+    assert [f["detail"] for f in of_kind(report, "not_elf")] == [
         "MI300/fwd_fp8.co: symbol or string table runs past the end of the file"
     ]
 
@@ -840,22 +938,10 @@ def test_symbol_table_past_the_end_is_reported_not_crashed_on(sync, env):
 def test_apply_refuses_a_report_that_escapes_the_module(sync, env, capsys):
     aiter, tree, kernels, cache, report = env
     base_upstream(aiter)
-    run(
-        sync,
-        tree,
-        aiter,
-        cache,
-        "plan",
-        "--ref",
-        "v0.1.0",
-        "--arch",
-        "gfx942",
-        "--report",
-        str(report),
-    )
+    plan(sync, env, "v0.1.0")
     doctored = json.loads(report.read_text())
-    doctored["modules"]["gfx942/fmha_v3_fwd"]["target"]["../../escape.co"] = "0" * 64
+    doctored["modules"][KEY]["target"]["../../escape.co"] = "0" * 64
     report.write_text(json.dumps(doctored))
-    assert run(sync, tree, aiter, cache, "apply", "--report", str(report)) == 2
+    assert apply(sync, env) == 2
     assert "does not write" in capsys.readouterr().err
     assert not (kernels / "gfx942").exists()
