@@ -6,6 +6,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4_policy.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_attribute_wmma_impl.hpp"
 
 namespace ck_tile {
 
@@ -236,8 +237,8 @@ struct GemmPipelineAgBgCrCompTDMV4
         BRegs b;
     };
 
-    /// A fragment as an operand of Op: the fragment itself, or the 8 data words of an fp4 one
-    /// padded to 16 (core pads it again).
+    /// A fragment as an operand of the WMMA traits: the fragment itself, or the 8 data words of
+    /// an fp4 one padded to 16 (the traits pad it again).
     template <typename Operand, typename Frag>
     CK_TILE_DEVICE static Operand MmaOperand(const Frag& f)
     {
@@ -250,17 +251,18 @@ struct GemmPipelineAgBgCrCompTDMV4
     CK_TILE_DEVICE static void Mma(CVec& c, const AFrag& a, const BFrag& b, int32_t as, int32_t bs)
     {
 #if defined(__gfx125__)
-        using Op     = core::arch::mma::amdgcn_mma<typename Problem::ADataType,
-                                                   typename Problem::BDataType,
-                                                   fp32_t,
-                                                   kAtomM,
-                                                   kAtomN,
-                                                   128u,
-                                                   decltype(core::arch::get_compiler_target()),
-                                                   core::arch::mma::MmaOpFamily::SCALE>;
-        using Params = std::conditional_t<kMma32, OpSelA<1>, OpSelA<0>>;
-        c            = Op::template exec<Params>(
-            MmaOperand<typename Op::AVecType>(a), MmaOperand<typename Op::BVecType>(b), c, as, bs);
+        using Op = WmmaTraits<gfx125_t,
+                              typename Problem::ADataType,
+                              typename Problem::BDataType,
+                              float,
+                              kAtomM,
+                              kAtomN,
+                              128>;
+        c = bit_cast<CVec>(Op::template wmma_intrinsic<>(MmaOperand<typename Op::AVecType>(a),
+                                                         as,
+                                                         MmaOperand<typename Op::BVecType>(b),
+                                                         bs,
+                                                         bit_cast<typename Op::CVecType>(c)));
 #else
         ignore = c;
         ignore = a;
