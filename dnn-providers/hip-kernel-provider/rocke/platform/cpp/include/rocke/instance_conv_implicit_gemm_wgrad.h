@@ -113,6 +113,11 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
     const char* dtype_b; /* default "fp16" */
     const char* dtype_d; /* default "fp16" */
     const char* dtype_acc; /* default "fp32" */
+    /* ConvDataSpec.mma_dtype: NULL (Python None, the default) = the MMA
+     * consumes dtype_a / dtype_b as stored; "tf32" = fp32 storage in memory and
+     * LDS, each LDS fragment reinterpreted as vec<tf32xN> for the catalog's
+     * TF32 atom (native XF32 on gfx942, BF16x3 emulation on gfx950). */
+    const char* mma_dtype; /* default NULL */
 
     int tile_m; /* default 64 */
     int tile_n; /* default 64 */

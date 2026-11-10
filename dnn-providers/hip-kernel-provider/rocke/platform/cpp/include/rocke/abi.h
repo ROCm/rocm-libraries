@@ -113,12 +113,15 @@ extern "C" {
  *     tdm_depth, ab_load_elem_bytes and its _set flag, split_barrier,
  *     tdm_alternate_issuers, tdm_early_refill), which changes its size and the
  *     layout of every GEMM spec that embeds it.
- * 14: rocke_implicit_gemm_conv_wgrad_spec_t gained prefetch_global_regs in its old
- *     tail padding: size unchanged, but an old caller leaves that byte
- *     unset. rocke_coalesced_tile_loader_t gained elem_dtype (the Python
- *     field), which changes its size and layout; it replaces
- *     rocke_coalesced_tile_loader_load_global_typed, which is gone. */
-#define ROCKE_ABI_VERSION 14
+ * 14: rocke_implicit_gemm_conv_spec_t, rocke_dgrad_conv_spec_t and
+ *     rocke_implicit_gemm_conv_wgrad_spec_t gained mma_dtype (TF32 compute)
+ *     mid-struct, and rocke_coalesced_tile_loader_t and
+ *     rocke_async_tile_loader_t gained elem_dtype, which changes their layout
+ *     and size.
+ * 15: rocke_implicit_gemm_conv_wgrad_spec_t gained prefetch_global_regs in
+ *     its old tail padding: size unchanged, but an old caller leaves that byte
+ *     unset. */
+#define ROCKE_ABI_VERSION 15
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

@@ -6,7 +6,7 @@ No GPU and no comgr: spec construction, the validity gates, the lowered IR,
 the kernel identity and the AOT grid, plus the C++ engine's IR where the
 ``rocke_engine`` binding is importable. The numerical counterpart is
 ``TestWgradPrefetchRegsNumerics`` in ``test_conv_wgrad_correctness.py``; the
-two-engine counterpart is configs 73-84 of the wgrad parity emitters.
+two-engine counterpart is configs 89-105 of the wgrad parity emitters.
 """
 
 from __future__ import annotations

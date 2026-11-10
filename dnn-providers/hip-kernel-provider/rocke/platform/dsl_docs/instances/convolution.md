@@ -651,7 +651,10 @@ knobs make it a single kernel (all default off, so every existing generic
 kernel is unchanged):
 
 - `preload_weights` (`waves_k == 1`): every weight fragment is loaded once in
-  the prologue and kept in registers for the whole row loop.
+  the prologue and kept in registers for the whole row loop. Bounded by
+  `PRELOAD_WEIGHT_VGPR_BUDGET`; `preload_weight_vgprs` counts the fragments at
+  storage width, so an fp32 / tf32 preload needs twice the VGPRs of the
+  16-bit one.
 - `dgrad_fused_weights`: `B` is the original weight `W[groups*cpg', KH, KW,
   kpg']` (transposed-problem terms); the prologue gathers each fragment with
   flipped taps and k<->c transposed addressing, so there is no pre-pass and no
@@ -686,9 +689,10 @@ field by the C++ engine's `rocke_build_direct_conv` and byte-identity gated):
 - `lds_pad` (multiple of 8): extra elements per staged input column, so the
   16 q-lanes of a fragment read spread over the LDS banks.
 - `stage_out` (`kpg % 16 == 0`): each finished output row goes through a
-  double-buffered LDS tile and is stored with 16-byte lanes over the
-  workgroup's contiguous channel span; the offsets come from the output
-  stride kernargs.
+  double-buffered LDS tile and is stored with 8-element lanes (one 16-byte
+  store at 16-bit storage, two at fp32) over the workgroup's contiguous
+  channel span; the offsets come from the output stride kernargs. fp32 / tf32
+  keeps the accumulators unrounded in the tile.
 - `xcd_tiles` (gfx950 only): the launch-order workgroup id is remapped with
   `chiplet_transform_chunked_runtime` so the `q_tiles * group_tiles`
   workgroups of one image row band run on one XCD; the grid and the chunk are
@@ -700,7 +704,8 @@ field by the C++ engine's `rocke_build_direct_conv` and byte-identity gated):
   so a tile taller than the image skips every dead row -- loads, staging,
   barriers and masked flushes -- where `row_guard` only skips their MFMAs.
 
-`direct_conv_lds_bytes` accounts for the column pad and the output tiles;
+`direct_conv_lds_bytes` accounts for the column pad and the output tiles, all
+at storage width (2 bytes per element for fp16 / bf16, 4 for fp32 / tf32);
 `direct_conv_grid` is the launch grid.
 
 The kernel name carries `pw` / `fw` / `fwl` / `we<n>` / `pf<n>` / `lso` /
