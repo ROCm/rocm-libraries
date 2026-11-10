@@ -52,6 +52,7 @@ from kernels.common.attention_bwd import (
     build_attn_bwd_main,
     validate_attn_bwd_spec,
 )
+from kernels.common._attention_bwd_caps import BWD_ARCHES
 from kernels.common._attention_bwd_frag import c_quad_transposable
 from kernels.common._attention_bwd_sched import SCHEDS
 from kernels.common._attention_bwd_body import BwdTileGeometry
@@ -621,10 +622,17 @@ CASES = (
     "bwd_gqa_gqa4_causal_tl",
     "bwd_kern_hkv_842_tl_fp16_d64",
 )
+# Targets that build a two-deep ring (the RDNA targets build only depth 1).
+_RING2_ARCHS = tuple(
+    a for a in BWD_ARCHES if 2 in tc.backward_axis("ring_depth").values(a)
+)
 # name -> (knobs, archs (None: every device target))
 LEVERS = {
     "ws_buffer": ({"ws_bounds": "buffer"}, None),
-    "ws_buffer_vgpr2": ({"ws_bounds": "buffer", "global_path": "vgpr", "ring_depth": 2}, None),
+    "ws_buffer_vgpr2": (
+        {"ws_bounds": "buffer", "global_path": "vgpr", "ring_depth": 2},
+        _RING2_ARCHS,
+    ),
     "slab_carry": ({"slab_carry": True}, None),
     "slab_carry_edge": ({"slab_carry": True, "edge_tiles": True}, None),
     "slab_carry_head_outer": (
