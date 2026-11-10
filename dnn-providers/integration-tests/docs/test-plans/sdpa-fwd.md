@@ -748,9 +748,9 @@ These sweeps use the compact layout. Each child of `values` and each sibling
 of `values` is on its own line, and each tensor is on its own line.
 `import_mode.format` records the layout, and an append keeps it.
 
-After a change to the bundle tree, run `scripts/verify_support_claims.py` and
-regenerate `SUPPORT_MATRIX_OVERVIEW.md` with
-`scripts/support_features/feature_matrix.py`
+After a change to the bundle tree, run `scripts/verify_support_claims.py`.
+`SUPPORT_MATRIX_OVERVIEW.md` is refreshed in a PR of its own, not here, so it
+may lag the bundle change until then
 ([Support Matrix](../support-matrix.md)).
 
 ### 9.4 Ids, names and metadata
