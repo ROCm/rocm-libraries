@@ -56,39 +56,17 @@ struct Coords
     index_t cluster_wy;
 };
 
-// th:TH_LOAD_NT | scope:SCOPE_SE.
-inline constexpr int kGl2PrefetchCpol = 1 | (1 << 3);
+// The GL2 prefetch's cache policy: th:TH_LOAD_NT | scope:SCOPE_SE (the enum has it on gfx12 only).
+#if defined(__gfx12__)
+inline constexpr auto kGl2PrefetchCoherence = amd_buffer_coherence_enum::SE_NT;
+#else
+inline constexpr auto kGl2PrefetchCoherence = amd_buffer_coherence_enum::coherence_default;
+#endif
 
 /// Keeps LLVM from moving LDS reads or WMMAs across this point; ALU work may cross.
 CK_TILE_DEVICE void fence()
 {
     sched_fence<LLVMSchedGroupMask::VALU | LLVMSchedGroupMask::SALU | LLVMSchedGroupMask::TRANS>();
-}
-
-/// `v`, opaque to LLVM: a scalar it can no longer factor out of the expressions using it.
-CK_TILE_DEVICE index_t opaque_scalar(index_t v)
-{
-#if defined(__gfx125__)
-    asm("" : "+s"(v));
-#endif
-    return v;
-}
-
-/// `c ? a : b` as an IR select. Clang emits `?:` as a branch, LLVM then sinks the address math of
-/// one side into it and the branch stays divergent; an asm barrier on the address instead makes
-/// expert scheduling drain the WMMA pipeline (va_vdst(0)) before it.
-CK_TILE_DEVICE const uint8_t* select_address(bool c, const uint8_t* a, const uint8_t* b)
-{
-    const uint64_t mask = uint64_t{0} - static_cast<uint64_t>(c);
-    return reinterpret_cast<const uint8_t*>((reinterpret_cast<uint64_t>(a) & mask) |
-                                            (reinterpret_cast<uint64_t>(b) & ~mask));
-}
-
-CK_TILE_DEVICE void global_prefetch([[maybe_unused]] const uint8_t* p)
-{
-#if defined(__gfx125__)
-    __builtin_amdgcn_global_prefetch(p, kGl2PrefetchCpol);
-#endif
 }
 
 /// The five descriptor groups of a rank-2 TDM tile load; groups 3 and 4 are zero.
@@ -378,8 +356,8 @@ struct GemmPipelineAgBgCrCompTDMV4
               // The last K step is partial (and its scales zero-padded) only with a K tail.
               k_atoms(integer_divide_nonnegative<mx_tdm_v4::kAtomK>(
                   Traits::kHasTail ? p_.K + mx_tdm_v4::kAtomK - 1 : p_.K)),
-              a_scale_stride(mx_tdm_v4::opaque_scalar(p_.M * 4)),
-              b_scale_stride(mx_tdm_v4::opaque_scalar(p_.N * 4))
+              a_scale_stride(opaque_scalar(p_.M * 4)),
+              b_scale_stride(opaque_scalar(p_.N * 4))
         {
             if constexpr(kHasCluster)
             {
@@ -653,13 +631,12 @@ struct GemmPipelineAgBgCrCompTDMV4
                         {
                             const index_t local = start ? index - start : index;
                             const uint8_t* here = address(number<cat>{}, local);
-                            pointer             = first ? here
-                                                        : mx_tdm_v4::select_address(
-                                                  index < start + count, here, pointer);
-                            first               = false;
+                            pointer =
+                                first ? here : select_address(index < start + count, here, pointer);
+                            first = false;
                         }
                     });
-                    mx_tdm_v4::global_prefetch(pointer);
+                    amd_global_prefetch<mx_tdm_v4::kGl2PrefetchCoherence>(pointer);
                 });
             }
             else
