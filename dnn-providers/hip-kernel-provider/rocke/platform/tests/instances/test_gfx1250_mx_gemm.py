@@ -14,12 +14,15 @@ from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.examples.common.scaled_gemm_reference import decode_e8m0
 from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
     _E2M1,
+    FIELDS,
     SPARSE_ALPHA,
     SPARSE_STEPS,
+    _time,
     check_inputs,
     decode_table,
     device_inputs,
     loop_scratch_ops,
+    main,
     reference,
     run_case,
     sparse_inputs,
@@ -811,6 +814,111 @@ class MxGemmBenchReferenceTest(unittest.TestCase):
             self.assertTrue((swizzled[4, :, 3] == 0).all())
             self.assertTrue(np.array_equal(swizzled[4, :, :3], canonical[:, 16:19]))
             self.assertTrue(np.array_equal(swizzled[0], canonical[:, :4]))
+
+
+class _FakeEvent:
+    def __init__(self, gpu):
+        self.gpu, self.at, self.destroyed = gpu, None, False
+
+    def record(self):
+        self.at = self.gpu.clock
+
+    def synchronize(self):
+        pass
+
+    def elapsed_to(self, end):
+        return float(end.at - self.at)
+
+    def destroy(self):
+        self.destroyed = True
+
+
+class _FakeGpu:
+    """``_time``'s launcher and its runtime in one: a GPU clock in ms that
+    ``launch`` advances by 2 and a prepared enqueue by 3, so each time shows
+    which path it measured. ``fail_on``: the enqueue call that raises."""
+
+    def __init__(self, fail_on=None):
+        self.runtime = self
+        self.clock = 0
+        self.events = []
+        self.prepared_with = []
+        self.enqueues = 0
+        self.fail_on = fail_on
+
+    def event(self):
+        self.events.append(_FakeEvent(self))
+        return self.events[-1]
+
+    def sync(self):
+        pass
+
+    def launch(self, arguments):
+        self.clock += 2
+
+    def prepare_launch(self, arguments):
+        self.prepared_with.append(arguments)
+
+        def enqueue():
+            self.enqueues += 1
+            if self.enqueues == self.fail_on:
+                raise RuntimeError("enqueue failed")
+            self.clock += 3
+
+        return enqueue
+
+
+class MxGemmBenchTimingTest(unittest.TestCase):
+    """The bench's timing and ``--out`` without a device."""
+
+    def test_event_batch_times_prepared_enqueues(self):
+        """event_batch_us brackets ``--batch`` prepared enqueues, built once,
+        with events and divides by the batch; median_us times ``launch``."""
+        gpu = _FakeGpu()
+        times = _time(gpu, b"args", warmup=5, iters=4, batch=10)
+        self.assertEqual(gpu.prepared_with, [b"args"])
+        self.assertEqual((times.event_batch, times.median), (3000.0, 2000.0))
+        self.assertIsInstance(times.batched, float)
+        self.assertIsInstance(times.enqueue, float)
+        self.assertTrue(all(event.destroyed for event in gpu.events))
+
+    def test_zero_counts_time_nothing(self):
+        gpu = _FakeGpu()
+        self.assertEqual(
+            _time(gpu, b"args", warmup=1, iters=0, batch=0), (None, None, None, None)
+        )
+        self.assertEqual((gpu.prepared_with, gpu.events), ([], []))
+
+    def test_failed_enqueue_destroys_the_batch_events(self):
+        gpu = _FakeGpu(fail_on=2)
+        with self.assertRaisesRegex(RuntimeError, "enqueue failed"):
+            _time(gpu, b"args", warmup=1, iters=1, batch=10)
+        self.assertEqual(len(gpu.events), 2)
+        self.assertTrue(all(event.destroyed for event in gpu.events))
+
+    def test_out_holds_every_row_without_base(self):
+        """``--out`` is written row by row; without ``--base`` nothing
+        rewrites it at the end."""
+        import contextlib
+        import csv
+        import io
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "rows" / "bench.csv"
+            argv = ["--host-only", "--tile", "48x256x512,256x256x64", "--out", str(out)]
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(argv), 0)
+            with out.open(newline="") as handle:
+                reader = csv.DictReader(handle)
+                rows = list(reader)
+        self.assertEqual(reader.fieldnames, FIELDS)
+        self.assertEqual(
+            [row["config"] for row in rows], ["tile=48x256x512", "tile=256x256x64"]
+        )
+        for row in rows:
+            self.assertTrue(row["check"].startswith("INVALID:"), row["check"])
 
 
 class MxGemmSparseCheckTest(unittest.TestCase):

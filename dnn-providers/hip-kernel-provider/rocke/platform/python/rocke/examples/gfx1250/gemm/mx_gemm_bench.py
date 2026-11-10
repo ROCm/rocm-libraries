@@ -9,11 +9,20 @@ one: compile, report code-object resources (VGPR, SGPR, spills, scratch,
 LDS) and the WMMA count, require bit-exact output at ``beta = 0`` and
 ``beta = 0.5`` on two input sets (``--check-data``: 0 / +1 over all of K,
 and many A/B values in a few K-steps), then time the ``beta = 0`` path, on
-hipBLASLt's MAF benchmark data by default (``--timing-inputs``), as
-``mxfp4_tdm_gemm_variants_bench`` does (batched enqueues and the median of
-event-timed launches). ``--base`` also times the Step 6.14 kernel of
-``mxfp4_tdm_gemm`` on the same problem before and after the configurations,
-and reports each configuration's speedup over the mean of the two.
+hipBLASLt's MAF benchmark data by default (``--timing-inputs``).
+``batched_us`` and ``event_batch_us`` are per-launch times over ``--batch``
+back-to-back launches: ``batched_us`` by the host clock around ``launch``
+calls, as ``mxfp4_tdm_gemm_variants_bench`` does, and ``event_batch_us`` by
+GPU events around launches whose arguments are built once, as CK Tile times
+kernels. ``enqueue_us`` is the host time per enqueue of that batch:
+``event_batch_us`` is a GPU time only where it is clearly above
+``enqueue_us``; where the two are close, the GPU waited for the host.
+``median_us`` is the median of ``--iters`` single event-timed launches.
+TFLOP/s and ``speedup_vs_base`` come from ``event_batch_us``
+(``median_us`` with ``--batch 0``). ``--base`` also times the Step 6.14
+kernel of ``mxfp4_tdm_gemm`` on the same problem before and after the
+configurations, and reports each configuration's speedup over the mean of
+the two.
 
 ``--host-only`` compiles and reports resources without touching a device;
 ``--check-only`` skips the timing. Absolute timings must not be committed
@@ -32,7 +41,9 @@ import statistics
 import struct
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 
@@ -50,6 +61,23 @@ from ....instances.gfx1250.mxfp4_tdm_gemm import (
     mxfp4_tdm_gemm_grid,
 )
 from ....instances.gfx1250.mxfp4_tdm_gemm_variants import variant_spec
+
+# Private names: _Launcher.prepare_launch builds the cluster launch of
+# Runtime._enqueue, as Runtime.prepare_launch has no cluster form.
+from ....runtime.hip_module import (
+    _HIP_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION,
+    HIP_LAUNCH_PARAM_BUFFER_POINTER,
+    HIP_LAUNCH_PARAM_BUFFER_SIZE,
+    HIP_LAUNCH_PARAM_END,
+    HipError,
+    _HipLaunchAttribute,
+    _HipLaunchConfig,
+    _hipDrvLaunchKernelEx,
+    check_launch_cluster,
+    current_device,
+    device_supports_cluster_launch,
+)
+from ....runtime.hip_module import _check as _hip_check
 from .mxfp4_tdm_gemm import (
     YAML_TILE,
     _u8_buffer,
@@ -97,6 +125,8 @@ FIELDS = [
     "wmma",
     "loop_scratch",
     "batched_us",
+    "event_batch_us",
+    "enqueue_us",
     "median_us",
     "tflops",
     "speedup_vs_base",
@@ -314,6 +344,9 @@ def _check(spec, got, expected, *, verify: str, samples: int) -> bool:
 class _Launcher:
     """A compiled kernel with device buffers for A, B, scales, C and D."""
 
+    # The workgroup shape of every launch, checked or timed.
+    _BLOCK = (128, 1, 1)
+
     def __init__(self, runtime, artifact, grid, cluster, arrays, out_bytes: int):
         self.runtime = runtime
         self.module = runtime.load_module(artifact.hsaco)
@@ -338,8 +371,61 @@ class _Launcher:
 
     def launch(self, arguments: bytes) -> None:
         self.runtime.launch(
-            self.function, self.grid, (128, 1, 1), arguments, cluster=self.cluster
+            self.function, self.grid, self._BLOCK, arguments, cluster=self.cluster
         )
+
+    def prepare_launch(self, arguments: bytes) -> Callable[[], None]:
+        """A zero-argument enqueue of this launch with every ctypes object
+        built once and kept alive by the callable, for timed loops:
+        ``launch`` rebuilds them on each call. It owns the argument buffer:
+        hold it until its launches finish."""
+        grid, block = self.grid, self._BLOCK
+        if self.cluster is None:
+            return self.runtime.prepare_launch(self.function, grid, block, arguments)
+        # Runtime.prepare_launch has no cluster form. This is the cluster
+        # branch of Runtime._enqueue (the same checks, attribute and config)
+        # with every ctypes object built once; it must change with that branch.
+        shape = check_launch_cluster(grid, self.cluster)
+        device = current_device()
+        if device_supports_cluster_launch(device) is False:
+            raise HipError(
+                f"device {device} does not support cluster launch (cluster {shape})"
+            )
+        args_buf = (ctypes.c_ubyte * len(arguments)).from_buffer_copy(arguments)
+        size_buf = ctypes.c_size_t(len(arguments))
+        extra = (ctypes.c_void_p * 5)(
+            HIP_LAUNCH_PARAM_BUFFER_POINTER,
+            ctypes.cast(args_buf, ctypes.c_void_p),
+            HIP_LAUNCH_PARAM_BUFFER_SIZE,
+            ctypes.cast(ctypes.pointer(size_buf), ctypes.c_void_p),
+            HIP_LAUNCH_PARAM_END,
+        )
+        attr = _HipLaunchAttribute()
+        attr.id = _HIP_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION
+        attr.val.clusterDim.x, attr.val.clusterDim.y, attr.val.clusterDim.z = shape
+        config = _HipLaunchConfig(
+            gridDimX=grid[0],
+            gridDimY=grid[1],
+            gridDimZ=grid[2],
+            blockDimX=block[0],
+            blockDimY=block[1],
+            blockDimZ=block[2],
+            sharedMemBytes=0,
+            hStream=0,
+            attrs=ctypes.pointer(attr),
+            numAttrs=1,
+        )
+        config_ptr = ctypes.pointer(config)
+        function = self.function
+        keep = (args_buf, size_buf, extra, attr, config, config_ptr)
+
+        def enqueue(_keep=keep) -> None:
+            _hip_check(
+                _hipDrvLaunchKernelEx(config_ptr, function, None, extra),
+                "hipDrvLaunchKernelEx",
+            )
+
+        return enqueue
 
     def output(self) -> bytes:
         self.runtime.sync()
@@ -348,33 +434,79 @@ class _Launcher:
         return bytes(host)
 
     def close(self) -> None:
-        self.module.unload()
+        # hipFree synchronizes the device, so the module is unloaded only
+        # after every launch that uses it has finished.
         for pointer in self.pointers:
             self.runtime.free(pointer)
+        self.module.unload()
 
 
-def _time(launcher: _Launcher, arguments: bytes, *, warmup, iters, batch):
+class _Times(NamedTuple):
+    """Microseconds per launch; see the module docstring. ``batched``,
+    ``event_batch`` and ``enqueue`` are ``None`` when ``--batch`` is 0,
+    ``median`` when ``--iters`` is 0, and all of them when nothing was
+    timed."""
+
+    batched: float | None = None
+    event_batch: float | None = None
+    enqueue: float | None = None
+    median: float | None = None
+
+
+def _time(launcher: _Launcher, arguments: bytes, *, warmup, iters, batch) -> _Times:
+    """Time the launch of ``arguments``; see the module docstring. When a
+    launch or a timing call raises an ``Exception``, the launches already
+    queued are waited for before it propagates, so the caller may unload the
+    module and free the buffers."""
     runtime = launcher.runtime
-    for _ in range(max(warmup, 1)):
-        launcher.launch(arguments)
-    runtime.sync()
-    batched_us = None
-    if batch > 0:
-        begin = time.perf_counter()
-        for _ in range(batch):
+    batched_us = event_batch_us = enqueue_us = None
+    times = []
+    try:
+        for _ in range(max(warmup, 1)):
             launcher.launch(arguments)
         runtime.sync()
-        batched_us = (time.perf_counter() - begin) * 1.0e6 / batch
-    times = []
-    for _ in range(iters):
-        start, end = runtime.event(), runtime.event()
-        start.record()
-        launcher.launch(arguments)
-        end.record()
-        runtime.sync()
-        times.append(start.elapsed_to(end) * 1.0e3)
+        if batch > 0:
+            begin = time.perf_counter()
+            for _ in range(batch):
+                launcher.launch(arguments)
+            runtime.sync()
+            batched_us = (time.perf_counter() - begin) * 1.0e6 / batch
+            enqueue = launcher.prepare_launch(arguments)
+            start, end = runtime.event(), runtime.event()
+            try:
+                start.record()
+                begin = time.perf_counter()
+                for _ in range(batch):
+                    enqueue()
+                enqueue_us = (time.perf_counter() - begin) * 1.0e6 / batch
+                end.record()
+                end.synchronize()
+                event_batch_us = start.elapsed_to(end) * 1.0e3 / batch
+            finally:
+                start.destroy()
+                end.destroy()
+        for _ in range(iters):
+            start, end = runtime.event(), runtime.event()
+            start.record()
+            launcher.launch(arguments)
+            end.record()
+            runtime.sync()
+            times.append(start.elapsed_to(end) * 1.0e3)
+            start.destroy()
+            end.destroy()
+    except Exception as exc:
+        # The queued launches still use the module and the buffers that the
+        # caller releases next. A failing wait is not raised: the error that
+        # propagates names the call that failed.
+        try:
+            runtime.sync()
+        except Exception as drain_exc:  # noqa: BLE001 - reported on exc
+            add_note = getattr(exc, "add_note", None)
+            if add_note is not None:
+                add_note(f"waiting for the device after this error failed: {drain_exc}")
+        raise
     median_us = statistics.median(times) if times else None
-    return batched_us, median_us
+    return _Times(batched_us, event_batch_us, enqueue_us, median_us)
 
 
 def _wmma_count(llvm_text: str | None) -> str:
@@ -433,7 +565,8 @@ def _loop_scratch(hsaco: bytes) -> str:
 
 
 def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
-    """Check at every ``--check-betas`` value, then time. Returns (check, batched, median)."""
+    """Check at every ``--check-betas`` value, then time. Returns (check,
+    times)."""
     m, n, k = spec.M, spec.N, spec.K
     alpha = np.float32(1.0 / max(k, 256))
     inputs = check_inputs(spec)
@@ -454,7 +587,14 @@ def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
                 for index, array in enumerate(device_inputs(data)):
                     launcher.upload(index, array)
             for beta in args.check_betas:
-                launcher.launch(launcher.arguments(m, n, k, data_alpha, beta))
+                arguments = launcher.arguments(m, n, k, data_alpha, beta)
+                # beta 0 goes through the enqueue event_batch_us times, held
+                # until output() has synchronized; other betas through launch.
+                if beta == 0:
+                    enqueue = launcher.prepare_launch(arguments)
+                else:
+                    enqueue = functools.partial(launcher.launch, arguments)
+                enqueue()
                 got = np.frombuffer(launcher.output(), dtype=np.uint8)
                 got = got.reshape(m, n, -1)
                 expected = reference(
@@ -471,19 +611,18 @@ def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
                 for index, array in enumerate(device_inputs(inputs)):
                     launcher.upload(index, array)
         if failed:
-            return "FAIL:" + ",".join(failed), None, None
+            return "FAIL:" + ",".join(failed), _Times()
         if args.check_only:
-            return "PASS", None, None
+            return "PASS", _Times()
         timed = launcher.arguments(m, n, k, alpha, 0.0)
         if timing_inputs:
             timing = device_inputs((*timed_inputs(spec), inputs[4]))
             for index, array in enumerate(timing[:4]):
                 launcher.upload(index, array)
             timed = launcher.arguments(m, n, k, 1.0, 0.0)
-        batched, median = _time(
+        return "PASS", _time(
             launcher, timed, warmup=args.warmup, iters=args.iters, batch=args.batch
         )
-        return "PASS", batched, median
     finally:
         launcher.close()
 
@@ -508,7 +647,7 @@ def run_case(spec: MxGemmSpec, *, betas=(0.0, 0.5)) -> str:
         samples=0,
         check_only=True,
     )
-    check, _, _ = _run(
+    check, _ = _run(
         spec,
         artifact,
         mx_gemm_grid(spec),
@@ -648,7 +787,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--warmup", type=int, default=200)
     parser.add_argument("--iters", type=int, default=50)
-    parser.add_argument("--batch", type=int, default=2000)
+    parser.add_argument(
+        "--batch",
+        type=int,
+        default=2000,
+        help="back-to-back launches timed for batched_us, event_batch_us and "
+        "enqueue_us (0 skips them)",
+    )
     parser.add_argument(
         "--timing-inputs",
         choices=("tensile", "check"),
@@ -660,7 +805,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--host-only", action="store_true", help="compile only; no device"
     )
-    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument(
+        "--out", type=Path, default=None, help="CSV to create; must not exist"
+    )
     parser.add_argument("--emit-dir", type=Path, default=None)
     args = parser.parse_args(argv)
     m, n, k = PROBLEMS[args.shape]
@@ -703,7 +850,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.host_only:
             return _row(config, check="HOST", **values), None
-        check, batched, median = _run(
+        check, times = _run(
             run_spec,
             artifact,
             grid,
@@ -712,13 +859,16 @@ def main(argv: list[str] | None = None) -> int:
             runtime=runtime,
             timing_inputs=args.timing_inputs == "tensile",
         )
-        best = batched if batched is not None else median
+        # event_batch is None only when --batch is 0, and then so is batched.
+        best = times.event_batch if times.event_batch is not None else times.median
         tflops = 2.0 * m * n * k / (best * 1.0e-6) / 1.0e12 if best else None
         row = _row(
             config,
             check=check,
-            batched_us=_fmt(batched),
-            median_us=_fmt(median),
+            batched_us=_fmt(times.batched),
+            event_batch_us=_fmt(times.event_batch),
+            enqueue_us=_fmt(times.enqueue),
+            median_us=_fmt(times.median),
             tflops=_fmt(tflops),
             **values,
         )
@@ -735,12 +885,28 @@ def main(argv: list[str] | None = None) -> int:
             run_spec,
         )
 
+    # --out gets each row as it finishes, so a run that dies keeps its rows.
+    # It must not exist: opening it truncates it before the first row.
+    handle = writer = None
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        handle = args.out.open("x", newline="")
+        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer.writeheader()
+        handle.flush()
+
+    def report(row):
+        print("\t".join(str(row[f]) for f in FIELDS), flush=True)
+        if writer is not None:
+            writer.writerow(row)
+            handle.flush()
+
     rows, base_times = [], []
     if args.base:
         row, best = run_base(f"{BASE_VARIANT} (before)")
         rows.append(row)
         base_times.append(best)
-        print("\t".join(str(row[f]) for f in FIELDS), flush=True)
+        report(row)
     timed = []
     for config, spec in configurations(args, m, n, k):
         reason = validate(spec, arch)
@@ -762,12 +928,12 @@ def main(argv: list[str] | None = None) -> int:
                 )
         rows.append(row)
         timed.append((row, best))
-        print("\t".join(str(row[f]) for f in FIELDS), flush=True)
+        report(row)
     if args.base:
         row, best = run_base(f"{BASE_VARIANT} (after)")
         rows.append(row)
         base_times.append(best)
-        print("\t".join(str(row[f]) for f in FIELDS), flush=True)
+        report(row)
     base = [t for t in base_times if t]
     if base:
         base_mean = sum(base) / len(base)
@@ -778,12 +944,14 @@ def main(argv: list[str] | None = None) -> int:
     print("\t".join(FIELDS))
     for row in rows:
         print("\t".join(str(row[f]) for f in FIELDS))
-    if args.out is not None:
-        args.out.parent.mkdir(parents=True, exist_ok=True)
-        with args.out.open("w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=FIELDS)
-            writer.writeheader()
-            writer.writerows(rows)
+    if handle is not None:
+        handle.close()
+        if base:
+            # The speedups exist only now; write the whole file again.
+            with args.out.open("w", newline="") as final:
+                final_writer = csv.DictWriter(final, fieldnames=FIELDS)
+                final_writer.writeheader()
+                final_writer.writerows(rows)
         print(f"wrote {args.out}", flush=True)
     bad = [r for r in rows if not r["check"].startswith(("PASS", "HOST", "INVALID"))]
     return 1 if bad else 0
