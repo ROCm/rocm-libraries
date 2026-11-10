@@ -229,8 +229,8 @@ namespace
                       bool                   supply_c,
                       rocsparse_pointer_mode mode)
     {
-        SCOPED_TRACE("m=" + std::to_string(m) + " n=" + std::to_string(n) + " split="
-                     + std::to_string(split) + " supply_c=" + std::to_string(supply_c)
+        SCOPED_TRACE("m=" + std::to_string(m) + " n=" + std::to_string(n)
+                     + " split=" + std::to_string(split) + " supply_c=" + std::to_string(supply_c)
                      + " device=" + std::to_string(mode == rocsparse_pointer_mode_device));
         const rocsparse_datatype dt = rocsparse_ut::dt_of<T>();
         Rng                      rng(7);
@@ -309,16 +309,10 @@ namespace
                           handle, descr.d, sA.p, sB.p, mat_c, stage, &bs, nullptr),
                       rocsparse_status_success);
             DevBuf<char> tmp(bs);
-            ASSERT_EQ(rocsparse_spgeam(handle,
-                                       descr.d,
-                                       sA.p,
-                                       sB.p,
-                                       mat_c,
-                                       stage,
-                                       bs,
-                                       bs ? tmp.ptr : nullptr,
-                                       nullptr),
-                      rocsparse_status_success);
+            ASSERT_EQ(
+                rocsparse_spgeam(
+                    handle, descr.d, sA.p, sB.p, mat_c, stage, bs, bs ? tmp.ptr : nullptr, nullptr),
+                rocsparse_status_success);
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         };
         auto analysis_nnz = [&]() {
@@ -331,13 +325,10 @@ namespace
             else
             {
                 int64_t nnz = -1;
-                ASSERT_EQ(rocsparse_spgeam_get_output(handle,
-                                                      descr.d,
-                                                      rocsparse_spgeam_output_nnz,
-                                                      &nnz,
-                                                      sizeof(nnz),
-                                                      nullptr),
-                          rocsparse_status_success);
+                ASSERT_EQ(
+                    rocsparse_spgeam_get_output(
+                        handle, descr.d, rocsparse_spgeam_output_nnz, &nnz, sizeof(nnz), nullptr),
+                    rocsparse_status_success);
                 ASSERT_EQ(nnz, 0);
             }
         };
@@ -387,8 +378,7 @@ TEST_F(ExtraGeam, spgeam_empty_operands)
         {
             for(bool supply_c : {true, false})
             {
-                empty_spgeam<float>(
-                    handle, d.m, d.n, split, supply_c, rocsparse_pointer_mode_host);
+                empty_spgeam<float>(handle, d.m, d.n, split, supply_c, rocsparse_pointer_mode_host);
                 if(HasFatalFailure())
                     return;
                 empty_spgeam<rocsparse_double_complex>(
@@ -397,8 +387,7 @@ TEST_F(ExtraGeam, spgeam_empty_operands)
                     return;
             }
             // Device pointer mode used to memset a null nnz. C is omitted.
-            empty_spgeam<float>(
-                handle, d.m, d.n, split, false, rocsparse_pointer_mode_device);
+            empty_spgeam<float>(handle, d.m, d.n, split, false, rocsparse_pointer_mode_device);
             if(HasFatalFailure())
                 return;
         }

@@ -548,8 +548,8 @@ namespace rocsparse
 
             if((nnz_A == 0 && nnz_B == 0) && csr_row_ptr_C != nullptr)
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
-                    handle, m + 1, static_cast<I>(descr_C->base), csr_row_ptr_C));
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::valset(handle, m + 1, static_cast<I>(descr_C->base), csr_row_ptr_C));
             }
             else if(csr_row_ptr_C == nullptr && called_from_spgeam && descr != nullptr
                     && descr->csr_row_ptr_C != nullptr)
@@ -560,20 +560,20 @@ namespace rocsparse
                 {
                 case rocsparse_indextype_i32:
                 {
-                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
-                        handle,
-                        m + 1,
-                        static_cast<int32_t>(rocsparse_index_base_zero),
-                        static_cast<int32_t*>(descr->csr_row_ptr_C)));
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::valset(handle,
+                                          m + 1,
+                                          static_cast<int32_t>(rocsparse_index_base_zero),
+                                          static_cast<int32_t*>(descr->csr_row_ptr_C)));
                     break;
                 }
                 case rocsparse_indextype_i64:
                 {
-                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
-                        handle,
-                        m + 1,
-                        static_cast<int64_t>(rocsparse_index_base_zero),
-                        static_cast<int64_t*>(descr->csr_row_ptr_C)));
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::valset(handle,
+                                          m + 1,
+                                          static_cast<int64_t>(rocsparse_index_base_zero),
+                                          static_cast<int64_t*>(descr->csr_row_ptr_C)));
                     break;
                 }
                 default:
