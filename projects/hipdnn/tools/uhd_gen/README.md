@@ -880,6 +880,25 @@ cannot consume candidate metadata. An engine-level query takes no constraint, so
 configuration-level query, not an L1 one.
 The example feature set demonstrates the workflow, not an accuracy recommendation.
 
+An engine-level measurement is one graph, so by default each graph is its own
+`hipdnn_bench` process, and an engine whose setup is costly pays it for every graph:
+MIOpen loading its CK grouped-convolution library takes about 11 s of a ~17 s graph on
+gfx1151. `--bench-batch N` hands the bench N graphs at a time as a `--graph-list` (one
+path per line); one process and one handle measure them in turn, each graph with its own
+graph, plan and buffers, and write one JSON line per graph naming it as `graph_path`. A
+batch gets `--bench-timeout` seconds per graph. Graphs a batch leaves unanswered -- it
+crashed or timed out on one of them -- are measured again one per process, so a failure
+still lands on the graph that caused it. `--plugin-dir` may name the engine's plugin
+library rather than a directory, so the bench loads only that plugin and no other
+provider's setup. Catalog sweeps (L2) are not batched: a sweep already measures every
+candidate of its graph in one process.
+
+```bash
+hipdnn_bench --graph-list graphs.txt --engine-name MIOPEN_ENGINE \
+    --plugin-dir <plugin dir>/miopen_plugin.dll \
+    --collect-immediate --ranking-metric tflops
+```
+
 Generation preserves supplied graph UUIDs and assigns reproducible IDs to ID-less
 JSON inputs. It records the physical device ID, selector revision, commands,
 constraints, warmup, timing statistics, and disjoint training/evaluation graph-device
