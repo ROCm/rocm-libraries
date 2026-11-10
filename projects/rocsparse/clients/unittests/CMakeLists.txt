@@ -192,6 +192,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # rocsparse_dense_transpose*.cpp compiled in (appended to
   # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below).
   unit_test_internal_common_large_grids.cpp
+  unit_test_internal_common_bsr_ind.cpp
   unit_test_internal_infostructs.cpp
   #10156: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_precond_direct.cpp
@@ -274,6 +275,13 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   #10154: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_geam.cpp
   unit_test_internal_level3_sddmm.cpp
+  # --- sddmm grid clamp / grid stride [AISPARSE-673] ------------------------
+  # Distinct anchor at the very end of the list so this leaf does not conflict
+  # with the sibling large-grid branches that append after their own groups.
+  # Drives rocsparse_sddmm through roc::rocsparse with a shrunken
+  # handle->properties.maxGridSize[0], plus a direct launch of the CSR/CSC
+  # dense-sample kernel; no compile-in library TUs.
+  unit_test_internal_level3_sddmm_grid_clamp.cpp
   unit_test_internal_level3_bsrmm.cpp
   # bsrmm grid.x/grid.y and coomm block reduce forced clamp [AISPARSE-665/704]
   unit_test_internal_level3_bsrmm_grids.cpp
