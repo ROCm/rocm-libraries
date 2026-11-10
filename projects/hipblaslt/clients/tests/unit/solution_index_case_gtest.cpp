@@ -158,8 +158,9 @@ TEST(HostUnitSolutionIndexCase, smoke_GroupedMixedStorage)
     EXPECT_EQ(arg.lda[1], arg.lda[0]);
 }
 
-// A solution that always writes E runs with ReLU and a bias, unless its own
-// activation whitelist excludes ReLU.
+// A solution that always writes E runs with ReLU, and with a bias when it
+// supports one, unless its own activation whitelist excludes ReLU. Without
+// bias support a gradient solution differentiates E alone (DReLU).
 TEST(HostUnitSolutionIndexCase, smoke_RequiredEpilogue)
 {
     TensileLite::ContractionSolution solution;
@@ -175,6 +176,13 @@ TEST(HostUnitSolutionIndexCase, smoke_RequiredEpilogue)
     EXPECT_EQ(arg.activation_type, hipblaslt_activation_type::relu);
     EXPECT_EQ(arg.bias_type, HIP_R_32F);
     EXPECT_EQ(arg.bias_source, hipblaslt_bias_source::d);
+
+    p.useBias        = 0;
+    p.useGradient    = true;
+    auto const dRelu = made(solution);
+    EXPECT_TRUE(dRelu.gradient);
+    EXPECT_TRUE(dRelu.use_e);
+    EXPECT_FALSE(dRelu.bias_vector);
 
     auto allowed   = std::make_shared<Predicates::Contraction::ActivationEnumWhiteList>();
     allowed->value = {TensileLite::ActivationType::Gelu};

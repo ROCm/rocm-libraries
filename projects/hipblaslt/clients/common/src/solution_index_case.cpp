@@ -462,29 +462,33 @@ std::variant<Arguments, UnsupportedSolution> solutionIndexCase(
         arg.compute_input_typeB = *inputB;
     }
 
-    // Outputs the solution always writes: a gradient needs its bias; E is
-    // used with ReLU (forward) or its derivative (gradient), with a bias too.
+    // Outputs the solution always writes: a gradient reduces into its bias or
+    // differentiates its E input; E is used with ReLU (forward) or its
+    // derivative (gradient). A solution with bias support runs with a bias.
     bool const gradient = p.useGradient, aux = p.useE;
+    if(gradient && !aux && !p.useBias)
+        return unsupported("gradient epilogue without bias or E");
     if(gradient || aux)
     {
-        if(!p.useBias)
-            return unsupported("gradient or E epilogue without bias support");
-        std::optional<hipblaslt_bias_source> source;
-        for(int code : p.biasSrcWhiteList)
-            if((source = biasSource(code)))
-                break;
-        auto const& types = p.biasDataTypeWhiteList;
-        if(!source || types.empty())
-            return unsupported("no usable bias source or type");
-        bool const floatAllowed
-            = std::find(types.begin(), types.end(), rocisa::DataType::Float) != types.end();
-        auto biasType = hipType(floatAllowed ? rocisa::DataType::Float : types.front());
-        if(!biasType)
-            return unsupported("bias datatype the client cannot express");
-        arg.bias_vector = true;
-        arg.bias_type   = *biasType;
-        arg.bias_source = *source;
-        arg.gradient    = gradient;
+        if(p.useBias)
+        {
+            std::optional<hipblaslt_bias_source> source;
+            for(int code : p.biasSrcWhiteList)
+                if((source = biasSource(code)))
+                    break;
+            auto const& types = p.biasDataTypeWhiteList;
+            if(!source || types.empty())
+                return unsupported("no usable bias source or type");
+            bool const floatAllowed
+                = std::find(types.begin(), types.end(), rocisa::DataType::Float) != types.end();
+            auto biasType = hipType(floatAllowed ? rocisa::DataType::Float : types.front());
+            if(!biasType)
+                return unsupported("bias datatype the client cannot express");
+            arg.bias_vector = true;
+            arg.bias_type   = *biasType;
+            arg.bias_source = *source;
+        }
+        arg.gradient = gradient;
         if(aux)
         {
             auto required
