@@ -12,8 +12,11 @@ and a valid ``sched`` still lowers to the same ``.ll`` on both engines. The
 binding's own refusal (``*_spec_to_dict`` straight into the C++ validator) is
 covered by each family's parity test and is not bypassed here.
 
-CPU only (no kernel launch). Skips when the ``rocke_library_engine``
-extension is not importable.
+CPU only (no kernel launch). :class:`TestSchedRefusedBeforeEngine` needs no
+engine: it replaces ``import_engine`` with a stub that fails the test, so it
+runs in CI (which installs no ``rocke_library_engine``) and proves the refusal
+happens before the binding is reached. :class:`TestEngineBridgeSched` diffs
+the two engines and skips when ``rocke_library_engine`` is not importable.
 
 Run:
   PYTHONPATH=<engine build>/cpp/bindings:rocke/platform/python:rocke/library \\
@@ -38,6 +41,7 @@ from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_fwd_small_wmma import FwdSmallcWmmaSpec, FwdSmallkWmmaSpec
 from kernels.common.conv_winograd_gemm_wmma import WinogradGemmWmmaSpec
 from kernels.conv import engine_bridge as eb
+from rocke.core.codegen_policy import scheduler_strategy_reason
 
 _HAS_ENGINE = importlib.util.find_spec("rocke_library_engine") is not None
 _SKIP = "" if _HAS_ENGINE else "rocke_library_engine extension not importable"
@@ -119,6 +123,30 @@ def _cases():
             ),
         ),
     )
+
+
+def _engine_reached(module=eb.ENGINE_MODULE):
+    raise AssertionError(
+        f"import_engine({module!r}) reached: unknown sched not refused first"
+    )
+
+
+class TestSchedRefusedBeforeEngine(unittest.TestCase):
+    """Runs without ``rocke_library_engine``: an unknown ``sched`` is refused
+    by ``_reject_unknown_sched`` before ``import_engine``, on both backends."""
+
+    def test_unknown_sched_refused_before_engine_import(self):
+        reason = scheduler_strategy_reason("bogus")
+        self.assertIsNotNone(reason)
+        with mock.patch.object(eb, "import_engine", side_effect=_engine_reached):
+            for fn, spec in _cases():
+                bad = dataclasses.replace(spec, sched="bogus")
+                want = f"invalid {type(spec).__name__} for {_ARCH}: {reason}"
+                for backend in ("python", "cpp"):
+                    with self.subTest(family=fn.__name__, backend=backend):
+                        with self.assertRaises(ValueError) as cm:
+                            fn(bad, arch=_ARCH, backend=backend)
+                        self.assertEqual(str(cm.exception), want)
 
 
 # The gfx1250 builders lower tensor_load_to_lds only at llvm23, so pin the
