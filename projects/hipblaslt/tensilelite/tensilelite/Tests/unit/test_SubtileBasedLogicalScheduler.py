@@ -5056,10 +5056,10 @@ class TestHalfDisjointLds:
             **{("B", t): 0 for t in range(4)}, **{("B", t): 1 for t in range(4, 8)},
         }
         assert self._grs(parts) == [
-            [("A", 0, 4)],
-            [("B", 0, 4)],
-            [("SA", 0, 8), ("SB", 0, 8), ("A", 4, 7)],
-            [("A", 7, 8), ("B", 4, 8)],
+            [("A", 0, 3)],
+            [("A", 3, 4), ("B", 0, 4)],
+            [("SA", 0, 8), ("SB", 0, 8), ("A", 4, 8), ("B", 4, 6)],
+            [("B", 6, 8)],
         ]
         assert not any(
             lr.mustPrecedeP0Overwrite for slots in parts
@@ -5069,10 +5069,42 @@ class TestHalfDisjointLds:
         s = LogicalScheduler(self._cfg(4, 8, grB=2, grSA=4))
         parts = s.build(stop_after=Pass.GR)
         assert self._grs(parts) == [
-            [("A", 0, 2)],
+            [("A", 0, 1)],
+            [("A", 1, 2), ("B", 0, 4)],
+            [("SA", 0, 4), ("SB", 0, 8), ("A", 2, 4), ("B", 4, 6)],
+            [("B", 6, 8)],
+        ]
+
+    @staticmethod
+    def _tile_stream(parts):
+        return [[(t, tile) for t, start, end in part for tile in range(start, end)]
+                for part in parts]
+
+    def test_loads_follow_free_gaps_within_their_half(self):
+        """Partition 3 reads the next iteration's A and B and, in C1, the
+        entry scales, so it has the fewest free gaps and takes fewer loads
+        than its MFMA share.  Each half keeps its loads and their order."""
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        split = self._tile_stream(self._grs(s.build(stop_after=Pass.GR)))
+        byMfma = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        byMfma._half_disjoint_load_gaps = lambda mfmas: [1] * len(mfmas)
+        old = self._tile_stream(self._grs(byMfma.build(stop_after=Pass.GR)))
+        for half in (slice(0, 2), slice(2, 4)):
+            assert sum(split[half], []) == sum(old[half], [])
+        assert len(split[3]) < len(old[3])
+        assert len(split[2]) > len(old[2])
+        mfmas = [16] * 4
+        gaps = s._half_disjoint_load_gaps(mfmas)
+        assert gaps[3] == min(gaps) and gaps[2] == max(gaps)
+
+    def test_loads_that_do_not_fit_free_gaps_spread_by_mfma_count(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        s._half_disjoint_load_gaps = lambda mfmas: [1, 1, 1, 2]
+        assert self._grs(s.build(stop_after=Pass.GR)) == [
+            [("A", 0, 4)],
             [("B", 0, 4)],
-            [("SA", 0, 4), ("SB", 0, 8), ("A", 2, 3)],
-            [("A", 3, 4), ("B", 4, 8)],
+            [("SA", 0, 8), ("SB", 0, 8), ("A", 4, 7)],
+            [("A", 7, 8), ("B", 4, 8)],
         ]
 
     def test_each_half_opens_with_one_wait_and_barrier(self):
