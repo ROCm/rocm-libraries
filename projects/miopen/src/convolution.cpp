@@ -56,11 +56,7 @@ std::size_t GetMaxWorkSpaceSize(const std::vector<std::pair<std::string, std::si
 }
 
 #if MIOPEN_USE_GEMM
-// Largest GEMM workspace among dilated-convolution records in the shipped find-dbs
-// (GemmFwdRest, 256-512-512-3x3-256-256-256-4-2x2-2x2-2x2-0-NCHW-FP16-F_g32). Dilated GEMM
-// workspace is reported only up to this size: reporting it uncapped made callers that allocate
-// the reported size run out of memory on large diffusion shapes (~120 GB, see #6974).
-constexpr std::size_t MaxDilatedGemmWorkspaceSize = 301989888; // 288 MiB
+using solver::conv::MaxDilatedGemmWorkspaceSize;
 #endif
 
 std::size_t GetWorkSpaceSizeGEMM(const miopen::ExecutionContext& ctx,

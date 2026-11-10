@@ -2426,6 +2426,13 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwd1x1_0_1 final : GemmFwdBase
     friend struct GemmFwdRest;
 };
 
+// Largest GEMM workspace among dilated-convolution records in the shipped find-dbs
+// (GemmFwdRest, 256-512-512-3x3-256-256-256-4-2x2-2x2-2x2-0-NCHW-FP16-F_g32). GemmFwdRest splits a
+// larger dilated Im2Col along the output to fit it; GetWorkSpaceSizeGEMM reports nothing above it,
+// since reporting it uncapped made callers that allocate the reported size run out of memory on
+// large diffusion shapes (~120 GB, see #6974).
+inline constexpr std::size_t MaxDilatedGemmWorkspaceSize = 301989888; // 288 MiB
+
 struct MIOPEN_INTERNALS_EXPORT GemmFwdRest final : GemmFwdBase
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<GemmFwdRest>(); }
