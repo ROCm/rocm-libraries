@@ -42,11 +42,16 @@ inline std::vector<int64_t>
 
 /// CPU reference for the backward MoE grouped matmul (NONE-mode routing only —
 /// this schema has no gather/scatter fields, so group `g` always reduces exactly
-/// expert `g`, and `FirstTokenOffset` row count must equal the expert count).
+/// expert `g`).
 ///
-/// `FirstTokenOffset` gives the non-decreasing token-row boundaries per expert:
-/// expert `e` owns rows `[FirstTokenOffset[e], FirstTokenOffset[e+1])` (or up to
-/// `tokenRows` for the last expert). For each expert:
+/// `FirstTokenOffset` gives the non-decreasing token-row boundaries per expert, in one
+/// of two layouts (E = dweight.dims[0]):
+///   - implicit starts, `E` entries: expert `e` owns rows
+///     `[FirstTokenOffset[e], FirstTokenOffset[e+1])`, the last expert up to `tokenRows`;
+///   - explicit boundaries, `E + 1` entries (only for `E > 1`, as MoE routing produces):
+///     expert `e` owns `[FirstTokenOffset[e], FirstTokenOffset[e+1])`, and token rows at
+///     or past `FirstTokenOffset[E]` are not read.
+/// For each expert:
 ///   `DWeight[e, k, n] = sum over r in the expert's row range of Token[r, k] * DOutput[r, n]`
 class CpuFpReferenceMoeGroupedMatmulBwd
 {
@@ -100,7 +105,22 @@ public:
             offsets[static_cast<size_t>(expert)] = offset;
             previousOffset = offset;
         }
-        offsets[static_cast<size_t>(expertCount)] = tokenRows;
+        if(firstTokenOffset.dims()[0] == expertCount + 1)
+        {
+            const int64_t finalBoundary = firstTokenOffset.getHostValue({expertCount, 0, 0});
+            if(finalBoundary < previousOffset || finalBoundary > tokenRows)
+            {
+                throw std::runtime_error(
+                    "CpuFpReferenceMoeGroupedMatmulBwd: final FirstTokenOffset boundary "
+                    + std::to_string(finalBoundary) + " must lie in ["
+                    + std::to_string(previousOffset) + ", " + std::to_string(tokenRows) + "]");
+            }
+            offsets[static_cast<size_t>(expertCount)] = finalBoundary;
+        }
+        else
+        {
+            offsets[static_cast<size_t>(expertCount)] = tokenRows;
+        }
 
         // --- Compute, parallel over (expert, k) pairs. Each work item reduces over
         // its expert's token-row range and produces one full DWeight row of length
@@ -207,10 +227,13 @@ private:
         {
             throw std::runtime_error(prefix + "expert count (dweight.dims[0]) must be positive");
         }
-        if(firstTokenOffset.dims()[0] != expertCount)
+        const int64_t offsetCount = firstTokenOffset.dims()[0];
+        if(offsetCount != expertCount && !(expertCount > 1 && offsetCount == expertCount + 1))
         {
-            throw std::runtime_error(prefix
-                                     + "first_token_offset row count must equal the expert count");
+            throw std::runtime_error(
+                prefix
+                + "first_token_offset row count must equal the expert count (group starts) or, "
+                  "with more than one expert, the expert count plus one (explicit boundaries)");
         }
 
         if(token.dims()[2] != dweight.dims()[1])

@@ -605,4 +605,38 @@ TEST_F(TestMoeGroupedMatmulBwdNodeCreateOperation, SuccessCreatesFourTensorsAndO
     EXPECT_EQ(operations.size(), 1u);
 }
 
+TEST(TestMoeGroupedMatmulBwdNode, InferAcceptsExplicitBoundariesWithSuppliedDweight)
+{
+    // Two experts with three explicit boundaries: dweight must be set to [2, K, N].
+    auto attrs = createValidAttributes();
+    attrs.get_first_token_offset()->set_dim({3, 1, 1});
+    const GraphAttributes graphAttrs;
+    MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttrs);
+    ASSERT_TRUE(node.pre_validate_node().is_good());
+    auto error = node.infer_properties_node();
+    EXPECT_TRUE(error.is_good()) << error.err_msg;
+    EXPECT_EQ(node.attributes.get_dweight()->get_dim(), (std::vector<int64_t>{2, 16, 32}));
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, InferUnsetDweightUsesImplicitStarts)
+{
+    auto attrs = createValidAttributes();
+    attrs.get_first_token_offset()->set_dim({3, 1, 1});
+    attrs.get_dweight()->set_dim({});
+    const GraphAttributes graphAttrs;
+    MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttrs);
+    ASSERT_TRUE(node.infer_properties_node().is_good());
+    EXPECT_EQ(node.attributes.get_dweight()->get_dim(), (std::vector<int64_t>{3, 16, 32}));
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, InferRejectsSingleExpertWithTwoOffsets)
+{
+    // E == 1 stays implicit, so two offsets cannot describe one expert.
+    auto attrs = createValidAttributes();
+    attrs.get_dweight()->set_dim({1, 16, 32});
+    const GraphAttributes graphAttrs;
+    MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttrs);
+    EXPECT_EQ(node.infer_properties_node().code, error_code_t::INVALID_VALUE);
+}
+
 // NOLINTEND(misc-const-correctness)

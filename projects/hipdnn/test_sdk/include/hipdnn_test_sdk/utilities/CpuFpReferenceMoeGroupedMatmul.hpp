@@ -19,15 +19,21 @@ namespace hipdnn_test_sdk::utilities
 
 /// CPU reference for the forward MoE grouped matmul.
 ///
-/// A group of routed rows is defined per `FirstTokenOffset` entry; group `g` uses
-/// expert `g % E` (the offset table is laid out `[batch][expert]`, expert-minor).
+/// `FirstTokenOffset` (length L over E experts, see `moeGroupedMatmulOffsetLayout`)
+/// defines the groups of routed rows; group `g` uses expert `g % E`:
+///   - implicit starts (L % E == 0, the `[batch][expert]` expert-minor layout): group
+///     `g` is `[offset[g], offset[g + 1])`, the last group ending at the routed capacity;
+///   - explicit boundaries (E > 1, L % E == 1, as MoE routing produces): L - 1 groups,
+///     group `g` is `[offset[g], offset[g + 1])` with `offset[0] == 0`; routed rows at
+///     or past `offset[L - 1]` are never read.
 /// Per mode, the source token row and destination output row for routed row `r`
 /// are:
 ///   NONE:    src = r,                 dst = r
 ///   GATHER:  src = TokenIndex[r],     dst = r
 ///   SCATTER: src = r,                 dst = TokenIndex[r] * top_k + TokenKs[r]
 /// `Output[0, dst, n] = sum_k Token[0, src, k] * Weight[expert, k, n]`. Output rows
-/// no group ever writes are zero-filled.
+/// no group ever writes are zero-filled with implicit starts and left untouched with
+/// explicit boundaries.
 class CpuFpReferenceMoeGroupedMatmul
 {
 public:
@@ -53,7 +59,12 @@ public:
         const int64_t outputRows = output.dims()[1];
         const int64_t hiddenK = weight.dims()[1];
         const int64_t outputN = weight.dims()[2];
-        const int64_t groupCount = firstTokenOffset.dims()[0];
+        const int64_t offsetCount = firstTokenOffset.dims()[0];
+        const bool explicitBoundaries
+            = hipdnn_flatbuffers_sdk::utilities::moeGroupedMatmulOffsetLayout(offsetCount,
+                                                                              expertCount)
+              == hipdnn_flatbuffers_sdk::utilities::MoeGroupedMatmulOffsetLayout::EXPLICIT;
+        const int64_t groupCount = explicitBoundaries ? offsetCount - 1 : offsetCount;
         const int64_t routedRows = (mode == Mode::NONE) ? 0 : tokenIndex->dims()[1];
         const int64_t rowsTotal = (mode == Mode::GATHER) ? routedRows : tokenRows;
 
@@ -69,7 +80,7 @@ public:
         // only range-checked on the next iteration, as that iteration's `start` -
         // after the inner loop has already read past it.
         int64_t previousOffset = 0;
-        for(int64_t group = 0; group < groupCount; ++group)
+        for(int64_t group = 0; group < offsetCount; ++group)
         {
             const int64_t offset = firstTokenOffset.getHostValue({group, 0, 0});
             if(offset < 0 || offset > rowsTotal)
@@ -86,13 +97,20 @@ public:
                     "(violated at group "
                     + std::to_string(group) + ")");
             }
+            if(explicitBoundaries && group == 0 && offset != 0)
+            {
+                throw std::runtime_error(
+                    "CpuFpReferenceMoeGroupedMatmul: explicit FirstTokenOffset boundaries must "
+                    "start at 0, got "
+                    + std::to_string(offset));
+            }
             previousOffset = offset;
         }
 
         for(int64_t group = 0; group < groupCount; ++group)
         {
             const int64_t start = firstTokenOffset.getHostValue({group, 0, 0});
-            const int64_t end = (group + 1 < groupCount)
+            const int64_t end = (group + 1 < offsetCount)
                                     ? firstTokenOffset.getHostValue({group + 1, 0, 0})
                                     : rowsTotal;
 
@@ -183,6 +201,10 @@ public:
 
             if(expert < 0)
             {
+                if(explicitBoundaries)
+                {
+                    return;
+                }
                 for(int64_t nIdx = 0; nIdx < outputN; ++nIdx)
                 {
                     outRow[nIdx * outputStride2]
@@ -319,10 +341,14 @@ private:
         {
             throw std::runtime_error(prefix + "expert count (weight.dims[0]) must be positive");
         }
-        if(firstTokenOffset.dims()[0] % expertCount != 0)
+        if(hipdnn_flatbuffers_sdk::utilities::moeGroupedMatmulOffsetLayout(
+               firstTokenOffset.dims()[0], expertCount)
+           == hipdnn_flatbuffers_sdk::utilities::MoeGroupedMatmulOffsetLayout::INVALID)
         {
             throw std::runtime_error(
-                prefix + "first_token_offset row count must be a multiple of the expert count");
+                prefix
+                + "first_token_offset row count must be a multiple of the expert count, or "
+                  "(explicit boundaries, more than one expert) one more than a multiple");
         }
 
         // Presence/top_k rules are exactly the shared FlatBuffers routing contract

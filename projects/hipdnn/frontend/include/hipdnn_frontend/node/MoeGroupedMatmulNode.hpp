@@ -94,10 +94,19 @@ public:
         HIPDNN_RETURN_IF_TRUE(weight->get_dim()[0] <= 0,
                               ErrorCode::INVALID_VALUE,
                               "MoE weight tensor must describe at least one expert");
-        HIPDNN_RETURN_IF_TRUE(
-            firstTokenOffset->get_dim()[0] % weight->get_dim()[0] != 0,
-            ErrorCode::INVALID_VALUE,
-            "MoE first-token-offset tensor length must be divisible by expert count");
+        // first_token_offset length L over E experts: L % E == 0 lists implicit group starts
+        // (the last group ends at the routed capacity); for E > 1, L % E == 1 lists explicit
+        // L boundaries of L - 1 groups (cuDNN's current layout). E == 1 stays implicit.
+        const auto offsetCount = firstTokenOffset->get_dim()[0];
+        const auto expertCount = weight->get_dim()[0];
+        const bool implicitOffsets = offsetCount % expertCount == 0;
+        const bool explicitOffsets
+            = expertCount > 1 && offsetCount > 1 && offsetCount % expertCount == 1;
+        HIPDNN_RETURN_IF_TRUE(offsetCount <= 0 || (!implicitOffsets && !explicitOffsets),
+                              ErrorCode::INVALID_VALUE,
+                              "MoE first-token-offset tensor length must be a multiple of the "
+                              "expert count (group starts) or, with more than one expert, one "
+                              "more than a multiple (explicit group boundaries)");
         HIPDNN_RETURN_IF_TRUE(firstTokenOffset->get_data_type() != DataType::INT32,
                               ErrorCode::INVALID_VALUE,
                               "MoE first-token-offset tensor must have INT32 data type");

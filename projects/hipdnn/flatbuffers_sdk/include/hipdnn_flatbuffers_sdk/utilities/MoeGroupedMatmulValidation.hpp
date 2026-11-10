@@ -26,6 +26,41 @@ struct MoeGroupedMatmulRouting
     int64_t expertCount = 0; ///< weight dims[0]; must be positive to bound top_k
 };
 
+/// Layout of a MoE grouped matmul `first_token_offset` table of length `offsetCount`
+/// over `expertCount` experts (cuDNN MoeGroupedMatmul "Important Notes"):
+///   - IMPLICIT: `offsetCount % expertCount == 0`; entry `g` is the start row of group
+///     `g` and the last group ends at the routed capacity (cuDNN's deprecated layout).
+///   - EXPLICIT: `expertCount > 1` and `offsetCount % expertCount == 1`; the table holds
+///     `G + 1` non-decreasing boundaries (`G = offsetCount - 1`) starting at 0, group `g`
+///     is `[offset[g], offset[g + 1])`, and rows at or past `offset[G]` are left untouched.
+/// Group `g` uses expert `g % expertCount` in both layouts. With one expert every length
+/// is a multiple, so `expertCount == 1` stays IMPLICIT (backward compatible; cuDNN treats
+/// it as explicit).
+enum class MoeGroupedMatmulOffsetLayout
+{
+    INVALID,
+    IMPLICIT,
+    EXPLICIT,
+};
+
+inline MoeGroupedMatmulOffsetLayout moeGroupedMatmulOffsetLayout(int64_t offsetCount,
+                                                                 int64_t expertCount)
+{
+    if(offsetCount <= 0 || expertCount <= 0)
+    {
+        return MoeGroupedMatmulOffsetLayout::INVALID;
+    }
+    if(offsetCount % expertCount == 0)
+    {
+        return MoeGroupedMatmulOffsetLayout::IMPLICIT;
+    }
+    if(expertCount > 1 && offsetCount > 1 && offsetCount % expertCount == 1)
+    {
+        return MoeGroupedMatmulOffsetLayout::EXPLICIT;
+    }
+    return MoeGroupedMatmulOffsetLayout::INVALID;
+}
+
 /// Returns nullptr when the routing contract holds, otherwise a static reason
 /// string the caller wraps in its own error type.
 inline const char* checkMoeGroupedMatmulRouting(const MoeGroupedMatmulRouting& routing)
