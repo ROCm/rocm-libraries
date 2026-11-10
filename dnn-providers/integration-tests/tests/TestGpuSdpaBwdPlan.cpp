@@ -602,17 +602,17 @@ TEST(TestGpuSdpaBwdPlanZeroDropout, EqualsNoDropoutBitForBitAndTheCpuExecutor)
     };
 
     const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> exact(0.0F, 0.0F);
-    const auto noDropout = run(spec(std::nullopt, false), true);
+    auto noDropout = run(spec(std::nullopt, false), true);
     for(const bool seedAndOffset : {true, false})
     {
         SCOPED_TRACE(std::string("seed and offset ") + (seedAndOffset ? "named" : "absent"));
-        const auto zero = run(spec(0.0F, seedAndOffset), true);
+        auto zero = run(spec(0.0F, seedAndOffset), true);
         EXPECT_TRUE(exact.allClose(noDropout.dQ, zero.dQ));
         EXPECT_TRUE(exact.allClose(noDropout.dK, zero.dK));
         EXPECT_TRUE(exact.allClose(noDropout.dV, zero.dV));
     }
 
-    const auto cpu = run(spec(0.0F, true), false);
+    auto cpu = run(spec(0.0F, true), false);
     const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> loose(2e-4F, 2e-4F);
     EXPECT_TRUE(loose.allClose(cpu.dQ, noDropout.dQ));
     EXPECT_TRUE(loose.allClose(cpu.dK, noDropout.dK));
