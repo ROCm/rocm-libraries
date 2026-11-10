@@ -102,6 +102,17 @@ __device__ __forceinline__ void k4StoreTileChannelsFirst(const K4Args& a,
     }
 }
 
+// A halo column's slot: at stride 2 a halo row holds its even columns first, then its odd ones, so
+// the 16 lanes of a fragment read (columns 2 apart) read consecutive pixels.
+template <int ST, int HC>
+__device__ __forceinline__ int k4HaloColumn(int hc)
+{
+    if constexpr(ST == 2)
+        return (hc & 1) * ((HC + 1) / 2) + (hc >> 1);
+    else
+        return hc;
+}
+
 // Matrix-core kernel. A workgroup of 4 waves owns TH output rows x 16 WP output columns x CB
 // channel blocks of one output plane. Per depth tap it stages that input plane's halo in LDS
 // (16-byte loads along the channels; pixels padded by 16 bytes so the 16 lanes of a fragment read
@@ -193,7 +204,12 @@ __device__ void k4ConvMma(const K4Args& a)
                     val.e[j] = at[j * planes];
                 if(!ok)
                     val.raw = Raw{};
-                *reinterpret_cast<Raw*>(halo + (hr * HC + hc) * PITCH + v * VEC) = val.raw;
+                if constexpr(ST == 2)
+                    *reinterpret_cast<Raw*>(halo + (hr * HC + k4HaloColumn<ST, HC>(hc)) * PITCH
+                                            + v * VEC)
+                        = val.raw;
+                else
+                    *reinterpret_cast<Raw*>(halo + (hr * HC + hc) * PITCH + v * VEC) = val.raw;
             }
         }
         else
@@ -210,7 +226,12 @@ __device__ void k4ConvMma(const K4Args& a)
                 Raw val = *reinterpret_cast<const Raw*>(in + at);
                 if(!ok)
                     val = Raw{};
-                *reinterpret_cast<Raw*>(halo + p * PITCH + v * VEC) = val;
+                if constexpr(ST == 2)
+                    *reinterpret_cast<Raw*>(halo + (hr * HC + k4HaloColumn<ST, HC>(hc)) * PITCH
+                                            + v * VEC)
+                        = val;
+                else
+                    *reinterpret_cast<Raw*>(halo + p * PITCH + v * VEC) = val;
             }
         }
         __syncthreads();
@@ -238,7 +259,8 @@ __device__ void k4ConvMma(const K4Args& a)
                     for(int p = 0; p < WP; ++p)
                     {
                         const int hc = (p * 16 + row) * ST + fs, hr = r * ST + fr;
-                        const T* src = halo + (hr * HC + hc) * PITCH + cbi * 16 + kb;
+                        const T* src
+                            = halo + (hr * HC + k4HaloColumn<ST, HC>(hc)) * PITCH + cbi * 16 + kb;
 #pragma unroll
                         for(int q = 0; q < KC; ++q)
                             acc[it][p]
