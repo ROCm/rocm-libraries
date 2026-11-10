@@ -573,11 +573,10 @@ class TestSmallAddressing(unittest.TestCase):
         once landed past it (the 2x32 tile on a 33x34 C=3 image; K=4, 3x3,
         four waves and an 8x8 tile).
 
-        The AOT grid is sampled at every 4th valid spec (deterministic, stride
-        4 over the flat valid-spec list) so the test stays within the 30 s
-        per-item pytest-timeout on slow CI while retaining representative
-        coverage of boundary shapes.  The two hardcoded boundary specs run
-        unconditionally."""
+        Small C models every block of each spec, so its AOT grid is sampled
+        at every 4th valid spec (deterministic) to keep the test inside its
+        pytest-timeout; small K models one block, so every valid small-K AOT
+        spec runs.  The two hardcoded boundary specs run unconditionally."""
         import dataclasses
 
         from kernels.conv.direct_aot_jobs import (
@@ -612,8 +611,8 @@ class TestSmallAddressing(unittest.TestCase):
                 problem=_problem(N=1, H=8, W=8, C=64, K=4), out_h=8, out_w=8
             ),
         ]
-        # Sample every 4th valid spec (stride keeps the test comfortably under
-        # the 30 s pytest-timeout on slow CI; coverage spans all caps groups).
+        # Sample every 4th valid small-C spec (it walks every block, so the
+        # stride keeps the test inside its pytest-timeout); small K runs all.
         _sample_stride = 4
         _valid_idx = 0
         for variant, *_ in sides.values():
@@ -624,7 +623,10 @@ class TestSmallAddressing(unittest.TestCase):
                     spec = make_direct_spec(variant, probe, knobs)
                     if not validate_direct_spec(variant, spec, "gfx950")[0]:
                         continue
-                    if _valid_idx % _sample_stride == 0:
+                    if (
+                        variant == "direct_fwd_smallk_mfma"
+                        or _valid_idx % _sample_stride == 0
+                    ):
                         p = spec.problem
                         for H, W in ((17, 19), (33, 34)):
                             specs.append(
