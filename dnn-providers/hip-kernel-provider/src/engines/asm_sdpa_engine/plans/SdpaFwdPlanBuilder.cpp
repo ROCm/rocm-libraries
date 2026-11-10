@@ -378,6 +378,82 @@ bool fwdKvRowExtentsFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAtt
     return ok;
 }
 
+// Validates the optional stats (LSE) output tensor that the kernel writes as dense
+// FP32 [B, H, Sq]. Q must already be known to be rank 4.
+static bool
+    isSupportedStatsTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& stats,
+                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    HIP_KERNEL_RETURN_FALSE_IF(stats.virtual_(), "stats tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&stats),
+                               "stats tensor must not be pass-by-value");
+
+    HIP_KERNEL_RETURN_FALSE_IF(stats.data_type() != DataType::FLOAT,
+                               "stats tensor datatype must be FP32 (Actual type: "
+                                   + EnumNameDataType(stats.data_type()) + ")");
+
+    const auto statsRank = stats.dims()->size();
+    HIP_KERNEL_RETURN_FALSE_IF(
+        statsRank != 3 && statsRank != 4,
+        "stats tensor must be rank 3 [B,H,Sq] or rank 4 [B,H,Sq,1] (Actual rank: "
+            + std::to_string(statsRank) + ")");
+
+    if(statsRank == 4)
+    {
+        HIP_KERNEL_RETURN_FALSE_IF(stats.dims()->Get(3) != 1,
+                                   "stats tensor rank-4 last dim must be 1 (Actual: "
+                                       + std::to_string(stats.dims()->Get(3)) + ")");
+    }
+
+    HIP_KERNEL_RETURN_FALSE_IF(stats.dims()->Get(0) != q.dims()->Get(0)
+                                   || stats.dims()->Get(1) != q.dims()->Get(1)
+                                   || stats.dims()->Get(2) != q.dims()->Get(2),
+                               "stats tensor shape [B,H,Sq] must match Q tensor");
+    return true;
+}
+
+// Checks every byte offset the kernel forms in 32 bits: the per-field strides,
+// the Ts product and, for hd192x128, the K/V per-head row extent. `inputBytes`
+// is the resolved Q/K/V element size and `tsQo` the matched row's Q-tile size.
+static bool fwdByteRangesFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* stats,
+                                int64_t inputBytes,
+                                int64_t tsQo)
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    HIP_KERNEL_RETURN_FALSE_IF(!wouldFwdByteStridesFitUint32(q, k, v, o, stats, inputBytes),
+                               "Forward byte strides overflow uint32_t kernarg fields");
+
+    // s_Ts = tileSizeQo * qStrideRow * inBytesPerElement (SdpaFwdArgsBuilder) is
+    // the one forward kernarg that is a product rather than a single stride, and
+    // it is formed in unsigned int, so it wraps for Q sequence strides the
+    // per-field check above accepts. The resolved row's ts_qo folds into the
+    // element size so the product is never formed outside the predicate.
+    // Mirrors the backward Ts check.
+    HIP_KERNEL_RETURN_FALSE_IF(!plan_utils::byteStrideFitsU32(
+                                   "Ts (ts_qo * stride_q)", q.strides()->Get(2), inputBytes * tsQo),
+                               "Forward Ts product overflows the uint32_t s_Ts kernarg field");
+
+    // The hd192x128 kernels on both architectures address each K and V head
+    // through a 32-bit buffer offset, so a head whose rows span 2^32 bytes or
+    // more is out of their reach even when every per-field stride fits. Ports
+    // AITER's can_impl_fmha_v3_fwd rule (aiter/ops/mha.py, batch and varlen).
+    const bool isHd192x128 = q.dims()->Get(3) == 192 && v.dims()->Get(3) == 128;
+    HIP_KERNEL_RETURN_FALSE_IF(isHd192x128 && !fwdKvRowExtentsFitU32(k, v, inputBytes),
+                               "hd192x128 K or V per-head row extent reaches 2^32 bytes");
+    return true;
+}
+
 static std::string getKernelTocKey(std::string coName, const std::string& archId, bool isMi308)
 {
     if(archId == "gfx942")
@@ -553,34 +629,10 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    "stats_tensor_uid not found in tensor map");
 
         statsTensor = statsIt->second;
-
-        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->virtual_(), "stats tensor must not be virtual");
-        HIP_KERNEL_RETURN_FALSE_IF(
-            hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(statsTensor),
-            "stats tensor must not be pass-by-value");
-
-        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->data_type() != DataType::FLOAT,
-                                   "stats tensor datatype must be FP32 (Actual type: "
-                                       + EnumNameDataType(statsTensor->data_type()) + ")");
-
-        const auto statsRank = statsTensor->dims()->size();
-        HIP_KERNEL_RETURN_FALSE_IF(
-            statsRank != 3 && statsRank != 4,
-            "stats tensor must be rank 3 [B,H,Sq] or rank 4 [B,H,Sq,1] (Actual rank: "
-                + std::to_string(statsRank) + ")");
-
-        if(statsRank == 4)
+        if(!isSupportedStatsTensor(*statsTensor, *qTensor))
         {
-            HIP_KERNEL_RETURN_FALSE_IF(statsTensor->dims()->Get(3) != 1,
-                                       "stats tensor rank-4 last dim must be 1 (Actual: "
-                                           + std::to_string(statsTensor->dims()->Get(3)) + ")");
+            return false;
         }
-
-        // Shape comparison is safe now — Q rank-4 is validated above.
-        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->dims()->Get(0) != qTensor->dims()->Get(0)
-                                       || statsTensor->dims()->Get(1) != qTensor->dims()->Get(1)
-                                       || statsTensor->dims()->Get(2) != qTensor->dims()->Get(2),
-                                   "stats tensor shape [B,H,Sq] must match Q tensor");
     }
 
     HIP_KERNEL_RETURN_FALSE_IF(qTensor->data_type() != kTensor->data_type()
@@ -722,32 +774,16 @@ bool SdpaFwdPlanBuilder::isApplicable(
 
     // Q/K/V byte strides and the Ts product are scaled by the resolved input
     // size, which the datatype checks above have narrowed to bf16 or fp8bf16.
-    const int64_t inputBytes = fwdInputBytesPerElement(dataTypeId);
-
-    HIP_KERNEL_RETURN_FALSE_IF(!wouldFwdByteStridesFitUint32(
-                                   *qTensor, *kTensor, *vTensor, *oTensor, statsTensor, inputBytes),
-                               "Forward byte strides overflow uint32_t kernarg fields");
-
-    // s_Ts = tileSizeQo * qStrideRow * inBytesPerElement (SdpaFwdArgsBuilder) is
-    // the one forward kernarg that is a product rather than a single stride, and
-    // it is formed in unsigned int, so it wraps for Q sequence strides the
-    // per-field check above accepts. The resolved row's ts_qo folds into the
-    // element size so the product is never formed outside the predicate.
-    // Mirrors the backward Ts check.
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !plan_utils::byteStrideFitsU32("Ts (ts_qo * stride_q)",
-                                       qTensor->strides()->Get(2),
-                                       inputBytes * cfg_fmha_fwd.at(key).ts_qo),
-        "Forward Ts product overflows the uint32_t s_Ts kernarg field");
-
-    // The hd192x128 kernels on both architectures address each K and V head
-    // through a 32-bit buffer offset, so a head whose rows span 2^32 bytes or
-    // more is out of their reach even when every per-field stride fits. Ports
-    // AITER's can_impl_fmha_v3_fwd rule (aiter/ops/mha.py, batch and varlen).
-    const bool isHd192x128 = qTensor->dims()->Get(3) == 192 && vTensor->dims()->Get(3) == 128;
-    HIP_KERNEL_RETURN_FALSE_IF(isHd192x128
-                                   && !fwdKvRowExtentsFitU32(*kTensor, *vTensor, inputBytes),
-                               "hd192x128 K or V per-head row extent reaches 2^32 bytes");
+    if(!fwdByteRangesFitU32(*qTensor,
+                            *kTensor,
+                            *vTensor,
+                            *oTensor,
+                            statsTensor,
+                            fwdInputBytesPerElement(dataTypeId),
+                            cfg_fmha_fwd.at(key).ts_qo))
+    {
+        return false;
+    }
 
     return true;
 }
