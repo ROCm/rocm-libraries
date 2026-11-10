@@ -1,0 +1,3424 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""The direct convolution AOT grid: which kernels the cache builds, and how one
+of them is built.
+
+:data:`DIRECT_CAPABILITIES` (what each binary is baked for) times the tuning
+grids (what it is tuned with) is every direct kernel the cache holds;
+:func:`direct_job_for_identity` reads the job back off one identity and
+:func:`direct_kernel_for_job` turns it into kernel IR. Enumerating in parallel,
+compiling and planning launches is :mod:`benchmarks.common.direct_kernel_sweep`;
+this module sits below ``dispatch`` so the dispatcher can build a registered
+instance itself.
+"""
+
+from __future__ import annotations
+
+import itertools
+import json
+from dataclasses import dataclass, replace
+from functools import lru_cache
+from typing import Dict, Iterator, List, Optional, Sequence, Tuple
+
+from kernels.conv.aot_jobs import BuildJob
+from kernels.conv.direct_variants import (
+    DIRECT_DEPTHWISE_WIN_FWD as _DW_WIN_FWD,
+    DIRECT_DGRAD_PATCH_WMMA as _DGRAD_PATCH,
+    DIRECT_DGRAD_SMALLC_WMMA as _DGRAD_SMALLC,
+    DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
+    DIRECT_DEPTHWISE_TILED_DGRAD as _DW_TILED_DGRAD,
+    DIRECT_DW_FWD_WMMA as _DW_FWD_WMMA,
+    DIRECT_FWD_GSTREAM_WMMA as _FWD_GSTREAM,
+    DIRECT_FWD_TAPOUTER_WMMA as _FWD_TAPOUTER,
+    DIRECT_FWD_SMALLC_WMMA as _FWD_SMALLC,
+    DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
+    DIRECT_FWD_WMMA as _FWD_WMMA,
+    DIRECT_GROUPED_HALO as _GROUPED_HALO,
+    DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
+    DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
+    DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
+    direct_spec_takes_target_wave,
+    DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
+    DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
+    PER_AXIS_PAD_VARIANTS,
+    direct_wgrad_fold_knobs,
+    dgrad_rtc_vgprs,
+    DIRECT_WGRAD_REDUCE,
+    DIRECT_WGRAD_TWO_STAGE as _WGRAD_TWO_STAGE,
+    direct_dgrad_weight_transforms,
+    direct_mfma_knobs_reason as _mfma_knobs_reason,
+    make_direct_spec as make_spec,
+    select_direct_kernel_builder as _build_kernel,
+    validate_direct_spec as validate_spec,
+    direct_wgrad_replicas,
+)
+from kernels.conv.kernel_identity import DIRECTIONS, KernelIdentity
+
+# Direction name of the forward helper kernels (shape-independent passes like
+# the split-C reduction) -- found by exact identity, not by capability match.
+_FWD_HELPER = "direct_fwd_helper"
+
+
+# Operand dtypes the direct kernels build for. The cache is filled for one at a
+# time (--compile-all --dtype); each binary records its dtype and is only
+# offered to problems of that dtype. Variants without a kernel for a dtype
+# (the 4c atom is fp16-only) are dropped by their spec validators.
+#
+# "fp32" and "tf32" both store fp32 tensors: "fp32" runs the MFMA kernels on
+# the exact fp32 atoms, "tf32" feeds them TF32 operands (native XF32 on gfx942,
+# BF16x3 emulation on gfx950). The scalar-FMA kernels serve both in fp32.
+DIRECT_DTYPES = ("fp16", "bf16", "fp32", "tf32")
+# What --compile-all builds when --dtype names none; fp32/tf32 are opt-in
+# (--dtype fp32 / --dtype tf32), as for implicit GEMM.
+DIRECT_COMPILE_DTYPES = ("fp16", "bf16")
+DIRECT_DTYPE = "fp16"  # the default dtype
+# Convolution directions the direct cache holds kernels for: all of them.
+DIRECT_DIRECTIONS = DIRECTIONS
+
+
+def direct_storage_dtype(dtype: str) -> str:
+    """The element type of a direct problem's tensors: ``fp32`` for tf32.
+
+    The kernels' own rule (``conv_direct_grouped._storage_dtype``), so the
+    cache and the builders cannot disagree on how a dtype is stored; an
+    unknown dtype raises ``ValueError``.
+    """
+    from kernels.common.conv_direct_grouped import _storage_dtype
+
+    return _storage_dtype(dtype)
+
+
+def direct_dtype_triple(dtype: str) -> Tuple[str, str, str]:
+    """``(dtype_a, dtype_b, dtype_d)`` of a direct kernel's cache identity.
+
+    TF32 is fp32 storage with TF32 operands at the MMA, so its triple is
+    ``("tf32", "tf32", "fp32")`` -- the implicit-GEMM cache's spelling. Every
+    other dtype is all three, which keeps the fp16/bf16 identities (and their
+    cache hashes) exactly as they were.
+    """
+    direct_storage_dtype(dtype)  # reject an unknown dtype
+    return ("tf32", "tf32", "fp32") if dtype == "tf32" else (dtype,) * 3
+
+
+@lru_cache(maxsize=None)
+def tf32_is_emulated(arch: str) -> bool:
+    """Does ``arch`` run TF32 as BF16x3 emulation (gfx950) rather than as
+    native XF32 (gfx942)? Asked of the catalog's 16x16 TF32 atom; an arch with
+    no TF32 atom counts as native (the looser bound)."""
+    from rocke.core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except Exception:  # noqa: BLE001 - unknown arch: no catalog to ask
+        return False
+    family = "wmma" if target.wave_size == 32 else "mma"
+    op = target.mma.select_largest_k(
+        family=family, a_dtype="tf32", b_dtype="tf32", c_dtype="fp32", m=16, n=16
+    )
+    return op is not None and not op.is_native
+
+
+# ---------------------------------------------------------------------------
+# Tuning grids -- shared with benchmark_direct_conv's JIT sweep so the cache
+# and the sweep explore the same configurations.
+# ---------------------------------------------------------------------------
+
+# Grouped forward (DirectConvSpec) and the MFMA dgrad's fprop pass.
+BLOCK_Q = (16, 32)
+BLOCK_GROUPS = (1, 2, 4, 8, 16)
+DOUBLE_BUFFER = (True, False)
+# Grouped forward K-atom width for fp32-storage problems only (fp32/tf32):
+# fold_k32 reduces 32 channels per atom (cpg % 32 == 0), else 16.
+GROUPED_FOLD_K32 = (False, True)
+# Depthwise (cpg == 1) forward and dgrad.
+# block_w=32 is omitted from both directions: across the depthwise corpus, at
+# both dtypes, it never won a single geometry -- every shape whose best config
+# used a wide block_w landed on 8 or 16 -- while still costing a quarter of the
+# candidate builds and tuning launches.
+#
+# The surviving values differ by direction, because the two directions do not
+# have the same fallback.  Forward is overwhelmingly a block_w=4 story: the
+# column-streamed variant (its own grid below) covers the wide-block cases, so
+# the preloading kernel rarely needs to go wide, and the few shapes that do go
+# wide land on 16 rather than 8.  Dropping 8 from the forward grid is therefore
+# free, while dropping 16 is not.  Dgrad has no second variant to fall back on,
+# so its tail keeps both 8 and 16 -- dropping either regresses small-spatial /
+# large-filter shapes, 8 the more severely of the two.  Dgrad also carries 7:
+# it tiles the 7- and 14-wide maps of the 7x7 depthwise stages without a
+# ragged edge, and on those it beats every power of two (14 never did).
+# Neither tuple is reducible further without giving up a shape's best config.
+DW_BLOCK_W_FWD = (4, 16)
+DW_BLOCK_W_DGRAD = (4, 7, 8, 16)
+# Channel-packed depthwise dgrad: (cpl, block_w values, block_waves values).
+# Two channels per lane win on most layers; the wider packs only on a few.
+DW_DGRAD_CPL_GRID = (
+    (2, (4, 7, 8), (1, 2, 4)),
+    (4, (4,), (1, 2)),
+    (8, (4, 8), (1, 4)),
+)
+# Spill gate of the channel-packed depthwise dgrad grid (see
+# _dw_dgrad_packed_spills): the live-register estimate past which the compiled
+# grid spills. Calibrated by compiling every cpl > 1 entry: on gfx942 / gfx950
+# each entry estimated past 288 overflows the 256 architectural VGPRs (most of
+# them to scratch), and on gfx1151 / gfx1201 each one spills to scratch, while
+# the entries at or below it compile spill-free bar a single register on a few.
+# gfx1250 gives a lane of a block of up to two waves far more registers and
+# spills only in four-wave blocks, past 448.
+DW_DGRAD_PACKED_LIVE_BUDGET = 288
+DW_DGRAD_PACKED_LIVE_BUDGET_GFX1250 = 448
+# Rotated-filter depthwise dgrad through the output-stationary kernel: wide
+# tiles amortize the KW-1 column halo of the large filters it serves.
+DW_TILED_DGRAD_BLOCK_W = (4, 8, 16, 32)
+DW_TILED_DGRAD_BLOCK_H = (1, 2, 3, 4, 7)
+DW_TILED_DGRAD_BLOCK_WAVES = (1,)
+DW_BLOCK_WAVES = (1, 2, 4)
+# Output-stationary depthwise forward. Widths and heights of 7 and 14 tile the
+# 7/14/28/56-wide feature maps of the common CNN stages without a ragged edge;
+# the spec validator drops the tiles that overflow the register budget and the
+# unrolled loops that would take long to compile.
+DW_TILED_BLOCK_W = (4, 7, 8, 14, 16)
+DW_TILED_BLOCK_H = (1, 2, 4, 7)
+DW_TILED_BLOCK_WAVES = (1, 2)
+DW_TILED_UNROLL = (False, True)
+# Channel-packed depthwise forward (cpl > 1: every lane owns cpl adjacent
+# channels, vector loads/stores and packed f32 FMAs): (cpl, block_w values,
+# block_waves values) for the weight-preloading kernel, and the tiles of the
+# output-stationary kernel (cpl 2; its tiles shrink with the packed registers).
+# The packed row-streaming kernel wins the large-batch layers, the tiled one
+# the stride-2 layers.
+DW_FWD_CPL_GRID = (
+    (2, (2, 4, 7, 8), (1, 2, 4)),
+    (4, (4,), (1, 2)),
+)
+DW_TILED_CPL = 2
+
+# Column-streamed depthwise forward. It keeps only ``block_h*block_w + KH`` f32
+# live per lane instead of ``KH*KW + KH*block_w``, so its sweet spot sits at far
+# smaller block_w than the weight-preloading kernel's. block_h is the output-row
+# tile: the row loop is unrolled at build time, so the tile height is a
+# capability while the image height stays a kernarg. Pairs whose band does not
+# fit the arch's live-f32 budget are dropped by the spec validator.
+#
+# Measured on gfx950 over 15 depthwise shapes (3x3..11x11, stride 1 and 2,
+# 7x7..112x112 images, large enough batches to clear launch latency): block_w
+# 8/16/32 never won a shape, and this 3x3x3 grid matches the best of the full
+# 3x6x3 grid on every one. All three block_h values are needed -- dropping 32
+# costs up to 16% on a shape, dropping 8 up to 74%.
+DW_COL_BLOCK_W = (1, 2, 4)
+DW_COL_BLOCK_H = (8, 16, 32)
+# Windowed depthwise dgrad (direct_depthwise_dgrad_win, stride 1). Its row
+# loop is unrolled over a tile of block_h dX rows, so the tile is a knob while
+# the image height stays a kernarg. The cache carries the image of the tile
+# policy rather than a product: a tile that keeps a small feature map whole
+# (block_w == block_h, the 7..16-wide maps of the late CNN stages), and
+# narrower column tiles over row chunks for taller maps. block_waves covers
+# small channel counts (1) and the 256-channel block (4 waves of single
+# channels, 2 of channel pairs). Small filters (KW == 3) also get packed
+# channel pairs; wider ones pair their taps on fdot2 where the arch has it.
+DW_WIN_TILES = (
+    (7, 7),
+    (8, 8),
+    (12, 12),
+    (14, 14),
+    (16, 16),
+    (7, 14),
+    (8, 14),
+    (8, 16),
+    (7, 28),
+)
+DW_WIN_WAVES = (1, 4)
+DW_WIN_PAIR_WAVES = (2,)
+# Statically unrolled FMAs per lane the cache builds at most (the validator
+# allows more; past this the compile time grows without a matching win).
+DW_WIN_UNROLL_BUDGET = 1 << 14
+# Toeplitz MFMA form: "same"-padded filters, images folded 1/2/4 per tile,
+# 4- and 8-wave blocks, and row tiles that keep up to 16-row maps whole or
+# chunk taller ones.
+DW_WIN_MFMA_FILTERS = (5, 7, 9)
+DW_WIN_MFMA_FOLDS = (1, 2, 4)
+DW_WIN_MFMA_WAVES = (4, 8)
+DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
+# Taller row tiles for the wave32 WMMA form only (gfx1250): they keep 28- and
+# 32-row maps whole or chunk the large ones in fewer tiles. The gfx950 MFMA
+# grid stays at DW_WIN_MFMA_BLOCK_H.
+DW_WIN_WMMA_BLOCK_H = (28, 32)
+DW_WIN_MFMA_PREFETCH = 2
+# The forward pass on the same Toeplitz MFMA kernel (rotated filter,
+# direct_depthwise_win): "same"-padded square filters, stride 1.
+DW_WIN_FWD_FILTERS = (3, 5, 7, 9)
+# ... and its grouped form (cpg = kpg, the ResNeXt 3x3 layers).
+DW_WIN_FWD_G8_FILTERS = (3,)
+DW_WIN_FWD_GROUP_CH = (8, 16, 24, 32, 40, 48, 56, 64)
+# Toeplitz WMMA depthwise forward (direct_dw_fwd_wmma, stride 1, wave32):
+# "same"-padded 3x3..7x7 plus "valid" 7x7 (a 9x9's register-resident
+# fragments overflow the budget). Tiles from 1 row (small maps, many blocks)
+# to a whole 56/64-row map.
+DW_FWD_WMMA_CAPS = ((3, 1), (5, 2), (7, 3), (7, 0))
+DW_FWD_WMMA_FOLDS = (1, 2, 4)
+DW_FWD_WMMA_WAVES = (2, 4, 8, 16)
+DW_FWD_WMMA_BLOCK_H = (1, 2, 4, 7, 8, 12, 14, 16, 28, 32, 56, 64)
+DW_FWD_WMMA_PREFETCH = (2, 3, 4)
+# 4c dgrad (direct_grouped_dgrad_4c, cpg = kpg = 4): the 4x4x4 MFMA kernel on
+# the transposed problem with fused weights. The cache carries the image of
+# the 4c dispatch policy -- the (4, 16) tile with gathered weights, LDS-staged
+# weights (gfx950) and the row-staged form (gfx950) -- plus a small
+# neighbourhood of wider column and group tiles. The row-staged form takes one
+# q wave per 4 columns (waves_q = block_q / 4).
+DGRAD_4C_BLOCK_Q = (4, 8, 16)
+DGRAD_4C_BLOCK_GROUPS = (16, 32, 64)
+# (dgrad_weights_lds, stage_rows); the validator drops the LDS forms on
+# targets without transpose LDS reads.
+DGRAD_4C_FORMS = ((False, False), (True, False), (True, True))
+# Fused-weight generic dgrad (direct_grouped_dgrad_fused): the generic
+# forward row stream on the transposed problem reading the original weights
+# in its prologue (gathered, or LDS-staged transpose reads on gfx950). The
+# cache carries the image of the generic direct dgrad policy per capability
+# (see _dgrad_fused_policy_reason) rather than a product: 16-column strips
+# (32 on H-tiled images with wide channel groups), block_groups at or below
+# the policy's per-channel row (halved for 5x5/7x7), and the tile heights a
+# tiled or whole-image pick maps to -- a pick that streamed the whole image
+# takes the smallest tile at least as tall, and the row guard skips the MFMA
+# work of the rows past it.
+DGRAD_FUSED_FILTERS = (1, 3, 5, 7)
+DGRAD_FUSED_CHANNELS = (4, 8, 12, 16, 20, 24, 28, 32)
+DGRAD_FUSED_BLOCK_Q = (16, 32)
+DGRAD_FUSED_BLOCK_GROUPS = (1, 2, 4)
+DGRAD_FUSED_BLOCK_H = (4, 8, 16, 32)
+# Tile heights of 5x5 / 7x7 filters: the policy always tiles them by 4 rows
+# (8 covers a whole image of up to 8 rows).
+DGRAD_FUSED_BLOCK_H_LARGE = (4, 8)
+# Preloaded weight registers up to which the policy adds the waves_per_eu
+# hint (16-wide atoms only).
+DGRAD_FUSED_WPE = 4
+DGRAD_FUSED_WPE_MAX_VGPRS = 36
+# The policy's row-stream stack (square channel groups, 16-column strips,
+# waves_m = 2 not valid): the two-row prefetch with the LDS-only row barrier
+# and the XCD row-band order, plus (lds_pad, stage_out) -- the policy tries
+# (pad, staged), (pad, unstaged), (0, unstaged) and keeps the first that
+# does not add launch rounds, a shape-dependent choice, so all three are
+# cached. ``pad`` is DGRAD_FUSED_LDS_PAD when a staged input column is an
+# even number of 16-byte units, else 0. None is the spec without the stack.
+DGRAD_FUSED_PREFETCH_ROWS = 2
+# Tile heights the policy only reaches through whole-image picks (it tiles
+# with 4 and 8 rows): those entries also leave the workgroup once the image
+# is done (row_exit), so a short image skips the tile's dead rows.
+DGRAD_FUSED_EXIT_BLOCK_H = (16, 32)
+DGRAD_FUSED_LDS_PAD = 8
+DGRAD_FUSED_STREAM = (None, (0, False), (0, True), (8, False), (8, True))
+_DGRAD_FUSED_STREAM_KEYS = (
+    "prefetch_rows",
+    "lds_only_sync",
+    "xcd_tiles",
+    "lds_pad",
+    "stage_out",
+)
+# Grouped scalar-FMA dgrad.
+DGRAD_BLOCK_Q = (4, 8, 16, 32)
+# MFMA dgrad fprop pass: output rows per block, then
+# (waves_q, waves_k, runtime_k_loop, persistent_grid, fold_k32).
+DGRAD_BLOCK_H = (8, 16)
+DGRAD_WAVES = (
+    (1, 1, False, False, False),
+    (1, 4, False, False, False),
+    # A 2-way split of the 16-channel atoms: even atom counts 4 does not
+    # divide (kpg 96, 160, 224, ...) get a preloading config too.
+    (1, 2, False, False, False),
+    # runtime_k_loop: one K-atom at a time -> low VGPR use, more blocks/CU.
+    (1, 4, True, False, False),
+    (1, 2, False, False, True),
+    (1, 6, False, False, True),
+)
+
+
+def dgrad_waves(dtype: str) -> Tuple[Tuple[int, int, bool, bool, bool], ...]:
+    """The MFMA dgrad fprop-pass waves grid for problem dtype ``dtype``.
+
+    fp16/bf16 get :data:`DGRAD_WAVES` as is. fp32-storage problems (fp32 and
+    tf32) also get the K-32 fold of every unfolded entry: gfx950's emulated
+    TF32 atom is K-32 wide, so an unfolded (16-channel) atom is zero-padded to
+    it, and :func:`tf32_narrow_reason` keeps the padded one only where the
+    fold cannot run the shape.
+    """
+    if direct_storage_dtype(dtype) != "fp32":
+        return DGRAD_WAVES
+    out = list(DGRAD_WAVES)
+    for wq, wk, rk, pg, k32 in DGRAD_WAVES:
+        if not k32 and (wq, wk, rk, pg, True) not in out:
+            out.append((wq, wk, rk, pg, True))
+    return tuple(out)
+
+
+# Direct wgrad (DirectConvWgradSpec): (waves_k, waves_c, waves_q). The JIT
+# sweep tries waves_c in {1, 2, ceil(cpg/16)}; with runtime channels the cache
+# cannot know cpg, so it carries the ceil(cpg/16) values of the common channel
+# counts and plan_for drops the ones wider than a problem's channel tiles.
+WGRAD_WAVES_FIXED = (
+    (1, 1, 1),
+    (2, 1, 1),
+    (4, 1, 1),
+    (6, 1, 1),
+    (8, 1, 1),
+    (2, 1, 2),
+    (4, 1, 2),
+    (1, 2, 1),
+    (2, 2, 1),
+    (4, 2, 1),
+)
+WGRAD_WAVES_C_WIDE = (3, 4, 6, 8, 12, 16)
+WGRAD_WAVES_K_WIDE = (1, 2, 4)
+WGRAD_HPB = (30, 60, 120)
+# Stem dgrad (direct_dgrad_patch_wmma / direct_dgrad_smallc_wmma): the patch
+# sizes of the patch embeddings the cache serves.
+DGRAD_PATCH_SIZES = (4, 14, 16)
+# (filter, pad, stride, C) of the overlapping stems the cache serves.
+DGRAD_SMALLC_STEMS = ((3, 1, 1, 4), (3, 1, 2, 3), (7, 3, 2, 3))
+# dgrad_patch_wmma: (waves_c, waves_p, tiles_c, tiles_p, tile_w, r_blk, ck,
+# prefetch). Each tuple fits one block_c = r_blk*P*C (validated per patch
+# size; the rest drop out): the best few per patch size of a tuning sweep.
+DGRAD_PATCH_KNOBS = (
+    (1, 2, 3, 4, 32, 4, 32, True),
+    (1, 2, 3, 4, 32, 4, 64, True),
+    (1, 4, 3, 2, 32, 4, 64, True),
+    (2, 1, 3, 8, 16, 2, 64, True),
+    (2, 2, 3, 8, 16, 2, 64, True),
+    (2, 4, 3, 4, 16, 2, 64, True),
+    (3, 1, 1, 8, 16, 4, 32, True),
+    (3, 1, 1, 8, 32, 4, 32, False),
+    (3, 1, 1, 8, 32, 4, 32, True),
+    (3, 4, 1, 2, 16, 4, 64, True),
+    (4, 2, 5, 4, 32, 7, 32, False),
+    (4, 2, 6, 4, 8, 8, 32, False),
+    (4, 2, 6, 4, 16, 8, 32, False),
+    (4, 4, 6, 4, 16, 8, 32, False),
+    (8, 2, 5, 4, 32, 14, 32, False),
+    (8, 2, 5, 4, 32, 14, 32, True),
+)
+# dgrad_smallc_wmma: (waves_c, waves_p, tiles_c, tiles_p, out_h, out_w, ck,
+# prefetch); the best few per stem of a tuning sweep.
+DGRAD_SMALLC_KNOBS = (
+    (1, 3, 3, 8, 8, 32, 64, True),
+    (1, 4, 3, 6, 8, 32, 64, True),
+    (1, 5, 3, 5, 8, 32, 64, True),
+    (1, 7, 3, 3, 16, 16, 64, True),
+    (2, 4, 1, 5, 32, 32, 32, False),
+    (2, 4, 1, 5, 32, 32, 32, True),
+    (2, 4, 5, 6, 32, 32, 32, True),
+    (2, 4, 5, 6, 32, 32, 64, True),
+    (2, 6, 1, 6, 32, 64, 32, True),
+    (2, 6, 5, 4, 32, 32, 64, True),
+    (3, 3, 1, 8, 16, 16, 64, True),
+    (3, 5, 1, 5, 8, 32, 64, True),
+)
+# Wave32 WMMA direct dgrad (direct_dgrad_wmma): (waves_c, waves_p, tiles_c,
+# tiles_p, tile_w, tile_n, ck, stages, prefetch), prefetch builds with the
+# iterative-ilp scheduler. The union of the five best configurations per
+# shape of a tuning sweep over the dense and grouped (cpg >= 8) stride-1 3x3
+# dgrad layers of the reference workloads; each binary serves any extent and
+# channel count, and the per-problem tile-efficiency check
+# (direct_spec_for_problem) drops the ones a shape would mostly pad.
+DGRAD_WMMA_KNOBS = (
+    (1, 2, 1, 4, 8, 1, 32, 3, True),
+    (1, 2, 1, 4, 16, 1, 32, 3, True),
+    (1, 2, 1, 4, 32, 1, 32, 3, True),
+    (1, 2, 4, 4, 8, 1, 64, 3, True),
+    (1, 2, 4, 4, 16, 1, 64, 2, True),
+    (1, 2, 4, 4, 16, 1, 64, 3, True),
+    (1, 4, 1, 4, 16, 1, 32, 2, True),
+    (1, 4, 1, 4, 16, 2, 32, 3, True),
+    (1, 4, 1, 4, 32, 1, 32, 3, True),
+    (1, 4, 1, 8, 16, 2, 32, 2, False),
+    (1, 4, 1, 8, 16, 2, 32, 2, True),
+    (1, 4, 2, 4, 16, 1, 32, 2, False),
+    (1, 4, 2, 8, 16, 2, 32, 2, False),
+    (1, 4, 2, 8, 16, 2, 32, 2, True),
+    (1, 4, 4, 4, 16, 1, 32, 2, True),
+    (1, 4, 4, 4, 16, 1, 64, 2, True),
+    (1, 4, 4, 4, 16, 2, 64, 2, True),
+    (1, 4, 4, 4, 32, 1, 32, 2, True),
+    (1, 4, 4, 4, 32, 2, 32, 2, True),
+    (1, 4, 4, 6, 16, 1, 32, 2, False),
+    (1, 4, 4, 6, 16, 1, 32, 2, True),
+    (1, 4, 4, 6, 16, 1, 64, 2, True),
+    (1, 4, 4, 6, 16, 2, 32, 2, True),
+    (1, 4, 4, 6, 16, 2, 64, 2, True),
+    (1, 4, 4, 6, 32, 1, 32, 2, False),
+    (1, 4, 4, 6, 32, 1, 32, 2, True),
+    (1, 4, 4, 6, 32, 1, 64, 2, True),
+    (1, 4, 4, 6, 32, 2, 64, 2, True),
+    (1, 4, 8, 4, 16, 1, 32, 2, True),
+    (1, 4, 8, 4, 32, 1, 32, 2, True),
+    (1, 4, 8, 4, 64, 1, 32, 2, True),
+    (1, 8, 1, 2, 8, 4, 32, 2, False),
+    (1, 8, 1, 2, 8, 4, 32, 2, True),
+    (1, 8, 1, 2, 8, 4, 32, 3, False),
+    (1, 8, 1, 2, 8, 4, 32, 3, True),
+    (1, 8, 1, 4, 16, 2, 32, 2, False),
+    (1, 8, 1, 4, 16, 2, 32, 2, True),
+    (1, 8, 2, 4, 16, 2, 32, 2, False),
+    (1, 8, 2, 4, 16, 2, 32, 2, True),
+    (2, 2, 2, 4, 16, 1, 64, 2, True),
+    (2, 2, 2, 4, 16, 1, 64, 3, True),
+    (2, 2, 4, 4, 8, 2, 32, 3, True),
+    (2, 2, 4, 4, 16, 1, 32, 3, True),
+    (2, 2, 4, 6, 16, 1, 32, 2, True),
+    (2, 2, 4, 6, 16, 1, 32, 3, True),
+    (2, 2, 4, 6, 32, 1, 32, 2, True),
+    (2, 2, 4, 8, 32, 1, 32, 2, True),
+    (2, 2, 4, 8, 64, 1, 32, 2, True),
+    (2, 4, 2, 4, 16, 1, 64, 2, True),
+    (2, 4, 2, 4, 16, 2, 64, 2, True),
+    (2, 4, 2, 8, 32, 1, 32, 2, True),
+    (2, 4, 4, 6, 4, 4, 32, 2, True),
+    (2, 4, 4, 6, 8, 2, 32, 2, False),
+    (2, 4, 4, 6, 8, 2, 32, 2, True),
+    (2, 4, 4, 6, 8, 4, 32, 2, True),
+    (2, 4, 4, 6, 16, 1, 32, 2, True),
+    (2, 4, 4, 6, 64, 1, 32, 2, True),
+    (2, 4, 4, 8, 16, 1, 32, 2, True),
+    (2, 4, 4, 8, 16, 2, 32, 2, True),
+    (2, 4, 4, 8, 16, 4, 32, 2, True),
+    (2, 4, 4, 8, 32, 1, 32, 2, True),
+    (2, 4, 4, 8, 32, 2, 32, 2, True),
+    (2, 4, 4, 8, 32, 4, 32, 2, True),
+    (2, 4, 4, 8, 64, 1, 32, 2, True),
+    (2, 4, 6, 4, 16, 1, 32, 2, True),
+    (2, 4, 6, 4, 16, 2, 32, 2, True),
+    (2, 4, 6, 4, 32, 1, 32, 2, True),
+    (4, 2, 2, 8, 16, 1, 32, 2, True),
+    (4, 2, 2, 8, 16, 1, 32, 3, False),
+    (4, 2, 2, 8, 16, 1, 32, 3, True),
+    (4, 2, 2, 8, 32, 1, 32, 2, True),
+)
+
+# Split-barrier configurations of direct_dgrad_wmma: (waves_c, waves_p,
+# tiles_c, tiles_p, tile_w, tile_n, ck, stages, prefetch, wave_epilogue), all
+# with split_barrier=True; prefetch builds with the iterative-ilp scheduler.
+# The best configurations per shape of a tuning sweep over the dense stride-1
+# 3x3 dgrad layers, including tiles whose width is not a power of two (24, 28,
+# 40, 56: whole rows of the 24/28/40/56-wide maps, no padded columns).
+DGRAD_WMMA_SB_KNOBS = (
+    (1, 2, 1, 4, 16, 1, 32, 3, True, True),
+    (1, 4, 3, 7, 16, 2, 32, 2, True, True),
+    (1, 4, 3, 7, 32, 1, 32, 2, True, False),
+    (1, 4, 4, 4, 16, 1, 64, 2, True, False),
+    (1, 4, 4, 4, 16, 1, 64, 2, True, True),
+    (1, 4, 4, 6, 16, 1, 32, 2, True, False),
+    (1, 4, 4, 6, 16, 1, 32, 2, True, True),
+    (1, 4, 4, 6, 16, 2, 32, 2, True, True),
+    (1, 4, 4, 6, 32, 1, 32, 2, True, False),
+    (1, 4, 4, 6, 32, 1, 32, 2, True, True),
+    (1, 4, 8, 4, 16, 1, 32, 2, True, True),
+    (1, 5, 4, 5, 40, 1, 32, 2, True, True),
+    (1, 7, 3, 7, 16, 1, 32, 2, True, True),
+    (1, 7, 4, 7, 14, 1, 32, 2, True, True),
+    (1, 7, 4, 7, 28, 1, 32, 2, True, False),
+    (1, 7, 4, 7, 28, 1, 32, 2, True, True),
+    (1, 7, 4, 10, 56, 1, 32, 2, False, False),
+    (1, 8, 3, 9, 32, 2, 32, 2, True, False),
+    (1, 8, 4, 6, 24, 4, 32, 2, True, False),
+    (1, 8, 4, 6, 24, 4, 32, 2, True, True),
+    (1, 8, 4, 6, 32, 1, 32, 2, True, True),
+    (1, 8, 4, 8, 16, 1, 32, 2, True, True),
+    (1, 8, 4, 8, 32, 1, 32, 2, True, True),
+    (1, 8, 4, 8, 64, 1, 32, 2, True, True),
+    (1, 8, 4, 9, 24, 1, 32, 2, False, True),
+    (1, 8, 8, 5, 16, 1, 32, 2, False, False),
+    (1, 8, 8, 5, 16, 1, 32, 2, False, True),
+    (1, 8, 8, 5, 64, 1, 32, 2, False, False),
+    (2, 2, 2, 4, 16, 1, 64, 3, True, False),
+    (2, 2, 4, 4, 8, 2, 32, 3, True, False),
+    (2, 2, 4, 4, 8, 2, 32, 3, True, True),
+    (2, 2, 4, 6, 16, 1, 32, 2, True, False),
+    (2, 2, 4, 6, 16, 1, 32, 2, True, True),
+    (2, 2, 4, 8, 16, 1, 32, 2, True, False),
+    (2, 2, 4, 8, 16, 1, 32, 2, True, True),
+    (2, 2, 4, 8, 32, 1, 32, 2, True, True),
+    (2, 4, 4, 8, 16, 1, 32, 2, True, False),
+    (2, 4, 4, 8, 16, 1, 32, 2, True, True),
+    (2, 4, 4, 8, 32, 1, 32, 2, True, True),
+    (2, 4, 4, 10, 16, 1, 32, 2, False, True),
+    (2, 4, 4, 10, 64, 1, 32, 2, False, False),
+    (2, 4, 6, 4, 16, 1, 32, 2, True, False),
+    (2, 4, 6, 4, 16, 1, 32, 2, True, True),
+)
+# Grouped layers with fewer than 8 channels per group (or 16): direct_dgrad_wmma
+# packs 32 // cpg groups into one block-diagonal super-group, one dY chunk.
+DGRAD_WMMA_PACKED_CHANNELS = (4, 8, 16)
+DGRAD_WMMA_PACKED_KNOBS = (
+    (1, 4, 2, 8, 16, 2, 32, 2, True),
+    (1, 4, 2, 8, 32, 2, 32, 2, True),
+    (1, 8, 2, 4, 16, 2, 32, 2, True),
+    (1, 8, 2, 4, 16, 4, 32, 2, True),
+    (1, 8, 2, 4, 32, 2, 32, 2, True),
+    (2, 4, 1, 8, 16, 2, 32, 2, True),
+)
+# Small groups at stride 2 (ResNeXt / RegNet downsampling 3x3 at 8 or 16
+# channels per group): the packed super-group of DGRAD_WMMA_PACKED_KNOBS under
+# the stride-2 phase decomposition, so every block holds 4 x tiles_c x tiles_p
+# accumulators: fewer pixel tiles per wave than the stride-1 packed rows.
+DGRAD_WMMA_PACKED_STRIDED_KNOBS = (
+    (1, 4, 2, 2, 16, 1, 32, 2, False),
+    (1, 4, 2, 4, 8, 1, 32, 2, False),
+    (1, 4, 2, 4, 16, 1, 32, 2, False),
+    (1, 4, 2, 4, 16, 2, 32, 2, False),
+    (1, 4, 2, 4, 16, 1, 32, 2, True),
+    (1, 8, 2, 2, 16, 1, 32, 2, False),
+    (1, 8, 2, 4, 8, 1, 32, 2, False),
+    (1, 8, 2, 4, 16, 1, 32, 2, False),
+    (2, 4, 1, 4, 16, 1, 32, 2, False),
+    (2, 4, 1, 4, 16, 2, 32, 2, False),
+    (1, 2, 2, 4, 16, 1, 32, 2, False),
+    (1, 4, 2, 3, 16, 1, 32, 2, False),
+)
+# Stride 2 (phase decomposition: every block computes all four output phases
+# from one dY halo, so it holds 4 x tiles_c x tiles_p accumulators).
+DGRAD_WMMA_STRIDED_KNOBS = (
+    (1, 4, 2, 4, 8, 1, 32, 2, False),
+    (1, 4, 2, 4, 16, 1, 32, 2, False),
+    (1, 4, 2, 4, 16, 1, 32, 2, True),
+    (1, 4, 2, 4, 16, 2, 32, 2, False),
+    (1, 4, 4, 3, 8, 1, 32, 2, False),
+    (1, 4, 4, 3, 16, 1, 32, 2, False),
+    (2, 4, 2, 4, 4, 2, 64, 2, True),
+    (2, 4, 2, 4, 8, 1, 64, 2, True),
+    (2, 4, 2, 4, 8, 2, 64, 2, True),
+    (2, 4, 2, 4, 16, 1, 64, 2, True),
+    (2, 4, 2, 4, 16, 2, 64, 2, True),
+    (1, 8, 3, 4, 16, 1, 64, 2, False),
+    (2, 2, 2, 6, 8, 2, 64, 2, False),
+    (2, 2, 2, 6, 16, 1, 32, 2, False),
+    (2, 2, 2, 6, 16, 2, 32, 2, False),
+    (2, 2, 2, 6, 16, 2, 64, 2, False),
+    (2, 4, 2, 6, 16, 2, 64, 2, False),
+    (4, 2, 2, 6, 16, 1, 32, 2, False),
+)
+# 2x2 stride 2 (patch merge): every phase is a 1x1, all four share one B
+# fragment, so wider channel blocks pay off.
+DGRAD_WMMA_PATCH2_KNOBS = (
+    (1, 4, 2, 2, 8, 2, 64, 2, False),
+    (2, 4, 2, 2, 8, 2, 64, 2, False),
+    (2, 4, 2, 4, 8, 2, 64, 2, True),
+    (2, 4, 2, 4, 16, 1, 64, 2, False),
+    (2, 4, 2, 4, 16, 1, 64, 2, True),
+    (4, 2, 2, 2, 8, 1, 64, 2, False),
+)
+# Dilated 3x3 rows the cache carries: (PAD, dil_h, dil_w). The symmetric
+# "same" layers of the reference workloads: DeepLabv3 ASPP / dilated ResNet
+# backbones (2, 4) and SSD300 fc6 (6). Dilation 12 and up does not fit the
+# dY halo in LDS with these tiles.
+DGRAD_WMMA_DILATIONS = ((2, 2, 2), (4, 4, 4), (6, 6, 6))
+DGRAD_WMMA_DILATED_KNOBS = (
+    (1, 4, 4, 4, 16, 1, 32, 2, True),
+    (1, 4, 4, 4, 16, 1, 64, 2, True),
+    (1, 4, 4, 4, 32, 1, 32, 2, True),
+    (1, 4, 4, 4, 32, 2, 32, 2, True),
+    (2, 4, 4, 6, 64, 1, 32, 2, True),
+    (2, 4, 4, 8, 16, 1, 32, 2, True),
+    (2, 4, 4, 8, 32, 1, 32, 2, True),
+    (2, 4, 4, 8, 64, 1, 32, 2, True),
+)
+WGRAD_MFMA_K = (32,)
+# Wave32 WMMA direct forward (direct_fwd_wmma): (waves_k, waves_p, tiles_k,
+# tiles_p, tile_w, tile_n, ck, stages, prefetch, split_barrier,
+# wave_epilogue, phase_split, row_ring); prefetch builds with the
+# iterative-ilp scheduler. Each table is the union of the best configurations
+# per shape of a tuning sweep over the reference forward layers of its
+# capability cell; every binary serves any extent and channel count, and the
+# per-problem tile-efficiency check (direct_spec_for_problem) drops the ones a
+# shape would mostly pad.
+FWD_WMMA_PACKED_CHANNELS = (4, 8, 16)
+# Dilated 3x3 rows the cache carries: (PAD, stride, dil_h, dil_w).
+FWD_WMMA_DILATIONS = ((2, 1, 1, 2), (4, 1, 1, 4), (1, 1, 3, 1), (1, 2, 3, 1))
+FWD_WMMA_KNOBS = (
+    (1, 2, 1, 4, 16, 1, 32, 3, True, False, False, False, False),
+    (1, 2, 1, 4, 16, 1, 32, 3, True, True, True, False, False),
+    (1, 2, 1, 4, 32, 1, 32, 3, True, False, False, False, False),
+    (1, 4, 1, 4, 16, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 1, 4, 32, 1, 32, 3, True, False, False, False, False),
+    (1, 4, 2, 4, 16, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 4, 4, 16, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 4, 4, 16, 1, 64, 2, True, True, False, False, False),
+    (1, 4, 4, 4, 16, 1, 64, 2, True, True, True, False, False),
+    (1, 4, 4, 4, 32, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 4, 4, 32, 2, 32, 2, True, False, False, False, False),
+    (1, 4, 4, 6, 16, 1, 32, 2, True, True, False, False, False),
+    (1, 4, 4, 6, 16, 1, 32, 2, True, True, True, False, False),
+    (1, 4, 4, 6, 16, 2, 32, 2, True, True, True, False, False),
+    (1, 4, 4, 6, 32, 1, 32, 2, True, True, False, False, False),
+    (1, 4, 4, 6, 32, 1, 32, 2, True, True, True, False, False),
+    (1, 5, 4, 5, 40, 1, 32, 2, True, True, True, False, False),
+    (1, 8, 4, 6, 24, 4, 32, 2, True, True, True, False, False),
+    (1, 8, 4, 6, 32, 1, 32, 2, True, True, True, False, False),
+    (1, 8, 4, 8, 16, 1, 32, 2, True, True, True, False, False),
+    (1, 8, 4, 8, 32, 1, 32, 2, True, True, True, False, False),
+    (1, 8, 4, 8, 64, 1, 32, 2, True, True, True, False, False),
+    (1, 8, 4, 9, 24, 1, 32, 2, False, True, True, False, False),
+    (1, 8, 6, 8, 32, 1, 32, 3, False, False, False, False, True),
+    (1, 8, 8, 6, 32, 1, 32, 2, False, False, False, False, True),
+    (1, 8, 8, 6, 32, 1, 32, 3, False, False, False, False, True),
+    (2, 2, 2, 4, 16, 1, 64, 2, True, False, False, False, False),
+    (2, 2, 2, 4, 16, 1, 64, 3, True, False, False, False, False),
+    (2, 2, 2, 4, 16, 1, 64, 3, True, True, False, False, False),
+    (2, 4, 2, 6, 16, 2, 64, 2, False, False, False, False, False),
+    (2, 4, 2, 8, 32, 1, 32, 2, True, False, False, False, False),
+    (2, 4, 4, 6, 16, 1, 32, 2, True, False, False, False, False),
+    (2, 4, 4, 8, 16, 1, 64, 2, True, False, False, False, True),
+    (2, 4, 4, 8, 32, 1, 64, 2, True, False, False, False, True),
+    (2, 4, 4, 10, 16, 1, 32, 2, False, True, True, False, False),
+    (2, 4, 6, 8, 16, 1, 32, 2, False, False, False, False, True),
+    (2, 4, 8, 6, 16, 1, 32, 2, False, False, False, False, True),
+)
+# Ping-pong (two wave ranks a barrier apart) on the dense stride-1 grid:
+# (waves_k, waves_p, tiles_k, tiles_p, tile_w, tile_n, ck, pp_group, sched).
+# Measured winners on gfx1250: the 240-block SDXL 40x40 layer (c#122) and the
+# deep-C 48x48 layer (c#129), plus the 64x64 / 384x384 SD and Flux layers.
+FWD_WMMA_PP_KNOBS = (
+    (2, 4, 4, 10, 16, 1, 32, 1, None),
+    (2, 4, 4, 10, 16, 1, 32, 1, "iterative-ilp"),
+    (2, 4, 4, 6, 16, 1, 32, 3, "iterative-ilp"),
+    (2, 4, 4, 6, 16, 1, 32, 1, None),
+    (1, 8, 4, 6, 32, 1, 32, 3, "iterative-ilp"),
+    (1, 8, 4, 6, 32, 1, 32, 2, "iterative-ilp"),
+    (1, 8, 4, 8, 16, 1, 32, 2, "iterative-ilp"),
+    (1, 8, 2, 8, 32, 1, 32, 3, None),
+)
+FWD_WMMA_PACKED_KNOBS = (
+    (1, 2, 2, 2, 16, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 2, 2, 32, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 2, 4, 32, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 2, 6, 16, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 2, 6, 32, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 2, 8, 16, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 2, 8, 16, 2, 32, 2, True, False, False, False, False),
+    (1, 4, 2, 8, 32, 2, 32, 2, True, False, False, False, False),
+    (1, 8, 2, 2, 16, 1, 32, 2, True, False, False, False, False),
+    (1, 8, 2, 4, 16, 2, 32, 2, True, False, False, False, False),
+    (1, 8, 2, 4, 16, 4, 32, 2, True, False, False, False, False),
+    (1, 8, 2, 4, 32, 2, 32, 2, True, False, False, False, False),
+    (1, 8, 2, 8, 16, 4, 32, 2, True, False, False, False, False),
+    (2, 2, 1, 4, 32, 1, 32, 2, True, False, False, False, False),
+    (2, 4, 1, 2, 8, 1, 32, 2, True, False, False, False, False),
+)
+FWD_WMMA_PACKED_STRIDED_KNOBS = (
+    (1, 8, 2, 1, 32, 1, 32, 2, True, False, False, True, False),
+    (1, 8, 2, 1, 32, 2, 32, 2, True, False, False, True, False),
+    (1, 8, 2, 2, 16, 1, 32, 2, True, False, False, False, False),
+    (1, 8, 2, 2, 16, 1, 32, 2, True, False, False, True, False),
+    (2, 4, 1, 2, 32, 2, 32, 2, True, False, False, True, False),
+    (2, 4, 1, 4, 16, 1, 32, 2, True, False, False, True, False),
+)
+# direct_fwd_gstream_wmma (small groups, row-band walk): channels per group
+# baked (cpg == kpg) and its knob rows (waves_k, waves_p, tiles_k, tiles_p,
+# tile_w, walk, stages, phase_split, pf_depth). phase_split rows build at
+# stride 2 only; tile_w 8 with short walks serves the 7x7 / 8x8 maps. Blocks
+# of 128 output channels read 256-byte runs of each NHWC pixel (wide layers).
+FWD_GSTREAM_CHANNELS = (8, 16, 32, 64)
+FWD_GSTREAM_KNOBS = (
+    (1, 2, 2, 2, 8, 2, 2, False, 1),
+    (1, 2, 2, 2, 16, 4, 2, True, 1),
+    (2, 1, 2, 4, 16, 4, 2, False, 1),
+    (2, 1, 2, 4, 16, 4, 2, True, 1),
+    (2, 2, 2, 1, 16, 8, 2, False, 2),
+    (2, 2, 2, 1, 16, 8, 2, True, 2),
+    (2, 2, 2, 2, 8, 1, 2, False, 1),
+    (2, 2, 2, 2, 8, 2, 2, False, 1),
+    (2, 2, 2, 2, 8, 4, 2, False, 1),
+    (2, 2, 2, 2, 8, 4, 2, True, 1),
+    (2, 2, 2, 2, 16, 4, 2, False, 1),
+    (2, 2, 2, 2, 16, 4, 2, True, 1),
+    (2, 2, 2, 2, 16, 4, 2, True, 2),
+    (2, 2, 2, 2, 16, 8, 2, False, 2),
+    (2, 2, 2, 2, 16, 12, 2, True, 1),
+    (2, 2, 2, 2, 32, 4, 2, False, 1),
+    (2, 2, 4, 1, 8, 1, 2, False, 1),
+    (2, 2, 4, 1, 8, 2, 2, False, 1),
+    (2, 2, 4, 1, 8, 4, 2, False, 1),
+    (2, 2, 4, 1, 16, 4, 2, False, 1),
+    (2, 2, 4, 1, 16, 12, 2, False, 1),
+    (2, 2, 4, 1, 16, 12, 2, True, 1),
+    (2, 2, 4, 1, 16, 24, 2, True, 1),
+    (2, 2, 4, 1, 32, 12, 2, False, 1),
+    (4, 1, 2, 2, 16, 12, 2, True, 1),
+    (4, 1, 2, 4, 16, 4, 2, False, 1),
+    (4, 2, 2, 1, 8, 2, 2, False, 1),
+    (4, 2, 2, 1, 16, 12, 2, False, 1),
+    (4, 2, 2, 2, 16, 4, 2, False, 1),
+    (4, 2, 2, 2, 16, 12, 2, True, 1),
+)
+# Groups whose channels are not whole 32-channel k-steps / 16-row M tiles
+# (RegNet's 56): the last k-step and M tile are padded with zero weights, and
+# the padding output rows are not stored. Their own rows (all-K-wave blocks of
+# two groups hold the weights of one tile column in VGPRs).
+FWD_GSTREAM_PADG_CHANNELS = (56,)
+FWD_GSTREAM_PADG_KNOBS = (
+    (4, 1, 2, 4, 16, 4, 2, False, 1),
+    (4, 1, 2, 4, 16, 4, 2, True, 1),
+    (4, 1, 2, 4, 32, 4, 2, True, 1),
+    (8, 1, 2, 4, 16, 4, 2, False, 1),
+    (8, 1, 2, 4, 16, 4, 2, True, 1),
+    (8, 1, 2, 4, 32, 4, 2, False, 1),
+    (8, 1, 2, 4, 32, 4, 2, True, 1),
+    (8, 1, 2, 4, 32, 8, 2, True, 1),
+)
+FWD_WMMA_STRIDED_KNOBS = (
+    (1, 4, 2, 2, 16, 1, 64, 2, True, False, False, True, False),
+    (1, 4, 2, 2, 32, 1, 64, 2, True, False, False, True, False),
+    (1, 4, 6, 2, 8, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 6, 2, 16, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 6, 2, 16, 1, 32, 2, True, False, False, True, False),
+    (1, 8, 2, 1, 16, 1, 64, 2, True, False, False, True, False),
+    (1, 8, 2, 1, 32, 1, 64, 2, True, False, False, True, False),
+    (1, 8, 6, 2, 16, 1, 32, 2, True, False, False, True, False),
+    (1, 8, 6, 2, 32, 1, 32, 2, True, False, False, True, False),
+    (2, 2, 1, 4, 16, 1, 64, 2, True, False, False, True, False),
+    (2, 2, 1, 4, 32, 1, 64, 2, True, False, False, True, False),
+    (2, 2, 2, 2, 8, 1, 64, 2, True, False, False, True, False),
+    (2, 2, 2, 2, 16, 1, 64, 2, True, False, False, True, False),
+    (2, 2, 2, 4, 16, 1, 32, 2, True, False, False, True, False),
+    (2, 4, 1, 2, 16, 1, 64, 2, True, False, False, True, False),
+    (2, 4, 2, 2, 8, 1, 32, 2, True, False, False, False, False),
+    # Phase-split halo with weights streamed per filter row (row_ring): the
+    # smaller weight slots leave room for 128-channel blocks and three
+    # stages. 256-pixel blocks fill whole waves of 256 on 32x32 outputs; the
+    # 40-wide tiles fit the 40x40 outputs of 80x80 layers exactly.
+    (1, 8, 8, 2, 32, 1, 32, 3, False, False, False, True, True),
+    (1, 8, 8, 2, 32, 1, 32, 3, True, False, False, True, True),
+    (2, 4, 4, 2, 16, 1, 32, 3, False, False, False, True, True),
+    (2, 4, 4, 4, 16, 1, 32, 3, False, False, False, True, True),
+    (2, 4, 4, 4, 32, 1, 32, 3, False, False, False, True, True),
+    (2, 5, 4, 2, 40, 1, 32, 3, False, False, False, True, True),
+    (2, 5, 4, 4, 40, 1, 32, 3, False, False, False, True, True),
+    (2, 4, 4, 4, 16, 1, 32, 3, True, False, False, True, True),
+    (2, 4, 4, 4, 32, 1, 32, 3, True, False, False, True, True),
+    (2, 5, 4, 4, 40, 1, 32, 3, True, False, False, True, True),
+    # Four images of 8x8 outputs per block (no phase split): the 16x16 and
+    # 14x14 stride-2 inputs of the deep ResNet stages fill 256-pixel blocks.
+    (2, 4, 4, 4, 8, 4, 32, 3, False, False, False, False, True),
+    (2, 4, 4, 4, 8, 4, 32, 3, True, False, False, False, True),
+    (1, 8, 8, 2, 8, 4, 32, 3, False, False, False, False, True),
+)
+FWD_WMMA_PATCH2_KNOBS = (
+    (1, 2, 1, 4, 16, 1, 32, 3, True, True, True, False, False),
+    (1, 4, 2, 2, 16, 1, 64, 2, True, False, False, True, False),
+    (1, 4, 8, 4, 16, 1, 32, 2, True, False, False, False, False),
+    (1, 8, 2, 1, 16, 1, 64, 2, True, False, False, True, False),
+    (2, 4, 4, 6, 8, 2, 32, 2, True, False, False, False, False),
+    (2, 4, 6, 4, 16, 2, 32, 2, True, False, False, False, False),
+)
+FWD_WMMA_DILATED_KNOBS = (
+    (1, 2, 1, 1, 16, 1, 64, 2, True, False, False, False, False),
+    (1, 2, 1, 4, 16, 1, 64, 2, True, False, False, False, False),
+    (1, 2, 1, 4, 32, 1, 32, 3, True, False, False, False, False),
+    (1, 2, 4, 2, 8, 1, 64, 2, True, False, False, False, False),
+    (1, 2, 4, 4, 16, 1, 64, 2, True, False, False, False, False),
+    (1, 4, 1, 4, 16, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 1, 4, 32, 1, 32, 3, True, False, False, False, False),
+    (1, 4, 2, 2, 16, 1, 64, 2, True, False, False, False, False),
+    (1, 4, 2, 2, 32, 1, 64, 2, True, False, False, False, False),
+    (1, 4, 2, 4, 16, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 2, 6, 16, 1, 64, 2, True, False, False, False, False),
+    (1, 4, 2, 6, 32, 1, 64, 2, True, False, False, False, False),
+    (1, 4, 2, 6, 32, 2, 64, 2, True, False, False, False, False),
+    (1, 4, 4, 4, 16, 1, 64, 2, True, False, False, False, False),
+    (1, 4, 4, 4, 16, 1, 64, 2, True, True, False, False, False),
+    (1, 4, 4, 4, 16, 1, 64, 2, True, True, True, False, False),
+    (1, 4, 4, 4, 32, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 4, 6, 16, 1, 32, 2, True, True, True, False, False),
+    (1, 4, 4, 6, 32, 1, 32, 2, True, True, False, False, False),
+    (1, 4, 4, 6, 32, 1, 32, 2, True, True, True, False, False),
+    (1, 7, 4, 7, 14, 1, 32, 2, True, True, True, False, False),
+    (1, 7, 4, 7, 28, 1, 32, 2, True, True, True, False, False),
+    (1, 8, 4, 6, 32, 1, 32, 2, True, True, True, False, False),
+    (1, 8, 4, 8, 64, 1, 32, 2, True, True, True, False, False),
+    (2, 1, 1, 1, 8, 1, 64, 2, True, False, False, False, False),
+    (2, 2, 1, 1, 16, 1, 64, 2, True, False, False, False, False),
+    (2, 2, 2, 2, 8, 1, 64, 2, True, False, False, False, False),
+    (2, 2, 4, 8, 16, 1, 32, 2, True, True, False, False, False),
+    (2, 2, 4, 8, 16, 1, 32, 2, True, True, True, False, False),
+    (2, 4, 1, 2, 16, 4, 64, 2, True, False, False, False, False),
+    (2, 4, 2, 8, 32, 1, 32, 2, True, False, False, False, False),
+)
+FWD_WMMA_DILATED_STRIDED_KNOBS = (
+    (1, 2, 2, 1, 8, 1, 32, 2, True, False, False, False, False),
+    (1, 4, 2, 1, 8, 2, 64, 2, True, False, False, False, False),
+    (1, 4, 2, 2, 32, 2, 32, 2, True, False, False, False, False),
+    (1, 4, 4, 1, 8, 2, 64, 2, True, False, False, False, False),
+    (2, 1, 1, 4, 16, 1, 64, 2, True, False, False, False, False),
+    (4, 1, 1, 4, 16, 2, 32, 2, True, False, False, False, False),
+)
+# 3x3 stride 2 "valid" (PAD 0; the Inception-v3 reduction layers 35x35 ->
+# 17x17 and 17x17 -> 8x8): tiles that fit the odd output maps. Two images of
+# 4x20 (17x17 maps: 72% of the padded grid real, against 38% for the 16- and
+# 32-wide tiles) or 8x8 per block, 128 K.
+FWD_WMMA_S2V_KNOBS = (
+    (2, 2, 2, 4, 8, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 2, 5, 20, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 4, 4, 8, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 4, 5, 20, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 4, 6, 24, 2, 32, 2, True, False, False, False, False),
+    (4, 2, 2, 5, 20, 2, 32, 2, True, False, False, True, False),
+)
+# 7x1 / 1x7 "same" (the Inception-v3 17x17 factorized layers): two images of
+# 4x20 per block, as for the 17x17 stride-2 maps; 3x1 / 1x3 "same" (its 8x8
+# blocks).
+FWD_WMMA_RECT_LAYERS = ((7, 1, 3, 0), (1, 7, 0, 3), (3, 1, 1, 0), (1, 3, 0, 1))
+FWD_WMMA_RECT_KNOBS = (
+    (1, 4, 4, 5, 20, 2, 32, 2, True, False, False, False, False),
+    # 32-channel K blocks: 200-240 blocks at n16 (the n16 17x17 layers)
+    (2, 2, 1, 5, 20, 2, 32, 3, True, False, False, False, False),
+    (2, 2, 2, 5, 20, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 3, 5, 20, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 4, 6, 24, 2, 32, 2, True, False, False, False, False),
+)
+# 3x1 / 1x3 "same" (the Inception-v3 8x8 blocks, c384 -> 384): one or two
+# 8x8 images per block and 32-64 channel K blocks, so n16-n128 fill the CUs.
+FWD_WMMA_RECT3_KNOBS = (
+    (4, 2, 2, 2, 8, 1, 32, 3, True, False, False, False, False),
+    (4, 2, 1, 2, 8, 1, 32, 3, True, False, False, False, False),
+    (2, 2, 2, 4, 8, 2, 32, 2, True, False, False, False, False),
+    (4, 2, 2, 4, 8, 2, 32, 3, True, False, False, False, False),
+)
+# 1 x R filters on 1-D signals, (R, dilation), "same" padding: the HiFi-GAN
+# resblock / generator layers.
+FWD_WMMA_1D_FILTERS = tuple((r, d) for r in (3, 7, 11) for d in (1, 3, 5))
+# (waves_k, waves_p, tiles_k, tiles_p, ck, stages, mode): tile_h = 1, tile_w =
+# the block's pixels. 32-64 channels: small K blocks over long strips (memory
+# bound); 128-256 channels: the dense 3x3 schedules.
+FWD_WMMA_1D_KNOBS = (
+    (1, 4, 2, 4, 32, 2, ""),
+    (1, 8, 2, 4, 32, 2, ""),
+    (1, 4, 2, 8, 32, 2, ""),
+    (1, 4, 4, 4, 32, 2, ""),
+    (2, 4, 4, 4, 32, 3, "pfsb"),
+    (2, 4, 4, 4, 64, 2, ""),
+    (1, 8, 8, 4, 32, 2, "pfsb"),
+    (2, 4, 4, 8, 32, 2, "pp"),
+    (2, 4, 4, 10, 32, 2, "pp"),
+)
+# Strided GEMM (strided_view) rows of the stride-2 filters without overlap,
+# 1x1 s2 and 2x2 s2: (waves_k, waves_p, tiles_k, tiles_p, tile_w, ck, stages,
+# prefetch, fold_n); prefetch builds with the iterative-ilp scheduler.
+FWD_WMMA_SV_KNOBS = (
+    # 32-channel x 64-pixel blocks with 64-128 channel chunks: the n1 deep
+    # downsamples (c896 -> 2016 at 16x16 / 14x14) launch 252 blocks.
+    (2, 1, 1, 1, 8, 128, 3, True, False),
+    (2, 1, 1, 1, 8, 64, 3, True, False),
+    (1, 2, 4, 4, 32, 64, 2, True, True),
+    (2, 1, 4, 4, 8, 64, 2, True, True),
+    (2, 1, 4, 4, 8, 64, 3, True, False),
+    (2, 1, 4, 4, 8, 64, 3, True, True),
+    (2, 1, 4, 4, 32, 32, 2, True, True),
+    (2, 2, 2, 4, 8, 64, 3, True, True),
+    (2, 2, 2, 4, 16, 64, 3, True, True),
+    (2, 2, 4, 2, 8, 64, 3, True, True),
+    (2, 2, 4, 4, 8, 64, 2, False, False),
+    (2, 2, 4, 4, 8, 64, 2, False, True),
+    (2, 2, 4, 4, 8, 64, 3, True, True),
+    (2, 2, 4, 4, 16, 64, 3, True, True),
+    (2, 2, 4, 8, 8, 64, 2, True, True),
+    (2, 2, 4, 8, 16, 64, 2, True, True),
+    (2, 2, 4, 8, 16, 64, 3, True, True),
+    (2, 2, 8, 4, 8, 64, 2, True, True),
+    (2, 2, 8, 4, 8, 64, 3, True, True),
+    (2, 4, 4, 4, 8, 64, 3, True, True),
+)
+# 1-D strided filters as a 1 x m stride-1 conv over a polyphase view
+# (poly_view): (R, stride, column padding) of the vocoder upsampling-style
+# layers, and (waves_k, waves_p, tiles_k, tiles_p, tile_w, ck, stages,
+# prefetch) rows (one output row: tile_w == block_p).
+FWD_WMMA_POLY_LAYERS = ((16, 8, 4), (4, 2, 1))
+FWD_WMMA_POLY_KNOBS = (
+    (1, 4, 4, 4, 256, 64, 2, True),
+    (2, 2, 2, 4, 128, 32, 3, False),
+    (2, 2, 2, 4, 128, 32, 3, True),
+    (2, 2, 4, 4, 128, 64, 2, True),
+    (2, 2, 4, 8, 256, 64, 2, False),
+    (2, 2, 4, 8, 256, 64, 2, True),
+    (2, 4, 4, 4, 256, 64, 2, False),
+    (2, 4, 4, 4, 256, 64, 2, True),
+)
+# END FWD_WMMA TABLES
+# Wave32 (gfx1250) wgrad runs the image-per-block kernel: one block per image
+# and k x c tile, KH rows staged per LDS sync. (waves_k, waves_c) and
+# (wave_tiles_k, wave_tiles_c); the spec's register estimate drops the
+# combinations that would spill, and _wgrad_image_spills the register-staged
+# multi-tile bodies a block of more than 8 waves cannot hold.
+WGRAD_W32_WAVES = (
+    (1, 1),
+    (2, 1),
+    (1, 2),
+    (2, 2),
+    (4, 1),
+    (4, 2),
+    (2, 4),
+    (4, 4),
+    (8, 1),
+    (8, 2),
+)
+WGRAD_W32_TILES = ((1, 1), (2, 1), (1, 2))
+WGRAD_W32_ROWS_PER_SYNC = (1, 3)
+# Its two-stage reduction: every block adds into one of WGRAD_W32_WS_REPLICAS
+# fp32 scratch slabs (spreading the atomics over them takes the same-line
+# contention off), staged channel-fastest through LDS where the block's dW
+# tile fits (lds_epilogue; the job falls back to the direct epilogue where it
+# does not). row_blocks splits the rows of an image over grid y for shapes
+# whose k x c tiling leaves few workgroups; tdm_stages=3 stages the rows
+# through a 3-deep TDM ring instead of registers.
+WGRAD_W32_ROW_BLOCKS = (1, 2, 4, 16)
+WGRAD_W32_TDM_STAGES = (0, 3)
+WGRAD_W32_WS_REPLICAS = 8
+# Past this many waves per block the compiler caps a wave32 wave at 256 VGPRs.
+WGRAD_W32_UNCAPPED_WAVES = 8
+# Small-channel wgrad (C=3 / C=4 stems; wave32). ((waves_k, waves_c, wave_tiles_k,
+# wave_tiles_c, vec_x, sub_steps, ws_replicas, uniform_wave), row_blocks):
+# the winners of the stem sweeps, from a narrow 3x3/s2 stem (one 16-wide K
+# tile) to the wide patchify stems (K up to 1152), each with the pixel-range
+# splits over grid y it won with. A narrow K tile leaves few dW tiles, so it
+# wins with a deep split; the wide patchify tiles with a shallow one.
+WGRAD_SMALL_C_CONFIGS = (
+    ((1, 1, 2, 2, 0, 2, 8, False), (512, 2048)),
+    ((8, 1, 1, 3, 4, 4, 32, True), (256, 512)),
+    ((8, 1, 1, 3, 4, 2, 32, False), (256, 512)),
+    ((2, 4, 2, 3, 8, 1, 32, False), (256, 512)),
+    ((4, 4, 2, 2, 8, 4, 4, True), (8, 16, 32)),
+    ((4, 4, 2, 2, 8, 2, 4, True), (8, 16, 32)),
+    ((4, 4, 2, 2, 4, 2, 4, True), (8, 16, 32)),
+    # uniform_wave=False here: with it on, this 16-wave vec_x=4 / sub_steps=4
+    # tile spills SGPRs into VGPR lanes at the 128-VGPR cap and the binary
+    # returns an all-zero dW, so both validators refuse it. Off, it verifies.
+    ((4, 4, 2, 2, 4, 4, 4, False), (8, 16, 32)),
+)
+# Depthwise wgrad, VALU kernel (wave32). (chan_per_lane, waves, rows_per_wave,
+# wo_chunk, r_split, ws_replicas, prefetch, carry): the winners of the
+# depthwise sweeps over 3x3 (stride 1 and 2) and 7x7 layers. r_split > 1
+# splits the filter rows of a 7x7 over wave groups to keep its accumulators
+# in registers; the validator drops the splits a filter cannot take.
+DW_WGRAD_CONFIGS = (
+    (2, 4, 1, 8, 1, 32, True, False),
+    (2, 8, 1, 8, 1, 32, True, True),
+    (2, 8, 1, 8, 1, 16, True, True),
+    (2, 8, 1, 8, 1, 16, True, False),
+    (2, 8, 4, 8, 1, 16, False, True),
+    (2, 4, 4, 8, 1, 16, False, True),
+    (4, 8, 4, 8, 1, 16, False, False),
+    (4, 8, 4, 8, 1, 16, False, True),
+    (4, 8, 1, 8, 1, 16, True, False),
+    (4, 8, 2, 8, 1, 16, True, True),
+    (2, 8, 8, 8, 2, 16, False, True),
+    (2, 4, 8, 8, 2, 16, False, True),
+    (2, 8, 8, 8, 2, 16, True, True),
+    (2, 8, 8, 16, 4, 16, False, True),
+    (2, 8, 4, 8, 2, 16, False, True),
+)
+
+# Tiled direct wgrad (DirectWgradTiledSpec): (wave_k16, wave_c16, waves_k,
+# waves_c) arrangements, (prefetch, row_unroll) pipelines, rows per segment,
+# workgroups launched, images packed per strip. Measured on gfx950 bf16 over
+# 3x3 C = K = 128 layers: 32x32 wave tiles in four-wave blocks (two per CU)
+# lead; eight-wave blocks are kept for the shapes that fill few channel tiles;
+# unfold_n = 4 is what a 40-wide image needs (Wo % 32 != 0).
+WGRAD_TILED_WAVES = ((2, 2, 2, 2), (2, 2, 4, 2), (2, 1, 2, 2))
+WGRAD_TILED_PIPE = ((2, 0), (5, 6))
+WGRAD_TILED_RPS = (15, 30)
+WGRAD_TILED_BLOCKS = (256, 512)
+WGRAD_TILED_UNFOLD = (1, 4)
+# Eight-wave blocks of two ping-ponged wave groups, on
+# the plain two-row prefetch of four-wave 32x32 tiles.
+WGRAD_TILED_PINGPONG = ((2, 2, 2, 2), (2, 0), (30,), (256,), (1,))
+# Depthwise LDS-ring wgrad (DwWgradLdsSpec): lanes along columns, prefetch,
+# output rows per segment, workgroups.
+WGRAD_DW_LANES_W = (8, 16, 32)
+WGRAD_DW_PREFETCH = (1, 2)
+WGRAD_DW_RPS = (16, 32, 64)
+WGRAD_DW_BLOCKS = (1024, 2048)
+# Small-C depthwise (DwWgradColsSpec): channel counts it bakes, strip widths,
+# threads, workgroups.
+WGRAD_DW_COLS_CHANNELS = (1, 2, 3, 4, 8)
+WGRAD_DW_COLS_STRIP = (8, 16)
+WGRAD_DW_COLS_THREADS = (128, 256)
+WGRAD_DW_COLS_BLOCKS = (2048, 4096)
+# Dense small-C gather wgrad (WgradGatherSpec): (wave_k16, waves_k), prefetch,
+# output rows per segment, workgroups.
+WGRAD_GATHER_WAVES = ((2, 1), (1, 3), (2, 3), (1, 6), (2, 2))
+WGRAD_GATHER_PREFETCH = (1, 2)
+WGRAD_GATHER_RPS = (8, 16)
+WGRAD_GATHER_BLOCKS = (256, 1024, 2048)
+# Depthwise wgrad on the batched 4x4x4 MFMA (DwWgradMfmaSpec): (4-column
+# tiles per block, images packed per tile), input rows per unit, staging
+# buffers, workgroups. Measured on gfx950 bf16 7x7 layers (ConvNeXt):
+# 16-wide tiles lead below 32 columns, 32-wide on 56x56; 7x7 images pack 2 to
+# a 20-wide or 3 to a 32-wide tile.
+WGRAD_DW_MFMA_TILES = ((4, 1), (8, 1), (5, 2), (8, 3))
+WGRAD_DW_MFMA_RPC = (7, 14, 28)
+WGRAD_DW_MFMA_PREFETCH = (1, 2)
+WGRAD_DW_MFMA_BLOCKS = (1024, 2048)
+# Grouped wgrad, 4 or 8 channels per group, on the batched 4x4x4 MFMA
+# (GroupedWgradMfmaSpec): (waves_q, wave_q4), rows per unit, staging
+# buffers, workgroups.
+WGRAD_GROUPED_MFMA_WAVES = ((4, 2), (4, 1), (2, 1), (2, 2))
+WGRAD_GROUPED_MFMA_RPC = (28, 56)
+WGRAD_GROUPED_MFMA_PREFETCH = (2, 3)
+WGRAD_GROUPED_MFMA_BLOCKS = (1024, 2048)
+
+# Runtime-channel MFMA dgrad (direct_dgrad_mfma_rtc). Its compute pass is the
+# forward kernel on the transposed problem, whose K reduction runs over the
+# dgrad's kpg (dY channels) and whose M-tiles cover its cpg (dX channels).
+# A binary bakes the tile counts, so the cache holds one per count:
+#   m_tiles: 16-channel tiles of cpg -- dX channels per group up to 64.
+DGRAD_RTC_M_TILES = (1, 2, 3, 4)
+#   k_atoms: K-atoms of kpg, up to this many dY channels per group, in steps
+#   of waves_k atoms (each wave preloads an equal slice).
+DGRAD_RTC_MAX_KPG = 512
+#   The plain-weight loop (waves_k == 1) re-reads its weights every row and
+#   only wins for a few K-atoms; past that the preloading configs take over.
+#   (Odd atom counts above it -- kpg 80, 112, ... -- have no binary: no split
+#   divides them, and longer plain loops with wide block_groups overflow the
+#   backend's LDS limit.)
+DGRAD_RTC_LOOP_MAX_ATOMS = 4
+#   Share of a wave's register budget the weights and accumulators of a
+#   binary may fill (dgrad_rtc_vgprs; the budget shrinks as more waves of a
+#   block share a SIMD). The estimate leaves out addresses and loop state;
+#   calibrated on gfx950 builds, configs past it spill to scratch, so they
+#   are not cached.
+DGRAD_RTC_VGPR_FILL = 0.875
+# Wave32 WMMA forward of tiny channel counts (direct_fwd_smallc_wmma /
+# direct_fwd_smallk_wmma): (filter, pad, stride, C) of the stems and
+# (filter, pad, stride, K) of the few-output-channel layers the cache serves.
+FWD_SMALLC_STEMS = (
+    (3, 1, 1, 3),
+    (3, 1, 1, 4),
+    (3, 1, 2, 3),
+    (3, 0, 2, 3),  # Inception-v3 stem: 299x299 -> 149x149, "valid"
+    (7, 3, 2, 3),
+    (4, 0, 4, 3),
+    (14, 0, 14, 3),
+    (16, 0, 16, 3),
+)
+# Small-K rows: (KH, KW, PAD, PAD_W, stride, K). 3x3 K=4: the SD VAE
+# quant_conv; 3x3 K=3: RGB output layers (SD VAE conv_out, Real-ESRGAN);
+# 1x7 K=1 with "same" column padding: the HiFi-GAN conv_post on a 1-D signal.
+FWD_SMALLK_LAYERS = (
+    (3, 3, 1, 1, 1, 4),
+    (3, 3, 1, 1, 1, 3),
+    (1, 7, 0, 3, 1, 1),
+)
+# Tap-outer WMMA forward (direct_fwd_tapouter_wmma): the "same"-padded dilated
+# 3x3 rows of atrous / ASPP layers it serves, (PAD, dil); stride 1.
+FWD_TAPOUTER_DILATIONS = (
+    (2, 2),
+    (4, 4),
+    (6, 6),
+    (12, 12),
+    (18, 18),
+    (24, 24),
+    (36, 36),
+)
+# (waves_k, waves_p, tiles_k, tiles_p, tile_w, ck, stages): the best few per
+# shape of a tuning sweep over dilated 3x3 layers of 2048 -> 256 channels.
+FWD_TAPOUTER_KNOBS = (
+    (1, 4, 8, 2, 16, 64, 2),
+    (1, 4, 8, 2, 16, 128, 2),
+    (2, 2, 4, 2, 16, 128, 2),
+    (2, 2, 4, 4, 8, 128, 2),
+    (2, 2, 4, 4, 16, 64, 2),
+    (2, 2, 4, 4, 16, 128, 2),
+    (2, 2, 4, 4, 32, 128, 2),
+    (2, 4, 4, 2, 16, 64, 2),
+    (4, 1, 4, 4, 16, 128, 2),
+    (4, 2, 4, 4, 16, 64, 2),
+)
+# fwd_smallc_wmma: (waves_k, waves_p, tiles_k, tiles_p, out_h, out_w,
+# tiles_per_block, tdm_store); the best few per stem of a tuning sweep.
+FWD_SMALLC_KNOBS = (
+    (1, 1, 2, 4, 4, 16, 8, 1),
+    (1, 1, 2, 8, 8, 16, 1, 1),
+    (1, 1, 2, 8, 8, 16, 2, 1),
+    (1, 1, 2, 8, 8, 16, 4, 1),
+    (1, 1, 2, 8, 8, 16, 8, 1),
+    (1, 1, 4, 4, 2, 32, 1, 1),
+    (1, 1, 4, 4, 4, 16, 1, 1),
+    (1, 1, 4, 8, 8, 16, 1, 1),
+    (1, 1, 4, 8, 8, 16, 2, 1),
+    (1, 2, 4, 4, 8, 16, 4, 1),
+    (1, 2, 4, 4, 8, 16, 8, 1),
+    (1, 2, 8, 4, 2, 64, 8, 1),
+    (1, 2, 8, 4, 4, 32, 4, 1),
+    (1, 2, 8, 4, 4, 32, 8, 1),
+    (1, 4, 8, 4, 4, 64, 4, 1),
+    (2, 1, 2, 2, 2, 16, 1, 1),
+    (2, 1, 2, 4, 4, 16, 1, 1),
+    (2, 1, 2, 8, 8, 16, 1, 1),
+    (2, 2, 2, 2, 4, 16, 1, 1),
+    (2, 2, 2, 4, 4, 32, 1, 1),
+    (2, 2, 2, 4, 8, 16, 1, 1),
+    (2, 4, 2, 4, 4, 64, 2, 1),
+    (2, 8, 2, 2, 8, 32, 4, 1),
+    (2, 8, 2, 4, 8, 64, 2, 1),
+)
+# fwd_smallk_wmma: (waves_c, waves_p, tiles_c, tiles_p, out_h, out_w, ck,
+# stages, prefetch); prefetch builds with the iterative-ilp scheduler.
+FWD_SMALLK_KNOBS = (
+    (1, 4, 3, 3, 6, 16, 64, 2, True),
+    (1, 4, 3, 3, 6, 16, 64, 3, True),
+    (1, 4, 3, 4, 12, 12, 64, 3, True),
+    (3, 2, 1, 5, 10, 10, 64, 3, True),
+    (3, 4, 1, 4, 12, 12, 64, 3, False),
+    (3, 4, 1, 4, 12, 12, 64, 3, True),
+)
+# Per-layer knob rows where the K=4 rows above do not fit: the GEMM column
+# block is R*S*K rounded up to 16 (32 for 3x3 K=3, 16 for 1x7 K=1).
+FWD_SMALLK_KNOBS_BY_LAYER = {
+    (3, 3, 3): (
+        (1, 3, 2, 3, 6, 16, 32, 2, True),
+        (1, 3, 2, 3, 6, 16, 32, 3, True),
+        (1, 3, 2, 3, 6, 16, 64, 2, False),
+        (1, 3, 2, 3, 6, 16, 64, 2, True),
+        (1, 2, 2, 4, 6, 14, 32, 2, True),
+        (1, 2, 2, 4, 6, 14, 64, 2, True),
+        (1, 4, 2, 3, 4, 30, 64, 2, True),
+        (1, 4, 2, 3, 10, 14, 64, 2, True),
+        (1, 4, 2, 3, 6, 16, 32, 2, True),
+        (1, 4, 2, 3, 6, 16, 64, 2, True),
+        (1, 4, 2, 4, 6, 30, 32, 3, True),
+        (1, 4, 2, 4, 6, 30, 64, 2, True),
+        (1, 4, 2, 4, 14, 14, 64, 2, True),
+        (2, 4, 1, 4, 14, 14, 64, 2, True),
+        (1, 2, 2, 4, 2, 30, 64, 2, True),
+        (1, 4, 2, 2, 2, 30, 64, 2, True),
+        (1, 8, 2, 4, 14, 30, 64, 2, True),
+        (1, 4, 2, 8, 14, 30, 64, 2, False),
+    ),
+    (1, 7, 1): (
+        (1, 2, 1, 2, 1, 58, 32, 2, True),
+        (1, 2, 1, 4, 1, 122, 32, 2, False),
+        (1, 2, 1, 8, 1, 250, 32, 2, True),
+        (1, 2, 1, 4, 1, 122, 32, 2, True),
+        (1, 4, 1, 2, 1, 122, 32, 2, True),
+        (1, 4, 1, 4, 1, 250, 32, 2, False),
+        (1, 4, 1, 4, 1, 250, 32, 2, True),
+        (1, 8, 1, 2, 1, 250, 32, 2, True),
+        (1, 4, 1, 8, 1, 506, 32, 2, True),
+        (1, 8, 1, 4, 1, 506, 32, 2, True),
+    ),
+}
+
+
+def wgrad_waves() -> Tuple[Tuple[int, int, int], ...]:
+    """Every (waves_k, waves_c, waves_q) the wgrad cache builds."""
+    out = set(WGRAD_WAVES_FIXED)
+    out.update((wk, wc, 1) for wk in WGRAD_WAVES_K_WIDE for wc in WGRAD_WAVES_C_WIDE)
+    return tuple(
+        sorted(w for w in out if w[0] * w[1] <= 16 and w[0] * w[1] * w[2] * 64 <= 1024)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Capabilities
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DirectCaps:
+    """What one binary is baked for; everything else about a shape is runtime.
+
+    ``cpg = kpg = 0`` means the channel counts are runtime too (the non-grouped
+    kernel).
+    """
+
+    KH: int
+    PAD: int
+    stride: int
+    cpg: int
+    kpg: int
+    # Filter dilation per axis; only the variants that compute a dilated
+    # convolution (direct_nongrouped, direct_fwd_wmma, direct_fwd_tapouter_wmma
+    # and direct_dgrad_wmma) have rows with dilation.
+    dil_h: int = 1
+    dil_w: int = 1
+    # Filter width and column padding where they differ from KH / PAD (0 and
+    # -1: the same); only the rows of PER_AXIS_PAD_VARIANTS
+    # (kernels.conv.direct_variants) use them.
+    kw: int = 0
+    pad_w: int = -1
+
+    @property
+    def KW(self) -> int:
+        return self.kw or self.KH
+
+    @property
+    def PAD_W(self) -> int:
+        return self.PAD if self.pad_w < 0 else self.pad_w
+
+
+def _grouped_channels() -> Tuple[int, ...]:
+    # The reference library covers cpg == kpg in {4, 8, 16, 32}.
+    return (4, 8, 16, 32)
+
+
+# (cpg, kpg) of the dense (groups == 1) 3x3 convolutions whose dgrad the MFMA
+# direct pipeline serves. Implicit GEMM maps dX channels to its N tile, so a
+# narrow C (4, 24, 48) leaves most of every MFMA idle there, while the direct
+# kernel reduces over K instead: on these shapes it runs up to twice as fast.
+_DENSE_MFMA_DGRAD_CHANNELS = ((4, 320), (24, 24), (48, 192))
+
+
+_DEPTHWISE_FILTERS = (3, 5, 7, 9, 11)
+# Large-kernel depthwise forward (RepLKNet/ConvNeXt-style 13x13 and 31x31):
+# stride 1, "same" padding only -- the layers that use them -- so they add a
+# handful of capabilities rather than a full padding/stride range each.
+_DEPTHWISE_FILTERS_LARGE = (13, 31)
+# The output-stationary depthwise kernel keeps one filter row in registers, so
+# large filters (RepLKNet-style 13x13 .. 31x31) build quickly; it covers
+# every odd filter up to the depthwise limit.
+_DEPTHWISE_TILED_FILTERS = tuple(range(3, 32, 2))
+# Non-square depthwise filters the rotated-filter dgrad kernel caches.
+_DEPTHWISE_TILED_DGRAD_RECT = ((51, 5), (5, 51))
+_STRIDES = (1, 2)
+# The non-grouped kernel exists for 3x3: its LDS halo reuse is what lets it beat
+# implicit GEMM there. A 1x1 has no halo to share and is a plain GEMM.
+_NONGROUPED_FILTERS = (3,)
+# Wgrad filters the cache carries. The kernel takes any KH, KW <= 8; a 1x1
+# wgrad is a plain GEMM with no halo to reuse, so it is left to implicit GEMM.
+_WGRAD_FILTERS = (3, 5, 7)
+# Input channel counts the dense small-C gather wgrad bakes (KW * C <= 96).
+_GATHER_CHANNELS = (3, 4, 8, 16, 24, 32)
+# Channels per group (= filters per group) the 4x4x4 MFMA grouped wgrad bakes.
+_GROUPED_MFMA_CHANNELS = (4, 8)
+# Small-channel (C=3) stems: (filter, stride, padding, output channels). The
+# kernel bakes the channel counts, so each stem a network uses is a row: the
+# 3x3/s2 and 7x7/s2 convolutional stems and the patchify stems of the
+# transformer-style networks (4x4/s4, 14x14/s14, 16x16/s16).
+_SMALL_C_STEMS = (
+    (3, 2, 1, (16, 24, 32, 48, 64)),
+    # The stride-1 3x3 input layers of the UNet / VAE / super-resolution
+    # networks and the unpadded 3x3/s2 Inception stem.
+    (3, 1, 1, (32, 64)),
+    (3, 2, 0, (32,)),
+    (7, 2, 3, (64,)),
+    (4, 4, 0, (96, 128, 192)),
+    (14, 14, 0, (1024, 1152, 1280)),
+    (16, 16, 0, (768, 1024)),
+)
+# Stems with 4 input channels (filter, stride, padding, output channels): the
+# latent-space input convolution of the latent diffusion UNets (4 latent
+# channels -> 320, and the 512-wide variant).
+_SMALL_C4_STEMS = ((3, 1, 1, (320, 512)),)
+# Depthwise wgrad filters (VALU kernel), stride 1 and 2.
+_DW_WGRAD_FILTERS = (3, 5, 7)
+# Dilated 3x3 rows of the non-grouped kernel: (PAD, stride, dil_h, dil_w). The
+# kernel bounds its rows and columns by the runtime output extents, so any
+# padding works; the rows bake the "same" padding of the symmetric dilations
+# and the asymmetric ones the reference workloads use (DeepLab-style row/column
+# dilation with the padding of the undilated axis).
+_NONGROUPED_DILATED = (
+    (2, 1, 2, 2),
+    (3, 1, 3, 3),
+    (4, 1, 4, 4),
+    (1, 1, 3, 1),
+    (1, 2, 3, 1),
+    (2, 1, 1, 2),
+    (4, 1, 1, 4),
+)
+
+
+def _same_pad(kh: int) -> int:
+    return (kh - 1) // 2
+
+
+def _dgrad_fused_weights_fit(kh: int, cpg: int, kpg: int) -> bool:
+    """Do the fused dgrad's preloaded weights fit their register budget?
+
+    The kernel runs the transposed problem: its K-atoms cover the dgrad's
+    ``kpg`` and its 16-row M-tiles the dgrad's ``cpg``; each (tap, atom,
+    M-tile) fragment holds 2 VGPRs per 16-wide atom (4 per 32-wide one, at
+    half the atoms), so the count does not depend on fold_k32.
+    """
+    from kernels.common.conv_direct_grouped import PRELOAD_WEIGHT_VGPR_BUDGET
+
+    return kh * kh * -(-kpg // 16) * -(-cpg // 16) * 2 <= PRELOAD_WEIGHT_VGPR_BUDGET
+
+
+def _large_depthwise_fwd_caps(max_kh: int = 31) -> Tuple["DirectCaps", ...]:
+    return tuple(
+        DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=1, kpg=1)
+        for k in _DEPTHWISE_FILTERS_LARGE
+        if k <= max_kh
+    )
+
+
+def _all_pads(kh: int) -> range:
+    # The reference library takes the padding as a runtime value in [0, KH-1].
+    return range(kh)
+
+
+def _col_pads(kh: int) -> Tuple[int, ...]:
+    # The column-streamed kernel can compute any PAD in [0, KH-1] (bar stride-1
+    # over-padding, which its validator rejects), but every padding is its own
+    # binary. The cache carries the two networks actually use -- "valid"
+    # (PAD=0) and "same" -- rather than the whole range: the intermediate ones
+    # would be two thirds of the variant's entries for shapes that are rare in
+    # practice. Other paddings still build on demand (the JIT sweep).
+    return tuple(sorted({0, _same_pad(kh)}))
+
+
+# variant -> (direction, capability list). Forward rows only list "same"
+# padding: every forward direct kernel streams input rows and flushes output
+# rows by input-row index, which is only right for PAD == (KH-1)/2 (see
+# kernels.common.conv_direct_grouped.forward_padding_reason). Dgrad kernels
+# bound their rows by p_Ho and are padding-generic, so they get the full
+# [0, KH-1] range like the reference.
+DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
+    # Grouped forward, 3x3. The reference also serves stride 2; rocke's
+    # grouped forward kernels are stride-1 only, so that row is absent.
+    "direct_grouped": (
+        "fwd",
+        tuple(
+            DirectCaps(KH=3, PAD=1, stride=1, cpg=c, kpg=c) for c in _grouped_channels()
+        ),
+    ),
+    # Non-grouped forward (groups == 1), C and K runtime. The kernel bounds
+    # rows and columns against the runtime output extents, so it is not tied
+    # to "same" padding the way the row-streaming kernels are; the cache bakes
+    # the "same" padding the forward rows here share.
+    "direct_nongrouped": (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=0, kpg=0)
+            for k, s in itertools.product(_NONGROUPED_FILTERS, _STRIDES)
+        )
+        + tuple(
+            DirectCaps(KH=3, PAD=pad, stride=s, cpg=0, kpg=0, dil_h=dh, dil_w=dw)
+            for pad, s, dh, dw in _NONGROUPED_DILATED
+        ),
+    ),
+    # Grouped forward through the non-grouped kernel's LDS-halo pipeline:
+    # groups and per-group channels runtime, small cpg merged into one MFMA
+    # problem with block-diagonal weights (knob group_merge).
+    _GROUPED_HALO: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=0, kpg=0)
+            for k, s in itertools.product(_NONGROUPED_FILTERS, _STRIDES)
+        ),
+    ),
+    # Depthwise forward: square odd filters 3..11, stride 1 and 2, plus the
+    # large stride-1 filters.
+    # The weight-preloading kernel holds KH*KW taps per lane, so 31x31 does
+    # not fit it; the column-streamed and spatial kernels cover that one.
+    "direct_depthwise": (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=1, kpg=1)
+            for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
+        )
+        + _large_depthwise_fwd_caps(max_kh=13),
+    ),
+    # Output-stationary depthwise forward: every odd filter up to 31x31.
+    "direct_depthwise_tiled": (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=1, kpg=1)
+            for k, s in itertools.product(_DEPTHWISE_TILED_FILTERS, _STRIDES)
+        ),
+    ),
+    # Depthwise forward for groups < wave_size: lanes split over channels and
+    # output columns. Same capabilities; the spec validator offers it only to
+    # problems with fewer groups than a wave.
+    "direct_depthwise_spatial": (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=1, kpg=1)
+            for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
+        )
+        + _large_depthwise_fwd_caps(),
+    ),
+    # Column-streamed depthwise forward: same filters and strides. It bounds
+    # its output rows against p_Ho rather than streaming them by input row, so
+    # unlike the other forward kernels it also serves "valid" padding.
+    "direct_depthwise_col": (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
+            for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
+            for pad in _col_pads(k)
+        )
+        + _large_depthwise_fwd_caps(),
+    ),
+    # Depthwise dgrad (row-streaming kernel): same filters and strides.
+    "direct_depthwise_dgrad": (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
+            for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
+            for pad in _all_pads(k)
+        ),
+    ),
+    # Depthwise forward on the windowed dgrad kernel's MFMA form (rotated
+    # filter over its stride-1 grid): stride 1 and 2, "same" padding; and its
+    # grouped form with 8..64 channels per group.
+    _DW_WIN_FWD: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=1, kpg=1)
+            for k in DW_WIN_FWD_FILTERS
+            for s in _STRIDES
+        )
+        + tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=c, kpg=c)
+            for k in DW_WIN_FWD_G8_FILTERS
+            for c in DW_WIN_FWD_GROUP_CH
+            for s in _STRIDES
+        ),
+    ),
+    # Depthwise dgrad, windowed kernel: stride 1, the same filters, every
+    # padding (it bounds its rows by p_Ho and its columns by p_Wo).
+    "direct_depthwise_dgrad_win": (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
+            for k in _DEPTHWISE_FILTERS
+            for pad in _all_pads(k)
+        ),
+    ),
+    # Large-filter stride-1 depthwise dgrad as a rotated-filter forward pass
+    # (13x13 .. 31x31, "same" padding); the row-streaming kernel
+    # (direct_depthwise_dgrad) preloads every tap and stops at 11x11.
+    _DW_TILED_DGRAD: (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=1, kpg=1)
+            for k in _DEPTHWISE_TILED_FILTERS
+            if k > max(_DEPTHWISE_FILTERS)
+        )
+        # SLaK-style decomposed large kernels (51x5 and 5x51, "same" padding).
+        + tuple(
+            DirectCaps(
+                KH=kh,
+                kw=kw,
+                PAD=_same_pad(kh),
+                pad_w=_same_pad(kw),
+                stride=1,
+                cpg=1,
+                kpg=1,
+            )
+            for kh, kw in _DEPTHWISE_TILED_DGRAD_RECT
+        ),
+    ),
+    # Grouped dgrad, scalar FMA: any stride and padding the reference covers.
+    "direct_grouped_dgrad": (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=s, cpg=c, kpg=c)
+            for c, s, pad in itertools.product(
+                _grouped_channels(), _STRIDES, _all_pads(3)
+            )
+        ),
+    ),
+    # Grouped dgrad, MFMA pipeline (weight transpose -> reorganize -> fprop).
+    # Its last pass is a forward kernel on the transposed problem, so it
+    # inherits the forward limits: stride 1 and "same" padding. Besides the
+    # grouped channel counts it carries the dense ones it wins on.
+    "direct_grouped_dgrad_mfma": (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=3, PAD=1, stride=1, cpg=c, kpg=c) for c in _grouped_channels()
+        )
+        + tuple(
+            DirectCaps(KH=3, PAD=1, stride=1, cpg=c, kpg=k)
+            for c, k in _DENSE_MFMA_DGRAD_CHANNELS
+        ),
+    ),
+    # 4c dgrad: one fused-weight kernel, a forward 4c kernel on the
+    # transposed problem, so stride 1 and "same" padding; 1x1 and 3x3.
+    "direct_grouped_dgrad_4c": (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=4, kpg=4) for k in (1, 3)
+        ),
+    ),
+    # Generic dgrad with the weight transform fused into the kernel (one
+    # forward-ABI kernel over the transposed problem, no pre-pass): stride 1,
+    # "same"-padded square filters up to 7x7 and per-group channel counts in
+    # 4-channel steps up to 32 on either side, including cpg != kpg.
+    # (A 5x5 / 7x7 filter whose fused weights do not fit the preload register
+    # budget at any knob has no row: the pre-pass pipeline serves it.)
+    "direct_grouped_dgrad_fused": (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=c, kpg=kk)
+            for k in DGRAD_FUSED_FILTERS
+            for c in DGRAD_FUSED_CHANNELS
+            for kk in DGRAD_FUSED_CHANNELS
+            if _dgrad_fused_weights_fit(k, c, kk)
+        ),
+    ),
+    # The same pipeline with runtime channels: dense (groups == 1) and any
+    # cpg/kpg whose tile counts a cached binary has (knobs k_atoms/m_tiles).
+    "direct_dgrad_mfma_rtc": (
+        "dgrad",
+        (DirectCaps(KH=3, PAD=1, stride=1, cpg=0, kpg=0),),
+    ),
+    # Wave32 WMMA dgrad: stride 1, channels and groups runtime. It bounds rows
+    # and columns against the runtime extents, so it serves "valid" padding as
+    # well as "same".
+    _DGRAD_WMMA: (
+        "dgrad",
+        tuple(DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0) for pad in _col_pads(3))
+        # Small groups: G groups packed into one block-diagonal super-group
+        # (bakes cpg = kpg).
+        + tuple(
+            DirectCaps(KH=3, PAD=1, stride=1, cpg=c, kpg=c)
+            for c in DGRAD_WMMA_PACKED_CHANNELS
+        )
+        # Small groups at stride 2: packed super-group + phase decomposition.
+        + tuple(
+            DirectCaps(KH=3, PAD=1, stride=2, cpg=c, kpg=c)
+            for c in DGRAD_WMMA_PACKED_CHANNELS
+        )
+        # Stride 2 by phase decomposition: 3x3 "same" and the 2x2 patch-merge.
+        + (
+            DirectCaps(KH=3, PAD=1, stride=2, cpg=0, kpg=0),
+            DirectCaps(KH=2, PAD=0, stride=2, cpg=0, kpg=0),
+        )
+        # Dilated 3x3 (per-axis dilation, "same"-or-less padding).
+        + tuple(
+            DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0, dil_h=dh, dil_w=dw)
+            for pad, dh, dw in DGRAD_WMMA_DILATIONS
+        ),
+    ),
+    # Stem dgrad on wave32 WMMA: patch embeddings (stride == filter, no
+    # padding) of 3-channel images, and the overlapping 3- / 4-channel stems
+    # of the reference workloads. dX channels baked, dY channels runtime.
+    _DGRAD_PATCH: (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=p, PAD=0, stride=p, cpg=3, kpg=0) for p in DGRAD_PATCH_SIZES
+        ),
+    ),
+    _DGRAD_SMALLC: (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=st, cpg=c, kpg=0)
+            for k, pad, st, c in DGRAD_SMALLC_STEMS
+        ),
+    ),
+    # Tiled wgrad: dense and grouped, channel counts runtime, stride 1.
+    "direct_wgrad_tiled": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=0, kpg=0)
+            for k in (3,)
+            for pad in _col_pads(k)
+        ),
+    ),
+    # Depthwise wgrad through LDS rings: 3x3 (8 channels x 9 taps of fp32
+    # partial sums per lane), stride 1 and 2, C runtime (a multiple of 8).
+    "direct_wgrad_dw": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=s, cpg=1, kpg=1)
+            for s in _STRIDES
+            for pad in _col_pads(3)
+        ),
+    ),
+    # Small-C depthwise wgrad (stem layers): every depthwise filter; the
+    # channel count is a knob (``channels``).
+    "direct_wgrad_dw_cols": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
+            for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
+            for pad in _col_pads(k)
+        ),
+    ),
+    # Depthwise wgrad on the batched 4x4x4 MFMA: every depthwise filter,
+    # stride 1, C runtime (a multiple of 8).
+    "direct_wgrad_dw_mfma": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
+            for k in _DEPTHWISE_FILTERS
+            for pad in _col_pads(k)
+        ),
+    ),
+    # Grouped wgrad with 4 or 8 channels per group (cpg = kpg baked, groups
+    # runtime), 3x3 stride 1, on the batched 4x4x4 MFMA.
+    "direct_wgrad_grouped_mfma": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=1, cpg=c, kpg=c)
+            for c in _GROUPED_MFMA_CHANNELS
+            for pad in _col_pads(3)
+        ),
+    ),
+    # Dense small-C wgrad, any stride: C is baked, K runtime.
+    "direct_wgrad_gather": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=s, cpg=c, kpg=0)
+            for c in _GATHER_CHANNELS
+            for s in _STRIDES
+            for pad in _col_pads(3)
+        ),
+    ),
+    # Wave32 WMMA forward: channels and groups runtime. It bounds rows and
+    # columns against the runtime extents, so it serves "valid" padding as
+    # well as "same".
+    _FWD_WMMA: (
+        "fwd",
+        tuple(DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0) for pad in _col_pads(3))
+        # Small groups: G groups packed into one block-diagonal super-group
+        # (bakes cpg = kpg), stride 1 and 2.
+        + tuple(
+            DirectCaps(KH=3, PAD=1, stride=s, cpg=c, kpg=c)
+            for c in FWD_WMMA_PACKED_CHANNELS
+            for s in _STRIDES
+        )
+        # Stride 2: 3x3 "same", 3x3 "valid", the 2x2 patch merge and the
+        # 1x1 downsample (the last two also as strided GEMMs).
+        + (
+            DirectCaps(KH=3, PAD=1, stride=2, cpg=0, kpg=0),
+            DirectCaps(KH=3, PAD=0, stride=2, cpg=0, kpg=0),
+            DirectCaps(KH=2, PAD=0, stride=2, cpg=0, kpg=0),
+            DirectCaps(KH=1, PAD=0, stride=2, cpg=0, kpg=0),
+        )
+        # Dilated 3x3 (per-axis dilation), stride 1 and 2.
+        + tuple(
+            DirectCaps(KH=3, PAD=pad, stride=s, cpg=0, kpg=0, dil_h=dh, dil_w=dw)
+            for pad, s, dh, dw in FWD_WMMA_DILATIONS
+        )
+        # 1 x R "same" filters on 1-D signals (H = 1), dilated or not.
+        + tuple(
+            DirectCaps(
+                KH=1,
+                kw=r,
+                PAD=0,
+                pad_w=(r - 1) * d // 2,
+                stride=1,
+                cpg=0,
+                kpg=0,
+                dil_w=d,
+            )
+            for r, d in FWD_WMMA_1D_FILTERS
+        )
+        # Rectangular filters with per-axis "same" padding, stride 1.
+        + tuple(
+            DirectCaps(KH=kh, kw=kw, PAD=ph, pad_w=pw, stride=1, cpg=0, kpg=0)
+            for kh, kw, ph, pw in FWD_WMMA_RECT_LAYERS
+            # a 1 x R "same" undilated row is already a 1-D cap above
+            if not (
+                kh == 1
+                and ph == 0
+                and (kw, 1) in FWD_WMMA_1D_FILTERS
+                and pw == (kw - 1) // 2
+            )
+        )
+        # 1-D strided filters 1 x m*S (poly_view): (R, stride, column padding).
+        + tuple(
+            DirectCaps(KH=1, kw=r, PAD=0, pad_w=pw, stride=st, cpg=0, kpg=0)
+            for r, st, pw in FWD_WMMA_POLY_LAYERS
+        ),
+    ),
+    # Wgrad (grouped and non-grouped), channel counts runtime. The kernel is a
+    # stride-1 algorithm; it bounds its rows and columns against the runtime
+    # extents, so it serves "valid" padding as well as "same".
+    "direct_wgrad": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=0, kpg=0)
+            for k in _WGRAD_FILTERS
+            for pad in _col_pads(k)
+        ),
+    ),
+    # Small-channel stems (groups == 1, cpg == 3 or 4), wave32 only: one row
+    # per stem, channel counts baked.
+    "direct_wgrad_small_c": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=3, kpg=kpg)
+            for k, s, pad, kpgs in _SMALL_C_STEMS
+            for kpg in kpgs
+        )
+        + tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=4, kpg=kpg)
+            for k, s, pad, kpgs in _SMALL_C4_STEMS
+            for kpg in kpgs
+        ),
+    ),
+    # Depthwise wgrad, VALU kernel (wave32): the channel count is runtime;
+    # "valid" and "same" padding at stride 1 and 2.
+    "direct_depthwise_wgrad": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
+            for k, s in itertools.product(_DW_WGRAD_FILTERS, _STRIDES)
+            for pad in _col_pads(k)
+        ),
+    ),
+    # Forward of tiny channel counts on wave32 WMMA, ungrouped: the small
+    # channel count baked, the other one runtime.
+    _FWD_SMALLC: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=st, cpg=c, kpg=0)
+            for k, pad, st, c in FWD_SMALLC_STEMS
+        ),
+    ),
+    _FWD_SMALLK: (
+        "fwd",
+        tuple(
+            DirectCaps(
+                KH=kh,
+                kw=0 if kw == kh else kw,
+                PAD=pad,
+                pad_w=-1 if pw == pad else pw,
+                stride=st,
+                cpg=0,
+                kpg=kk,
+            )
+            for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
+        ),
+    ),
+    # Tap-outer WMMA forward of large dilations: channels and groups
+    # runtime, the filter, padding and dilation baked.
+    _FWD_TAPOUTER: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0, dil_h=d, dil_w=d)
+            for pad, d in FWD_TAPOUTER_DILATIONS
+        ),
+    ),
+    # Small-group forward walking row bands (cpg == kpg baked), 3x3 "same".
+    _FWD_GSTREAM: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=3, PAD=1, stride=s, cpg=c, kpg=c)
+            for c in FWD_GSTREAM_CHANNELS + FWD_GSTREAM_PADG_CHANNELS
+            for s in _STRIDES
+        ),
+    ),
+    _DW_FWD_WMMA: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
+            for k, pad in DW_FWD_WMMA_CAPS
+        ),
+    ),
+}
+
+# The Stage 2 fold of the two-stage wgrad kernels reads every extent from its
+# kernargs: one binary per replica count, keyed by these placeholder caps.
+_WGRAD_REDUCE_CAPS = DirectCaps(KH=1, PAD=0, stride=1, cpg=0, kpg=0)
+
+
+def dgrad_rtc_k_atoms(waves_k: int, fold_k32: bool) -> Tuple[int, ...]:
+    """The K-atom counts the runtime-channel dgrad cache builds for a split.
+
+    Preloading splits (``waves_k > 1``) take every multiple of ``waves_k`` up
+    to :data:`DGRAD_RTC_MAX_KPG` channels; the plain-weight loop only the
+    first :data:`DGRAD_RTC_LOOP_MAX_ATOMS`.
+    """
+    atom = 32 if fold_k32 else 16
+    if waves_k == 1:
+        return tuple(range(1, DGRAD_RTC_LOOP_MAX_ATOMS + 1))
+    return tuple(range(waves_k, DGRAD_RTC_MAX_KPG // atom + 1, waves_k))
+
+
+def dgrad_rtc_spills(
+    knobs: dict, KH: int, KW: int, arch: str, dtype: str = DIRECT_DTYPE
+) -> bool:
+    """Would this runtime-channel dgrad binary for problem dtype ``dtype``
+    spill on ``arch`` (see :data:`DGRAD_RTC_VGPR_FILL`)?"""
+    from rocke.core.arch import ArchTarget
+
+    limits = ArchTarget.from_gfx(arch).limits
+    waves = knobs["block_groups"] * knobs["waves_q"] * knobs["waves_k"]
+    budget = limits.vgprs // -(-waves // 4)  # waves of a block share 4 SIMDs
+    vgprs = dgrad_rtc_vgprs(knobs, KH, KW, dtype, arch)
+    return vgprs > DGRAD_RTC_VGPR_FILL * budget
+
+
+def _fwd_wmma_1d_knobs(kw: int = 3) -> Iterator[dict]:
+    """1 x R rows: one output row per block, the tile as wide as the block.
+    The weight slot grows with the filter width: the 64-channel chunk rows
+    only fit LDS (and only win) for 1x3 filters, the three-stage and the
+    widest pingpong rows not for 1x11."""
+    for wk, wp, tk, tp, ck, st, mode in FWD_WMMA_1D_KNOBS:
+        if (ck > 32 and kw > 3) or (kw > 7 and (st > 2 or tp >= 10)):
+            continue
+        knobs = dict(
+            waves_k=wk,
+            waves_p=wp,
+            tiles_k=tk,
+            tiles_p=tp,
+            tile_w=wp * tp * 16,
+            ck=ck,
+            stages=st,
+        )
+        if mode == "pp":
+            knobs["pingpong"] = True
+        elif mode == "pfsb":
+            knobs.update(prefetch=True, split_barrier=True)
+        yield knobs
+
+
+def _dgrad_wmma_knobs(rows, pack_groups: int = 1) -> Iterator[dict]:
+    for wc, wp, tc, tp, tw, tn, ck, st, pf in rows:
+        knobs = dict(
+            waves_c=wc,
+            waves_p=wp,
+            tiles_c=tc,
+            tiles_p=tp,
+            tile_w=tw,
+            tile_n=tn,
+            ck=ck,
+            stages=st,
+        )
+        if pf:
+            knobs.update(prefetch=True, sched="iterative-ilp")
+        if pack_groups > 1:
+            knobs.update(pack_groups=pack_groups)
+        yield knobs
+
+
+def _wmma_fwd_knob_row(
+    wk: int, wp: int, tk: int, tp: int, tw: int, *, prefetch: bool = False, **rest
+) -> dict:
+    """One WMMA forward tuning row as knobs: the wave / tile shape, ``rest``
+    without the switches that are off (False or None), and ``prefetch`` with
+    the iterative-ilp scheduler it is tuned with."""
+    knobs = dict(waves_k=wk, waves_p=wp, tiles_k=tk, tiles_p=tp, tile_w=tw)
+    knobs.update((k, v) for k, v in rest.items() if v is not False and v is not None)
+    if prefetch:
+        knobs.update(prefetch=True, sched="iterative-ilp")
+    return knobs
+
+
+def _fwd_wmma_poly_knobs() -> Iterator[dict]:
+    for *shape, ck, st, pf in FWD_WMMA_POLY_KNOBS:
+        yield _wmma_fwd_knob_row(
+            *shape, ck=ck, stages=st, poly_view=True, prefetch=bool(pf)
+        )
+
+
+def _fwd_wmma_sv_knobs() -> Iterator[dict]:
+    for *shape, ck, st, pf, fn in FWD_WMMA_SV_KNOBS:
+        yield _wmma_fwd_knob_row(
+            *shape,
+            ck=ck,
+            stages=st,
+            strided_view=True,
+            fold_n=bool(fn),
+            prefetch=bool(pf),
+        )
+
+
+def _fwd_wmma_knobs(rows, pack_groups: int = 1) -> Iterator[dict]:
+    for wk, wp, tk, tp, tw, tn, ck, st, pf, sb, we, ps, rr in rows:
+        yield _wmma_fwd_knob_row(
+            wk,
+            wp,
+            tk,
+            tp,
+            tw,
+            tile_n=tn,
+            ck=ck,
+            stages=st,
+            split_barrier=bool(sb),
+            wave_epilogue=bool(we),
+            phase_split=bool(ps),
+            row_ring=bool(rr),
+            pack_groups=pack_groups if pack_groups > 1 else None,
+            prefetch=bool(pf),
+        )
+
+
+def _dw_fwd_cpl_arch(arch: str) -> bool:
+    """Channel-packed depthwise forward is tuned and register-budgeted for the
+    wave32 (gfx1250-class) register file only."""
+    from rocke.core.arch import ArchTarget
+
+    return ArchTarget.from_gfx(arch).wave_size == 32
+
+
+def _knob_grid(
+    variant: str, arch: str, dtype: str, caps: Optional[DirectCaps] = None
+) -> Iterator[dict]:
+    if variant == "direct_nongrouped":
+        from kernels.common.conv_direct_nongrouped import (
+            nongrouped_knobs,
+            nongrouped_split_knobs,
+        )
+
+        # Every width (no Wo to pick from): plan_for keeps those that fit.
+        yield from nongrouped_knobs(arch, dtype)
+        # The split-C rows serve small images with many channels; the dilated
+        # rows (DeepLab-style, large maps) never need them.
+        if caps is None or (caps.dil_h, caps.dil_w) == (1, 1):
+            yield from nongrouped_split_knobs(arch, dtype)
+    elif variant == _GROUPED_HALO:
+        from kernels.common.conv_direct_nongrouped import grouped_knobs
+
+        yield from grouped_knobs(arch, dtype)
+    elif variant == "direct_grouped":
+        for bq, bg, db in itertools.product(BLOCK_Q, BLOCK_GROUPS, DOUBLE_BUFFER):
+            if direct_storage_dtype(dtype) != "fp32":
+                # The 16-bit grid predates the fold knob: its knobs (and so
+                # its identities) carry none.
+                yield dict(block_q=bq, block_groups=bg, double_buffer=db)
+                continue
+            # fp32 storage: the K-32 fold is what feeds gfx950's emulated
+            # 16x16x32 TF32 atom one-to-one (a 16-channel atom is zero-padded
+            # to it); tf32_narrow_reason drops the narrow one where the fold
+            # covers the shape.
+            for k32 in GROUPED_FOLD_K32:
+                yield dict(block_q=bq, block_groups=bg, double_buffer=db, fold_k32=k32)
+    elif variant == "direct_depthwise":
+        for bw, waves in itertools.product(DW_BLOCK_W_FWD, DW_BLOCK_WAVES):
+            yield dict(block_w=bw, block_waves=waves)
+        # Channel-packed lanes (cpl > 1); cpl == 1 keeps the knob-less identity.
+        if _dw_fwd_cpl_arch(arch):
+            for cpl, bws, waves_list in DW_FWD_CPL_GRID:
+                for bw, waves in itertools.product(bws, waves_list):
+                    yield dict(block_w=bw, block_waves=waves, cpl=cpl)
+    elif variant == "direct_depthwise_spatial":
+        for waves in DW_BLOCK_WAVES:
+            yield dict(block_waves=waves)
+    elif variant == "direct_depthwise_tiled":
+        for bw, bh, waves, unroll in itertools.product(
+            DW_TILED_BLOCK_W, DW_TILED_BLOCK_H, DW_TILED_BLOCK_WAVES, DW_TILED_UNROLL
+        ):
+            yield dict(block_w=bw, block_h=bh, block_waves=waves, unroll_rows=unroll)
+        if _dw_fwd_cpl_arch(arch):
+            for bw, bh, waves in itertools.product(
+                DW_TILED_BLOCK_W, DW_TILED_BLOCK_H, DW_TILED_BLOCK_WAVES
+            ):
+                yield dict(block_w=bw, block_h=bh, block_waves=waves, cpl=DW_TILED_CPL)
+    elif variant == "direct_depthwise_dgrad":
+        for bw, waves in itertools.product(DW_BLOCK_W_DGRAD, DW_BLOCK_WAVES):
+            yield dict(block_w=bw, block_waves=waves)
+        # Channel-packed lanes (cpl > 1); cpl == 1 keeps the knob-less identity.
+        for cpl, bws, waves_list in DW_DGRAD_CPL_GRID:
+            for bw, waves in itertools.product(bws, waves_list):
+                yield dict(block_w=bw, block_waves=waves, cpl=cpl)
+    elif variant == "direct_depthwise_dgrad_win":
+        for (bw, bh), dot2, waves in itertools.product(
+            DW_WIN_TILES, (False, True), DW_WIN_WAVES
+        ):
+            yield dict(
+                block_w=bw, block_h=bh, block_waves=waves, ch_per_lane=1, dot2=dot2
+            )
+        for (bw, bh), waves in itertools.product(DW_WIN_TILES, DW_WIN_PAIR_WAVES):
+            yield dict(
+                block_w=bw, block_h=bh, block_waves=waves, ch_per_lane=2, dot2=False
+            )
+        from kernels.common.conv_direct_grouped import DW_DGRAD_WMMA_ARCHES
+
+        block_hs = DW_WIN_MFMA_BLOCK_H
+        if arch in DW_DGRAD_WMMA_ARCHES:
+            block_hs += DW_WIN_WMMA_BLOCK_H
+        for fold, waves, bh in itertools.product(
+            DW_WIN_MFMA_FOLDS, DW_WIN_MFMA_WAVES, block_hs
+        ):
+            yield dict(
+                mfma=True,
+                w_fold=fold,
+                block_waves=waves,
+                block_h=bh,
+                prefetch_rows=DW_WIN_MFMA_PREFETCH,
+            )
+    elif variant == _DW_WIN_FWD:
+        # A grouped block holds whole groups: one or two per block, plus the
+        # depthwise wave counts that are whole multiples of the group.
+        waves_grid = DW_WIN_MFMA_WAVES
+        if caps is not None and caps.cpg > 1:
+            per_group = caps.cpg // 8
+            waves_grid = tuple(
+                w
+                for w in sorted({per_group, 2 * per_group, *DW_WIN_MFMA_WAVES})
+                if w <= 8 and w % per_group == 0
+            )
+        for fold, waves, bh in itertools.product(
+            DW_WIN_MFMA_FOLDS, waves_grid, DW_WIN_MFMA_BLOCK_H
+        ):
+            yield dict(
+                w_fold=fold,
+                block_waves=waves,
+                block_h=bh,
+                prefetch_rows=DW_WIN_MFMA_PREFETCH,
+            )
+    elif variant == _DW_TILED_DGRAD:
+        for bw, bh, waves in itertools.product(
+            DW_TILED_DGRAD_BLOCK_W, DW_TILED_DGRAD_BLOCK_H, DW_TILED_DGRAD_BLOCK_WAVES
+        ):
+            yield dict(block_w=bw, block_h=bh, block_waves=waves)
+    elif variant == "direct_depthwise_col":
+        for bh, bw, waves in itertools.product(
+            DW_COL_BLOCK_H, DW_COL_BLOCK_W, DW_BLOCK_WAVES
+        ):
+            yield dict(block_h=bh, block_w=bw, block_waves=waves)
+    elif variant == "direct_grouped_dgrad":
+        for bq, bg in itertools.product(DGRAD_BLOCK_Q, BLOCK_GROUPS):
+            yield dict(block_q=bq, block_groups=bg)
+    elif variant == "direct_grouped_dgrad_4c":
+        for bq, bg, (lds, sr) in itertools.product(
+            DGRAD_4C_BLOCK_Q, DGRAD_4C_BLOCK_GROUPS, DGRAD_4C_FORMS
+        ):
+            yield {
+                "block_q": bq,
+                "block_groups": bg,
+                "dgrad_weights_lds": lds,
+                "stage_rows": sr,
+            }
+    elif variant == "direct_grouped_dgrad_fused":
+        # Filtered per capability by _dgrad_fused_policy_reason.
+        for bq, bg, bh, k32, lds, wpe, stream in itertools.product(
+            DGRAD_FUSED_BLOCK_Q,
+            DGRAD_FUSED_BLOCK_GROUPS,
+            DGRAD_FUSED_BLOCK_H,
+            (False, True),
+            (False, True),
+            (0, DGRAD_FUSED_WPE),
+            DGRAD_FUSED_STREAM,
+        ):
+            knobs = {
+                "block_q": bq,
+                "block_groups": bg,
+                "block_h": bh,
+                "fold_k32": k32,
+                "dgrad_weights_lds": lds,
+                "waves_per_eu": wpe,
+            }
+            if bh in DGRAD_FUSED_EXIT_BLOCK_H:
+                knobs["row_exit"] = True
+            if stream is not None:
+                knobs.update(
+                    prefetch_rows=DGRAD_FUSED_PREFETCH_ROWS,
+                    lds_only_sync=True,
+                    xcd_tiles=True,
+                    lds_pad=stream[0],
+                    stage_out=stream[1],
+                )
+            yield knobs
+    elif variant == "direct_grouped_dgrad_mfma":
+        for bq, bg, bh, (wq, wk, rk, pg, k32) in itertools.product(
+            BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, dgrad_waves(dtype)
+        ):
+            yield dict(
+                block_q=bq,
+                block_groups=bg,
+                block_h=bh,
+                waves_q=wq,
+                waves_k=wk,
+                runtime_k_loop=rk,
+                persistent_grid=pg,
+                fold_k32=k32,
+            )
+    elif variant == "direct_dgrad_mfma_rtc":
+        for bq, bg, bh, (wq, wk, rk, pg, k32) in itertools.product(
+            BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, dgrad_waves(dtype)
+        ):
+            if wk > 1 and rk:
+                # A K split preloads its weights, which takes precedence over
+                # the runtime K loop: the binary would duplicate rk=False.
+                continue
+            if wk > 1 and bg > 1:
+                # Rejected by the spec (the LDS reduction is per group).
+                continue
+            for ka, mt in itertools.product(
+                dgrad_rtc_k_atoms(wk, k32), DGRAD_RTC_M_TILES
+            ):
+                yield dict(
+                    block_q=bq,
+                    block_groups=bg,
+                    block_h=bh,
+                    waves_q=wq,
+                    waves_k=wk,
+                    runtime_k_loop=rk,
+                    persistent_grid=pg,
+                    fold_k32=k32,
+                    k_atoms=ka,
+                    m_tiles=mt,
+                )
+    elif variant == _DGRAD_WMMA:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return  # a wave32 kernel: no tuning for this arch at all
+        if caps is not None and caps.cpg > 0:
+            # Pack groups up to one 32-channel WMMA K step.
+            yield from _dgrad_wmma_knobs(
+                (
+                    DGRAD_WMMA_PACKED_STRIDED_KNOBS
+                    if caps.stride > 1
+                    else DGRAD_WMMA_PACKED_KNOBS
+                ),
+                pack_groups=max(1, 32 // caps.cpg),
+            )
+        elif caps is not None and caps.stride > 1 and caps.KH == caps.stride:
+            yield from _dgrad_wmma_knobs(DGRAD_WMMA_PATCH2_KNOBS)
+        elif caps is not None and caps.stride > 1:
+            yield from _dgrad_wmma_knobs(DGRAD_WMMA_STRIDED_KNOBS)
+        elif caps is not None and (caps.dil_h, caps.dil_w) != (1, 1):
+            yield from _dgrad_wmma_knobs(DGRAD_WMMA_DILATED_KNOBS)
+        else:
+            yield from _dgrad_wmma_knobs(DGRAD_WMMA_KNOBS)
+            for wc, wp, tc, tp, tw, tn, ck, st, pf, we in DGRAD_WMMA_SB_KNOBS:
+                knobs = dict(
+                    waves_c=wc,
+                    waves_p=wp,
+                    tiles_c=tc,
+                    tiles_p=tp,
+                    tile_w=tw,
+                    tile_n=tn,
+                    ck=ck,
+                    stages=st,
+                )
+                if pf:
+                    knobs.update(prefetch=True, sched="iterative-ilp")
+                knobs.update(split_barrier=True)
+                if we:
+                    knobs.update(wave_epilogue=True)
+                yield knobs
+    elif variant == "direct_wgrad_tiled":
+        for (wk16, wc16, wk, wc), (pf, ru), rps, tb, un in itertools.product(
+            WGRAD_TILED_WAVES,
+            WGRAD_TILED_PIPE,
+            WGRAD_TILED_RPS,
+            WGRAD_TILED_BLOCKS,
+            WGRAD_TILED_UNFOLD,
+        ):
+            yield dict(
+                wave_k16=wk16,
+                wave_c16=wc16,
+                waves_k=wk,
+                waves_c=wc,
+                prefetch=pf,
+                row_unroll=ru,
+                rows_per_seg=rps,
+                target_blocks=tb,
+                unfold_n=un,
+            )
+        (wk16, wc16, wk, wc), (pf, ru), rpss, tbs, uns = WGRAD_TILED_PINGPONG
+        for rps, tb, un in itertools.product(rpss, tbs, uns):
+            yield dict(
+                wave_k16=wk16,
+                wave_c16=wc16,
+                waves_k=wk,
+                waves_c=wc,
+                prefetch=pf,
+                row_unroll=ru,
+                rows_per_seg=rps,
+                target_blocks=tb,
+                unfold_n=un,
+                q_groups=2,
+                pingpong=True,
+            )
+    elif variant == "direct_wgrad_dw":
+        for lw, pf, rps, tb in itertools.product(
+            WGRAD_DW_LANES_W, WGRAD_DW_PREFETCH, WGRAD_DW_RPS, WGRAD_DW_BLOCKS
+        ):
+            yield dict(
+                lanes_c=8, lanes_w=lw, prefetch=pf, rows_per_seg=rps, target_blocks=tb
+            )
+    elif variant == "direct_wgrad_dw_cols":
+        for c, st, th, tb in itertools.product(
+            WGRAD_DW_COLS_CHANNELS,
+            WGRAD_DW_COLS_STRIP,
+            WGRAD_DW_COLS_THREADS,
+            WGRAD_DW_COLS_BLOCKS,
+        ):
+            yield dict(channels=c, strip=st, threads=th, target_blocks=tb)
+    elif variant == "direct_wgrad_dw_mfma":
+        for (qt, un), rpc, pf, tb in itertools.product(
+            WGRAD_DW_MFMA_TILES,
+            WGRAD_DW_MFMA_RPC,
+            WGRAD_DW_MFMA_PREFETCH,
+            WGRAD_DW_MFMA_BLOCKS,
+        ):
+            yield dict(
+                q_tiles=qt,
+                rows_per_chunk=rpc,
+                prefetch=pf,
+                target_blocks=tb,
+                unfold_n=un,
+            )
+    elif variant == "direct_wgrad_grouped_mfma":
+        for (wq, q4), rpc, pf, tb in itertools.product(
+            WGRAD_GROUPED_MFMA_WAVES,
+            WGRAD_GROUPED_MFMA_RPC,
+            WGRAD_GROUPED_MFMA_PREFETCH,
+            WGRAD_GROUPED_MFMA_BLOCKS,
+        ):
+            yield dict(
+                waves_q=wq,
+                wave_q4=q4,
+                rows_per_chunk=rpc,
+                prefetch=pf,
+                target_blocks=tb,
+            )
+    elif variant == "direct_wgrad_gather":
+        for (wk16, wk), pf, rps, tb in itertools.product(
+            WGRAD_GATHER_WAVES,
+            WGRAD_GATHER_PREFETCH,
+            WGRAD_GATHER_RPS,
+            WGRAD_GATHER_BLOCKS,
+        ):
+            yield dict(
+                wave_k16=wk16,
+                waves_k=wk,
+                prefetch=pf,
+                rows_per_seg=rps,
+                target_blocks=tb,
+            )
+    elif variant in (_DGRAD_PATCH, _DGRAD_SMALLC):
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        patch = variant == _DGRAD_PATCH
+        for wc, wp, tc, tp, a, c, ck, pf in (
+            DGRAD_PATCH_KNOBS if patch else DGRAD_SMALLC_KNOBS
+        ):
+            knobs = dict(
+                waves_c=wc, waves_p=wp, tiles_c=tc, tiles_p=tp, ck=ck, stages=2
+            )
+            knobs.update(dict(tile_w=a, r_blk=c) if patch else dict(out_h=a, out_w=c))
+            if pf:
+                knobs.update(prefetch=True, sched="iterative-ilp")
+            yield knobs
+    elif variant == _FWD_WMMA:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return  # a wave32 kernel: no tuning for this arch at all
+        if caps is not None and caps.KH != caps.KW:
+            if caps.stride > 1:
+                yield from _fwd_wmma_poly_knobs()
+            else:
+                # 1 x R rows on 1-D signals and / or the Inception rectangular
+                # rows (a 1x7 "same" cap is both).
+                if caps.KH == 1:
+                    yield from _fwd_wmma_1d_knobs(caps.KW)
+                if (caps.KH, caps.KW, caps.PAD, caps.pad_w) in FWD_WMMA_RECT_LAYERS:
+                    yield from _fwd_wmma_knobs(
+                        FWD_WMMA_RECT3_KNOBS
+                        if caps.KH * caps.KW == 3
+                        else FWD_WMMA_RECT_KNOBS
+                    )
+        elif caps is not None and caps.cpg > 0:
+            # Pack groups up to one 32-channel WMMA K step.
+            yield from _fwd_wmma_knobs(
+                (
+                    FWD_WMMA_PACKED_STRIDED_KNOBS
+                    if caps.stride > 1
+                    else FWD_WMMA_PACKED_KNOBS
+                ),
+                pack_groups=max(1, 32 // caps.cpg),
+            )
+        elif caps is not None and caps.stride > 1 and caps.KH == 1:
+            yield from _fwd_wmma_sv_knobs()
+        elif caps is not None and caps.stride > 1 and caps.KH == caps.stride:
+            yield from _fwd_wmma_knobs(FWD_WMMA_PATCH2_KNOBS)
+            yield from _fwd_wmma_sv_knobs()
+        elif caps is not None and caps.stride > 1 and caps.dil_h == caps.dil_w == 1:
+            yield from _fwd_wmma_knobs(
+                FWD_WMMA_S2V_KNOBS if caps.PAD == 0 else FWD_WMMA_STRIDED_KNOBS
+            )
+        elif caps is not None and (caps.dil_h, caps.dil_w) != (1, 1):
+            yield from _fwd_wmma_knobs(
+                FWD_WMMA_DILATED_STRIDED_KNOBS
+                if caps.stride > 1
+                else FWD_WMMA_DILATED_KNOBS
+            )
+        else:
+            yield from _fwd_wmma_knobs(FWD_WMMA_KNOBS)
+            # tap_reuse copies of the dense rows it can serve (one image per
+            # block, whole rows per wave, no row ring); the validator drops
+            # the rest.
+            for knobs in _fwd_wmma_knobs(FWD_WMMA_KNOBS):
+                if knobs["tile_n"] == 1 and not knobs.get("row_ring"):
+                    yield dict(knobs, tap_reuse=True)
+            for *shape, tn, ck, pg, sched in FWD_WMMA_PP_KNOBS:
+                yield _wmma_fwd_knob_row(
+                    *shape,
+                    tile_n=tn,
+                    ck=ck,
+                    stages=2,
+                    pingpong=True,
+                    pp_group=pg if pg > 1 else None,
+                    sched=sched or None,
+                )
+    elif variant == _FWD_TAPOUTER:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        for *shape, ck, st in FWD_TAPOUTER_KNOBS:
+            yield _wmma_fwd_knob_row(*shape, ck=ck, stages=st)
+    elif variant == _FWD_GSTREAM:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        padded = caps is not None and caps.cpg not in FWD_GSTREAM_CHANNELS
+        for *shape, walk, st, ps, pd in (
+            FWD_GSTREAM_PADG_KNOBS if padded else FWD_GSTREAM_KNOBS
+        ):
+            if ps and (caps is None or caps.stride != 2):
+                continue
+            yield _wmma_fwd_knob_row(
+                *shape,
+                walk=walk,
+                stages=st,
+                phase_split=bool(ps),
+                pf_depth=pd if pd > 1 else None,
+            )
+    elif variant == _DW_FWD_WMMA:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        for fold, waves, bh, pf in itertools.product(
+            DW_FWD_WMMA_FOLDS,
+            DW_FWD_WMMA_WAVES,
+            DW_FWD_WMMA_BLOCK_H,
+            DW_FWD_WMMA_PREFETCH,
+        ):
+            yield dict(block_waves=waves, block_h=bh, w_fold=fold, prefetch_rows=pf)
+    elif variant in (_FWD_SMALLC, _FWD_SMALLK):
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        if variant == _FWD_SMALLC:
+            for wk, wp, tk, tp, oh, ow, tb, ts in FWD_SMALLC_KNOBS:
+                knobs = dict(
+                    waves_k=wk, waves_p=wp, tiles_k=tk, tiles_p=tp, out_h=oh, out_w=ow
+                )
+                if tb > 1:
+                    knobs["tiles_per_block"] = tb
+                if ts:
+                    knobs["tdm_store"] = True
+                yield knobs
+        else:
+            rows = FWD_SMALLK_KNOBS
+            if caps is not None:
+                rows = FWD_SMALLK_KNOBS_BY_LAYER.get(
+                    (caps.KH, caps.KW, caps.kpg), FWD_SMALLK_KNOBS
+                )
+            for wc, wp, tc, tp, oh, ow, ck, st, pf in rows:
+                knobs = dict(
+                    waves_c=wc,
+                    waves_p=wp,
+                    tiles_c=tc,
+                    tiles_p=tp,
+                    out_h=oh,
+                    out_w=ow,
+                    ck=ck,
+                    stages=st,
+                )
+                if pf:
+                    knobs.update(prefetch=True, sched="iterative-ilp")
+                yield knobs
+    elif variant == "direct_wgrad":
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size == 32:
+            for (wk, wc), (tk, tc), rps, rb, tdm in itertools.product(
+                WGRAD_W32_WAVES,
+                WGRAD_W32_TILES,
+                WGRAD_W32_ROWS_PER_SYNC,
+                WGRAD_W32_ROW_BLOCKS,
+                WGRAD_W32_TDM_STAGES,
+            ):
+                yield dict(
+                    wave_size=32,
+                    mfma_k=32,
+                    image_per_block=True,
+                    waves_k=wk,
+                    waves_c=wc,
+                    wave_tiles_k=tk,
+                    wave_tiles_c=tc,
+                    rows_per_sync=rps,
+                    row_blocks=rb,
+                    tdm_stages=tdm,
+                    ws_replicas=WGRAD_W32_WS_REPLICAS,
+                    lds_epilogue=True,
+                )
+            return
+        for (wk, wc, wq), hpb, mk in itertools.product(
+            wgrad_waves(), WGRAD_HPB, WGRAD_MFMA_K
+        ):
+            yield dict(waves_k=wk, waves_c=wc, waves_q=wq, ho_per_block=hpb, mfma_k=mk)
+    elif variant == "direct_wgrad_small_c":
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        for (wk, wc, tk, tc, vx, ss, wsr, uw), row_blocks in WGRAD_SMALL_C_CONFIGS:
+            for rb in row_blocks:
+                yield dict(
+                    waves_k=wk,
+                    waves_c=wc,
+                    wave_tiles_k=tk,
+                    wave_tiles_c=tc,
+                    vec_x=vx,
+                    sub_steps=ss,
+                    ws_replicas=wsr,
+                    uniform_wave=uw,
+                    row_blocks=rb,
+                )
+    elif variant == "direct_depthwise_wgrad":
+        from rocke.core.arch import ArchTarget
+
+        # Cached for the wave32 targets (gfx11, gfx12, gfx1250) only; the
+        # VALU kernel also builds at wave64, but the cache does not carry it.
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        for cpl, waves, rpw, woc, rs, wsr, pf, cy in DW_WGRAD_CONFIGS:
+            yield dict(
+                wave_size=32,
+                chan_per_lane=cpl,
+                waves=waves,
+                rows_per_wave=rpw,
+                wo_chunk=woc,
+                r_split=rs,
+                ws_replicas=wsr,
+                prefetch=pf,
+                carry=cy,
+            )
+    else:
+        raise ValueError(f"unknown direct conv variant {variant!r}")
+
+
+def _dw_win_policy_reason(caps: DirectCaps, knobs: dict, arch: str) -> Optional[str]:
+    """Why the cache does not build this windowed depthwise dgrad knob for
+    ``caps`` (``None`` when it does). These are cache-scope rules of the knob
+    image (see :data:`DW_WIN_TILES`), not kernel limits: the validator still
+    accepts what they skip, so a JIT sweep can try it."""
+    from kernels.common.conv_direct_grouped import DW_DGRAD_WIN_DOT2_ARCHES
+
+    if knobs.get("mfma"):
+        if caps.KH not in DW_WIN_MFMA_FILTERS or caps.PAD != _same_pad(caps.KH):
+            return "the MFMA form is cached for 'same'-padded 5x5..9x9 only"
+        return None
+    want_dot2 = caps.KW >= 5 and arch in DW_DGRAD_WIN_DOT2_ARCHES
+    if knobs["dot2"] != want_dot2:
+        return "dot2 is cached exactly where it pairs taps (KW >= 5, fdot2 arch)"
+    if knobs["ch_per_lane"] > 1 and caps.KW != 3:
+        return "packed channel pairs are cached for 3x3 only"
+    fmas = (
+        knobs["block_h"] * caps.KH * caps.KW * knobs["block_w"] * knobs["ch_per_lane"]
+    )
+    if fmas > DW_WIN_UNROLL_BUDGET:
+        return f"{fmas} unrolled FMAs exceed the cache budget {DW_WIN_UNROLL_BUDGET}"
+    return None
+
+
+def _dgrad_fused_rule_block_groups(caps: DirectCaps) -> int:
+    """block_groups of the generic direct dgrad policy's per-channel row:
+    the wider channel count times block_groups stays near a 32..64-channel
+    slice (1 from 32 channels, 2 from 16, else 4), halved for 5x5 / 7x7
+    filters (their accumulator ring is KH deep)."""
+    chans = max(caps.cpg, caps.kpg)
+    bg = 1 if chans >= 32 else 2 if chans >= 16 else 4
+    return max(1, bg // 2) if caps.KH >= 5 else bg
+
+
+def _dgrad_fused_policy_reason(
+    caps: DirectCaps, knobs: dict, arch: str, dtype: str = DIRECT_DTYPE
+) -> str | None:
+    """Why the cache does not build this fused generic dgrad knob for ``caps``
+    (``None`` when it does). Cache-scope rules of the policy image (see
+    :data:`DGRAD_FUSED_FILTERS`), not kernel limits: the validator still
+    accepts what they skip, so a JIT sweep can try it."""
+    from kernels.common import conv_direct_grouped as dc
+
+    stream = "prefetch_rows" in knobs
+    if stream:
+        # Cheap rules of the row-stream stack first; the base knobs below are
+        # decided without it, as the policy does.
+        if caps.cpg != caps.kpg:
+            return "the row-stream stack is cached for square channel groups only"
+        if knobs["block_q"] != 16:
+            return "the row-stream stack is cached on 16-column strips only"
+        # The staged input column is block_groups * (dgrad kpg) channels.
+        row_bytes = knobs["block_groups"] * caps.kpg * 2
+        pad = DGRAD_FUSED_LDS_PAD if row_bytes % 32 == 0 else 0
+        if (knobs["lds_pad"], knobs["stage_out"]) not in (
+            (pad, True),
+            (pad, False),
+            (0, False),
+        ):
+            return f"the row-stream stack is cached with lds_pad {pad} or 0"
+        knobs = {k: v for k, v in knobs.items() if k not in _DGRAD_FUSED_STREAM_KEYS}
+
+    rule_bg = _dgrad_fused_rule_block_groups(caps)
+    if knobs["block_groups"] > rule_bg:
+        return f"block_groups above the policy's {rule_bg} for these channels"
+    large = caps.KH >= 5
+    if large and knobs["block_h"] not in DGRAD_FUSED_BLOCK_H_LARGE:
+        return f"5x5/7x7 filters are cached at tiles {DGRAD_FUSED_BLOCK_H_LARGE}"
+    if knobs["block_q"] != 16:
+        chans = max(caps.cpg, caps.kpg)
+        if knobs["block_h"] not in (4, 8):
+            return "32-column strips are cached on 4- and 8-row tiles only"
+        if not (chans >= 16 or (large and chans >= 8)):
+            return "32-column strips are cached for wide channel groups only"
+    if knobs["fold_k32"] and caps.kpg % 32:
+        return "fold_k32 needs kpg % 32 == 0"
+    probe = probe_problem(caps, dtype, "direct_grouped_dgrad_fused")
+    if not knobs["fold_k32"] and caps.kpg % 32 == 0:
+        # 16-wide atoms are the fallback where the 32-wide one is not valid
+        # (no 16x16x32 atom on the target).
+        k32 = make_spec(
+            "direct_grouped_dgrad_fused", probe, {**knobs, "fold_k32": True}
+        )
+        if validate_spec("direct_grouped_dgrad_fused", k32, arch)[0]:
+            return "16-wide atoms are cached where fold_k32 is invalid"
+    want_wpe = 0
+    if not knobs["fold_k32"]:
+        base = make_spec(
+            "direct_grouped_dgrad_fused", probe, {**knobs, "waves_per_eu": 0}
+        )
+        if dc.preload_weight_vgprs(base) <= DGRAD_FUSED_WPE_MAX_VGPRS:
+            want_wpe = DGRAD_FUSED_WPE
+    if knobs["waves_per_eu"] != want_wpe:
+        return f"waves_per_eu is cached at the policy's {want_wpe} for these knobs"
+    if not knobs["dgrad_weights_lds"]:
+        # Gathered weights are the fallback where the LDS-staged form is not
+        # valid (no transpose reads, or the staged slice does not fit).
+        lds = make_spec(
+            "direct_grouped_dgrad_fused", probe, {**knobs, "dgrad_weights_lds": True}
+        )
+        if validate_spec("direct_grouped_dgrad_fused", lds, arch)[0]:
+            return "gathered weights are cached where the LDS-staged form is invalid"
+    if stream:
+        # The policy keeps the spec without the stack where waves_m = 2 is
+        # valid (its split-M stack is opt-in, not cached).
+        split_m = make_spec(
+            "direct_grouped_dgrad_fused",
+            probe,
+            {
+                **knobs,
+                "prefetch_rows": DGRAD_FUSED_PREFETCH_ROWS,
+                "lds_only_sync": True,
+                "waves_m": 2,
+            },
+        )
+        if validate_spec("direct_grouped_dgrad_fused", split_m, arch)[0]:
+            return "the row-stream stack is not cached where waves_m = 2 is valid"
+    return None
+
+
+def _nongrouped_spills(spec, arch: str) -> bool:
+    """Would this non-grouped kernel spill registers? Such a binary pays scratch
+    traffic every channel chunk and is the slowest to compile, so it is not
+    cached.
+    Its register footprint is fixed by the baked capabilities and the tile, not
+    by the probe shape, so one answer holds for every problem it would serve."""
+    from kernels.common.conv_direct_nongrouped import nongrouped_register_reason
+
+    return nongrouped_register_reason(spec, arch) is not None
+
+
+def _dw_dgrad_packed_spills(caps: DirectCaps, knobs: dict, arch: str) -> bool:
+    """Would this channel-packed (``cpl > 1``) depthwise dgrad binary spill?
+
+    Not a validity rule -- a spilling kernel is still correct -- but it costs
+    build time, cache size and tuning time for a binary selection would skip.
+    The estimate is per lane: two registers per packed weight tap (the
+    ``cpl * KH * KW`` taps are preloaded) plus the accumulator rows,
+    ``cpl * KH * block_w`` of them per stride step. The compiled grid tracks
+    the weights far more than the accumulator slots or the prefetched dY rows,
+    so neither the slot count's stride factor nor the prefetch is charged; see
+    :data:`DW_DGRAD_PACKED_LIVE_BUDGET` for the calibration.
+    """
+    from rocke.core.arch import ArchTarget
+
+    cpl = knobs.get("cpl", 1)
+    if cpl == 1:
+        return False
+    live = cpl * caps.KH * (2 * caps.KW + knobs["block_w"] / caps.stride)
+    if ArchTarget.from_gfx(arch).target_family == "gfx12_cdna":
+        if knobs["block_waves"] < 4:
+            return False
+        return live > DW_DGRAD_PACKED_LIVE_BUDGET_GFX1250
+    return live > DW_DGRAD_PACKED_LIVE_BUDGET
+
+
+def _wgrad_image_spills(spec) -> bool:
+    """Would this wave32 image-per-block wgrad binary spill registers?
+
+    The spec's estimate counts the accumulators and the dY/X fragments only.
+    The register-staged body (``tdm_stages=0``) of a multi-tile wave
+    (``wave_tiles_k * wave_tiles_c > 1``) also holds the staged rows and
+    compiles to more than 256 VGPRs: a block of up to
+    :data:`WGRAD_W32_UNCAPPED_WAVES` waves holds that, but a larger block caps
+    a wave at 256, so the binary spills to scratch. Such a tiling reaches the
+    grid as the direct-epilogue fallback of a block whose dW tile does not fit
+    the LDS epilogue. The TDM-staged body of the same tiling stays under the
+    cap and is still cached. Not a validity rule (a spilling kernel is still
+    correct), so it is a grid filter, like the other ``*_spills`` here.
+    """
+    if not getattr(spec, "image_per_block", False):
+        return False
+    return (
+        spec.waves_k * spec.waves_c > WGRAD_W32_UNCAPPED_WAVES
+        and spec.tdm_stages == 0
+        and spec.wave_tiles_k * spec.wave_tiles_c > 1
+    )
+
+
+def _depthwise_stream_spills(spec) -> bool:
+    """Would this row-streaming depthwise kernel spill registers? Such a binary
+    takes minutes to compile and runs far slower than the output-stationary
+    kernel the grid also builds for the shape, so it is not cached."""
+    from kernels.common.conv_direct_grouped import depthwise_stream_register_reason
+
+    return depthwise_stream_register_reason(spec) is not None
+
+
+# ---------------------------------------------------------------------------
+# Identities and jobs
+# ---------------------------------------------------------------------------
+
+
+def _identity(
+    arch: str,
+    wave_size: int,
+    variant: str,
+    direction: str,
+    caps: DirectCaps,
+    knobs: dict,
+    dtype: str = DIRECT_DTYPE,
+) -> KernelIdentity:
+    dtype_a, dtype_b, dtype_d = direct_dtype_triple(dtype)
+    return KernelIdentity(
+        arch=arch,
+        direction=direction,
+        algorithm=variant,
+        dtype_a=dtype_a,
+        dtype_b=dtype_b,
+        dtype_d=dtype_d,
+        # Direct conv is not a GEMM: no tile, warp or vector fields.
+        tile_m=0,
+        tile_n=0,
+        tile_k=0,
+        warp_m=0,
+        warp_n=0,
+        warp_tile_m=0,
+        warp_tile_n=0,
+        warp_tile_k=0,
+        pipeline="direct",
+        epilogue="direct",
+        wave_size=wave_size,
+        vector_size_a=0,
+        vector_size_b=0,
+        vector_size_c=0,
+        filter_h=caps.KH,
+        filter_w=caps.KW,
+        stride_h=caps.stride,
+        stride_w=caps.stride,
+        dilation_h=caps.dil_h,
+        dilation_w=caps.dil_w,
+        pad_h=caps.PAD,
+        pad_w=caps.PAD_W,
+        cpg=caps.cpg,
+        kpg=caps.kpg,
+        knobs=json.dumps(knobs, sort_keys=True),
+    )
+
+
+def _helper_identity(
+    arch: str,
+    wave_size: int,
+    variant: str,
+    caps: DirectCaps,
+    knobs: dict,
+    dtype: str = DIRECT_DTYPE,
+) -> KernelIdentity:
+    # The weight transforms depend on the filter and channel counts only;
+    # stride and padding are zeroed so every pipeline entry that shares a
+    # filter shares the helper binary. The wgrad fold depends on its knobs
+    # alone (the dW extent it folds), so it zeroes the channel counts too.
+    # The two-stage reduce depends on its replica count alone.
+    if variant == DIRECT_WGRAD_REDUCE:
+        return wgrad_reduce_identity(arch, wave_size, knobs["ws_replicas"], dtype)
+    if variant == _WGRAD_FOLD:
+        return _identity(
+            arch,
+            wave_size,
+            variant,
+            "direct_wgrad_helper",
+            replace(caps, PAD=0, stride=0, cpg=0, kpg=0),
+            knobs,
+            dtype,
+        )
+    return _identity(
+        arch,
+        wave_size,
+        variant,
+        "direct_dgrad_helper",
+        replace(caps, PAD=0, stride=0),
+        knobs,
+        dtype,
+    )
+
+
+# Capabilities of the split reduction: it bakes no filter or channel count.
+_NO_CAPS = DirectCaps(KH=0, PAD=0, stride=0, cpg=0, kpg=0)
+
+
+def _split_reduce_identity(
+    arch: str, wave_size: int, split_c: int, dtype: str = DIRECT_DTYPE
+) -> KernelIdentity:
+    return _identity(
+        arch,
+        wave_size,
+        _SPLIT_REDUCE,
+        _FWD_HELPER,
+        _NO_CAPS,
+        {"split_c": split_c},
+        dtype,
+    )
+
+
+def wgrad_reduce_identity(
+    arch: str, wave_size: int, ws_replicas: int, dtype: str = DIRECT_DTYPE
+) -> KernelIdentity:
+    """The cached Stage 2 fold of a two-stage wgrad kernel with ``ws_replicas``."""
+    return _identity(
+        arch,
+        wave_size,
+        DIRECT_WGRAD_REDUCE,
+        "direct_wgrad_helper",
+        _WGRAD_REDUCE_CAPS,
+        {"ws_replicas": ws_replicas},
+        dtype,
+    )
+
+
+def _split_reduce_job(
+    arch: str, wave_size: int, split_c: int, dtype: str = DIRECT_DTYPE
+) -> BuildJob:
+    return _job(
+        _split_reduce_identity(arch, wave_size, split_c, dtype),
+        _NO_CAPS,
+        {"split_c": split_c},
+    )
+
+
+def _caps_of(identity: KernelIdentity) -> DirectCaps:
+    return DirectCaps(
+        KH=identity.filter_h,
+        PAD=identity.pad_h,
+        stride=identity.stride_h,
+        cpg=identity.cpg,
+        kpg=identity.kpg,
+        dil_h=identity.dilation_h,
+        dil_w=identity.dilation_w,
+        kw=0 if identity.filter_w == identity.filter_h else identity.filter_w,
+        pad_w=-1 if identity.pad_w == identity.pad_h else identity.pad_w,
+    )
+
+
+def _dw_cols_probe_width(caps: DirectCaps, channels: int, strip: int) -> int:
+    """A width the small-C depthwise wgrad takes at ``caps``, or 64 if none.
+
+    The kernel needs Wo to be a multiple of its strip and both W * C and
+    Wo * C to be whole 16-byte vectors. W is a runtime extent, so any width
+    that passes probes the same binary; a fixed 64 fails every one of them
+    at PAD 0 (Wo = 62 at 3x3), which left those capability rows unbuilt.
+    """
+    for w in range(64, 64 + 16 * strip * caps.stride):
+        wo = (w + 2 * caps.PAD - caps.KH) // caps.stride + 1
+        if (w * channels) % 8 == 0 and (wo * channels) % 8 == 0 and wo % strip == 0:
+            return w
+    return 64
+
+
+def _dw_mfma_probe_width(caps: DirectCaps, knobs: dict) -> int:
+    """The narrowest W whose ``unfold_n`` packed images fit the depthwise
+    MFMA wgrad's column tile (W is a runtime extent, so any such width probes
+    the same binary), or 64 when none does."""
+    for w in range(1, 65):
+        wo = w + 2 * caps.PAD - caps.KH + 1
+        if wo < 1:
+            continue
+        pitch = max(wo, wo + caps.KH - 1 - caps.PAD, caps.PAD + w)
+        if knobs["unfold_n"] * pitch <= 4 * knobs["q_tiles"]:
+            return w
+    return 64
+
+
+def probe_problem(
+    caps: DirectCaps,
+    dtype: str = DIRECT_DTYPE,
+    variant: Optional[str] = None,
+    knobs: Optional[dict] = None,
+):
+    """A problem with exactly ``caps`` that every knob in the grid fits.
+
+    The emitted IR does not depend on N, H, W or groups (the shape-invariance
+    cases in test_conv_abi.py assert it), so the probe only has to satisfy the
+    spec validators: 64 groups divide every block_groups, 256 depthwise
+    channels fill the widest depthwise block (the spatial depthwise kernel
+    takes fewer groups than a wave, so it gets 8; the dense MFMA dgrad channel
+    counts serve groups == 1, so they get 1), and 64x64 leaves every
+    stride-2 output wider than the widest W tile. Runtime channel counts
+    (``cpg == 0``: the non-grouped forward kernel and wgrad) take one group of
+    256: a multiple of every channel chunk and of every channel tile, and as
+    many 16-channel tiles as the widest wgrad ``waves_c`` -- 1024 for the
+    non-grouped kernel, whose split-C rows need a chunk per split.
+
+    The runtime-channel MFMA dgrad bakes its channel *tile counts* instead,
+    so its probe takes them from ``knobs``: ``k_atoms`` full K-atoms of dY
+    channels and ``m_tiles`` full 16-channel tiles of dX channels, over 16
+    groups (a multiple of every block_groups).
+    """
+    from kernels.common.conv_direct_grouped import DirectConvProblem
+
+    if variant in (_FWD_SMALLC, _FWD_SMALLK):
+        # Ungrouped, the small channel count baked; 128 of the runtime one
+        # (a multiple of every channel block and chunk) on a 64x64 image.
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=1,
+            cpg=caps.cpg or 128,
+            kpg=caps.kpg or 128,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            pad_w=caps.pad_w,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant == _FWD_WMMA and caps.KW != caps.KH and caps.stride > 1:
+        # A 1-D strided filter: one row, 256 runtime channels, W a multiple
+        # of the stride.
+        return DirectConvProblem(
+            N=1,
+            H=1,
+            W=64 * caps.stride,
+            groups=1,
+            cpg=256,
+            kpg=256,
+            KH=1,
+            KW=caps.KW,
+            PAD=0,
+            pad_w=caps.pad_w,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant == "direct_wgrad_dw_cols":
+        # The binary bakes C (knob ``channels``): one group per channel.
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=_dw_cols_probe_width(caps, knobs["channels"], knobs["strip"]),
+            groups=knobs["channels"],
+            cpg=1,
+            kpg=1,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant == "direct_wgrad_dw_mfma" and knobs.get("unfold_n", 1) > 1:
+        # Packed images: the narrowest image ``unfold_n`` of fit the tile.
+        return DirectConvProblem(
+            N=knobs["unfold_n"],
+            H=64,
+            W=_dw_mfma_probe_width(caps, knobs),
+            groups=256,
+            cpg=1,
+            kpg=1,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant == "direct_wgrad_gather":
+        # Dense, C baked, K runtime: a K wider than every block_k.
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=1,
+            cpg=caps.cpg,
+            kpg=96,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant == "direct_dgrad_mfma_rtc":
+        atom = 32 if knobs["fold_k32"] else 16
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=16,
+            cpg=knobs["m_tiles"] * 16,
+            kpg=knobs["k_atoms"] * atom,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant == _GROUPED_HALO:
+        # Runtime groups and channels: 64 channels per group are a multiple of
+        # every chunk and channel tile at every merge degree, and 16 groups a
+        # multiple of every degree.
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=16,
+            cpg=64,
+            kpg=64,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant in (_DGRAD_PATCH, _DGRAD_SMALLC):
+        # Ungrouped stems: dX channels baked, 64 dY channels, a 64x64 image
+        # (whole patches for every patch size up to 16 but 14).
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=1,
+            cpg=caps.cpg,
+            kpg=64,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if caps.cpg == 0:
+        # The non-grouped kernel's split-C rows need a whole chunk per split:
+        # 1024 channels cover the deepest split (16 x ck 64).
+        channels = 1024 if variant == "direct_nongrouped" else 256
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=1,
+            cpg=channels,
+            kpg=channels,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+            dil_h=caps.dil_h,
+            dil_w=caps.dil_w,
+            pad_w=caps.pad_w,
+        )
+    n_images = 1
+    if variant == "direct_depthwise_spatial":
+        groups = 8
+    elif variant == "direct_grouped_dgrad_fused":
+        # Its rows share channel counts with the dense MFMA dgrad rows but
+        # serve grouped problems: every block_groups must divide the probe,
+        # and eight images give every tile height the row bands xcd_tiles
+        # needs.
+        groups = 64
+        n_images = 8
+    elif variant == "direct_wgrad_small_c":
+        groups = 1
+    elif (caps.cpg, caps.kpg) in _DENSE_MFMA_DGRAD_CHANNELS:
+        # Dense channel counts serve groups == 1: one group per block. Wider
+        # blocks would only build kernels no problem with these counts can
+        # launch (and some of them fail to compile).
+        groups = 1
+    else:
+        groups = 256 if caps.cpg == 1 else 64
+    return DirectConvProblem(
+        N=n_images,
+        H=64,
+        W=64,
+        groups=groups,
+        cpg=caps.cpg,
+        kpg=caps.kpg,
+        KH=caps.KH,
+        KW=caps.KW,
+        PAD=caps.PAD,
+        stride=caps.stride,
+        dtype=dtype,
+        dil_h=caps.dil_h,
+        dil_w=caps.dil_w,
+        pad_w=caps.pad_w,
+    )
+
+
+def _job(identity: KernelIdentity, caps: DirectCaps, knobs: dict) -> BuildJob:
+    return BuildJob(
+        identity=identity,
+        direction=identity.direction,
+        spec_kwargs=knobs,
+        caps=dict(
+            KH=caps.KH,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            cpg=caps.cpg,
+            kpg=caps.kpg,
+            dil_h=caps.dil_h,
+            dil_w=caps.dil_w,
+            **({"kw": caps.kw} if caps.kw else {}),
+            **({"pad_w": caps.pad_w} if caps.pad_w >= 0 else {}),
+        ),
+    )
+
+
+# Non-grouped atoms whose K is half the wide atom of the same tile; on an arch
+# that emulates TF32 only the wide (K-32 / K-16) atoms exist, so these are
+# zero-padded to them.
+_NONGROUPED_NARROW_ATOMS = {"32x32x8": "32x32x16", "16x16x16": "16x16x32"}
+
+
+def tf32_narrow_reason(variant: str, problem, knobs: dict, arch: str) -> Optional[str]:
+    """Why a TF32 config is not worth building or timing, or ``None``.
+
+    gfx950 has only the wide emulated TF32 atoms (16x16x32 / 32x32x16, eight
+    fp32 per lane); a 16-channel K-atom (four per lane) is zero-padded to one,
+    so it issues the same three bf16 MFMAs for half the work. Such a config is
+    dropped -- but only where a wide config computes the same ``problem``;
+    elsewhere the padded one is the only kernel and stays. Never drops
+    anything for another dtype or on an arch with native TF32 (gfx942, where a
+    narrow fragment is split exactly, not padded).
+    """
+    if getattr(problem, "dtype", None) != "tf32" or not tf32_is_emulated(arch):
+        return None
+    if variant == "direct_grouped":
+        if not knobs.get("fold_k32") and problem.cpg % 32 == 0:
+            return "tf32 K-16 atom zero-padded on an emulated arch; fold_k32 covers cpg"
+        return None
+    if variant in _MFMA_DGRAD:
+        if knobs.get("fold_k32"):
+            return None
+        # The fprop pass reduces over kpg: the fold covers it when the grid
+        # has the folded twin, kpg is a multiple of 32, its atom count
+        # splits over the same waves_k and the twin fits its registers.
+        twin = (
+            knobs.get("waves_q", 1),
+            knobs["waves_k"],
+            knobs.get("runtime_k_loop", False),
+            knobs.get("persistent_grid", False),
+            True,
+        )
+        if twin not in dgrad_waves("tf32"):
+            return None
+        wide = dict(knobs, fold_k32=True)
+        if variant == "direct_dgrad_mfma_rtc":
+            if problem.kpg % 32 or problem.kpg // 32 not in dgrad_rtc_k_atoms(
+                knobs["waves_k"], True
+            ):
+                return None
+            wide["k_atoms"] = problem.kpg // 32
+            if dgrad_rtc_spills(wide, problem.KH, problem.KW, arch, problem.dtype):
+                return None
+        if _mfma_knobs_reason(problem, wide, arch) is None:
+            return "tf32 K-16 atom zero-padded on an emulated arch; fold_k32 covers kpg"
+        return None
+    if variant == "direct_nongrouped":
+        if knobs.get("atom") in _NONGROUPED_NARROW_ATOMS and problem.cpg % 32 == 0:
+            return (
+                f"tf32 atom {knobs['atom']} zero-padded on an emulated arch; "
+                f"{_NONGROUPED_NARROW_ATOMS[knobs['atom']]} covers C"
+            )
+        return None
+    if variant == "direct_wgrad":
+        # The wgrad MFMA K is the output-column axis: mfma_k=16 pads.
+        if knobs.get("mfma_k", 32) < 32:
+            return "tf32 mfma_k=16 zero-padded on an emulated arch; mfma_k=32 covers it"
+    return None
+
+
+def _caps_jobs(
+    arch: str,
+    wave_size: int,
+    variant: str,
+    direction: str,
+    caps: DirectCaps,
+    dtype: str,
+) -> Tuple[int, List[Tuple[str, BuildJob]]]:
+    """Walk one (variant, capability) cell of the grid.
+
+    Returns the raw candidate count and the valid ``(key, job)`` pairs in
+    generator order; duplicates are resolved by the caller's ordered merge.
+    The MFMA dgrad entries pull in their weight-transform helpers.
+    """
+    out: List[Tuple[str, BuildJob]] = []
+    n_raw = 0
+    rtc_dgrad = variant == "direct_dgrad_mfma_rtc"
+    # The runtime-channel dgrad probe follows each knob's tile counts, the
+    # small-C depthwise wgrad's its baked channel count, the depthwise MFMA
+    # wgrad's its packed images (a narrow enough image).
+    knob_probe = rtc_dgrad or variant in (
+        "direct_wgrad_dw_cols",
+        "direct_wgrad_dw_mfma",
+    )
+    probe = None if knob_probe else probe_problem(caps, dtype, variant)
+    for knobs in _knob_grid(variant, arch, dtype, caps):
+        n_raw += 1
+        if knob_probe:
+            probe = probe_problem(caps, dtype, variant, knobs)
+        if rtc_dgrad and dgrad_rtc_spills(knobs, caps.KH, caps.KW, arch, dtype):
+            continue
+        if variant in _MFMA_DGRAD and _mfma_knobs_reason(probe, knobs, arch):
+            continue
+        if variant == "direct_depthwise_dgrad_win" and _dw_win_policy_reason(
+            caps, knobs, arch
+        ):
+            continue
+        if variant == "direct_grouped_dgrad_fused" and _dgrad_fused_policy_reason(
+            caps, knobs, arch, dtype
+        ):
+            continue
+        if variant == "direct_depthwise_dgrad" and _dw_dgrad_packed_spills(
+            caps, knobs, arch
+        ):
+            continue
+        # The probe's channel counts are the binary's own when they are
+        # baked; a runtime-channel binary is judged per problem in plan_for.
+        if (
+            caps.cpg
+            and not rtc_dgrad
+            and tf32_narrow_reason(variant, probe, knobs, arch)
+        ):
+            continue
+        spec = make_spec(variant, probe, knobs, wave_size)
+        if not validate_spec(variant, spec, arch)[0]:
+            if not knobs.get("lds_epilogue"):
+                continue
+            # The block's dW tile does not fit the LDS epilogue: the same
+            # tiling with the direct epilogue instead.
+            knobs = dict(knobs, lds_epilogue=False)
+            spec = make_spec(variant, probe, knobs, wave_size)
+            if not validate_spec(variant, spec, arch)[0]:
+                continue
+        if variant in _HALO_VARIANTS and _nongrouped_spills(spec, arch):
+            continue
+        if variant == "direct_depthwise" and _depthwise_stream_spills(spec):
+            continue
+        if variant == "direct_wgrad" and _wgrad_image_spills(spec):
+            continue
+        cell = [
+            _job(
+                _identity(
+                    arch, wave_size, variant, f"direct_{direction}", caps, knobs, dtype
+                ),
+                caps,
+                knobs,
+            )
+        ]
+        if variant in _WGRAD_FOLDED:
+            fold_knobs = direct_wgrad_fold_knobs(variant, caps.KH, caps.KW, caps.cpg)
+            cell.append(
+                _job(
+                    _helper_identity(
+                        arch, wave_size, _WGRAD_FOLD, caps, fold_knobs, dtype
+                    ),
+                    replace(caps, PAD=0, stride=0, cpg=0, kpg=0),
+                    fold_knobs,
+                )
+            )
+        if variant == "direct_nongrouped" and knobs.get("split_c", 1) > 1:
+            cell.append(_split_reduce_job(arch, wave_size, knobs["split_c"], dtype))
+        if variant in _MFMA_DGRAD:
+            for helper, helper_knobs, _, _ in direct_dgrad_weight_transforms(
+                knobs, variant
+            ):
+                cell.append(
+                    _job(
+                        _helper_identity(
+                            arch, wave_size, helper, caps, helper_knobs, dtype
+                        ),
+                        caps,
+                        helper_knobs,
+                    )
+                )
+        if variant in _WGRAD_TWO_STAGE and direct_wgrad_replicas(spec) > 1:
+            reduce_id = wgrad_reduce_identity(
+                arch, wave_size, direct_wgrad_replicas(spec), dtype
+            )
+            cell.append(
+                _job(reduce_id, _WGRAD_REDUCE_CAPS, json.loads(reduce_id.knobs))
+            )
+        out.extend((job.identity.stable_hash(), job) for job in cell)
+    return n_raw, out
+
+
+def count_direct_jobs(
+    directions: Sequence[str], arch: str, dtype: str = DIRECT_DTYPE
+) -> int:
+    """Raw candidate count ``direct_kernel_sweep.enumerate_direct_jobs`` walks
+    (the progress denominator): capabilities times tuning knobs, before validation."""
+    return sum(
+        sum(1 for _ in _knob_grid(variant, arch, dtype, caps))
+        for variant, (direction, caps_list) in DIRECT_CAPABILITIES.items()
+        if direction in directions
+        for caps in caps_list
+    )
+
+
+def grid_caches_variant(variant: str, arch: str, dtype: str = DIRECT_DTYPE) -> bool:
+    """Whether the direct-conv AOT grid has a valid job of ``variant`` for
+    ``arch``: some capability of :data:`DIRECT_CAPABILITIES` with a tuning
+    knob there that the variant's validator accepts.
+
+    The grid and the validators are where each variant's arch scope lives
+    (the depthwise wgrad one, for example, is the wave32 targets), so a test
+    that should run wherever the cache ships a kernel asks this rather than
+    keeping its own arch list. An arch rocke has no target for has no job.
+    """
+    from rocke.core.arch import ArchTarget
+
+    try:
+        wave_size = ArchTarget.from_gfx(arch).wave_size
+    except KeyError:
+        return False
+    direction, caps_list = DIRECT_CAPABILITIES[variant]
+    return any(
+        _caps_jobs(arch, wave_size, variant, direction, caps, dtype)[1]
+        for caps in caps_list
+    )
+
+
+@dataclass(frozen=True)
+class _DtypeOnly:
+    """The only problem field a shape-independent helper's spec reads."""
+
+    dtype: str
+
+
+def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
+    """Build one direct job's kernel IR. Returns ``(kernel, meta)``.
+
+    Compilation, deduplication and incremental rebuilds are
+    :func:`compile_jobs`'s; this only decides what the kernel is.
+    """
+    if dtype not in DIRECT_DTYPES:
+        raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
+    caps = DirectCaps(**job.caps)
+    variant = job.identity.algorithm
+    if variant == _SPLIT_REDUCE:
+        spec = make_spec(variant, _DtypeOnly(dtype), job.spec_kwargs)
+        return _build_kernel(variant, spec, arch), {}
+    probe = probe_problem(caps, dtype, variant, job.spec_kwargs)
+    spec = make_spec(variant, probe, job.spec_kwargs, job.identity.wave_size)
+    ok, why = validate_spec(variant, spec, arch)
+    if not ok:
+        raise ValueError(why)
+    # The wave size the binary is built at, for every spec that takes the
+    # target's: the run side checks it against the identity before it derives
+    # a launch geometry from it (direct_entry_wave_reason).
+    meta = (
+        {"spec_wave_size": spec.wave_size}
+        if direct_spec_takes_target_wave(variant, job.spec_kwargs)
+        else {}
+    )
+    return _build_kernel(variant, spec, arch), meta
+
+
+def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
+    """The job ``--compile-all`` builds the direct identity ``identity`` from.
+
+    A direct identity carries its capabilities and knobs verbatim, so the job
+    is read straight off it -- and then checked: the identity those caps and
+    knobs produce has to equal ``identity``, or the grid cannot build it (a
+    non-square filter, say) and ``LookupError`` is raised.
+    """
+    if not identity.is_direct:
+        raise LookupError(f"not a direct conv identity: {identity.algorithm}")
+    if identity.dtype_a not in DIRECT_DTYPES:
+        raise LookupError(
+            f"direct conv builds {DIRECT_DTYPES}, not {identity.dtype_a!r}"
+        )
+    caps = _caps_of(identity)
+    knobs = json.loads(identity.knobs) if identity.knobs else {}
+    if identity.direction == _FWD_HELPER:
+        split_c = knobs.get("split_c")
+        rebuilt = (
+            _split_reduce_identity(
+                identity.arch, identity.wave_size, split_c, identity.dtype_a
+            )
+            if identity.algorithm == _SPLIT_REDUCE and isinstance(split_c, int)
+            else None
+        )
+        if (
+            rebuilt is None
+            or replace(rebuilt, llvm_flavor=identity.llvm_flavor) != identity
+        ):
+            raise LookupError(
+                f"the direct grid cannot build this identity: {identity.label()}"
+            )
+        return _job(identity, _NO_CAPS, {"split_c": split_c})
+    if identity.direction in ("direct_dgrad_helper", "direct_wgrad_helper"):
+        rebuilt = _helper_identity(
+            identity.arch,
+            identity.wave_size,
+            identity.algorithm,
+            caps,
+            knobs,
+            identity.dtype_a,
+        )
+    else:
+        rebuilt = _identity(
+            identity.arch,
+            identity.wave_size,
+            identity.algorithm,
+            identity.direction,
+            caps,
+            knobs,
+            identity.dtype_a,
+        )
+    rebuilt = replace(rebuilt, llvm_flavor=identity.llvm_flavor)
+    if (caps.kw or caps.pad_w >= 0) and identity.algorithm not in PER_AXIS_PAD_VARIANTS:
+        # Only the PER_AXIS_PAD_VARIANTS rows carry a non-square filter or a
+        # per-axis padding; the spec validation below still checks those.
+        raise LookupError(
+            f"the direct grid cannot build this identity: "
+            f"{caps.KH}x{caps.KW} filter, padding {caps.PAD}x{caps.PAD_W}"
+        )
+    if rebuilt != identity:
+        want, got = identity.to_dict(), rebuilt.to_dict()
+        diff = {k: want[k] for k in want if want[k] != got[k]}
+        raise LookupError(f"the direct grid cannot build this identity: {diff}")
+    if identity.direction not in ("direct_dgrad_helper", "direct_wgrad_helper"):
+        # The fields can be consistent and still name a kernel no variant
+        # computes (a dilated grouped kernel, say): ask the kernel's validator.
+        variant = identity.algorithm
+        probe = probe_problem(caps, identity.dtype_a, variant, knobs)
+        spec = make_spec(variant, probe, knobs, identity.wave_size)
+        ok, why = validate_spec(variant, spec, identity.arch)
+        if not ok:
+            raise LookupError(f"the direct grid cannot build this identity: {why}")
+    if identity.direction == "direct_dgrad_helper":
+        # A helper's identity zeroes the padding and stride (its code does
+        # not read them), but the grid builds it with the capabilities of the
+        # MFMA dgrad row that pulled it in -- the one row, baked or runtime
+        # channels (cpg == kpg == 0), with its filter and channel counts.
+        caps = next(
+            (
+                row
+                for variant in _MFMA_DGRAD
+                for row in DIRECT_CAPABILITIES[variant][1]
+                if (row.KH, row.cpg, row.kpg) == (caps.KH, caps.cpg, caps.kpg)
+            ),
+            caps,
+        )
+    return _job(identity, caps, knobs)

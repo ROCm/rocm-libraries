@@ -5,11 +5,13 @@
 #include "transpose_weights_layout.h"
 #include "transpose_lds_layout.h"
 #include "memory.h"
+#include "packed_ops.h"
 #include "types.h"
 #include "hipconv/conv_params.hpp"
 #include <hip/hip_runtime.h>
 
 #include <cstdint>
+#include <type_traits>
 
 namespace hipconv::cdna4::direct_transpose_weights
 {
@@ -26,6 +28,75 @@ constexpr int C_divisor = 64;
 // conflict-free across all four phases, where stride 136 still collided. 288-byte
 // rows stay 16-B aligned (b128 requirement).
 constexpr int LDS_K_STRIDE = 144;
+
+// LDS row stride (fp32) for the tf32 K x C tile.
+//
+// 68 pads the 64-channel row by one 16-byte quad, so 68 % 64 == 4 and the 16 k-rows
+// a consecutive-lane group reads land on 16 disjoint 4-bank quads. 272-byte rows stay
+// 16-B aligned for the b128 halves the store reads.
+constexpr int LDS_K_STRIDE_FP32 = 68;
+
+// LDS row pitch of the fprop [K][C] tile, in source elements.
+template <typename T>
+constexpr int lds_k_stride()
+{
+    return sizeof(T) == 4 ? LDS_K_STRIDE_FP32 : LDS_K_STRIDE;
+}
+
+// 16-byte slots one K(16) x C(32) operand tile occupies (1024 bytes).
+constexpr int TILE_SLOTS = 64;
+
+// Planes the formatted weights store per operand tile: 2 for tf32's (big, small).
+template <hipconv::DataType DT>
+constexpr int store_planes()
+{
+    return DT == hipconv::DataType::tf32 ? 2 : 1;
+}
+
+// The formatter splits tf32 once, so the workspace holds bf16, as does DirectL1's input LDS.
+using ::ToSplitType;
+
+// Read 8 contiguous source elements as one operand fragment, split if tf32.
+//
+// The 16-bit case is a single b128 straight out of LDS. tf32 reads two b128 halves
+// (32 bytes cannot be assumed 32-B aligned at this row pitch) and decomposes them.
+template <hipconv::DataType DT>
+__device__ inline auto load_frag(const ToType<DT>* p)
+{
+    using T = ToType<DT>;
+    if constexpr(DT == hipconv::DataType::tf32)
+    {
+        const auto lo = *reinterpret_cast<const fp32x4_t*>(p);
+        const auto hi = *reinterpret_cast<const fp32x4_t*>(p + 4);
+        return fp32xN_to_bf16_pair<8>(__builtin_shufflevector(lo, hi, 0, 1, 2, 3, 4, 5, 6, 7));
+    }
+    else
+    {
+        using fragx8_t = std::conditional_t<DT == hipconv::DataType::bf16, bf16x8_t, fp16x8_t>;
+        return *reinterpret_cast<const fragx8_t*>(reinterpret_cast<const T*>(p));
+    }
+}
+
+// Write one operand fragment to the formatted workspace. tile_slot is already scaled
+// by store_planes(); tf32 puts its small plane in the tile after the big one.
+template <hipconv::DataType DT, typename FragT>
+__device__ inline void store_frag(ToSplitType<DT>* dst_v8_raw, int tile_slot, int lane, FragT frag)
+{
+    using fragx8_t =
+        std::conditional_t<DT == hipconv::DataType::bf16 || DT == hipconv::DataType::tf32,
+                           bf16x8_t,
+                           fp16x8_t>;
+    auto* dst_v8 = reinterpret_cast<fragx8_t*>(dst_v8_raw);
+    if constexpr(DT == hipconv::DataType::tf32)
+    {
+        dst_v8[tile_slot + lane]              = frag.big;
+        dst_v8[tile_slot + TILE_SLOTS + lane] = frag.small;
+    }
+    else
+    {
+        dst_v8[tile_slot + lane] = frag;
+    }
+}
 
 // Transpose one K(Kwg) x C(64) source tile into a wavegroup's DirectL1 sub-tensor.
 //
@@ -44,7 +115,7 @@ constexpr int LDS_K_STRIDE = 144;
 // so it is a pure offset on src (+wg*Kwg) and dst (+wg*sub-tensor).
 template <int Kh, int Kw, int Kwg, hipconv::DataType DT>
 __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ src,
-                                                 ToType<DT>* __restrict__ dst,
+                                                 ToSplitType<DT>* __restrict__ dst,
                                                  int K,
                                                  int C,
                                                  int C_padded,
@@ -52,25 +123,29 @@ __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ 
                                                  int Kwg_total)
 {
     using T = ToType<DT>;
-    static_assert(sizeof(T) == 2, "transpose_weights only supports 2-byte element types");
+    static_assert(sizeof(T) == 2 || DT == hipconv::DataType::tf32,
+                  "transpose_weights supports 2-byte element types and tf32");
     static_assert(Kwg % 16 == 0 && Kwg <= 64, "Kwg must be a multiple of 16, <= 64");
-    using datatypex8_t = std::conditional_t<DT == hipconv::DataType::bf16, bf16x8_t, fp16x8_t>;
 
     constexpr int k16_count = Kwg / 16;
+    constexpr int planes    = store_planes<DT>();
+    constexpr int K_STRIDE  = lds_k_stride<T>();
 
     // K partition (blockIdx.z): a source K offset (wg*Kwg) and a dest sub-tensor.
     //
-    // The dest base is the layout's wave_group axis (stride = one sub-tensor).
+    // The dest base is the layout's wave_group axis (stride = one sub-tensor), scaled
+    // by planes (see weights_loader.h).
     using DstSubLayout               = WeightsLayout<Kh, Kw, Kwg, 1>;
     const int wg                     = blockIdx.z;
     const int src_k_offset_in_stripe = wg * Kwg;
-    ToType<DT>* sub_dst =
-        dst + static_cast<size_t>(DstSubLayout(Kq * Kwg, C_padded).wave_group(wg).offset);
+    ToSplitType<DT>* sub_dst =
+        dst + static_cast<size_t>(planes * DstSubLayout(Kq * Kwg, C_padded).wave_group(wg).offset);
 
     // Group (blockIdx.y): a base-pointer shift on both src and dst (each contiguous).
     const int g = blockIdx.y;
     src += static_cast<size_t>(g) * K * Kh * Kw * C;
-    sub_dst += static_cast<size_t>(g) * (static_cast<size_t>(Kq) * Kwg_total) * C_padded * Kh * Kw;
+    sub_dst += static_cast<size_t>(g) * planes * (static_cast<size_t>(Kq) * Kwg_total) * C_padded *
+               Kh * Kw;
 
     // Decode (c64, kh, kw, kq) from blockIdx.x, c64 fastest (k16 is a wave axis now).
     const int c64_count = C_padded / 64;
@@ -87,10 +162,10 @@ __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ 
     const int wave = tid / 64;
     const int lane = tid & 63;
 
-    // K(Kwg=64) rows x LDS_K_STRIDE fp16.
-    __shared__ T lds[64 * LDS_K_STRIDE];
+    // K(Kwg=64) rows x K_STRIDE source elements.
+    __shared__ T lds[64 * K_STRIDE];
     auto* lds_u4               = reinterpret_cast<uint4*>(lds);
-    constexpr int lds_u4_count = (64 * LDS_K_STRIDE) / 8;
+    constexpr int lds_u4_count = (64 * K_STRIDE * (int)sizeof(T)) / 16;
     for(int i = tid; i < lds_u4_count; i += BLOCK_SIZE)
         lds_u4[i] = uint4{0, 0, 0, 0};
     __syncthreads();
@@ -101,8 +176,10 @@ __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ 
     constexpr int data_format = 1 << 15;
     const int valid_c         = C - c_base;
     const int valid_bytes     = valid_c > 0 ? valid_c * (int)sizeof(T) : 0;
-    // Cap at 128 (32 lanes x 4 B) so lanes 32..63 are OOB and zero the LDS pad.
-    const int c_vec_num_bytes = valid_bytes < 128 ? valid_bytes : 128;
+    // Cap at the 64-channel row so the lanes past it are OOB and zero the LDS pad.
+    // At 2 bytes that is 128 (lanes 32..63 idle); at 4 it is 256 (all 64 lanes active).
+    constexpr int row_bytes   = 64 * (int)sizeof(T);
+    const int c_vec_num_bytes = valid_bytes < row_bytes ? valid_bytes : row_bytes;
 
     // Source canonical layout positioned at (kh, kw, c_base); k advances per row.
     auto src_layout         = ChannelsLastWeightsLayout<Kh, Kw>(K, C).kh(wg_kh).kw(wg_kw).c(c_base);
@@ -127,7 +204,7 @@ __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ 
         auto rsrc = __builtin_amdgcn_make_buffer_rsrc(
             const_cast<T*>(src_k_ptr), /*stride=*/0, c_vec_num_bytes, data_format);
 
-        T* lds_row = &lds[k_local * LDS_K_STRIDE];
+        T* lds_row = &lds[k_local * K_STRIDE];
         __builtin_amdgcn_raw_ptr_buffer_load_lds(
             rsrc, lds_row, /*bytes_per_lane=*/4, lane * 4, 0, 0, 0);
     }
@@ -137,7 +214,7 @@ __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ 
 
     // Store phase: wave w handles k16 = w.
     //
-    // Lane L holds K-row = L%16 and c8-group = L/16; its 8 operand fp16 are the 8
+    // Lane L holds K-row = L%16 and c8-group = L/16; its 8 operand elements are the 8
     // contiguous channels lds[(k16*16 + L%16)][c32*32 + (L/16)*8 ..].
     if(wave >= k16_count)
         return;
@@ -149,7 +226,6 @@ __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ 
                     .kw(wg_kw)
                     .kh(wg_kh)
                     .k16(k16);
-    auto* dst_v8 = reinterpret_cast<datatypex8_t*>(sub_dst);
 
     const int k_row = k16 * 16 + (lane % 16);
     const int c8grp = lane / 16; // 0..3
@@ -158,14 +234,16 @@ __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ 
     for(int c32_idx = 0; c32_idx < 2; ++c32_idx)
     {
         const int c = c32_idx * 32 + c8grp * 8;
-        dst_v8[base.c32(c32_idx).offset + lane] =
-            *reinterpret_cast<const datatypex8_t*>(&lds[k_row * LDS_K_STRIDE + c]);
+        store_frag<DT>(sub_dst,
+                       planes * base.c32(c32_idx).offset,
+                       lane,
+                       load_frag<DT>(&lds[k_row * K_STRIDE + c]));
     }
 }
 
 template <int Kh, int Kw, int Kwg, hipconv::DataType DT>
 __global__ void transpose_weights_kernel(const ToType<DT>* __restrict__ src,
-                                         ToType<DT>* __restrict__ dst,
+                                         ToSplitType<DT>* __restrict__ dst,
                                          int K,
                                          int C,
                                          int C_padded,
@@ -202,9 +280,22 @@ __global__ void transpose_weights_kernel(const ToType<DT>* __restrict__ src,
 // for the tr-read (as in LDS_K_STRIDE).
 constexpr int DGRAD_LDS_DOUT_STRIDE = 136;
 
+// LDS dout-row pitch (fp32) for the tf32 [dout][din] tile.
+//
+// gfx950 tr-reads are 16-bit only, so the tf32 store phase reads the 8 dout of a
+// fragment one ds_read_b32 at a time. 66 makes 8 * 66 == 16 mod 64, spreading a wave's
+// four dout-groups over four disjoint 16-bank ranges.
+constexpr int DGRAD_LDS_DOUT_STRIDE_FP32 = 66;
+
+template <typename T>
+constexpr int dgrad_lds_dout_stride()
+{
+    return sizeof(T) == 4 ? DGRAD_LDS_DOUT_STRIDE_FP32 : DGRAD_LDS_DOUT_STRIDE;
+}
+
 template <int Kh, int Kw, int Kwg, hipconv::DataType DT>
 __device__ void transpose_weights_dgrad_subtensor_impl(const ToType<DT>* __restrict__ src,
-                                                       ToType<DT>* __restrict__ dst,
+                                                       ToSplitType<DT>* __restrict__ dst,
                                                        int K_dout,
                                                        int C_din,
                                                        int C_padded_dout,
@@ -212,28 +303,34 @@ __device__ void transpose_weights_dgrad_subtensor_impl(const ToType<DT>* __restr
                                                        int Kwg_total)
 {
     using T = ToType<DT>;
-    static_assert(sizeof(T) == 2, "transpose_weights only supports 2-byte element types");
+    static_assert(sizeof(T) == 2 || DT == hipconv::DataType::tf32,
+                  "transpose_weights supports 2-byte element types and tf32");
     static_assert(Kwg % 16 == 0 && Kwg <= 64, "Kwg must be a multiple of 16, <= 64");
     using datatypex8_t = std::conditional_t<DT == hipconv::DataType::bf16, bf16x8_t, fp16x8_t>;
     using int16x4_t    = __attribute__((ext_vector_type(4))) short;
     using int16x8_t    = __attribute__((ext_vector_type(8))) short;
 
-    constexpr int k16_count = Kwg / 16;
+    constexpr int k16_count   = Kwg / 16;
+    constexpr int planes      = store_planes<DT>();
+    constexpr bool is_tf32    = (DT == hipconv::DataType::tf32);
+    constexpr int DOUT_STRIDE = dgrad_lds_dout_stride<T>();
 
     // K partition (blockIdx.z): a source din offset (wg*Kwg) and a dest sub-tensor.
     //
-    // The dest base is the layout's wave_group axis (stride = one sub-tensor).
+    // The dest base is the layout's wave_group axis (stride = one sub-tensor), scaled
+    // by planes (see weights_loader.h).
     using DstSubLayout                 = WeightsLayout<Kh, Kw, Kwg, 1>;
     const int wg                       = blockIdx.z;
     const int src_din_offset_in_stripe = wg * Kwg;
-    ToType<DT>* sub_dst =
-        dst + static_cast<size_t>(DstSubLayout(Kq * Kwg, C_padded_dout).wave_group(wg).offset);
+    ToSplitType<DT>* sub_dst =
+        dst +
+        static_cast<size_t>(planes * DstSubLayout(Kq * Kwg, C_padded_dout).wave_group(wg).offset);
 
     // Group (blockIdx.y): a base-pointer shift on both src and dst (each contiguous).
     const int g = blockIdx.y;
     src += static_cast<size_t>(g) * K_dout * Kh * Kw * C_din;
-    sub_dst +=
-        static_cast<size_t>(g) * (static_cast<size_t>(Kq) * Kwg_total) * C_padded_dout * Kh * Kw;
+    sub_dst += static_cast<size_t>(g) * planes * (static_cast<size_t>(Kq) * Kwg_total) *
+               C_padded_dout * Kh * Kw;
 
     // Decode (c64, kh, kw, kq) from blockIdx.x, c64 fastest (k16 is a wave axis now).
     //
@@ -254,10 +351,10 @@ __device__ void transpose_weights_dgrad_subtensor_impl(const ToType<DT>* __restr
     const int wave = tid / 64;
     const int lane = tid & 63;
 
-    // 64 dout rows x DGRAD_LDS_DOUT_STRIDE fp16.
-    __shared__ T lds[64 * DGRAD_LDS_DOUT_STRIDE];
+    // 64 dout rows x DOUT_STRIDE source elements.
+    __shared__ T lds[64 * DOUT_STRIDE];
     auto* lds_u4               = reinterpret_cast<uint4*>(lds);
-    constexpr int lds_u4_count = (64 * DGRAD_LDS_DOUT_STRIDE) / 8;
+    constexpr int lds_u4_count = (64 * DOUT_STRIDE * (int)sizeof(T)) / 16;
     for(int i = tid; i < lds_u4_count; i += BLOCK_SIZE)
         lds_u4[i] = uint4{0, 0, 0, 0};
     __syncthreads();
@@ -304,7 +401,7 @@ __device__ void transpose_weights_dgrad_subtensor_impl(const ToType<DT>* __restr
         auto rsrc = __builtin_amdgcn_make_buffer_rsrc(
             const_cast<T*>(src_ptr), /*stride=*/0, din_num_bytes, data_format);
 
-        T* lds_row = &lds[dout_local * DGRAD_LDS_DOUT_STRIDE];
+        T* lds_row = &lds[dout_local * DOUT_STRIDE];
         __builtin_amdgcn_raw_ptr_buffer_load_lds(
             rsrc, lds_row, /*bytes_per_lane=*/4, lane * 4, 0, 0, 0);
     }
@@ -312,7 +409,7 @@ __device__ void transpose_weights_dgrad_subtensor_impl(const ToType<DT>* __restr
     wait_vmcnt<0>();
     __syncthreads();
 
-    // Store phase: tr-read the LDS [dout][din] tile as operands, store lane*8.
+    // Store phase: read the LDS [dout][din] tile as operands, store lane*8.
     //
     // wave w handles k16 = w; waves beyond k16_count (none for Kwg=64) sit out.
     if(wave >= k16_count)
@@ -322,39 +419,63 @@ __device__ void transpose_weights_dgrad_subtensor_impl(const ToType<DT>* __restr
     using DstLayout = WeightsLayout<Kh, Kw, Kwg, 8>;
     auto base =
         DstLayout(Kq * Kwg, C_padded_dout).kq(wg_kq).c64(wg_c64).kw(wg_kw).kh(wg_kh).k16(k16);
-    auto* dst_v8 = reinterpret_cast<datatypex8_t*>(sub_dst);
 
-    // M = din (contiguous, via col()), reduction = dout (strided, via row()).
-    //
-    // This wave's k16 sub-tile occupies LDS din columns [k16*16, +16).
-    using TR            = TransposeLDSLayout<16, 32>;
-    const int din_col   = k16 * 16 + TR::col(lane);
-    const int dout_row0 = TR::row(lane, 0);
-    const int dout_row1 = TR::row(lane, 1);
+    if constexpr(is_tf32)
+    {
+        // No 32-bit transpose read exists, so spell out the mapping the tr16 path
+        // below gets from the hardware shuffle: lane L's element j is at
+        // (K = din = k16*16 + L%16, C = dout = c32*32 + (L/16)*8 + j).
+        const int din_row  = k16 * 16 + (lane % 16);
+        const int dout_grp = (lane / 16) * 8;
 
 #pragma unroll
-    for(int c32_idx = 0; c32_idx < 2; ++c32_idx)
+        for(int c32_idx = 0; c32_idx < 2; ++c32_idx)
+        {
+            fp32x8_t v;
+#pragma unroll
+            for(int j = 0; j < 8; ++j)
+                v[j] = lds[(c32_idx * 32 + dout_grp + j) * DOUT_STRIDE + din_row];
+
+            store_frag<DT>(
+                sub_dst, planes * base.c32(c32_idx).offset, lane, fp32xN_to_bf16_pair<8>(v));
+        }
+    }
+    else
     {
-        // c32_idx selects which 32-dout half of the 64-row LDS tile.
-        const int dout_half = 32 * c32_idx;
-        auto* a0            = reinterpret_cast<int16x4_t*>(
-            &lds[(dout_row0 + dout_half) * DGRAD_LDS_DOUT_STRIDE + din_col]);
-        auto* a1 = reinterpret_cast<int16x4_t*>(
-            &lds[(dout_row1 + dout_half) * DGRAD_LDS_DOUT_STRIDE + din_col]);
+        auto* dst_v8 = reinterpret_cast<datatypex8_t*>(sub_dst);
 
-        int16x4_t r0 = __builtin_amdgcn_ds_read_tr16_b64_v4i16(a0);
-        int16x4_t r1 = __builtin_amdgcn_ds_read_tr16_b64_v4i16(a1);
+        // M = din (contiguous, via col()), reduction = dout (strided, via row()).
+        //
+        // This wave's k16 sub-tile occupies LDS din columns [k16*16, +16).
+        using TR            = TransposeLDSLayout<16, 32>;
+        const int din_col   = k16 * 16 + TR::col(lane);
+        const int dout_row0 = TR::row(lane, 0);
+        const int dout_row1 = TR::row(lane, 1);
 
-        datatypex8_t frag = __builtin_bit_cast(
-            datatypex8_t, (int16x8_t){r0[0], r0[1], r0[2], r0[3], r1[0], r1[1], r1[2], r1[3]});
+#pragma unroll
+        for(int c32_idx = 0; c32_idx < 2; ++c32_idx)
+        {
+            // c32_idx selects which 32-dout half of the 64-row LDS tile.
+            const int dout_half = 32 * c32_idx;
+            auto* a0 =
+                reinterpret_cast<int16x4_t*>(&lds[(dout_row0 + dout_half) * DOUT_STRIDE + din_col]);
+            auto* a1 =
+                reinterpret_cast<int16x4_t*>(&lds[(dout_row1 + dout_half) * DOUT_STRIDE + din_col]);
 
-        dst_v8[base.c32(c32_idx).offset + lane] = frag;
+            int16x4_t r0 = __builtin_amdgcn_ds_read_tr16_b64_v4i16(a0);
+            int16x4_t r1 = __builtin_amdgcn_ds_read_tr16_b64_v4i16(a1);
+
+            datatypex8_t frag = __builtin_bit_cast(
+                datatypex8_t, (int16x8_t){r0[0], r0[1], r0[2], r0[3], r1[0], r1[1], r1[2], r1[3]});
+
+            dst_v8[base.c32(c32_idx).offset + lane] = frag;
+        }
     }
 }
 
 template <int Kh, int Kw, int Kwg, hipconv::DataType DT>
 __global__ void transpose_weights_dgrad_kernel(const ToType<DT>* __restrict__ src,
-                                               ToType<DT>* __restrict__ dst,
+                                               ToSplitType<DT>* __restrict__ dst,
                                                int K_dout,
                                                int C_din,
                                                int C_padded_dout,
@@ -398,7 +519,7 @@ get_padded_channels(int K, int C, int& K_padded, int& C_padded, int k_padded_ove
 // WavesK defaults to 2; 4 packs K(256).
 template <int Kh, int Kw, int Kwg, hipconv::DataType DT, int WavesK = 2>
 inline void launch_transpose_weights(const ToType<DT>* d_src,
-                                     ToType<DT>* d_dst,
+                                     ToSplitType<DT>* d_dst,
                                      int K,
                                      int C,
                                      int groups            = 1,
@@ -433,7 +554,7 @@ inline void launch_transpose_weights(const ToType<DT>* d_src,
 // K_dout/C_din are per-group. WavesK defaults to 2; 4 packs din(256).
 template <int Kh, int Kw, int Kwg, hipconv::DataType DT, int WavesK = 2>
 inline void launch_transpose_weights_dgrad(const ToType<DT>* d_src,
-                                           ToType<DT>* d_dst,
+                                           ToSplitType<DT>* d_dst,
                                            int K_dout,
                                            int C_din,
                                            int groups            = 1,

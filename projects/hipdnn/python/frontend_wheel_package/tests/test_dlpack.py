@@ -361,6 +361,22 @@ class TestDlpackDevice:
         assert graph.execute(handle, pack, workspace).is_good()
         assert graph.execute_plan_at_index(handle, pack, workspace, 0).is_good()
 
+    def test_timed_execute_with_dlpack_only_producers(self):
+        """Timed execution accepts the same tensor keys and pointers as execute."""
+        graph, a, b, out = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+        handle = build_all_plans(graph)
+        buffers = {t: hipdnn.DeviceBuffer(4 * t.get_volume()) for t in (a, b, out)}
+        pack = {
+            t: _OffsetProducer(buf.ptr(), 0, device_type=10)
+            for t, buf in buffers.items()
+        }
+        workspace_buf = hipdnn.DeviceBuffer(max(graph.get_workspace_size(), 1))
+        workspace = _OffsetProducer(workspace_buf.ptr(), 0, device_type=10)
+
+        err, timing = graph.execute_timed_ext(handle, pack, workspace)
+        assert err.is_good(), err.get_message()
+        assert not timing.timed_out
+
     def test_execute_with_numpy_integer_keys_and_pointers(self):
         """Integer-pointer packs built with NumPy scalars keep working."""
         graph, a, b, out = build_pointwise_add_graph()

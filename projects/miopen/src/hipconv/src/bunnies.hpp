@@ -1,6 +1,7 @@
 #pragma once
 
 #include "packed_ops.h"
+#include "tensor_view.hpp"
 
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
@@ -9,6 +10,7 @@
 #include <array>
 #include <concepts>
 #include <functional>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -17,6 +19,9 @@ namespace bunnies
 
 using int16x4   = __attribute__((ext_vector_type(4))) int16_t;
 using int32x2   = __attribute__((ext_vector_type(2))) int32_t;
+using int32x4   = __attribute__((ext_vector_type(4))) int32_t;
+using int32x8   = __attribute__((ext_vector_type(8))) int32_t;
+using int32x16  = __attribute__((ext_vector_type(16))) int32_t;
 using uint32x2  = __attribute__((ext_vector_type(2))) uint32_t;
 using uint32x3  = __attribute__((ext_vector_type(3))) uint32_t;
 using uint32x4  = __attribute__((ext_vector_type(4))) uint32_t;
@@ -255,200 +260,11 @@ inline __device__ void tile_cast(Dest& dest, Src const& src)
     }
 }
 
-///////////////////////////
-///////// Memref //////////
-///////////////////////////
-
-template <typename IdxT = int>
-struct slice
-{
-    IdxT offset = 0, size = 0;
-};
-
-namespace detail
-{
-template <typename IdxT>
-__device__ auto offset(IdxT i)
-{
-    return i;
-}
-template <typename IdxT>
-__device__ auto offset(slice<IdxT> i)
-{
-    return i.offset;
-}
-template <typename IdxT>
-__device__ auto size(IdxT i)
-{
-    return 0;
-}
-template <typename IdxT>
-__device__ auto size(slice<IdxT> i)
-{
-    return i.size;
-}
-} // namespace detail
-
-template <int Dim, typename IdxT = int, typename OffsetT = IdxT>
-struct tensor_view
-{
-    static constexpr int dim = Dim;
-    using tuple_t            = std::array<IdxT, Dim>;
-
-    OffsetT offset;
-    std::array<IdxT, Dim> shape, stride;
-
-    __device__ auto delta(std::array<IdxT, Dim> const& idx) const -> IdxT
-    {
-        IdxT p = 0;
-#pragma unroll
-        for(int i = 0; i < Dim; ++i)
-        {
-            p += idx[i] * stride[i];
-        }
-        return p;
-    }
-    template <std::integral... I>
-    __device__ auto delta(I... idx) const -> IdxT
-    {
-        static_assert(sizeof...(I) == Dim);
-
-        std::array<IdxT, Dim> offsets = {static_cast<IdxT>(idx)...};
-        return delta(offsets);
-    }
-    __device__ auto operator()(std::array<IdxT, Dim> const& idx) const -> OffsetT
-    {
-        return offset + delta(idx);
-    }
-    template <std::integral... I>
-    __device__ auto operator()(I... idx) const -> OffsetT
-    {
-        return offset + delta(std::forward<I>(idx)...);
-    }
-
-    // Checks whether a multi-index is within bounds; does not check whether index is negative
-    __device__ auto in_bounds(std::array<IdxT, Dim> const& idx) const -> bool
-    {
-        bool ok = true;
-#pragma unroll
-        for(int i = 0; i < Dim; ++i)
-        {
-            ok = ok && idx[i] < shape[i];
-        }
-        return ok;
-    }
-    template <std::integral... I>
-    __device__ auto in_bounds(I... idx) const -> bool
-    {
-        std::array<IdxT, Dim> offsets = {static_cast<IdxT>(idx)...};
-        return in_bounds(offsets);
-    }
-    // Checks whether a multi-index is within bounds; checks that indices are non-negative
-    __device__ auto in_bounds_maybe_negative(std::array<IdxT, Dim> const& idx) const -> bool
-    {
-        bool ok = true;
-#pragma unroll
-        for(int i = 0; i < Dim; ++i)
-        {
-            ok = ok && idx[i] >= 0 && idx[i] < shape[i];
-        }
-        return ok;
-    }
-    template <std::integral... I>
-    __device__ auto in_bounds_maybe_negative(I... idx) const -> bool
-    {
-        std::array<IdxT, Dim> offsets = {static_cast<IdxT>(idx)...};
-        return in_bounds_maybe_negative(offsets);
-    }
-
-    template <typename... I>
-    __device__ auto subview(I&&... idx_or_slice) const
-    {
-        static_assert(sizeof...(I) == Dim);
-        static_assert(((std::is_same_v<std::decay_t<I>, IdxT> ||
-                        std::is_same_v<std::decay_t<I>, slice<IdxT>>) &&
-                       ...));
-
-        constexpr int SubDim = (static_cast<int>(std::is_same_v<I, slice<IdxT>>) + ...);
-
-        std::array<IdxT, Dim> offsets  = {detail::offset(idx_or_slice)...};
-        std::array<bool, Dim> is_slice = {std::is_same_v<I, slice<IdxT>>...};
-
-        OffsetT suboffset = offset;
-        std::array<IdxT, SubDim> subshape, substride;
-        int j = 0;
-#pragma unroll
-        for(int i = 0; i < Dim; ++i)
-        {
-            suboffset += offsets[i] * stride[i];
-            if(is_slice[i])
-            {
-                subshape[j]  = shape[i];
-                substride[j] = stride[i];
-                ++j;
-            }
-        }
-        return tensor_view<SubDim, IdxT, OffsetT>(suboffset, subshape, substride);
-    }
-};
-
-template <int Dim, typename T, typename IdxT = int>
-using memref = tensor_view<Dim, IdxT, T*>;
-
-template <int Dim, typename IdxT = int, typename OffsetT = IdxT>
-__device__ auto
-make_view(OffsetT offset, std::array<IdxT, Dim> const& shape, std::array<IdxT, Dim> const& stride)
-{
-    return tensor_view<Dim, IdxT, OffsetT>{offset, shape, stride};
-}
-
-template <int Dim, typename IdxT = int, typename OffsetT = IdxT>
-__device__ auto make_view_col_major(std::array<IdxT, Dim> const& shape)
-{
-    std::array<IdxT, Dim> stride;
-    stride[0] = 1;
-    for(int mode = 0; mode < Dim - 1; ++mode)
-    {
-        stride[mode + 1] = stride[mode] * shape[mode];
-    }
-    return tensor_view<Dim, IdxT, OffsetT>{0, shape, stride};
-}
-
-template <int Dim, typename IdxT = int, typename OffsetT = IdxT>
-__device__ auto make_view_row_major(std::array<IdxT, Dim> const& shape)
-{
-    std::array<IdxT, Dim> stride;
-    stride[Dim - 1] = 1;
-    for(int mode = Dim - 1; mode > 0; --mode)
-    {
-        stride[mode - 1] = stride[mode] * shape[mode];
-    }
-    return tensor_view<Dim, IdxT, OffsetT>{0, shape, stride};
-}
-
-template <int Dim, typename T, typename IdxT = int>
-__device__ auto
-make_memref(T* ptr, std::array<IdxT, Dim> const& shape, std::array<IdxT, Dim> const& stride)
-{
-    return make_view<Dim, IdxT, T*>(ptr, shape, stride);
-}
-
-template <int Dim, typename T, typename IdxT = int>
-__device__ auto make_memref_col_major(std::array<IdxT, Dim> const& shape)
-{
-    return make_view_col_major<Dim, IdxT, T*>(shape);
-}
-
-template <int Dim, typename T, typename IdxT = int>
-__device__ auto make_memref_row_major(std::array<IdxT, Dim> const& shape)
-{
-    return make_view_row_major<Dim, IdxT, T*>(shape);
-}
 
 ///////////////////////////
 ///////// Actions /////////
 ///////////////////////////
-//
+
 __device__ __forceinline__ auto lane_id() -> int
 {
     return threadIdx.x % warpSize;
@@ -747,17 +563,38 @@ __device__ __forceinline__ void global_store(T* global_ptr, RegTile& rt, VOffset
     }
 }
 
+// One plane's storage vector: `.data`, or `.big` / `.small` of a split matrix.
+template <bool Small, typename Block>
+__device__ auto* block_storage(Block& block)
+{
+    if constexpr(requires { block.data; })
+        return &block.data;
+    else if constexpr(Small)
+        return &block.small;
+    else
+        return &block.big;
+}
+
 // Drives a tiled register load: for each block/round it maps the lane's element
 // to a (row,col) coord, asks `map` for the source offset, and issues LoadInst.
 // Address-space-agnostic (the LoadInst + `base` pointer decide LDS vs global),
 // so despite historical usage it is not LDS-specific.
-template <typename LoadInst, reg_tile_concept RegTile, typename MemT, typename Map>
+// `Plane` and `Small` load one plane of a split tile: Plane is the 16-bit matrix the plane is read
+// as, `Small` the member it fills. By default the tile loads as its own matrix.
+template <typename LoadInst,
+          typename Plane = void,
+          bool Small     = false,
+          reg_tile_concept RegTile,
+          typename MemT,
+          typename Map>
 __device__ void load_tile(RegTile& rt, MemT* base, Map&& map)
 {
+    using matrix = std::conditional_t<std::is_void_v<Plane>, typename RegTile::matrix, Plane>;
+
     using ld_t                        = typename LoadInst::type;
-    constexpr int bpi                 = bits_per_item(RegTile::matrix::fmt);
+    constexpr int bpi                 = bits_per_item(matrix::fmt);
     constexpr int num_items_per_round = LoadInst::bits_per_load / bpi;
-    constexpr int num_rounds          = RegTile::matrix::num_items / num_items_per_round;
+    constexpr int num_rounds          = matrix::num_items / num_items_per_round;
     const int lane                    = lane_id();
 #pragma unroll
     for(int mb = 0; mb < RegTile::row_blocks; ++mb)
@@ -769,10 +606,11 @@ __device__ void load_tile(RegTile& rt, MemT* base, Map&& map)
             for(int rnd = 0; rnd < num_rounds; ++rnd)
             {
                 const auto laneitem = LoadInst::map(lane, rnd * num_items_per_round, bpi);
-                const auto coord    = RegTile::matrix::map(laneitem);
+                const auto coord    = matrix::map(laneitem);
                 const int offset    = map(mb, nb, coord[0], coord[1]);
                 LoadInst::load(base + offset,
-                               reinterpret_cast<ld_t*>(&rt.block(mb, nb).data) + rnd);
+                               reinterpret_cast<ld_t*>(block_storage<Small>(rt.block(mb, nb))) +
+                                   rnd);
             }
         }
     }

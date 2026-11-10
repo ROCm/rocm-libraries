@@ -15,6 +15,7 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/TensorFileUtils.hpp>
 #include <type_traits>
@@ -23,7 +24,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> tensorFromFileAndAttributes(
+inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> tensorFromFileAndAttributes(
     const std::filesystem::path& filepath,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attributes)
 {
@@ -33,10 +34,47 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> tensorFromFileAndAtt
     return tensor;
 }
 
+inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedTensorFromFileAndAttributes(
+    const std::filesystem::path& filepath,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attributes,
+    std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> offset,
+    const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>& lengths = nullptr)
+{
+    auto tensor = hipdnn_test_sdk::detail::createRaggedTensorFromAttributeAndOffset(
+        attributes, std::move(offset), lengths);
+    hipdnn_test_sdk::detail::fillTensorFromFile(*tensor, filepath);
+
+    return tensor;
+}
+
+/// The length tensor of ragged tensor `uid` (raggedLengthUids), or null when the tensor's node has
+/// no seq_len. Length tensors are not ragged, so the map already holds them when ragged tensors
+/// are built.
+inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> findRaggedLengths(
+    const std::unordered_map<int64_t, int64_t>& lengthUids,
+    const std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>&
+        tensorMap,
+    int64_t uid)
+{
+    const auto lengthUidIt = lengthUids.find(uid);
+    if(lengthUidIt == lengthUids.end())
+    {
+        return nullptr;
+    }
+    const auto lengthIt = tensorMap.find(lengthUidIt->second);
+    if(lengthIt == tensorMap.end())
+    {
+        throw std::runtime_error("Error in findRaggedLengths(): ragged tensor "
+                                 + std::to_string(uid) + " references missing seq_len tensor "
+                                 + std::to_string(lengthUidIt->second));
+    }
+    return lengthIt->second;
+}
+
 struct GraphAndTensorMap
 {
     flatbuffers::DetachedBuffer graphBuffer;
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensorMap;
+    std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>> tensorMap;
     std::vector<int64_t> outputTensorUids;
 
     const hipdnn_flatbuffers_sdk::data_objects::Graph& graph() const
@@ -62,28 +100,42 @@ struct GraphAndTensorMap
         return deviceBuffers;
     }
 
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
+    std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>
         extractAndClearOutputTensorData()
     {
-        std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
+        std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>
             outputTensorMap;
 
         auto tensorAttributeMap = createGraphWrapper().getTensorMap();
+        const auto lengthUids = raggedLengthUids(graph());
         for(const int64_t uid : outputTensorUids)
         {
-            auto dataType = tensorAttributeMap[uid]->data_type();
+            const auto* attributes = tensorAttributeMap[uid];
             auto& outputTensorPtr = tensorMap[uid];
+
+            if(const auto offsetUid = attributes->ragged_offset_tensor_uid(); offsetUid.has_value())
+            {
+                std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> zeroedTensorPtr
+                    = hipdnn_test_sdk::detail::createRaggedTensorFromAttributeAndOffset(
+                        *attributes,
+                        tensorMap.at(offsetUid.value()),
+                        findRaggedLengths(lengthUids, tensorMap, uid));
+                zeroedTensorPtr->fillTensorWithValue(0.f);
+                std::swap(zeroedTensorPtr, outputTensorPtr);
+                outputTensorMap[uid] = std::move(zeroedTensorPtr);
+                continue;
+            }
 
             auto zeroedTensorPtr = std::visit(
                 [&](auto dataType) {
                     using DataType = decltype(dataType);
-                    auto tensorPtr = std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>(
+                    auto tensorPtr = std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>(
                         new hipdnn_data_sdk::utilities::Tensor<DataType>(
                             outputTensorPtr->dims(), outputTensorPtr->strides()));
                     tensorPtr->fillTensorWithValue(0.f);
                     return tensorPtr;
                 },
-                hipdnn_test_sdk::utilities::datatypeToNativeVariant(dataType));
+                hipdnn_test_sdk::utilities::datatypeToNativeVariant(attributes->data_type()));
 
             std::swap(zeroedTensorPtr, outputTensorPtr);
 
@@ -94,7 +146,7 @@ struct GraphAndTensorMap
     }
 
     bool validateTensors(
-        std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>&
+        std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>&
             referenceTensors,
         float absTolerance,
         float relTolerance)
@@ -195,17 +247,47 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
 
     auto outputTensorUids = getOutputTensorUidsFromGraph(graphJson);
 
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensorMap;
+    std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>> tensorMap;
 
     if(graph->tensors() == nullptr || graph->tensors()->empty())
     {
         throw std::runtime_error("Graph needs to include at least one tensor");
     }
+
+    std::vector<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> raggedTensors;
+
     for(auto attributes : *graph->tensors())
     {
+        if(attributes->ragged_offset_tensor_uid().has_value())
+        {
+            raggedTensors.push_back(attributes);
+            continue;
+        }
+
         auto tensorPath
             = basePath.string() + ".tensor" + std::to_string(attributes->uid()) + ".bin";
         tensorMap[attributes->uid()] = tensorFromFileAndAttributes(tensorPath, *attributes);
+    }
+
+    const auto lengthUids = raggedLengthUids(*graph);
+
+    for(auto attributes : raggedTensors)
+    {
+        auto raggedOffsetId = attributes->ragged_offset_tensor_uid().value();
+        auto offsetIt = tensorMap.find(raggedOffsetId);
+        if(offsetIt == tensorMap.end())
+        {
+            throw std::runtime_error(
+                "Error in loadGraphAndTensors(): ragged tensor " + std::to_string(attributes->uid())
+                + " references missing offset tensor " + std::to_string(raggedOffsetId));
+        }
+        auto tensorPath
+            = basePath.string() + ".tensor" + std::to_string(attributes->uid()) + ".bin";
+        tensorMap[attributes->uid()] = raggedTensorFromFileAndAttributes(
+            tensorPath,
+            *attributes,
+            offsetIt->second,
+            findRaggedLengths(lengthUids, tensorMap, attributes->uid()));
     }
 
     return {graphBuilder.Release(), std::move(tensorMap), outputTensorUids};

@@ -9,15 +9,17 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "ConvolutionFwdGraphTestUtils.hpp"
+#include "RaggedGraphTestUtils.hpp"
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/gpu-graph-executor/detail/GpuConvolutionFwdPlan.hpp"
 #include "harness/gpu-graph-executor/detail/GpuConvolutionFwdSignatureKey.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
@@ -26,6 +28,7 @@ using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::types;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 TEST(TestGpuConvolutionFwdPlanBuilder, PlanConstruction)
 {
@@ -118,6 +121,47 @@ TEST(TestGpuConvolutionFwdPlanBuilder, IsApplicable)
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 }
 
+// No GPU plan builder reads ragged offsets, so each rejects ragged tensors, not only SDPA.
+TEST(TestGpuConvolutionFwdPlanBuilder, IsNotApplicableForRaggedTensors)
+{
+    constexpr int64_t X_UID = 10;
+    constexpr int64_t W_UID = 11;
+    constexpr int64_t Y_UID = 12;
+
+    const std::vector<int64_t> xDims = {1, 1, 2, 2};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> yDims = {1, 1, 2, 2};
+
+    auto graphBuilder = createConvFwdGraph(X_UID,
+                                           W_UID,
+                                           Y_UID,
+                                           xDims,
+                                           wDims,
+                                           yDims,
+                                           generateStrides(xDims),
+                                           generateStrides(wDims),
+                                           generateStrides(yDims),
+                                           {0, 0},
+                                           {1, 1},
+                                           {1, 1},
+                                           DataType::FLOAT);
+
+    const GpuConvolutionFwdPlanBuilder<DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT>
+        floatPlanBuilder;
+
+    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    ASSERT_TRUE(floatPlanBuilder.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
+
+    auto ragged = markFirstTensorRagged(graphBuilder.GetBufferPointer());
+    auto raggedWrap
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
+    EXPECT_FALSE(floatPlanBuilder.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
+}
+
 // ============================================================================
 // Templated helper for plan execution vs CPU reference
 // ============================================================================
@@ -196,8 +240,8 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
     hipdnn_data_sdk::utilities::Tensor<YType> cpuY(yDims, yStrides);
 
     constexpr unsigned int SEED = 42;
-    cpuX.fillWithRandomValues(static_cast<XType>(-1), static_cast<XType>(1), SEED);
-    cpuW.fillWithRandomValues(static_cast<WType>(-1), static_cast<WType>(1), SEED + 1);
+    fillWithRandomValues(cpuX, static_cast<XType>(-1), static_cast<XType>(1), SEED);
+    fillWithRandomValues(cpuW, static_cast<WType>(-1), static_cast<WType>(1), SEED + 1);
 
     // Allocate device buffers (RAII — freed automatically)
     const hipdnn_data_sdk::utilities::Workspace dX(xCount * sizeof(XType));
@@ -231,7 +275,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
     cpuVariantPack[W_UID] = cpuW.rawHostData();
     cpuVariantPack[Y_UID] = cpuY.rawHostData();
 
-    hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
 
     // Compare
@@ -401,4 +445,48 @@ TEST(TestGpuConvolutionFwdPlanBuilder, UnregisteredSignatureThrows)
         DataType::INT8, DataType::INT8, DataType::INT8, DataType::FLOAT};
 
     EXPECT_THROW(registry.getPlanBuilder(unregisteredKey), std::runtime_error);
+}
+
+TEST(TestGpuConvolutionFwdPlanBuilder, IsNotApplicableForConvolutionMode)
+{
+    constexpr int64_t X_UID = 10;
+    constexpr int64_t W_UID = 11;
+    constexpr int64_t Y_UID = 12;
+
+    const std::vector<int64_t> xDims = {1, 1, 2, 2};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> yDims = {1, 1, 2, 2};
+
+    auto graphBuilder = createConvFwdGraph(X_UID,
+                                           W_UID,
+                                           Y_UID,
+                                           xDims,
+                                           wDims,
+                                           yDims,
+                                           generateStrides(xDims),
+                                           generateStrides(wDims),
+                                           generateStrides(yDims),
+                                           {0, 0},
+                                           {1, 1},
+                                           {1, 1},
+                                           DataType::FLOAT);
+
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+    const GpuConvolutionFwdPlanBuilder<DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT>
+        patient;
+
+    EXPECT_TRUE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+
+    // The kernels are cross-correlation only, so true convolution must be rejected.
+    auto* attributes = const_cast<ConvolutionFwdAttributes*>(
+        graphWrap.getNode(0).attributes_as_ConvolutionFwdAttributes());
+    ASSERT_NE(attributes, nullptr);
+    ASSERT_TRUE(attributes->mutate_conv_mode(ConvMode::CONVOLUTION));
+
+    EXPECT_FALSE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 }

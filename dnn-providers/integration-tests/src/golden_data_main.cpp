@@ -28,7 +28,7 @@
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "harness/TestConfig.hpp"
-#include "harness/bundle/BundleRegistration.hpp"
+#include "harness/reference-validation/GoldenDataRegistration.hpp"
 
 int main(int argc, char** argv) noexcept
 {
@@ -147,25 +147,38 @@ int main(int argc, char** argv) noexcept
         opts.validatorDevice = validator;
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
-        if(runCpu)
+        // The CPU lane's cost exclusion is justified by the GPU lane covering the
+        // bundles it drops, so the plan has to know whether that lane really runs.
+        // --reference already answers half of it; the other half is the device,
+        // because the GPU harness SKIP_IF_NO_DEVICES()s in SetUp() and a registered
+        // suite that skips covers nothing. Short-circuited so --reference cpu does
+        // not probe for a device.
+        hipdnn_integration_tests::bundle::GoldenDataSession session;
+        session.cpuSelected = runCpu;
+        session.gpuSelected = runGpu;
+        session.gpuHasDevice = runGpu && !hipdnn_integration_tests::bundle::noHipDevicesAvailable();
+
+        const auto bundles = hipdnn_integration_tests::bundle::loadGoldenDataBundles();
+        if(bundles.has_value())
         {
-            hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
-                hipdnn_integration_tests::ReferenceExecutorType::CPU);
-        }
-        if(runGpu)
-        {
-            hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
-                hipdnn_integration_tests::ReferenceExecutorType::GPU);
+            const auto plan
+                = hipdnn_integration_tests::bundle::planGoldenDataValidation(*bundles, session);
+            hipdnn_integration_tests::bundle::printPlanSummary(plan, std::cerr);
+            hipdnn_integration_tests::bundle::registerGoldenDataPlan(plan, *bundles);
         }
 
         const int result = RUN_ALL_TESTS();
 
         // An empty run here is not automatically an error: golden `.bin` blobs are
         // DVC-managed, so a tree that has not pulled them registers nothing and has
-        // nothing to say. Only a run whose data directory is actually present and
-        // still selected nothing is suspicious.
+        // nothing to say. Nor is it one when bundles were switched off outright --
+        // HIPDNN_TEST_ALLOW_BUNDLES=0 leaves this binary with nothing to do by
+        // construction, and the engine binary's equivalent guard already excludes it.
+        // Only a run whose data directory is actually present and still selected
+        // nothing is suspicious.
         const auto* unitTest = ::testing::UnitTest::GetInstance();
-        if(unitTest->test_to_run_count() == 0)
+        if(unitTest->test_to_run_count() == 0
+           && hipdnn_integration_tests::TestConfig::get().allowBundles())
         {
             const auto dataDir = hipdnn_integration_tests::bundle::resolveDataDir();
             std::cerr << "No golden-data validation tests ran. Bundle data directory: " << dataDir

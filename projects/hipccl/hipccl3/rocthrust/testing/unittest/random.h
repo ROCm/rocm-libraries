@@ -1,0 +1,142 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+#pragma once
+
+#include <thrust/detail/type_traits.h>
+#include <thrust/host_vector.h>
+#include <thrust/random.h>
+
+#include <limits>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
+
+namespace unittest
+{
+
+inline unsigned int hash(unsigned int a)
+{
+  a = (a + 0x7ed55d16) + (a << 12);
+  a = (a ^ 0xc761c23c) ^ (a >> 19);
+  a = (a + 0x165667b1) + (a << 5);
+  a = (a + 0xd3a2646c) ^ (a << 9);
+  a = (a + 0xfd7046c5) + (a << 3);
+  a = (a ^ 0xb55a4f09) ^ (a >> 16);
+  return a;
+}
+
+template <typename T, typename = void>
+struct generate_random_integer;
+
+template <typename T>
+struct generate_random_integer<
+  T,
+  typename THRUST_NS_QUALIFIER::detail::disable_if<THRUST_NS_QUALIFIER::detail::is_non_bool_arithmetic<T>::value>::type>
+{
+  T operator()(unsigned int i) const
+  {
+    THRUST_NS_QUALIFIER::default_random_engine rng(hash(i));
+
+    return static_cast<T>(rng());
+  }
+};
+
+template <typename T>
+struct generate_random_integer<T, _THRUST_STD::enable_if_t<THRUST_NS_QUALIFIER::detail::is_non_bool_integral<T>::value>>
+{
+  T operator()(unsigned int i) const
+  {
+    THRUST_NS_QUALIFIER::default_random_engine rng(hash(i));
+    THRUST_NS_QUALIFIER::uniform_int_distribution<T> dist;
+
+    return static_cast<T>(dist(rng));
+  }
+};
+
+template <typename T>
+struct generate_random_integer<T, typename _THRUST_STD::enable_if_t<_THRUST_STD::is_floating_point<T>::value>>
+{
+  T operator()(unsigned int i) const
+  {
+    T const min = std::numeric_limits<T>::min();
+    T const max = std::numeric_limits<T>::max();
+
+    THRUST_NS_QUALIFIER::default_random_engine rng(hash(i));
+    THRUST_NS_QUALIFIER::uniform_real_distribution<T> dist(min, max);
+
+    return static_cast<T>(dist(rng));
+  }
+};
+
+template <>
+struct generate_random_integer<bool>
+{
+  bool operator()(unsigned int i) const
+  {
+    THRUST_NS_QUALIFIER::default_random_engine rng(hash(i));
+    THRUST_NS_QUALIFIER::uniform_int_distribution<unsigned int> dist(0, 1);
+
+    return dist(rng) == 1;
+  }
+};
+
+template <typename T>
+struct generate_random_sample
+{
+  T operator()(unsigned int i) const
+  {
+    THRUST_NS_QUALIFIER::default_random_engine rng(hash(i));
+    THRUST_NS_QUALIFIER::uniform_int_distribution<unsigned int> dist(0, 20);
+
+    return static_cast<T>(dist(rng));
+  }
+};
+
+template <typename T>
+THRUST_NS_QUALIFIER::host_vector<T> random_integers(const size_t N)
+{
+  THRUST_NS_QUALIFIER::host_vector<T> vec(N);
+  THRUST_NS_QUALIFIER::transform(
+    THRUST_NS_QUALIFIER::counting_iterator<unsigned int>(static_cast<unsigned int>(0)),
+    THRUST_NS_QUALIFIER::counting_iterator<unsigned int>(static_cast<unsigned int>(N)),
+    vec.begin(),
+    generate_random_integer<T>());
+
+  return vec;
+}
+
+template <typename T>
+T random_integer()
+{
+  return generate_random_integer<T>()(0);
+}
+
+template <typename T>
+THRUST_NS_QUALIFIER::host_vector<T> random_samples(const size_t N)
+{
+  THRUST_NS_QUALIFIER::host_vector<T> vec(N);
+  THRUST_NS_QUALIFIER::transform(
+    THRUST_NS_QUALIFIER::counting_iterator<unsigned int>(static_cast<unsigned int>(0)),
+    THRUST_NS_QUALIFIER::counting_iterator<unsigned int>(static_cast<unsigned int>(N)),
+    vec.begin(),
+    generate_random_sample<T>());
+
+  return vec;
+}
+
+}; // end namespace unittest

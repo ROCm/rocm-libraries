@@ -3,8 +3,8 @@
 /*
  * helper_rocke.helpers.io.c -- C99 port of rocke.helpers.io.io_ir_type,
  * store_scalar_from_f32, load_scalar, load_scalar_as_f32, load_vec,
- * load_vec_as_f32, load_lane_slice_f32, store_vec, pack_f32_to and
- * vector_row_copy.
+ * load_vec_as_f32, load_lane_slice_f32, store_vec, pack_f32_to,
+ * vector_row_copy, concat_tree and smem_load_fragment.
  *
  * Faithful translation of:
  *
@@ -25,6 +25,8 @@
 #include "rocke/helper_rocke.helpers.io.h"
 
 #include <string.h>
+
+#include <vector>
 
 #include "rocke/arena.h" /* rocke_arena_alloc */
 #include "rocke/ir_internal.h" /* rocke_i_set_err, rocke_i_live */
@@ -171,6 +173,16 @@ rocke_value_t* rocke_b_load_scalar_as_f32(rocke_ir_builder_t* b,
 rocke_value_t* rocke_b_load_vec(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, const char* dtype, int n)
 {
+    return rocke_b_load_vec_ex(b, ptr, idx, dtype, n, NULL);
+}
+
+rocke_value_t* rocke_b_load_vec_ex(rocke_ir_builder_t* b,
+                                   rocke_value_t* ptr,
+                                   rocke_value_t* idx,
+                                   const char* dtype,
+                                   int n,
+                                   const rocke_mem_opts_t* opts)
+{
     const rocke_type_t* ty;
 
     if(!rocke_i_live(b))
@@ -191,14 +203,10 @@ rocke_value_t* rocke_b_load_vec(
     {
         return NULL;
     }
-    /* Python: if dtype in ("f16","fp16"): return b.global_load_vN_f16(ptr,idx,n)
-     *         return b.global_load_vN(ptr, idx, ty, n)
+    /* Python: return b.global_load_vN(ptr, idx, io_ir_type(dtype), n,
+     *                                 temporal_hint=temporal_hint)
      * Python passes no align -> default (0). */
-    if(strcmp(dtype, "f16") == 0 || strcmp(dtype, "fp16") == 0)
-    {
-        return rocke_b_global_load_vN_f16(b, ptr, idx, n, 0);
-    }
-    return rocke_b_global_load_vN(b, ptr, idx, ty, n, 0);
+    return rocke_b_global_load_vN_ex(b, ptr, idx, ty, n, 0, opts);
 }
 
 int rocke_b_load_vec_as_f32(rocke_ir_builder_t* b,
@@ -207,6 +215,17 @@ int rocke_b_load_vec_as_f32(rocke_ir_builder_t* b,
                             const char* dtype,
                             int n,
                             rocke_value_t** out)
+{
+    return rocke_b_load_vec_as_f32_ex(b, ptr, idx, dtype, n, out, NULL);
+}
+
+int rocke_b_load_vec_as_f32_ex(rocke_ir_builder_t* b,
+                               rocke_value_t* ptr,
+                               rocke_value_t* idx,
+                               const char* dtype,
+                               int n,
+                               rocke_value_t** out,
+                               const rocke_mem_opts_t* opts)
 {
     rocke_value_t* v;
     int i;
@@ -220,8 +239,8 @@ int rocke_b_load_vec_as_f32(rocke_ir_builder_t* b,
         return 0;
     }
 
-    /* Python: v = load_vec(b, ptr, idx, dtype=dtype, n=n) */
-    v = rocke_b_load_vec(b, ptr, idx, dtype, n);
+    /* Python: v = load_vec(b, ptr, idx, dtype=dtype, n=n, temporal_hint=temporal_hint) */
+    v = rocke_b_load_vec_ex(b, ptr, idx, dtype, n, opts);
     if(v == NULL)
     {
         return 0;
@@ -284,6 +303,16 @@ int rocke_b_load_lane_slice_f32(rocke_ir_builder_t* b,
 void rocke_b_store_vec(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, rocke_value_t* value, int n)
 {
+    rocke_b_store_vec_ex(b, ptr, idx, value, n, NULL);
+}
+
+void rocke_b_store_vec_ex(rocke_ir_builder_t* b,
+                          rocke_value_t* ptr,
+                          rocke_value_t* idx,
+                          rocke_value_t* value,
+                          int n,
+                          const rocke_mem_opts_t* opts)
+{
     if(!rocke_i_live(b))
     {
         return;
@@ -296,8 +325,9 @@ void rocke_b_store_vec(
             b, ROCKE_ERR_VALUE, "store_vec n must be 2/4/8 (got %d); use store_scalar for n=1", n);
         return;
     }
-    /* Python: b.global_store_vN(ptr, idx, value, n). No align -> default (0). */
-    rocke_b_global_store_vN(b, ptr, idx, value, n, 0);
+    /* Python: b.global_store_vN(ptr, idx, value, n, temporal_hint=temporal_hint).
+     * No align -> default (0). */
+    rocke_b_global_store_vN_ex(b, ptr, idx, value, n, 0, opts);
 }
 
 rocke_value_t* rocke_b_pack_f32_to(rocke_ir_builder_t* b,
@@ -404,4 +434,62 @@ void rocke_b_vector_row_copy(rocke_ir_builder_t* b,
         rocke_b_store_scalar_from_f32(
             b, dst, rocke_b_add(b, dst_base, rocke_b_const_i32(b, d)), s, dtype);
     }
+}
+
+rocke_value_t* rocke_b_concat_tree(rocke_ir_builder_t* b, rocke_value_t* const* parts, int count)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(count <= 0 || (count & (count - 1)) != 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "concat_tree needs a power-of-two part count, got %d", count);
+    std::vector<rocke_value_t*> level(parts, parts + count);
+    /* Python: while len(parts) > 1: parts = [vec_concat(parts[i], parts[i + 1]) ...] */
+    while(level.size() > 1)
+    {
+        std::vector<rocke_value_t*> next;
+        for(size_t i = 0; i < level.size(); i += 2)
+            next.push_back(rocke_b_vec_concat(b, level[i], level[i + 1]));
+        level.swap(next);
+    }
+    return level[0];
+}
+
+rocke_value_t* rocke_b_smem_load_fragment(rocke_ir_builder_t* b,
+                                          rocke_value_t* smem,
+                                          rocke_value_t* row,
+                                          rocke_value_t* idx,
+                                          const rocke_type_t* dtype,
+                                          int n,
+                                          int max_elems,
+                                          int stride)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(n <= max_elems)
+    {
+        rocke_value_t* ind[2] = {row, idx};
+        return rocke_b_smem_load_vN(b, smem, ind, 2, dtype, n);
+    }
+    if(n % max_elems != 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "LDS fragment of %d elements is not a multiple of the %d-element load",
+            n,
+            max_elems);
+    const int step = stride > 0 ? stride : max_elems;
+    std::vector<rocke_value_t*> parts;
+    for(int h = 0; h < n / max_elems; ++h)
+    {
+        rocke_value_t* ind[2] = {row, idx};
+        if(h != 0)
+        {
+            /* Sequenced: Python evaluates const_i32 before add before the load. */
+            rocke_value_t* k = rocke_b_const_i32(b, (int64_t)h * step);
+            ind[1] = rocke_b_add(b, idx, k);
+        }
+        parts.push_back(rocke_b_smem_load_vN(b, smem, ind, 2, dtype, max_elems));
+    }
+    return rocke_b_concat_tree(b, parts.data(), (int)parts.size());
 }

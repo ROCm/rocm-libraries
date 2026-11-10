@@ -9,6 +9,7 @@
 #include <half/half.hpp>
 #include <miopen/bfloat16.hpp>
 #include <miopen/handle.hpp>
+#include <miopen/target_properties.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -56,7 +57,8 @@ NumericsResult RunKernel(const std::vector<T>& input, bool compute_stats)
 
     const std::string options =
         " -DMIOPEN_FP8_CLIPPING=" + std::to_string(MIOPEN_FP8_CLIPPING) +
-        " -DMIOPEN_FP8_IEEE_EXPONENT_BIAS=" + std::to_string(MIOPEN_FP8_IEEE_EXPONENT_BIAS);
+        " -DMIOPEN_FP8_IEEE_EXPONENT_BIAS=" +
+        std::to_string(miopen::UsesIeeeExponentBias(handle.GetDeviceName()) ? 1 : 0);
     // Two blocks: a partly occupied block and a completely idle block. Both must
     // contribute neutral extrema, not zero or a finite numeric_limits sentinel.
     handle.AddKernel("CheckNumericsRegression",

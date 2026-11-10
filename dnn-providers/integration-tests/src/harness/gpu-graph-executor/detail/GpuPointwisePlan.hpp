@@ -218,6 +218,8 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->in_1_tensor_uid().value(), Input1DataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->out_0_tensor_uid(), OutputDataTypeEnum);
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         // Reject if any operand is runtime pass-by-value; the plan cannot resolve a PBV host scalar.
         return !anyOperandIsRuntimePassByValue(tensorMap,
                                                {nodeAttributes->in_0_tensor_uid(),
@@ -295,6 +297,8 @@ public:
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->in_0_tensor_uid(), InputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->out_0_tensor_uid(), OutputDataTypeEnum);
+
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
 
         // Reject if any operand is runtime pass-by-value; the plan cannot resolve a PBV host scalar.
         return !anyOperandIsRuntimePassByValue(

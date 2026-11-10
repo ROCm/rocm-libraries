@@ -27,8 +27,12 @@
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <type_traits>
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedData.hpp>
@@ -45,6 +49,12 @@ namespace TensileLite
             : m_debug(Debug::Instance().printKernelArguments())
             , m_debugSkipLaunch(Debug::Instance().skipKernelLaunch())
         {
+        }
+
+        SolutionAdapter::SolutionAdapter(ModuleApi moduleApi)
+            : SolutionAdapter()
+        {
+            m_moduleApi = moduleApi;
         }
 
         SolutionAdapter::SolutionAdapter(bool debug)
@@ -64,23 +74,26 @@ namespace TensileLite
         {
             Debug::Instance().markerStart("UnloadCodeObjectFiles");
             for(auto module : m_modules)
-                HIP_CHECK_PRINT(hipModuleUnload(module),
-                    [&](hipError_t error) {
-                        std::cerr << "hipModuleUnload failed: " << std::endl
-                                << " error: " << hipGetErrorString(error) << std::endl;
-                    }
-                );
+                HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error) {
+                    std::cerr << "hipModuleUnload failed: " << std::endl
+                              << " error: " << hipGetErrorString(error) << std::endl;
+                });
             // Extra rotation copies are independent hipModule_t handles loaded
             // by loadCodeObjectFileExtraCopies(); they own their own device
             // memory and must be unloaded too or we leak it per copy.
             for(auto const& copyModules : m_extraModuleCopies)
                 for(auto module : copyModules)
-                    HIP_CHECK_PRINT(hipModuleUnload(module),
-                        [&](hipError_t error) {
-                            std::cerr << "hipModuleUnload failed: " << std::endl
-                                    << " error: " << hipGetErrorString(error) << std::endl;
-                        }
-                    );
+                    HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error) {
+                        std::cerr << "hipModuleUnload failed: " << std::endl
+                                  << " error: " << hipGetErrorString(error) << std::endl;
+                    });
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+            for(auto const& entry : m_localModules)
+                HIP_CHECK_PRINT(m_moduleApi.unload(entry.second), [&](hipError_t error) {
+                    std::cerr << "hipModuleUnload failed: " << entry.first << std::endl
+                              << " error: " << hipGetErrorString(error) << std::endl;
+                });
+#endif
             Debug::Instance().markerStop();
         }
 
@@ -94,84 +107,106 @@ namespace TensileLite
             return coFilename;
         }
 
+        static void logCodeObjectLoadError(std::string const& path, hipError_t error)
+        {
+            std::cerr << "hipModuleLoad failed: " << path << std::endl
+                      << " error: " << hipGetErrorString(error) << std::endl;
+        }
+
         hipError_t SolutionAdapter::loadCodeObjectFile(std::string const& path)
         {
-            Debug::Instance().markerStart("loadCodeObjectFile", path);
-            hipModule_t module;
+            hipError_t error = loadCodeObjectFileOnce(path);
+            if(error == hipSuccess)
+                return error;
 
-            hipError_t error = hipModuleLoad(&module, path.c_str());
-            // Large problem sizes may cause global memory to run out of space 
-            // when loading the module, which can lead to hipErrorLaunchFailure or hipErrorNoBinaryForGpu.
-            if(error == hipErrorLaunchFailure || error == hipErrorNoBinaryForGpu)
-            {        
-                // Reset the error code from previous hipModuleLoad failure
-                (void)hipGetLastError();
-                std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
-                for(auto m_module : m_modules)
+            if(error != hipErrorLaunchFailure && error != hipErrorNoBinaryForGpu)
+            {
+                logCodeObjectLoadError(path, error);
+                return error;
+            }
+
+            std::string lazyArch;
+            std::string lazyDir;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                lazyArch = m_lazyLoadArchitecture;
+                lazyDir  = m_codeObjectDirectory;
+            }
+
+            // Without an architecture, helper recovery would probe an invalid
+            // name such as Kernels.so-000-.hsaco and hide the primary error.
+            if(lazyArch.empty())
+            {
+                logCodeObjectLoadError(path, error);
+                return error;
+            }
+
+            // Reset the error code from the failed hipModuleLoad.
+            (void)m_moduleApi.getLastError();
+            std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
+            for(auto module : m_modules)
+            {
+                HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error_t) {
+                    std::cerr << "hipModuleUnload failed: " << std::endl
+                              << " error: " << hipGetErrorString(error_t) << std::endl;
+                });
+            }
+
+            // Extra rotation copies are not recreated by recovery.
+            if(!m_extraModuleCopies.empty())
+            {
+                std::cerr << "[icache-rotate] WARNING: out-of-memory retry is dropping "
+                          << m_extraModuleCopies.size()
+                          << " rotation copy set(s); I-cache rotation is now disabled "
+                          << "until loadCodeObjectFileExtraCopies() is called again." << std::endl;
+            }
+            for(auto const& copyModules : m_extraModuleCopies)
+            {
+                for(auto module : copyModules)
                 {
-                    HIP_CHECK_PRINT(hipModuleUnload(m_module),
-                        [&](hipError_t error_t) {
-                            std::cerr << "hipModuleUnload failed: " << std::endl
-                                      << " error: " << hipGetErrorString(error_t) << std::endl;
-                        }
-                    );
+                    HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error_t) {
+                        std::cerr << "hipModuleUnload failed: " << std::endl
+                                  << " error: " << hipGetErrorString(error_t) << std::endl;
+                    });
                 }
-                // Also unload the extra rotation copies; otherwise we leak
-                // their device memory and leave rotation state inconsistent
-                // after the retry below. These are NOT reloaded on retry, so
-                // warn that I-cache rotation is disabled after this recovery.
-                if(!m_extraModuleCopies.empty())
-                {
-                    std::cerr << "[icache-rotate] WARNING: out-of-memory retry is dropping "
-                              << m_extraModuleCopies.size()
-                              << " rotation copy set(s); I-cache rotation is now disabled "
-                              << "until loadCodeObjectFileExtraCopies() is called again."
-                              << std::endl;
-                }
-                for(auto const& copyModules : m_extraModuleCopies)
-                {
-                    for(auto m_module : copyModules)
-                    {
-                        HIP_CHECK_PRINT(hipModuleUnload(m_module),
-                            [&](hipError_t error_t) {
-                                std::cerr << "hipModuleUnload failed: " << std::endl
-                                          << " error: " << hipGetErrorString(error_t) << std::endl;
-                            }
-                        );
-                    }
-                }
-                // Need to clean up all these old modules' data structures, otherwise next problem will getKernel failed
-                m_access.lock();
+            }
+
+            {
+                std::lock_guard<std::mutex> guard(m_access);
                 m_modules.clear();
                 m_loadedModuleNames.clear();
                 m_loadedCOFiles.clear();
+                m_helperKernelPath.clear();
                 m_kernels.clear();
                 m_extraModuleCopies.clear();
                 m_extraKernels.clear();
                 m_currentRotationCopy.store(0);
-                m_access.unlock();
-                // Need to re-run lazy-loading for hsaco(helper kernels) module reload
-                std::string lazyArch;
-                std::string lazyDir;
-                lazyArch = m_lazyLoadArchitecture;
-                lazyDir  = m_codeObjectDirectory;
-                HIP_CHECK_RETURN_WITH_LOG(initializeLazyLoading(lazyArch, lazyDir),
-                    [&](hipError_t error_t) {
-                        std::cerr << "initializeLazyLoading after module clear failed: " << std::endl
-                                  << " error: " << hipGetErrorString(error_t) << std::endl;
-                    }
-                );
-                HIP_CHECK_RETURN_WITH_LOG(hipModuleLoad(&module, path.c_str()),
-                    [&](hipError_t error_t) {
-                        std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
-                                  << " error: " << hipGetErrorString(error_t) << std::endl;
-                    }
-                );
             }
-            else if(error)
+
+            hipError_t lazyLoadingError = initializeLazyLoading(lazyArch, lazyDir);
+            if(lazyLoadingError != hipSuccess)
             {
-                std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
-                          << " error: " << hipGetErrorString(error) << std::endl;
+                std::cerr << "initializeLazyLoading after module clear failed; preserving "
+                             "the original hipModuleLoad error: "
+                          << hipGetErrorString(error) << std::endl;
+                return error;
+            }
+
+            error = loadCodeObjectFileOnce(path);
+            if(error != hipSuccess)
+                logCodeObjectLoadError(path, error);
+            return error;
+        }
+
+        hipError_t SolutionAdapter::loadCodeObjectFileOnce(std::string const& path)
+        {
+            Debug::Instance().markerStart("loadCodeObjectFile", path);
+            hipModule_t module;
+
+            hipError_t error = m_moduleApi.load(&module, path.c_str());
+            if(error != hipSuccess)
+            {
+                Debug::Instance().markerStop();
                 return error;
             }
 
@@ -186,7 +221,10 @@ namespace TensileLite
                 //Isolate filename
                 size_t start = path.rfind('/');
                 start        = (start == std::string::npos) ? 0 : start + 1;
-                m_loadedCOFiles.insert(removeXnack(std::string(path.begin() + start, path.end())));
+                std::string fileName(path.begin() + start, path.end());
+                if(fileName.rfind("Kernels.so-000-", 0) == 0)
+                    m_helperKernelPath = path;
+                m_loadedCOFiles.insert(removeXnack(fileName));
             }
             Debug::Instance().markerStop();
             return hipSuccess;
@@ -273,8 +311,245 @@ namespace TensileLite
             }
         }
 
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+        namespace
+        {
+            uint64_t readLE(unsigned char const* p, int bytes)
+            {
+                uint64_t v = 0;
+                for(int i = bytes - 1; i >= 0; --i)
+                    v = (v << 8) | p[i];
+                return v;
+            }
+
+            // hipModuleLoad crashes inside the runtime (ROCm 7.2) on a code
+            // object whose contents run past the end of the file, as a copy
+            // cut short leaves it, so those are rejected before it sees them.
+            // This can go once hipModuleLoad returns an error for such files.
+            // Only the headers of the ELF, offload bundle and compressed
+            // offload bundle layouts are read; any other file is left for
+            // hipModuleLoad to judge. It catches a damaged file, not one
+            // replaced between this check and the load.
+            bool codeObjectFitsInFile(std::string const& path)
+            {
+                std::ifstream file(path, std::ios::binary);
+                if(!file)
+                    return true;
+                file.seekg(0, std::ios::end);
+                uint64_t const size = static_cast<uint64_t>(file.tellg());
+                file.seekg(0);
+
+                auto read = [&](uint64_t offset, uint64_t length) {
+                    std::vector<unsigned char> bytes(length);
+                    file.seekg(static_cast<std::streamoff>(offset));
+                    file.read(reinterpret_cast<char*>(bytes.data()),
+                              static_cast<std::streamsize>(length));
+                    return bytes;
+                };
+                auto fits = [size](uint64_t offset, uint64_t count, uint64_t entrySize) {
+                    return offset <= size
+                           && (entrySize == 0 || count <= (size - offset) / entrySize);
+                };
+                auto startsWith
+                    = [](std::vector<unsigned char> const& bytes, std::string const& magic) {
+                          return bytes.size() >= magic.size()
+                                 && std::equal(magic.begin(), magic.end(), bytes.begin());
+                      };
+
+                constexpr uint64_t headerSize = 64;
+                if(size < 4)
+                    return true;
+                auto header = read(0, std::min(size, headerSize));
+
+                // Compressed offload bundle: the header records the bundle's
+                // size from version 2 on.
+                if(startsWith(header, "CCOB"))
+                {
+                    if(size < 8)
+                        return false;
+                    uint64_t const version = readLE(&header[4], 2);
+                    if(version == 2)
+                        return size >= 12 && readLE(&header[8], 4) <= size;
+                    if(version >= 3)
+                        return size >= 16 && readLE(&header[8], 8) <= size;
+                    return true;
+                }
+
+                if(startsWith(header, "__CLANG_OFFLOAD_BUNDLE__"))
+                {
+                    if(size < 32)
+                        return false;
+                    uint64_t const entries = readLE(&header[24], 8);
+                    uint64_t       offset  = 32;
+                    for(uint64_t i = 0; i < entries; ++i)
+                    {
+                        if(!fits(offset, 3, 8))
+                            return false;
+                        auto     entry   = read(offset, 24);
+                        uint64_t idBytes = readLE(&entry[16], 8);
+                        if(!fits(readLE(&entry[0], 8), readLE(&entry[8], 8), 1)
+                           || !fits(offset + 24, idBytes, 1))
+                            return false;
+                        offset += 24 + idBytes;
+                    }
+                    return static_cast<bool>(file);
+                }
+
+                if(header[0] != 0x7f || header[1] != 'E' || header[2] != 'L' || header[3] != 'F')
+                    return true;
+                // ELFCLASS64, little-endian: what every AMDGPU code object is.
+                if(size < headerSize || header[4] != 2 || header[5] != 1)
+                    return false;
+
+                uint64_t const phoff     = readLE(&header[0x20], 8);
+                uint64_t const shoff     = readLE(&header[0x28], 8);
+                uint64_t const phentsize = readLE(&header[0x36], 2);
+                uint64_t const phnum     = readLE(&header[0x38], 2);
+                uint64_t const shentsize = readLE(&header[0x3A], 2);
+                uint64_t const shnum     = readLE(&header[0x3C], 2);
+                if((phnum && phentsize < 56) || (shnum && shentsize < 64)
+                   || !fits(phoff, phnum, phentsize) || !fits(shoff, shnum, shentsize))
+                    return false;
+
+                for(uint64_t i = 0; i < phnum; ++i)
+                {
+                    auto ph = read(phoff + i * phentsize, 56);
+                    if(!fits(readLE(&ph[8], 8), readLE(&ph[32], 8), 1))
+                        return false;
+                }
+                constexpr uint64_t SHT_NOBITS = 8;
+                for(uint64_t i = 0; i < shnum; ++i)
+                {
+                    auto sh = read(shoff + i * shentsize, 64);
+                    if(readLE(&sh[4], 4) != SHT_NOBITS
+                       && !fits(readLE(&sh[24], 8), readLE(&sh[32], 8), 1))
+                        return false;
+                }
+                return static_cast<bool>(file);
+            }
+        } // namespace
+
+        bool SolutionAdapter::isLocalCodeObject(std::string const& codeObjectFile)
+        {
+            // Runs on every launch, so it avoids building a path where the
+            // first character decides.
+#ifdef _WIN32
+            return !codeObjectFile.empty() && std::filesystem::path(codeObjectFile).is_absolute();
+#else
+            return !codeObjectFile.empty() && codeObjectFile.front() == '/';
+#endif
+        }
+
+        hipError_t SolutionAdapter::loadLocalCodeObject(std::string const& path)
+        {
+            // Loads of one path are serialized so it is loaded once; loads of
+            // different paths do not wait for each other.
+            std::shared_ptr<std::mutex> pathMutex;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                if(m_localModules.count(path) != 0)
+                    return hipSuccess;
+                auto& slot = m_localLoadMutexes[path];
+                if(!slot)
+                    slot = std::make_shared<std::mutex>();
+                pathMutex = slot;
+            }
+            std::lock_guard<std::mutex> loadGuard(*pathMutex);
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                if(m_localModules.count(path) != 0)
+                    return hipSuccess;
+            }
+
+            if(!codeObjectFitsInFile(path))
+            {
+                std::cerr << "hipModuleLoad skipped: " << path << std::endl
+                          << " error: code object is truncated or malformed" << std::endl;
+                return hipErrorInvalidImage;
+            }
+
+            hipModule_t module;
+            hipError_t  error;
+            try
+            {
+                error = m_moduleApi.load(&module, path.c_str());
+            }
+            catch(std::exception const& e)
+            {
+                std::cerr << "hipModuleLoad threw: " << e.what() << std::endl;
+                error = hipErrorInvalidImage;
+            }
+            if(error != hipSuccess)
+            {
+                (void)m_moduleApi.getLastError();
+                logCodeObjectLoadError(path, error);
+                return error;
+            }
+
+            // Keep ownership until insertion succeeds, so an allocation failure
+            // cannot leave a loaded module outside the adapter's maps.
+            std::unique_ptr<std::remove_pointer_t<hipModule_t>, decltype(m_moduleApi.unload)>
+                ownedModule(module, m_moduleApi.unload);
+
+            if(m_debug)
+                std::cout << "loaded local code object " << path << std::endl;
+
+            std::lock_guard<std::mutex> guard(m_access);
+            m_localModules.emplace(path, module);
+            ownedModule.release();
+            m_loadedModuleNames.push_back(concatenate("Local file ", path));
+            return hipSuccess;
+        }
+
+        hipError_t SolutionAdapter::getLocalKernel(hipFunction_t&     rv,
+                                                   std::string const& path,
+                                                   std::string const& name)
+        {
+            auto key = std::make_pair(path, name);
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                auto                        it = m_localKernels.find(key);
+                if(it != m_localKernels.end())
+                {
+                    rv = it->second;
+                    return hipSuccess;
+                }
+            }
+
+            hipError_t err = loadLocalCodeObject(path);
+            if(err != hipSuccess)
+                return err == hipErrorNotFound ? hipErrorFileNotFound : err;
+
+            std::lock_guard<std::mutex> guard(m_access);
+            err = hipModuleGetFunction(&rv, m_localModules.at(path), name.c_str());
+            if(err == hipSuccess)
+                m_localKernels.emplace(std::move(key), rv);
+            else
+                (void)m_moduleApi.getLastError();
+            return err;
+        }
+
+        size_t SolutionAdapter::localCodeObjectCount()
+        {
+            std::lock_guard<std::mutex> guard(m_access);
+            return m_localModules.size();
+        }
+#endif
+
         bool SolutionAdapter::FindCodeObject(std::string const& codeObjectFile)
         {
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+            if(isLocalCodeObject(codeObjectFile))
+            {
+                {
+                    std::lock_guard<std::mutex> guard(m_access);
+                    if(m_localModules.count(codeObjectFile) != 0)
+                        return true;
+                }
+                static_cast<void>(loadLocalCodeObject(codeObjectFile));
+                return false;
+            }
+#endif
             //If required code object file hasn't yet been loaded, load it now
             m_access.lock();
             bool loaded = m_loadedCOFiles.find(removeXnack(codeObjectFile))
@@ -363,7 +638,38 @@ namespace TensileLite
                 }
                 else
                 {
-                    (void)hipGetLastError(); // clear hipErrorNotFound
+                    (void)m_moduleApi.getLastError(); // clear hipErrorNotFound
+                }
+            }
+
+            // If helper rotation copies were not loaded, fall back to the
+            // original m_modules so multi-kernel launches still resolve.
+            if(copyIdx > 0)
+            {
+                auto origIt = m_kernels.find(name);
+                if(origIt != m_kernels.end())
+                {
+                    rv = origIt->second;
+                    return hipSuccess;
+                }
+
+                for(auto module : m_modules)
+                {
+                    err = hipModuleGetFunction(&rv, module, name.c_str());
+
+                    if(err == hipSuccess)
+                    {
+                        m_kernels[name] = rv;
+                        return err;
+                    }
+                    else if(err != hipErrorNotFound)
+                    {
+                        return err;
+                    }
+                    else
+                    {
+                        (void)m_moduleApi.getLastError(); // clear hipErrorNotFound
+                    }
                 }
             }
 
@@ -393,7 +699,7 @@ namespace TensileLite
             for(int i = 0; i < extraCopies; ++i)
             {
                 hipModule_t module;
-                hipError_t  error = hipModuleLoad(&module, path.c_str());
+                hipError_t  error = m_moduleApi.load(&module, path.c_str());
                 if(error != hipSuccess)
                 {
                     std::cerr << "loadCodeObjectFileExtraCopies hipModuleLoad failed: " << path
@@ -419,6 +725,34 @@ namespace TensileLite
             return hipSuccess;
         }
 
+        hipError_t SolutionAdapter::loadHelperKernelExtraCopies(int extraCopies)
+        {
+            std::string path;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                if(m_helperKernelPath.empty())
+                    return hipSuccess;
+                path = m_helperKernelPath;
+                if(extraCopies <= 0)
+                    extraCopies = (int)m_extraModuleCopies.size();
+                if(extraCopies <= 0)
+                    return hipSuccess;
+                // Each rotation slot should mirror every module in m_modules.
+                if(!m_extraModuleCopies.empty()
+                   && m_extraModuleCopies[0].size() >= m_modules.size())
+                    return hipSuccess;
+            }
+
+            hipError_t err = loadCodeObjectFileExtraCopies(path, extraCopies);
+            if(err != hipSuccess)
+                return err;
+
+            if(m_debug)
+                std::cout << "[icache-rotate] loaded " << extraCopies
+                          << " extra rotation copies of helper " << path << std::endl;
+            return hipSuccess;
+        }
+
         void SolutionAdapter::selectRotationCopy(int idx)
         {
             // Atomic store; no lock needed. Read by getKernel.
@@ -440,49 +774,44 @@ namespace TensileLite
         // avoid separating construction and initialization
         void SolutionAdapter::codeObjectDir(std::string codeObjDir)
         {
+            if(!codeObjDir.empty() && codeObjDir.back() != '/')
+                codeObjDir += '/';
 
-            if(!codeObjDir.empty())
-            {
-                if(codeObjDir.back() != '/')
-                {
-                    codeObjDir += '/';
-                }
-            }
-
-            m_access.lock();
-            m_codeObjectDirectory = codeObjDir;
-            m_access.unlock();
+            std::lock_guard<std::mutex> guard(m_access);
+            m_codeObjectDirectory = std::move(codeObjDir);
         }
 
-        hipError_t SolutionAdapter::initializeLazyLoading(std::string arch,
-                                                          std::string codeObjDir)
+        void SolutionAdapter::setLazyLoadingContext(std::string arch, std::string codeObjDir)
         {
-            //Ensure there's a slash at the end of the path
-            if(!codeObjDir.empty())
-            {
-                if(codeObjDir.back() != '/')
-                {
-                    codeObjDir += '/';
-                }
-            }
+            if(!codeObjDir.empty() && codeObjDir.back() != '/')
+                codeObjDir += '/';
 
-            //Remove xnack and sramecc qualifiers
+            // Remove xnack and sramecc qualifiers.
             size_t loc = arch.find(":");
             if(loc != std::string::npos)
                 arch.resize(loc);
 
-            std::string helperKernelName = std::string("Kernels.so-000-") + arch;
+            std::lock_guard<std::mutex> guard(m_access);
+            m_lazyLoadArchitecture = std::move(arch);
+            m_codeObjectDirectory  = std::move(codeObjDir);
+        }
 
-            m_access.lock();
+        hipError_t SolutionAdapter::initializeLazyLoading(std::string arch, std::string codeObjDir)
+        {
+            setLazyLoadingContext(std::move(arch), std::move(codeObjDir));
 
-            // Record for module reload
-            m_lazyLoadArchitecture = arch;
-            m_codeObjectDirectory  = codeObjDir;
-
-            //If required code object file hasn't yet been loaded, load it now
-            bool loaded = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco")
-                          != m_loadedCOFiles.end();
-            m_access.unlock();
+            std::string lazyArch;
+            std::string lazyDir;
+            bool        loaded;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                lazyArch                     = m_lazyLoadArchitecture;
+                lazyDir                      = m_codeObjectDirectory;
+                std::string helperKernelName = std::string("Kernels.so-000-") + lazyArch;
+                // If required code object file hasn't yet been loaded, load it now.
+                loaded = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco")
+                         != m_loadedCOFiles.end();
+            }
 
             if(!loaded)
             {
@@ -490,18 +819,20 @@ namespace TensileLite
                 //Try xnack variations
                 for(auto ver : {"", "-xnack-", "-xnack+"})
                 {
-                    std::string modifiedCOName = helperKernelName + ver + ".hsaco";
-                    err                        = loadCodeObjectFile(codeObjDir + modifiedCOName);
+                    std::string modifiedCOName = "Kernels.so-000-" + lazyArch + ver + ".hsaco";
+                    err                        = loadCodeObjectFileOnce(lazyDir + modifiedCOName);
 
                     if(err == hipSuccess)
                     {
                         return err;
                     }
-                    else if(err == hipErrorFileNotFound)
+
+                    logCodeObjectLoadError(lazyDir + modifiedCOName, err);
+                    if(err == hipErrorFileNotFound)
                     {
                         // We expect that we could fail for cases when we have xnack variations
                         // so clear hipErrorFileNotFound between iterations.
-                        (void)hipGetLastError();
+                        (void)m_moduleApi.getLastError();
                     }
                 }
 
@@ -569,11 +900,46 @@ namespace TensileLite
             // bounded against the one it actually passes.
             if(enableCluster)
             {
+                if(kernel.clusterDim.x == 0 || kernel.clusterDim.y == 0)
+                {
+                    std::cerr << "hipDrvLaunchKernelEx: clusterDim.x and clusterDim.y must be non-zero "
+                              << "(got " << kernel.clusterDim.x << ", " << kernel.clusterDim.y
+                              << ") for kernel: " << kernel.kernelName << std::endl;
+                    return hipErrorInvalidValue;
+                }
+
+                // Incomplete clusters can hang in hipDrvLaunchKernelEx. Do not pad
+                // here: the work partition and reduction state already use this grid.
+                if(kernel.numWorkGroups.x % kernel.clusterDim.x != 0
+                   || kernel.numWorkGroups.y % kernel.clusterDim.y != 0)
+                {
+                    std::cerr << "hipDrvLaunchKernelEx: workgroup grid must be divisible by cluster "
+                              << "dimensions (numWorkGroups " << kernel.numWorkGroups
+                              << ", clusterDim " << kernel.clusterDim
+                              << ") for kernel: " << kernel.kernelName << std::endl;
+                    return hipErrorInvalidValue;
+                }
+
                 // hipDrvLaunchKernelEx enumerates the grid in workgroups.
                 if(!fitsLaunchDim(kernel.numWorkGroups))
                 {
                     std::cerr << "hipDrvLaunchKernelEx: workgroup count exceeds the 32-bit grid "
                               << "dimensions (numWorkGroups " << kernel.numWorkGroups
+                              << ") for kernel: " << kernel.kernelName << std::endl;
+                    return hipErrorInvalidValue;
+                }
+
+                // Cluster ids in y and z are 16-bit; more clusters would wrap.
+                const size_t clustersY = kernel.numWorkGroups.y / kernel.clusterDim.y;
+                const size_t clustersZ = kernel.numWorkGroups.z;
+                if(clustersY > KernelInvocation::MaxClusterGridDimYZ
+                   || clustersZ > KernelInvocation::MaxClusterGridDimYZ)
+                {
+                    std::cerr << "hipDrvLaunchKernelEx: cluster count in y/z (" << clustersY
+                              << ", " << clustersZ << ") exceeds the cluster launch limit of "
+                              << KernelInvocation::MaxClusterGridDimYZ
+                              << " clusters (numWorkGroups " << kernel.numWorkGroups
+                              << ", clusterDim " << kernel.clusterDim
                               << ") for kernel: " << kernel.kernelName << std::endl;
                     return hipErrorInvalidValue;
                 }
@@ -616,15 +982,28 @@ namespace TensileLite
             }
 
             hipFunction_t function;
-            HIP_CHECK_RETURN_WITH_LOG(getKernel(function, kernel.kernelName),
-                [&](hipError_t error) {
+            auto          findKernel = [&]() {
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+                // Helper kernels (beta-only, output conversion) carry their
+                // solution's code object name but live in the shipped helpers.
+                if(isLocalCodeObject(kernel.codeObjectFile))
+                {
+                    hipError_t err
+                        = getLocalKernel(function, kernel.codeObjectFile, kernel.kernelName);
+                    if(err != hipErrorNotFound)
+                        return err;
+                }
+#endif
+                return getKernel(function, kernel.kernelName);
+            };
+            HIP_CHECK_RETURN_WITH_LOG(
+                findKernel(), [&](hipError_t error) {
                     std::cerr << "getKernel failed: " << kernel.kernelName << std::endl
                             << " with workgroup size: " << kernel.workGroupSize << std::endl
                             << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
                             << " with numWorkItems : " << kernel.numWorkItems << std::endl
                             << " error: " << hipGetErrorString(error) << std::endl;
-                }
-            );
+                });
 
             void*  kernelArgs = const_cast<void*>(kernel.args.data());
             size_t argsSize   = kernel.args.size();
@@ -641,14 +1020,6 @@ namespace TensileLite
 #ifdef HIP_HAS_CLUSTER_LAUNCH
             if(enableCluster)
             {
-                if(kernel.clusterDim.x == 0 || kernel.clusterDim.y == 0)
-                {
-                    std::cerr << "hipDrvLaunchKernelEx: clusterDim.x and clusterDim.y must be non-zero "
-                              << "(got " << kernel.clusterDim.x << ", " << kernel.clusterDim.y
-                              << ") for kernel: " << kernel.kernelName << std::endl;
-                    return hipErrorInvalidValue;
-                }
-
                 HIP_LAUNCH_CONFIG config = {0};
                 // The grid dimension is not affected by cluster launch, and is still enumerated
                 // using number of blocks.

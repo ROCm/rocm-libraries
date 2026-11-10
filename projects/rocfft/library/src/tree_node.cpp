@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include "tree_node.h"
+#include "../../shared/arithmetic.h"
 #include "../../shared/precision_type.h"
 #include "../../shared/ptrdiff.h"
 #include "function_pool.h"
@@ -63,6 +64,16 @@ TreeNode::~TreeNode()
     {
         Repo::ReleaseTwiddle1D(twiddles_large);
         twiddles_large = nullptr;
+    }
+    if(twiddles_off_dim)
+    {
+        Repo::ReleaseTwiddle1D(twiddles_off_dim);
+        twiddles_off_dim = nullptr;
+    }
+    if(twiddles_pp)
+    {
+        Repo::ReleaseTwiddlePP(twiddles_pp);
+        twiddles_pp = nullptr;
     }
     if(chirp)
     {
@@ -131,26 +142,38 @@ void LeafNode::GetKernelPartialPassFactors()
     }
     case 1: // work along y will be split between x and z
     {
+        std::stringstream msg;
+        std::stringstream factors_msg;
+
+        msg << "work in the off-dimension = ";
+
+        factors_msg << "radix-(";
+        for(const auto factor : kernelFactorsPP)
+            factors_msg << factor << ",";
+        factors_msg.seekp(-1, std::ios_base::end);
+        factors_msg << ") pass(es)";
+
+        auto root_transform_type = GetRootPlanTransformType();
+
         if(scheme == CS_KERNEL_STOCKHAM_PP)
         {
-            std::stringstream msg;
-            msg << "work in the off-dimension:" << std::endl;
-            msg << "\t     radix: [";
-            for(const auto factor : kernelFactorsPP)
-                msg << " " << factor;
-            msg << " ] pass(es) + Hadamard product with twiddle factors. \n";
-            comments.push_back(msg.str());
+
+            if(root_transform_type == rocfft_transform_type_real_inverse)
+                msg << "local data transposition + " << factors_msg.str() << ".";
+            else
+                msg << factors_msg.str() << " + Hadamard product with twiddle factors.";
         }
         if(scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         {
-            std::stringstream msg;
-            msg << "work in the off-dimension:" << std::endl;
-            msg << "\t     local data transposition + radix: [";
-            for(const auto factor : kernelFactorsPP)
-                msg << " " << factor;
-            msg << " ] pass(es). \n";
-            comments.push_back(msg.str());
+            if(root_transform_type == rocfft_transform_type_real_inverse)
+                msg << factors_msg.str() << " + Hadamard product with twiddle factors.";
+            else
+                msg << "local data transposition + " << factors_msg.str() << ".";
         }
+
+        msg << "\n";
+
+        comments.push_back(msg.str());
 
         break;
     }
@@ -291,6 +314,25 @@ bool LeafNode::CreateDeviceResources()
     return CreateLargeTwdTable();
 }
 
+bool LeafNode::CreatePartialPassDeviceResources(size_t off_dim_length)
+{
+    twd_attach_halfN = (ebtype != EmbeddedType::NONE);
+
+    // Create twiddle tables for partial pass along ppOffDim
+    std::tie(twiddles_off_dim, twiddles_off_dim_size)
+        = Repo::GetTwiddles1D(product(kernelFactorsPP.begin(), kernelFactorsPP.end()),
+                              GetTwiddleTableLengthLimit(),
+                              precision,
+                              deviceProp,
+                              0,
+                              twd_attach_halfN,
+                              kernelFactorsPP);
+    std::tie(twiddles_pp, twiddles_pp_size)
+        = Repo::GetTwiddlesPP(off_dim_length, precision, deviceProp);
+
+    return LeafNode::CreateDeviceResources();
+}
+
 void LeafNode::SetupGridParam(GridParam& gp)
 {
     // derived classes setup the gp (bwd, wgs, lds, padding), funPtr
@@ -408,9 +450,9 @@ void TreeNode::CollapseContiguousDims()
     collapsible_axes.push_back(length.size());
 
     // TODO: replace members TreeNode::length, TreeNode::outputLength, TreeNode::inStride,
-    // TreeNode::outStride, etc. by data_layout_t instances and introduce a (static)
-    //    data_layout_t::compress_batch_axes_consistently_in(data_layout_t& layout_0,
-    //                                                       data_layout_t& layout_1
+    // TreeNode::outStride, etc. by data_set_t instances and introduce a (static)
+    //    data_set_t::compress_batch_axes_consistently_in(data_set_t& layout_0,
+    //                                                       data_set_t& layout_1
     //                                                       [, ...]);
     // which handle compression of batch axes consistently across two (or more) data layouts.
 

@@ -30,6 +30,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/datatype.hpp>
+#include <miopen/target_properties.hpp>
 
 #include <limits>
 
@@ -110,7 +111,8 @@ bool checkNumericsImpl(
     const std::vector<size_t> vgd = {numBlocks * threadsPerBlock, size_t{1}, size_t{1}};
     const std::string build_options =
         " -DMIOPEN_FP8_CLIPPING=" + std::to_string(MIOPEN_FP8_CLIPPING) +
-        " -DMIOPEN_FP8_IEEE_EXPONENT_BIAS=" + std::to_string(MIOPEN_FP8_IEEE_EXPONENT_BIAS);
+        " -DMIOPEN_FP8_IEEE_EXPONENT_BIAS=" +
+        std::to_string(UsesIeeeExponentBias(handle.GetDeviceName()) ? 1 : 0);
     handle.AddKernel("MIOpenCheckNumerics",
                      "MIOpenCheckNumerics",
                      program_name,

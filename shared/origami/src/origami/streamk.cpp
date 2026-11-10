@@ -336,10 +336,12 @@ static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
   // A/B data in L1/L2); skip all corrections for batch > 1.
   if (batch > 1) return sk_grid;
 
-  // ipt == 1: pure tile-streaming.  DP's N-locality wins over a bounded
-  // tile-count window; outside it, keep SK.
+  // One K iteration per tile, so there is nothing to split.  sk_grid is always
+  // below tiles here, so each workgroup covers more than one tile.  Past two
+  // workgroups per CU it is better to use one workgroup per tile instead.
+  // Threshold is measured, not derived.
   if (iters_per_tile <= 1) {
-    if (cu_count > 0 && tiles >= cu_count * 2 && tiles < cu_count * 32) return tiles;
+    if (cu_count > 0 && sk_grid > 2 * cu_count) return tiles;
     return sk_grid;
   }
 

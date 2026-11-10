@@ -28,18 +28,33 @@ What lives here
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from rocke.core.dtypes import normalize_dtype
 from rocke.core.ir import (
     BF16,
     F16,
     F32,
+    I32,
+    TF32,
     IRBuilder,
     Type,
     Value,
+    VectorType,
 )
+from rocke.helpers.io import smem_load_fragment
+from rocke.helpers.magic_division import do_magic_division_dynamic
 from rocke.helpers.spec import choose_load_vec
-from rocke.helpers.transforms import TensorDescriptor, embed, pad, unmerge_magic
+from rocke.helpers.transforms import (
+    TensorDescriptor,
+    DynamicTensorDescriptor,
+    embed,
+    embed_dynamic,
+    pad,
+    pad_dynamic,
+    unmerge_magic,
+    unmerge_magic_dynamic,
+)
 
 
 # ---------------------------------------------------------------------
@@ -53,10 +68,30 @@ def _ir_dtype(dtype: str) -> Type:
     """Map a dtype string (``"fp16"``, ``"bf16"``, ``"fp32"``) to an IR ``Type``."""
     t = _DTYPE_TO_IR.get(dtype)
     if t is None:
+        if _is_tf32_spelling(dtype):
+            raise ValueError(
+                f"{dtype!r} is a compute mode, not a storage dtype: use "
+                "dtype_a='fp32', dtype_b='fp32' with mma_dtype='tf32'"
+            )
         raise ValueError(
             f"unsupported conv dtype {dtype!r}; choose fp16, bf16, or fp32"
         )
     return t
+
+
+def _smem_dtype_for(dtype: str) -> Optional[Type]:
+    """LDS element type for a *storage* dtype; ``None`` selects the f16 path.
+
+    Keyed on storage, never on the MMA dtype: a TF32 kernel keeps fp32 tiles in
+    LDS and only reinterprets the fragment it reads (:func:`_to_mma_operand`).
+    """
+    return BF16 if dtype == "bf16" else F32 if dtype == "fp32" else None
+
+
+def _is_tf32_spelling(dtype) -> bool:
+    """Does ``dtype`` spell the logical TF32 compute mode (``tf32``, ``xf32``,
+    any case)? The aliases are ``rocke.core.dtypes``'s."""
+    return isinstance(dtype, str) and normalize_dtype(dtype) == "tf32"
 
 
 # ---------------------------------------------------------------------
@@ -73,12 +108,65 @@ class ConvDataSpec:
       B: KYXC, dtype_b (weights)
       D: NHWK, dtype_d (output)
       accumulator: dtype_acc (always fp32)
+
+    ``mma_dtype`` selects the matrix-core input type when it differs from the
+    storage type. ``None`` (the default) means the MMA consumes ``dtype_a`` /
+    ``dtype_b`` as stored. The one other value is ``"tf32"``: A and B stay
+    fp32 in memory and LDS, and each fragment read from LDS is reinterpreted as
+    ``vec<tf32xN>`` for the catalog's TF32 atom -- native XF32 on gfx942, BF16x3
+    emulation on gfx950. The reinterpretation does not round, so gfx942 drops the
+    low 13 mantissa bits in hardware and gfx950 splits the full fp32 payload.
     """
 
     dtype_a: str = "fp16"
     dtype_b: str = "fp16"
     dtype_d: str = "fp16"
     dtype_acc: str = "fp32"
+    mma_dtype: Optional[str] = None
+
+    @property
+    def mma_a(self) -> str:
+        """The dtype the MMA consumes for A."""
+        return self.mma_dtype or self.dtype_a
+
+    @property
+    def mma_b(self) -> str:
+        """The dtype the MMA consumes for B."""
+        return self.mma_dtype or self.dtype_b
+
+    @property
+    def is_tf32(self) -> bool:
+        return self.mma_dtype == "tf32"
+
+    def mma_dtype_reason(self) -> Optional[str]:
+        """Why this dtype combination cannot build, or ``None`` if it can.
+
+        Catches the storage/compute mix-ups the byte-sizing validators cannot:
+        they key on ``dtype_a == "fp32"`` and would size a ``"tf32"`` storage
+        dtype as a 2-byte type.
+        """
+        if _is_tf32_spelling(self.dtype_a) or _is_tf32_spelling(self.dtype_b):
+            return (
+                "tf32 is a compute mode, not a storage dtype: use "
+                "dtype_a='fp32', dtype_b='fp32' with mma_dtype='tf32'"
+            )
+        if self.mma_dtype is None:
+            return None
+        if self.mma_dtype != "tf32":
+            return f"mma_dtype must be None or 'tf32', got {self.mma_dtype!r}"
+        if self.dtype_a != "fp32" or self.dtype_b != "fp32":
+            return (
+                "mma_dtype='tf32' needs fp32 A and B storage, got "
+                f"dtype_a={self.dtype_a!r}, dtype_b={self.dtype_b!r}"
+            )
+        # TF32 is a compute mode for fp32 convolutions (as in cuDNN and
+        # MIOpen): one rule for fwd, dgrad and wgrad, so they cannot drift.
+        if self.dtype_d != "fp32":
+            return (
+                "mma_dtype='tf32' is an fp32-convolution compute mode and needs "
+                f"an fp32 output (dtype_d='fp32'), got dtype_d={self.dtype_d!r}"
+            )
+        return None
 
 
 @dataclass(frozen=True)
@@ -427,6 +515,45 @@ def make_a_descriptor(
 
 
 # ---------------------------------------------------------------------
+# AOT kernarg block
+# ---------------------------------------------------------------------
+
+
+def emit_param_block(
+    b: IRBuilder,
+    arg_names: Sequence[Tuple[str, str]],
+    *,
+    declare_ptr: Optional[Callable[[str, str], Value]] = None,
+) -> Dict[str, Value]:
+    """Declare an AOT kernarg block in :mod:`kernels.common.conv_abi` order.
+
+    Emitting the params from the same ordered list the launch signature is
+    built from is what makes the two agree by construction — kernargs are
+    packed positionally, so a hand-maintained second copy of the order is a
+    silent-corruption bug waiting to happen (see the module docstring there).
+
+    ``declare_ptr(name, kind)`` is called for every non-``i32`` entry and must
+    return the declared ``Value``; the caller owns those because the
+    noalias / readonly / align attributes are direction-specific. It is only
+    optional for blocks that contain no pointers.
+
+    Returns ``{name: Value}`` for every entry.
+    """
+    out: Dict[str, Value] = {}
+    for name, kind in arg_names:
+        if kind == "i32":
+            out[name] = b.param(name, I32)
+        else:
+            if declare_ptr is None:
+                raise ValueError(
+                    f"AOT arg {name!r} has kind {kind!r} but no declare_ptr "
+                    f"callback was supplied"
+                )
+            out[name] = declare_ptr(name, kind)
+    return out
+
+
+# ---------------------------------------------------------------------
 # MFMA body helpers (shared by forward and wgrad K-loop bodies)
 # ---------------------------------------------------------------------
 
@@ -450,6 +577,277 @@ def _emit_smem_load(
     if n == 4:
         return b.smem_load_v4_f16(smem, row, col)
     return b.smem_load_vN_f16(smem, row, col, n=n)
+
+
+def _to_mma_operand(b: IRBuilder, frag: Value, data: "ConvDataSpec") -> Value:
+    """Hand an fp32 LDS fragment to a TF32 MMA as ``vec<tf32xN>``.
+
+    A bitcast: no instruction is emitted and no bit is rounded. Every other
+    data spec gets ``frag`` back unchanged, so existing kernels are untouched.
+    """
+    if not data.is_tf32:
+        return frag
+    return b.bitcast(frag, VectorType(TF32, frag.type.count))
+
+
+# ---------------------------------------------------------------------
+# TF32 compute helpers (shared by forward, dgrad and wgrad)
+# ---------------------------------------------------------------------
+
+# Widest single LDS load a TF32 fragment is issued as (fp32 elements): 16 B,
+# one ds_read_b128. Wider fragments are read as several of these.
+_TF32_LDS_LOAD_MAX = 4
+
+# Physical MFMAs one emulated logical MMA issues, per emulation recipe.
+_EMULATION_MFMAS = {"bf16x3": 3}
+
+
+def _mfma_issues_per_mma(op) -> int:
+    """Physical MFMAs one logical ``op`` issues (3 for gfx950 BF16x3 TF32)."""
+    return _EMULATION_MFMAS[op.emulation.recipe.value] if op.emulation else 1
+
+
+def _load_mma_operand(
+    b: IRBuilder,
+    smem: Value,
+    row: Value,
+    col: Value,
+    n: int,
+    *,
+    smem_dtype: Optional[Type],
+    data: ConvDataSpec,
+) -> Value:
+    """Read one MFMA operand fragment from LDS, in the type the MMA consumes.
+
+    Non-TF32 specs take exactly the :func:`_emit_smem_load` path they always
+    did. Under TF32 the fragment is fp32 in LDS; it is read by
+    :func:`~rocke.helpers.io.smem_load_fragment` in loads of at most four
+    elements -- each claims only the 16-byte alignment a ``ds_read_b128``
+    needs, which the validated row stride guarantees -- and then reinterpreted
+    once as ``vec<tf32xN>`` (:func:`_to_mma_operand`, a free bitcast).
+    """
+    if not data.is_tf32:
+        return _emit_smem_load(b, smem, row, col, n, smem_dtype=smem_dtype)
+    frag = smem_load_fragment(
+        b, smem, row, col, dtype=F32, n=n, max_elems=_TF32_LDS_LOAD_MAX
+    )
+    return _to_mma_operand(b, frag, data)
+
+
+def _tf32_reason(spec, target, family: str, arch: str) -> Optional[str]:
+    """Why ``spec`` (TF32 compute) cannot build on ``arch``, or ``None``.
+
+    TF32 is an MFMA-only mode: no wave32 catalog has a TF32 row, and the WMMA
+    phases read their fragments through a path that was never taught the
+    fp32 -> tf32 reinterpretation. An MFMA arch with no TF32 row at all gets
+    its own reason rather than the generic warp-tile one, so a caller can tell
+    "wrong shape" from "this arch has no TF32". ``spec`` is any conv spec with
+    ``warp_tile_m`` / ``warp_tile_n`` / ``warp_tile_k``.
+    """
+    if family != "mma":
+        return f"mma_dtype='tf32' is MFMA-only; {arch} is a WMMA target"
+    _shapes = sorted(
+        (op.m, op.n, op.k)
+        for op in target.mma.ops
+        if op.family == "mma"
+        and op.a_dtype == "tf32"
+        and op.b_dtype == "tf32"
+        and op.c_dtype == "fp32"
+    )
+    if not _shapes:
+        return f"mma_dtype='tf32': {arch} has no TF32 MFMA atom"
+    if (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k) not in _shapes:
+        return (
+            f"mma_dtype='tf32': warp_tile "
+            f"{(spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)} is not a "
+            f"TF32 atom on {arch} (have {_shapes})"
+        )
+    _op = target.mma.op_for_shape(
+        family="mma",
+        a_dtype="tf32",
+        b_dtype="tf32",
+        c_dtype="fp32",
+        m=spec.warp_tile_m,
+        n=spec.warp_tile_n,
+        k=spec.warp_tile_k,
+    )
+    return _tf32_register_reason(spec, _op)
+
+
+def _tf32_any_arch_frag_len(spec) -> Optional[int]:
+    """Per-lane fragment of the TF32 atom ``spec``'s warp tile names, any arch.
+
+    Read from the arch-agnostic ``MfmaAtom`` table, keyed by ``(m, n, k)``
+    alone. That is only sound while no ``(m, n, k)`` is a TF32 atom on two
+    arches with different fragment widths -- true today (gfx942's native atoms
+    are K=8/4, gfx950's emulated ones K=32/16). ``test_conv_tf32_register_guard``
+    asserts it against every arch catalog, so an atom that breaks it fails a
+    test instead of letting an arch-free check validate the wrong width. With
+    an arch in hand, :func:`_tf32_conv_spec_reason` uses the arch's own op.
+    """
+    from rocke.helpers.atoms import mfma_atom
+
+    try:
+        return mfma_atom(
+            "tf32", spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k
+        ).a_per_lane
+    except (KeyError, ValueError):
+        return None
+
+
+def _tf32_conv_spec_reason(
+    spec, arch: Optional[str] = None, *, async_needs_k_outer: bool = False
+) -> str:
+    """Why ``spec``'s dtypes cannot build (on ``arch``, if given), or ``""``.
+
+    The one TF32 gate for the dgrad and wgrad kernels, used by both their
+    ``validate`` (``arch=None``) and their ``is_valid_*_spec`` (with the arch),
+    so no family's rules or messages can drift from another's. Every non-TF32
+    spec returns ``""`` unless it spells TF32 as a storage dtype. The forward
+    kernel's gate (``conv_implicit_gemm._fwd_tf32_reason``) shares the atom and
+    stride rules (:func:`_tf32_mfma_reason`).
+
+    TF32 keeps fp32 tiles in LDS and reads each operand fragment as plain
+    contiguous fp32 vectors before reinterpreting it as ``vec<tf32xN>``. That
+    rules out:
+
+    * ``lds_k_outer``: its fetch is the 16-bit transpose read
+      (``ds_read_b64_tr_b16``), which has no 32-bit form;
+    * ``async_dma`` where the kernel's direct load needs the K-outer tile
+      (``async_needs_k_outer``, wgrad);
+    * a swizzled ``lds_layout``: the fragment read is not swizzle-aware;
+    * WMMA (wave32) targets and arches without a TF32 atom (:func:`_tf32_reason`);
+
+    and requires an LDS row stride the fragment read stays aligned on
+    (:func:`_tf32_lds_stride_reason`) and, for the emulated atom, a warp tile
+    below the register ceiling (:func:`_tf32_register_reason`).
+    """
+    data = spec.data
+    why = data.mma_dtype_reason()
+    if why:
+        return why
+    if not data.is_tf32:
+        return ""
+    if spec.lds_k_outer:
+        return (
+            "mma_dtype='tf32': lds_k_outer is not supported -- the K-outer "
+            "operand fetch is a 16-bit transpose read (ds_read_b64_tr_b16) with "
+            "no 32-bit form, and TF32 keeps fp32 tiles in LDS"
+        )
+    if async_needs_k_outer and spec.async_dma:
+        return (
+            "mma_dtype='tf32': async_dma is not supported -- this kernel's "
+            "direct global->LDS load needs the K-outer tile, which TF32 cannot use"
+        )
+    layout = spec.lds_layout
+    if layout is not None and layout.swizzle is not None:
+        return (
+            "mma_dtype='tf32': a swizzled lds_layout is not supported -- the "
+            "fragment is read as contiguous fp32 vectors"
+        )
+    return _tf32_mfma_reason(spec, arch)
+
+
+def _tf32_mfma_reason(spec, arch: Optional[str] = None) -> str:
+    """Why TF32 ``spec`` cannot issue its TF32 atom (on ``arch``, if given), or
+    ``""``: the rules every implicit-GEMM direction shares.
+
+    A wave64 spec, a warp tile that is a TF32 atom (on ``arch``; arch-free, on
+    any arch -- :func:`_tf32_any_arch_frag_len`), the register ceiling when the
+    arch is known (:func:`_tf32_reason`), and an LDS row stride the fragment
+    read stays aligned on (:func:`_tf32_lds_stride_reason`). ``spec`` must be a
+    TF32 spec with ``wave_size``, the warp tile and ``effective_lds_layout()``.
+    """
+    if spec.wave_size != 64:
+        return (
+            f"mma_dtype='tf32' is MFMA-only; wave_size={spec.wave_size} is a "
+            "WMMA target"
+        )
+    if arch is None:
+        frag = _tf32_any_arch_frag_len(spec)
+        if frag is None:
+            return (
+                f"mma_dtype='tf32': warp_tile "
+                f"{(spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)} is "
+                "not a TF32 atom on any arch"
+            )
+    else:
+        from rocke.core.arch import ArchTarget
+
+        target = ArchTarget.from_gfx(arch)
+        family = "wmma" if target.wave_size == 32 else "mma"
+        why = _tf32_reason(spec, target, family, arch)
+        if why:
+            return why
+        frag = target.mma.op_for_shape(
+            family="mma",
+            a_dtype="tf32",
+            b_dtype="tf32",
+            c_dtype="fp32",
+            m=spec.warp_tile_m,
+            n=spec.warp_tile_n,
+            k=spec.warp_tile_k,
+        ).a_frag_len
+    try:
+        row = spec.effective_lds_layout().row_stride
+    except ValueError as e:
+        return str(e)
+    # A and B share the layout, so one stride covers both tiles.
+    return _tf32_lds_stride_reason(row, frag) or ""
+
+
+# Emulated (BF16x3) TF32 warp tiles at or above this many fp32 accumulators per
+# lane sit at the 512-VGPR ceiling once the hi/lo split temporaries are live,
+# and comgr's VGPR->AGPR spill path miscompiles kernels there: one accumulator
+# register comes out wrong while the same IR is correct at -O1 or with
+# -amdgpu-spill-vgpr-to-agpr=0 (the same failure the direct MFMA dgrad's
+# 384-VGPR preload budget avoids). Such tiles spill heavily anyway, so they are
+# not worth keeping.
+_TF32_EMULATED_MAX_ACC_PER_LANE = 384
+
+
+def _tf32_register_reason(spec, op) -> Optional[str]:
+    """Reject an emulated-TF32 warp tile that reaches the VGPR ceiling, or None.
+
+    ``op`` is the resolved TF32 MMA op (``None`` or a native atom: no check).
+    ``spec`` is any conv spec with ``tile_m/n`` and ``warp_m/n``; TF32 is
+    MFMA-only, so a lane is one of 64.
+    """
+    if op is None or op.emulation is None:
+        return None
+    _acc = (spec.tile_m // spec.warp_m) * (spec.tile_n // spec.warp_n) // 64
+    if _acc >= _TF32_EMULATED_MAX_ACC_PER_LANE:
+        return (
+            f"mma_dtype='tf32': {_acc} fp32 accumulators per lane with the "
+            "BF16x3-emulated atom reach the 512-VGPR ceiling, where the "
+            "VGPR->AGPR spill path miscompiles; use a smaller warp tile "
+            f"(< {_TF32_EMULATED_MAX_ACC_PER_LANE} accumulators per lane)"
+        )
+    return None
+
+
+def _tf32_lds_stride_reason(row_stride: int, frag: int) -> Optional[str]:
+    """Reject an LDS row stride that would misalign a TF32 fragment read.
+
+    A TF32 fragment is ``frag`` fp32 values read from one LDS row (2 on gfx942
+    -> ``ds_read_b64``, 8 on gfx950 -> two ``ds_read_b128``; see
+    :func:`_load_mma_operand`). The column offset is always a multiple of the
+    fragment, so the read is aligned exactly when the row stride is. The loads
+    claim ``min(frag, 4) * 4`` bytes of alignment -- at most 16, the pool's
+    own alignment -- so the row stride must be a multiple of ``min(frag, 4)``
+    elements; anything else would over-claim alignment. The same rule keeps
+    every tile allocation a multiple of 16 bytes, so the tiles placed after
+    the first one in the pool stay 16-byte aligned too.
+    """
+    _need = min(frag, _TF32_LDS_LOAD_MAX)
+    if row_stride % _need:
+        return (
+            f"mma_dtype='tf32': LDS row stride {row_stride} fp32 elements is not "
+            f"a multiple of {_need}, so the {frag}-wide fragment read would be "
+            f"misaligned; use an lds_k_pad that keeps tile_k + pad a "
+            f"multiple of {_need}"
+        )
+    return None
 
 
 def _apply_accumulator_epilogue(
@@ -540,6 +938,64 @@ def _choose_load_vec_for(
     Thin adapter over the shared :func:`rocke.helpers.spec.choose_load_vec`."""
     elem_bytes = {"fp16": 2, "bf16": 2, "fp32": 4}.get(dtype_a, 2)
     return choose_load_vec(tile_m, tile_n, tile_k, block_size, elem_bytes=elem_bytes)
+
+
+def coalesced_load_reason(
+    operand: str, tile_rows: int, tile_cols: int, block_size: int, load_vec: int
+) -> Optional[str]:
+    """Why a ``CoalescedTileLoader`` with an exact ``load_vec`` cannot copy
+    this tile, or ``None`` if it can.
+
+    The loader gives every thread the same number of ``load_vec``-wide chunks
+    (``CoalescedTileLoader.vecs_per_thread``), so the chunk count must divide
+    by the block size. A width chosen by the loader itself always does; an
+    explicit ``vector_size_*`` is used verbatim and may not, which the builder
+    only discovers mid-build. Validators call this so such a spec is rejected
+    up front. C++ twin: ``rocke_conv_coalesced_load_reason``.
+    """
+    chunks = (tile_rows * tile_cols) // load_vec
+    if chunks % block_size:
+        return (
+            f"{operand} load: tile {tile_rows}x{tile_cols} / {load_vec} = {chunks} "
+            f"not divisible by block_size {block_size}"
+        )
+    return None
+
+
+# One global load/store per lane moves at most 16 bytes (dwordx4): 8 x 16-bit
+# or 4 x fp32 -- the top rung of every default_vector_sizes ladder.
+MAX_VECTOR_BYTES = 16
+
+# Per-dtype element size for the vector-width check. Keyed explicitly (rather
+# than a fp32-vs-everything-else ternary) so a future 1- or 8-byte dtype is a
+# one-line table edit here and in the C++ twin's rocke_conv_vector_width_elem_bytes,
+# instead of a silent fallthrough to the 2-byte default.
+_VECTOR_WIDTH_DTYPE_BYTES = {"fp16": 2, "bf16": 2, "fp32": 4}
+
+
+def vector_width_reason(
+    widths: Sequence[Tuple[str, Optional[int], str]],
+) -> Optional[str]:
+    """Why an explicit ``vector_size_*`` is wider than one 16-byte access, or
+    ``None`` if every width fits.
+
+    ``widths`` holds ``(operand, vector_size, dtype)`` triples. An unset width
+    (``None``) is derived from ``default_vector_sizes``, whose per-dtype
+    ladder already stops at 16 bytes; an explicit one is used verbatim, so an
+    fp32 operand at width 8 (32 bytes) would otherwise pass and the AOT sweep
+    would compile it next to the 16-byte kernels. C++ twin:
+    ``rocke_conv_vector_width_ok``.
+    """
+    for operand, vec, dtype in widths:
+        if vec is None:
+            continue
+        nbytes = vec * _VECTOR_WIDTH_DTYPE_BYTES.get(dtype, 2)
+        if nbytes > MAX_VECTOR_BYTES:
+            return (
+                f"vector_size_{operand}={vec} x {dtype} is {nbytes} bytes "
+                f"> {MAX_VECTOR_BYTES}-byte max per-lane access"
+            )
+    return None
 
 
 # ---------------------------------------------------------------------
@@ -762,3 +1218,506 @@ def emit_wavelet_kloop(
 
             for _ in range(epi_barriers):
                 b.sync()
+
+
+def emit_wavelet_kloop_dynamic(
+    b: IRBuilder,
+    *,
+    warp_id: Value,
+    tid: Value,
+    n_math_warps: int,
+    math_block_size: int,
+    k_lo: Value,
+    k_hi: Value,
+    block_k: int,
+    A_smem: Value,
+    B_smem: Value,
+    a_wavelet_loader,
+    b_wavelet_loader,
+    a_descriptor: Callable,
+    b_descriptor: Callable,
+    a_rsrc: Value,
+    b_rsrc: Value,
+    k_off_capture: List,
+    accs: List,
+    emit_mfma_phase: Callable,
+    emit_epilogue_fn: Callable,
+    epi_barriers: int,
+) -> None:
+    """Runtime-extent variant of :func:`emit_wavelet_kloop`.
+
+    The compile-time version peels the final tile so its trailing barrier
+    pair can be omitted. That peel is not expressible against a runtime
+    ``k_hi``, and guarding the barriers with ``scf_if`` is not an option: the
+    math and load wave groups would then emit different barrier counts and
+    the workgroup would hang at ``s_barrier``.
+
+    Instead both loops run the *same* runtime trip count and every iteration
+    emits the full barrier pair. The cost is one extra fetch+store of a tile
+    at ``k >= k_hi``; its coords fall outside the descriptor's padded bounds,
+    so the buffer resource returns zero and nothing ever reads it back.
+
+    Barrier protocol — the two branches emit ``1 + 2 * K_tiles + epi_barriers``
+    barriers each, which is what keeps them in lockstep::
+
+        MATH: barrier_0                       ← tile k_lo is already in LDS
+              for k in [k_lo, k_hi) step block_k:
+                WMMA(LDS)                     ← consumes tile k
+                barrier_A                     ← math done reading LDS
+                barrier_B                     ← wait for load to write tile k+1
+              epilogue                        ← emits epi_barriers bare syncs
+
+        LOAD: fetch tile k_lo → regs, store → LDS
+              barrier_0
+              for k in [k_lo, k_hi) step block_k:
+                fetch tile k+1 → regs         ← overlaps math's WMMA of tile k
+                barrier_A                     ← wait for math to release LDS
+                store regs → LDS
+                barrier_B                     ← signal tile k+1 ready
+              for _ in epi_barriers: barrier
+
+    ``emit_epilogue_fn(final_accs)`` is called in the math branch after the
+    loop; it must emit exactly ``epi_barriers`` barriers internally.
+    ``k_lo`` / ``k_hi`` are i32 SSA values bounding this CTA's K slice
+    (``k_lo`` is nonzero only on the split-K paths).
+    """
+    c_block_k = b.const_i32(block_k)
+    c_nmath = b.const_i32(n_math_warps)
+    warp_id_s = b.readfirstlane(warp_id)
+    is_math = b.cmp_lt(warp_id_s, c_nmath)
+
+    load_tid = b.sub(tid, b.const_i32(math_block_size))
+
+    def _fetch(k_off: Value):
+        k_off_capture[0] = k_off
+        af = a_wavelet_loader.fetch(
+            b, tid=load_tid, descriptor=a_descriptor, rsrc=a_rsrc
+        )
+        bf = b_wavelet_loader.fetch(
+            b, tid=load_tid, descriptor=b_descriptor, rsrc=b_rsrc
+        )
+        return af, bf
+
+    def _store(af, bf):
+        a_wavelet_loader.store_fetched(b, smem_dst=A_smem, fetched=af)
+        b_wavelet_loader.store_fetched(b, smem_dst=B_smem, fetched=bf)
+
+    with b.scf_if_else(is_math) as (math_ctx, load_ctx):
+        with math_ctx:
+            b.sync()  # barrier_0
+
+            for_m = b.scf_for_iter(k_lo, k_hi, c_block_k, accs, iv_name="k_math")
+            with for_m as (k_math, m_vars):
+                k_off_capture[0] = k_math
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(m_vars))
+                b.sync()  # barrier_A
+                b.sync()  # barrier_B
+                b.scf_yield(*new_accs)
+
+            emit_epilogue_fn(list(for_m.results))
+
+        with load_ctx:
+            af0, bf0 = _fetch(k_lo)
+            b.s_waitcnt(vmcnt=0)
+            _store(af0, bf0)
+            b.s_waitcnt(lgkmcnt=0)
+            b.sync()  # barrier_0
+
+            # No carried state on this side, so a plain scf.for suffices.
+            with b.scf_for(k_lo, k_hi, c_block_k, iv_name="k_load") as k_load:
+                af_next, bf_next = _fetch(b.add(k_load, c_block_k))
+                b.sync()  # barrier_A
+                b.s_waitcnt(vmcnt=0)
+                _store(af_next, bf_next)
+                b.s_waitcnt(lgkmcnt=0)
+                b.sync()  # barrier_B
+
+            for _ in range(epi_barriers):
+                b.sync()
+
+
+# -----------------------------------------------------------------------
+# Dynamic (AOT) descriptor builders — shared by all conv directions
+# -----------------------------------------------------------------------
+
+
+def mul_u24(b: IRBuilder, x: Value, y: Value) -> Value:
+    """``x * y`` for operands known to be non-negative and below 2**24.
+
+    Masking both operands to 24 bits lets the backend select the full-rate
+    ``v_mul_u32_u24`` instead of the quarter-rate ``v_mul_lo_u32``; the masks
+    themselves fold away. Only for K-loop terms whose bound the host enforces
+    (``conv_args.MUL24_REDUCTION_LIMIT``) -- a wider operand loses its high bits.
+    """
+    c24 = b.const_i32(0xFFFFFF)
+    return b.mul(b.land(x, c24), b.land(y, c24))
+
+
+def magic_divmod(
+    b: IRBuilder, val: Value, mult, shift, dim, *, u24: bool = False
+) -> Tuple[Value, Value]:
+    """``(val // dim, val % dim)`` through a magic pair, as one unmerge step.
+
+    Same emission as a :class:`UnmergeMagicDynamic` step: each of ``mult`` /
+    ``shift`` / ``dim`` may be a runtime ``Value`` or a build-time ``int``, and
+    a build-time ``dim == 1`` skips the division. ``u24`` computes the
+    ``quot * dim`` product with :func:`mul_u24`.
+    """
+
+    def as_value(x):
+        return x if isinstance(x, Value) else b.const_i32(int(x))
+
+    if isinstance(dim, int) and dim == 1:
+        return val, b.const_i32(0)
+    quot = do_magic_division_dynamic(b, val, as_value(mult), as_value(shift))
+    dim_v = as_value(dim)
+    prod = mul_u24(b, quot, dim_v) if u24 else b.mul(quot, dim_v)
+    return quot, b.sub(val, prod)
+
+
+def _magic_triple(params, prefix: str, name: str, dim: Value):
+    """One ``(mult, shift, dim)`` entry for :func:`unmerge_magic_dynamic`.
+
+    ``UnmergeMagicDiv`` peels one extent at a time off the flat coord
+    (``tmp //= dims[i]``), so every triple divides by a *single* extent --
+    ``m -> (n, ho, wo)`` divides by ``Wo`` and then by ``Ho``, never by
+    ``Ho*Wo``. The host precomputes the magic pair for that same extent.
+    """
+    return (
+        params[f"p_magic_{prefix}{name}_mult"],
+        params[f"p_magic_{prefix}{name}_shift"],
+        dim,
+    )
+
+
+def spatial_unmerge_dynamic(
+    params, *, upper: str, prefix: str, is_3d: bool, leading: str = "n"
+):
+    """``m``/``k_wg`` -> ``(n, [do,] ho, wo)`` with runtime magic numbers.
+
+    ``prefix`` selects the magic-pair family: the forward ``m`` decode uses
+    ``m_``, the wgrad reduction index ``k_wg`` uses ``k_``. The coord names
+    stay the same either way because both index the same output grid.
+    """
+    into = [leading] + (["do"] if is_3d else []) + ["ho", "wo"]
+    triples = []
+    if is_3d:
+        triples.append(_magic_triple(params, prefix, "Do", params["p_Do"]))
+    triples.append(_magic_triple(params, prefix, "Ho", params["p_Ho"]))
+    triples.append(_magic_triple(params, prefix, "Wo", params["p_Wo"]))
+    return unmerge_magic_dynamic(upper, into=into, magic_triples=triples)
+
+
+def channel_unmerge_dynamic(
+    params, *, upper: str, prefix: str, is_3d: bool, cdim: Value, last: str = "c"
+):
+    """``k``/``n_wg`` -> ``([z,] y, x, c)`` with runtime magic numbers."""
+    into = (["z"] if is_3d else []) + ["y", "x", last]
+    triples = []
+    if is_3d:
+        triples.append(_magic_triple(params, prefix, "Y", params["p_Y"]))
+    triples.append(_magic_triple(params, prefix, "X", params["p_X"]))
+    triples.append(_magic_triple(params, prefix, "cpg", cdim))
+    return unmerge_magic_dynamic(upper, into=into, magic_triples=triples)
+
+
+def filter_pads_dynamic(params, *, is_3d: bool):
+    """Bound checks on the filter coords produced by the ``k`` unmerge.
+
+    When the reduction extent is not a multiple of ``tile_k`` the K-loop runs
+    past it and the unmerge yields ``y >= Y`` / ``x >= X``. Without these the
+    kernel would read valid-looking offsets that cross into adjacent weight
+    rows.
+    """
+    out = []
+    if is_3d:
+        out.append(pad_dynamic("z", lo=0, hi=params["p_Z"]))
+    out.append(pad_dynamic("y", lo=0, hi=params["p_Y"]))
+    out.append(pad_dynamic("x", lo=0, hi=params["p_X"]))
+    return out
+
+
+def _a_channel_decode_dynamic(
+    b, params, *, is_3d: bool, grouped: bool, upper: str, prefix: str
+):
+    """Runtime counterpart of :func:`_a_channel_decode`.
+
+    Ungrouped, the contraction index unmerges straight to the absolute NHWC
+    channel. Grouped, it only spans ``cpg``, so it unmerges to ``c_in_group``
+    and an ``embed`` recovers ``c = group*cpg + c_in_group`` from the caller's
+    block-z index.
+    """
+    if grouped:
+        return [
+            channel_unmerge_dynamic(
+                params,
+                upper=upper,
+                prefix=prefix,
+                is_3d=is_3d,
+                cdim=params["p_cpg"],
+                last="c_in_group",
+            ),
+            embed_dynamic(
+                upper=["group", "c_in_group"],
+                lower="c",
+                strides=[params["p_cpg"], 1],
+                offset=0,
+                lo=0,
+                hi=params["p_C"],
+            ),
+        ]
+    return [
+        channel_unmerge_dynamic(
+            params, upper=upper, prefix=prefix, is_3d=is_3d, cdim=params["p_cpg"]
+        )
+    ]
+
+
+def make_a_descriptor_dynamic(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    is_3d: bool = False,
+    grouped: bool = False,
+    decompose_m: bool = True,
+    spatial_upper: str = "m",
+    spatial_prefix: str = "m_",
+    channel_upper: str = "k",
+    channel_prefix: str = "k_",
+    stride_prefix: str = "p_A_stride_",
+    name: Optional[str] = None,
+):
+    """AOT counterpart of :func:`make_a_descriptor`: ``(m, k) -> N[D]HWC``.
+
+    Same transform DAG as the compile-time builder, with every extent, stride
+    and magic constant taken from the AOT kernarg block instead of being
+    folded in as ``const_i32``.
+
+    ``decompose_m=False`` drops the leading ``m`` unmerge so callers that
+    already hold ``(n, ho, wo)`` cheaply feed them straight in, exactly as in
+    the static version.
+
+    The coord / magic-prefix / stride-prefix overrides exist for wgrad, whose
+    X operand has the same DAG under different names (``k_wg`` for the output
+    position and ``n_wg`` for the filter-channel index) -- which is why the
+    static version there simply reuses ``make_a_descriptor``.
+    """
+    neg_pH = b.sub(b.const_i32(0), params["p_pH"])
+    neg_pW = b.sub(b.const_i32(0), params["p_pW"])
+
+    transforms = []
+    if decompose_m:
+        transforms.append(
+            spatial_unmerge_dynamic(
+                params, upper=spatial_upper, prefix=spatial_prefix, is_3d=is_3d
+            )
+        )
+    if is_3d:
+        neg_pD = b.sub(b.const_i32(0), params["p_pD"])
+        transforms.append(
+            embed_dynamic(
+                upper=["do", "z"],
+                lower="di",
+                strides=[params["p_sD"], params["p_dD"]],
+                offset=neg_pD,
+                lo=0,
+                hi=params["p_Di"],
+            )
+        )
+    transforms += [
+        embed_dynamic(
+            upper=["ho", "y"],
+            lower="hi",
+            strides=[params["p_sH"], params["p_dH"]],
+            offset=neg_pH,
+            lo=0,
+            hi=params["p_Hi"],
+        ),
+        embed_dynamic(
+            upper=["wo", "x"],
+            lower="wi",
+            strides=[params["p_sW"], params["p_dW"]],
+            offset=neg_pW,
+            lo=0,
+            hi=params["p_Wi"],
+        ),
+        *_a_channel_decode_dynamic(
+            b,
+            params,
+            is_3d=is_3d,
+            grouped=grouped,
+            upper=channel_upper,
+            prefix=channel_prefix,
+        ),
+        *filter_pads_dynamic(params, is_3d=is_3d),
+    ]
+
+    if is_3d:
+        coord_names = ["n", "di", "hi", "wi", "c"]
+        strides = [
+            params[f"{stride_prefix}n"],
+            params[f"{stride_prefix}di"],
+            params[f"{stride_prefix}hi"],
+            params[f"{stride_prefix}wi"],
+            b.const_i32(1),
+        ]
+        default_name = "A_ndhwc"
+    else:
+        coord_names = ["n", "hi", "wi", "c"]
+        strides = [
+            params[f"{stride_prefix}n"],
+            params[f"{stride_prefix}hi"],
+            params[f"{stride_prefix}wi"],
+            b.const_i32(1),
+        ]
+        default_name = "A_nhwc"
+    return DynamicTensorDescriptor.create(
+        name or default_name, coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def make_b_descriptor_dynamic(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    is_3d: bool = False,
+    channel_upper: str = "k_gemm",
+    channel_prefix: str = "k_",
+    stride_prefix: str = "p_B_stride_",
+    name: Optional[str] = None,
+):
+    """AOT counterpart of :func:`make_b_descriptor`: ``(k_out, k_gemm) -> K[Z]YXC``.
+
+    The weight slab is per-group (channel extent ``cpg``); the group rides in
+    the absolute ``k_out`` row index supplied by the caller.
+
+    The coord / prefix overrides serve wgrad's dW, which is the same layout
+    indexed by ``n_wg`` instead of ``k_gemm``.
+    """
+    transforms = [
+        channel_unmerge_dynamic(
+            params,
+            upper=channel_upper,
+            prefix=channel_prefix,
+            is_3d=is_3d,
+            cdim=params["p_cpg"],
+        ),
+        *filter_pads_dynamic(params, is_3d=is_3d),
+    ]
+    if is_3d:
+        coord_names = ["k_out", "z", "y", "x", "c"]
+        strides = [
+            params[f"{stride_prefix}k"],
+            params[f"{stride_prefix}z"],
+            params[f"{stride_prefix}y"],
+            params[f"{stride_prefix}x"],
+            b.const_i32(1),
+        ]
+        default_name = "B_kzyxc"
+    else:
+        coord_names = ["k_out", "y", "x", "c"]
+        strides = [
+            params[f"{stride_prefix}k"],
+            params[f"{stride_prefix}y"],
+            params[f"{stride_prefix}x"],
+            b.const_i32(1),
+        ]
+        default_name = "B_kyxc"
+    return DynamicTensorDescriptor.create(
+        name or default_name, coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def make_d_descriptor_dynamic(
+    b: IRBuilder, params: Dict[str, Value], *, is_3d: bool = False
+):
+    """AOT counterpart of :func:`make_d_descriptor`: ``(m, k_out) -> N[D]HWK``."""
+    transforms = [spatial_unmerge_dynamic(params, upper="m", prefix="m_", is_3d=is_3d)]
+    if is_3d:
+        coord_names = ["n", "do", "ho", "wo", "k_out"]
+        strides = [
+            params["p_D_stride_n"],
+            params["p_D_stride_do"],
+            params["p_D_stride_ho"],
+            params["p_D_stride_wo"],
+            b.const_i32(1),
+        ]
+        name = "D_ndhwk"
+    else:
+        coord_names = ["n", "ho", "wo", "k_out"]
+        strides = [
+            params["p_D_stride_n"],
+            params["p_D_stride_ho"],
+            params["p_D_stride_wo"],
+            b.const_i32(1),
+        ]
+        name = "D_nhwk"
+    return DynamicTensorDescriptor.create(
+        name, coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def emit_direct_epilogue_wmma(
+    b,
+    spec,
+    op,
+    accs,
+    warp_m_idx,
+    warp_n_idx,
+    lane,
+    block_m_off,
+    block_n_off,
+    d_rsrc,
+    c0,
+    *,
+    addr_fn,
+    p_M,
+    p_kpg,
+):
+    """Per-lane WMMA direct epilogue with runtime bounds.
+
+    ``addr_fn(b, m_val, n_val) -> (off_elements, valid)`` — same AddrFn
+    contract as DirectEpilogue / CShuffleEpilogue.
+    """
+    mfmas_m = spec.mfmas_per_warp_m
+    mfmas_n = spec.mfmas_per_warp_n
+    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
+    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
+    c_map = op.dst_layout()
+    _fp32_out = spec.data.dtype_d == "fp32"
+    _bf16_out = spec.data.dtype_d == "bf16"
+    _elem_bytes = 4 if _fp32_out else 2
+
+    flat = 0
+    for mi in range(mfmas_m):
+        for ni in range(mfmas_n):
+            acc = accs[flat]
+            flat += 1
+            atom_m_off = b.add(
+                b.add(block_m_off, warp_m_off),
+                b.const_i32(mi * spec.warp_tile_m),
+            )
+            atom_n_off = b.add(
+                b.add(block_n_off, warp_n_off),
+                b.const_i32(ni * spec.warp_tile_n),
+            )
+            for i in range(op.dst.frag_len):
+                row_off, col_off = c_map.coord(b, lane, i)
+                m_val = b.add(atom_m_off, row_off)
+                n_val = b.add(atom_n_off, col_off)
+                m_ok = b.cmp_lt(m_val, p_M)
+                n_ok = b.cmp_lt(n_val, p_kpg)
+                ok = b.land(m_ok, n_ok)
+
+                v_f32 = b.vec_extract(acc, i)
+                d_off_elems, _ = addr_fn(b, m_val, n_val)
+                d_off_bytes = b.mul(d_off_elems, b.const_i32(_elem_bytes))
+                safe_off = b.select(ok, d_off_bytes, b.const_i32((1 << 31) - 1))
+                if _fp32_out:
+                    b.buffer_store_f32(d_rsrc, safe_off, c0, v_f32)
+                elif _bf16_out:
+                    b.buffer_store_bf16(
+                        d_rsrc, safe_off, c0, b.trunc_f32_to_bf16(v_f32)
+                    )
+                else:
+                    b.buffer_store_f16(d_rsrc, safe_off, c0, b.trunc_f32_to_f16(v_f32))

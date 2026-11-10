@@ -151,12 +151,16 @@ inline void hashAppend(Hasher& hasher, const Float64Value* value, const UidCanon
 inline bool logicallyEqual(const Float64Value* a, const Float64Value* b, const UidCanon&, const UidCanon&);
 inline void hashAppend(Hasher& hasher, const Float8Value* value, const UidCanon&);
 inline bool logicallyEqual(const Float8Value* a, const Float8Value* b, const UidCanon&, const UidCanon&);
+inline void hashAppend(Hasher& hasher, const GdnAttributes* value, const UidCanon& canon);
+inline bool logicallyEqual(const GdnAttributes* a, const GdnAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const Graph* value, const UidCanon& canon);
 inline bool logicallyEqual(const Graph* a, const Graph* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const Int32Value* value, const UidCanon&);
 inline bool logicallyEqual(const Int32Value* a, const Int32Value* b, const UidCanon&, const UidCanon&);
 inline void hashAppend(Hasher& hasher, const Int64Value* value, const UidCanon&);
 inline bool logicallyEqual(const Int64Value* a, const Int64Value* b, const UidCanon&, const UidCanon&);
+inline void hashAppend(Hasher& hasher, const KdaAttributes* value, const UidCanon& canon);
+inline bool logicallyEqual(const KdaAttributes* a, const KdaAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const LayernormAttributes* value, const UidCanon& canon);
 inline bool logicallyEqual(const LayernormAttributes* a, const LayernormAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const LayernormBackwardAttributes* value, const UidCanon& canon);
@@ -266,6 +270,12 @@ inline void hashAppend(Hasher& hasher, NodeAttributes type, const void* value, c
     case NodeAttributes::MoeGroupedMatmulBwdAttributes:
         hashAppend(hasher, static_cast<const MoeGroupedMatmulBwdAttributes*>(value), canon);
         break;
+    case NodeAttributes::GdnAttributes:
+        hashAppend(hasher, static_cast<const GdnAttributes*>(value), canon);
+        break;
+    case NodeAttributes::KdaAttributes:
+        hashAppend(hasher, static_cast<const KdaAttributes*>(value), canon);
+        break;
     default:
         break;
     }
@@ -325,6 +335,10 @@ inline bool logicallyEqual(NodeAttributes aType, const void* a, NodeAttributes b
         return logicallyEqual(static_cast<const MoeGroupedMatmulAttributes*>(a), static_cast<const MoeGroupedMatmulAttributes*>(b), aCanon, bCanon);
     case NodeAttributes::MoeGroupedMatmulBwdAttributes:
         return logicallyEqual(static_cast<const MoeGroupedMatmulBwdAttributes*>(a), static_cast<const MoeGroupedMatmulBwdAttributes*>(b), aCanon, bCanon);
+    case NodeAttributes::GdnAttributes:
+        return logicallyEqual(static_cast<const GdnAttributes*>(a), static_cast<const GdnAttributes*>(b), aCanon, bCanon);
+    case NodeAttributes::KdaAttributes:
+        return logicallyEqual(static_cast<const KdaAttributes*>(a), static_cast<const KdaAttributes*>(b), aCanon, bCanon);
     default:
         return true;
     }
@@ -1733,6 +1747,249 @@ inline bool logicallyEqual(const Float8Value* a, const Float8Value* b, const Uid
     return true;
 }
 
+inline void hashAppend(Hasher& hasher, const GdnAttributes* value, const UidCanon& canon)
+{
+    if(value == nullptr)
+    {
+        hasher.tag(0);
+        return;
+    }
+    hasher.tag(1);
+    hashAppend(hasher, canon(value->q_tensor_uid()));
+    hashAppend(hasher, canon(value->k_tensor_uid()));
+    hashAppend(hasher, canon(value->v_tensor_uid()));
+    hashAppend(hasher, canon(value->g_tensor_uid()));
+    hashAppend(hasher, canon(value->beta_tensor_uid()));
+    hashAppend(hasher, canon(value->cu_seqlens_tensor_uid()));
+    {
+        const auto optional = value->initial_state_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->a_log_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->dt_bias_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->state_indices_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    hashAppend(hasher, canon(value->o_tensor_uid()));
+    {
+        const auto optional = value->final_state_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->state_checkpoints_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->scale();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hasher.raw(*optional);
+        }
+    }
+    hasher.raw(value->output_final_state());
+    hasher.raw(value->use_qk_l2norm());
+    hasher.raw(value->checkpoint_every_n_tokens());
+    hasher.raw(value->use_beta_sigmoid());
+    hasher.raw(value->allow_neg_eigval());
+    hasher.raw(value->safe_gate());
+    hasher.raw(static_cast<int64_t>(value->gate_domain()));
+    hasher.raw(value->batch_invariant());
+    hasher.raw(value->overwrite_initial_state());
+}
+
+inline bool logicallyEqual(const GdnAttributes* a, const GdnAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
+{
+    if(a == b)
+    {
+        return true;
+    }
+    if(a == nullptr || b == nullptr)
+    {
+        return false;
+    }
+    if(aCanon(a->q_tensor_uid()) != bCanon(b->q_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->k_tensor_uid()) != bCanon(b->k_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->v_tensor_uid()) != bCanon(b->v_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->g_tensor_uid()) != bCanon(b->g_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->beta_tensor_uid()) != bCanon(b->beta_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->cu_seqlens_tensor_uid()) != bCanon(b->cu_seqlens_tensor_uid()))
+    {
+        return false;
+    }
+    {
+        const auto aUid = a->initial_state_tensor_uid();
+        const auto bUid = b->initial_state_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->a_log_tensor_uid();
+        const auto bUid = b->a_log_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->dt_bias_tensor_uid();
+        const auto bUid = b->dt_bias_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->state_indices_tensor_uid();
+        const auto bUid = b->state_indices_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    if(aCanon(a->o_tensor_uid()) != bCanon(b->o_tensor_uid()))
+    {
+        return false;
+    }
+    {
+        const auto aUid = a->final_state_tensor_uid();
+        const auto bUid = b->final_state_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->state_checkpoints_tensor_uid();
+        const auto bUid = b->state_checkpoints_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aValue = a->scale();
+        const auto bValue = b->scale();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
+    }
+    if(a->output_final_state() != b->output_final_state())
+    {
+        return false;
+    }
+    if(a->use_qk_l2norm() != b->use_qk_l2norm())
+    {
+        return false;
+    }
+    if(a->checkpoint_every_n_tokens() != b->checkpoint_every_n_tokens())
+    {
+        return false;
+    }
+    if(a->use_beta_sigmoid() != b->use_beta_sigmoid())
+    {
+        return false;
+    }
+    if(a->allow_neg_eigval() != b->allow_neg_eigval())
+    {
+        return false;
+    }
+    if(a->safe_gate() != b->safe_gate())
+    {
+        return false;
+    }
+    if(a->gate_domain() != b->gate_domain())
+    {
+        return false;
+    }
+    if(a->batch_invariant() != b->batch_invariant())
+    {
+        return false;
+    }
+    if(a->overwrite_initial_state() != b->overwrite_initial_state())
+    {
+        return false;
+    }
+    return true;
+}
+
 inline void hashAppend(Hasher& hasher, const Graph* value, const UidCanon& canon)
 {
     if(value == nullptr)
@@ -1860,6 +2117,269 @@ inline bool logicallyEqual(const Int64Value* a, const Int64Value* b, const UidCa
         return false;
     }
     if(a->value() != b->value())
+    {
+        return false;
+    }
+    return true;
+}
+
+inline void hashAppend(Hasher& hasher, const KdaAttributes* value, const UidCanon& canon)
+{
+    if(value == nullptr)
+    {
+        hasher.tag(0);
+        return;
+    }
+    hasher.tag(1);
+    hashAppend(hasher, canon(value->q_tensor_uid()));
+    hashAppend(hasher, canon(value->k_tensor_uid()));
+    hashAppend(hasher, canon(value->v_tensor_uid()));
+    hashAppend(hasher, canon(value->g_tensor_uid()));
+    hashAppend(hasher, canon(value->beta_tensor_uid()));
+    hashAppend(hasher, canon(value->cu_seqlens_tensor_uid()));
+    {
+        const auto optional = value->initial_state_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->a_log_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->dt_bias_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->state_indices_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    hashAppend(hasher, canon(value->o_tensor_uid()));
+    {
+        const auto optional = value->final_state_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->state_checkpoints_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->scale();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hasher.raw(*optional);
+        }
+    }
+    hasher.raw(value->output_final_state());
+    hasher.raw(value->use_qk_l2norm());
+    hasher.raw(value->checkpoint_every_n_tokens());
+    hasher.raw(value->use_beta_sigmoid());
+    hasher.raw(value->allow_neg_eigval());
+    hasher.raw(value->safe_gate());
+    hasher.raw(static_cast<int64_t>(value->gate_domain()));
+    {
+        const auto optional = value->gate_lower_bound();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hasher.raw(*optional);
+        }
+    }
+    hasher.raw(value->batch_invariant());
+    hasher.raw(value->overwrite_initial_state());
+}
+
+inline bool logicallyEqual(const KdaAttributes* a, const KdaAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
+{
+    if(a == b)
+    {
+        return true;
+    }
+    if(a == nullptr || b == nullptr)
+    {
+        return false;
+    }
+    if(aCanon(a->q_tensor_uid()) != bCanon(b->q_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->k_tensor_uid()) != bCanon(b->k_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->v_tensor_uid()) != bCanon(b->v_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->g_tensor_uid()) != bCanon(b->g_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->beta_tensor_uid()) != bCanon(b->beta_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->cu_seqlens_tensor_uid()) != bCanon(b->cu_seqlens_tensor_uid()))
+    {
+        return false;
+    }
+    {
+        const auto aUid = a->initial_state_tensor_uid();
+        const auto bUid = b->initial_state_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->a_log_tensor_uid();
+        const auto bUid = b->a_log_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->dt_bias_tensor_uid();
+        const auto bUid = b->dt_bias_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->state_indices_tensor_uid();
+        const auto bUid = b->state_indices_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    if(aCanon(a->o_tensor_uid()) != bCanon(b->o_tensor_uid()))
+    {
+        return false;
+    }
+    {
+        const auto aUid = a->final_state_tensor_uid();
+        const auto bUid = b->final_state_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->state_checkpoints_tensor_uid();
+        const auto bUid = b->state_checkpoints_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aValue = a->scale();
+        const auto bValue = b->scale();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
+    }
+    if(a->output_final_state() != b->output_final_state())
+    {
+        return false;
+    }
+    if(a->use_qk_l2norm() != b->use_qk_l2norm())
+    {
+        return false;
+    }
+    if(a->checkpoint_every_n_tokens() != b->checkpoint_every_n_tokens())
+    {
+        return false;
+    }
+    if(a->use_beta_sigmoid() != b->use_beta_sigmoid())
+    {
+        return false;
+    }
+    if(a->allow_neg_eigval() != b->allow_neg_eigval())
+    {
+        return false;
+    }
+    if(a->safe_gate() != b->safe_gate())
+    {
+        return false;
+    }
+    if(a->gate_domain() != b->gate_domain())
+    {
+        return false;
+    }
+    {
+        const auto aValue = a->gate_lower_bound();
+        const auto bValue = b->gate_lower_bound();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
+    }
+    if(a->batch_invariant() != b->batch_invariant())
+    {
+        return false;
+    }
+    if(a->overwrite_initial_state() != b->overwrite_initial_state())
     {
         return false;
     }

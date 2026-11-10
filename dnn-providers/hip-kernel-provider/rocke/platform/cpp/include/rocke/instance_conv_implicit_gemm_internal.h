@@ -154,6 +154,26 @@ typedef struct rocke_conv_build_ctx
     const char* arch; /* `arch` (NULL-normalised)      */
     const rocke_conv_build_overrides_t* ov; /* override callbacks (may NULL) */
     const rocke_conv_problem_t* p; /* &spec->problem (alias `p`)    */
+    /* ---- group merging (Gm) ---- *
+     * `p` stays the TRUE per-group problem, and so do the AOT kernargs: the
+     * host packs them from the tensors, which do not merge. `p_load` is the
+     * problem the *tile* covers -- spec.merged_problem, i.e. `p` with groups
+     * divided by group_merge -- and is only read host-side (store width).
+     * Merging is depthwise-only, so the merged per-group channel run is
+     * exactly Gm: the kernel folds it in as the build-time constants c_gm /
+     * c_gm_mask / c_gm_shift. Mirrors the Python builder's `merged` block. */
+    rocke_conv_problem_t merged_problem; /* spec.merged_problem (by value)    */
+    const rocke_conv_problem_t* p_load; /* &merged_problem (alias `p_load`)  */
+    int group_merge; /* spec.group_merge (>= 1)           */
+    int group_merge_log2; /* log2(group_merge); 0 when Gm == 1 */
+    bool merged; /* group_merge > 1                   */
+    /* Python `grouped = p.groups > 1 or merged`: an AOT merged binary serves
+     * every group count Gm divides, so the build-time count cannot elide the
+     * block_id_z group decode even when Gm == groups. */
+    bool grouped;
+    rocke_value_t* c_gm; /* const_i32(Gm); NULL unmerged      */
+    rocke_value_t* c_gm_mask; /* const_i32(Gm - 1); NULL unmerged  */
+    rocke_value_t* c_gm_shift; /* const_i32(log2 Gm); NULL unmerged */
     const rocke_archtarget_t* target; /* ArchTarget.from_gfx(arch)     */
     const rocke_mmaop_t* op; /* _resolve_conv_op(spec, arch)  */
     const rocke_mfma_atom_t* atom; /* spec.atom (NULL on WMMA path) */
@@ -168,10 +188,144 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* B_bytes; /* param B_bytes (I32)                       */
     rocke_value_t* D_bytes; /* param D_bytes (I32)                       */
 
+    /* ---- AOT runtime problem-dimension params (Value, not compile-time int) ----
+     * Python: p_N = b.param("p_N", I32) … p_num_pid_n = b.param("p_num_pid_n", I32)
+     * Every former b.const_i32(p.X) is replaced by the corresponding p_* Value.
+     */
+    rocke_value_t* p_N;
+    rocke_value_t* p_Hi;
+    rocke_value_t* p_Wi;
+    rocke_value_t* p_C;
+    rocke_value_t* p_K;
+    rocke_value_t* p_Y;
+    rocke_value_t* p_X;
+    rocke_value_t* p_sH;
+    rocke_value_t* p_sW;
+    rocke_value_t* p_pH;
+    rocke_value_t* p_pW;
+    rocke_value_t* p_dH;
+    rocke_value_t* p_dW;
+    rocke_value_t* p_groups;
+    rocke_value_t* p_Ho;
+    rocke_value_t* p_Wo;
+    rocke_value_t* p_cpg;
+    rocke_value_t* p_kpg;
+    /* 3-D depth extents. Emitted only when spec.problem.is_3d; the ABI
+     * interleaves them with the 2-D dims (see conv_abi._dims), so the
+     * shared emitter -- not each caller -- decides where they land. */
+    /* Whether the AOT block carries the depth extents. wgrad/dgrad give
+     * ctx->p a GEMM-shaped stub problem with no depth, so this is read from
+     * the *real* spec problem and is the only thing the shared descriptor
+     * builders may consult for the 3-D shape. */
+    bool params_is_3d;
+    rocke_value_t* p_Z;
+    rocke_value_t* p_Di;
+    rocke_value_t* p_sD;
+    rocke_value_t* p_pD;
+    rocke_value_t* p_dD;
+    rocke_value_t* p_Do;
+    rocke_value_t* p_K_gemm; /* [Z*]Y*X*cpg  (fwd reduction dim) */
+    rocke_value_t* p_M; /* N*Ho*Wo  (fwd output spatial) */
+    /* Strides (row-major, in elements) */
+    rocke_value_t* p_A_stride_n;
+    rocke_value_t* p_A_stride_di;
+    rocke_value_t* p_A_stride_hi;
+    rocke_value_t* p_A_stride_wi;
+    rocke_value_t* p_B_stride_k;
+    rocke_value_t* p_B_stride_z;
+    rocke_value_t* p_B_stride_y;
+    rocke_value_t* p_B_stride_x;
+    rocke_value_t* p_D_stride_n;
+    rocke_value_t* p_D_stride_do;
+    rocke_value_t* p_D_stride_ho;
+    rocke_value_t* p_D_stride_wo;
+    /* Magic-number pairs for runtime unmerge */
+    rocke_value_t* p_magic_m_Do_mult;
+    rocke_value_t* p_magic_m_Do_shift;
+    rocke_value_t* p_magic_m_Ho_mult;
+    rocke_value_t* p_magic_m_Ho_shift;
+    rocke_value_t* p_magic_m_Wo_mult;
+    rocke_value_t* p_magic_m_Wo_shift;
+    rocke_value_t* p_magic_k_Y_mult;
+    rocke_value_t* p_magic_k_Y_shift;
+    rocke_value_t* p_magic_k_X_mult;
+    rocke_value_t* p_magic_k_X_shift;
+    rocke_value_t* p_magic_k_cpg_mult;
+    rocke_value_t* p_magic_k_cpg_shift;
+    /* Grid info (chiplet swizzle) */
+    rocke_value_t* p_num_pid_m;
+    rocke_value_t* p_num_pid_n;
+
+    /* ---- backward-direction AOT kernargs ----
+     * The forward slots above are named for the forward tensors (A = NHWC
+     * activation, B = KYXC filter, D = NHWK output). wgrad and dgrad bind
+     * different tensors to the same operand positions, so they get their own
+     * named slots rather than reusing the forward ones under a comment --
+     * a descriptor builder reading "p_A_stride_hi" when the tensor is
+     * actually NHWK is exactly the kind of mix-up byte-identity will not
+     * catch until the numbers come out wrong. */
+    rocke_value_t* p_wg_M;
+    rocke_value_t* p_wg_N;
+    rocke_value_t* p_wg_K;
+    rocke_value_t* p_dg_M;
+    rocke_value_t* p_dg_N;
+    rocke_value_t* p_dg_K;
+    rocke_value_t* p_dY_stride_n;
+    rocke_value_t* p_dY_stride_do;
+    rocke_value_t* p_dY_stride_ho;
+    rocke_value_t* p_dY_stride_wo;
+    rocke_value_t* p_X_stride_n;
+    rocke_value_t* p_X_stride_di;
+    rocke_value_t* p_X_stride_hi;
+    rocke_value_t* p_X_stride_wi;
+    rocke_value_t* p_dW_stride_k;
+    rocke_value_t* p_dW_stride_z;
+    rocke_value_t* p_dW_stride_y;
+    rocke_value_t* p_dW_stride_x;
+    rocke_value_t* p_W_stride_k;
+    rocke_value_t* p_W_stride_y;
+    rocke_value_t* p_W_stride_x;
+    rocke_value_t* p_dX_stride_n;
+    rocke_value_t* p_dX_stride_hi;
+    rocke_value_t* p_dX_stride_wi;
+    /* wgrad: k_wg -> (n, ho, wo) divides by Wo then Ho; n_wg -> (y, x, c)
+     * divides by cpg then X. dgrad: m -> (n, hi, wi) divides by Wi then Hi. */
+    rocke_value_t* p_magic_k_Do_mult;
+    rocke_value_t* p_magic_k_Do_shift;
+    rocke_value_t* p_magic_k_Ho_mult;
+    rocke_value_t* p_magic_k_Ho_shift;
+    rocke_value_t* p_magic_k_Wo_mult;
+    rocke_value_t* p_magic_k_Wo_shift;
+    rocke_value_t* p_magic_n_Y_mult;
+    rocke_value_t* p_magic_n_Y_shift;
+    rocke_value_t* p_magic_n_X_mult;
+    rocke_value_t* p_magic_n_X_shift;
+    rocke_value_t* p_magic_n_cpg_mult;
+    rocke_value_t* p_magic_n_cpg_shift;
+    rocke_value_t* p_magic_m_Hi_mult;
+    rocke_value_t* p_magic_m_Hi_shift;
+    rocke_value_t* p_magic_m_Wi_mult;
+    rocke_value_t* p_magic_m_Wi_shift;
+
+    /* D-side group base for the epilogue: g*kpg, folded into k_out.
+     * Distinct from k_out_group_base above, which the A/B loaders use --
+     * Python builds a second one next to the D descriptor, before the K-loop. */
+    rocke_value_t* d_k_out_group_base;
+    /* Pointwise d_addr validity: Python emits a single const_i32(1) next to
+     * the D descriptor and reuses it for every store. */
+    rocke_value_t* ir_always_valid_d;
+    /* Pointwise D row pitch: p_kpg ungrouped (== K), p_K grouped, where a
+     * group's kpg columns sit at g*kpg (d_k_out_group_base) in a row of K. */
+    rocke_value_t* ir_d_pitch_pw;
+    /* Negated offsets used by embed_dynamic (p_pH_neg = -p_pH, p_pW_neg = -p_pW) */
+    rocke_value_t* p_pH_neg;
+    rocke_value_t* p_pW_neg;
+    rocke_value_t* p_pD_neg;
+
     /* ---- per-lane MMA fragment widths (off op) ---- */
     int a_per_lane; /* op.a_frag_len */
     int b_per_lane; /* op.b_frag_len */
-    int c_per_lane; /* op.c_frag_len */
+    int c_per_lane; /* op.dst.frag_len (output partials and epilogues) */
 
     /* ---- block tile dims (aliases of spec geometry) ---- */
     int block_m; /* spec.tile_m */
@@ -193,7 +347,7 @@ typedef struct rocke_conv_build_ctx
     /* ---- common geometry constants (SSA) ---- */
     rocke_value_t* c0; /* const_i32(0)         */
     rocke_value_t* c_block_k; /* const_i32(block_k)  */
-    rocke_value_t* c_K_gemm; /* const_i32(p.K_gemm)  */
+    rocke_value_t* c_K_gemm; /* p_K_gemm, or p_K_gemm * c_gm under merge */
 
     /* ---- per-CTA tile origins (chiplet-swizzle aware) ---- */
     rocke_value_t* block_m_off_v; /* grid.block_m_off OR swizzled row*tile_m */
@@ -204,6 +358,25 @@ typedef struct rocke_conv_build_ctx
      * k_out_group_base = b.mul(group_idx, kpg)  (absolute output-filter base for B/D) */
     rocke_value_t* group_idx;
     rocke_value_t* k_out_group_base;
+
+    /* ---- forward split-K state (spec.split_k > 1; all NULL / false off it) ----
+     * The trailing ws_ptr / ws_bytes / ks / ks_count kernargs, the CTA's K
+     * slice (z = group * ks_count + slice), and the slab base the epilogue adds
+     * to every D offset. Mirrors the Python builder's `split` locals. */
+    bool fwd_split;
+    rocke_value_t* fwd_p_ws;
+    rocke_value_t* fwd_p_ws_bytes;
+    rocke_value_t* fwd_p_ks;
+    rocke_value_t* fwd_p_ks_count;
+    rocke_value_t* fwd_slice_id;
+    rocke_value_t* fwd_slab_base;
+
+    /* ---- wgrad stream-K state (NULL off the stream-K path) ---- *
+     * wgrad_c_kpg       = b.const_i32(kpg)  (grouped dY k_out fold, Python c_kpg)
+     * wgrad_replica_sel = linear CTA index hashed into the workspace replica in
+     *                     place of block_id_z (Python replica_sel). */
+    rocke_value_t* wgrad_c_kpg;
+    rocke_value_t* wgrad_replica_sel;
 
     /* ---- LDS plan + smem handles ---- */
     rocke_conv_lds_layout_t lds_layout; /* spec.effective_lds_layout()         */
@@ -219,7 +392,7 @@ typedef struct rocke_conv_build_ctx
     int k_atoms; /* spec.k_atoms_per_tile_k */
 
     /* ---- accumulators ---- */
-    rocke_value_t* acc_init; /* zero_vec_f32(c_per_lane)    */
+    rocke_value_t* acc_init; /* zero_vec_f32(op->srcs[2].frag_len) */
     /* The `accs` list: one zero-acc iter-arg per (mi, ni) warp MFMA tile, named
      * "acc_m{mi}_n{ni}" + the shared acc_init. */
     const char* acc_names[ROCKE_CONV_MAX_ACCS];
@@ -229,6 +402,11 @@ typedef struct rocke_conv_build_ctx
     /* ---- global -> LDS coalesced copy plan ---- */
     int threads; /* spec.block_size           */
     int load_vec; /* _choose_load_vec(spec)    */
+    /* Python carries _def_vec_a and _def_vec_b separately; they are equal here
+     * because default_vector_sizes derives both from cpg -- except under merge,
+     * where B is forced scalar (the merged B tile is 1/Gm dense and the diagonal
+     * mask is per-element, which a vector load cannot express). */
+    int load_vec_b; /* load_vec, or 1 under merge */
 
     /* ---- coordinate-transform descriptors ---- */
     rocke_tensor_descriptor_t* A_desc; /* make_a_descriptor(p, decompose_m); NULL if pointwise */
@@ -261,6 +439,10 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* ir_c_K_pw; /* const_i32(kpg)    — second (fwd) / _c_C_ir=cpg (wgrad) */
     rocke_value_t* ir_c_M_pw; /* const_i32(M/wg_M) — third  (fwd) / _c_wgM_ir  (wgrad) */
     rocke_value_t* ir_always_valid; /* const_i32(1)  — fourth (fwd) / _c_wgN_ir  (wgrad) */
+    /* Forward grouped pointwise only: g*cpg, the first input channel of the
+     * group's slab in A's C-wide pixel row (Python _pw_a_chan_base). NULL when
+     * ungrouped, where cpg == C and the flat A offset needs no base. */
+    rocke_value_t* ir_pw_a_chan_base;
     rocke_value_t* ir_c_wgN_pw; /* wgrad only: const_i32(wg_N) — fifth */
 
     /* ---- optional B-descriptor override (wgrad only) ---- *
@@ -284,6 +466,12 @@ typedef struct rocke_conv_build_ctx
      * pipeline="wavelet": a_wavelet_loader/b_wavelet_loader are
      *   CoalescedTileLoader sized to num_load_waves * wave_size threads. */
     bool async_dma; /* spec.async_dma (cached)         */
+    /* gfx1250 async K loop (wgrad only): the sync loaders' slot partition with
+     * each chunk moved by global_load_async_to_lds from a_ptr / b_ptr instead of
+     * a buffer load. Zeroed by the ctx memset, so fwd/dgrad are unaffected. */
+    bool async_global_lds;
+    rocke_value_t* a_ptr;
+    rocke_value_t* b_ptr;
     /* spec.lds_k_outer (wgrad only). Zeroed by the ctx memset, so the forward
      * and dgrad drivers keep their exact previous behaviour. */
     bool lds_k_outer;
@@ -305,6 +493,19 @@ typedef struct rocke_conv_build_ctx
      * at split_k == 1, so without this the C engine emits a full-range
      * reduction under split-K atomics. */
     int kloop_num_iters;
+    /* Runtime upper bound for the AOT k-loop drivers. NULL means "use
+     * ctx->c_K_gemm", which is what the forward conv wants; wgrad/dgrad set it
+     * to their split-K slice end. Together with kloop_k_lo this replaces the
+     * old compile-time kloop_num_iters for every driver that now emits an
+     * scf.for over a runtime extent. */
+    rocke_value_t* kloop_k_hi;
+    /* Offset whose tile is known to read as zero (the global reduction
+     * extent). The ping-pong drivers compute a second tile per step and rely
+     * on the one past an odd tile count reading zero; that only holds at the
+     * real end of the tensor. When kloop_k_hi is a split-K slice end, set
+     * this and the drivers redirect a prefetch at or past kloop_k_hi here, so
+     * it cannot pull in the next slice's first tile. NULL = no redirect. */
+    rocke_value_t* kloop_k_zero_fill;
     /* Atom edge + fragment length used by the K-outer transpose-read feed. */
     rocke_value_t* tr_lane_mod4;
     rocke_value_t* tr_grp16;
@@ -315,6 +516,22 @@ typedef struct rocke_conv_build_ctx
      * wave64 ds_read_b64_tr_b16 is type-agnostic, which is why gfx950 parity
      * never caught it. */
     const rocke_type_t* tr_dtype;
+    /* _smem_dtype: the LDS element type of the operand tiles, keyed on the
+     * *storage* dtype (rocke_conv_smem_dtype_for); NULL selects the f16 path.
+     * Equal to the MMA operand type except under TF32 compute. */
+    const rocke_type_t* smem_dtype;
+    /* ir_dtype_a / ir_dtype_b: _ir_dtype(spec.data.dtype_a / dtype_b), the
+     * storage element types of the A/B tensors, LDS tiles and tile loaders. */
+    const rocke_type_t* ir_dtype_a;
+    const rocke_type_t* ir_dtype_b;
+    /* spec.data.is_tf32: each fp32 LDS fragment is reinterpreted as
+     * vec<tf32xN> (rocke_conv_load_mma_operand). */
+    bool is_tf32;
+    /* Instruction-stream shape of one logical MMA step, for the compv3/compv4
+     * scheduling hints: the ds_reads one fragment takes and the physical MFMAs
+     * one atom issues. 1/1 for every non-TF32 atom; each builder sets both. */
+    int ds_reads_per_frag;
+    int mfmas_per_mma;
     rocke_async_tile_loader_t a_loader; /* async A loader (valid iff async)*/
     rocke_async_tile_loader_t b_loader; /* async B loader                  */
     bool have_async_loaders; /* true => a_loader/b_loader valid */
@@ -335,7 +552,10 @@ typedef struct rocke_conv_build_ctx
      *   K_iters    = ceil(p.K_gemm / block_k) */
     rocke_value_t* wavelet_load_tid; /* load-wave-relative tid in [0, nloads*ws) */
     rocke_value_t* wavelet_is_math; /* i1: warp_id < n_math_warps             */
-    int wavelet_n_math_warps; /* warp_m * warp_n                        */
+    int wavelet_n_math_warps;
+    /* spec.block_size: the math waves' thread count, subtracted from tid to
+     * get the load waves' local id. */
+    int wavelet_math_block_size; /* warp_m * warp_n                        */
     int wavelet_K_iters; /* ceil(K_gemm / block_k)                 */
     int wavelet_epi_barriers; /* N_epi: extra barriers epilogue emits    */
 
@@ -359,7 +579,34 @@ typedef struct rocke_conv_build_ctx
      * phase reads final_accs. */
     rocke_value_t* final_accs[ROCKE_CONV_MAX_ACCS];
     int num_final_accs;
+
+    /* ---- forward A/B addressing split into a K-invariant and a K-varying part ----
+     * Python's split_ab block: when set, rocke_conv_a_descriptor /
+     * rocke_conv_b_descriptor distribute the strides so LLVM can hoist the row
+     * part out of the K loop. The constants are emitted by ctx_init before the
+     * schedule prologue. */
+    bool split_ab;
+    rocke_value_t* split_neg_pH;
+    rocke_value_t* split_neg_pW;
+    rocke_value_t* split_ystep; /* dH * A_stride_hi */
+    rocke_value_t* split_xstep; /* dW * A_stride_wi */
+    rocke_value_t* split_group_base; /* group_idx * cpg (c_gm merged), NULL when ungrouped */
 } rocke_conv_build_ctx_t;
+
+/* Python mul_u24: x * y with both operands masked to 24 bits so the backend
+ * selects v_mul_u32_u24. Only for terms the host bounds (conv_args.MUL24_REDUCTION_LIMIT). */
+rocke_value_t* rocke_conv_mul_u24(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y);
+
+/* Python magic_divmod with runtime Values: *quot = val // dim through the
+ * magic pair, *rem = val - quot * dim (rocke_conv_mul_u24 when u24). */
+void rocke_conv_magic_divmod(rocke_ir_builder_t* b,
+                             rocke_value_t* val,
+                             rocke_value_t* mult,
+                             rocke_value_t* shift,
+                             rocke_value_t* dim,
+                             bool u24,
+                             rocke_value_t** quot,
+                             rocke_value_t** rem);
 
 /* ===================================================================== *
  *  PHASE FUNCTIONS -- one per Python closure / module-level helper.
@@ -384,6 +631,17 @@ const rocke_mmaop_t* rocke_conv_resolve_op(rocke_ir_builder_t* b,
 /* _choose_load_vec(spec) -> width. Thin adapter over rocke_choose_load_vec. */
 int rocke_conv_choose_load_vec(const rocke_implicit_gemm_conv_spec_t* spec);
 
+/* The default sync-path load width: rocke_conv_choose_load_vec clamped by the
+ * per-group channel count (Python _sync_load_vecs without an explicit
+ * vector_size_*). Reads the *merged* problem, so under group_merge the A run is
+ * Gm wide. 0 when the tile admits no width. */
+int rocke_conv_default_load_vec(const rocke_implicit_gemm_conv_spec_t* spec);
+
+/* The B counterpart: rocke_conv_default_load_vec, except 1 under group_merge
+ * (the merged B tile is 1/Gm dense and its diagonal mask is per-element, which
+ * a vector load cannot express). */
+int rocke_conv_default_load_vec_b(const rocke_implicit_gemm_conv_spec_t* spec);
+
 /* _emit_mfma(b, atom, a, bv, c): atom.emit MFMA dispatch. */
 rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
                                     const rocke_mfma_atom_t* atom,
@@ -391,9 +649,51 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
                                     rocke_value_t* bv,
                                     rocke_value_t* c);
 
-/* _emit_smem_load(b, smem, row, col, n): f16/n==4 fast path else vN. */
-rocke_value_t* rocke_conv_emit_smem_load(
-    rocke_ir_builder_t* b, rocke_value_t* smem, rocke_value_t* row, rocke_value_t* col, int n);
+/* _ir_dtype(dtype): "fp16" -> f16, "bf16" -> bf16, "fp32" -> f32. Any other
+ * spelling sets the builder's ValueError (a TF32 spelling with the "compute
+ * mode, not a storage dtype" text) and returns NULL. */
+const rocke_type_t* rocke_conv_ir_dtype(rocke_ir_builder_t* b, const char* dtype);
+
+/* The _DTYPE_TO_IR lookup alone (no builder): NULL for an unsupported dtype,
+ * where _ir_dtype would raise. NULL dtype is the "fp16" default. */
+const rocke_type_t* rocke_conv_ir_dtype_lookup(const char* dtype);
+
+/* _smem_dtype_for(dtype): the LDS element type for a *storage* dtype; NULL
+ * selects the f16 path. Keyed on storage, never on the MMA dtype: a TF32
+ * kernel keeps fp32 tiles in LDS and only reinterprets the fragment it reads. */
+const rocke_type_t* rocke_conv_smem_dtype_for(const char* dtype);
+
+/* _emit_smem_load(b, smem, row, col, n, smem_dtype=None): a non-f16
+ * smem_dtype reads smem_load_vN of that type (an fp32 n == 1 read is
+ * extracted to a scalar); NULL / f16 takes the f16 n == 4 fast path, else
+ * smem_load_vN_f16. */
+rocke_value_t* rocke_conv_emit_smem_load(rocke_ir_builder_t* b,
+                                         rocke_value_t* smem,
+                                         rocke_value_t* row,
+                                         rocke_value_t* col,
+                                         int n,
+                                         const rocke_type_t* smem_dtype);
+
+/* _to_mma_operand(b, frag, data): hand an fp32 LDS fragment to a TF32 MMA as
+ * vec<tf32xN> (a bitcast, no rounding). Every non-TF32 spec gets frag back. */
+rocke_value_t* rocke_conv_to_mma_operand(rocke_ir_builder_t* b, rocke_value_t* frag, bool is_tf32);
+
+/* _load_mma_operand(b, smem, row, col, n, smem_dtype=, data=): one MFMA
+ * operand fragment from LDS, in the type the MMA consumes. Non-TF32 specs take
+ * exactly rocke_conv_emit_smem_load; under TF32 the fp32 fragment is read in
+ * loads of at most ROCKE_CONV_TF32_LDS_LOAD_MAX elements, concatenated, then
+ * reinterpreted once as vec<tf32xN>. */
+rocke_value_t* rocke_conv_load_mma_operand(rocke_ir_builder_t* b,
+                                           rocke_value_t* smem,
+                                           rocke_value_t* row,
+                                           rocke_value_t* col,
+                                           int n,
+                                           const rocke_type_t* smem_dtype,
+                                           bool is_tf32);
+
+/* _mfma_issues_per_mma(op): the physical MFMAs one logical op issues (3 for
+ * the gfx950 BF16x3 TF32 emulation, 1 for every native atom). */
+int rocke_conv_mfma_issues_per_mma(const rocke_mmaop_t* op);
 
 /* _emit_frag_smem_load(b, src, mn_in_atom, k_in_atom, atom_mn_base, k_tile_base,
  * frag_len): one frag_len-wide operand fragment from a row-major LDS tile
@@ -424,7 +724,8 @@ rocke_value_t* rocke_conv_emit_frag_smem_load(rocke_ir_builder_t* b,
                                               rocke_value_t* k_in_atom,
                                               rocke_value_t* atom_mn_base,
                                               rocke_value_t* k_tile_base,
-                                              int frag_len);
+                                              int frag_len,
+                                              const rocke_type_t* smem_dtype);
 
 /* _apply_accumulator_epilogue(b, epilogue, accs[n], out_accs[n]): apply the
  * static fp32 ConvAccumulatorEpilogue per-lane then re-pack. Identity copies
@@ -454,6 +755,22 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
                                        rocke_value_t* col,
                                        rocke_value_t** out_valid,
                                        void* ctx_user);
+
+/* b_descriptor for group_merge > 1: splits k_gemm into (y, x, g_k) with g_k
+ * innermost and ANDs the diagonal predicate g_k == g_n onto the load's valid.
+ * Installed into ctx->b_descriptor_fn by the build glue, so both loader legs
+ * pick it up. Same rocke_loads_descriptor_fn contract.
+ *
+ * Mirrors Python b_descriptor_merged (conv_implicit_gemm.py). Putting the mask
+ * on the *weight* load rather than the store is what keeps the output store
+ * dense: an invalid element takes the buffer descriptor's OOB sentinel and
+ * reads back as hardware zero, so the redundant MAC is a no-op and no memory
+ * traffic is issued. */
+rocke_value_t* rocke_conv_b_descriptor_merged(rocke_ir_builder_t* b,
+                                              rocke_value_t* row,
+                                              rocke_value_t* col,
+                                              rocke_value_t** out_valid,
+                                              void* ctx_user);
 
 /* ----- load / compute closures (ctx-driven) ----- */
 
@@ -506,6 +823,10 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
  * its run_ping_pong sequencing inline against ctx until that port lands.) */
 void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx);
 
+/* gfx1250 async branch (wgrad only, ctx->async_global_lds): one-barrier
+ * ping-pong over global_load_async_to_lds copies drained by s_wait_asynccnt. */
+void rocke_conv_emit_kloop_async_global_lds(rocke_conv_build_ctx_t* ctx);
+
 /* pipeline=="wavelet" branch (Python lines 1539-1797): dedicated load-wave /
  * math-wave split. Requires ctx->have_wavelet_loaders and the wavelet_* fields
  * to be populated by rocke_conv_build_ctx_init. Dispatches the WMMA
@@ -520,17 +841,24 @@ void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx);
 void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx);
 
 /* _emit_direct_epilogue(b, spec, accs[n], grid, d_rsrc): MFMA per-lane scalar
- * fp16 store via DirectEpilogue + the D descriptor addr_fn. */
+ * fp16 store via DirectEpilogue + the D descriptor addr_fn. D_desc,
+ * k_out_group_base (NULL when ungrouped) and the bounds are the kernel's
+ * runtime values, exactly as for the cshuffle epilogue. */
 void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      const rocke_implicit_gemm_conv_spec_t* spec,
                                      rocke_value_t* const* accs,
                                      int num_accs,
                                      const rocke_warp_grid_t* grid,
                                      rocke_value_t* d_rsrc,
-                                     rocke_value_t* ir_c_K_pw);
+                                     rocke_value_t* ir_d_pitch_pw,
+                                     rocke_value_t* always_valid_d,
+                                     const rocke_tensor_descriptor_t* D_desc,
+                                     rocke_value_t* k_out_group_base,
+                                     rocke_value_t* bound_m,
+                                     rocke_value_t* bound_n);
 
 /* _emit_direct_epilogue_wmma(b, spec, op, accs[n], warp_m_idx, warp_n_idx, lane,
- * block_m_off, block_n_off, d_rsrc, c0, ir_c_K_pw): WMMA per-lane fp16 store. */
+ * block_m_off, block_n_off, d_rsrc, c0, ir_d_pitch_pw): WMMA per-lane fp16 store. */
 void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           const rocke_implicit_gemm_conv_spec_t* spec,
                                           const rocke_mmaop_t* op,
@@ -543,9 +871,14 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* block_n_off,
                                           rocke_value_t* d_rsrc,
                                           rocke_value_t* c0,
-                                          rocke_value_t* ir_c_K_pw);
+                                          rocke_value_t* ir_d_pitch_pw,
+                                          const rocke_tensor_descriptor_t* D_desc,
+                                          rocke_value_t* k_out_group_base,
+                                          rocke_value_t* slab_base,
+                                          rocke_value_t* bound_m,
+                                          rocke_value_t* bound_n);
 
-/* _emit_cshuffle_epilogue(b, spec, accs[n], grid, d_rsrc, ir_c_K_pw): LDS-staged
+/* _emit_cshuffle_epilogue(b, spec, accs[n], grid, d_rsrc, ir_d_pitch_pw): LDS-staged
  * cshuffle store via CShuffleEpilogue.from_grid + the D descriptor addr_fn. */
 void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_implicit_gemm_conv_spec_t* spec,
@@ -553,8 +886,15 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        int num_accs,
                                        const rocke_warp_grid_t* grid,
                                        rocke_value_t* d_rsrc,
-                                       rocke_value_t* ir_c_K_pw,
-                                       const rocke_mmaop_t* op);
+                                       rocke_value_t* ir_d_pitch_pw,
+                                       rocke_value_t* always_valid_d,
+                                       const rocke_mmaop_t* op,
+                                       const rocke_tensor_descriptor_t* D_desc,
+                                       rocke_value_t* k_out_group_base,
+                                       rocke_value_t* slab_base,
+                                       const char* out_dtype,
+                                       rocke_value_t* bound_m,
+                                       rocke_value_t* bound_n);
 
 /* ----- driver-internal ctx population (the build prologue, lines 787-1032) ----
  * Splitting the long prologue out of the public entry keeps the glue TU small;

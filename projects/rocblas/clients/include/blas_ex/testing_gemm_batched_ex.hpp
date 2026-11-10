@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -226,6 +226,29 @@ DAPI_CHECK(rocblas_gemm_batched_ex_fn, (handle, transA, transB, M, N, K, zero,
 nullptr, a_type, lda, nullptr, b_type, ldb, zero, nullptr, c_type, ldc,
 dD.ptr_on_device(), d_type, ldd, batch_count, compute_type, algo, solution_index, flags));
         // clang-format on
+
+        // Batched A/B/C/D are arrays of pointers and must be pointer-aligned, on both the
+        // default path and the forced source-kernel path.
+        {
+            static constexpr int32_t c_source_solution_index = -2; // library-internal source GEMM
+            static constexpr size_t  byte_offset             = 2;
+
+            const void* dA_off = reinterpret_cast<char*>(dA.ptr_on_device()) + byte_offset;
+            const void* dB_off = reinterpret_cast<char*>(dB.ptr_on_device()) + byte_offset;
+            const void* dC_off = reinterpret_cast<char*>(dC.ptr_on_device()) + byte_offset;
+            void*       dD_off = reinterpret_cast<char*>(dD.ptr_on_device()) + byte_offset;
+
+            // clang-format off
+            DAPI_EXPECT(rocblas_status_invalid_size, rocblas_gemm_batched_ex_fn, (handle, transA, transB, M, N, K,
+                        alpha, dA_off, a_type, lda, dB_off, b_type, ldb, beta, dC_off, c_type, ldc,
+                        dD_off, d_type, ldd, batch_count, compute_type, algo, solution_index, flags));
+
+            DAPI_EXPECT(rocblas_status_invalid_size, rocblas_gemm_batched_ex_fn, (handle, transA, transB, M, N, K,
+                        alpha, dA_off, a_type, lda, dB_off, b_type, ldb, beta, dC_off, c_type, ldc,
+                        dD_off, d_type, ldd, batch_count, compute_type, rocblas_gemm_algo_solution_index,
+                        c_source_solution_index, flags));
+            // clang-format on
+        }
     }
 }
 

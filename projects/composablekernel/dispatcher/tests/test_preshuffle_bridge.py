@@ -23,6 +23,7 @@ Run: python3 -m pytest tests/test_preshuffle_bridge.py -v
 import json
 import sys
 import unittest
+import tempfile
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -99,7 +100,7 @@ class TestPreshuffleName(unittest.TestCase):
         # A permute_n=True config must be rejected at build time (the permuteN
         # pipeline is not bridged yet), before any codegen/compile happens.
         from gemm_utils import setup_multiple_gemm_dispatchers
-        cfg = _make_config(permute_n=True)
+        cfg = _make_config(permute_n=True, gfx_arch="gfx1250")
         with self.assertRaises(ValueError):
             setup_multiple_gemm_dispatchers([cfg])
 
@@ -244,41 +245,136 @@ class TestPreshuffleConfigsCoverPersistentFalse(unittest.TestCase):
                 self.assertIn(True, vals, f"{name} must sweep persistent=True")
 
 
-class TestShuffledBCacheGuardParity(unittest.TestCase):
-    """The shuffled-B cache use-site guard must match its definition guard.
+class TestPreshuffleGfx1250(unittest.TestCase):
+    def test_arch_spec_survives_regeneration(self):
+        sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
+        from arch_specs_generated import PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS
+        specs = json.loads((DISPATCHER_DIR / "codegen" / "arch_specs.json").read_text())
+        expected = {"fp16_fp16_fp32": [[16, 16, 32]],
+                    "bf16_bf16_fp32": [[16, 16, 32]],
+                    "fp8_fp8_fp32": [[16, 16, 64]],
+                    "bf8_bf8_fp32": [[16, 16, 64]]}
+        self.assertEqual(specs["preshuffle_warp_tile_combos"]["gfx1250"], expected)
+        self.assertEqual(PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS["gfx1250"], expected)
 
-    ``ShuffledBCache``/``g_shuffled_b_cache`` are defined only under
-    ``#if defined(GEMM_KEY_PRESHUFFLE) && (GEMM_KEY_PRESHUFFLE != 0)``. Codegen
-    emits ``#define GEMM_KEY_PRESHUFFLE 0`` for every non-preshuffle kernel, so a
-    bare ``#ifdef GEMM_KEY_PRESHUFFLE`` at a use-site is true for those kernels
-    and references the (undeclared) cache, breaking the standard dispatcher_gemm
-    lib. The use-site must therefore carry the same ``!= 0`` guard.
+    def test_wave32_lds_distribution_rejects_oversized_k(self):
+        sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
+        from unified_gemm_codegen import is_preshuffle_config_valid
+        args = dict(tile_m=128, tile_n=128, tile_k=512, warp_m=2, warp_n=2,
+                    warp_k=1, warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+                    datatype="fp16")
+        self.assertTrue(is_preshuffle_config_valid(**args, warp_size=64))
+        self.assertFalse(is_preshuffle_config_valid(**args, warp_size=32))
+
+    def test_ci_configs_generate_all_epilogues_and_persistent_modes(self):
+        sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
+        from gemm_utils import expand_sweep
+        from unified_gemm_codegen import UnifiedGemmCodegen, GemmVariant
+        for dtype in ("fp16", "bf16"):
+            configs = expand_sweep(str(_CONFIG_DIR / "default_ci_config.json"),
+                                   arch="gfx1250", dtype=dtype, variant="preshuffle")
+            self.assertEqual(len(configs), 4)
+            self.assertEqual({(c.epilogue, c.persistent) for c in configs},
+                             {("default", False), ("default", True),
+                              ("cshuffle", False), ("cshuffle", True)})
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for index, config in enumerate(configs):
+                    config_file = root / f"{index}.json"
+                    config_file.write_text(json.dumps(config.to_codegen_json()))
+                    gen = UnifiedGemmCodegen(root / str(index), datatype=dtype,
+                                            layout="rcr", gpu_target="gfx1250",
+                                            config_file=config_file,
+                                            variants=[GemmVariant.PRESHUFFLE])
+                    result = gen.generate_all(parallel=False)
+                    self.assertEqual(result["failed"], [])
+                    self.assertEqual(len(result["kernels"]), 1)
+                    self.assertEqual(Path(result["kernels"][0]).stem, config.name)
+
+
+class TestShuffledBCacheGuardParity(unittest.TestCase):
+    """Every use of the shuffled-B cache must sit under its definition's guard.
+
+    ``g_shuffled_b_cache`` is compiled conditionally, so a use-site guarded more
+    weakly than the definition references an undeclared symbol and breaks the
+    build of the kernels that fall in the gap.  This test pins definition/use
+    parity structurally, rather than pinning one specific macro spelling.
+
+    It deliberately does NOT name ``GEMM_KEY_PRESHUFFLE``.  That macro is gone:
+    preshuffle is now a capability carried in the kernel's own metadata
+    (``SelectedKernel::Preshuffle``, emitted by unified_gemm_codegen.py) and
+    branched on with ``if constexpr``, so the unused half is discarded before
+    instantiation -- the same dead-code elimination the old ``#if
+    GEMM_KEY_PRESHUFFLE`` provided.  The single remaining guard,
+    ``GEMM_KEY_DTYPE_A``, only asks "is this a modern codegen header?" and is not
+    a preshuffle switch (see the comment block at the top of the .cpp).  The
+    earlier version of this test searched for a literal
+    ``g_shuffled_b_cache = ShuffledBCache{}`` assignment that no longer exists
+    and died with StopIteration once the cache switched to ``.clear()``.
     """
 
     _SRC = DISPATCHER_DIR / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
+    _SYMBOL = "g_shuffled_b_cache"
 
-    def test_cache_use_site_guard_is_nonzero_form(self):
+    @staticmethod
+    def _guard_stacks(lines):
+        """Yield ``(lineno, text, active_guards)`` tracking #if/#else/#endif nesting.
+
+        ``active_guards`` is the tuple of enclosing conditional expressions, so
+        two sites compile under the same conditions iff their tuples match.
+        """
+        stack = []
+        for i, raw in enumerate(lines, 1):
+            s = raw.strip()
+            if s.startswith("#if"):
+                # "#ifdef X" / "#ifndef X" / "#if <expr>" -> normalised condition
+                cond = s.split(None, 1)[1].strip() if len(s.split(None, 1)) > 1 else ""
+                if s.startswith("#ifdef"):
+                    cond = f"defined({cond})"
+                elif s.startswith("#ifndef"):
+                    cond = f"!defined({cond})"
+                stack.append(cond)
+            elif s.startswith("#elif") or s.startswith("#else"):
+                if stack:
+                    stack[-1] = f"!({stack[-1]})"
+            elif s.startswith("#endif"):
+                if stack:
+                    stack.pop()
+            yield i, raw, tuple(stack)
+
+    def test_cache_uses_share_the_definition_guard(self):
         lines = self._SRC.read_text().splitlines()
-        use_idx = next(
-            i
-            for i, ln in enumerate(lines)
-            if "g_shuffled_b_cache = ShuffledBCache{}" in ln
+        sites = [
+            (n, text, guards)
+            for n, text, guards in self._guard_stacks(lines)
+            if self._SYMBOL in text and not text.strip().startswith("//")
+        ]
+        self.assertTrue(sites, f"{self._SYMBOL} not found in {self._SRC.name}")
+
+        definitions = [s for s in sites if f"ShuffledBCache {self._SYMBOL}" in s[1]]
+        self.assertEqual(
+            len(definitions), 1,
+            f"expected exactly one definition of {self._SYMBOL}, got "
+            f"{[(n, t.strip()) for n, t, _ in definitions]}",
         )
-        guard = next(
-            lines[j]
-            for j in range(use_idx, -1, -1)
-            if lines[j].lstrip().startswith(("#if", "#ifdef"))
-            and "GEMM_KEY_PRESHUFFLE" in lines[j]
+        def_line, _, def_guards = definitions[0]
+        self.assertTrue(
+            def_guards,
+            f"{self._SYMBOL} is defined unconditionally at line {def_line}; if that "
+            f"is intentional this test can be retired, but then the uses are "
+            f"unconditional too and the parity it protects no longer applies.",
         )
-        self.assertIn(
-            "GEMM_KEY_PRESHUFFLE != 0",
-            guard,
-            f"cache use-site guarded by non-'!= 0' directive: {guard!r}",
-        )
-        self.assertFalse(
-            guard.lstrip().startswith("#ifdef "),
-            f"cache use-site must not use bare #ifdef: {guard!r}",
-        )
+
+        for n, text, guards in sites:
+            if n == def_line:
+                continue
+            with self.subTest(line=n):
+                self.assertEqual(
+                    guards[: len(def_guards)], def_guards,
+                    f"line {n} uses {self._SYMBOL} under {guards!r}, which is not "
+                    f"nested inside the definition guard {def_guards!r} (defined at "
+                    f"line {def_line}): {text.strip()!r}",
+                )
 
 
 if __name__ == "__main__":

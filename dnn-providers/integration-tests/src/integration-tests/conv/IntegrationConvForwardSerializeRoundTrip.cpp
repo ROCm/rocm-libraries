@@ -12,6 +12,8 @@
 
 #include <hip/hip_runtime.h>
 
+#include <stdexcept>
+
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
@@ -95,9 +97,6 @@ public:
 protected:
     void runGraphTest() override
     {
-        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-        SKIP_IF_ASAN();
-
         const auto& testCase = this->GetParam();
         const auto& [layout, convTestCase] = testCase;
 

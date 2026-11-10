@@ -13,7 +13,9 @@ else()
     set(HIPBLASLT_IS_SUBPROJECT TRUE)
 endif()
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite/cmake")
 
 # ROCm libraries root (for shared/ctest and other shared resources)
 # Only set default when not already defined (e.g. by superproject / rocm-libraries).
@@ -73,6 +75,11 @@ if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT HIPBLASLT_ENABLE_HOST)
 endif()
 if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT HIPBLASLT_ENABLE_DEVICE)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_GEMM_A2A_FUSION requires HIPBLASLT_ENABLE_DEVICE=ON")
+endif()
+
+option(HIPBLASLT_ENABLE_LOCAL_KERNELS "Build experimental runtime local kernel registration." OFF)
+if(HIPBLASLT_ENABLE_LOCAL_KERNELS AND NOT HIPBLASLT_ENABLE_HOST)
+    message(FATAL_ERROR "HIPBLASLT_ENABLE_LOCAL_KERNELS requires HIPBLASLT_ENABLE_HOST=ON")
 endif()
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
@@ -140,6 +147,36 @@ else()
 endif()
 tensilelite_normalize_targets(GPU_TARGETS ${GPU_TARGETS})
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
+
+# Save original targets (with :xnack- suffix) for TensileCreateLibrary.
+#
+# Deliberately a normal variable, not a cache entry: derived from GPU_TARGETS,
+# it has to be re-derived whenever that changes. Cached, it outlived the targets
+# it was derived from, so reconfiguring an existing build directory kept the
+# first configure's value while GPU_TARGETS moved on -- and since the two differ
+# only by a suffix hip::device never sees, nothing looked wrong. `invoke build`
+# reconfigures in place unless --clean is passed, so that was the common path.
+#
+# The condition still defers to a value supplied from outside, whether by
+# -DTENSILELITE_GPU_TARGETS or by an enclosing project: hipSPARSELt sets it from
+# its unstripped list before adding us as a subdirectory, and the GPU_TARGETS we
+# see by then has had the suffix stripped, so overwriting would drop it before
+# hipSPARSELt's own create_device_library() reads it back.
+if(NOT TENSILELITE_GPU_TARGETS)
+    set(TENSILELITE_GPU_TARGETS "${GPU_TARGETS}")
+else()
+    # A value from outside never passed the check above, and this is the list
+    # TensileLite builds from -- the one an xnack qualifier still reaches, since
+    # GPU_TARGETS has it stripped by then. Checking it here is what stops an
+    # enclosing project from handing us a target the direct path would refuse,
+    # device ASAN beside xnack- among them.
+    tensilelite_validate_gpu_targets("${TENSILELITE_GPU_TARGETS}")
+endif()
+
+# Strip xnack suffix from xnack_any platforms (e.g. gfx1250) for hip::device
+# offload targets. find_package(hip) bakes GPU_TARGETS into --offload-arch on
+# hip::device, and xnack_any platforms must use the bare arch.
+tensilelite_normalize_xnack_archs(GPU_TARGETS ${GPU_TARGETS})
 
 find_package(hip REQUIRED)
 if(HIPBLASLT_ENABLE_HOST)
@@ -269,21 +306,63 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     endif()
 endif()
 
+# Only a MessagePack host library compiles the C++ msgpack sources.
+# A YAML host does not, including when device libraries are enabled:
+# those libraries are produced by the Python Tensile step.
 if(NOT HIPBLASLT_ENABLE_YAML)
     # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
     # Prefer 6.x (msgpack-cxx)
+    set(hipblaslt_msgpack_fetched FALSE)
     find_package(msgpack-cxx CONFIG)
     if(msgpack-cxx_FOUND)
         message(STATUS "Found msgpack-cxx (>=6.x)")
         set(hipblaslt_msgpack_target "msgpack-cxx")
     else()
         # TODO: set minimum version required for *-cxx library
-        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
-        set(hipblaslt_msgpack_target "msgpackc-cxx")
-        message(STATUS "Found msgpack (<=5.x)")
+        find_package(msgpackc-cxx CONFIG QUIET NAMES msgpackc-cxx msgpack)
+        if(msgpackc-cxx_FOUND)
+            set(hipblaslt_msgpack_target "msgpackc-cxx")
+            message(STATUS "Found msgpack (<=5.x)")
+        elseif(HIPBLASLT_ENABLE_FETCH)
+            # Header-only, downloaded at configure time. Opt-in, so a machine
+            # with no msgpack package and no network still gets an immediate,
+            # legible configure failure instead of a silent download.
+            message(STATUS "msgpack-cxx was not found; fetching 6.1.0")
+            include(FetchContent)
+            FetchContent_Declare(
+                msgpack-cxx
+                URL https://github.com/msgpack/msgpack-c/releases/download/cpp-6.1.0/msgpack-cxx-6.1.0.tar.gz
+                URL_HASH SHA256=23ede7e93c8efee343ad8c6514c28f3708207e5106af3b3e4969b3a9ed7039e7
+            )
+            set(MSGPACK_USE_BOOST OFF CACHE BOOL "" FORCE)
+            set(MSGPACK_CXX17 ON CACHE BOOL "" FORCE)
+            set(MSGPACK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+            set(MSGPACK_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+            set(MSGPACK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+            # msgpack-cxx 6.1.0 still calls cmake_minimum_required(VERSION 3.1).
+            # CMake 4 rejects that. The floor applies only while that project is added.
+            set(_hipblaslt_saved_policy_minimum "${CMAKE_POLICY_VERSION_MINIMUM}")
+            set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+            FetchContent_MakeAvailable(msgpack-cxx)
+            if(_hipblaslt_saved_policy_minimum STREQUAL "")
+                unset(CMAKE_POLICY_VERSION_MINIMUM)
+            else()
+                set(CMAKE_POLICY_VERSION_MINIMUM "${_hipblaslt_saved_policy_minimum}")
+            endif()
+            set(hipblaslt_msgpack_target "msgpack-cxx")
+            set(hipblaslt_msgpack_fetched TRUE)
+        else()
+            message(FATAL_ERROR
+                "msgpack-cxx was not found. Install msgpack-cxx (>=6.x) or "
+                "msgpackc-cxx (<=5.x), or configure with "
+                "-DHIPBLASLT_ENABLE_FETCH=ON to download it at configure time. "
+                "A msgpack package is required when the host library is "
+                "built against MessagePack.")
+        endif()
     endif()
 endif()
 
+set(TENSILELITE_BUNDLED_ORIGAMI OFF)
 if(ROCM_LIBS_SUPERBUILD)
     if(NOT TARGET roc::origami)
         message(FATAL_ERROR "The ROCm libraries superbuild must provide the roc::origami target before configuring hipBLASLt.")
@@ -291,15 +370,38 @@ if(ROCM_LIBS_SUPERBUILD)
 elseif(HIPBLASLT_ENABLE_THEROCK)
     find_package(origami CONFIG REQUIRED)
 else()
+    set(TENSILELITE_BUNDLED_ORIGAMI ON)
+    set(TENSILELITE_BUNDLED_ORIGAMI_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/origami")
     block(SCOPE_FOR VARIABLES)
+        set(ORIGAMI_INSTALL_COMPONENT origami-devel)
         set(ORIGAMI_BUILD_SHARED_LIBS OFF)
         set(ORIGAMI_ENABLE_FETCH ON)
         set(ORIGAMI_BUILD_TESTING OFF)
         set(ORIGAMI_ENABLE_PYTHON OFF)
         set(BUILD_TESTING OFF)
         set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${CMAKE_CURRENT_BINARY_DIR}/origami")
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${TENSILELITE_BUNDLED_ORIGAMI_BINARY_DIR}")
     endblock()
+endif()
+
+if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    if(ROCM_LIBS_SUPERBUILD)
+        if(NOT TARGET roc::mxDataGeneratorPreSwizzle)
+            message(FATAL_ERROR "The ROCm libraries superbuild must provide the roc::mxDataGeneratorPreSwizzle target before configuring hipBLASLt.")
+        endif()
+    elseif(HIPBLASLT_ENABLE_THEROCK)
+        find_package(mxDataGenerator CONFIG REQUIRED)
+    elseif(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/mxdatagenerator/CMakeLists.txt")
+        block()
+            set(CMAKE_SKIP_INSTALL_RULES ON)
+            add_subdirectory(
+                "${ROCM_LIBRARIES_ROOT}/shared/mxdatagenerator"
+                "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator"
+                EXCLUDE_FROM_ALL)
+        endblock()
+    else()
+        find_package(mxDataGenerator CONFIG REQUIRED)
+    endif()
 endif()
 
 add_library(hipblaslt-headers INTERFACE)
@@ -310,6 +412,15 @@ target_include_directories(hipblaslt-headers
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/library/include>
 )
 target_link_libraries(hipblaslt-headers INTERFACE hip::host)
+
+# The measurement engine and candidate search hipblaslt-bench and tune mode share,
+# header-only. Build tree only: nothing outside this project includes it.
+add_library(hipblaslt-benchmark INTERFACE)
+target_include_directories(hipblaslt-benchmark
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/src/benchmark>
+)
+target_link_libraries(hipblaslt-benchmark INTERFACE hip::host)
 
 # `hipblaslt-version.h` is consumed by `library/include/hipblaslt/hipblaslt.h`
 # (only included when HIPBLASLT_ENABLE_HOST is ON). When HOST is ON, the
@@ -374,7 +485,28 @@ if(_hipblaslt_mxdatagen_enabled)
     add_subdirectory(clients/common)
 endif()
 
+if(HIPBLASLT_ENABLE_HOST)
+    if(LEGACY_HIPBLAS_DIRECT)
+        rocm_package_add_dependencies(DEPENDS "hipblas >= 0.50.0")
+    else()
+        set(hipblas_common_minimum 1.0.0)
+        if(HIPBLASLT_BUILD_SHARED_LIBS)
+            rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-dev >= ${hipblas_common_minimum}")
+            rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-devel >= ${hipblas_common_minimum}")
+        else()
+            rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-static-dev >= ${hipblas_common_minimum}")
+            rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-static-devel >= ${hipblas_common_minimum}")
+        endif()
+    endif()
+endif()
+
 block(SCOPE_FOR VARIABLES)
+    unset(CPACK_DEBIAN_PACKAGE_DEPENDS)
+    unset(CPACK_RPM_PACKAGE_REQUIRES)
+    unset(CPACK_DEBIAN_DEVEL_PACKAGE_DEPENDS)
+    unset(CPACK_RPM_DEVEL_PACKAGE_REQUIRES)
+    set(TENSILELITE_ENABLE_YAML "${HIPBLASLT_ENABLE_YAML}")
+    set(TENSILELITE_ENABLE_MXDATAGENERATOR "${HIPBLASLT_ENABLE_MXDATAGENERATOR}")
     set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
     add_subdirectory(tensilelite)
 endblock()
@@ -407,6 +539,7 @@ if(HIPBLASLT_ENABLE_HOST)
         PRIVATE
             hip::device
             roc::tensilelite-host
+            $<BUILD_INTERFACE:hipblaslt-benchmark>
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
@@ -457,6 +590,35 @@ if(HIPBLASLT_ENABLE_HOST)
     add_subdirectory(library)
 endif()
 
+if(HIPBLASLT_ENABLE_HOST
+   AND HIPBLASLT_BUILD_SHARED_LIBS
+   AND TENSILELITE_BUILD_SHARED_LIBS
+   AND NOT WIN32
+   AND (HIPBLASLT_BUILD_TESTING OR TENSILELITE_BUILD_TESTING OR BUILD_TESTING))
+    get_filename_component(_hipblaslt_cxx_dir "${CMAKE_CXX_COMPILER}" REALPATH)
+    get_filename_component(_hipblaslt_cxx_dir "${_hipblaslt_cxx_dir}" DIRECTORY)
+    find_program(HIPBLASLT_LLVM_IFS llvm-ifs
+        HINTS "${_hipblaslt_cxx_dir}"
+        PATHS "${ROCM_PATH}/lib/llvm/bin" "$ENV{ROCM_PATH}/lib/llvm/bin" /opt/rocm/lib/llvm/bin
+    )
+    if(HIPBLASLT_LLVM_IFS)
+        enable_testing()
+        add_test(
+            NAME hipblaslt.symbol-contract.tensilelite-host
+            COMMAND "${CMAKE_COMMAND}"
+                "-DLLVM_IFS=${HIPBLASLT_LLVM_IFS}"
+                "-DCONSUMER=$<TARGET_FILE:hipblaslt>"
+                "-DPROVIDER=$<TARGET_FILE:tensilelite-host>"
+                "-DREQUIRED_IMPORTS=${CMAKE_CURRENT_SOURCE_DIR}/library/symbol-contract/tensilelite-host-imports.txt"
+                "-DNAMESPACE_PATTERN=11TensileLite"
+                "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/symbol-contract"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_check_symbol_contract.cmake"
+        )
+    else()
+        message(STATUS "llvm-ifs not found; hipblaslt.symbol-contract.tensilelite-host test disabled")
+    endif()
+endif()
+
 if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
 endif()
@@ -496,26 +658,6 @@ if(HIPBLASLT_ENABLE_HOST)
         COMPONENT devel
     )
 
-    if( LEGACY_HIPBLAS_DIRECT )
-        rocm_package_add_dependencies(DEPENDS "hipblas >= 0.50.0")
-    else()
-        set(hipblas_common_minimum 1.0.0)
-        if(BUILD_SHARED_LIBS)
-            rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-dev >= ${hipblas_common_minimum}")
-            rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-devel >= ${hipblas_common_minimum}")
-        else()
-            rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-static-dev >= ${hipblas_common_minimum}")
-            rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-static-devel >= ${hipblas_common_minimum}")
-        endif()
-    endif()
-endif()
-
-if(TENSILELITE_ENABLE_HOST)
-    install(
-        FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_codegen.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt"
-        COMPONENT devel
-    )
 endif()
 
 set(_hipblaslt_export_targets)
@@ -525,44 +667,35 @@ if(HIPBLASLT_ENABLE_HOST)
     list(APPEND _hipblaslt_export_targets roc::hipblaslt)
     list(APPEND _hipblaslt_export_depends PACKAGE ${hipblas_target})
 endif()
-if(TENSILELITE_ENABLE_HOST)
-    list(APPEND _hipblaslt_export_targets roc::tensilelite-host)
-endif()
 
 if(_hipblaslt_export_targets)
     block(SCOPE_FOR VARIABLES)
         set(_hipblaslt_static_depends)
 
-        if(TARGET tensilelite-host)
-            get_target_property(_tensilelite_host_type tensilelite-host TYPE)
-        endif()
         if(TARGET hipblaslt)
             get_target_property(_hipblaslt_target_type hipblaslt TYPE)
         endif()
 
-        if(_tensilelite_host_type STREQUAL "STATIC_LIBRARY")
-            list(APPEND _hipblaslt_static_depends PACKAGE ZLIB)
-        endif()
-
-        if(HIPBLASLT_ENABLE_YAML)
-            if(_tensilelite_host_type STREQUAL "STATIC_LIBRARY")
-                list(APPEND _hipblaslt_static_depends PACKAGE LLVM)
-            endif()
-        elseif(_tensilelite_host_type STREQUAL "STATIC_LIBRARY"
-               OR _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
-            if(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
+        if(NOT HIPBLASLT_ENABLE_YAML AND _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
+            if(hipblaslt_msgpack_fetched)
+                # A static archive carries msgpack into INTERFACE_LINK_LIBRARIES
+                # as $<LINK_ONLY:msgpack-cxx>, so the export set references it.
+                # A fetched msgpack-cxx is a build-tree target, not an imported
+                # one, and cannot be exported; downstream static consumers would
+                # also have no msgpack to link against. Say so here rather than
+                # at generate time.
+                message(FATAL_ERROR
+                    "A static, exported hipBLASLt needs an installed msgpack "
+                    "package: a fetched msgpack-cxx is a build-tree target and "
+                    "cannot be exported. Install msgpack-cxx (>=6.x) or "
+                    "msgpackc-cxx (<=5.x), or build shared with "
+                    "-DHIPBLASLT_BUILD_SHARED_LIBS=ON.")
+            elseif(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
                 list(APPEND _hipblaslt_static_depends PACKAGE msgpack-cxx CONFIG)
             else()
                 list(APPEND _hipblaslt_static_depends
                     PACKAGE msgpackc-cxx CONFIG NAMES msgpackc-cxx msgpack)
             endif()
-        endif()
-
-        # rocm_export_targets emits STATIC_DEPENDS only when the canonical
-        # variable is OFF. Scope that choice to config generation so a mixed
-        # shared hipBLASLt/static TensileLite export remains discoverable.
-        if(_hipblaslt_static_depends)
-            set(BUILD_SHARED_LIBS OFF)
         endif()
 
         rocm_export_targets(
@@ -592,17 +725,6 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
         COMPONENT runtime
     )
-    # The gfx1250 v0 GEMM tree builds into its own directory (see
-    # device-library/CMakeLists.txt) but installs as one more subdir of the same
-    # library/ root. The property is only set when that tree is built.
-    get_property(_gfx1250v0_library_dir GLOBAL PROPERTY HIPBLASLT_GFX1250V0_LIBRARY_DIR)
-    if(_gfx1250v0_library_dir)
-        rocm_install(
-            DIRECTORY "${_gfx1250v0_library_dir}"
-            DESTINATION "${HIPBLASLT_TENSILE_LIBRARY_DIR}/library"
-            COMPONENT runtime
-        )
-    endif()
 endif()
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
@@ -723,8 +845,15 @@ if(HIPBLASLT_ENABLE_CLIENT)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
+    # hipblaslt-test-hostunit is the standalone host-only unit test binary. It is
+    # installed so it ships in TheRock's blas test artifact; see
+    # clients/tests/unit/CMakeLists.txt for why its name has to keep the
+    # "hipblaslt-test" prefix.
     rocm_install(
-        TARGETS hipblaslt-test
+        TARGETS
+            hipblaslt-test
+            hipblaslt-test-hostunit
+            hipblaslt-test-tuning-store
         COMPONENT tests
     )
     rocm_install(
@@ -740,47 +869,42 @@ endif()
 
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
-#   share/hipblaslt/tensilelite/Tensile/     — Tensile Python package
+#   share/hipblaslt/tensilelite/tensilelite/ — TensileLite Python package
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
+#   share/hipblaslt/tensilelite/stinkytofu/   — stinkytofu Python package (gfx1250 backend)
+#   share/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/ — rocisa facade over stinkytofu
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
     set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
 
-    # Tensile Python package
+    # TensileLite Python package
     install(
-        DIRECTORY "${_tensilelite_src}/Tensile/"
-        DESTINATION "${_tensilelite_install_dest}/Tensile"
+        DIRECTORY "${_tensilelite_src}/tensilelite/"
+        DESTINATION "${_tensilelite_install_dest}/tensilelite"
         COMPONENT tests
         PATTERN "__pycache__" EXCLUDE
         PATTERN ".pytest_cache" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
+        PATTERN "source_only" EXCLUDE
     )
 
     # Scripts used by unit tests
     install(
         FILES
             "${_tensilelite_src}/scripts/analyze_timing.py"
+            "${_tensilelite_src}/scripts/check_no_absolute_imports.py"
             "${_tensilelite_src}/scripts/precommit_affected_tests.py"
         DESTINATION "${_tensilelite_install_dest}/scripts"
         COMPONENT tests
     )
 
-    # Imported directly by unit tests, so these generators must ship at the
-    # tensilelite root, not under scripts/.
-    install(
-        FILES
-            "${_tensilelite_src}/AMaxGenerator.py"
-            "${_tensilelite_src}/LayerNormGenerator.py"
-        DESTINATION "${_tensilelite_install_dest}"
-        COMPONENT tests
-    )
     # Preserve executable permissions on entry points
     install(
         PROGRAMS
-            "${_tensilelite_src}/Tensile/bin/Tensile"
-            "${_tensilelite_src}/Tensile/bin/TensileCreateLibrary"
-        DESTINATION "${_tensilelite_install_dest}/Tensile/bin"
+            "${_tensilelite_src}/tensilelite/bin/Tensile"
+            "${_tensilelite_src}/tensilelite/bin/TensileCreateLibrary"
+        DESTINATION "${_tensilelite_install_dest}/tensilelite/bin"
         COMPONENT tests
     )
 
@@ -814,6 +938,37 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
                 )
             endif()
         endif()
+    endif()
+
+    # FFM runs with PYTHONPATH=share/hipblaslt/tensilelite. The lib/hipblaslt
+    # install in rocisa/CMakeLists.txt is a different root, and TheRock's lib
+    # component keeps lib/hipblaslt/rocisa plus every *.so. Put the package
+    # here so gfx1250 codegen can import it. The *.so is claimed by the lib
+    # artifact; these Python files stay in the test artifact; flattening
+    # puts them back next to each other. The target exists for every GPU
+    # family (see STINKYTOFU_BUILD_PYTHON in rocisa/CMakeLists.txt).
+    if(TARGET stinkytofu_python)
+        set(_stinkytofu_py_src "${ROCM_LIBRARIES_ROOT}/shared/stinkytofu")
+        install(TARGETS stinkytofu_python
+            LIBRARY DESTINATION "${_tensilelite_install_dest}/stinkytofu"
+            COMPONENT tests
+        )
+        install(FILES "${_stinkytofu_py_src}/python_module/stinkytofu/__init__.py"
+            DESTINATION "${_tensilelite_install_dest}/stinkytofu"
+            COMPONENT tests
+        )
+        if(TARGET intrinsics_compiled)
+            install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc"
+                DESTINATION "${_tensilelite_install_dest}/stinkytofu"
+                COMPONENT tests
+            )
+        endif()
+        install(DIRECTORY
+            "${_tensilelite_src}/rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/"
+            DESTINATION "${_tensilelite_install_dest}/rocisa_stinkytofu_adaptor"
+            COMPONENT tests
+            FILES_MATCHING PATTERN "*.py"
+        )
     endif()
 
     # rocisa tests
@@ -917,7 +1072,67 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
     rocm_package_setup_client_component(samples)
 endif()
 
+if(TENSILELITE_BUILD_SHARED_LIBS)
+    set(_tensilelite_devel_package tensilelite-host)
+else()
+    set(_tensilelite_devel_package tensilelite-host-static)
+endif()
+set(tensilelite_minimum 1.5.0)
+if(ENABLE_ASAN_PACKAGING)
+    set(_tensilelite_runtime_package tensilelite-host-asan)
+else()
+    set(_tensilelite_runtime_package tensilelite-host)
+endif()
+if(TENSILELITE_ENABLE_HOST)
+    rocm_package_add_deb_dependencies(COMPONENT devel
+        DEPENDS "${_tensilelite_devel_package}-dev >= ${tensilelite_minimum}")
+    rocm_package_add_rpm_dependencies(COMPONENT devel
+        DEPENDS "${_tensilelite_devel_package}-devel >= ${tensilelite_minimum}")
+
+    if(TENSILELITE_BUILD_SHARED_LIBS)
+        if(CPACK_RPM_PACKAGE_REQUIRES)
+            rocm_package_add_rpm_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_RPM_PACKAGE_REQUIRES}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            if(ENABLE_ASAN_PACKAGING)
+                rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core-asan")
+            else()
+                rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+            endif()
+        endif()
+
+        if(CPACK_DEBIAN_PACKAGE_DEPENDS)
+            rocm_package_add_deb_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            if(ENABLE_ASAN_PACKAGING)
+                rocm_package_add_deb_dependencies(COMPONENT runtime DEPENDS "rocm-core-asan")
+            else()
+                rocm_package_add_deb_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+            endif()
+        endif()
+
+        rocm_package_add_dependencies(COMPONENT runtime
+            DEPENDS "${_tensilelite_runtime_package} >= ${tensilelite_minimum}")
+    endif()
+endif()
+unset(_tensilelite_devel_package)
+unset(_tensilelite_runtime_package)
+unset(tensilelite_minimum)
+
 if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
+    if(TENSILELITE_ENABLE_HOST)
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-cpack.cmake"
+            "set(_tensilelite_package_dir \"\${CPACK_PACKAGE_DIRECTORY}/_CPack_Packages/tensilelite/\${CPACK_GENERATOR}\")\n"
+            "file(REMOVE_RECURSE \"\${_tensilelite_package_dir}\")\n"
+            "execute_process(COMMAND \"${CMAKE_CPACK_COMMAND}\" --config \"${CMAKE_CURRENT_BINARY_DIR}/tensilelite/CPackConfig.cmake\" -G \"\${CPACK_GENERATOR}\" -B \"\${_tensilelite_package_dir}\" COMMAND_ERROR_IS_FATAL ANY)\n"
+            "file(GLOB _tensilelite_package_files LIST_DIRECTORIES false \"\${_tensilelite_package_dir}/*\")\n"
+            "file(COPY \${_tensilelite_package_files} DESTINATION \"\${CPACK_PACKAGE_DIRECTORY}\")\n"
+        )
+        list(APPEND CPACK_POST_BUILD_SCRIPTS "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-cpack.cmake")
+    endif()
     set(HIPBLASLT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
     rocm_create_package(
         NAME hipblaslt
@@ -953,6 +1168,30 @@ if(HIPBLASLT_ENABLE_COVERAGE)
     target_compile_definitions(hipblaslt-clients-common PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
+
+    # The coverage runner's untiered pass selects tests outside every tier
+    # category, so it needs the category list. Read it from the test data rather
+    # than repeating it: a category added there would otherwise fall into that
+    # pass unannounced, and it may need a longer timeout or a different GPU than
+    # this job allows. known_bug and multi_gpu carry no `category:` entries
+    # (known_bug is assigned from known_bugs.yaml, and the multi_gpu tests carry
+    # the token in the suite name), so they are listed explicitly.
+    set(coverage_tier_categories "known_bug" "multi_gpu")
+    file(GLOB coverage_test_data_files CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/clients/tests/data/*.yaml")
+    foreach(data_file IN LISTS coverage_test_data_files)
+        file(STRINGS "${data_file}" category_lines REGEX "^[ \t]*category:[ \t]*[A-Za-z_]+")
+        foreach(category_line IN LISTS category_lines)
+            string(REGEX REPLACE "^[ \t]*category:[ \t]*([A-Za-z_]+).*$" "\\1"
+                category "${category_line}")
+            list(APPEND coverage_tier_categories "${category}")
+        endforeach()
+    endforeach()
+    list(REMOVE_DUPLICATES coverage_tier_categories)
+    list(SORT coverage_tier_categories)
+    string(JOIN "," coverage_tier_categories_arg ${coverage_tier_categories})
+    message(STATUS "hipBLASLt coverage: tier categories ${coverage_tier_categories_arg}")
+
     # Allow GTEST_FILTER to be set via environment variable to filter tests during coverage runs.
     # Usage: GTEST_FILTER="*quick*" make coverage
     # Default: Run all tests if GTEST_FILTER is not set
@@ -961,7 +1200,7 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         DEPENDS hipblaslt-test
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
-        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_coverage_tests.sh" "$<TARGET_FILE:hipblaslt-test>" "${coverage_dir}"
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_coverage_tests.sh" "$<TARGET_FILE:hipblaslt-test>" "${coverage_dir}" "${coverage_tier_categories_arg}"
         COMMENT "Running hipblaslt testcases for coverage report"
       )
 
@@ -979,13 +1218,21 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         HINTS ${ROCM_PATH}/llvm/bin
         PATHS /opt/rocm/llvm/bin
       )
+      # Report hipBLASLt library code only. The test client is instrumented so that
+      # inline library functions it shares are counted, but it is not product code.
+      # TensileLite reports under its own Codecov flags, and so do the components
+      # under shared/. Those matter here because instrumenting an archive also
+      # instruments the header-only templates its sources instantiate:
+      # hipblaslt-rocroller brought 6,205 lines of shared/rocroller headers into
+      # this report at 4.9%, which belong to the rocRoller flag, not this one.
+      set(coverage_ignore_regex ".*Tensile.*|.*origami.*|.*/tensilelite/.*|.*/clients/.*|.*/shared/.*")
       add_custom_target(
         coverage
         DEPENDS code_cov_tests
         COMMAND ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/hipblaslt-coverage_*.profraw" -o "${coverage_dir}/hipblaslt.profdata"
-        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*"
-        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=html -output-dir="${coverage_dir}"
-        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=lcov > "${coverage_dir}/coverage.info"
+        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex="${coverage_ignore_regex}"
+        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex="${coverage_ignore_regex}" -format=html -output-dir="${coverage_dir}"
+        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex="${coverage_ignore_regex}" -format=lcov > "${coverage_dir}/coverage.info"
         COMMENT "Generating code coverage report"
       )
 endif()

@@ -32,19 +32,69 @@
 //
 #pragma once
 
+#include "../include/rocsparse_clients_log.hpp"
 #include "rocsparse.h"
 
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 #include <vector>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
+// gtest reports what() for an exception that escapes a test body, so the message
+// names the failing call.
+inline void unit_test_throw_hip_error(const char* call, hipError_t status)
+{
+    if(status == hipSuccess)
+    {
+        return;
+    }
+
+    // Consume the error so that it is not reported again by the next test.
+    (void)hipGetLastError();
+
+    std::ostringstream message;
+    message << call << " failed: " << hipGetErrorString(status) << " (" << static_cast<int>(status)
+            << ")";
+    throw std::runtime_error(message.str());
+}
+
+inline void unit_test_throw_rocsparse_error(const char* call, rocsparse_status status)
+{
+    if(status == rocsparse_status_success)
+    {
+        return;
+    }
+
+    std::ostringstream message;
+    message << call << " failed: " << rocsparse_get_status_name(status) << " ("
+            << static_cast<int>(status) << ")";
+    throw std::runtime_error(message.str());
+}
 
 namespace rocsparse_ut
 {
-#define UT_CHECK_HIP(cmd)                                             \
-    do                                                                \
-    {                                                                 \
-        hipError_t status_ = (cmd);                                   \
-        ASSERT_EQ(status_, hipSuccess) << hipGetErrorString(status_); \
+// A failed call leaves its error pending, so consume it before the assert
+// returns; otherwise a later hipGetLastError() blames the wrong call.
+#define UT_CHECK_HIP(cmd)                                                             \
+    do                                                                                \
+    {                                                                                 \
+        hipError_t status_ = (cmd);                                                   \
+        if(status_ != hipSuccess)                                                     \
+        {                                                                             \
+            (void)hipGetLastError();                                                  \
+        }                                                                             \
+        ASSERT_EQ(status_, hipSuccess) << #cmd << ": " << hipGetErrorString(status_); \
     } while(0)
 
 #define UT_EXPECT_ROC(cmd, expected) EXPECT_EQ((cmd), (expected))
@@ -71,6 +121,16 @@ namespace rocsparse_ut
     inline rocsparse_datatype dt_of<rocsparse_double_complex>()
     {
         return rocsparse_datatype_f64_c;
+    }
+    template <>
+    inline rocsparse_datatype dt_of<_Float16>()
+    {
+        return rocsparse_datatype_f16_r;
+    }
+    template <>
+    inline rocsparse_datatype dt_of<rocsparse_bfloat16>()
+    {
+        return rocsparse_datatype_bf16_r;
     }
 
     template <typename I>
@@ -101,8 +161,20 @@ namespace rocsparse_ut
     {
         return rocsparse_double_complex(v, 0.0);
     }
+    template <>
+    inline _Float16 scalar<_Float16>(float v)
+    {
+        return static_cast<_Float16>(v);
+    }
+    template <>
+    inline rocsparse_bfloat16 scalar<rocsparse_bfloat16>(float v)
+    {
+        return rocsparse_bfloat16(v);
+    }
 
     // ----- tiny device buffer RAII ------------------------------------------
+    // Both constructors throw std::runtime_error if hipMalloc or hipMemcpy fails,
+    // so ptr is null only for an empty buffer.
     template <typename T>
     struct device_vector
     {
@@ -113,25 +185,26 @@ namespace rocsparse_ut
         explicit device_vector(const std::vector<T>& host)
         {
             n = host.size();
-            if(hipMalloc(&ptr, n * sizeof(T)) != hipSuccess)
+            unit_test_throw_hip_error("hipMalloc", hipMalloc(&ptr, n * sizeof(T)));
+            const hipError_t copy_status
+                = hipMemcpy(ptr, host.data(), n * sizeof(T), hipMemcpyHostToDevice);
+            if(copy_status != hipSuccess)
             {
-                ptr = nullptr;
-                return;
+                rocsparse_clients_log_hip_error("hipFree", hipFree(ptr));
+                unit_test_throw_hip_error("hipMemcpy", copy_status);
             }
-            (void)hipMemcpy(ptr, host.data(), n * sizeof(T), hipMemcpyHostToDevice);
         }
         explicit device_vector(size_t count)
             : n(count)
         {
-            if(hipMalloc(&ptr, n * sizeof(T)) != hipSuccess)
-                ptr = nullptr;
+            unit_test_throw_hip_error("hipMalloc", hipMalloc(&ptr, n * sizeof(T)));
         }
         device_vector(const device_vector&) = delete;
         device_vector& operator=(const device_vector&) = delete;
         ~device_vector()
         {
             if(ptr)
-                (void)hipFree(ptr);
+                rocsparse_clients_log_hip_error("hipFree", hipFree(ptr));
         }
         operator T*() const
         {
@@ -148,7 +221,9 @@ namespace rocsparse_ut
         std::vector<T> host(count);
         if(count > 0 && device_ptr != nullptr)
         {
-            (void)hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost);
+            unit_test_throw_hip_error(
+                "hipMemcpy",
+                hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost));
         }
         return host;
     }
@@ -222,6 +297,38 @@ namespace rocsparse_ut
         return props.warpSize;
     }
 
+    // True on gfx8 / gfx9, where the rocsparse::wfreduce_* routines are built on
+    // DPP row_shr / row_bcast steps (ROCSPARSE_USE_MOVE_DPP). Those leave the
+    // result only in the TOP lanes of the wavefront: lane wf-1 for
+    // wfreduce_sum / _max / _min, and the last SUB lanes for
+    // wfreduce_partial_sum<WFSIZE, SUB> (the lanes callers read). On every other
+    // architecture the shuffle-based variants return the result in every lane.
+    // ROCSPARSE_USE_MOVE_DPP only exists in the device pass, so the host tests
+    // select the architecture from the device name instead.
+    inline bool device_uses_dpp_wfreduce()
+    {
+        static const bool uses_dpp = [] {
+            int             dev   = 0;
+            hipDeviceProp_t props = {};
+            if(hipGetDevice(&dev) != hipSuccess
+               || hipGetDeviceProperties(&props, dev) != hipSuccess)
+                return false;
+            return std::strncmp(props.gcnArchName, "gfx8", 4) == 0
+                   || std::strncmp(props.gcnArchName, "gfx9", 4) == 0;
+        }();
+
+        return uses_dpp;
+    }
+
+    // First lane of a wavefront of `wf` lanes whose wfreduce_* result is
+    // specified for a reduction leaving `sub` result lanes (sub == 1 for
+    // sum / max / min): lane 0 (every lane) on the shuffle path, lane wf-sub on
+    // the DPP path. Check lanes [first, wf).
+    inline uint32_t wfreduce_first_valid_lane(uint32_t wf, uint32_t sub)
+    {
+        return device_uses_dpp_wfreduce() ? wf - sub : 0;
+    }
+
 #ifdef __HIPCC__
     // ------------------------------------------------------------------------
     // Single-block / single-warp launch helpers
@@ -244,6 +351,8 @@ namespace rocsparse_ut
     template <typename Kernel, typename... Args>
     hipError_t launch_single_block(Kernel kernel, unsigned int block_dim, Args... args)
     {
+        // Clear any error left pending by an earlier test, so it isn't blamed on this launch.
+        (void)hipGetLastError();
         hipLaunchKernelGGL(kernel, dim3(1), dim3(block_dim), 0, 0, args...);
         const hipError_t launch = hipGetLastError();
         if(launch != hipSuccess)
@@ -281,4 +390,74 @@ namespace rocsparse_ut
         return hipErrorInvalidValue;
     }
 #endif // __HIPCC__
+
+    // setenv / unsetenv do not exist on Windows.
+    inline void set_env(const char* name, const char* value)
+    {
+#ifdef _WIN32
+        (void)_putenv_s(name, value);
+#else
+        (void)::setenv(name, value, 1);
+#endif
+    }
+
+    inline void unset_env(const char* name)
+    {
+#ifdef _WIN32
+        (void)_putenv_s(name, "");
+#else
+        (void)::unsetenv(name);
+#endif
+    }
+
+    // Sets an environment variable for the lifetime of the object and restores the
+    // previous state afterwards, also when an ASSERT_* returns early.
+    class scoped_env
+    {
+    public:
+        scoped_env(const char* name, const char* value)
+            : m_name(name)
+        {
+            if(const char* old = std::getenv(name))
+            {
+                m_had_old = true;
+                m_old     = old;
+            }
+            set_env(name, value);
+        }
+
+        ~scoped_env()
+        {
+            if(m_had_old)
+            {
+                set_env(m_name.c_str(), m_old.c_str());
+            }
+            else
+            {
+                unset_env(m_name.c_str());
+            }
+        }
+
+        scoped_env(const scoped_env&) = delete;
+        scoped_env& operator=(const scoped_env&) = delete;
+
+    private:
+        std::string m_name;
+        std::string m_old;
+        bool        m_had_old = false;
+    };
+
+    // A file in the system temporary directory (/tmp on Linux). The process id is
+    // part of the name so concurrent runs of the same binary do not collide.
+    inline std::string temp_file_path(const char* name)
+    {
+#ifdef _WIN32
+        const auto pid = static_cast<long>(_getpid());
+#else
+        const auto pid = static_cast<long>(::getpid());
+#endif
+        return (std::filesystem::temp_directory_path()
+                / (std::string(name) + "." + std::to_string(pid)))
+            .string();
+    }
 } // namespace rocsparse_ut

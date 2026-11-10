@@ -4,21 +4,29 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuReferenceValidationFactory.hpp>
 
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <stdexcept>
 #include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
+
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
 
 namespace
 {
@@ -32,7 +40,7 @@ class TestGpuFpValidation : public ::testing::Test
 {
 };
 
-using FpTypes = ::testing::Types<float, half, bfloat16, double>;
+using FpTypes = ::testing::Types<float, HalfType, BFloat16Type, double>;
 TYPED_TEST_SUITE(TestGpuFpValidation, FpTypes, );
 
 TYPED_TEST(TestGpuFpValidation, ExactMatchPasses)
@@ -42,7 +50,10 @@ TYPED_TEST(TestGpuFpValidation, ExactMatchPasses)
     Tensor<TypeParam> ref({2, 3, 4});
     Tensor<TypeParam> impl({2, 3, 4});
 
-    ref.fillWithRandomValues(static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+    fillWithRandomValues(ref, static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    ref.memory().hostData();
 
     // Copy ref data into impl so they are identical
     const auto* refHost = ref.memory().hostData();
@@ -63,7 +74,10 @@ TYPED_TEST(TestGpuFpValidation, WithinTolerancePasses)
     Tensor<TypeParam> ref({4, 4});
     Tensor<TypeParam> impl({4, 4});
 
-    ref.fillWithRandomValues(static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+    fillWithRandomValues(ref, static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    ref.memory().hostData();
 
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();
@@ -476,6 +490,58 @@ TEST(TestGpuValidatorFactory, TemplatedCreatesInt32)
 }
 
 // ============================================================================
+// Ragged rejection tests
+// ============================================================================
+
+const std::vector<int64_t> K_RAGGED_DIMS = {2, 2, 3, 2};
+const std::vector<int64_t> K_RAGGED_STRIDES = {12, 2, 4, 1};
+
+template <typename T>
+RaggedTensor<T> makeRaggedTensor()
+{
+    const std::vector<int32_t> offsets = {0, 8, 20};
+    auto offsetTensor = std::make_shared<Tensor<int32_t>>(
+        std::vector<int64_t>{static_cast<int64_t>(offsets.size()), 1, 1, 1});
+    for(size_t i = 0; i < offsets.size(); ++i)
+    {
+        offsetTensor->setHostValue(offsets[i], static_cast<int64_t>(i), 0, 0, 0);
+    }
+    return RaggedTensor<T>(K_RAGGED_DIMS, K_RAGGED_STRIDES, SDPA_SEQ_AXIS, offsetTensor);
+}
+
+template <typename T>
+void expectRaggedRejected(const IReferenceValidation& validator)
+{
+    auto reference = makeRaggedTensor<T>();
+    auto implementation = makeRaggedTensor<T>();
+    EXPECT_THROW(validator.allClose(reference, implementation), std::invalid_argument);
+
+    Tensor<T> dense(K_RAGGED_DIMS, K_RAGGED_STRIDES);
+    EXPECT_THROW(validator.allClose(dense, implementation), std::invalid_argument);
+}
+
+TEST(TestGpuValidationRaggedRejection, FpValidatorThrowsOnRaggedTensors)
+{
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::FLOAT);
+    ASSERT_NE(validator, nullptr);
+    expectRaggedRejected<float>(*validator);
+}
+
+TEST(TestGpuValidationRaggedRejection, IntValidatorThrowsOnRaggedTensors)
+{
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::INT32);
+    ASSERT_NE(validator, nullptr);
+    expectRaggedRejected<int32_t>(*validator);
+}
+
+TEST(TestGpuValidationRaggedRejection, RmsValidatorThrowsOnRaggedTensors)
+{
+    const auto validator = createGpuRmsValidator(hipdnn_frontend::DataType::FLOAT, 1e-5f);
+    ASSERT_NE(validator, nullptr);
+    expectRaggedRejected<float>(*validator);
+}
+
+// ============================================================================
 // Constructor validation tests
 // ============================================================================
 
@@ -510,7 +576,7 @@ class TestGpuVsCpuValidation : public ::testing::Test
 {
 };
 
-using GpuCpuFpTypes = ::testing::Types<float, half, bfloat16>;
+using GpuCpuFpTypes = ::testing::Types<float, HalfType, BFloat16Type>;
 TYPED_TEST_SUITE(TestGpuVsCpuValidation, GpuCpuFpTypes, );
 
 TYPED_TEST(TestGpuVsCpuValidation, AgreeOnPass)
@@ -520,7 +586,10 @@ TYPED_TEST(TestGpuVsCpuValidation, AgreeOnPass)
     Tensor<TypeParam> ref({8, 8});
     Tensor<TypeParam> impl({8, 8});
 
-    ref.fillWithRandomValues(static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+    fillWithRandomValues(ref, static_cast<TypeParam>(-1.0f), static_cast<TypeParam>(1.0f), 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    ref.memory().hostData();
 
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();
@@ -582,7 +651,10 @@ TEST(TestGpuFpValidationLargeTensor, LargeTensorExactMatch)
     Tensor<float> ref({64, 32, 32});
     Tensor<float> impl({64, 32, 32});
 
-    ref.fillWithRandomValues(-1.0f, 1.0f, 42);
+    fillWithRandomValues(ref, -1.0f, 1.0f, 42);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    ref.memory().hostData();
 
     const auto* refHost = ref.memory().hostData();
     auto* implHost = impl.memory().hostData();

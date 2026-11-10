@@ -76,7 +76,8 @@ using fmha_bwd_trait_{F_idx} = ck_tile::TileFmhaBwdTraits<{F_dpad},
                                                        {F_dvpad},
                                                        {F_bias},
                                                        {F_dbias},
-                                                       {F_occupancy}>;
+                                                       {F_occupancy},
+                                                       {F_qdo_slots}>;
 using fmha_mask_{F_idx}      = {F_mask};
 using fmha_dropout_{F_idx}   = {F_dropout};
 
@@ -102,7 +103,9 @@ using fmha_bwd_pipeline_problem_{F_idx} = ck_tile::BlockFmhaBwdPipelineProblem<
     fmha_mask_{F_idx},
     fmha_dropout_{F_idx},
     {F_trload},
-    fmha_bwd_trait_{F_idx}>;
+    fmha_bwd_trait_{F_idx},
+    {F_tdm_kr_ktr},
+    {F_tdm_decode}>;
 
 using fmha_bwd_pipeline_{F_idx} = ck_tile::BlockFmhaBwdDQDKDVPipeline<fmha_bwd_pipeline_problem_{F_idx}>;
 
@@ -141,7 +144,7 @@ using dq_dk_dv_trait_{F_idx} = fmha_bwd_dq_dk_dv_traits_<{F_hdim},
                                                          {F_dvpad},
                                                          {F_deterministic},
                                                          {F_trload},
-                                                         {F_maxq},
+                                                         {F_tagq},
                                                          {F_bn0}>;
 
 template <>
@@ -149,7 +152,7 @@ float fmha_bwd_dq_dk_dv_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>(const ck_tile::st
 {{
     using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
     if(s.log_level_ > 0)
-        std::cout << ", " << k_::GetName() << std::flush;
+        std::cout << ", {F_kname}" << std::flush;
     auto [kargs, grids]                    = fmha_bwd_dq_dk_dv_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
@@ -207,7 +210,7 @@ size_t fmha_bwd_dq_dk_dv_dq_ws_device_upper_bound_<dq_dk_dv_trait_{F_idx}, {F_ar
 {{
     using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
     return k_::GetWorkspaceDeviceSizeUpperBound(
-        max_batch, hdim_q, nhead_q, total_seqlen_q_padded, max_seqlen_k);
+        max_batch, k_::DqAccHdim(hdim_q), nhead_q, total_seqlen_q_padded, max_seqlen_k);
 }}
 
 template <>
@@ -217,8 +220,14 @@ size_t fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<dq_dk_dv_trait_{F_idx}, {F_arch.tag
     const ck_tile::index_t* seqstart_qs, const ck_tile::index_t* seqstart_ks)
 {{
     using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
-    return k_::PrepareWorkspaceHost(
-        cpu_ws, batch_size, hdim_q, nhead_q, seqlen_q, seqlen_k, seqstart_qs, seqstart_ks);
+    return k_::PrepareWorkspaceHost(cpu_ws,
+                                    batch_size,
+                                    k_::DqAccHdim(hdim_q),
+                                    nhead_q,
+                                    seqlen_q,
+                                    seqlen_k,
+                                    seqstart_qs,
+                                    seqstart_ks);
 }}
 
 template <>
@@ -230,7 +239,7 @@ void fmha_bwd_dq_dk_dv_dq_prepare_ws_device_<dq_dk_dv_trait_{F_idx}, {F_arch.tag
 {{
     using k_      = fmha_bwd_dq_dk_dv_kernel_{F_idx};
     using prep_k_ = typename k_::PrepareWorkspaceKernel;
-    auto kargs        = prep_k_::MakeKargs(gpu_ws, batch_size, hdim_q, nhead_q, seqlen_q,
+    auto kargs        = prep_k_::MakeKargs(gpu_ws, batch_size, k_::DqAccHdim(hdim_q), nhead_q, seqlen_q,
                                     seqlen_k, num_cus, seqstart_qs, seqstart_ks);
     const dim3 grids  = prep_k_::GridSize();
     const dim3 blocks = prep_k_::BlockSize();
@@ -248,8 +257,7 @@ bool fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>(
 template <>
 std::string fmha_bwd_dq_dk_dv_get_name_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>()
 {{
-    using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
-    return k_::GetName();
+    return "{F_kname}";
 }}
 
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
@@ -287,8 +295,8 @@ def FMHA_BWD_API_COND_STATEMENT(F_cond: str, F_body: str, *, if_i=0) -> str:
 FMHA_BWD_API_INNER_DISPATCH_COMMON = """{F_if}((t.is_group_mode == {F_mode}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_dbias == {F_dbias}) && ({F_dropout_check}) &&
         ({F_scheck}) && ({F_dcheck}) && ({F_dvcheck}) && (t.is_deterministic == {F_deterministic}){F_max_seq_q_cond}{F_cond_extra}) {{
     using dot_do_o_trait_ = fmha_bwd_dot_do_o_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dvpad} > 0)>;
-    using dq_dk_dv_trait_ = fmha_bwd_dq_dk_dv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_mask}, {F_dropout}, {F_bias}, {F_dbias}, {F_dpad}, {F_dvpad}, {F_deterministic}, {F_trload}, {F_maxq}, {F_bn0}>;
-    using convert_dq_trait_ = fmha_bwd_convert_dq_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dpad} > 0), {F_deterministic}>;
+    using dq_dk_dv_trait_ = fmha_bwd_dq_dk_dv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_mask}, {F_dropout}, {F_bias}, {F_dbias}, {F_dpad}, {F_dvpad}, {F_deterministic}, {F_trload}, {F_tagq}, {F_bn0}>;
+    using convert_dq_trait_ = fmha_bwd_convert_dq_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dpad} > 0), {F_deterministic}, {F_pad_dq_acc_row}>;
 """
 FMHA_BWD_API_INNER_DISPATCH_RUN = """
     r = fmha_bwd_<dot_do_o_trait_, dq_dk_dv_trait_, std::conditional_t<{F_convert_dq_enabled}, convert_dq_trait_, void>, {F_arch.tag}>(s, a);
@@ -339,14 +347,34 @@ class FmhaBwdDQDKDVTileSize:
     F_wk1: int  # warp size along k in gemm1/gemm3
     F_occupancy: int  # occupancy
     max_seq_q: int = 0
+    dispatch_max_seq_q: int = 0
+    dispatch_max_seq_k: int = 0
+    dispatch_min_grid: int = 0
+    allow_mask: bool = False
+    tdm_kr_ktr: bool = False
+    qdo_slots: int = 0
+    # Decode tile whose global->LDS traffic goes through TDM. gfx12 only; the
+    # gfx950 decode tiles leave this off and keep the original pipeline.
+    tdm_decode: bool = False
 
     @property
     def name(self) -> str:
         return (
             f"b{self.F_bm0}x{self.F_bn0}x{self.F_bk0}x{self.F_bk1}x{self.F_bk2}x{self.F_bk3}x{self.F_bk4}x{self.F_bhdq}x{self.F_bhdv}"
             + f"_r{self.F_rm0}x{self.F_rn0}x{self.F_rk0}_r{self.F_rm1}x{self.F_rn1}x{self.F_rk1}_r{self.F_rm2}x{self.F_rn2}x{self.F_rk2}"
-            + f"_w{self.F_wm0}x{self.F_wn0}x{self.F_wk0}_w{self.F_wm1}x{self.F_wn1}x{self.F_wk1}_o{self.F_occupancy}_maxq{self.max_seq_q}"
+            + f"_w{self.F_wm0}x{self.F_wn0}x{self.F_wk0}_w{self.F_wm1}x{self.F_wn1}x{self.F_wk1}"
+            + ("" if self.F_occupancy == -1 else f"_o{self.F_occupancy}")
+            + f"_maxq{self.max_seq_q}"
+            + (f"_dmaxq{self.dispatch_max_seq_q}" if self.dispatch_max_seq_q else "")
+            + (f"_q{self.qdo_slots}" if self.qdo_slots else "")
+            + (f"_dmaxk{self.dispatch_max_seq_k}" if self.dispatch_max_seq_k else "")
+            + (f"_dmingrid{self.dispatch_min_grid}" if self.dispatch_min_grid else "")
+            + ("_tdm" if self.tdm_kr_ktr else "")
         )
+
+    @property
+    def seq_q_limit(self) -> int:
+        return self.max_seq_q or self.dispatch_max_seq_q
 
 
 @dataclass(frozen=True)
@@ -370,6 +398,7 @@ class FmhaBwdDQDKDVKernel:
     @property
     def template(self) -> str:
         return FMHA_BWD_KERNEL_HEADER + FMHA_BWD_DQ_DK_DV_KERNEL_BODY.format(
+            F_kname=self.name,
             F_idx=self.F_idx,
             F_arch=self.F_arch,
             F_hdim=self.F_hdim,
@@ -404,11 +433,15 @@ class FmhaBwdDQDKDVKernel:
             F_dbias=BOOL_MAP[self.F_dbias],
             F_dropout=DROPOUT_MAP[self.F_dropout],
             F_occupancy=self.F_tile.F_occupancy,
+            F_qdo_slots=self.F_tile.qdo_slots,
             F_mask=get_mask_map(self.mask_impl)[self.F_mask],
             F_mode=MODE_MAP[self.F_mode],
             F_deterministic=BOOL_MAP[self.F_deterministic],
             F_trload=BOOL_MAP[self.F_trload],
+            F_tdm_kr_ktr=BOOL_MAP["t" if self.F_tile.tdm_kr_ktr else "f"],
+            F_tdm_decode=BOOL_MAP["t" if self.F_tile.tdm_decode else "f"],
             F_maxq=self.F_tile.max_seq_q,
+            F_tagq=self.F_tile.seq_q_limit,
         )
 
     @property
@@ -452,7 +485,9 @@ class FmhaBwdDQDKDVKernel:
                 n += "_nmask"
 
         if self.F_dropout != "no":
-            n += f"_{self.F_dropout}"
+            n += "_" + self.F_dropout.replace("storerandval", "srv").replace(
+                "_wg", "_w"
+            )
         else:
             n += "_ndropout"
 
@@ -462,9 +497,9 @@ class FmhaBwdDQDKDVKernel:
             n += "_ndeterministic"
 
         if self.F_trload == "t":
-            n += "_trload"
+            n += "_tl"
         else:
-            n += "_ntrload"
+            n += "_ntl"
         return n
 
     @property
@@ -565,15 +600,23 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     @staticmethod
     def get_dq_dk_dv_tiles(dtype: str, tr_load: str) -> List[FmhaBwdDQDKDVTileSize]:
         if tr_load == "t":
-            return []
+            if dtype not in ["fp16", "bf16"]:
+                return []
+            return [
+                #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
+                FmhaBwdDQDKDVTileSize( 32,  32,  64,  32,  64,  32,  32,   64,   64,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  2, 32, dispatch_min_grid=768, allow_mask=True, tdm_decode=True),
+                FmhaBwdDQDKDVTileSize( 32,  32, 128,  32, 128,  32,  32,  128,  128,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  1, 32, dispatch_min_grid=768, allow_mask=True, tdm_decode=True),
+            ]  # fmt: skip
         if dtype in ["fp16", "bf16"]:
             return [
                 #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
-                FmhaBwdDQDKDVTileSize( 32,  64,  32,  32,  32,  32,  64,   32,   32,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 32,  16, 16, 32, -1),
-                FmhaBwdDQDKDVTileSize( 32,  64,  64,  32,  64,  32,  32,   64,   64,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1),
+                FmhaBwdDQDKDVTileSize( 64, 128,  32,  64,  32,  64,  32,   32,   32,  1, 4, 1,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32, -1, tdm_kr_ktr=True),
+                FmhaBwdDQDKDVTileSize( 64, 128,  64,  64,  64,  64,  32,   64,   64,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 32,  16, 16, 32, -1, tdm_kr_ktr=True),
                 #FmhaBwdDQDKDVTileSize( 32,  64,  64,  32,  64,  32,  64,   64,   64,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1),
-                FmhaBwdDQDKDVTileSize( 32,  64, 128,  32, 128,  32, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1),
-                FmhaBwdDQDKDVTileSize( 32,  64, 256,  32, 256,  32, 32,  256,  256,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1),
+                FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, tdm_kr_ktr=True, qdo_slots=2, dispatch_max_seq_q=2048),
+                FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, tdm_kr_ktr=True),
+                FmhaBwdDQDKDVTileSize( 32,  64, 128,  32, 128,  32, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, tdm_kr_ktr=True, dispatch_max_seq_q=32, qdo_slots=2),
+                FmhaBwdDQDKDVTileSize( 32,  64, 256,  32, 256,  32, 32,  256,  256,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, tdm_kr_ktr=True),
             ]  # fmt: skip
         return []
 
@@ -629,7 +672,7 @@ float fmha_bwd_dot_do_o_<dot_do_o_trait_{F_idx}, {F_arch.tag}>(const ck_tile::st
 {{
     using k_ = fmha_bwd_dot_do_o_kernel_{F_idx};
     if(s.log_level_ > 0)
-        std::cout << ", " << k_::GetName() << std::flush;
+        std::cout << ", {F_kname}" << std::flush;
     auto [kargs, grids]                    = fmha_bwd_dot_do_o_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
@@ -651,8 +694,14 @@ void fmha_bwd_dot_do_o_oneshot_<dot_do_o_trait_{F_idx}, {F_arch.tag}>(const ck_t
 template <>
 std::string fmha_bwd_dot_do_o_get_name_<dot_do_o_trait_{F_idx}, {F_arch.tag}>()
 {{
+    return "{F_kname}";
+}}
+
+template <>
+ck_tile::index_t fmha_bwd_dot_do_o_m0_<dot_do_o_trait_{F_idx}, {F_arch.tag}>()
+{{
     using k_ = fmha_bwd_dot_do_o_kernel_{F_idx};
-    return k_::GetName();
+    return k_::kM0;
 }}
 
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
@@ -674,6 +723,7 @@ class FmhaBwdOGradDotOKernel:
     @property
     def template(self) -> str:
         return FMHA_BWD_KERNEL_HEADER + FMHA_BWD_DOT_DO_O_KERNEL_BODY.format(
+            F_kname=self.name,
             F_idx=self.F_idx,
             F_arch=self.F_arch,
             F_hdim=self.F_hdim,
@@ -698,7 +748,10 @@ class FmhaBwdOGradDotOKernel:
             return n
 
         pn = pad_name()
-        n = f"fmha_bwd_dot_do_o_d{self.F_hdim}_{self.F_dtype}_b{self.F_bm0}_{self.F_mode}_o{self.F_occupancy}"
+        n = (
+            f"fmha_bwd_dot_do_o_d{self.F_hdim}_{self.F_dtype}_b{self.F_bm0}_{self.F_mode}"
+            + ("" if self.F_occupancy == -1 else f"_o{self.F_occupancy}")
+        )
         if pn != "":
             n += f"_{pn}"
         else:
@@ -735,21 +788,22 @@ using fmha_bwd_convert_dq_{F_idx} =
     typename ck_tile::BlockFmhaBwdConvertQGrad<fmha_bwd_convert_dq_pipeline_problem_{F_idx}>;
 
 using fmha_bwd_convert_dq_kernel_{F_idx} =
-    ck_tile::FmhaBwdConvertQGradKernel<fmha_bwd_convert_dq_{F_idx}>;
+    ck_tile::FmhaBwdConvertQGradKernel<fmha_bwd_convert_dq_{F_idx}, {F_pad_dq_acc_row}>;
 
 using convert_dq_trait_{F_idx} = fmha_bwd_convert_dq_traits_<{F_hdim},
                                                              {F_dtype},
                                                              {F_mode},
                                                              {F_spad},
                                                              {F_dpad},
-                                                             {F_deterministic}>;
+                                                             {F_deterministic},
+                                                             {F_pad_dq_acc_row}>;
 
 template <>
 float fmha_bwd_convert_dq_<convert_dq_trait_{F_idx}, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_bwd_args a)
 {{
     using k_ = fmha_bwd_convert_dq_kernel_{F_idx};
     if(s.log_level_ > 0)
-        std::cout << ", " << k_::GetName() << std::flush;
+        std::cout << ", {F_kname}" << std::flush;
     auto [kargs, grids]                    = fmha_bwd_convert_dq_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
@@ -771,8 +825,7 @@ void fmha_bwd_convert_dq_oneshot_<convert_dq_trait_{F_idx}, {F_arch.tag}>(const 
 template <>
 std::string fmha_bwd_convert_dq_get_name_<convert_dq_trait_{F_idx}, {F_arch.tag}>()
 {{
-    using k_ = fmha_bwd_convert_dq_kernel_{F_idx};
-    return k_::GetName();
+    return "{F_kname}";
 }}
 
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
@@ -792,10 +845,12 @@ class FmhaBwdConvertQGradKernel:
     F_occupancy: int  #
     F_deterministic: str  #
     disabled: bool  # sometimes this kernel is not used
+    F_pad_dq_acc_row: bool = False
 
     @property
     def template(self) -> str:
         return FMHA_BWD_KERNEL_HEADER + FMHA_BWD_CONVERT_DQ_KERNEL_BODY.format(
+            F_kname=self.name,
             F_idx=self.F_idx,
             F_arch=self.F_arch,
             F_hdim=self.F_hdim,
@@ -806,6 +861,7 @@ class FmhaBwdConvertQGradKernel:
             F_mode=MODE_MAP[self.F_mode],
             F_occupancy=self.F_occupancy,
             F_deterministic=BOOL_MAP[self.F_deterministic],
+            F_pad_dq_acc_row=BOOL_MAP["t" if self.F_pad_dq_acc_row else "f"],
         )
 
     @property
@@ -821,11 +877,16 @@ class FmhaBwdConvertQGradKernel:
             return n
 
         pn = pad_name()
-        n = f"fmha_bwd_convert_dq_d{self.F_hdim}_{self.F_dtype}_b{self.F_bm0}_{self.F_mode}_o{self.F_occupancy}"
+        n = (
+            f"fmha_bwd_convert_dq_d{self.F_hdim}_{self.F_dtype}_b{self.F_bm0}_{self.F_mode}"
+            + ("" if self.F_occupancy == -1 else f"_o{self.F_occupancy}")
+        )
         if pn != "":
             n += f"_{pn}"
         else:
             n += "_npad"
+        if self.F_pad_dq_acc_row:
+            n += "_dqaccrow"
         if self.F_deterministic == "t":
             n += "_deterministic"
         else:
@@ -898,23 +959,35 @@ class FmhaBwdApiTrait:
 
     @property
     def max_seq_q_cond(self) -> str:
-        if self.tile.max_seq_q != 0:
-            if self.mode == "group":
-                return f" && (t.max_seqlen_q <= {self.tile.max_seq_q})"
-            else:
-                return f" && (t.seqlen_q <= {self.tile.max_seq_q})"
-        else:
-            return ""
+        prefix = "max_" if self.mode == "group" else ""
+        cond = ""
+        if self.tile.seq_q_limit != 0:
+            cond += f" && (t.{prefix}seqlen_q <= {self.tile.seq_q_limit})"
+        if self.tile.dispatch_max_seq_k != 0:
+            cond += f" && (t.{prefix}seqlen_k <= {self.tile.dispatch_max_seq_k})"
+        if self.tile.dispatch_min_grid != 0:
+            cond += f" && (t.batch * t.nhead_q >= {self.tile.dispatch_min_grid})"
+        return cond
 
     @property
     def extra_cond(self) -> str:
-        if self.tr_load == "t" and self.tile.max_seq_q == 0 and self.tile.F_bn0 == 128 and self.tile.F_bhdq == 128:
+        if (
+            self.tr_load == "t"
+            and self.tile.max_seq_q == 0
+            and self.tile.F_bn0 == 128
+            and self.tile.F_bhdq == 128
+        ):
             if self.mode == "group":
                 return " && (t.max_seqlen_k <= 256)"
             else:
                 return " && (t.seqlen_k <= 256)"
         else:
             return ""
+
+    @property
+    def pad_dq_acc_row(self) -> bool:
+        # must match the dq_dk_dv pipeline's kPadDqAccRow: the TDM pipeline pads padded-hdim rows
+        return self.tile.tdm_kr_ktr and self.dpad != 0
 
     @property
     def dot_do_o_kernel(self) -> FmhaBwdOGradDotOKernel:
@@ -976,6 +1049,7 @@ class FmhaBwdApiTrait:
             F_occupancy=get_occupancy(self.dtype, self.hdim),
             F_deterministic=self.deterministic,
             disabled=self.tile.max_seq_q != 0,
+            F_pad_dq_acc_row=self.pad_dq_acc_row,
         )
 
 
@@ -1017,8 +1091,9 @@ class FmhaBwdApiPool:
                 F_dpad=trait.dpad,
                 F_dvpad=trait.dvpad,
                 F_deterministic=BOOL_MAP[trait.deterministic],
+                F_pad_dq_acc_row=BOOL_MAP["t" if trait.pad_dq_acc_row else "f"],
                 F_trload=BOOL_MAP[trait.tr_load],
-                F_maxq=trait.tile.max_seq_q,
+                F_tagq=trait.tile.seq_q_limit,
                 F_max_seq_q_cond=trait.max_seq_q_cond,
                 F_cond_extra=trait.extra_cond,
                 F_bn0=trait.tile.F_bn0,
@@ -1027,17 +1102,21 @@ class FmhaBwdApiPool:
                 F_arch=trait.arch,
                 F_convert_dq_enabled=BOOL_MAP[not trait.convert_dq_kernel.disabled],
             )
-            inners_launcher += inners_common + FMHA_BWD_API_INNER_DISPATCH_LAUNCHER.format(
-                F_arch=trait.arch,
-                F_convert_dq_enabled=BOOL_MAP[not trait.convert_dq_kernel.disabled],
+            inners_launcher += (
+                inners_common
+                + FMHA_BWD_API_INNER_DISPATCH_LAUNCHER.format(
+                    F_arch=trait.arch,
+                    F_convert_dq_enabled=BOOL_MAP[not trait.convert_dq_kernel.disabled],
+                )
             )
         return inners, inners_launcher
 
     @staticmethod
     def max_seq_q_sort_key(trait):
         return (
-            trait.tile.max_seq_q if trait.tile.max_seq_q != 0 else 1000000
-        )  # sort 0 to the end
+            trait.tile.seq_q_limit or 1000000,
+            trait.tile.dispatch_max_seq_k or 1000000,
+        )
 
     @staticmethod
     def dtype_cond(dtype: str) -> str:
@@ -1053,7 +1132,9 @@ class FmhaBwdApiPool:
             per_dtypes = ""
             for i_dtype, (dtype, pool_by_dtype) in enumerate(pool_by_arch.items()):
                 per_hdim_case = ""
-                for i_hdim, (hdim, pool_by_hdim) in enumerate(pool_by_dtype.items()):
+                for i_hdim, (hdim, pool_by_hdim) in enumerate(
+                    sorted(pool_by_dtype.items())
+                ):
                     traits = sorted(pool_by_hdim, key=self.max_seq_q_sort_key)
                     inners = self._api_inners(traits)
                     per_hdim_case += FMHA_BWD_API_COND_STATEMENT(
@@ -1069,6 +1150,7 @@ class FmhaBwdApiPool:
             # empty string we add some ignore to suppress warning in api
             per_arch = ("(void)t; (void)s; (void)a;", "(void)t;")[variant]
         return per_arch
+
     @property
     def api(self) -> str:
         result = FMHA_BWD_KERNEL_HEADER + FMHA_BWD_API.format(
@@ -1129,14 +1211,14 @@ def get_bwd_blobs(
             hdim = tile.F_bhdq
             if (mode == "group") and (spad1d == "f"):
                 continue
-            if ("no" not in mask) and tile.max_seq_q != 0:
+            if ("no" not in mask) and tile.seq_q_limit != 0 and not tile.allow_mask:
                 continue
             if (bias == "no" or bias == "alibi") and dbias == "t":
                 continue
             if "wg32" in dropout:
                 continue
-            if spad1d == "f" and tile.max_seq_q != 0 and tile.max_seq_q < M0_1D:
-                continue  # max_seq_q < M0_1D requires padding
+            if spad1d == "f" and tile.seq_q_limit != 0 and tile.seq_q_limit < M0_1D:
+                continue  # seq_q_limit < M0_1D requires padding
             if tr_load == "t":
                 # tr_load can only work with 8 pad
                 if dpad != dvpad or dpad == 1:
@@ -1196,6 +1278,15 @@ def get_bwd_blobs(
                 cond &= dropout in ["no", "dropout_wg32", "dropout_wg16"]
                 cond &= dpad == dvpad
                 cond &= deterministic == "f"
+                if not cond:
+                    continue
+            # CK Tile Python API
+            elif receipt == 5:
+                # CK Tile Python pads equal Q/V head dimensions to multiples of 8.
+                cond = dtype in ["fp16", "bf16"] and hdim <= 256
+                cond &= bias in ["no", "alibi"] or (mode == "batch" and bias == "bias")
+                cond &= dropout in ["no", "dropout_wg32", "dropout_wg16"]
+                cond &= dpad == dvpad and dpad in [0, 8]
                 if not cond:
                     continue
             # Aiter (mha_bwd) integration

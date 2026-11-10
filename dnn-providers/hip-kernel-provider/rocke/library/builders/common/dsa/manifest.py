@@ -1,0 +1,277 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""``run_manifest`` adapter for the gfx942 lightning indexer (numpy pack + oracle).
+
+Importing this module registers kind ``lightning_indexer_bf16``. The manifest
+carries ``runner_module`` so ``python -m rocke.run_manifest`` can import this file
+on a cluster node that has ``library/`` on ``PYTHONPATH`` -- no platform edit, no
+torch. This is the numpy GPU lane: it allocates device buffers, launches the
+kernel, copies the scores back, and grades them against the CPU oracle in
+``hostpack.ref_indexer_scores``.
+
+``--shape`` is ``seqlen_q, seqlen_k, n_index_heads`` (the three ints the remote
+CLI forwards); ``index_head_dim`` and ``q_pos_base`` live on the manifest.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+from rocke.helpers.manifest import make_simple_op_manifest
+from rocke.runtime.host_buffers import as_u8_buffer, nbytes, require_numpy
+from rocke.runtime.hip_module import Runtime
+from rocke.runtime.packing import pack_args
+from rocke.run_manifest import register_manifest_runner
+
+from .hostpack import NEG_INF_SCORE, f32_to_bf16_bits, make_inputs, ref_indexer_scores
+
+KIND = "lightning_indexer_bf16"
+RUNNER_MODULE = "builders.common.dsa.manifest"
+
+# seqlen_q, seqlen_k, n_index_heads. seqlen_k > 2048 is where sparsity would
+# matter, but the indexer scores every key regardless, so a small shape is a
+# fine smoke default here.
+_DEFAULT_SHAPE = (8, 64, 4)
+# Tight relative-error gate: the kernel computes in f32 from bf16-rounded
+# operands, so real error is ~1e-4; 1e-3 leaves margin without letting a dropped
+# head or a broken causal mask pass.
+_DEFAULT_TOL = 1e-3
+
+_I32_MAX = 2**31 - 1
+
+
+def _validate_q_pos_base(q_pos_base: int, seqlen_q: int) -> None:
+    """Reject a causal base that makes ``pos(q) = q_pos_base + q`` wrap i32.
+
+    ``q_pos_base`` is an unchecked runtime i32. The kernel forms the position of
+    the last query row as ``q_pos_base + (seqlen_q - 1)`` in both bodies; if that
+    exceeds ``INT32_MAX`` it wraps negative and the causal compare stores the
+    sentinel for keys that are actually valid. Reject at the host boundary rather
+    than silently miscompute on device.
+    """
+    hi = _I32_MAX - (max(int(seqlen_q), 1) - 1)
+    if not 0 <= int(q_pos_base) <= hi:
+        raise ValueError(
+            f"q_pos_base {q_pos_base} out of range [0, {hi}] for seqlen_q "
+            f"{seqlen_q}: pos(q) = q_pos_base + q must fit i32"
+        )
+
+
+def _validate_offsets(
+    seqlen_q: int, seqlen_k: int, n_index_heads: int, index_head_dim: int
+) -> None:
+    """Reject a runtime shape whose largest element offset overflows i32.
+
+    seqlen_q / seqlen_k are runtime kernel arguments now, so the offset bound is a
+    launch-time concern, not a compile-time one: the score store index is
+    row_q*seqlen_k + k_col, the index-query base q*n_index_heads*index_head_dim,
+    and the index-key base s*index_head_dim, all computed in i32 on device.
+    """
+    q, k, h, d = int(seqlen_q), int(seqlen_k), int(n_index_heads), int(index_head_dim)
+    if q * k >= 2**31:
+        raise ValueError(f"seqlen_q*seqlen_k ({q * k}) overflows the i32 score offset")
+    if q * h * d >= 2**31:
+        raise ValueError(
+            f"seqlen_q*n_index_heads*index_head_dim ({q * h * d}) overflows the i32 "
+            f"index-query offset"
+        )
+    if k * d >= 2**31:
+        raise ValueError(
+            f"seqlen_k*index_head_dim ({k * d}) overflows the i32 key offset"
+        )
+
+
+def _with_size_bytes(signature: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for arg in signature:
+        item = dict(arg)
+        ty = str(item["type"])
+        if ty.startswith("ptr"):
+            item.setdefault("size_bytes", 8)
+        elif ty in ("i32", "f32"):
+            item.setdefault("size_bytes", 4)
+        else:
+            item.setdefault("size_bytes", 8)
+        out.append(item)
+    return out
+
+
+def make_lightning_indexer_manifest(
+    *,
+    artifact,
+    spec,
+    args_signature: Sequence[Mapping[str, Any]],
+    q_pos_base: int = 0,
+    default_shape: Sequence[int] = _DEFAULT_SHAPE,
+    verify_tol: float = _DEFAULT_TOL,
+    warmup_iters: int = 5,
+    timed_iters: int = 100,
+    notes: str = "",
+) -> Dict[str, Any]:
+    """Emit a v1 manifest the remote ``run_manifest`` path can execute."""
+    # Fail fast on a causal base that would wrap i32 before baking it into the manifest.
+    _validate_q_pos_base(q_pos_base, int(spec.seqlen_q))
+    Q, Sk, HI = (int(x) for x in default_shape)
+    note = notes or (
+        "gfx942 lightning indexer. --shape is seqlen_q,seqlen_k,n_index_heads; "
+        f"pack/check live in {RUNNER_MODULE}."
+    )
+    return make_simple_op_manifest(
+        artifact=artifact,
+        kind=KIND,
+        op="lightning_indexer",
+        dtype=str(getattr(spec, "dtype", "bf16")),
+        threads_per_block=int(spec.tile.block_size),
+        default_shape=(Q, Sk, HI),
+        args_signature=_with_size_bytes(args_signature),
+        warmup_iters=warmup_iters,
+        timed_iters=timed_iters,
+        notes=note,
+        extra={
+            "runner_module": RUNNER_MODULE,
+            # n_index_heads and index_head_dim are compiled into the kernel, so the
+            # runner rejects a --shape that tries to change them (seqlen_q/seqlen_k
+            # are runtime args and may differ).
+            "n_index_heads": int(spec.n_index_heads),
+            "index_head_dim": int(spec.index_head_dim),
+            "q_pos_base": int(q_pos_base),
+            "body": str(spec.body),
+            "verify_tol": float(verify_tol),
+        },
+    )
+
+
+def _shape(
+    manifest: dict, shape: Optional[Tuple[int, int, int]]
+) -> Tuple[int, int, int]:
+    if shape is None or shape == (0, 0, 0):
+        ds = manifest.get("default_shape", list(_DEFAULT_SHAPE))
+        if len(ds) != 3:
+            raise ValueError(f"{KIND} default_shape must be [Q, Sk, HI], got {ds!r}")
+        return int(ds[0]), int(ds[1]), int(ds[2])
+    return int(shape[0]), int(shape[1]), int(shape[2])
+
+
+def run_lightning_indexer_manifest_problem(
+    manifest: dict, shape: Optional[Tuple[int, int, int]], verify: bool
+) -> tuple:
+    """Problem builder: ``(make_args, grid, block, flop, bytes_xfer, check)``."""
+    from kernels.common.lightning_indexer import (
+        IndexerSpec,
+        IndexerTileSpec,
+        lightning_indexer_grid,
+    )
+
+    np = require_numpy()
+    Q, Sk, HI = _shape(manifest, shape)
+    D_I = int(manifest["index_head_dim"])
+    # n_index_heads and index_head_dim are compiled into the kernel (head loop
+    # bound, buffer strides, grid name), so --shape must not change them: a
+    # mismatch would size index_q/w for one head count while the kernel strides
+    # another, writing/reading out of bounds. seqlen_q/seqlen_k are runtime args,
+    # so overriding those is allowed.
+    built_HI = int(manifest["n_index_heads"])
+    if HI != built_HI:
+        raise ValueError(
+            f"--shape n_index_heads {HI} != the compiled {built_HI}; n_index_heads "
+            f"is baked into the kernel and cannot be overridden (seqlen_q/seqlen_k can)"
+        )
+    # body is required, and must be the one the kernel was built for: defaulting a
+    # missing body to 'scalar' would launch the scalar grid for an MFMA binary
+    # (16x the workgroups) and run far past the buffers.
+    if "body" not in manifest:
+        raise ValueError(f"{KIND} manifest is missing 'body' (scalar | mfma)")
+    body = str(manifest["body"])
+    if body not in ("scalar", "mfma"):
+        raise ValueError(f"{KIND} body {body!r} must be 'scalar' or 'mfma'")
+    q_pos_base = int(manifest.get("q_pos_base", 0))
+    # Re-check against the runtime Q, which --shape may have overridden past the compiled seqlen_q.
+    _validate_q_pos_base(q_pos_base, Q)
+    # seqlen_q/seqlen_k are runtime kernel args, so their i32 offset bounds are
+    # checked here against the actual launch shape (--shape may override the spec).
+    _validate_offsets(Q, Sk, HI, D_I)
+    tol = float(manifest.get("verify_tol", _DEFAULT_TOL))
+    signature = list(manifest["args_signature"])
+    threads = int(manifest["threads_per_block"])
+
+    ins = make_inputs(Q, HI, D_I, Sk, seed=0)
+    index_q_bits = f32_to_bf16_bits(ins["index_q"])
+    index_k_bits = f32_to_bf16_bits(ins["index_k"])
+    w = ins["w"].astype(np.float32)
+    scores = np.zeros((Q, Sk), dtype=np.float32)
+    ref = ref_indexer_scores(ins["index_q"], ins["index_k"], w, q_pos_base)
+
+    # Grid from the kernel's own helper (never a hand copy, so it cannot drift):
+    # rebuild the spec for the resolved shape and body and ask it. The rebuilt
+    # spec is used only to size the launch; the kernel is already compiled.
+    grid = lightning_indexer_grid(
+        IndexerSpec(
+            n_index_heads=HI,
+            index_head_dim=D_I,
+            seqlen_q=Q,
+            seqlen_k=Sk,
+            body=body,
+            tile=IndexerTileSpec(block_size=threads),
+        )
+    )
+    block = (threads, 1, 1)
+    # Two flops per (q, key, head, dim): one multiply, one add in the dot.
+    flop = 2.0 * Q * Sk * HI * D_I
+    bytes_xfer = float(
+        index_q_bits.nbytes + index_k_bits.nbytes + w.nbytes + scores.nbytes
+    )
+
+    def make_args(rt: Runtime):
+        q_dev = rt.alloc(nbytes(index_q_bits))
+        k_dev = rt.alloc(nbytes(index_k_bits))
+        w_dev = rt.alloc(nbytes(w))
+        s_dev = rt.alloc(nbytes(scores))
+        rt.memcpy_h2d(q_dev, as_u8_buffer(index_q_bits), nbytes(index_q_bits))
+        rt.memcpy_h2d(k_dev, as_u8_buffer(index_k_bits), nbytes(index_k_bits))
+        rt.memcpy_h2d(w_dev, as_u8_buffer(w), nbytes(w))
+        rt.memset(s_dev, 0, nbytes(scores))
+        ptrs = (q_dev, k_dev, w_dev, s_dev)
+        args = pack_args(
+            signature,
+            {
+                "index_q": q_dev,
+                "index_k": k_dev,
+                "w": w_dev,
+                "scores": s_dev,
+                "q_pos_base": q_pos_base,
+                "seqlen_q": Q,
+                "seqlen_k": Sk,
+            },
+        )
+        return args, ptrs
+
+    def check(rt: Runtime, ptrs):
+        if not verify:
+            return 0.0, 0, int(scores.size)
+        s_dev = ptrs[3]
+        rt.memcpy_d2h(as_u8_buffer(scores), s_dev, nbytes(scores))
+        got = scores
+        valid = ref > (0.5 * NEG_INF_SCORE)
+        bad = 0
+        # 1. Future (masked) keys must be written exactly as the sentinel -- this
+        #    is what catches a broken causal mask (a real/zero score there fails).
+        bad += int((got[~valid] != np.float32(NEG_INF_SCORE)).sum())
+        # 2. Valid scores must be finite -- NaN/inf slip past a plain `> tol`
+        #    comparison because NaN comparisons are always False.
+        bad += int((~np.isfinite(got[valid])).sum())
+        # 3. Valid scores within a tight relative tolerance. The denominator is
+        #    floored at a fraction of the row max so a near-zero score (a dropped
+        #    head shows up here) cannot hide behind a huge relative denominator.
+        r = ref[valid].astype(np.float64)
+        g = got[valid].astype(np.float64)
+        row_max = float(np.abs(r).max()) if r.size else 1.0
+        denom = np.maximum(np.abs(r), 1e-3 * row_max)
+        rel = np.abs(g - r) / denom
+        bad += int((rel > tol).sum())
+        d = float(rel.max()) if rel.size else 0.0
+        return d, bad, int(got.size)
+
+    return make_args, grid, block, flop, bytes_xfer, check
+
+
+register_manifest_runner(KIND, run_lightning_indexer_manifest_problem)

@@ -67,7 +67,8 @@ def _seg_3d_kernel(num_seqs: int, kv_len: int):
     )
     _spec3d, _reduce, build_seg, _build_red, _ = au._tiled_3d_impl("gfx950")
     seg_spec = replace(
-        au._tiled_3d_spec_from_problem(problem), num_segments=au._num_segments(problem)
+        au._tiled_3d_spec_from_problem(problem, "gfx950"),
+        num_segments=au._num_segments(problem, "gfx950"),
     )
     return build_seg(seg_spec, arch="gfx950")
 

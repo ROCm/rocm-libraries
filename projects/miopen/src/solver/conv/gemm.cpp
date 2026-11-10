@@ -34,9 +34,9 @@ bool GemmFwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     const auto& yDesc = problem.GetOut();
 
     // rocBlas needs the output to be 32-bit always
-    if(xDesc.GetType() == miopenInt8      //
-       && (yDesc.GetType() != miopenFloat //
-           && yDesc.GetType() != miopenInt32))
+    if(xDesc.GetType() == miopenInt8 &&
+       (wDesc.GetType() != miopenInt8 ||
+        (yDesc.GetType() != miopenFloat && yDesc.GetType() != miopenInt32)))
         return false;
 
     const auto rblas_fp8_supported = IsFP8Supported(ctx.GetStream().GetDeviceName());
@@ -222,7 +222,8 @@ bool GemmFwd1x1_0_2::IsSlow(const ExecutionContext& context,
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx11            = StartsWith(arch, "gfx110") || StartsWith(arch, "gfx115");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
     auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
@@ -231,7 +232,7 @@ bool GemmFwd1x1_0_2::IsSlow(const ExecutionContext& context,
     auto channels_per_group     = c / g;
     auto spatial_work_per_group = s * channels_per_group;
 
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
     {
         return false;
     }
@@ -254,6 +255,8 @@ bool GemmFwd1x1_0_2::IsApplicable(const ExecutionContext& context,
     if(!GemmFwdBase::IsApplicable(context, problem))
         return false;
 
+    if(!problem.IsLayoutDefault())
+        return false;
     decltype(auto) conv  = problem.GetConv();
     decltype(auto) wDesc = problem.GetWeights();
 
@@ -522,6 +525,9 @@ bool GemmFwd1x1_0_1_int8::IsApplicable(const ExecutionContext& context,
     if(!GemmFwdBase::IsApplicable(context, problem))
         return false;
 
+    if(!problem.IsLayoutDefault())
+        return false;
+
     decltype(auto) conv  = problem.GetConv();
     decltype(auto) wDesc = problem.GetWeights();
 
@@ -576,7 +582,7 @@ ConvSolution GemmFwd1x1_0_1_int8::GetSolution(const ExecutionContext& context,
 
     TensorDescriptor ygemmDesc(miopenInt32, yDesc.GetLengths(), yDesc.GetStrides());
     const GemmDescriptor tmp_gemm_desc = [&]() {
-        auto tmp          = CreateGemmDescriptorConvFwd(wDesc, xDesc, yDesc);
+        auto tmp          = CreateGemmDescriptorConvFwd(problem);
         tmp.deterministic = problem.GetConv().attribute.deterministic;
         if(problem.IsTensorsCasted())
         {
@@ -675,7 +681,8 @@ bool GemmFwd1x1_0_1::IsSlow(const ExecutionContext& context,
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx11            = StartsWith(arch, "gfx110") || StartsWith(arch, "gfx115");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
     auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
@@ -684,7 +691,7 @@ bool GemmFwd1x1_0_1::IsSlow(const ExecutionContext& context,
     auto channels_per_group     = c / g;
     auto spatial_work_per_group = s * channels_per_group;
 
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
     {
         return false;
     }
@@ -717,7 +724,7 @@ bool GemmFwd1x1_0_1::IsApplicable(const ExecutionContext& context,
     // for f8 on every architecture except gfx942. Grouped NHWC has no branch there at all.
     const auto nhwc_supported = problem.IsLayoutNHWC() && conv.group_count == 1 &&
                                 !problem.IsTensorsCasted() && !problem.IsFp8() && !problem.IsBfp8();
-    if(!problem.IsLayoutDefault() && !nhwc_supported)
+    if(!(problem.IsLayoutDefault() || nhwc_supported))
         return false;
 
     const auto spatial_dim = conv.GetSpatialDimension();
@@ -769,13 +776,14 @@ ConvSolution GemmFwd1x1_0_1::GetSolution(const ExecutionContext& context,
             out_spatial.begin(), out_spatial.end(), std::size_t(1), std::multiplies<std::size_t>());
 
         const GemmDescriptor tmp_gemm_desc = [&]() {
-            auto tmp            = CreateGemmDescriptorConvFwd(wDesc, xDesc, yDesc);
+            auto tmp            = CreateGemmDescriptorConvFwd(problem);
             tmp.deterministic   = problem.GetConv().attribute.deterministic;
             tmp.conv_attributes = problem.GetConv().attribute;
             tmp.batch_count     = 1;
             tmp.strideA         = 0;
             tmp.strideB         = 0;
             tmp.strideC         = 0;
+            tmp.isColMajor      = false;
             tmp.m               = static_cast<int>(in_n * out_spatial_size);
             tmp.n               = static_cast<int>(wei_k);
             tmp.transA          = false;
@@ -818,7 +826,7 @@ ConvSolution GemmFwd1x1_0_1::GetSolution(const ExecutionContext& context,
     else if(group_count > 1)
     {
         const GemmDescriptor tmp_gemm_desc = [&]() {
-            auto tmp          = CreateGemmDescriptorGroupConvFwd(wDesc, xDesc, yDesc, group_count);
+            auto tmp          = CreateGemmDescriptorGroupConvFwd(problem);
             tmp.deterministic = problem.GetConv().attribute.deterministic;
             if(problem.IsTensorsCasted())
             {
@@ -992,7 +1000,8 @@ bool GemmFwdRest::IsSlow(const ExecutionContext& context, const ProblemDescripti
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx11            = StartsWith(arch, "gfx110") || StartsWith(arch, "gfx115");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
     auto b                      = problem.GetBatchSize();
@@ -1003,7 +1012,7 @@ bool GemmFwdRest::IsSlow(const ExecutionContext& context, const ProblemDescripti
     auto channels_per_group     = c / g;
     auto spatial_work_per_group = s * channels_per_group;
 
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
     {
         // GemmFwdRest - SPB-only filtering
         // Analysis: 63.8% terrible cases - batch fragmentation dominant
@@ -1060,8 +1069,7 @@ bool GemmFwdRest::IsApplicable(const ExecutionContext& context,
        problem.GetWeights().GetType() != miopenInt8)
         return true;
 
-    // Everything below goes through Im2Col, which indexes x channel-major.
-    if(!problem.IsLayoutDefault())
+    if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
         return false;
 
     return GetWorkspaceSize(context, problem) > 0;
@@ -1097,7 +1105,7 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
     if(use_batched_fwd_point_output)
     {
         const auto tmp_gemm_desc = [&]() {
-            auto tmp            = CreateGemmDescriptorConvFwd(wDesc, xDesc, yDesc);
+            auto tmp            = CreateGemmDescriptorConvFwd(problem);
             tmp.deterministic   = problem.GetConv().attribute.deterministic;
             tmp.conv_attributes = problem.GetConv().attribute;
             if(problem.IsTensorsCasted())
@@ -1132,6 +1140,7 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
 #endif
 
                 // C[N, K] = A[N, CZYX] * B^T[CZYX, K], where B stores W[K, CZYX].
+                gemm_desc.isColMajor  = false;
                 gemm_desc.batch_count = 1;
                 gemm_desc.strideA     = 0;
                 gemm_desc.strideB     = 0;
@@ -1154,9 +1163,8 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
 
     solution.invoker_factory = [=](const std::vector<Kernel>&) {
         const auto tmp_gemm_desc = [&]() {
-            auto tmp          = conv.group_count > 1
-                                    ? CreateGemmDescriptorGroupConvFwd(wDesc, xDesc, yDesc, conv.group_count)
-                                    : CreateGemmDescriptorConvFwd(wDesc, xDesc, yDesc);
+            auto tmp          = conv.group_count > 1 ? CreateGemmDescriptorGroupConvFwd(problem)
+                                                     : CreateGemmDescriptorConvFwd(problem);
             tmp.deterministic = problem.GetConv().attribute.deterministic;
             if(problem.IsTensorsCasted())
             {
@@ -1208,7 +1216,6 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
                              std::to_string(workSpaceSize) + " provided, " +
                              std::to_string(workspace_req) + " required)");
             }
-
             for(std::size_t i = 0; i < in_n; i++)
             {
                 std::size_t out_offset = i * wei_k * out_spatial_size;
@@ -1226,10 +1233,12 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
                                        conv.GetConvStrides(),
                                        conv.GetConvDilations(),
                                        workSpace,
-                                       xDesc.GetType());
+                                       xDesc.GetType(),
+                                       problem.IsLayoutNHWC(),
+                                       problem.GetGroupCount());
 
                 std::size_t wksp_offset = 0;
-                if(wDesc.GetType() == miopenInt8)
+                if(wDesc.GetType() == miopenInt8 && !problem.IsLayoutNHWC())
                 {
                     wksp_offset = in_c * wei_spatial_size * out_spatial_size;
 

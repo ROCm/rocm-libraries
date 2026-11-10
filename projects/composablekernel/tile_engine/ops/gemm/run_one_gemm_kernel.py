@@ -34,7 +34,13 @@ if gemm_pypath:
         if p and p not in sys.path:
             sys.path.insert(0, p)
 
-from gemm_utils import GemmProblem, GpuGemmRunner, GpuMultiABDRunner  # noqa: E402
+from gemm_utils import (  # noqa: E402
+    GemmProblem,
+    GpuGemmRunner,
+    GpuMultiABDRunner,
+    _sweep_inputs,
+    _sweep_max_rel,
+)
 import numpy as np  # noqa: E402
 
 
@@ -62,7 +68,8 @@ def _run_one(
     the emitted ``verified`` field then reflects correctness, not just liveness
     (``non_zero``).
 
-    Standard path: reference is ``A @ B``. Multi-ABD path (B1): the reference is
+    Standard path: reference is ``A @ B`` on the kernel's quantized inputs
+    (``GpuGemmRunner.reference``). Multi-ABD path (B1): the reference is
     the full ``E = CDE( AB(As) @ BB(Bs), {Ds} )`` computed inside
     GpuMultiABDRunner (it owns the operands); the runner returns ``max_rel`` on
     the result. ``layout4`` and the per-group element-wise ops come from the
@@ -88,18 +95,9 @@ def _run_one(
             result = runner.run(problem, verify=verify, verify_tol=verify_tol)
             A = B = None
         else:
-            # Cache host matrices per shape so batch mode doesn't regenerate huge
-            # inputs per kernel.
-            cache = getattr(_run_one, "_ab_cache", {})
-            key = (problem.M, problem.N, problem.K)
-            if key not in cache:
-                rng = np.random.RandomState(42)
-                cache[key] = (
-                    (rng.randn(problem.M, problem.K) * 0.1).astype(np.float32),
-                    (rng.randn(problem.K, problem.N) * 0.1).astype(np.float32),
-                )
-                _run_one._ab_cache = cache
-            A, B = cache[key]
+            # Drawn once per shape; kernels of the shape reuse their encoding and
+            # verify reference (gemm_utils._sweep_inputs).
+            A, B = _sweep_inputs((problem.M, problem.K), (problem.K, problem.N))
 
             # CRITICAL: load the library ONLY inside this subprocess.
             runner = GpuGemmRunner(lib_path=so_path)
@@ -128,10 +126,10 @@ def _run_one(
                     out["max_rel"] = result.max_rel
                     out["verified"] = bool(result.max_rel <= verify_tol)
             elif verify and A is not None and B is not None:
-                ref = A.astype(np.float32) @ B.astype(np.float32)
-                got = result.output.astype(np.float32)
-                denom = float(np.max(np.abs(ref))) or 1.0
-                max_rel = float(np.max(np.abs(got - ref)) / denom)
+                # Reference uses the SAME quantized inputs the device sees, so the
+                # metric isolates compute error from input quantization (fp8/bf8
+                # rounding alone exceeds the default tolerance).
+                max_rel = _sweep_max_rel(runner, A, B, result.output)
                 out["max_rel"] = max_rel
                 out["verified"] = bool(max_rel <= verify_tol)
             print(json.dumps(out), flush=True)

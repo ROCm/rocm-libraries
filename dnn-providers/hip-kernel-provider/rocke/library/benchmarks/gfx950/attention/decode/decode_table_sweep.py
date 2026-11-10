@@ -3,16 +3,21 @@
 
 Per published (model, kv_len) decode shape (seqlen_q=1) this walks
 ``iter_dispatch_attention_all`` and launches each admitted candidate through
-``DispatchResult.bind_torch``. 3D candidates also sweep ``num_cus`` the same
-way ``benchmark_decode_live`` does, because that is the decode split-KV axis.
+``DispatchResult.bind_torch``. Candidates whose spec reads ``num_cus`` (the
+heuristic split-KV paths) also sweep it the same way ``benchmark_decode_live``
+does; tuning specs fix their segment count, so they run once.
 
     python -m benchmarks.gfx950.attention.decode.decode_table_sweep --list-only
     rocke-decode-table-sweep --dtype bf16 --output-json results.json
+    rocke-decode-table-sweep --candidate-prefix attention_gfx950_u \\
+        --shard 0/8 --output-json shard0.json        # one GPU's share
+    rocke-decode-table-sweep --summarize shard*.json  # best per shape
 """
 
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import traceback
 from dataclasses import replace
@@ -37,13 +42,14 @@ from benchmarks.common.attention_combo_sweep import (
 SEQLENS = [1024, 2048, 4096, 8192, 16384, 32768]
 DEFAULT_NUM_CUS = [30, 60, 80, 120, 152, 304]
 
-# (label, num_query_heads, num_kv_heads, head_size, kv_lens)
+# (label, num_query_heads, num_kv_heads, head_size, kv_lens, batch)
+# batch is the native decode batch each model is published with.
 MODELS = [
-    ("Llama-3-8B", 32, 8, 128, SEQLENS),
-    ("Llama-3-70B", 64, 8, 128, [4096, 8192, 16384]),
-    ("Llama-3.1-405B", 128, 8, 128, [4096, 8192]),
-    ("Qwen3-235B-A22B", 64, 4, 128, [4096]),
-    ("Qwen3-30B-A3B", 32, 4, 128, [4096]),
+    ("Llama-3-8B", 32, 8, 128, SEQLENS, 16),
+    ("Llama-3-70B", 64, 8, 128, [4096, 8192, 16384], 16),
+    ("Llama-3.1-405B", 128, 8, 128, [4096, 8192], 16),
+    ("Qwen3-235B-A22B", 64, 4, 128, [4096], 64),
+    ("Qwen3-30B-A3B", 32, 4, 128, [4096], 64),
 ]
 
 _TOL = 2e-2
@@ -58,10 +64,11 @@ def _shape_request(
     dtype: str,
     algorithm: str,
     kv_block_size: int,
+    batch: int = 1,
     num_cus: int = 0,
 ):
     return AttentionRequest(
-        batch=1,
+        batch=batch,
         nhead_q=hq,
         nhead_k=hkv,
         seqlen_q=1,
@@ -82,11 +89,30 @@ def _spec_path(spec) -> str:
 
 
 def _iter_shapes(args):
-    for label, hq, hkv, d, seqlens in MODELS:
+    """``(label, hq, hkv, d, kv_len, batch)`` per published shape;
+    ``--batch`` overrides the model's native batch when set."""
+    for label, hq, hkv, d, seqlens, batch in MODELS:
         if args.only_model and args.only_model not in label:
             continue
         for s in seqlens:
-            yield label, hq, hkv, d, s
+            yield label, hq, hkv, d, s, int(args.batch or batch)
+
+
+def _parse_shard(text: str):
+    index, count = (int(x) for x in str(text).split("/"))
+    if count < 1 or not 0 <= index < count:
+        raise argparse.ArgumentTypeError(
+            f"--shard wants I/N with 0 <= I < N, got {text!r}"
+        )
+    return index, count
+
+
+def _reads_num_cus(spec) -> bool:
+    """Tuning specs fix their segment count; only the heuristic paths read
+    ``num_cus``."""
+    return getattr(spec, "path", "") in ("2d", "3d") and not getattr(
+        spec, "tuning_id", ""
+    )
 
 
 def _run_args(args) -> SimpleNamespace:
@@ -103,9 +129,10 @@ def _run_args(args) -> SimpleNamespace:
 def list_combos(args) -> int:
     print(
         f"dtype={args.dtype} algorithm={args.algorithm} "
-        f"block={args.kv_block_size} (CPU list-only)"
+        f"block={args.kv_block_size} batch={args.batch or 'per model'} "
+        "(CPU list-only)"
     )
-    for label, hq, hkv, d, s in _iter_shapes(args):
+    for label, hq, hkv, d, s, batch in _iter_shapes(args):
         req = _shape_request(
             hq=hq,
             hkv=hkv,
@@ -114,6 +141,7 @@ def list_combos(args) -> int:
             dtype=args.dtype,
             algorithm=args.algorithm,
             kv_block_size=args.kv_block_size,
+            batch=batch,
         )
         combos = tuple(
             iter_registered_attention_combos(
@@ -125,14 +153,18 @@ def list_combos(args) -> int:
                 sweep_level=args.sweep_level,
             )
         )
-        print(f"\n{label} Sq=1 Sk={s} Hq={hq} Hkv={hkv} D={d}  n={len(combos)}")
+        print(
+            f"\n{label} B={batch} Sq=1 Sk={s} Hq={hq} Hkv={hkv} D={d}  "
+            f"n={len(combos)}"
+        )
         for candidate, spec in combos:
             extra = ""
-            if isinstance(spec, AttentionDenseSpec):
+            kernel_spec = getattr(spec, "kernel_spec", spec)
+            if isinstance(kernel_spec, AttentionDenseSpec):
                 extra = (
-                    f"  bm={getattr(spec, 'block_m', None)} "
-                    f"persist={getattr(spec, 'persistent', None)} "
-                    f"wdma={getattr(spec, 'wide_lds_dma', None)}"
+                    f"  bm={kernel_spec.block_m} bn={kernel_spec.block_n} "
+                    f"persist={kernel_spec.persistent} "
+                    f"wdma={getattr(kernel_spec, 'wide_lds_dma', None)}"
                 )
             print(
                 f"  {candidate.name:<48} {candidate.algorithm:<18} "
@@ -144,6 +176,7 @@ def list_combos(args) -> int:
 def _run_unified_graph(req, result, args) -> dict:
     import torch
     from rocke.runtime import synchronize_and_release, time_launches
+    from rocke.runtime.launcher import no_fence
 
     tensors = _unified_tensors(req, args.seed)
     if hasattr(result.spec, "with_num_kv_blocks"):
@@ -171,28 +204,25 @@ def _run_unified_graph(req, result, args) -> dict:
         out = tensors["out"]
         max_abs = float((out.reshape_as(ref).float() - ref).abs().max().item())
 
-    graph_mode = "internal"
-    timed = call
-    captured = None
+    # A launcher call outside no_fence() event-synchronizes, which invalidates
+    # a capture; and the launch has to go to the capture stream, not the one
+    # the binding was made on.
+    captured = torch.cuda.CUDAGraph()
     try:
-        captured = torch.cuda.CUDAGraph()
         with torch.cuda.graph(captured):
-            call()
+            with no_fence():
+                binding.launch(stream=torch.cuda.current_stream().cuda_stream)
         torch.cuda.synchronize()
-        graph_mode = "outer"
-        timed = captured.replay
-    except Exception as exc:  # noqa: BLE001
-        print(
-            f"  outer CUDAGraph failed ({type(exc).__name__}: {exc}); "
-            "timing internal/eager path",
-            flush=True,
-        )
-        try:
-            torch.cuda.synchronize()
-        except Exception:
-            pass
-        captured = None
-        timed = call
+    except Exception as exc:
+        # An invalidated capture poisons the HIP context for every later
+        # launch in this process, so stop rather than record a run of bogus
+        # errors.
+        raise SystemExit(
+            f"outer CUDAGraph capture failed ({type(exc).__name__}: {exc}); "
+            "the process cannot launch again"
+        ) from exc
+    graph_mode = "outer"
+    timed = captured.replay
 
     ms = time_launches(timed, warmup=args.warmup, iters=args.iters, stream=stream)
     synchronize_and_release(stream)
@@ -236,7 +266,8 @@ def sweep(args) -> list[dict]:
 
     rows: list[dict] = []
     run_args = _run_args(args)
-    for label, hq, hkv, d, s in _iter_shapes(args):
+    shard_index, shard_count = args.shard
+    for label, hq, hkv, d, s, batch in _iter_shapes(args):
         base = _shape_request(
             hq=hq,
             hkv=hkv,
@@ -245,6 +276,7 @@ def sweep(args) -> list[dict]:
             dtype=args.dtype,
             algorithm=args.algorithm,
             kv_block_size=args.kv_block_size,
+            batch=batch,
         )
         try:
             results = tuple(
@@ -288,9 +320,13 @@ def sweep(args) -> list[dict]:
             _store_row(rows, rec, args)
             print(f"SKIP {label} Sk={s}: no registered combo", flush=True)
             continue
-        for result in results:
-            is_dense = isinstance(result.spec, AttentionDenseSpec)
-            cus_list = [0] if is_dense else list(args.num_cus)
+        for index, result in enumerate(results):
+            # The stream order does not depend on kv_len, so a shard keeps the
+            # same specs on every length of a model and reuses their compiles.
+            if index % shard_count != shard_index:
+                continue
+            is_dense = getattr(result.spec, "path", "") == "dense"
+            cus_list = list(args.num_cus) if _reads_num_cus(result.spec) else [0]
             for cus in cus_list:
                 req = replace(base, num_cus=int(cus))
                 rec = {
@@ -301,11 +337,15 @@ def sweep(args) -> list[dict]:
                     "num_kv_heads": hkv,
                     "head_size": d,
                     "dtype": args.dtype,
+                    "batch": batch,
                     "kv_block_size": args.kv_block_size,
                     "config": result.candidate.name,
                     "candidate": result.candidate.name,
                     "algorithm": result.candidate.algorithm,
                     "spec_id": result.candidate.spec_id,
+                    "path": _spec_path(result.spec),
+                    "tuning_id": getattr(result.spec, "tuning_id", ""),
+                    "knobs": dict(getattr(result.spec, "knobs", ()) or ()),
                     "num_cus": int(cus),
                 }
                 try:
@@ -317,9 +357,9 @@ def sweep(args) -> list[dict]:
                                 req,
                                 algorithm=result.candidate.algorithm,
                                 spec_id=result.candidate.spec_id,
-                                attention_tuning_id=getattr(
-                                    result.spec, "tuning_id", "auto"
-                                ),
+                                tuning_id=getattr(result.spec, "tuning_id", "")
+                                or "auto",
+                                tuning_knobs=getattr(result.spec, "knobs", ()),
                             )
                         )
                         launch = attention_dispatch_result(req, result.candidate, spec)
@@ -330,7 +370,7 @@ def sweep(args) -> list[dict]:
                     rec.update(**res)
                     print(
                         f"{rec['status'].upper():4} {label} Sk={s} "
-                        f"{result.candidate.name} cus={cus}: "
+                        f"{rec['tuning_id'] or result.candidate.name} cus={cus}: "
                         f"{rec.get('tflops', float('nan')):.1f} TF  "
                         f"{rec.get('ms', float('nan')):.4f} ms  "
                         f"graph={rec.get('cuda_graph', '-')}  "
@@ -350,14 +390,20 @@ def sweep(args) -> list[dict]:
     return rows
 
 
-def best_table(rows: list[dict]) -> None:
-    best: dict[tuple[str, int], dict] = {}
+def _best_by(rows: list[dict], key) -> dict:
+    best: dict = {}
     for r in rows:
         if r.get("status") != "ok":
             continue
-        key = (r["model"], r["seqlen_k"])
-        if key not in best or r["tflops"] > best[key]["tflops"]:
-            best[key] = r
+        k = key(r)
+        if k not in best or r["tflops"] > best[k]["tflops"]:
+            best[k] = r
+    return best
+
+
+def best_table(rows: list[dict]) -> None:
+    best = _best_by(rows, lambda r: (r["model"], r["seqlen_k"]))
+    best_path = _best_by(rows, lambda r: (r["model"], r["seqlen_k"], r.get("path", "")))
 
     unsupported = {
         (r["model"], r["seqlen_k"])
@@ -367,10 +413,10 @@ def best_table(rows: list[dict]) -> None:
 
     models = [m for m in MODELS if any(r.get("model") == m[0] for r in rows)]
     header = f"{'model':<20}" + "".join(f"{s:>10}" for s in SEQLENS)
-    print("\n=== best-of-registry decode TFLOP/s (batch 1, Sq=1) ===")
+    print("\n=== best-of-registry decode TFLOP/s (native batch per model, Sq=1) ===")
     print(header)
     print("-" * len(header))
-    for label, _, _, _, _ in models:
+    for label, *_ in models:
         line = f"{label:<20}"
         for s in SEQLENS:
             r = best.get((label, s))
@@ -382,16 +428,29 @@ def best_table(rows: list[dict]) -> None:
                 line += f"{'-':>10}"
         print(line)
 
-    print("\n=== winning candidate per shape ===")
-    for label, _, _, _, kv_lens in models:
+    print("\n=== winning config per shape (overall, then best 2D and best 3D) ===")
+    for label, _, _, _, kv_lens, _ in models:
         for s in kv_lens:
             r = best.get((label, s))
-            if r:
+            if not r:
+                continue
+            print(
+                f"{label:<20} Sk={s:<6} {r.get('path', ''):<3} "
+                f"{r.get('tuning_id') or r.get('candidate', ''):<56} "
+                f"cus={r.get('num_cus', 0):<4} "
+                f"{r['tflops']:>7.1f} TF  {r['us']:>8.2f} us  "
+                f"graph={r.get('cuda_graph', '-')}  max_abs={r['max_abs']:.2e}"
+            )
+            for path in ("2d", "3d"):
+                p = best_path.get((label, s, path))
+                if p is None:
+                    print(f"{'':<27} best {path}: none ran")
+                    continue
                 print(
-                    f"{label:<20} Sk={s:<6} {r.get('candidate', ''):<40} "
-                    f"cus={r.get('num_cus', 0):<4} "
-                    f"{r['tflops']:>7.1f} TF  {r['ms']:.4f} ms  "
-                    f"max_abs={r['max_abs']:.2e}"
+                    f"{'':<27} best {path}: "
+                    f"{p.get('tuning_id') or p.get('candidate', ''):<56} "
+                    f"{p['tflops']:>7.1f} TF  {p['us']:>8.2f} us  "
+                    f"knobs={json.dumps(p.get('knobs', {}), sort_keys=True)}"
                 )
 
     bad = [r for r in rows if r.get("status") == "mismatch"]
@@ -417,14 +476,39 @@ def main() -> int:
         help="AttentionRequest.algorithm filter; 'auto' enumerates every "
         "executable registry family that admits the decode shape.",
     )
-    ap.add_argument("--kv-block-size", type=int, default=16)
+    ap.add_argument(
+        "--kv-block-size",
+        type=int,
+        default=16,
+    )
+    ap.add_argument(
+        "--batch",
+        type=int,
+        default=0,
+        help="decode batch; 0 uses each model's native batch",
+    )
     ap.add_argument(
         "--num-cus",
         nargs="+",
         type=int,
         default=DEFAULT_NUM_CUS,
-        help="num_cus values for 3D/2D decode (ignored for dense). "
-        "0 means auto-resolve to the device CU count.",
+        help="num_cus values for the heuristic 2D/3D decode paths (tuning and "
+        "dense specs do not read it). 0 means auto-resolve to the device CU count.",
+    )
+    ap.add_argument(
+        "--shard",
+        type=_parse_shard,
+        default=(0, 1),
+        metavar="I/N",
+        help="run only every N-th spec of each shape's stream, starting at I",
+    )
+    ap.add_argument(
+        "--summarize",
+        nargs="+",
+        default=None,
+        metavar="JSON",
+        help="print the best-config tables for saved --output-json files "
+        "(globs allowed) and exit; no GPU needed",
     )
     ap.add_argument("--warmup", type=int, default=15)
     ap.add_argument("--iters", type=int, default=50)
@@ -437,14 +521,16 @@ def main() -> int:
         "--sweep-level",
         choices=("production", "full"),
         default="production",
-        help="production walks the curated stacks. full samples every kernel knob",
+        help="production walks the curated unified-tuning stacks and sets each "
+        "dense knob to every legal value one at a time from the shipped spec. "
+        "full samples every knob combination",
     )
     ap.add_argument(
         "--tuning-sample",
         type=int,
         default=256,
-        help="with --sweep-level full: random legal specs per tuning candidate, "
-        "seeded by --seed (0 = the full stream). Ignored for production",
+        help="with --sweep-level full: random legal specs per tuning or dense "
+        "candidate, seeded by --seed (0 = the full stream). Ignored for production",
     )
     ap.add_argument("--output-json", default="")
     ap.add_argument(
@@ -454,6 +540,14 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    if args.summarize:
+        rows = []
+        for pattern in args.summarize:
+            for path in sorted(glob.glob(pattern)) or [pattern]:
+                with open(path, encoding="utf-8") as fh:
+                    rows.extend(json.load(fh))
+        best_table(rows)
+        return _rows_exit_code(rows)
     if args.list_only:
         return list_combos(args)
 
@@ -463,8 +557,9 @@ def main() -> int:
     print(f"torch={torch.__version__} device={torch.cuda.get_device_name(0)}")
     print(
         f"dtype={args.dtype} algorithm={args.algorithm} "
-        f"block={args.kv_block_size} num_cus={args.num_cus} "
-        f"check={not args.no_check}"
+        f"block={args.kv_block_size} batch={args.batch or 'per model'} "
+        f"num_cus={args.num_cus} "
+        f"shard={args.shard[0]}/{args.shard[1]} check={not args.no_check}"
     )
 
     rows = sweep(args)

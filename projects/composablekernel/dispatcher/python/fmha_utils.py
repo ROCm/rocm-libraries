@@ -16,7 +16,7 @@ Usage:
     result = runner.run(Q, K, V, problem)
 """
 
-from dispatcher_common import unified_framework_flags
+from dispatcher_common import unified_framework_flags, load_hip_runtime
 import ctypes
 import json
 import os
@@ -741,33 +741,31 @@ class FmhaRunner:
             raise RuntimeError("Failed to initialize FMHA dispatcher")
 
     def _load_hip(self):
-        for name in ["libamdhip64.so", "libamdhip64.so.6"]:
-            try:
-                self._hip = ctypes.CDLL(name)
-                self._hip.hipMalloc.argtypes = [
-                    ctypes.POINTER(ctypes.c_void_p),
-                    ctypes.c_size_t,
-                ]
-                self._hip.hipMalloc.restype = ctypes.c_int
-                self._hip.hipFree.argtypes = [ctypes.c_void_p]
-                self._hip.hipFree.restype = ctypes.c_int
-                self._hip.hipMemcpy.argtypes = [
-                    ctypes.c_void_p,
-                    ctypes.c_void_p,
-                    ctypes.c_size_t,
-                    ctypes.c_int,
-                ]
-                self._hip.hipMemcpy.restype = ctypes.c_int
-                self._hip.hipMemset.argtypes = [
-                    ctypes.c_void_p,
-                    ctypes.c_int,
-                    ctypes.c_size_t,
-                ]
-                self._hip.hipMemset.restype = ctypes.c_int
-                return
-            except OSError:
-                continue
-        raise RuntimeError("Could not load libamdhip64.so")
+        # Soname selection lives in dispatcher_common.load_hip_runtime(). This
+        # used to try only ["libamdhip64.so", "libamdhip64.so.6"], which fails
+        # on ROCm 7 (only .so.7 is registered) and wherever the unversioned dev
+        # symlink is not on the loader path.
+        self._hip = load_hip_runtime()
+        self._hip.hipMalloc.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_size_t,
+        ]
+        self._hip.hipMalloc.restype = ctypes.c_int
+        self._hip.hipFree.argtypes = [ctypes.c_void_p]
+        self._hip.hipFree.restype = ctypes.c_int
+        self._hip.hipMemcpy.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_int,
+        ]
+        self._hip.hipMemcpy.restype = ctypes.c_int
+        self._hip.hipMemset.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_size_t,
+        ]
+        self._hip.hipMemset.restype = ctypes.c_int
 
     @classmethod
     def from_prebuilt(cls, arch: Optional[str] = None) -> "FmhaRunner":
@@ -841,6 +839,90 @@ class FmhaRunner:
             Q_c = np.ascontiguousarray(Q.astype(in_dt))
             K_c = np.ascontiguousarray(K.astype(in_dt))
             V_c = np.ascontiguousarray(V.astype(in_dt))
+        if api_family == "batch_prefill":
+            page_size = kwargs.get("page_size", 64)
+            kv_layout = kwargs.get("kv_layout", 0)
+
+            def _pack_linear_paged(x):
+                bsz, heads, seqlen, hdim = x.shape
+                pages_per_seq = (seqlen + page_size - 1) // page_size
+                packed = np.zeros(
+                    (bsz * pages_per_seq, heads, page_size, hdim), dtype=x.dtype
+                )
+                for batch_id in range(bsz):
+                    for page_id in range(pages_per_seq):
+                        begin = page_id * page_size
+                        end = min(begin + page_size, seqlen)
+                        packed[
+                            batch_id * pages_per_seq + page_id, :, : end - begin, :
+                        ] = x[batch_id, :, begin:end, :]
+                return np.ascontiguousarray(packed.reshape(-1))
+
+            if kv_layout != 1:
+                return FmhaResult(
+                    success=False,
+                    error="batch_prefill runner packs linear KV only",
+                )
+            # The C runner sizes its host->device copies from prob, not from these arrays.
+            for name, arr, want in (
+                ("Q", Q_c, prob.q_shape()),
+                ("K", K_c, prob.k_shape()),
+                ("V", V_c, prob.v_shape()),
+            ):
+                if arr.shape != want:
+                    return FmhaResult(
+                        success=False,
+                        error=f"batch_prefill {name} shape {arr.shape} != problem {want}",
+                    )
+            K_c = _pack_linear_paged(K_c)
+            V_c = _pack_linear_paged(V_c)
+            Q_api = np.ascontiguousarray(np.transpose(Q_c, (0, 2, 1, 3)))
+            O_api = np.zeros(
+                (prob.batch, prob.seqlen_q, prob.nhead_q, prob.hdim_v), dtype=out_dt
+            )
+            time_ms = ctypes.c_float(0.0)
+            rc = self._lib._lib.fmha_dispatcher_run_batch_prefill(
+                ctypes.c_void_p(Q_api.ctypes.data),
+                ctypes.c_void_p(K_c.ctypes.data),
+                ctypes.c_void_p(V_c.ctypes.data),
+                ctypes.c_void_p(O_api.ctypes.data),
+                prob.batch,
+                prob.nhead_q,
+                prob.nhead_k,
+                prob.seqlen_q,
+                prob.seqlen_k,
+                prob.hdim_q,
+                prob.hdim_v,
+                ctypes.c_float(prob.scale),
+                mask_type,
+                bias_type,
+                page_size,
+                kv_layout,
+                kwargs.get("kv_lookup", 0),
+                kwargs.get("is_v_rowmajor", 1),
+                data_type.encode(),
+                has_lse,
+                has_dropout,
+                has_logits,
+                has_sink,
+                has_skip,
+                ctypes.byref(time_ms),
+            )
+            if rc != 0:
+                return FmhaResult(success=False, error=f"Kernel failed (rc={rc})")
+            ops = prob.num_ops
+            tflops = (
+                ops / (time_ms.value * 1e-3) / 1e12
+                if time_ms.value > 0 and ops > 0
+                else 0.0
+            )
+            O_c = np.ascontiguousarray(np.transpose(O_api, (0, 2, 1, 3)))
+            if data_type == "bf16":
+                O_c = _bf16_to_float32(O_c)
+            return FmhaResult(
+                success=True, output=O_c, time_ms=time_ms.value, tflops=tflops
+            )
+
         O_c = np.zeros(prob.o_shape(), dtype=out_dt)
 
         d_q, d_k, d_v, d_o = (ctypes.c_void_p() for _ in range(4))

@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
+
 #include "Container.hpp"
 #include "Handle.hpp"
 #include "version.h"
@@ -13,13 +15,14 @@ using namespace hip_kernel_provider::core;
 #define HIPDNN_PLUGIN_HANDLE_TYPE Handle
 #define HIPDNN_PLUGIN_CONTEXT_TYPE Context
 
-#define HIPDNN_PLUGIN_API_VERSION "1.2.0"
+#define HIPDNN_PLUGIN_API_VERSION "1.4.0"
 #include <hipdnn_plugin_sdk/EnginePluginImpl.inl>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 
-/// Drops every ingestor pack's cached kpack modules. FOR TESTS ONLY.
+/// Drops every ingestor pack's cached kpack modules and closes every kpack archive the
+/// provider retains, so the next dispatch re-reads its archive from disk. FOR TESTS ONLY.
 ///
 /// Deliberately absent from EnginePluginApi.h: this is not part of the plugin ABI, the
 /// loader never calls it, and no product code path does either. It is reachable only by
@@ -45,5 +48,19 @@ using namespace hip_kernel_provider::core;
 extern "C" HIPDNN_PLUGIN_EXPORT void hipdnnEnginePluginResetKpackModuleCacheForTesting()
 {
     hip_kernel_provider::kernel_ingestor_engine::resetIngestorModuleCachesForTesting();
+}
+
+/// Lowers the per-image byte limit hipkernel:Gfx950ConvDgradAot's batch chunker slices
+/// at, inside this loaded plugin, so a small batch exercises the chunked-launch device
+/// path without needing a multi-GiB image. FOR TESTS ONLY, for the same reason as
+/// hipdnnEnginePluginResetKpackModuleCacheForTesting above: the limit lives in a
+/// function-local static (Gfx950ConvDgradGeometry.hpp::batchChunkByteLimitForTesting()),
+/// and a test in another TU holds its own copy of that static unless it reaches through
+/// this exported symbol into the plugin's own.
+extern "C" HIPDNN_PLUGIN_EXPORT void
+    hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimitForTesting(int64_t limit)
+{
+    hip_kernel_provider::kernel_ingestor_engine::setGfx950ConvDgradAotBatchChunkByteLimitForTesting(
+        limit);
 }
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

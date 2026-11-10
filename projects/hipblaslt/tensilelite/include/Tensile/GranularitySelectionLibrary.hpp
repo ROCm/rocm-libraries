@@ -241,13 +241,13 @@ namespace TensileLite
                             // this local copy, so it is USO-gated like the widened
                             // predicate. Task holds a reference to problem, so the
                             // mutation is visible to taskPredicate either way.
-                            if(problem.getParams().uniformSummationOrder())
+                            if(problem.getParams().uniformSummationOrder() != 0)
                                 problem.setGroupedGemm(true);
                             if(!selectionPredicate(task, hardware, *(row.second), problem))
                                 useSolution = false;
                         }
                     }
-                    else if(searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY)
+                    else if(isGemmTypeOnlySearch(searchType))
                     {
                         if(!isGemmTypeSame((*row.second), problems[0]))
                             useSolution = false;
@@ -255,13 +255,7 @@ namespace TensileLite
 
                     if(useSolution)
                     {
-                        if((*row.second).requiredHostWorkspaceSizePerProblem
-                           == static_cast<size_t>(-1))
-                        {
-                            (*row.second).requiredHostWorkspaceSizePerProblem
-                                = (*row.second)
-                                      .requiredHostSizeGroupedGemmSingle(problems[0], hardware);
-                        }
+                        (*row.second).ensureRequiredHostWorkspaceSize(problems[0], hardware);
                         rv.insert(row.second);
                     }
                 }

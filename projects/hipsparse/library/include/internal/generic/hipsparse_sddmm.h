@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 extern "C" {
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSDDMM_bufferSize returns the size of the buffer required when computing the sampled
@@ -71,7 +72,6 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t          handle,
                                             hipsparseOperation_t       opA,
@@ -99,6 +99,7 @@ hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t           handle,
                                             size_t*                     pBufferSizeInBytes);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSDDMM_preprocess performs the required preprocessing used when computing the
@@ -143,7 +144,6 @@ hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t           handle,
 *          \p opA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t          handle,
                                             hipsparseOperation_t       opA,
@@ -171,6 +171,7 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
                                             void*                       tempBuffer);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Sampled dense-dense matrix multiplication.
 *
@@ -219,7 +220,6 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *  \p hipsparseSDDMM supports different algorithms, which can provide better performance for different matrices.
 *
 *  <table>
-*  <caption id="sddmm_algorithms">Algorithms</caption>
 *  <tr><th>CSR/CSC Algorithms
 *  <tr><td>HIPSPARSE_SDDMM_ALG_DEFAULT</td>
 *  </table>
@@ -229,7 +229,6 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="sddmm_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>HIP_R_16F
 *  <tr><td>HIP_R_32F
@@ -240,7 +239,6 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Mixed Precisions:
 *  <table>
-*  <caption id="sddmm_mixed">Mixed Precisions</caption>
 *  <tr><th>A / B     <th>C         <th>compute_type
 *  <tr><td>HIP_R_16F <td>HIP_R_32F <td>HIP_R_32F
 *  <tr><td>HIP_R_16F <td>HIP_R_16F <td>HIP_R_32F
@@ -279,7 +277,6 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *          \p opA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSDDMM(hipsparseHandle_t          handle,
                                  hipsparseOperation_t       opA,

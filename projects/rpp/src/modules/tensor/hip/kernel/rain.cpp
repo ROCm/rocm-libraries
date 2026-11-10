@@ -76,7 +76,7 @@ __global__ void rain_pkd_hip_tensor(T* srcPtr1, T* srcPtr2, uint3 srcStridesNHW,
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
     if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) ||
-        (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth * 3)) {
+        (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth)) {
         return;
     }
 

@@ -61,7 +61,7 @@ static void LogCmdRedux(const miopen::ReduceTensorDescriptor reduceTensorDesc,
         std::transform(inLens.begin(),
                        inLens.end(),
                        std::back_inserter(strInLens),
-                       [](const int x) { return std::to_string(x); });
+                       [](std::size_t x) { return std::to_string(x); });
         ss << " -D " << miopen::JoinStrings(strInLens, ",");
         ss << " -I " << reduceTensorDesc.reduceTensorIndices_;
         ss << " -N " << reduceTensorDesc.reduceTensorNanOpt_;

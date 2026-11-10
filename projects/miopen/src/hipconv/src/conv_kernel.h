@@ -1,5 +1,6 @@
 #pragma once
 
+#include "kv_descriptor.h"
 #include "tolerance.h"
 
 #include <algorithm>
@@ -72,28 +73,26 @@ public:
     // The algorithm this kernel's family belongs to. Set by the family base.
     virtual hipconv::Algorithm algorithm() const = 0;
 
+    // The kernel's configuration as key=value fields; empty for a family without any.
+    //
+    // describe_config and matches_descriptor are built on it.
+    virtual KVDescriptor config_descriptor() const { return {}; }
+
     // Return a specification of the kernel's configuration.
     //
-    // The spec string is a comma-separated list of key=value pairs. Derived classes
-    // can implement the describe_config and matches_descriptor methods using the
-    // KVDescriptor class.
-    virtual std::string describe_config() const { return {}; }
+    // The spec string is a comma-separated list of key=value pairs. `full` renders
+    // every field; otherwise default values are omitted. No default argument: on a
+    // virtual it would bind statically.
+    virtual std::string describe_config(bool full) const
+    {
+        return config_descriptor().describe(full);
+    }
 
     // Does this kernel's configuration satisfy the given spec?
     //
     // True if the configuration matches every key-value pair in the spec.
     // Set *error and return false on bad syntax or an unknown key.
-    virtual bool matches_descriptor(std::string_view spec, std::string* error) const
-    {
-        for(char c : spec)
-            if(c != ' ' && c != '\t' && c != ',')
-            {
-                if(error)
-                    *error = "kernel '" + std::string(name()) + "' has no descriptor fields";
-                return false;
-            }
-        return true;
-    }
+    virtual bool matches_descriptor(std::string_view spec, std::string* error) const;
 
     // Does this kernel family support the given parameters?
     //
@@ -109,6 +108,13 @@ public:
 
     // Does this specific kernel configuration support the given parameters?
     virtual bool is_valid_config(const hipconv::ConvParams& par) const = 0;
+
+    // Can the current device run this kernel on the given parameters?
+    //
+    // Asked when binding a launch, never during selection, which stays a function of `par`
+    // and the architecture. True unless the kernel launches through a runtime library that
+    // may have no algorithm for `par` on this device.
+    virtual bool runs_on_current_device(const hipconv::ConvParams& /*par*/) const { return true; }
 
     virtual LaunchParams get_launch_params(const hipconv::ConvParams& par) const = 0;
 

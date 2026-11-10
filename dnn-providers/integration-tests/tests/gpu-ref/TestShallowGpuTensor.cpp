@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/ShallowGpuTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -17,6 +18,7 @@
 using hipdnn_data_sdk::utilities::MemoryLocation;
 using hipdnn_data_sdk::utilities::Workspace;
 using hipdnn_gpu_ref::ShallowGpuTensor;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 namespace
 {

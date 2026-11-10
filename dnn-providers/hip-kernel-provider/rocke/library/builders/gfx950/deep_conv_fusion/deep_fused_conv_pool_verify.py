@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-import struct
 import sys
 from pathlib import Path
 
 from rocke.core.arch import ArchTarget
 from rocke.helpers import compile_kernel, make_conv_manifest, write_artifact
+from rocke.runtime.packing import pack_args
 from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue, ConvProblem
+from kernels.common.deep_fused_conv_pool import deep_fused_conv_pool_problem_values
 from kernels.gfx950.deep_fused_conv_pool import (
     FusedConvPoolProblem,
     Gfx950DeepFusedConvPoolSpec,
@@ -98,18 +99,33 @@ def _make_inputs(spec: Gfx950DeepFusedConvPoolSpec, *, seed: int):
     return A, B0, W1, Y
 
 
-def _pack_args(A_dev: int, B_dev: int, Y_dev: int, W1_dev: int, A, B0, Y, W1) -> bytes:
-    return struct.pack(
-        "<QQQQiiii",
-        A_dev,
-        B_dev,
-        Y_dev,
-        W1_dev,
-        W1.nbytes,
-        A.nbytes,
-        B0.nbytes,
-        Y.nbytes,
+def _pack_args(
+    spec: Gfx950DeepFusedConvPoolSpec,
+    A_dev: int,
+    B_dev: int,
+    Y_dev: int,
+    W1_dev: int,
+    A,
+    B0,
+    Y,
+    W1,
+) -> bytes:
+    # Pack through the signature: conv0's runtime problem block follows the
+    # byte sizes, and a fixed struct format would leave it uninitialized.
+    values = dict(
+        A=A_dev,
+        B=B_dev,
+        Y=Y_dev,
+        W1=W1_dev,
+        W1_bytes=W1.nbytes,
+        A_bytes=A.nbytes,
+        B_bytes=B0.nbytes,
+        Y_bytes=Y.nbytes,
+        **deep_fused_conv_pool_problem_values(
+            spec.problem.conv, tile_m=spec.tile_m, tile_n=spec.tile_n
+        ),
     )
+    return pack_args(deep_fused_conv_pool_signature(spec), values)
 
 
 def _useful_flops(spec: Gfx950DeepFusedConvPoolSpec) -> int:
@@ -140,7 +156,7 @@ def _verify_artifact(
         rt.memcpy_h2d(B_dev, _as_u8_buffer(B0), B0.nbytes)
         rt.memcpy_h2d(W1_dev, _as_u8_buffer(W1), W1.nbytes)
         rt.memset(Y_dev, 0, Y.nbytes)
-        args = _pack_args(A_dev, B_dev, Y_dev, W1_dev, A, B0, Y, W1)
+        args = _pack_args(spec, A_dev, B_dev, Y_dev, W1_dev, A, B0, Y, W1)
         rt.launch_blocking(
             fn,
             deep_fused_conv_pool_grid(spec),
@@ -198,7 +214,7 @@ def _benchmark_artifact(
         rt.memcpy_h2d(B_dev, _as_u8_buffer(B0), B0.nbytes)
         rt.memcpy_h2d(W1_dev, _as_u8_buffer(W1), W1.nbytes)
         rt.memset(Y_dev, 0, Y.nbytes)
-        args = _pack_args(A_dev, B_dev, Y_dev, W1_dev, A, B0, Y, W1)
+        args = _pack_args(spec, A_dev, B_dev, Y_dev, W1_dev, A, B0, Y, W1)
 
         for _ in range(warmup):
             rt.launch(fn, grid, block, args)
@@ -361,6 +377,7 @@ def main() -> int:
         kpg=conv.K,
         grid_explicit=grid,
         conv_layout="deep_fused_conv_pool",
+        args_signature=deep_fused_conv_pool_signature(spec),
         atoms=[f"tile.mfma_f32_32x32x{atom.k}_f16"],
         notes=(
             "Experimental gfx950 deep-fusion prototype: implicit-GEMM conv0 "
@@ -372,7 +389,6 @@ def main() -> int:
         ),
         extra={
             "kind": "deep_fused_conv_pool_fp16",
-            "args_signature": deep_fused_conv_pool_signature(spec),
             "pool": [
                 problem.pool_y,
                 problem.pool_x,

@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import Optional, OrderedDict, Callable
+from typing import OrderedDict, Callable, Dict, Any
 import sys
 import os
 
@@ -42,21 +42,13 @@ class Tuner(BaseTuner):
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
 
-    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
+    def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()
         params['block_size_x'] = BLOCK_SIZES
         params['ipt'] = IPT
         return params
 
-    def _get_key_type_name(self) -> str:
-        return "value_type"
-
-    def _get_value_type_name(self):
-        return "output_type"
-
-    def _get_restrictions(
-        self, value_type: str, output_type: Optional[str] = None
-    ) -> Callable[[dict], bool]:
+    def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
         # There litterally was no restrictions in legacy tuner or benchmark
         def validate(params):
             return True
@@ -65,9 +57,9 @@ class Tuner(BaseTuner):
 
     def tune_all(self) -> None:
         """Tune for all value type combinations"""
-        for val_type in COMMON_KEY_TYPES:
-            for out_type in COMMON_VALUE_TYPES:
-                self.tune_type(val_type, out_type)
+        for value_type in COMMON_KEY_TYPES:
+            for output_type in COMMON_VALUE_TYPES:
+                self.tune_type({"value_type": value_type, "output_type": output_type})
 
 
 if __name__ == "__main__":

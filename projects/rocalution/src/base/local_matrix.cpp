@@ -1937,6 +1937,15 @@ namespace rocalution
     {
         log_debug(this, "LocalMatrix::MoveToAcceleratorAsync()");
 
+        // A Move*Async() is already active, both copies exist until Sync()
+        if((this->asyncf_ == true) && (this->matrix_accel_ != NULL) && (this->matrix_host_ != NULL))
+        {
+            LOG_VERBOSE_INFO(4,
+                             "*** info: LocalMatrix::MoveToAcceleratorAsync() transfer already "
+                             "active - doing nothing");
+            return;
+        }
+
 #ifdef DEBUG_MODE
         this->Check();
 #endif
@@ -1967,6 +1976,15 @@ namespace rocalution
     void LocalMatrix<ValueType>::MoveToHostAsync(void)
     {
         log_debug(this, "LocalMatrix::MoveToHostAsync()");
+
+        // A Move*Async() is already active, both copies exist until Sync()
+        if((this->asyncf_ == true) && (this->matrix_accel_ != NULL) && (this->matrix_host_ != NULL))
+        {
+            LOG_VERBOSE_INFO(4,
+                             "*** info: LocalMatrix::MoveToHostAsync() transfer already active - "
+                             "doing nothing");
+            return;
+        }
 
         if((_rocalution_available_accelerator()) && (this->matrix_ == this->matrix_accel_))
         {
@@ -2012,10 +2030,9 @@ namespace rocalution
                                      "*** info: LocalMatrix::MoveToHostAsync() accelerator to host "
                                      "transfer (synced)");
                 }
-
                 // MoveToAcceleratorAsync();
-                if((_rocalution_available_accelerator() == true)
-                   && (this->matrix_ == this->matrix_host_))
+                else if((_rocalution_available_accelerator() == true)
+                        && (this->matrix_ == this->matrix_host_))
                 {
                     _rocalution_sync();
 
@@ -5211,7 +5228,7 @@ namespace rocalution
                 }
             }
 
-            // LCOV_EXCL_STop
+            // LCOV_EXCL_STOP
         }
     }
 
@@ -5793,7 +5810,7 @@ namespace rocalution
     {
         log_debug(this, "LocalMatrix::DiagonalMatrixMultR()", (const void*&)diag);
 
-        assert((diag.GetSize() == this->GetM()) || (diag.GetSize() == this->GetN()));
+        assert(diag.GetSize() == this->GetN());
 
         assert(((this->matrix_ == this->matrix_host_) && (diag.vector_ == diag.vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (diag.vector_ == diag.vector_accel_)));
@@ -5873,7 +5890,7 @@ namespace rocalution
     {
         log_debug(this, "LocalMatrix::DiagonalMatrixMultL()", (const void*&)diag);
 
-        assert((diag.GetSize() == this->GetM()) || (diag.GetSize() == this->GetN()));
+        assert(diag.GetSize() == this->GetM());
 
         assert(((this->matrix_ == this->matrix_host_) && (diag.vector_ == diag.vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (diag.vector_ == diag.vector_accel_)));
@@ -7007,8 +7024,7 @@ namespace rocalution
             prolong->MoveToHost();
 
             // Convert to CSR
-            unsigned int format   = mat_host.GetFormat();
-            int          blockdim = mat_host.GetBlockDimension();
+            unsigned int format = mat_host.GetFormat();
             mat_host.ConvertToCSR();
 
             if(mat_host.matrix_->AMGSmoothedAggregationProlongNnz(
@@ -8973,7 +8989,7 @@ namespace rocalution
         }
     }
 
-    // LCOV_EXCL_START
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     void LocalMatrix<ValueType>::CompressAdd(const LocalVector<int64_t>&   l2g,
                                              const LocalVector<int64_t>&   global_ghost_col,
@@ -9068,7 +9084,7 @@ namespace rocalution
 #endif
     }
 
-    // LCOV_EXCL_STOP
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     void LocalMatrix<ValueType>::RSExtPIProlongNnz(int64_t                     global_column_begin,

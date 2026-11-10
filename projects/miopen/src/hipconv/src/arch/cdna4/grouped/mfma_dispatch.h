@@ -3,6 +3,8 @@
 #include "packed_ops.h"
 #include "types.h"
 
+#include <bit>
+
 namespace hipconv::cdna4
 {
 
@@ -21,7 +23,8 @@ __device__ inline fp32x4_t mfma_16x16x16(fp16x4_t a, fp16x4_t b, fp32x4_t c)
 }
 __device__ inline fp32x4_t mfma_16x16x16(bf16x4_t a, bf16x4_t b, fp32x4_t c)
 {
-    return __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c, 0, 0, 0);
+    return __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(
+        std::bit_cast<int16x4_t>(a), std::bit_cast<int16x4_t>(b), c, 0, 0, 0);
 }
 
 __device__ inline fp32x4_t mfma_4x4x4_16b(fp16x4_t a, fp16x4_t b, fp32x4_t c)
@@ -30,7 +33,8 @@ __device__ inline fp32x4_t mfma_4x4x4_16b(fp16x4_t a, fp16x4_t b, fp32x4_t c)
 }
 __device__ inline fp32x4_t mfma_4x4x4_16b(bf16x4_t a, bf16x4_t b, fp32x4_t c)
 {
-    return __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(a, b, c, 0, 0, 0);
+    return __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(
+        std::bit_cast<int16x4_t>(a), std::bit_cast<int16x4_t>(b), c, 0, 0, 0);
 }
 
 // TF32 (simulated): inputs are fp32, computed via 3x BF16 MFMA.

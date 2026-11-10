@@ -8,6 +8,7 @@ import argparse
 from pathlib import Path
 
 from rocke.helpers import compile_kernel, make_conv_manifest, write_artifact
+from kernels.common.conv_abi import conv_manifest_args_signature
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
     DirectConvProblem,
@@ -89,6 +90,7 @@ def main() -> int:
         cpg=p.cpg,
         kpg=p.kpg,
         conv_layout="direct_grouped_4c",
+        args_signature=conv_manifest_args_signature(conv_layout="direct_grouped_4c"),
         grid_explicit=[q_tiles, g_tiles, p.N],
         warmup_iters=10,
         timed_iters=100,

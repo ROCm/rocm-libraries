@@ -1,0 +1,1206 @@
+{
+  "version": "1.0",
+  "id": "34f6a86f-dabc-4a3a-84ed-abb25d12097a",
+  "name": "hipkernel:gfx1151_wmma_attention_decode",
+  "matchers": [
+    "7a3c6052-d7d1-4abf-804c-5ee33faca795"
+  ],
+  "engine": "e4eb0bd2-2325-4326-b51a-50c657784041",
+  "dispatch": "c13ee592-ca28-4cc2-9fda-df07788789ef",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "e4eb0bd2-2325-4326-b51a-50c657784041",
+          "kmd_id": "a448d4b8-16ed-4ed8-8a79-c05c4bdb6b9d",
+          "metadata_fields": [
+            "dtype",
+            "kind",
+            "head_size",
+            "head_size_v",
+            "mask_mode",
+            "bias",
+            "block_size",
+            "block_m",
+            "dv_split"
+          ],
+          "matcher_only_fields": [],
+          "bindings": {
+            "dtype": {
+              "field": "dtype"
+            },
+            "kind": {
+              "method": "catalog_kind"
+            },
+            "head_size": {
+              "method": "catalog_head_size"
+            },
+            "head_size_v": {
+              "method": "catalog_head_size_v"
+            },
+            "mask_mode": {
+              "method": "catalog_mask"
+            },
+            "bias": {
+              "method": "catalog_bias"
+            },
+            "block_size": {
+              "method": "catalog_block_size"
+            },
+            "block_m": {
+              "method": "catalog_block_m"
+            },
+            "dv_split": {
+              "method": "catalog_dv_split"
+            }
+          },
+          "vocabulary": {
+            "dtype": {
+              "bf16": "BF16",
+              "fp16": "FP16"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.1",
+      "id": "9e112842-e669-40fe-bf4a-a252efc74fb9",
+      "name": "wmma_decode.fp16_d64_dvs1_nobias",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 64,
+            "dtype": "fp16",
+            "dv_split": 1
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 64,
+            "dtype": "fp16",
+            "dv_split": 1
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "decode",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "runtime",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "5d51e92d-c4a8-4063-b636-5fd1123a55bd",
+      "name": "wmma_decode.fp16_d64_dvs1_bias_f32",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 64,
+            "dtype": "fp16",
+            "bias": "f32",
+            "dv_split": 1
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 64,
+            "dtype": "fp16",
+            "bias": "f32",
+            "dv_split": 1
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "decode",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "runtime",
+        "bias": "f32",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "a545cdc2-af91-45f4-acf5-a22c253cb4ed",
+      "name": "wmma_decode.fp16_d64_dvs1_bias_q",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 64,
+            "dtype": "fp16",
+            "bias": "q",
+            "dv_split": 1
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 64,
+            "dtype": "fp16",
+            "bias": "q",
+            "dv_split": 1
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "decode",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "runtime",
+        "bias": "q",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "e32204bb-96cc-4ea8-9b77-a42add46b569",
+      "name": "wmma_decode.bf16_d64_dvs1_nobias",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 64,
+            "dtype": "bf16",
+            "dv_split": 1
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 64,
+            "dtype": "bf16",
+            "dv_split": 1
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "decode",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "runtime",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "db10271a-5782-4fa6-a1e8-851cc944a691",
+      "name": "wmma_decode.bf16_d64_dvs1_bias_f32",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 64,
+            "dtype": "bf16",
+            "bias": "f32",
+            "dv_split": 1
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 64,
+            "dtype": "bf16",
+            "bias": "f32",
+            "dv_split": 1
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "decode",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "runtime",
+        "bias": "f32",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "f516e2eb-9ca5-4e0a-b4bf-f87184aa7842",
+      "name": "wmma_decode.bf16_d64_dvs1_bias_q",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 64,
+            "dtype": "bf16",
+            "bias": "q",
+            "dv_split": 1
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 64,
+            "dtype": "bf16",
+            "bias": "q",
+            "dv_split": 1
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "decode",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "runtime",
+        "bias": "q",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "80c0cb3b-3cec-4e53-b3ff-78954196fdfb",
+      "name": "wmma_decode.fp16_d128_dvs1_nobias",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 128,
+            "dtype": "fp16",
+            "dv_split": 1
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 128,
+            "dtype": "fp16",
+            "dv_split": 1
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "decode",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "runtime",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "255aca3b-eb36-46b0-8c92-b7a9ec5297be",
+      "name": "wmma_decode.fp16_d128_dvs1_bias_f32",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 128,
+            "dtype": "fp16",
+            "bias": "f32",
+            "dv_split": 1
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 128,
+            "dtype": "fp16",
+            "bias": "f32",
+            "dv_split": 1
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "decode",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "runtime",
+        "bias": "f32",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "6089c8a0-2d26-400a-a1d0-67109e58e6b6",
+      "name": "wmma_decode.fp16_d128_dvs1_bias_q",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 128,
+            "dtype": "fp16",
+            "bias": "q",
+            "dv_split": 1
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 128,
+            "dtype": "fp16",
+            "bias": "q",
+            "dv_split": 1
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "decode",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "runtime",
+        "bias": "q",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "1d84d1f2-9b58-4137-b806-63d4bd695cff",
+      "name": "wmma_decode.bf16_d128_dvs1_nobias",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 128,
+            "dtype": "bf16",
+            "dv_split": 1
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 128,
+            "dtype": "bf16",
+            "dv_split": 1
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "decode",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "runtime",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "fb7634a4-5dc3-45a2-8783-8da97880d797",
+      "name": "wmma_decode.bf16_d128_dvs1_bias_f32",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 128,
+            "dtype": "bf16",
+            "bias": "f32",
+            "dv_split": 1
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 128,
+            "dtype": "bf16",
+            "bias": "f32",
+            "dv_split": 1
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "decode",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "runtime",
+        "bias": "f32",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "1c459978-fe94-45b7-9cbb-d317b3e71b5e",
+      "name": "wmma_decode.bf16_d128_dvs1_bias_q",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 128,
+            "dtype": "bf16",
+            "bias": "q",
+            "dv_split": 1
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 128,
+            "dtype": "bf16",
+            "bias": "q",
+            "dv_split": 1
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "decode",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "runtime",
+        "bias": "q",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "3690ba77-f248-4ada-807a-594c35b9021a",
+      "name": "wmma_decode.fp16_d256_dvs2_nobias",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "fp16",
+            "dv_split": 2
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "fp16",
+            "dv_split": 2
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "decode",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "runtime",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 2
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.1",
+      "id": "17b6e979-3a90-418e-b6ab-b71054c4fe89",
+      "name": "wmma_decode.fp16_d256_dvs2_bias_f32",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "fp16",
+            "bias": "f32",
+            "dv_split": 2
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "fp16",
+            "bias": "f32",
+            "dv_split": 2
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "decode",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "runtime",
+        "bias": "f32",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 2
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.1",
+      "id": "474824ac-0fc4-444e-b029-2aa4658ca1c5",
+      "name": "wmma_decode.fp16_d256_dvs2_bias_q",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "fp16",
+            "bias": "q",
+            "dv_split": 2
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "fp16",
+            "bias": "q",
+            "dv_split": 2
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "decode",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "runtime",
+        "bias": "q",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 2
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.1",
+      "id": "2654adf2-1ff5-42e5-b1e8-41ce3babc53f",
+      "name": "wmma_decode.bf16_d256_dvs2_nobias",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "bf16",
+            "dv_split": 2
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "bf16",
+            "dv_split": 2
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "decode",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "runtime",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 2
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.1",
+      "id": "50a9f037-eee8-4242-81ec-fa708e3a2aed",
+      "name": "wmma_decode.bf16_d256_dvs2_bias_f32",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "bf16",
+            "bias": "f32",
+            "dv_split": 2
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "bf16",
+            "bias": "f32",
+            "dv_split": 2
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "decode",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "runtime",
+        "bias": "f32",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 2
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.1",
+      "id": "a9b5c2a2-ae2e-406f-a41e-851c4342fcf5",
+      "name": "wmma_decode.bf16_d256_dvs2_bias_q",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "bf16",
+            "bias": "q",
+            "dv_split": 2
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "bf16",
+            "bias": "q",
+            "dv_split": 2
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "decode",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "runtime",
+        "bias": "q",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 2
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.1",
+      "id": "2d2687fa-76a8-41e6-9a41-bd33cc64fe27",
+      "name": "wmma_decode.fp16_d256_dvs4_nobias",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "fp16",
+            "dv_split": 4
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "fp16",
+            "dv_split": 4
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "decode",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "runtime",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 4
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.1",
+      "id": "22e6fc0e-9ec1-43c2-adcf-639d1f975380",
+      "name": "wmma_decode.fp16_d256_dvs4_bias_f32",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "fp16",
+            "bias": "f32",
+            "dv_split": 4
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "fp16",
+            "bias": "f32",
+            "dv_split": 4
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "decode",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "runtime",
+        "bias": "f32",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 4
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.1",
+      "id": "4aaf5ef8-1fb1-4b34-a6f5-0e893fed9e71",
+      "name": "wmma_decode.fp16_d256_dvs4_bias_q",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "fp16",
+            "bias": "q",
+            "dv_split": 4
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "fp16",
+            "bias": "q",
+            "dv_split": 4
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "decode",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "runtime",
+        "bias": "q",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 4
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.1",
+      "id": "f8fb42a4-780e-41bb-bb77-89d9f4416a17",
+      "name": "wmma_decode.bf16_d256_dvs4_nobias",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "bf16",
+            "dv_split": 4
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "bf16",
+            "dv_split": 4
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "decode",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "runtime",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 4
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.1",
+      "id": "da00c17a-484f-4ee0-8a69-f594dab20a34",
+      "name": "wmma_decode.bf16_d256_dvs4_bias_f32",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "bf16",
+            "bias": "f32",
+            "dv_split": 4
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "bf16",
+            "bias": "f32",
+            "dv_split": 4
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "decode",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "runtime",
+        "bias": "f32",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 4
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.1",
+      "id": "b6938a7e-d383-4162-a159-3388a514a421",
+      "name": "wmma_decode.bf16_d256_dvs4_bias_q",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "bf16",
+            "bias": "q",
+            "dv_split": 4
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "target": "generic",
+          "spec": {
+            "head_size": 256,
+            "dtype": "bf16",
+            "bias": "q",
+            "dv_split": 4
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "decode",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "runtime",
+        "bias": "q",
+        "block_size": 128,
+        "block_m": 16,
+        "dv_split": 4
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    }
+  ],
+  "arch": [
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1200",
+    "gfx1201"
+  ]
+}

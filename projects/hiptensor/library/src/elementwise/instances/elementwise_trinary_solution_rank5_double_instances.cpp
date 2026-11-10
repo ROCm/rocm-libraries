@@ -39,7 +39,7 @@ namespace hiptensor
         // 5d ElementwiseTrinary
         registerSolutions(enumerateElementwiseSolutions<ck::Tuple<double, double, double>,
                                                         ck::Tuple<double>,
-                                                        CkTrinaryWithUnaryCombinedOp,
+                                                        CkTrinaryWithUnaryCombinedOpF64,
                                                         5>());
     }
 } // namespace hiptensor

@@ -6,6 +6,8 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_fp8.h>
 
+#include <type_traits>
+
 using fp16_t   = _Float16;
 using fp16x2_t = __attribute__((ext_vector_type(2))) _Float16;
 using fp16x4_t = __attribute__((ext_vector_type(4))) _Float16;
@@ -64,6 +66,10 @@ struct ToTypeImpl<hipconv::DataType::tf32>
 
 template <hipconv::DataType type>
 using ToType = typename ToTypeImpl<type>::type;
+
+// ToType, except that tf32 is stored as one bf16 plane of its (big, small) split.
+template <hipconv::DataType DT>
+using ToSplitType = std::conditional_t<DT == hipconv::DataType::tf32, bf16_t, ToType<DT>>;
 
 inline auto mantissa_bits(hipconv::DataType type)
 {

@@ -1,13 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// src/core/rocke_build_id.cpp -- defines the engine freshness / provenance stamp.
+// src/core/rocke_build_id.cpp -- defines the native bundle provenance stamp.
 //
-// The two values are injected at configure time by the build system as the
-// compile definitions ROCKE_BUILD_ID (a content hash of the engine sources) and
-// ROCKE_ENGINE_VERSION (a human-readable version/date). If a build forgets to
-// define them, this TU falls back to "unknown" so callers never see an empty
-// string.
+// The two values are injected through a build-generated header as
+// ROCKE_BUILD_ID (a content hash of the portable-IR native bundle inputs) and
+// ROCKE_ENGINE_VERSION (a human-readable version/date). The header is regenerated
+// whenever an engine/CLI source or native build recipe changes, including during
+// an incremental build.
 //
 // NOTE ON THE FILE NAME: named with the ``rocke_`` prefix (not ``build_id.*``)
 // because the repository .gitignore ignores ``build*`` -- a ``build_id.*`` file
@@ -22,8 +22,9 @@
 extern "C" {
 #include "rocke/rocke_build_id.h"
 }
+#include "rocke_build_id_values.h"
 
-// Stringize the configure-time -D values. ROCKE_BUILD_ID / ROCKE_ENGINE_VERSION are
+// Stringize the build-generated values. ROCKE_BUILD_ID / ROCKE_ENGINE_VERSION are
 // passed as compile definitions; the indirection through ROCKE_STR forces macro
 // expansion before stringization.
 #ifndef ROCKE_BUILD_ID

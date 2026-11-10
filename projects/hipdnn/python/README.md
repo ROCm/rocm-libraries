@@ -17,6 +17,9 @@ python/
 │   └── src/
 │       ├── module.cpp                     # Main nanobind module entry point
 │       ├── bindings.hpp                   # Shared binding declarations
+│       ├── device_buffer.hpp              # hipdnn.DeviceBuffer
+│       ├── dlpack_adapter.cpp             # DLPack (__dlpack__) import for variant packs and tensor_like
+│       ├── dlpack_adapter.hpp
 │       ├── autotune_bindings.cpp
 │       ├── graph_bindings.cpp
 │       ├── handle_bindings.cpp
@@ -137,7 +140,8 @@ The wheel package uses a `src/` layout, so running pytest from
 
 ## DLPack Interoperability
 
-`Graph.execute()`, `Graph.execute_plan_at_index()`, `Graph.autotune()`, and
+`Graph.execute()`, `Graph.execute_timed_ext()`,
+`Graph.execute_plan_at_index()`, `Graph.autotune()`, and
 `Graph.autotune_exhaustive_sweep()` take a `variant_pack` keyed by tensor UID
 or by `Tensor`. Each value, and `workspace`, may be one of these kinds, checked
 in this order:
