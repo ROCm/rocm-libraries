@@ -105,6 +105,8 @@ def test_accepts_dynamic_gsu(algorithm, aga):
   {"UseScaleAlphaVec": 5},
   {"UseScaleAB": "Scalar"},
   {"UseScaleAB": "Vector"},
+  {"UseScaleCD": True},
+  {"GroupedGemm": True},
   {"ActivationType": "relu"},
   {"ActivationType": "hipblaslt_all"},
   {"UseBias": 1, "UseScaleAlphaVec": 1, "ActivationType": "hipblaslt_all",
@@ -112,7 +114,8 @@ def test_accepts_dynamic_gsu(algorithm, aga):
 ])
 def test_accepts_supported_options(overrides):
   """AdaptiveGemm, the automatic StoreRemapVectorWidth (-1, which Solution resolves and checks), the
-  epilogue vectors along M, also with the device-scalar bit of UseScaleAlphaVec, ScaleAB and the activations."""
+  epilogue vectors along M, also with the device-scalar bit of UseScaleAlphaVec, ScaleAB, ScaleCD, GroupedGemm
+  and the activations."""
   assert tdmStoreRejectReason(_state(**overrides)) is None
 
 
@@ -124,7 +127,8 @@ _OUTPUT = "TDMStoreInst supports bf16 and fp16 D converted from fp32 accumulator
 _ATOMIC_SK = "TDMStoreInst does not support atomic StreamK"
 _ACROSS_TILES = \
   "TDMStoreInst does not support PrefetchAcrossPersistent, ReuseAcrossPersistent or persistent spatial clusters"
-_PROBLEM = "TDMStoreInst does not support E, Gradient, gate residual, ScaleCD, AmaxD or GroupedGemm"
+_SIDE_EFFECTS = \
+  "TDMStoreInst does not support per-element epilogue side effects beyond C and D (E, Gradient, gate residual, AmaxD)"
 _ALONG_M = "TDMStoreInst supports bias and ScaleAlphaVec only along M"
 _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
 
@@ -144,12 +148,10 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"StoreRemapVectorWidth": 4}, "TDMStoreInst does not support StoreRemapVectorWidth"),
   ({"CompactLoopStore": True}, "TDMStoreInst does not support CompactLoopStore"),
   ({"FusedGemmA2A": True}, "TDMStoreInst does not support FusedGemmA2A"),
-  ({"UseE": True}, _PROBLEM),
-  ({"Gradient": True}, _PROBLEM),
-  ({"UseGateResidual": True}, _PROBLEM),
-  ({"UseScaleCD": True}, _PROBLEM),
-  ({"OutputAmaxD": True}, _PROBLEM),
-  ({"GroupedGemm": True}, _PROBLEM),
+  ({"UseE": True}, _SIDE_EFFECTS),
+  ({"Gradient": True}, _SIDE_EFFECTS),
+  ({"UseGateResidual": True}, _SIDE_EFFECTS),
+  ({"OutputAmaxD": True}, _SIDE_EFFECTS),
   ({"UseBias": 2}, _ALONG_M),
   ({"UseBias": 3}, _ALONG_M),
   ({"UseScaleAlphaVec": 2}, _ALONG_M),
@@ -585,6 +587,23 @@ def test_sav_device_scalar_bit_is_along_m(gp_gfx1250, gfx1250_iim, assembler, ca
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, ProblemType={"UseBias": 1, "UseScaleAlphaVec": 5})
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["ProblemType"]["UseScaleAlphaVec"] == 5 and "tensor_store_from_lds " in asm
+
+
+def test_scale_cd_scales_through_registers(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """ScaleC and ScaleD are scalars the kernel loads from its arguments into SGPRs: the TDM block of a level-2
+  kernel multiplies its elements by ScaleD, as the buffer_store path does."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, ProblemType={"UseScaleCD": True})
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert "AddressScaleC" in asm and "AddressScaleD" in asm
+  assert re.search(r"^\s*v_\w*mul\w* [^\n]*sgprScaleD", _tdmBlock(asm, "1", 8), re.M)
+
+
+@pytest.mark.parametrize("level", _LEVELS)
+def test_grouped_gemm_generates(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+  """GroupedGemm sets the sizes, strides and addresses of each group in the SGPRs the TDM descriptors read."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, ProblemType={"GroupedGemm": True})
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert "tensor_store_from_lds " in asm
 
 
 def _cacheTokens(line):
