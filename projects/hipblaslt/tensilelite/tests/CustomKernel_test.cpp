@@ -82,6 +82,51 @@ TEST(CustomKernelTest, UniformSummationOrderDeserializes)
         EXPECT_EQ(kernel.uniformSummationOrder, declared);
     }
 }
+
+namespace
+{
+    // Reads one {type: uint32, semantic: <name>} argument the way a logic file carries it.
+    std::vector<std::string> readArgSemantic(std::string const& name, CustomArgSemantic& semantic)
+    {
+        msgpack::zone                          zone;
+        std::map<std::string, msgpack::object> fields{
+            {"type", msgpack::object(std::string("uint32"), zone)},
+            {"semantic", msgpack::object(name, zone)}};
+
+        msgpack::sbuffer packed;
+        msgpack::pack(packed, fields);
+        auto unpacked = msgpack::unpack(packed.data(), packed.size());
+
+        CustomArgDefinition             arg;
+        Serialization::MessagePackInput reader(unpacked.get());
+        reader.input(arg);
+        semantic = arg.semantic;
+        return reader.error;
+    }
+}
+
+// rocRoller names its N tile count numTiles1 (dimension 1). The semantics are
+// named by N, and the dimension-index spelling is not a semantic.
+TEST(CustomKernelTest, StreamKTileCountSemanticsDeserialize)
+{
+    for(auto const& [name, expected] :
+        {std::pair{"RR_SKNumTilesN", CustomArgSemantic::RR_SKNumTilesN},
+         std::pair{"RR_SKMagicMultipleNumTilesN", CustomArgSemantic::RR_SKMagicMultipleNumTilesN},
+         std::pair{"RR_SKMagicShiftsNumTilesN", CustomArgSemantic::RR_SKMagicShiftsNumTilesN}})
+    {
+        CustomArgSemantic semantic{};
+        auto const        errors = readArgSemantic(name, semantic);
+        EXPECT_TRUE(errors.empty()) << name;
+        EXPECT_EQ(semantic, expected) << name;
+    }
+
+    for(auto const* name :
+        {"RR_SKNumTiles1", "RR_SKMagicMultipleNumTiles1", "RR_SKMagicShiftsNumTiles1"})
+    {
+        CustomArgSemantic semantic{};
+        EXPECT_FALSE(readArgSemantic(name, semantic).empty()) << name;
+    }
+}
 #endif
 
 namespace
