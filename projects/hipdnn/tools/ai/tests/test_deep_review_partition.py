@@ -5,6 +5,7 @@ orient-gate)."""
 
 import importlib.util
 import os
+import re
 import subprocess
 from pathlib import Path
 from types import ModuleType
@@ -579,3 +580,56 @@ def test_every_ingestor_impact_surface_pattern_triggers_the_impact_lane(part):
         and not pattern.split("*", 1)[0].startswith(part.IMPACT_PREFIXES)
     ]
     assert uncovered == []
+
+
+def test_design_lane_id_is_a_provisional_id(part):
+    # catches: DESIGN missing from REPORT_LANES, so `DESIGN-p1` is not recognised.
+    assert part.PROVISIONAL_ID.findall("see DESIGN-p1 and DESIGN2-p3") == [
+        "DESIGN-p1",
+        "DESIGN2-p3",
+    ]
+
+
+def test_design_scope_is_the_non_documentation_files(part):
+    rows = [
+        (path, 1, f"1\t0\t{path}")
+        for path in (
+            "projects/hipdnn/backend/a.cpp",
+            "projects/hipdnn/CMakeLists.txt",
+            "projects/hipdnn/docs/guide.md",
+            "projects/hipdnn/docs/notes.txt",
+            "LICENSE",
+        )
+    ]
+    assert {r[0] for r in part.concern_scope("DESIGN", rows)} == {
+        "projects/hipdnn/backend/a.cpp",
+        "projects/hipdnn/CMakeLists.txt",
+    }
+
+
+def test_packets_design_lane_is_not_applicable_to_a_docs_only_change(
+    part, tmp_path, capsys
+):
+    rd = make_round(tmp_path, [(1, 0, "projects/hipdnn/docs/guide.md")])
+    run(part, "areas", rd)
+    (rd / "owners.tsv").write_text("DOCS\tprojects/hipdnn/docs/guide.md\n")
+    run(part, "packets", rd, "--lanes", "DESIGN")
+    assert not (rd / "packets" / "DESIGN.md").exists()
+    assert "DESIGN: no changed file in scope, N/A" in capsys.readouterr().out
+
+
+def test_leak_sweep_allow_list_matches_every_report_lane(part):
+    # catches: a lane in REPORT_LANES missing from the sweep allow-list, whose IDs of 10
+    # or more then count as sweep hits and the Synthesize gate never passes.
+    leaks = (SCRIPT.parent.parent / "lanes" / "leaks.md").read_text()
+    allow = next(
+        line
+        for line in leaks.splitlines()
+        if line.startswith("^(") and "[0-9]*-p?[0-9]+$" in line
+    )
+    pattern = re.compile(allow)
+    for lane in part.REPORT_LANES:
+        assert pattern.fullmatch(f"{lane}-12"), lane
+        assert pattern.fullmatch(f"{lane}2-p3"), lane
+    listed = allow[2 : allow.index(")")].split("|")
+    assert sorted(listed) == sorted(part.REPORT_LANES)

@@ -16,6 +16,14 @@ overrides the gate. A result on the merged tree (`DRIFT`) outranks the same resu
 
 Never mark an unrelated improvement `BLOCKING` or soften incomplete cleanup.
 
+### Design findings
+
+A `design` finding (kind in [findings.md](findings.md)) is never `BLOCKING`: a concern that must block a merge is proved as a
+defect. It is `IMPORTANT` only when the cited contract, history or discussion shows a concrete cost to callers or implementers
+that this change already has, such as a wrong-layer dependency they must work around, an obligation every implementer now
+breaks, or a default that implies support that does not exist. Otherwise it is `SUGGESTION`. A foreclosed extension is always
+`FUTURE WORK`. An `IMPORTANT` design finding holds `Closure: OPEN` until a human decides it (fixed or accepted risk).
+
 ## M-rules
 
 | Rule | Requirement | Waiver |

@@ -75,6 +75,7 @@ CONCERN_LANES = {
     "API",
     "ROCK",
     "LEAK",
+    "DESIGN",
     "DUP",
     "DOCS",
     "RUN",
@@ -358,6 +359,8 @@ def concern_scope(lane: str, rows):
         ]
     if lane == "IMPACT":
         return [r for r in rows if r[0].startswith(IMPACT_PREFIXES)]
+    if lane == "DESIGN":
+        return [r for r in rows if not is_docs(r[0])]
     return rows
 
 
@@ -436,7 +439,7 @@ def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -
 def cmd_packets(args) -> None:
     """Write packets/<LANE>.md for each lane of owners.tsv (files with numstat rows, areas,
     Orient paths, `Sampled:`) and each concern lane named by --lanes (changed files in
-    scope). BUILD, DEPS and IMPACT scope to their trigger files, other concern lanes take
+    scope). BUILD, DEPS and IMPACT scope to their trigger files, DESIGN to the non-documentation files, other concern lanes take
     every changed file; DRIFT also lists drift.txt and is N/A when its Trigger is `no`. The
     diff is not read."""
     rd = Path(args.round_dir)

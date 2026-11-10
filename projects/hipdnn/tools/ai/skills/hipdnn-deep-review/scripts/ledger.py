@@ -52,6 +52,26 @@ THREAD_COLS = [
 COMMENT_URL = re.compile(r"https://[^/\s]+/[^/\s]+/[^/\s]+/pull/\d+#discussion_r\d+")
 M_OWNERS = {1: "TESTQ", 2: "TESTB", 3: "TESTQ", 4: "AUTH", 5: "AUTH"}
 BLOCKING_TIERS = ("BLOCKING", "IMPORTANT")
+FINDINGS_DOC = Path(__file__).resolve().parent.parent / "findings.md"
+# A design finding is capped here (policy.md *Design findings*).
+DESIGN_KIND = "design"
+DESIGN_MAX_TIER = "IMPORTANT"
+
+
+def known_kinds():
+    """The Kind values findings.md lists on the `Kind:` line of the finding block."""
+    for line in FINDINGS_DOC.read_text(encoding="utf-8").splitlines():
+        if line.startswith("Kind:"):
+            return [k.strip() for k in line[len("Kind:") :].split("|")]
+    raise rl.Fail(f"no Kind line in {FINDINGS_DOC.name}")
+
+
+def is_design(kind):
+    return kind.strip().casefold() == DESIGN_KIND
+
+
+def tier_exceeds_design_cap(tier):
+    return rl.TIERS.index(tier) < rl.TIERS.index(DESIGN_MAX_TIER)
 
 
 def ledger_path(evidence):
@@ -191,10 +211,12 @@ def cmd_ids(a):
     no report of the round parsed (a merged agent's other lanes included; cite earlier
     rounds by final ID), reports a provisional ID not of the form `<LANE>-p<n>` (`<LANE>`
     is capitals and an optional number) or a finding whose Tier is missing or not one of
-    the four tiers.
+    the four tiers, a Kind that is not in findings.md (compared case-insensitively), or a
+    `design` finding above IMPORTANT.
     """
     rp = rl.round_dir(a.evidence, a.round)
     require_flat(rp)
+    kinds = {k.casefold() for k in known_kinds()}
     tables = load_ledger(a.evidence)
     ft = rl.find_table(tables, "Findings")
     map_path = rp / "ID-MAP.md"
@@ -232,6 +254,18 @@ def cmd_ids(a):
                 raise rl.Fail(
                     f"{path.name}: {prov}: Tier '{f.get('Tier', '')}' is not one of "
                     + ", ".join(rl.TIERS)
+                )
+            kind = f.get("Kind", "")
+            if kind.strip().casefold() not in kinds:
+                raise rl.Fail(
+                    f"{path.name}: {prov}: Kind '{kind}' is not one of "
+                    + ", ".join(known_kinds())
+                )
+            if is_design(kind) and tier_exceeds_design_cap(f["Tier"]):
+                raise rl.Fail(
+                    f"{path.name}: {prov}: a design finding is at most "
+                    f"{DESIGN_MAX_TIER}, not {f['Tier']}; prove a blocking concern "
+                    "as a defect"
                 )
             m = re.fullmatch(r"([A-Z]+\d*)-p(\d+)", prov)
             if not m:
@@ -439,6 +473,15 @@ def cmd_verdicts(a):
             continue
         first, final = vs[0], vs[-1]
         reported = rl.tier_pair(row["Tier"])[0]
+        if is_design(row["Kind"]):
+            over = [v for v in vs if tier_exceeds_design_cap(v["Tier"])]
+            if over:
+                bad.append(
+                    f"{fid}: a design finding is at most {DESIGN_MAX_TIER}, not "
+                    f"{over[0]['Tier']}; file a blocking concern as a VER defect "
+                    "with its own proof"
+                )
+                continue
         if len(vs) == 1:
             why = None
             if first["Verdict"] == "REFUTED" and reported in BLOCKING_TIERS:

@@ -165,6 +165,7 @@ its trigger holds, else mark it `N/A`; when unsure, run it.
 | `API` | [public-api](lanes/public-api.md) | Public surfaces, behavior changes in source, docs of new public declarations | A file in the brief's surfaces table, or non-test source under `projects/hipdnn/` or `dnn-providers/`, changes |
 | `ROCK` | [therock](lanes/therock.md) | Whether TheRock CI builds and tests the change: skip-ci, job, family and tier selection, flags, RPATH, CTest files, artifact split, target-neutral outputs, Windows lookup and path length, tier timeout baselines. Its timeout projection against what `RUN` measured is the follow-up `ROCK-f1` | Non-documentation file changes |
 | `LEAK` | [leaks](lanes/leaks.md) | Private information in the change and in review output | Always |
+| `DESIGN` | [design](lanes/design.md) | The contract the change adds or alters, its layer and owner, the history behind the code it changes, extensions it forecloses | Non-documentation file changes |
 | `DUP` | [dedup](lanes/dedup.md) | Reuse of existing code; repetition within the change | Code is added |
 | `DOCS` | [docs](lanes/docs.md) | Accuracy and concision of docs and comments, including edited public headers | A documentation or source file changes |
 | `DRIFT` | [drift](lanes/drift.md) | The change merged onto the target's current tip: conflicts, broken target-side contracts, tests on the merge | `drift.txt` says `Trigger: yes` |
@@ -186,7 +187,7 @@ ledger.py seed "$EVIDENCE" <N> --lane 'DEPS=N/A (no manifest or source changes)'
 
 `packets` writes `packets/<LANE>.md` ([lanes/common.md](lanes/common.md) *Context packet*) for
 each lane of `owners.tsv` and each concern lane in `--lanes` (changed files in scope with their
-`numstat` rows, areas and Orient paths; BUILD, DEPS and IMPACT scope to their trigger files and print
+`numstat` rows, areas and Orient paths; BUILD, DEPS and IMPACT scope to their trigger files, and DESIGN to the non-documentation files; each prints
 `<LANE>: no changed file in scope, N/A` when none; `DRIFT` adds `drift.txt` and prints
 `DRIFT: N/A (<reason>)` when its trigger is `no` (give that reason to `seed` with `--lane`); every other concern lane takes all changed
 files, so name only lanes whose trigger holds; `--parent` is the stack parent). In round 2 on,
@@ -230,7 +231,7 @@ message. Agents see only their dispatch: each begins by reading `dispatch-contex
 
 **Queue.** Run at most `Agents:` agents at once, in this priority order: `RUN` first, then `DRIFT`, then
 `IMPACT` (its emitter builds every shipped variant twice), then the
-longest lanes (largest `CORR<k>`, then `TESTQ`), `DUP` and `DOCS` last. `RUN`, `DRIFT`, an approved
+longest lanes (largest `CORR<k>`, then `TESTQ`, then `DESIGN`), `DUP` and `DOCS` last. `RUN`, `DRIFT`, an approved
 `ROCK` build, `ROCK`'s configure diff (`Build host: yes`), or any other lane that builds or mutates, run concurrently in their own `$SCRATCH` trees and
 split `Cores:` between them while they overlap, `RUN` taking the larger share. `IMPACT`'s emitter does not
 read `Cores:`: it builds the two sides on two concurrent workers, so count two cores against `Cores:` while it runs.

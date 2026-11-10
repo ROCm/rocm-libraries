@@ -236,6 +236,45 @@ def test_ids_rejects_a_missing_or_unknown_tier(ledger, ev, capsys, tier):
     assert "CORR1.md: CORR1-p1: Tier" in err
 
 
+@pytest.mark.parametrize("kind", ["design", "Design"])
+def test_ids_rejects_a_design_finding_above_important(ledger, ev, capsys, kind):
+    # catches: a case variant of the Kind bypassing the design tier cap.
+    seeded(ledger, ev)
+    with_reports(
+        ledger,
+        ev,
+        DESIGN=report("DESIGN", [finding("DESIGN-p1", tier="BLOCKING", kind=kind)]),
+    )
+    capsys.readouterr()
+    assert run(ledger, "ids", ev) == 1
+    assert "DESIGN-p1: a design finding is at most IMPORTANT" in capsys.readouterr().err
+
+
+def test_ids_accepts_design_findings_up_to_important(ledger, rl, ev):
+    seeded(ledger, ev)
+    with_reports(
+        ledger,
+        ev,
+        DESIGN=report(
+            "DESIGN",
+            [
+                finding("DESIGN-p1", tier="IMPORTANT", kind="Design"),
+                finding("DESIGN-p2", tier="FUTURE WORK", kind="design"),
+            ],
+        ),
+    )
+    assert run(ledger, "ids", ev) == 0
+    assert [r["ID"] for r in table(rl, ev, "Findings").rows] == ["DESIGN-1", "DESIGN-2"]
+
+
+def test_ids_rejects_an_unknown_kind(ledger, ev, capsys):
+    seeded(ledger, ev)
+    with_reports(ledger, ev, CORR1=report("CORR1", [finding("CORR1-p1", kind="style")]))
+    capsys.readouterr()
+    assert run(ledger, "ids", ev) == 1
+    assert "CORR1-p1: Kind 'style' is not one of" in capsys.readouterr().err
+
+
 def test_claim_is_the_first_sentence_of_the_whole_actual(ledger, rl, ev):
     seeded(ledger, ev)
     long = "word " * 80
@@ -385,6 +424,25 @@ def test_verdicts_reject_nonconforming_verify_file(ledger, ev, capsys):
     write_verify(ev, "CORR-1", "PARTIAL", "IMPORTANT")  # no narrowed claim
     assert run(ledger, "verdicts", ev) == 1
     assert "PARTIAL without Claim" in capsys.readouterr().out
+
+
+def test_verdicts_reject_a_design_verify_file_at_blocking(ledger, rl, ev, capsys):
+    # catches: a verifier raising a design finding to BLOCKING through the verify file.
+    seeded(ledger, ev)
+    with_reports(
+        ledger,
+        ev,
+        DESIGN=report("DESIGN", [finding("DESIGN-p1", kind="design")]),
+    )
+    run(ledger, "ids", ev)
+    write_verify(ev, "DESIGN-1", "UPGRADED", "BLOCKING")
+    capsys.readouterr()
+    assert run(ledger, "verdicts", ev) == 1
+    out = capsys.readouterr().out
+    assert "DESIGN-1: a design finding is at most IMPORTANT" in out
+    assert table(rl, ev, "Findings").rows[0]["Tier"] == "IMPORTANT -> IMPORTANT"
+    write_verify(ev, "DESIGN-1", "CONFIRMED", "IMPORTANT")
+    assert run(ledger, "verdicts", ev) == 0
 
 
 def test_mlines_collect_fail_missing_and_vacuous_pass(ledger, ev, capsys):
