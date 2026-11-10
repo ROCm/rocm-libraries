@@ -24,6 +24,7 @@ targeting gfx1250) and are skipped when the toolchain is unavailable.
 """
 
 import copy
+import importlib
 import inspect
 import os
 import re
@@ -37,7 +38,6 @@ import pytest
 
 from tensilelite.Common.Architectures import (
     _REPORTED_ARCH_RE,
-    ARCH_BUILD_ALIASES,
     SUPPORTED_GFX,
     SUPPORTED_ISA,
     archMacroNames,
@@ -46,10 +46,8 @@ from tensilelite.Common.Architectures import (
     baseArchName,
     expandAllArchitectures,
     gfxToIsa,
-    isaCollisionFreeGroups,
     isaToGfx,
     steppingArchOf,
-    tuningArchOf,
 )
 from tensilelite import GpuArch
 from tensilelite.CustomYamlLoader import archMatch
@@ -672,11 +670,10 @@ def _stableLabels(src):
     return re.sub(r"_[A-Za-z0-9]{16}(?![A-Za-z0-9])", lambda m: ids.setdefault(m.group(0), f"_L{len(ids)}"), src)
 
 
-def _emit(archName, stinkyArchName=""):
-    from tensilelite.Common.GlobalParameters import globalParameters
+def _emit(archName):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.create_library.run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -701,7 +698,6 @@ def _emit(archName, stinkyArchName=""):
     # Solution derivation + assignGlobalParameters mutate process-global state
     # (globalParameters / validParameters); isolate so this never leaks.
     with _isolated_globals():
-        globalParameters["StinkyTofuArchName"] = stinkyArchName
         sol = Solution(
             _make_params(iim, MULTICAST_MI, ClusterDim=[2, 1]),
             False,
@@ -715,18 +711,18 @@ def _emit(archName, stinkyArchName=""):
         kernels = generateKernelObjectsFromSolutions([sol])
         assert len(kernels) == 1
         kernel = kernels[0]
-        assert kernel["Multicast"] is (tuningArchOf(archName) != GFX1250_STRICT)
+        assert kernel["Multicast"] is (archName != GFX1250_STRICT)
 
         kwa = KernelWriterAssembly(asm, DebugConfig())
         ri = _init_rocisa_for(kernel)
         _prepare_kernel(kernel, False)
         res = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(), False, kernel)
-        return canonicalize_asm(_stableLabels(res.src)), res.err, kwa.states.archCaps
+        return canonicalize_asm(_stableLabels(res.src)), res.err
 
 
 def test_gfx1250_emits_multicast_gfx1250_strict_does_not(gfx1250_cxx):
-    v1_src, v1_err, _ = _emit(GFX1250)
-    v0_src, v0_err, _ = _emit(GFX1250_STRICT)
+    v1_src, v1_err = _emit(GFX1250)
+    v0_src, v0_err = _emit(GFX1250_STRICT)
     assert v1_err == 0 and v0_err == 0
 
     assert any(m in v1_src for m in MULTICAST_MARKERS), (
@@ -777,7 +773,7 @@ def _emit_streamk_srcs(stepping):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.create_library.run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -927,11 +923,11 @@ def _write_min_config(tmp_path, **globalParams):
 
 
 def _stub_tensile_pipeline(monkeypatch, captured):
-    """Stubs every expensive step of `Tensile()` and captures what the benchmark
+    """Stubs every expensive step of `main()` and captures what the benchmark
     pipeline is handed. Mirrors the stub set in test_tensile_backend_config.py."""
     import types
 
-    from tensilelite import Tensile as TensileModule
+    TensileModule = importlib.import_module("tensilelite.run")
 
     monkeypatch.setattr(
         TensileModule, "validateToolchain", lambda *a: ("cxx", "cc", "bundler")
@@ -978,7 +974,7 @@ def test_tensile_entry_point_applies_the_strict_overrides(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path)
 
-    TensileModule.Tensile(
+    TensileModule.main(
         [config, str(tmp_path / "out"), "--gpu-targets", GFX1250_STRICT]
     )
 
@@ -996,7 +992,7 @@ def test_tensile_entry_point_leaves_gfx1250_capabilities_untouched(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path)
 
-    TensileModule.Tensile([config, str(tmp_path / "out"), "--gpu-targets", GFX1250])
+    TensileModule.main([config, str(tmp_path / "out"), "--gpu-targets", GFX1250])
 
     info = captured["isaInfoMap"][ISA_GFX1250]
     assert CAP_MULTICAST not in info.archCaps
@@ -1018,7 +1014,7 @@ def test_config_architecture_selects_the_stepping(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path, Architecture=GFX1250_STRICT, ISA=[[12, 5, 0]])
 
-    TensileModule.Tensile([config, str(tmp_path / "out")])
+    TensileModule.main([config, str(tmp_path / "out")])
 
     info = captured["isaInfoMap"][ISA_GFX1250]
     assert info.archCaps[CAP_MULTICAST] is False
@@ -1035,7 +1031,7 @@ def test_config_architecture_of_the_shipping_stepping_adds_nothing(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path, Architecture=GFX1250, ISA=[[12, 5, 0]])
 
-    TensileModule.Tensile([config, str(tmp_path / "out")])
+    TensileModule.main([config, str(tmp_path / "out")])
 
     info = captured["isaInfoMap"][ISA_GFX1250]
     assert CAP_MULTICAST not in info.archCaps
@@ -1051,7 +1047,7 @@ def test_gpu_targets_overrides_the_config_architecture(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path, Architecture=GFX1250_STRICT, ISA=[[12, 5, 0]])
 
-    TensileModule.Tensile([config, str(tmp_path / "out"), "--gpu-targets", GFX1250])
+    TensileModule.main([config, str(tmp_path / "out"), "--gpu-targets", GFX1250])
 
     info = captured["isaInfoMap"][ISA_GFX1250]
     assert CAP_MULTICAST not in info.archCaps
@@ -1068,7 +1064,7 @@ def test_config_architecture_for_an_isa_not_being_built_is_ignored(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path, Architecture="gfx942", ISA=[[12, 5, 0]])
 
-    TensileModule.Tensile([config, str(tmp_path / "out")])
+    TensileModule.main([config, str(tmp_path / "out")])
 
     assert captured["archNames"] == []
     assert CAP_MULTICAST not in captured["isaInfoMap"][ISA_GFX1250].archCaps
@@ -1083,7 +1079,7 @@ def test_config_architecture_naming_an_stepping_of_another_isa_is_rejected(
     config = _write_min_config(tmp_path, Architecture=GFX1250_STRICT, ISA=[[9, 4, 2]])
 
     with pytest.raises(ValueError) as excinfo:
-        TensileModule.Tensile([config, str(tmp_path / "out")])
+        TensileModule.main([config, str(tmp_path / "out")])
 
     assert GFX1250_STRICT in str(excinfo.value)
 
@@ -1099,7 +1095,7 @@ def test_unrecognized_config_architecture_is_rejected(
     config = _write_min_config(tmp_path, Architecture=arch, ISA=[[12, 5, 0]])
 
     with pytest.raises(ValueError) as excinfo:
-        TensileModule.Tensile([config, str(tmp_path / "out")])
+        TensileModule.main([config, str(tmp_path / "out")])
 
     assert arch in str(excinfo.value)
 
@@ -1114,7 +1110,7 @@ def test_mixed_steppings_in_the_config_architecture_are_rejected(
     )
 
     with pytest.raises(ValueError):
-        TensileModule.Tensile([config, str(tmp_path / "out")])
+        TensileModule.main([config, str(tmp_path / "out")])
 
 
 @pytest.mark.parametrize(
@@ -1471,7 +1467,7 @@ def test_auto_detect_tunes_for_the_architecture_it_found(
     )
     config = _write_min_config(tmp_path)
 
-    TensileModule.Tensile([config, str(tmp_path / "out")])
+    TensileModule.main([config, str(tmp_path / "out")])
 
     assert captured["archNames"] == [GFX1250_STRICT]
     info = captured["isaInfoMap"][ISA_GFX1250]
@@ -1492,7 +1488,7 @@ def test_auto_detect_on_the_base_architecture_is_unchanged(
     )
     config = _write_min_config(tmp_path)
 
-    TensileModule.Tensile([config, str(tmp_path / "out")])
+    TensileModule.main([config, str(tmp_path / "out")])
 
     assert captured["archNames"] == [GFX1250]
     info = captured["isaInfoMap"][ISA_GFX1250]
@@ -1513,7 +1509,7 @@ def test_auto_detect_still_rejects_a_misspelt_config_architecture(
     config = _write_min_config(tmp_path, Architecture="gfx1250-stict")
 
     with pytest.raises(ValueError) as excinfo:
-        TensileModule.Tensile([config, str(tmp_path / "out")])
+        TensileModule.main([config, str(tmp_path / "out")])
 
     assert "gfx1250-stict" in str(excinfo.value)
 
@@ -1528,7 +1524,7 @@ def test_tensile_entry_point_records_the_requested_names(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path)
 
-    TensileModule.Tensile(
+    TensileModule.main(
         [config, str(tmp_path / "out"), "--gpu-targets", GFX1250_STRICT]
     )
 
@@ -1550,7 +1546,7 @@ def test_unknown_gpu_target_is_rejected(
     config = _write_min_config(tmp_path)
 
     with pytest.raises(ValueError, match=target):
-        TensileModule.Tensile([config, str(tmp_path / "out"), "--gpu-targets", target])
+        TensileModule.main([config, str(tmp_path / "out"), "--gpu-targets", target])
 
 
 @pytest.mark.parametrize(
@@ -1575,7 +1571,7 @@ def test_qualified_gpu_targets_stay_accepted(
     TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
     config = _write_min_config(tmp_path)
 
-    TensileModule.Tensile([config, str(tmp_path / "out"), "--gpu-targets", target])
+    TensileModule.main([config, str(tmp_path / "out"), "--gpu-targets", target])
 
     assert captured["archNames"] == [target]
 
@@ -1584,8 +1580,8 @@ def _logicFileName(architectureName, scheduleName, tag=""):
     return f"{scheduleName}_{architectureName}{tag}.yaml"
 
 
-def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=(), buildGfx1250v0=False):
-    """Drives ``TensileCreateLibrary.run()`` for one requested architecture with
+def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
+    """Drives ``create_library.run.main()`` for one requested architecture with
     every expensive step stubbed. ``logicFiles`` writes minimal logic files
     (arch name, schedule name) into the logic dir; the real glob and filter run,
     so the selection observed is the production wiring's.
@@ -1597,7 +1593,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=(), buildGfx1250v
     """
     from unittest.mock import MagicMock
 
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.create_library.run as RunModule
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
@@ -1656,7 +1652,6 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=(), buildGfx1250v
             "DisableAsmComments": False,
             "UseCompression": False,
             "KeepBuildTmp": False,
-            "BuildGfx1250v0": buildGfx1250v0,
         },
     )
     monkeypatch.setattr(RunModule, "setVerbosity", lambda *a, **kw: None)
@@ -1691,7 +1686,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=(), buildGfx1250v
     )
 
     try:
-        RunModule.run()
+        RunModule.main()
     except _Stop:
         pass
 
@@ -1703,7 +1698,7 @@ def test_createlibrary_entry_point_applies_the_strict_overrides(
 ):
     """``TensileCreateLibrary --architecture=gfx1250-strict`` must derive its solutions
     under v0 capabilities; this is the second of the two entry points, and it
-    reaches the capability map by a different route than ``Tensile()``."""
+    reaches the capability map by a different route than ``main()``."""
     captured = _run_createlibrary(monkeypatch, tmp_path, GFX1250_STRICT)
 
     info = captured["isaInfoMap"][ISA_GFX1250]
@@ -1721,6 +1716,18 @@ def test_createlibrary_entry_point_forwards_the_requested_name(
     captured = _run_createlibrary(monkeypatch, tmp_path, GFX1250_STRICT)
 
     assert captured["cmdlineArchs"] == [GFX1250_STRICT]
+
+
+def test_createlibrary_entry_point_hands_stinkytofu_the_stepping_name(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """StinkyTofu picks its cost table, and KernelWriter the scaled-WMMA
+    workaround, by this name; the shared ISA would give them gfx1250's."""
+    from tensilelite.Common.GlobalParameters import globalParameters
+
+    _run_createlibrary(monkeypatch, tmp_path, GFX1250_STRICT)
+
+    assert globalParameters["StinkyTofuArchName"] == GFX1250_STRICT
 
 
 def test_createlibrary_entry_point_leaves_gfx1250_capabilities_untouched(
@@ -1895,7 +1902,7 @@ def test_client_writer_receives_the_requested_names(monkeypatch, tmp_path):
     and the re-spawn."""
     import types
 
-    from tensilelite import Tensile as TensileModule
+    TensileModule = importlib.import_module("tensilelite.run")
 
     captured = {}
     monkeypatch.setattr(
@@ -1959,7 +1966,7 @@ def _generateLogicData(monkeypatch, *architectureNames):
     from unittest.mock import MagicMock
 
     import tensilelite.LibraryIO as LibraryIO
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.create_library.run as RunModule
 
     libraries = {}
     parsed = []
@@ -2170,7 +2177,7 @@ def test_arch_names_by_isa_rejects_two_architectures_sharing_one_isa():
 def test_two_steppings_get_different_scratch_directories():
     """The collision this exists to prevent: same output directory, same kernel
     basenames, different machine code."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.create_library.run import buildTmpDir
 
     assert buildTmpDir("/out/Tensile", [GFX1250]) != buildTmpDir(
         "/out/Tensile", [GFX1250_STRICT]
@@ -2181,7 +2188,7 @@ def test_scratch_directory_ignores_order_and_qualifiers():
     """One run's scratch has to resolve to one directory however its
     architectures were spelled, or the cleanup would not find what the writer
     made."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.create_library.run import buildTmpDir
 
     assert buildTmpDir("/out/Tensile", ["gfx942", GFX1250]) == buildTmpDir(
         "/out/Tensile", [GFX1250, "gfx942"]
@@ -2194,7 +2201,7 @@ def test_scratch_directory_ignores_order_and_qualifiers():
 def test_scratch_stays_under_the_output_directory():
     """It is removed with rmtree, so the tag must not be able to steer that
     anywhere but inside build_tmp."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.create_library.run import buildTmpDir
 
     path = buildTmpDir("/out/Tensile", [GFX1250_STRICT])
 
@@ -2206,7 +2213,7 @@ def test_scratch_keeps_its_old_name_when_no_stepping_was_asked_for():
     """Every architecture set that could be built before steppings existed has to
     land where it always did, or upgrading orphans the scratch of every build in
     flight and every tool that reaches into it by path."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.create_library.run import buildTmpDir
 
     for archs in ([], ["gfx942"], ["gfx942", "gfx950", "gfx1200"], ["gfx942:xnack+"]):
         assert buildTmpDir("/out/Tensile", archs) == Path("/out/Tensile/build_tmp/TENSILE")
@@ -2216,7 +2223,7 @@ def test_only_the_stepping_side_of_a_shared_isa_is_renamed():
     """The two runs covering a shared ISA never occupy one group, so naming only
     the stepping's group apart is enough to separate them -- and it leaves the
     other run on the path it had."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.create_library.run import buildTmpDir
 
     assert buildTmpDir("/out/Tensile", [GFX1250]) == Path("/out/Tensile/build_tmp/TENSILE")
     assert buildTmpDir("/out/Tensile", [GFX1250_STRICT]) == (
@@ -2227,7 +2234,7 @@ def test_only_the_stepping_side_of_a_shared_isa_is_renamed():
 def test_scratch_name_survives_an_output_path_with_no_stem():
     """Path("/").stem is empty, and "<root>" / "" is "<root>" -- the run would
     take the shared parent as its own scratch and rmtree a sibling's work."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.create_library.run import buildTmpDir
 
     for outputPath in ("/", ""):
         path = buildTmpDir(outputPath, [GFX1250_STRICT])
@@ -2238,7 +2245,7 @@ def test_scratch_name_ignores_architectures_the_table_does_not_know():
     """An architecture spec is free text and gfxToIsa reads only the leading gfx
     digits, so "gfx1250/.." parses as a stepping. The name reaches rmtree, so
     only names the table vouches for may reach the name."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.create_library.run import buildTmpDir
 
     for hostile in ("gfx1250/..", "gfx1250-../..", "gfx1250 ", "../gfx1250-x"):
         path = buildTmpDir("/out/Tensile", [hostile])
@@ -2262,7 +2269,7 @@ def _scratch_tree(tmp_path, archs):
     """An output directory holding this run's scratch and a sibling's, both
     populated, so a cleanup that takes too much is visible as the sibling's
     file disappearing."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir, buildTmpRoot
+    from tensilelite.create_library.run import buildTmpDir, buildTmpRoot
 
     mine = buildTmpDir(tmp_path / "Tensile", archs)
     sibling = buildTmpRoot(tmp_path / "Tensile") / "SIBLING"
@@ -2275,7 +2282,7 @@ def _scratch_tree(tmp_path, archs):
 def test_a_solo_run_reclaims_the_whole_scratch_tree(tmp_path):
     """Nothing else is writing here, so the tree goes whole -- which is also what
     reclaims scratch an earlier build left under a name this run never uses."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpRoot, removeScratch
+    from tensilelite.create_library.run import buildTmpRoot, removeScratch
 
     mine, sibling = _scratch_tree(tmp_path, [GFX1250_STRICT])
 
@@ -2288,7 +2295,7 @@ def test_a_fanned_out_child_leaves_its_siblings_scratch_alone(monkeypatch, tmp_p
     """The whole reason the children are marked: a sibling group is assembling
     into the same parent right now, and kernel basenames come from the ISA, so
     taking the parent would delete files a live build is still writing."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.create_library import run as Run
 
     mine, sibling = _scratch_tree(tmp_path, [GFX1250_STRICT])
     monkeypatch.setenv(Run._GROUP_BUILD_ENV, "1")
@@ -2303,7 +2310,7 @@ def test_a_fanned_out_child_leaves_its_siblings_scratch_alone(monkeypatch, tmp_p
 def test_the_last_child_out_takes_the_shared_parent(monkeypatch, tmp_path):
     """Left behind by every child that is not last, the parent would otherwise
     survive every fan-out as an empty directory in the output tree."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.create_library import run as Run
 
     mine, sibling = _scratch_tree(tmp_path, [GFX1250_STRICT])
     shutil.rmtree(sibling)
@@ -2316,7 +2323,7 @@ def test_the_last_child_out_takes_the_shared_parent(monkeypatch, tmp_path):
 def test_a_run_that_wrote_no_scratch_says_so_rather_than_removing_something(tmp_path):
     """The caller reports the absence, so it has to be distinguishable from a
     successful removal rather than inferred from the directory being gone."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir, removeScratch
+    from tensilelite.create_library.run import buildTmpDir, removeScratch
 
     assert removeScratch(
         tmp_path / "Tensile", buildTmpDir(tmp_path / "Tensile", [GFX1250_STRICT])
@@ -2335,7 +2342,7 @@ _DIRECTIVE = '.amdgcn_target "amdgcn-amd-amdhsa--{}"'
 def test_the_target_id_is_rewritten_to_the_stepping(tmp_path):
     """Without this the assembler refuses the file outright: the base target id
     names a processor that is not valid for the stepping's subarch."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.create_library.run import _alignAmdgcnTargetToStepping
 
     asm = tmp_path / "k0.s"
     asm.write_text(f"{_DIRECTIVE.format(GFX1250)}\n  s_endpgm\n")
@@ -2352,7 +2359,7 @@ def test_an_ordinary_architectures_assembly_is_left_byte_identical(tmp_path):
     """Every architecture but a stepping already agrees with the ISA-derived
     name, so this must be provably inert for them -- it runs on every .s the
     build emits."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.create_library.run import _alignAmdgcnTargetToStepping
 
     isa = gfxToIsa("gfx942")
     asm = tmp_path / "k0.s"
@@ -2371,7 +2378,7 @@ def test_an_ordinary_architectures_assembly_is_left_byte_identical(tmp_path):
 def test_assembly_with_no_target_directive_is_left_alone(tmp_path):
     """The directive is rocisa's to emit, and a helper kernel that carries none
     must not acquire one -- nor make the rewrite an error."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.create_library.run import _alignAmdgcnTargetToStepping
 
     asm = tmp_path / "helper.s"
     asm.write_text("  s_endpgm\n")
@@ -2385,7 +2392,7 @@ def test_only_the_first_target_directive_is_rewritten(tmp_path):
     """One .s is one code object with one target. A second directive means the
     file is not what this rewrite assumes, and silently retargeting all of them
     would turn that into a code object claiming a target it was not built for."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.create_library.run import _alignAmdgcnTargetToStepping
 
     asm = tmp_path / "k0.s"
     asm.write_text(f"{_DIRECTIVE.format(GFX1250)}\n{_DIRECTIVE.format(GFX1250)}\n")
@@ -2422,7 +2429,7 @@ def test_the_two_retargets_compose_to_a_single_suffix(tmp_path):
     """The build runs both on each stepping kernel: this module's directive
     rewrite while writing it, then the assembler's before assembling it. Either
     alone is covered above; this is the order they actually run in."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.create_library.run import _alignAmdgcnTargetToStepping
     from tensilelite.Toolchain.Component import Assembler
 
     asm = tmp_path / "k0.s"
@@ -2555,7 +2562,7 @@ def _spawnedCommands(monkeypatch, groups, argv=PARENT_ARGV, requestedJobs=-1):
     ``requestedJobs`` is the parsed ``CpuThreads``; -1 is its default, meaning
     "every CPU".
     """
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.create_library import run as Run
 
     spawned = []
 
@@ -2672,7 +2679,7 @@ def test_children_are_told_they_share_a_scratch_parent(monkeypatch):
     child may take only its own subdirectory, because a sibling is writing into
     the same parent. Every other run reclaims the whole tree, so the children
     have to be marked or a fan-out would delete a live sibling's scratch."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.create_library import run as Run
 
     spawned = _spawnedCommands(monkeypatch, [[GFX1250], [GFX1250_STRICT]])
 
@@ -2683,7 +2690,7 @@ def test_children_are_told_they_share_a_scratch_parent(monkeypatch):
 def test_a_failed_group_is_not_swallowed(monkeypatch):
     """A group that fails while the other succeeds has to fail the run: a zero
     exit here lets the build be stamped with one stepping's library missing."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.create_library import run as Run
 
     class _Proc:
         def __init__(self, rc):
@@ -2733,7 +2740,7 @@ def test_windows_caps_the_thread_count_it_shares_out(monkeypatch):
     """The count is split among the groups, so it has to start from what this
     process could actually wait on. The Windows scheduler bounds that at 61
     handles, which CPUThreadCount already respects."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.create_library import run as Run
 
     monkeypatch.setattr(Run.os, "name", "nt")
     monkeypatch.setattr(Run.os, "cpu_count", lambda: 128)
@@ -2745,7 +2752,7 @@ def test_a_child_still_running_is_stopped_when_a_spawn_fails(monkeypatch):
     """A spawn can fail for reasons that have nothing to do with the build (fork
     under memory pressure). The groups already started would otherwise keep
     writing into the output directory after the parent has given up."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.create_library import run as Run
 
     terminated = []
 
@@ -2792,8 +2799,7 @@ def test_the_architecture_flag_is_replaced_whatever_its_spelling(monkeypatch):
 
 
 def _run_createlibrary_to_writes(
-    monkeypatch, tmp_path, arch, masterKey, mappingValue, shardNames=(), keepBuildTmp=True,
-    buildGfx1250v0=False,
+    monkeypatch, tmp_path, arch, masterKey, mappingValue, shardNames=(), keepBuildTmp=True
 ):
     """Drives ``run()`` all the way through the per-arch master/mapping write loops
     with the heavy steps stubbed, capturing every ``LibraryIO.write`` path and the
@@ -2810,10 +2816,10 @@ def _run_createlibrary_to_writes(
     """
     from unittest.mock import MagicMock
 
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.create_library.run as RunModule
 
     logic_dir = tmp_path / "logic"
-    logic_dir.mkdir(exist_ok=True)
+    logic_dir.mkdir()
     captured = {"writes": [], "wsk": {}}
     writeSignature = inspect.signature(RunModule.writeSolutionsAndKernelsTCL)
 
@@ -2865,7 +2871,6 @@ def _run_createlibrary_to_writes(
             "DisableAsmComments": False,
             "UseCompression": False,
             "KeepBuildTmp": keepBuildTmp,
-            "BuildGfx1250v0": buildGfx1250v0,
         },
     )
     monkeypatch.setattr(RunModule, "setVerbosity", lambda *a, **kw: None)
@@ -2893,7 +2898,7 @@ def _run_createlibrary_to_writes(
     monkeypatch.setattr(RunModule, "state", lambda x: x)
     monkeypatch.setattr(RunModule.LibraryIO, "write", _capture_write)
 
-    RunModule.run()
+    RunModule.main()
     return captured
 
 
@@ -2956,7 +2961,7 @@ def test_strict_build_hands_its_own_name_to_the_code_object_builders(
     command line verbatim and reads it back off the bundler's targets."""
     from unittest.mock import MagicMock
 
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.create_library.run as RunModule
 
     seen = {}
     srcSignature = inspect.signature(RunModule.buildSourceCodeObjectFiles)
@@ -3032,7 +3037,7 @@ def test_a_solo_build_clears_the_scratch_it_filled(
     through buildTmpDir, but the writer runs before the architecture list is
     narrowed to the supported subset -- narrowing drops the stepping, which would
     rename the directory and leave the real one behind."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpRoot
+    from tensilelite.create_library.run import buildTmpRoot
 
     captured = _run_createlibrary_to_writes(
         monkeypatch,
@@ -3065,7 +3070,7 @@ def test_a_fanned_out_build_clears_only_its_own_scratch(
     """End to end, through run() rather than the cleanup alone: this is the case
     where a sibling process is writing into the same parent, and a build that
     reclaimed the parent would delete the other stepping's kernels mid-build."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.create_library import run as Run
 
     sibling = Run.buildTmpRoot(tmp_path / "out") / "OUT"
     sibling.mkdir(parents=True)
@@ -3403,10 +3408,11 @@ def test_helper_cache_store_is_unchanged_for_ordinary_archs(tmp_path, monkeypatc
 # =========================================================================== #
 # The helper-kernel generators' auto-detect path.
 #
-# AMaxGenerator/SoftmaxGenerator/LayerNormGenerator take the architecture from
+# amax_generator/softmax_generator/layer_norm_generator take the architecture from
 # --arch; when it is missing they fall back to asking the device. That branch
 # lives in `if __name__ == '__main__'`, so it is only reachable by running the
-# script, which is why these spawn one rather than importing it.
+# module as a script, which is why these spawn one (`python -m`, the way the
+# device-library build runs them) rather than importing it.
 # =========================================================================== #
 _TENSILELITE = Path(__file__).resolve().parents[3]
 
@@ -3440,7 +3446,7 @@ def _rocmShimReporting(tmp_path, arch):
 
 
 @pytest.mark.parametrize(
-    "generator", ["AMaxGenerator.py", "SoftmaxGenerator.py", "LayerNormGenerator.py"]
+    "generator", ["amax_generator", "softmax_generator", "layer_norm_generator"]
 )
 @pytest.mark.parametrize("reported", [GFX1250, GFX1250_STRICT])
 def test_the_generators_build_for_the_architecture_the_device_reported(
@@ -3450,7 +3456,6 @@ def test_the_generators_build_for_the_architecture_the_device_reported(
     would build gfx1250 on either and hand the strict device code it rejects.
     The gfx1250 case is the regression fence: naming the architecture must not
     change what an ordinary architecture builds."""
-    script = _TENSILELITE / generator
     out = tmp_path / "kernel.s"
     env = dict(
         os.environ,
@@ -3459,7 +3464,7 @@ def test_the_generators_build_for_the_architecture_the_device_reported(
     )
 
     result = subprocess.run(
-        [sys.executable, str(script), "--arch", "", "-o", str(out)],
+        [sys.executable, "-m", f"tensilelite._extops.{generator}", "--arch", "", "-o", str(out)],
         env=env,
         capture_output=True,
         text=True,
@@ -3531,7 +3536,7 @@ def test_base_arch_name_strips_both_qualifier_and_predicate(bare, spec):
 
 
 @pytest.mark.parametrize(
-    "name", [n for n in _BARE_NAMES if n != "gfx1250-strict" and n not in ARCH_BUILD_ALIASES]
+    "name", [n for n in _BARE_NAMES if n != "gfx1250-strict"]
 )
 def test_only_the_stepping_reports_a_base_architecture(name):
     """A name that merely looks like a stepping must not answer.
@@ -3591,216 +3596,6 @@ def test_a_name_cannot_smuggle_a_path_separator():
     assert not re.fullmatch(r"[A-Za-z0-9_.+-]+", "gfx1250/..")
 
 
-# =========================================================================== #
-# gfx1250v0: gfx1250-strict's logic and capabilities, built for gfx1250 and
-# named gfx1250 in library/gfx1250v0/, for A0 parts the runtime reports as
-# gfx1250. Built only with --gfx1250v0, and only as its own fan-out child.
-# =========================================================================== #
-GFX1250V0 = "gfx1250v0"
-
-
-def test_alias_lookups_and_its_isa_partitioning():
-    from tensilelite.Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf
-
-    assert compilerTargetOf(GFX1250V0) == GFX1250
-    assert tuningArchOf(GFX1250V0) == GFX1250_STRICT
-    assert "-wmma-f4-insts" in deviceTargetFeaturesOf(GFX1250V0)
-    for spec in (GFX1250, GFX1250_STRICT, "gfx942:xnack+"):
-        assert (compilerTargetOf(spec), tuningArchOf(spec), deviceTargetFeaturesOf(spec)) == (spec, spec, [])
-    # Partitioning, scratch naming and the fan-out all rest on this: gfxToIsa's
-    # regex stops at the 'v', so the alias round-trips to gfx1250.
-    assert steppingArchOf(GFX1250V0) == GFX1250
-    assert GFX1250V0 not in expandAllArchitectures(["all"])
-    assert "__gfx1250v0__" not in archMacroNames(ISA_GFX1250)
-    assert isaCollisionFreeGroups([GFX1250, GFX1250_STRICT, GFX1250V0]) == [
-        [GFX1250], [GFX1250_STRICT], [GFX1250V0]
-    ]
-
-
-@pytest.mark.parametrize(
-    "arch, knob, child, expected",
-    [
-        (GFX1250, True, False, [[GFX1250], [GFX1250V0]]),
-        ("gfx942;" + GFX1250, True, False, [["gfx942", GFX1250], [GFX1250V0]]),
-        (GFX1250, False, False, None),
-        (GFX1250_STRICT, True, False, None),
-        (GFX1250, True, True, None),
-    ],
-    ids=["gfx1250", "gfx942-gfx1250", "flag-off", "strict", "fan-out-child"],
-)
-def test_gfx1250v0_is_added_only_on_request_for_bare_gfx1250(
-    monkeypatch, tmp_path, restore_global_parameters, arch, knob, child, expected
-):
-    if child:
-        monkeypatch.setenv("TENSILE_GROUP_BUILD", "1")
-    else:
-        monkeypatch.delenv("TENSILE_GROUP_BUILD", raising=False)
-    captured = _run_createlibrary(monkeypatch, tmp_path, arch, buildGfx1250v0=knob)
-
-    if expected:
-        assert captured["groups"] == expected
-    else:
-        assert "groups" not in captured
-        assert captured["cmdlineArchs"] == arch.split(";")
-
-
-def test_an_alias_named_in_architecture_is_rejected_before_codegen(
-    monkeypatch, tmp_path, restore_global_parameters, capsys
-):
-    monkeypatch.delenv("TENSILE_GROUP_BUILD", raising=False)
-    with pytest.raises(SystemExit):
-        _run_createlibrary(monkeypatch, tmp_path, GFX1250V0, buildGfx1250v0=True)
-    assert "request gfx1250 with --gfx1250v0" in capsys.readouterr().out
-
-
-def test_gfx1250v0_child_selects_strict_logic_under_strict_caps(
-    monkeypatch, tmp_path, restore_global_parameters
-):
-    from tensilelite.Common.GlobalParameters import globalParameters
-
-    monkeypatch.setenv("TENSILE_GROUP_BUILD", "1")
-    captured = _run_createlibrary(
-        monkeypatch, tmp_path, GFX1250V0, logicFiles=[_ARCH_LOGIC, _STRICT_LOGIC],
-        buildGfx1250v0=True,
-    )
-
-    assert captured["logicFiles"] == [_logicFileName(*_STRICT_LOGIC)]
-    assert captured["cmdlineArchs"] == [GFX1250V0]
-    assert globalParameters["StinkyTofuArchName"] == GFX1250_STRICT
-    info = captured["isaInfoMap"][ISA_GFX1250]
-    assert info.archCaps[CAP_MULTICAST] is False
-    assert info.asmCaps[CAP_FP4_32X16] is False
-
-
-def test_gfx1250v0_without_strict_logic_is_skipped(
-    monkeypatch, tmp_path, restore_global_parameters, capsys
-):
-    monkeypatch.setenv("TENSILE_GROUP_BUILD", "1")
-    captured = _run_createlibrary(
-        monkeypatch, tmp_path, GFX1250V0, logicFiles=[_ARCH_LOGIC], buildGfx1250v0=True
-    )
-
-    assert "cmdlineArchs" not in captured
-    assert "skipping gfx1250v0" in capsys.readouterr().out
-    assert not (tmp_path / "out" / "library" / GFX1250V0).exists()
-
-
-def test_gfx1250v0_emits_what_gfx1250_strict_emits(gfx1250_cxx):
-    """Strict caps reach both the Solution and the kernel writer's own overlay."""
-    strictSrc, strictErr, _ = _emit(GFX1250_STRICT, GFX1250_STRICT)
-    v0Src, v0Err, v0Caps = _emit(GFX1250V0, tuningArchOf(GFX1250V0))
-
-    assert strictErr == 0 and v0Err == 0
-    assert v0Caps[CAP_MULTICAST] is False
-    assert not any(m in v0Src for m in MULTICAST_MARKERS)
-    assert v0Src == strictSrc
-
-
-def test_gfx1250v0_parses_strict_logic_under_the_gfx1250_name(
-    monkeypatch, _restore_type_mismatch_collector
-):
-    from unittest.mock import MagicMock
-
-    import tensilelite.TensileCreateLibrary.Run as RunModule
-    from tensilelite import LibraryIO
-    from tensilelite.SolutionStructs.Problem import ProblemType
-
-    seen = {}
-
-    def _capture(_fn, it, *a, **kw):
-        seen["renames"] = next(iter(it))[-1]
-        return []
-
-    monkeypatch.setattr(RunModule, "ParallelMap2", _capture)
-    RunModule.generateLogicDataAndSolutions(
-        ["fake.yaml"],
-        {"Architecture": GFX1250V0, "CodeObjectVersion": "4", "LazyLibraryLoading": True,
-         "GenSolTable": False},
-        MagicMock(),
-        _stub_iim(),
-    )
-    assert seen["renames"] == {GFX1250_STRICT: GFX1250}
-
-    pt = {"OperationType": "GEMM", "DataType": "h", "DestDataType": "h",
-          "ComputeDataType": "s", "HighPrecisionAccumulate": True, "TransposeA": False,
-          "TransposeB": False, "UseBeta": True, "Batched": True}
-    data = {
-        "MinimumRequiredVersion": "5.0.0", "ScheduleName": GFX1250_STRICT,
-        "ArchitectureName": GFX1250_STRICT, "DeviceNames": ["Device 0000"],
-        "ProblemType": dict(ProblemType(pt, False).state), "Solutions": [],
-        "LibraryType": "FreeSize",
-    }
-    logic = LibraryIO.parseLibraryLogicData(
-        data, "x.yaml", MagicMock(), False, False, False, _stub_iim(), True, seen["renames"]
-    )
-
-    assert logic.architecture == GFX1250
-    assert all(n.endswith("_" + GFX1250) for n in logic.library.lazyLibraries)
-    assert logic.library.library.rows[0]["predicate"].value.value == GFX1250
-
-
-def test_gfx1250v0_writes_gfx1250_names_into_its_own_subtree(
-    monkeypatch, tmp_path, restore_global_parameters
-):
-    monkeypatch.setenv("TENSILE_GROUP_BUILD", "1")
-    (tmp_path / "logic").mkdir()
-    (tmp_path / "logic" / _logicFileName(*_STRICT_LOGIC)).write_text(
-        f"- {{MinimumRequiredVersion: 4.33.0}}\n- {GFX1250_STRICT}\n- {GFX1250_STRICT}\n"
-    )
-    shard = "TensileLibrary_lazy_" + GFX1250 + "_0"
-    captured = _run_createlibrary_to_writes(
-        monkeypatch, tmp_path, GFX1250V0, GFX1250, "prefix_" + GFX1250, shardNames=(shard,),
-        buildGfx1250v0=True,
-    )
-
-    writes = captured["writes"]
-    for name in (f"TensileLibrary_lazy_{GFX1250}", f"TensileLiteLibrary_lazy_{GFX1250}_Mapping", shard):
-        assert any(w.endswith(f"library/{GFX1250V0}/{name}") for w in writes), writes
-    assert not any(f"library/{GFX1250}/" in w or f"library/{GFX1250_STRICT}/" in w for w in writes)
-
-
-def test_gfx1250v0_code_objects_are_gfx1250_named_in_its_own_subtree(tmp_path, monkeypatch):
-    from unittest.mock import MagicMock
-
-    from tensilelite.Toolchain.Assembly import buildAssemblyCodeObjectFiles
-
-    bundler = MagicMock()
-    coFiles = buildAssemblyCodeObjectFiles(
-        MagicMock(), bundler, [{"ISA": ISA_GFX1250, "BaseName": "k0"}], tmp_path, tmp_path,
-        compress=True, archNames={ISA_GFX1250: GFX1250V0},
-    )
-    assert [str(c.relative_to(tmp_path)) for c in coFiles] == [f"{GFX1250V0}/TensileLibrary_{GFX1250}.co"]
-    assert bundler.compress.call_args[0][2] == GFX1250
-
-    coPaths = _run_build_source(tmp_path, monkeypatch, GFX1250, [GFX1250V0])
-    assert [p for p in coPaths if p.endswith(f"{GFX1250V0}/Kernels.so-000-{GFX1250}.hsaco")] == coPaths
-
-
-def test_gfx1250v0_assembles_and_compiles_for_gfx1250_with_strict_features(monkeypatch):
-    from tensilelite.Toolchain import Component as ComponentMod
-
-    captured = []
-    monkeypatch.setattr(ComponentMod, "_getVersion", lambda *a, **k: None)
-    monkeypatch.setattr(ComponentMod, "_invoke", lambda args, desc: captured.append([str(a) for a in args]))
-    assembler = ComponentMod.Assembler(Path("amdclang++"), 5)
-    compiler = ComponentMod.Compiler(Path("amdclang++"), "sha1")
-    assembler(GFX1250V0, 32, "k.s", "k.o")
-    assembler(GFX1250_STRICT, 32, "k.s", "k.o")
-    compiler("inc", [GFX1250V0], "k.cpp", "k.o")
-    compiler("inc", [GFX1250_STRICT], "k.cpp", "k.o")
-    v0Asm, strictAsm, v0Cc, strictCc = captured
-
-    def _features(args, flag):
-        return [args[i + 3] for i, a in enumerate(args) if a == flag and args[i + 1] == "-target-feature"]
-
-    expected = ["+needs-aligned-2addr-lds", "-wmma-f4-insts", "-block16-cvt-scale-insts"]
-    assert "-mcpu=gfx1250" in v0Asm and _features(v0Asm, "-Xclangas")[1:] == expected
-    assert "-mcpu=gfx1250-strict" in strictAsm and _features(strictAsm, "-Xclangas") == ["+real-true16"]
-    assert "--offload-arch=gfx1250" in v0Cc and _features(v0Cc, "-Xclang") == expected
-    assert "--offload-arch=gfx1250-strict" in strictCc and not _features(strictCc, "-Xclang")
-    assert not any(GFX1250V0 in a for a in v0Asm + v0Cc)
-
-
 # ``Architecture:`` beside a detected name. The enumerator reads the hardware,
 # and gfx1250 and gfx1250:xnack- are one chip under two driver configurations,
 # so it reports the bare name for both -- the config is the only place the mode
@@ -3808,7 +3603,7 @@ def test_gfx1250v0_assembles_and_compiles_for_gfx1250_with_strict_features(monke
 
 
 def _fromConfig(configArchitecture, isaList, archNames):
-    from tensilelite.Tensile import archNamesFromConfig
+    from tensilelite.run import archNamesFromConfig
 
     return archNamesFromConfig(configArchitecture, isaList, list(archNames))
 
@@ -3876,7 +3671,7 @@ def _iim_with_replay_on():
     return {ISA_GFX1250: IsaInfo({"SupportedISA": True}, {CAP_XNACK_REPLAY: True}, {}, {})}
 
 
-@pytest.mark.parametrize("spec", ["gfx1250:xnack-", "gfx1250-strict:xnack-", "gfx1250v0:xnack-"])
+@pytest.mark.parametrize("spec", ["gfx1250:xnack-", "gfx1250-strict:xnack-"])
 def test_xnack_minus_clears_replay(spec):
     iim = _iim_with_replay_on()
     applyArchCapOverrides(iim, [spec])
@@ -3886,7 +3681,7 @@ def test_xnack_minus_clears_replay(spec):
 def test_xnack_minus_layers_on_top_of_the_stepping_deltas():
     """Both layers land: the stepping's own caps and the xnack mode."""
     iim = _iim_with_replay_on()
-    applyArchCapOverrides(iim, ["gfx1250v0:xnack-"])
+    applyArchCapOverrides(iim, ["gfx1250-strict:xnack-"])
     caps = iim[ISA_GFX1250]
     assert caps.archCaps[CAP_XNACK_REPLAY] is False
     assert caps.archCaps[CAP_MULTICAST] is False
@@ -3969,32 +3764,14 @@ def test_a_target_refused_for_another_reason_stays_refused(monkeypatch):
     assert compilerTargetOf("gfx9999:xnack-", compiler) == "gfx9999:xnack-"
 
 
-def test_an_unqualified_build_alias_never_consults_the_compiler(monkeypatch):
-    """An unqualified alias names its own compiler target outright, so there is
-    nothing to ask about."""
+def test_without_a_compiler_every_spec_is_left_alone():
+    """No compiler to ask means nothing is probed and nothing dropped. The
+    toolchain characterization stubs rely on this to name files without a
+    subprocess."""
+    from tensilelite.Common.Architectures import compilerTargetOf
 
-    def refuse_everything(compiler, targetId):
-        raise AssertionError("the probe should not run for an unqualified alias")
-
-    import tensilelite.Common.Architectures as Arch
-
-    monkeypatch.setattr(Arch, "_targetIdAccepted", refuse_everything)
-    assert Arch.compilerTargetOf(GFX1250V0, "/stand-in/amdclang++") == GFX1250
-
-
-def test_a_build_alias_carries_the_qualifier_it_was_asked_with(monkeypatch):
-    """Only the base name is the alias's to replace. A qualifier names a driver
-    configuration, which the alias says nothing about, so it has to reach the
-    target the alias names -- and is then put to the compiler like any other."""
-    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: True)
-    assert compilerTargetOf(f"{GFX1250V0}:xnack-", compiler) == f"{GFX1250}:xnack-"
-
-
-def test_a_build_alias_falls_back_to_the_bare_target(monkeypatch):
-    """Where the qualified form is refused, the alias lands on its bare target,
-    which is what it resolves to on a toolchain without the qualified target."""
-    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: "xnack" not in t)
-    assert compilerTargetOf(f"{GFX1250V0}:xnack-", compiler) == GFX1250
+    for spec in (GFX1250, GFX1250_STRICT, "gfx942:xnack+", "gfx1250:xnack-"):
+        assert compilerTargetOf(spec) == spec
 
 
 # Capabilities come from a per-ISA cache, and some backends hand back the live
@@ -4059,62 +3836,12 @@ def test_overrides_do_not_outlive_the_build_that_asked_for_them(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# The xnack qualifier on the three paths that carry a build's identity onward:
-# the rename map read against logic files, the argument handed to the re-spawned
-# TensileCreateLibrary, and the benchmark cache key. Each drops the qualifier
-# somewhere it matters, and each drops it silently -- the bare name is a valid
-# name, so nothing downstream can tell it was meant to say more.
+# The xnack qualifier on the two paths that carry a build's identity onward:
+# the argument handed to the re-spawned TensileCreateLibrary, and the benchmark
+# cache key. Each drops the qualifier somewhere it matters, and each drops it
+# silently -- the bare name is a valid name, so nothing downstream can tell it
+# was meant to say more.
 # ---------------------------------------------------------------------------
-
-
-def _archRenames(archs):
-    from tensilelite.TensileCreateLibrary.Run import archRenamesOf
-
-    # No compiler: compilerTargetOf then resolves aliases and leaves every
-    # qualifier alone, which is the future a toolchain that accepts
-    # gfx1250:xnack- brings, and the case the keying has to be right for.
-    return archRenamesOf(archs, None)
-
-
-def test_arch_renames_are_keyed_by_the_name_logic_files_carry():
-    # gfx1250v0 is built as gfx1250 but tuned as gfx1250-strict, so its logic
-    # files say gfx1250-strict and that is what the key has to be.
-    assert _archRenames([GFX1250V0]) == {GFX1250_STRICT: GFX1250}
-
-
-def test_arch_renames_stay_bare_on_both_sides():
-    # The alias carries its request's qualifier to the compiler, but neither
-    # side of this map may show it: the key is matched against a logic file's
-    # declared name, and the value becomes a runtime hardware predicate that
-    # only a bare processor name can satisfy.
-    assert _archRenames([GFX1250V0 + ":xnack-"]) == {GFX1250_STRICT: GFX1250}
-    assert _archRenames([GFX1250V0]) == {GFX1250_STRICT: GFX1250}
-
-
-def test_arch_renames_qualifier_alone_is_not_a_rename():
-    # gfx1250:xnack- is tuned and built as the same architecture; only the
-    # driver configuration differs, and that is not a rename.
-    assert _archRenames([GFX1250 + ":xnack-"]) == {}
-    assert _archRenames([GFX1250_STRICT + ":xnack-"]) == {}
-
-
-def test_arch_renames_mutation_keying_on_the_requested_spec():
-    """The pre-fix map: both sides as requested, so neither side is usable."""
-    from tensilelite.Common.Architectures import compilerTargetOf, tuningArchOf
-
-    def mutated(archs):
-        return {
-            tuningArchOf(a): compilerTargetOf(a, None)
-            for a in archs
-            if tuningArchOf(a) != compilerTargetOf(a, None)
-        }
-
-    # A key no logic file can equal, so the rename never fires...
-    assert mutated([GFX1250_STRICT + ":xnack-"]) == {}
-    assert _archRenames([GFX1250_STRICT + ":xnack-"]) == {}
-    # ...and for the alias, a value no runtime predicate can match.
-    assert mutated([GFX1250V0 + ":xnack-"]) == {GFX1250_STRICT: GFX1250 + ":xnack-"}
-    assert _archRenames([GFX1250V0 + ":xnack-"]) == {GFX1250_STRICT: GFX1250}
 
 
 def test_rebuild_target_restores_the_qualifier_for_the_respawned_build():
@@ -4260,7 +3987,7 @@ def test_target_id_qualifiers_rejects_a_misspelling_or_a_repeat(spec, match):
 def test_config_architecture_rejects_a_misspelled_qualifier():
     """The config is where this matters: nothing downstream can catch it."""
     from tensilelite.Common.Architectures import ARCH_CAP_OVERRIDES
-    from tensilelite.Tensile import archNamesFromConfig
+    from tensilelite.run import archNamesFromConfig
 
     isaList = [ISA_GFX1250]
     assert archNamesFromConfig(GFX1250 + ":xnack-", isaList, []) == [GFX1250 + ":xnack-"]
@@ -4359,7 +4086,7 @@ def test_cap_overrides_reach_a_spec_with_a_second_qualifier():
 
 
 def test_config_rejects_two_entries_settling_the_detected_arch_differently():
-    from tensilelite.Tensile import archNamesFromConfig
+    from tensilelite.run import archNamesFromConfig
 
     isaList = [ISA_GFX1250]
     # Order decided the mode before: one spelling tuned with replay on, the
@@ -4404,7 +4131,7 @@ def test_config_allows_two_entries_with_the_same_effective_capabilities():
     them as distinct target IDs and the helper kernels differ, so picking one by
     position is the thing being refused.
     """
-    from tensilelite.Tensile import archNamesFromConfig
+    from tensilelite.run import archNamesFromConfig
 
     isa942 = [gfxToIsa("gfx942")]
     with pytest.raises(ValueError, match="different xnack modes"):

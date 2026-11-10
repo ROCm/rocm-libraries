@@ -23,7 +23,7 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_helpers.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_properties.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/sdpa_attributes.h>
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
+#include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
 {

@@ -163,7 +163,7 @@ def configMarks(filepath, rootDir, availableArchs, deviceTags=()):
 
     # A TensileLite config is a mapping (GlobalParameters/BenchmarkProblems/...).
     # Top-level sequences are library logic YAMLs (e.g. characterization data
-    # files), which are not standalone tensilelite.py configs. Signal the caller to
+    # files), which are not standalone run.py configs. Signal the caller to
     # skip them rather than crashing on doc["BenchmarkProblems"].
     if not isinstance(doc, dict):
         return None
@@ -331,7 +331,7 @@ def findConfigs(rootDir=None, availableArchs=None, deviceTags=None, splitWorlds=
             # Skip build client script
             if filename == "build_client.yaml":
                 continue
-            # filter out yamls in logic_yaml since they are not meant for tensilelite.py
+            # filter out yamls in logic_yaml since they are not meant for run.py
             elif filename.endswith('.yaml') and "logic_yaml" not in dirpath:
                 filepath = os.path.join(rootDir, dirpath, filename)
                 if not "test_data" in filepath:
