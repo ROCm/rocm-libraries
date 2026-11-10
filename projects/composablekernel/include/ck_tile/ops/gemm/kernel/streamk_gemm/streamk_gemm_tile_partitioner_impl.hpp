@@ -7,11 +7,12 @@ namespace ck_tile {
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::StreamKTilePartitionerBase(
-    index_t m, index_t n, index_t k, index_t max_active_wgs)
+    index_t m, index_t n, index_t k, index_t max_active_wgs, index_t batch_count)
     : max_active_wgs_{max_active_wgs}, n_{n}, k_{k}
 {
     iters_per_tile_    = integer_divide_ceil(k, KPerBlock);
-    num_tiles_         = integer_divide_ceil(m, MPerBlock) * integer_divide_ceil(n_, NPerBlock);
+    tiles_per_batch_   = integer_divide_ceil(m, MPerBlock) * integer_divide_ceil(n_, NPerBlock);
+    num_tiles_         = tiles_per_batch_ * batch_count;
     remainder_along_k_ = k % KPerBlock;
 
     bool big_enough         = num_tiles_ > max_active_wgs_;
@@ -140,6 +141,15 @@ StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::get_tile_
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 CK_TILE_DEVICE auto
+StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::get_batch_tile_index(
+    index_t tile_idx) const noexcept -> tuple<index_t, index_t>
+{
+    const index_t i_batch = amd_wave_read_first_lane(tile_idx / tiles_per_batch_);
+    return make_tuple(i_batch, amd_wave_read_first_lane(tile_idx - i_batch * tiles_per_batch_));
+}
+
+template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
+CK_TILE_DEVICE auto
 StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::get_output_tile_index(
     index_t tile_idx) const noexcept -> tuple<index_t, index_t>
 {
@@ -173,6 +183,14 @@ StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::get_num_t
     const noexcept
 {
     return num_tiles_;
+}
+
+template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
+CK_TILE_HOST_DEVICE index_t
+StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::get_tiles_per_batch()
+    const noexcept
+{
+    return tiles_per_batch_;
 }
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
@@ -381,8 +399,13 @@ struct StreamKTilePartitioner;
 // child class for Persistent Tile Partitioner
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>::StreamKTilePartitioner(
-    ck_tile::index_t m, ck_tile::index_t n, ck_tile::index_t k, ck_tile::index_t max_active_wgs)
-    : StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>(m, n, k, max_active_wgs)
+    ck_tile::index_t m,
+    ck_tile::index_t n,
+    ck_tile::index_t k,
+    ck_tile::index_t max_active_wgs,
+    ck_tile::index_t batch_count)
+    : StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>(
+          m, n, k, max_active_wgs, batch_count)
 { // inherit from base constructor
     dp_tiles_per_cta_ = this->dp_tiles_ / this->max_active_wgs_;
     extra_dp_tiles_   = this->dp_tiles_ % this->max_active_wgs_;
@@ -422,8 +445,13 @@ StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>::get_ext
 // child class for Non-Persistent Tile Partitioner
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>::StreamKTilePartitioner(
-    ck_tile::index_t m, ck_tile::index_t n, ck_tile::index_t k, ck_tile::index_t max_active_wgs)
-    : StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>(m, n, k, max_active_wgs)
+    ck_tile::index_t m,
+    ck_tile::index_t n,
+    ck_tile::index_t k,
+    ck_tile::index_t max_active_wgs,
+    ck_tile::index_t batch_count)
+    : StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>(
+          m, n, k, max_active_wgs, batch_count)
 { // inherit from base constructor
     dp_ctas_            = this->dp_tiles_;
     dp_start_block_idx_ = 0;
