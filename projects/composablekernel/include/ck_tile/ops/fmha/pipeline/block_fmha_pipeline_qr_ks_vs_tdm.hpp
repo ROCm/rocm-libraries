@@ -110,9 +110,6 @@ struct BlockFmhaPipelineQRKSVSTdm
     // fp8 O goes to global through LDS and one TDM store per wave (the kernel's tdm_store_2d),
     // so no per-lane O address is carried through the mainloop.
     static constexpr bool kTdmOStore = is_any_of<KDataType, fp8_t, bf8_t>::value;
-    // Edge-tile masking selects -INF through VGPR keep bits instead of per-element lane-mask
-    // predicates, which fill the SGPR file on causal/mask kernels.
-    static constexpr bool kMaskByBits = is_any_of<KDataType, fp8_t, bf8_t>::value;
     // fp8 casts and sums P one M band at a time (MakePForGemm1AndRowSum).
     static constexpr bool kBandedPCast = is_any_of<KDataType, fp8_t, bf8_t>::value;
 
@@ -2646,30 +2643,15 @@ struct BlockFmhaPipelineQRKSVSTdm
                     mask.IsEdgeTile(q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
                 if(need_perpixel_check)
                 {
-                    if constexpr(kMaskByBits)
-                    {
-                        set_tile_unless_kept(
-                            s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
-                                const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                                if constexpr(kHasSink)
-                                    return mask.GetInSinkBoundBits(row, col);
-                                else
-                                    return mask.GetInBoundBits(row, col);
-                            });
-                    }
-                    else
-                    {
-                        set_tile_if(
-                            s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
-                                const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                                if constexpr(kHasSink)
-                                    return mask.IsOutOfSinkBound(row, col);
-                                else
-                                    return mask.IsOutOfBound(row, col);
-                            });
-                    }
+                    set_tile_if(
+                        s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
+                            const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                            if constexpr(kHasSink)
+                                return mask.IsOutOfSinkBound(row, col);
+                            else
+                                return mask.IsOutOfBound(row, col);
+                        });
                 }
             }
 
