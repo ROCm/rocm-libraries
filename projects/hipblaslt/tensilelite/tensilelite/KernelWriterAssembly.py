@@ -25210,14 +25210,12 @@ class KernelWriterAssembly(KernelWriter):
   def gl2PrefetchTpList(self, kernel, tPA, tPB):
     """The tensors the GL2 prefetch warms L2 for.
 
-    The RAP reuse copy loads neither A nor its scales -- they stay resident -- so
-    prefetching them only spends L2 requests, and HBM bandwidth when the lines
-    have been evicted, on data the tile never reads.
+    The RAP reuse copy loads neither the resident operand nor its scales -- A for
+    RAP 1, B for RAP 2 -- so prefetching them only spends L2 requests, and HBM
+    bandwidth when the lines have been evicted, on data the tile never reads.
     """
     tpList = mxIssueTpList(kernel, tPA, tPB, includeMetadata=True)
-    if self.rapSkipsResidentLoads(kernel, "A"):
-      tpList = [tp for tp in tpList if tp["tensorChar"] not in ("A", "MXSA")]
-    return tpList
+    return [tp for tp in tpList if not self.rapSkipsResidentLoads(kernel, tp["tensorChar"])]
 
   def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Addresses Calculation")
@@ -25262,12 +25260,14 @@ class KernelWriterAssembly(KernelWriter):
     mod.addComment("GL2 Prefetch Skip PGR")
     comp = GL2PrefetchLoad.find(self)
     prefetchA = not self.rapSkipsResidentLoads(kernel, "A")
+    prefetchB = not self.rapSkipsResidentLoads(kernel, "B")
     if prefetchA:
       mod.add(comp.skipPGR(self, kernel, tPA))
-    mod.add(comp.skipPGR(self, kernel, tPB))
+    if prefetchB:
+      mod.add(comp.skipPGR(self, kernel, tPB))
     if kernel["ProblemType"]["MXBlockA"] and prefetchA:
       mod.add(comp.skipPGR(self, kernel, tPA["MX"]))
-    if kernel["ProblemType"]["MXBlockB"]:
+    if kernel["ProblemType"]["MXBlockB"] and prefetchB:
       mod.add(comp.skipPGR(self, kernel, tPB["MX"]))
     if kernel["enableTDMMetadata"]:
       mod.add(comp.skipPGR(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
