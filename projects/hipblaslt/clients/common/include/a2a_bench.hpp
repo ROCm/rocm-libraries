@@ -314,17 +314,8 @@ namespace hipblaslt_bench
         return mismatches == 0;
     }
 
-    inline bool fill_operands(const LauncherEnv& env, const Arguments& arg, RankResources& res)
+    inline bool fill_hpl(const LauncherEnv& env, const Arguments& arg, RankResources& res)
     {
-        if(res.collective == Collective::A2AGemm)
-        {
-            const std::vector<hipblasLtBfloat16> a
-                = a2a_gemm_values(size_t(arg.K[0]) * arg.M[0], env.rank, -1);
-            CHECK_HIP_RC(
-                hipMemcpy(res.dA, a.data(), a.size() * sizeof(a[0]), hipMemcpyHostToDevice));
-            return a2a_gemm_write_input(env, arg, res, 0);
-        }
-
         std::vector<hipblasLtBfloat16> hostA(size_t(arg.K[0]) * arg.M[0]);
         std::vector<hipblasLtBfloat16> hostB(size_t(arg.K[0]) * arg.N[0]);
 
@@ -342,6 +333,19 @@ namespace hipblaslt_bench
                                hostB.size() * sizeof(hipblasLtBfloat16),
                                hipMemcpyHostToDevice));
         return true;
+    }
+
+    inline bool fill_operands(const LauncherEnv& env, const Arguments& arg, RankResources& res)
+    {
+        if(res.collective == Collective::A2AGemm && (arg.norm_check || arg.allclose_check))
+        {
+            const std::vector<hipblasLtBfloat16> a
+                = a2a_gemm_values(size_t(arg.K[0]) * arg.M[0], env.rank, -1);
+            CHECK_HIP_RC(
+                hipMemcpy(res.dA, a.data(), a.size() * sizeof(a[0]), hipMemcpyHostToDevice));
+            return a2a_gemm_write_input(env, arg, res, 0);
+        }
+        return fill_hpl(env, arg, res);
     }
 
     // Rank s hands peer p the feature shard [p*shard, (p+1)*shard) of all its
@@ -439,8 +443,11 @@ namespace hipblaslt_bench
         if(res.collective == Collective::A2AGemm)
         {
             CHECK_HIP_RC(hipMalloc(&res.dGather, bytesB));
-            CHECK_HIP_RC(hipMalloc(&res.dRefB, bytesB));
-            CHECK_HIP_RC(hipMalloc(&res.dRefD, bytesD));
+            if(arg.norm_check || arg.allclose_check)
+            {
+                CHECK_HIP_RC(hipMalloc(&res.dRefB, bytesB));
+                CHECK_HIP_RC(hipMalloc(&res.dRefD, bytesD));
+            }
         }
         else
         {
@@ -583,7 +590,7 @@ namespace hipblaslt_bench
             &kWorkspaceSize,
             sizeof(kWorkspaceSize)));
 
-        if(a2aGemm)
+        if(a2aGemm && (arg.norm_check || arg.allclose_check))
         {
             CHECK_LT_RC(hipblasLtMatmulDescCreate(&res.plainMm, HIPBLAS_COMPUTE_32F, HIP_R_32F));
             CHECK_LT_RC(hipblasLtMatmulDescSetAttribute(

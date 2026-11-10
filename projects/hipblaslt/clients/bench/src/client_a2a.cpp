@@ -201,7 +201,7 @@ try
                 if(hipStreamSynchronize(res.stream) != hipSuccess || !check(i))
                     verified = false;
             }
-            if(!writeInput(0))
+            if(!agreement.agree(fill_hpl(env, arg, res), std::logical_and<>{}))
                 return 1;
         }
 
