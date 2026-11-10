@@ -1130,17 +1130,17 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8DescaleThatIsNotADeviceTens
         = {{"virtual", [](TensorAttributesT& tensor) { tensor.virtual_ = true; }},
            {"pass-by-value",
             [](TensorAttributesT& tensor) { tensor.is_runtime_pass_by_value = true; }}};
-    for(const std::string name : {"descale_q", "descale_k", "descale_v"})
+    for(const char* name : {"descale_q", "descale_k", "descale_v"})
     {
         for(const auto& entry : mutations)
         {
             const std::string& mutationName = entry.first;
             const auto& mutation = entry.second;
-            SCOPED_TRACE(mutationName + " " + name.c_str());
+            SCOPED_TRACE(mutationName + " " + name);
             const GraphTest test{
                 mutateGraph(createSdpaFwdFp8Graph(/*withDescale=*/true),
                             [&](GraphT& graph) { mutation(findTensor(graph, name)); }),
-                mutationName + " " + name.c_str()};
+                mutationName + " " + name};
             EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
         }
     }
