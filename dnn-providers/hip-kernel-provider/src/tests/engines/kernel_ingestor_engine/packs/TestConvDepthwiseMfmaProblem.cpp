@@ -157,6 +157,9 @@ TEST(TestConvDepthwiseMfmaGraphMatch, ServesUnitStrideChannelsLast16Bit)
         EXPECT_TRUE(graphAccepts(depthwise(32, {9, 20}, {3, 3}, DataType::BFLOAT16), direction));
         // 1-D runs as height 1.
         EXPECT_TRUE(graphAccepts(depthwise(32, {40}, {5}), direction));
+        auto channelsFirst = baseShape();
+        channelsFirst.channelsLast = false;
+        EXPECT_TRUE(graphAccepts(channelsFirst, direction));
     }
 }
 
@@ -174,9 +177,6 @@ TEST(TestConvDepthwiseMfmaGraphMatch, DeclinesWhatTheKernelDoesNotRun)
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         EXPECT_FALSE(graphAccepts(depthwise(32, {9, 20}, {3, 3}, DataType::FLOAT), direction));
-        auto channelsFirst = baseShape();
-        channelsFirst.channelsLast = false;
-        EXPECT_FALSE(graphAccepts(channelsFirst, direction));
         auto mixed = baseShape();
         mixed.stride = {1, 2};
         EXPECT_FALSE(graphAccepts(mixed, direction));
@@ -228,11 +228,56 @@ TEST(TestConvDepthwiseMfmaKernelMatch, DeclinesAnUnknownDirection)
     EXPECT_FALSE(matchesKernel(pack, fixture.context(), kernelOf(fields), *bound));
 }
 
-TEST(TestConvDepthwiseMfmaKernelMatch, DeclinesAnotherLayout)
+ConvShape channelsFirst(int64_t channels = 32)
+{
+    auto shape = depthwise(channels, {9, 20}, {3, 3});
+    shape.channelsLast = false;
+    return shape;
+}
+
+TEST(TestConvDepthwiseMfmaKernelMatch, LayoutMustMatchTheProblems)
 {
     Fields fields;
     fields.config.layout = "NCHW";
     EXPECT_FALSE(admits(fields));
+    EXPECT_TRUE(admits(fields, channelsFirst()));
+    fields.config.layout = "NHWC";
+    EXPECT_FALSE(admits(fields, channelsFirst()));
+    fields.config.layout = "NDHWC";
+    EXPECT_FALSE(admits(fields));
+    EXPECT_FALSE(admits(fields, channelsFirst()));
+}
+
+TEST(TestConvDepthwiseMfmaKernelMatch, ChannelsFirstTakesAnyChannelCount)
+{
+    // A wave owns a channel pair; an odd count leaves the last pair half empty.
+    Fields fields;
+    fields.config.layout = "NCHW";
+    fields.config.waves = 4;
+    EXPECT_TRUE(admits(fields, channelsFirst(3)));
+    EXPECT_TRUE(admits(fields, channelsFirst(1)));
+    fields.config.waves = 3;
+    EXPECT_FALSE(admits(fields, channelsFirst(6)));
+}
+
+TEST(TestConvDepthwiseMfmaKernelMatch, ChannelsFirstFoldsUpToEightImages)
+{
+    Fields fields;
+    fields.config.layout = "NCHW";
+    for(const int64_t fold : {1, 2, 4, 8})
+    {
+        fields.config.fold = fold;
+        EXPECT_TRUE(admits(fields, channelsFirst())) << fold;
+    }
+    for(const int64_t fold : {0, 3, 16})
+    {
+        fields.config.fold = fold;
+        EXPECT_FALSE(admits(fields, channelsFirst())) << fold;
+    }
+    // Channels-last stops at 4.
+    Fields last;
+    last.config.fold = 8;
+    EXPECT_FALSE(admits(last));
 }
 
 TEST(TestConvDepthwiseMfmaKernelMatch, AtomGatesTheDevice)
@@ -431,6 +476,24 @@ TEST(TestConvDepthwiseMfmaLaunch, StrideTwoStagesTwiceTheColumns)
     EXPECT_EQ(launch->grid, 2 * 1 * 1 * 2);
     // 2 x 32 + 4 x 2 staged columns and 32 output columns, two of each, 16 B per wave.
     EXPECT_EQ(conv_depthwise_mfma::mfmaLdsBytes(fields.config), 2 * (72 + 32) * 4 * 16);
+}
+
+TEST(TestConvDepthwiseMfmaLaunch, ChannelsFirstGridsChannelPairsAndClaimsNoLds)
+{
+    Fields fields;
+    fields.config.layout = "NCHW";
+    fields.config.waves = 2;
+    fields.config.fold = 4;
+    fields.config.rows = 4;
+    auto shape = channelsFirst(7);
+    shape.n = 5;
+    shape.input = {9, 40};
+    const auto launch = launchOf(fields, shape);
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_EQ(launch->block, 128);
+    // 2 image groups x 3 row chunks x 2 column tiles (32 wide) x 2 blocks of 2 channel pairs.
+    EXPECT_EQ(launch->grid, 2 * 3 * 2 * 2);
+    EXPECT_EQ(conv_depthwise_mfma::mfmaLdsBytes(fields.config), 0);
 }
 
 TEST(TestConvDepthwiseMfmaLaunch, BackwardDataRunsTheReflectedForwardForm)

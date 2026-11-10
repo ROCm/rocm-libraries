@@ -19,7 +19,7 @@
  *
  * The problem is the VALU depthwise engines' (parseDepthwiseValuProblem): forward, and unit-stride
  * backward data as the forward convolution of dy with the filter reflected. These kernels serve
- * its 2-D channels-last, unit-dilation 16-bit form at stride 1 or (forward) 2. Kept apart from the dispatch code
+ * its 2-D unit-dilation 16-bit form, channels-last or channels-first, at stride 1 or (forward) 2. Kept apart from the dispatch code
  * so every gate can be tested without a device.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_depthwise_mfma
@@ -28,6 +28,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine::conv_depthwise_mfma
 /// One kernel config: the KMD fields minus dtype and direction.
 struct MfmaConfig
 {
+    /// "NHWC" (the channel-diagonal core) or "NCHW" (the channel-pair core).
     std::string layout;
     /// The MFMA's K: 32 (v_mfma_f32_16x16x32, gfx950) or 16 (v_mfma_f32_16x16x16, gfx908+).
     int64_t atom = 0;
@@ -36,11 +37,11 @@ struct MfmaConfig
     int64_t kw = 0;
     /// The stride along both axes: 1, or 2 (forward only).
     int64_t stride = 0;
-    /// Waves per block, 8 channels each.
+    /// Waves per block: 8 channels each (NHWC) or a channel pair each (NCHW).
     int64_t waves = 0;
     /// Input rows in flight.
     int64_t depth = 0;
-    /// Images sharing the 32 output columns.
+    /// Images sharing the MFMA's output columns (32 NHWC, 128 NCHW): 1, 2, 4 (or 8, NCHW).
     int64_t fold = 0;
     /// Output rows a block streams.
     int64_t rows = 0;
@@ -57,7 +58,7 @@ struct MfmaLaunch
     bool flip = false;
 };
 
-/// LDS bytes a config's block claims (the kernel's two input and two output rows).
+/// LDS bytes a config's block claims: NHWC's two input and two output rows; NCHW none.
 int64_t mfmaLdsBytes(const MfmaConfig& config);
 
 /**

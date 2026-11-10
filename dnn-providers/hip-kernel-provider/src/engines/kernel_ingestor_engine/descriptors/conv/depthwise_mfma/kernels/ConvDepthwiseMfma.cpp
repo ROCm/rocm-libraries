@@ -1,9 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Unit-stride 2-D depthwise convolution on CDNA matrix cores, channels-last, 16-bit.
+// 2-D depthwise convolution at stride 1 or 2 on CDNA matrix cores, 16-bit. Channels-last runs
+// the channel-diagonal core below; channels-first the channel-pair core (depthwiseMfmaNchw).
 //
-// A wave owns 8 channels and 32 output columns and streams down the output rows, holding one
+// Channels-last: a wave owns 8 channels and 32 output columns and streams down the output rows, holding one
 // 16 x 16 fp32 accumulator per filter row as a ring (the accumulator of output row y collects
 // the input rows y - pad .. y - pad + kh - 1, then leaves). One MFMA multiplies
 //
@@ -26,13 +27,15 @@
 // images.
 //
 //   CONV_DWM_TYPE    _Float16 or __bf16
+//   CONV_DWM_LAYOUT  0: channels-last (NHWC), 1: channels-first (NCHW, depthwiseMfmaNchw)
 //   CONV_DWM_ATOM    32: v_mfma_f32_16x16x32 f16/bf16 (gfx950); 16: v_mfma_f32_16x16x16 f16 /
 //                    bf16_1k (gfx908 f16, gfx90a, gfx94x, gfx950)
 //   CONV_DWM_KH/KW   filter extent
 //   CONV_DWM_STRIDE  the stride along both axes (1 or 2; backward data runs at 1)
-//   CONV_DWM_WAVES   waves per block (8 channels each)
+//   CONV_DWM_WAVES   waves per block (8 channels each; channels-first: a channel pair each)
 //   CONV_DWM_DEPTH   input rows in flight
-//   CONV_DWM_FOLD    images sharing the 32 output columns (1, 2 or 4)
+//   CONV_DWM_FOLD    images sharing the output columns (32 channels-last: 1, 2 or 4; 128
+//                    channels-first: 1, 2, 4 or 8)
 //   CONV_DWM_FLIP    1 reads the filter reflected
 
 // Embedded headers are keyed by bare file name (src/cmake/KernelEmbedding.cmake).
@@ -49,6 +52,9 @@
 #endif
 #ifndef CONV_DWM_KW
 #error "CONV_DWM_KW must give the filter width"
+#endif
+#ifndef CONV_DWM_LAYOUT
+#define CONV_DWM_LAYOUT 0
 #endif
 #ifndef CONV_DWM_STRIDE
 #define CONV_DWM_STRIDE 1
@@ -344,6 +350,217 @@ drained:
     ostore((oy1 - oy0 - 1) & 1, oy1 - 1);
 }
 
+// Channels-first: the MFMA runs channel pairs along K instead of the channel diagonal.
+//
+//   A (16 x KA) = input: row j, k = P c + p (channel c of the pair, position p, P = KA / 2)
+//                 holds channel c at input column S 8j + p + P pass -- a lane's elements are
+//                 consecutive columns of one channel row, so it loads them straight from global
+//                 memory (one 16- or 8-byte load, unaligned: the CDNA buffer path allows it)
+//   B (KA x 16) = taps: column n = 8 c' + q, B[P c + p][8c' + q] = (c == c') w[c'][P pass + p - S q]
+//
+// so D[j][8c' + q] is channel c' at output column 8j + q: one MFMA covers 2 channels x 128 columns
+// and every tap of a filter row up to kw = P + 1 - 7 S in one pass. A wave owns one channel pair
+// and needs no LDS: its rows are contiguous in memory, so the 16 lanes of a column block read
+// one run. FOLD images share the 16 column blocks (16 / FOLD each) for narrow images. Channels
+// past c, columns past the row and rows past the image read zero through masks and
+// out-of-range offsets; outputs past them store to an out-of-range offset.
+template <class T, int KA, int KH, int KW, int S, int D, int F, bool FLIP>
+__device__ void depthwiseMfmaNchw(const ConvDepthwiseMfmaArgs& a)
+{
+    using Am = Atom<T, KA>;
+    typedef typename Am::frag frag;
+    constexpr int KPL = Am::KPL;
+    constexpr int P = KA / 2; // positions per channel per pass
+    constexpr int KWP = (KW + 7 * S + P - 1) / P; // passes: ceil((kw + 7 S) / P)
+    constexpr int JB = 16 / F; // column blocks per image segment
+    constexpr int SW = 8 * JB; // output columns per segment
+    constexpr int RING = (KH + S - 1) / S;
+    constexpr int U = lcm(S * RING, D);
+    constexpr int BIAS = 2 * S * RING * KH;
+    constexpr int NW = KPL / 2; // 32-bit words per fragment
+    typedef unsigned uw __attribute__((ext_vector_type(NW)));
+
+    const T* x = static_cast<const T*>(a.in);
+    const T* w = static_cast<const T*>(a.filter);
+    T* y = static_cast<T*>(a.out);
+    const int lane = threadIdx.x & 63, waves = blockDim.x >> 6;
+    const int pairBlocks = ((a.c + 1) / 2 + waves - 1) / waves;
+    const int wTiles = (a.wo + SW - 1) / SW;
+    int b = blockIdx.x;
+    // Wave-uniform (readfirstlane): the edge-row branch below must stay a scalar branch.
+    const int pair = __builtin_amdgcn_readfirstlane(b % pairBlocks * waves + (threadIdx.x >> 6));
+    b /= pairBlocks;
+    const int tx = b % wTiles;
+    b /= wTiles;
+    const int chk = b % a.chunks;
+    const int gi = b / a.chunks;
+    const int c0 = 2 * pair, x0 = tx * SW;
+    const int oy0 = chk * a.rows, oy1 = min(a.ho, oy0 + a.rows);
+    const int j = lane & 15, kb = lane >> 4;
+    const int f = j / JB, jl = j % JB;
+
+    // Taps: lane (n = 8 c' + q, kb) holds B[KPL kb .. + KPL - 1][n].
+    frag Bt[KH][KWP];
+    {
+        const int cq = j >> 3, q = j & 7;
+        const int cw = c0 + cq;
+#pragma unroll
+        for(int r = 0; r < KH; ++r)
+#pragma unroll
+            for(int ph = 0; ph < KWP; ++ph)
+#pragma unroll
+                for(int e = 0; e < KPL; ++e)
+                {
+                    const int k = KPL * kb + e, c = k / P, p = k % P;
+                    const int s = P * ph + p - S * q;
+                    T v = (T)0.0f;
+                    if(c == cq && s >= 0 && s < KW && cw < a.c)
+                        v = w[((long)cw * KH + (FLIP ? KH - 1 - r : r)) * KW
+                              + (FLIP ? KW - 1 - s : s)];
+                    Bt[r][ph][e] = v;
+                }
+    }
+
+    // Input: lane (j, kb) loads channel c0 + c, columns S (x0 + 8 jl) - pw + p0 + P pass.
+    const long planeI = (long)a.hi * a.wi, planeO = (long)a.ho * a.wo;
+    const long imgI = planeI * a.c, imgO = planeO * a.c;
+    const int nimg = min(F, a.n - gi * F);
+    const __amdgpu_buffer_rsrc_t xr
+        = __builtin_amdgcn_make_buffer_rsrc(const_cast<T*>(x + gi * F * imgI),
+                                            (short)0,
+                                            (int)(nimg * imgI * (long)sizeof(T)),
+                                            CONV_DWM_RSRC_FLAGS);
+    const __amdgpu_buffer_rsrc_t yr = __builtin_amdgcn_make_buffer_rsrc(
+        y + gi * F * imgO, (short)0, (int)(nimg * imgO * (long)sizeof(T)), CONV_DWM_RSRC_FLAGS);
+    const int cIn = (KPL * kb) / P, p0 = (KPL * kb) % P;
+    const bool chanIn = c0 + cIn < a.c && f < nimg;
+    unsigned inOff[KWP];
+    uw inMask[KWP];
+#pragma unroll
+    for(int ph = 0; ph < KWP; ++ph)
+    {
+        const int col = S * (x0 + 8 * jl) - a.pw + p0 + P * ph;
+        inOff[ph] = (unsigned)((f * imgI + (long)(c0 + cIn) * planeI + col) * (long)sizeof(T));
+        // Elements outside the row read a neighbour's data (or nothing): masked to zero.
+#pragma unroll
+        for(int e = 0; e < NW; ++e)
+        {
+            const bool lo = chanIn && col + 2 * e >= 0 && col + 2 * e < a.wi;
+            const bool hi = chanIn && col + 2 * e + 1 >= 0 && col + 2 * e + 1 < a.wi;
+            inMask[ph][e] = (lo ? 0x0000ffffu : 0u) | (hi ? 0xffff0000u : 0u);
+        }
+    }
+    const unsigned rowB = (unsigned)((long)a.wi * (long)sizeof(T));
+    // A lane's columns may run past its row on either side (padding, the tile's edge): the
+    // offsets reach into the neighbouring rows, whose elements the mask clears. The buffer
+    // (the block's images) answers a load that straddles either of its ends with zeros, valid
+    // elements included: rows that close to them -- the first plane's top rows (iy wi < pw) and
+    // the last channel pair's bottom rows -- load element by element.
+    const bool firstPair = c0 == 0, lastPair = c0 + 2 >= a.c;
+    // Raw words: the mask is applied where the MFMA reads them, so a load's wait stays there.
+    auto gload = [&](int iy, uw* d) {
+        const bool ok = iy >= 0 && iy < a.hi;
+        if((firstPair && iy >= 0 && (long)iy * a.wi < a.pw)
+           || (lastPair && iy < a.hi && (long)(a.hi - 1 - iy) * a.wi < KPL))
+        {
+#pragma unroll
+            for(int ph = 0; ph < KWP; ++ph)
+            {
+                const int col = S * (x0 + 8 * jl) - a.pw + p0 + P * ph;
+                const long start = f * imgI + (long)(c0 + cIn) * planeI + (long)iy * a.wi + col;
+                frag v;
+#pragma unroll
+                for(int e = 0; e < KPL; ++e)
+                {
+                    const bool in = ok && chanIn && col + e >= 0 && col + e < a.wi;
+                    const unsigned short h = __builtin_amdgcn_raw_buffer_load_b16(
+                        xr, in ? (unsigned)((start + e) * (long)sizeof(T)) : CONV_DWM_OOB, 0, 0);
+                    v[e] = __builtin_bit_cast(T, h);
+                }
+                d[ph] = __builtin_bit_cast(uw, v);
+            }
+            return;
+        }
+#pragma unroll
+        for(int ph = 0; ph < KWP; ++ph)
+        {
+            const unsigned o = ok ? inOff[ph] + (unsigned)iy * rowB : CONV_DWM_OOB;
+            if constexpr(NW == 4)
+                d[ph] = __builtin_amdgcn_raw_buffer_load_b128(xr, o, 0, 0);
+            else
+                d[ph] = __builtin_amdgcn_raw_buffer_load_b64(xr, o, 0, 0);
+        }
+    };
+
+    // Output: lane (n = 8 c' + q, rb) holds rows 4 rb .. + 3 (column blocks j) of column n.
+    const int cOut = j >> 3, q = j & 7, rb = kb;
+    unsigned outOff[4];
+#pragma unroll
+    for(int v = 0; v < 4; ++v)
+    {
+        const int jj = 4 * rb + v, fo = jj / JB, ox = x0 + 8 * (jj % JB) + q;
+        outOff[v]
+            = c0 + cOut < a.c && fo < nimg && ox < a.wo
+                  ? (unsigned)((fo * imgO + (long)(c0 + cOut) * planeO + ox) * (long)sizeof(T))
+                  : CONV_DWM_OOB;
+    }
+    const unsigned oRowB = (unsigned)((long)a.wo * (long)sizeof(T));
+    auto ostore = [&](const f4& acc, int oy) {
+        const bool ok = oy >= oy0 && oy < oy1;
+#pragma unroll
+        for(int v = 0; v < 4; ++v)
+        {
+            const T o = (T)acc[v];
+            __builtin_amdgcn_raw_buffer_store_b16(
+                __builtin_bit_cast(unsigned short, o),
+                yr,
+                ok && outOff[v] != CONV_DWM_OOB ? outOff[v] + (unsigned)oy * oRowB : CONV_DWM_OOB,
+                0,
+                0);
+        }
+    };
+
+    f4 acc[RING];
+#pragma unroll
+    for(int r = 0; r < RING; ++r)
+        acc[r] = f4{0.0f, 0.0f, 0.0f, 0.0f};
+    const int steps = S * (oy1 - oy0 - 1) + KH;
+    const int iyBase = S * oy0 - a.ph;
+    uw ring[D][KWP];
+#pragma unroll
+    for(int i = 0; i < D; ++i)
+        gload(iyBase + i, ring[i]);
+    for(int sb = 0;; sb += U)
+    {
+#pragma unroll
+        for(int t = 0; t < U; ++t)
+        {
+            const int s = sb + t;
+#pragma unroll
+            for(int r = 0; r < KH; ++r)
+            {
+                if((t - r + BIAS) % S != 0)
+                    continue;
+                const int slot = (t - r + BIAS) / S % RING;
+#pragma unroll
+                for(int ph = 0; ph < KWP; ++ph)
+                    acc[slot] = Am::mma(__builtin_bit_cast(frag, ring[t % D][ph] & inMask[ph]),
+                                        Bt[r][ph],
+                                        acc[slot]);
+            }
+            gload(iyBase + s + D, ring[t % D]);
+            if((t - (KH - 1) + BIAS) % S == 0)
+            {
+                const int done = (t - (KH - 1) + BIAS) / S % RING;
+                ostore(acc[done], oy0 + (s - (KH - 1)) / S);
+                acc[done] = f4{0.0f, 0.0f, 0.0f, 0.0f};
+            }
+            if(s + 1 >= steps)
+                return;
+        }
+    }
+}
+
 } // namespace conv_depthwise_mfma
 
 using ElementType = CONV_DWM_TYPE;
@@ -351,6 +568,7 @@ using ElementType = CONV_DWM_TYPE;
 extern "C" __global__ void __launch_bounds__(64 * CONV_DWM_WAVES)
     ConvDepthwiseMfma(ConvDepthwiseMfmaArgs args)
 {
+#if CONV_DWM_LAYOUT == 0
     conv_depthwise_mfma::depthwiseMfma<ElementType,
                                        CONV_DWM_ATOM,
                                        CONV_DWM_KH,
@@ -360,4 +578,14 @@ extern "C" __global__ void __launch_bounds__(64 * CONV_DWM_WAVES)
                                        CONV_DWM_DEPTH,
                                        CONV_DWM_FOLD,
                                        CONV_DWM_FLIP != 0>(args);
+#else
+    conv_depthwise_mfma::depthwiseMfmaNchw<ElementType,
+                                           CONV_DWM_ATOM,
+                                           CONV_DWM_KH,
+                                           CONV_DWM_KW,
+                                           CONV_DWM_STRIDE,
+                                           CONV_DWM_DEPTH,
+                                           CONV_DWM_FOLD,
+                                           CONV_DWM_FLIP != 0>(args);
+#endif
 }

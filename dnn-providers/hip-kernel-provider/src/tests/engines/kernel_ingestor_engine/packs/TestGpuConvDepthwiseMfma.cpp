@@ -39,7 +39,8 @@
  * skipped). The cases cover every catalog filter at 128 channels (every wave count), narrow and
  * odd extents against the 32-column tile and the folded images, a batch the fold does not
  * divide, channel counts of one wave, asymmetric and zero padding, unit-stride backward data (the
- * forward form with the filter reflected), true convolution, and stride 2 forward. A host-only test checks that
+ * forward form with the filter reflected), true convolution, stride 2 forward, and channels-first
+ * cases for its own core. A host-only test checks that
  * every config serves some case. The CPU reference is cross-correlation only, so true convolution
  * reflects the filter around it.
  */
@@ -295,6 +296,20 @@ std::vector<DeviceCase> deviceCases()
     auto convolution = depthwise(32, {17, 19}, {3, 3}, {1, 1}, {1, 1}, true);
     convolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"K3ConvolutionMode", convolution, FWD});
+    // Channels-first: every catalog filter, channel counts odd and below a pair, rows wider than
+    // a 128-column tile, the first plane's padding (reached before the buffer's start), folds
+    // of up to 8 images over a batch of 9.
+    const auto first = [](ConvShape shape) {
+        shape.channelsLast = false;
+        return shape;
+    };
+    cases.push_back({"NchwK3C5", first(depthwise(5, {13, 37}, {3, 3}, {1, 1}, {1, 1})), FWD});
+    cases.push_back({"NchwK5C3Wide", first(depthwise(3, {9, 150}, {5, 5}, {2, 2}, {1, 1})), FWD});
+    cases.push_back({"NchwK7C1", first(depthwise(1, {6, 5}, {7, 7}, {3, 3}, {1, 1})), FWD});
+    cases.push_back({"NchwK9C4", first(depthwise(4, {11, 12}, {9, 9}, {4, 4}, {1, 1})), FWD});
+    auto nchwBatch = first(depthwise(6, {7, 14}, {3, 3}, {1, 1}, {1, 1}));
+    nchwBatch.n = 9;
+    cases.push_back({"NchwK3N9", nchwBatch, FWD});
     // Unit-stride backward data runs the forward form (filter reflected): every case again.
     const size_t forwardCases = cases.size();
     for(size_t i = 0; i < forwardCases; ++i)
@@ -316,6 +331,13 @@ std::vector<DeviceCase> deviceCases()
     auto stridedUnpadded = strided(depthwise(64, {16, 66}, {3, 3}, {0, 0}, {1, 1}, true));
     stridedUnpadded.n = 3;
     cases.push_back({"S2K3Pad0N3", stridedUnpadded, FWD});
+    auto nchwStrided = strided(depthwise(3, {17, 300}, {3, 3}, {1, 1}, {1, 1}));
+    nchwStrided.channelsLast = false;
+    cases.push_back({"NchwS2K3C3", nchwStrided, FWD});
+    auto nchwStrided5 = strided(depthwise(5, {9, 31}, {5, 5}, {2, 2}, {1, 1}));
+    nchwStrided5.channelsLast = false;
+    nchwStrided5.n = 9;
+    cases.push_back({"NchwS2K5N9", nchwStrided5, FWD});
     return cases;
 }
 
@@ -371,7 +393,16 @@ void runCase(ConvShape shape, ConvDirection direction)
     {
         taps *= extent;
     }
-    const float accumulationBound = 1e-6f * static_cast<float>(taps);
+    float accumulationBound = 1e-6f * static_cast<float>(taps);
+    // gfx90a's fp16 MFMA flushes denormal inputs to zero (a hardware property, not this
+    // kernel's): each tap may lose up to the smallest normal fp16 times |w| <= 1.
+    if constexpr(std::is_same_v<T, Half>)
+    {
+        if(std::string(fixture.context().deviceProperties.gcnArchName).rfind("gfx90a", 0) == 0)
+        {
+            accumulationBound += 6.11e-5f * static_cast<float>(taps);
+        }
+    }
 
     const auto& handler = dispatchHandler(pack);
     int ran = 0;
