@@ -260,8 +260,9 @@ The hermetic suite
 changes only logic YAML triggers no TensileLite lane, and the build-wired `--check-all` is scoped to
 the architectures that pull-request builds target. `Component CI: hipBLASLt Logic Corpus`
 ([`component-ci-logic-corpus.yml`](../../../.github/workflows/component-ci-logic-corpus.yml)) closes
-both gaps. It runs on any change under `Tensile/Logic/`, the `TensileLogic` validators, or the corpus
-test plumbing, and runs `tox -e logic-corpus`: `TensileLogic --check-all --strict-known-bugs`, then
+both gaps. It runs on any change under `Tensile/Logic/`, the `TensileLogic` validators, the corpus
+test plumbing, or the SolutionUID codec (`tensilelite/SolutionIdGen.py`), and runs
+`tox -e logic-corpus`: `TensileLogic --check-all --strict-known-bugs`, then
 every `@needs_logic_corpus` test with `HIPBLASLT_REQUIRE_LOGIC_CORPUS=1`. The check covers the
 architectures whose logic the change touched, whether or not a pull-request build targets them, and
 the whole corpus when a validator or `known_bugs.yaml` changed or on a manual run. (The whole corpus

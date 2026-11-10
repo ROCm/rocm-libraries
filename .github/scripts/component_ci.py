@@ -49,8 +49,9 @@ COMPONENTS = {
     ],
     # The logic corpus is tuning data outside tensilelite/, so a change to it
     # alone triggers no TensileLite lane. This one validates the whole corpus
-    # and runs the unit tests that read it; the validator and the tests' corpus
-    # plumbing trigger it too.
+    # and runs the unit tests that read it; the validator, the tests' corpus
+    # plumbing, and the SolutionUID codec that the uniqueness test reads
+    # trigger it too.
     "hipblaslt_logic_corpus": [
         "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/**",
         "projects/hipblaslt/scripts/run_tensile_logic_check.py",
@@ -59,6 +60,7 @@ COMPONENTS = {
         "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/logic_corpus.py",
         "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/"
         "test_solution_uid_uniqueness.py",
+        "projects/hipblaslt/tensilelite/tensilelite/SolutionIdGen.py",
         "projects/hipblaslt/tensilelite/tox.ini",
         ".github/workflows/component-ci-logic-corpus.yml",
     ],
