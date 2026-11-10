@@ -375,14 +375,12 @@ CACHE_FWD_SPLIT_K_MFMA_TILE_N: Tuple[int, ...] = (32, 64, 128)
 CACHE_FWD_SPLIT_K_MFMA_PIPELINES: Tuple[str, ...] = ("mem", "compv3")
 # 16-byte vectors only: the layers it serves have deep, 8-aligned channels.
 CACHE_FWD_SPLIT_K_MFMA_VECS: Tuple[int, ...] = (8,)
-# (tile_m, tile_n, tile_k, warp_m, warp_n) left out of the MFMA split-K
-# subset: one wave holding the whole 128x128 tile carries 256 fp32
-# accumulators (the full AGPR file) and, with the 64-deep K tile, the split
-# binary runs out of VGPRs and spills to scratch where its unsplit twin does
-# not.
-CACHE_FWD_SPLIT_K_MFMA_EXCLUDED: Tuple[Tuple[int, int, int, int, int], ...] = (
-    (128, 128, 64, 1, 1),
-)
+# Tallest output tile a one-wave (1x1-warp) MFMA split-K kernel is built at.
+# One wave holding 128 rows sits at the register ceiling, and the split adds
+# the slice bounds and the slab base on top: those binaries spill (to scratch
+# at 128x128, SGPRs at 128x32 and 128x64) where their unsplit twins mostly do
+# not, so the 128-row tiles are built with 2 or more waves only.
+CACHE_FWD_SPLIT_K_MFMA_ONE_WAVE_MAX_TILE_M = 64
 # Single-launch cluster split-K forward (ImplicitGemmConvSpec.split_k_cluster):
 # the S slices of one output tile form a (1, 1, S) workgroup cluster and fold
 # their slabs after a cluster barrier, so there is no Stage 2 launch. The
@@ -926,8 +924,10 @@ def _fwd_split_geometry(geometry: tuple) -> bool:
             and tile_m in CACHE_FWD_SPLIT_K_MFMA_TILE_M
             and tile_n in CACHE_FWD_SPLIT_K_MFMA_TILE_N
             and tile_k in CACHE_FWD_SPLIT_K_TILE_K
-            and (tile_m, tile_n, tile_k, warp_m, warp_n)
-            not in CACHE_FWD_SPLIT_K_MFMA_EXCLUDED
+            and (
+                warp_m * warp_n > 1
+                or tile_m <= CACHE_FWD_SPLIT_K_MFMA_ONE_WAVE_MAX_TILE_M
+            )
         )
     return (
         epilogue == "cshuffle"

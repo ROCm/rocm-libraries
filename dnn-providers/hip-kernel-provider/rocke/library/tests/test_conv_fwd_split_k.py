@@ -758,9 +758,9 @@ class TestSplitKAotScope(unittest.TestCase):
         split = [j.identity for j in jobs if j.identity.split_k > 1]
         # The shipped set, pinned literally rather than read back from the
         # tables that generate it: jobs per (tile_m, tile_n, tile_k).
-        # 128x128x64 is short of the other 128-row tiles' 50 by the four
-        # 1x1-warp kernels (two warp tiles x mem / compv3) left out because
-        # they spill (CACHE_FWD_SPLIT_K_MFMA_EXCLUDED).
+        # The 128-row tiles have no 1x1-warp kernels (two warp tiles x mem /
+        # compv3 = 4 per tile, left out because they spill:
+        # CACHE_FWD_SPLIT_K_MFMA_ONE_WAVE_MAX_TILE_M).
         shipped = {
             (32, 32, 32): 10,
             (32, 32, 64): 10,
@@ -774,18 +774,18 @@ class TestSplitKAotScope(unittest.TestCase):
             (64, 64, 64): 26,
             (64, 128, 32): 36,
             (64, 128, 64): 36,
-            (128, 32, 32): 22,
-            (128, 32, 64): 22,
-            (128, 64, 32): 36,
-            (128, 64, 64): 36,
-            (128, 128, 32): 50,
+            (128, 32, 32): 18,
+            (128, 32, 64): 18,
+            (128, 64, 32): 32,
+            (128, 64, 64): 32,
+            (128, 128, 32): 46,
             (128, 128, 64): 46,
         }
         self.assertEqual(
             dict(collections.Counter((i.tile_m, i.tile_n, i.tile_k) for i in split)),
             shipped,
         )
-        self.assertEqual(len(split), 464)
+        self.assertEqual(len(split), 444)
         for ident in split:
             self.assertEqual(ident.split_k_cluster, 0)
             self.assertTrue(ident.two_stage)
@@ -793,9 +793,9 @@ class TestSplitKAotScope(unittest.TestCase):
             self.assertIn(ident.pipeline, ("mem", "compv3"))
             vecs = (ident.vector_size_a, ident.vector_size_b, ident.vector_size_c)
             self.assertEqual(vecs, (8, 8, 8))
-            self.assertNotEqual(
-                (ident.tile_m, ident.tile_n, ident.tile_k, ident.warp_m, ident.warp_n),
-                (128, 128, 64, 1, 1),
+            self.assertFalse(
+                ident.tile_m == 128 and (ident.warp_m, ident.warp_n) == (1, 1),
+                ident.label(),
             )
 
     def test_gfx942_has_no_split_jobs(self):
