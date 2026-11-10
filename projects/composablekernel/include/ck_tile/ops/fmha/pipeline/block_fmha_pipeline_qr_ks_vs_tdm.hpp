@@ -2918,6 +2918,9 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             if constexpr(kVFragments)
             {
+                // Keeps V fragments 1+ below softmax and the P cast. A masked fence lets softmax
+                // sink below it instead.
+                __builtin_amdgcn_sched_barrier(0);
                 Gemm1ByVFragment(o_acc,
                                  p_tile,
                                  v_tile,
