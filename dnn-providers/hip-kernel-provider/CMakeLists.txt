@@ -706,6 +706,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
 
     if(TARGET hkp_packaging_product)
+        # The tree installs wholesale, and install(DIRECTORY) only adds files. A reinstall
+        # into a prefix holding an earlier tree would keep any descriptor this build no
+        # longer produces. A pack that was renamed or split leaves its old file behind, which
+        # declares the same kernel ids as its successor, and the loader then drops the whole
+        # engine. That is how CONV_WRW vanished from a gfx1101 prefix updated across the
+        # wrw pack split. So clear this provider's subtree first. arch_content/ is per
+        # provider, so no other provider's content is touched; the path check below keeps an
+        # empty variable from widening the removal.
+        install(CODE "
+            set(_hkp_tree \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}\")
+            if(_hkp_tree MATCHES \"/arch_content/hip-kernel-provider$\" AND IS_DIRECTORY \"\${_hkp_tree}\")
+                message(STATUS \"Clearing the earlier descriptor tree: \${_hkp_tree}\")
+                file(REMOVE_RECURSE \"\${_hkp_tree}\")
+            endif()")
         # cmake-lint: disable=E1122
         install(DIRECTORY "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/"
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
