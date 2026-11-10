@@ -55,27 +55,23 @@ std::size_t GetMaxWorkSpaceSize(const std::vector<std::pair<std::string, std::si
     return sz;
 }
 
-#if MIOPEN_USE_GEMM
-// Fraction of the currently free device memory a dilated GEMM workspace may take. It matches the
-// 85% that Handle::GetMaxMemoryAllocSize allows of total memory, and leaves room for the
-// allocator's rounding and for the GEMM library's own handle state.
-constexpr double DilatedGemmWorkspaceFreeMemoryFraction = 0.85;
+// Fraction of the currently free device memory a workspace may take. It matches the 85% that
+// Handle::GetMaxMemoryAllocSize allows of total memory, and leaves room for the allocator's
+// rounding and for library handle state.
+constexpr double WorkspaceFreeMemoryFraction = 0.85;
 
-// Dilated GEMM workspace is reported only if it fits in the memory free right now: reporting it
-// unconditionally made callers that allocate the reported size run out of memory on large
-// diffusion shapes (~120 GB, see #6974). A caller that sizes its buffer from the workspace query
-// can then allocate it, and anything larger is left to solvers that need less.
-bool IsDilated(const conv::ProblemDescription& problem)
+// The largest workspace a caller that sizes its buffer from the workspace query can expect to
+// allocate right now. Read uncached, so it tracks allocations made since the handle was created.
+[[maybe_unused]] std::size_t FreeMemoryWorkspaceBudget(const miopen::ExecutionContext& ctx)
+{
+    return static_cast<std::size_t>(ctx.GetStream().GetAvailableMemory() *
+                                    WorkspaceFreeMemoryFraction);
+}
+
+[[maybe_unused]] bool IsDilated(const conv::ProblemDescription& problem)
 {
     return miopen::any_of(problem.GetConv().GetConvDilations(), [](auto v) { return v > 1; });
 }
-
-std::size_t DilatedGemmWorkspaceBudget(const miopen::ExecutionContext& ctx)
-{
-    return static_cast<std::size_t>(ctx.GetStream().GetAvailableMemory() *
-                                    DilatedGemmWorkspaceFreeMemoryFraction);
-}
-#endif
 
 std::size_t GetWorkSpaceSizeGEMM(const miopen::ExecutionContext& ctx,
                                  const conv::ProblemDescription& problem)
@@ -85,14 +81,17 @@ std::size_t GetWorkSpaceSizeGEMM(const miopen::ExecutionContext& ctx,
         return 0;
 
     auto sizes = AllGemmWorkspaceSize(ctx, problem);
+    // Dilated GEMM workspace is reported only within the free-memory budget. Reporting it
+    // unconditionally made callers that allocate the reported size run out of memory on large
+    // diffusion shapes (~120 GB, see #6974); before this budget it was not reported at all. Other
+    // solvers keep their previous limits.
     if(IsDilated(problem) && miopen::any_of(sizes, [](const auto& pr) { return pr.second > 0; }))
     {
-        const auto budget = DilatedGemmWorkspaceBudget(ctx);
+        const auto budget = FreeMemoryWorkspaceBudget(ctx);
         for(const auto& [solver, size] : sizes)
         {
             if(size > budget)
-                MIOPEN_LOG_I2(solver << ": " << size
-                                     << " exceeds the dilated GEMM workspace budget " << budget);
+                MIOPEN_LOG_I2(solver << ": " << size << " exceeds the workspace budget " << budget);
         }
         std::erase_if(sizes, [budget](const auto& pr) { return pr.second > budget; });
     }
@@ -452,16 +451,16 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
         const auto workspace_size = solutions.front().workspace_size;
 #if MIOPEN_USE_GEMM
         // The find-db record picks the solver; its workspace is recomputed above, but returning
-        // it here would skip the dilated workspace budget that GetWorkSpaceSizeGEMM applies on
-        // the path below.
+        // it here would skip the free-memory budget that GetWorkSpaceSizeGEMM applies to dilated
+        // GEMM on the path below.
         if(solutions.front().algorithm == miopenConvolutionAlgoGEMM && IsDilated(problem))
         {
-            const auto budget = DilatedGemmWorkspaceBudget(ctx);
+            const auto budget = FreeMemoryWorkspaceBudget(ctx);
             if(workspace_size > budget)
             {
                 MIOPEN_LOG_I2(solver::Id{solutions.front().solution_id}.ToString()
-                              << ": " << workspace_size
-                              << " exceeds the dilated GEMM workspace budget " << budget);
+                              << ": " << workspace_size << " exceeds the workspace budget "
+                              << budget);
                 ctx.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
                 break; // Fall down to Normal Find.
             }
