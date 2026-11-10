@@ -57,6 +57,23 @@ def test_cross_n_group_is_not_coalesced():
     assert second is False
 
 
+def test_first_pair_whose_own_halves_straddle_n_group_does_not_defer():
+    # Regression (F1): the deferred pair's OWN two halves must share blockIdxN, not just the
+    # forward partner pair. Here batchA straddles N (idx0 in N=0, idx1 in N=1) while the forward
+    # pair (idx2,idx3) is uniformly N=1. The asymmetric (forward-only) check used to defer
+    # firstPair here, but secondPair's backward check (idx0,idx1) then fails -> the deferred
+    # store never coalesces and is silently DROPPED. firstPair's own-pair N-group check prevents
+    # the defer, so the store is emitted normally instead.
+    w = _writer([(0, 0), (1, 1), (1, 2), (1, 3)])
+    # firstPair@idx1 (pairIdx=0): forward pair (idx2,idx3) is same N=1, but the deferred pair's
+    # own halves (idx0 N=0, idx1 N=1) are not -> must NOT defer.
+    first, second = w._subtileCoalescePairing(elementIdx=1, tt0=1, blockIdxN=1, canCoalesce=True)
+    assert (first, second) == (False, False)
+    # secondPair@idx3 also does not fire (batchA halves cross N): no coalesce, no drop either way.
+    first, second = w._subtileCoalescePairing(elementIdx=3, tt0=3, blockIdxN=1, canCoalesce=True)
+    assert second is False
+
+
 def test_missing_partner_pair_does_not_coalesce():
     # Only two rows (one pair): the even pair has no following pair to coalesce with.
     w = _writer([(0, 0), (0, 1)])

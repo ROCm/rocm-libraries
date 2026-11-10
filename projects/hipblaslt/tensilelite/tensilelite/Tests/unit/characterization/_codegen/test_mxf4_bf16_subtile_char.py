@@ -448,6 +448,25 @@ def test_coalesced_store_emits_the_full_dpp_blend_pattern():
     )
 
 
+def test_subtile_store_data_war_fence_uses_two_wait_states_on_gfx940():
+    """The subtile fold's >8B store-data WAR fence is ``s_nop 1`` (2 wait states), not ``s_nop 0``.
+
+    A VALU that overwrites a ``buffer_store_dwordx4``'s vdata needs 2 wait states on
+    GFX940-family parts, including gfx950, per LLVM ``checkVALUHazardsHelper``
+    (``hasGFX940Insts() ? 2 : 1``); the pre-GFX940 ``s_nop 0`` (1 wait state) is a latent
+    store-data corruption. The subtile paired/coalesced store emitters tag their WAR fence
+    with a ``gfx940+`` comment -- those must all be ``s_nop 1``. (The general serializedStore
+    epilogue WAR is a separate, library-wide site and is out of scope for this test.)
+    """
+    in_scope = "\n".join(src for _b, src, _e in _emit(_IN_SCOPE))
+    assert re.search(r"s_nop 1[^\n]*gfx940\+", in_scope), (
+        "the subtile fold must emit its store-data WAR fence as 's_nop 1' (2 wait states, gfx940+)"
+    )
+    assert not re.search(r"s_nop 0[^\n]*gfx940\+", in_scope), (
+        "a subtile-fold store-data WAR fence is still 's_nop 0' (1 wait state) -- one wait short on gfx940+"
+    )
+
+
 def test_uncoalesced_fallback_arm_is_the_partial_m_edge_guard_only():
     """The plain arm keeps exactly one runtime branch over the coalesce: the partial-M
     edge guard (``SubtileMGuard``).
