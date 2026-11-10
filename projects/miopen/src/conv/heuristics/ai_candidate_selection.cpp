@@ -1733,19 +1733,28 @@ SelectBestVocabCandidate(const std::string& arch,
                 continue;
             const std::string& kernel_id = vocab[idx].first;
             const int split_k            = split_k_of(kernel_id);
+            // Hand the check the bare GetTypeString; the caller's ck_validator re-appends
+            // "+<split_k>" for split-k solvers only. Return the same bare string.
+            std::string base = kernel_id;
+            {
+                const auto gt   = kernel_id.rfind('>');
+                const auto plus = kernel_id.find('+', gt == std::string::npos ? 0 : gt);
+                if(plus != std::string::npos)
+                    base = kernel_id.substr(0, plus);
+            }
             ++checks;
-            if(is_args_supported(kernel_id, split_k))
+            if(is_args_supported(base, split_k))
             {
                 MIOPEN_LOG_I2("Lazy-applicability selected: "
-                              << kernel_id << " (split_k=" << split_k << ", score=" << score
+                              << base << " (split_k=" << split_k << ", score=" << score
                               << ") after " << checks << " applicability check(s) of "
                               << vocab.size() << " vocab");
-                return std::make_pair(kernel_id, split_k);
+                return std::make_pair(base, split_k);
             }
         }
-        MIOPEN_LOG_I2("Lazy-applicability: none of "
-                      << vocab.size() << " vocab applicable for " << solver << " on " << arch
-                      << " (" << checks << " checks); falling back to FillValidKernels");
+        MIOPEN_LOG_I2("Lazy-applicability: none of " << vocab.size() << " vocab applicable for "
+                                                     << solver << " on " << arch << " (" << checks
+                                                     << " checks); -> solver non-AI default");
         return std::nullopt;
     }
     catch(const std::exception& ex)

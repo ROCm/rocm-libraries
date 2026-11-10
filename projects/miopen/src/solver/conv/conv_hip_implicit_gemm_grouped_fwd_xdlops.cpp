@@ -340,38 +340,24 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
         ScopedTimeLogger ai_timer("GrpConvFwdXdlops::HeuristicInit.RunAIHeuristics");
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
-            return loader.FillValidKernels(
-                CKSolverType::GrpConvFwd, p, p.GetInDataType(), try_tf32);
-        };
-
         auto ktn_runner = [this](const ExecutionContext& c, const ProblemDescription& p) {
             return RunKTNGeneric(*this, c, p);
         };
 
-        auto ck_val_creator = MakeCKValidatorCreator(
-            loader, CKSolverType::GrpConvFwd, problem.GetInDataType(), mode_use_tf32);
-
-        // Per-candidate applicability for the lazy (precomputed-vocab) fast path (fwd: no split_k).
-        auto is_args_supported = [&loader, &problem, mode_use_tf32](const std::string& kernel_id,
-                                                                    int /*split_k*/) {
-            return loader.IsArgsSupported(CKSolverType::GrpConvFwd,
-                                          problem,
-                                          kernel_id,
-                                          problem.GetInDataType(),
-                                          mode_use_tf32);
-        };
+        auto ck_val_creator = MakeCKValidatorCreator(loader,
+                                                     CKSolverType::GrpConvFwd,
+                                                     problem.GetInDataType(),
+                                                     mode_use_tf32,
+                                                     k2DFwdSolverConfig.uses_split_k);
 
         if(RunAIHeuristics(k2DFwdSolverConfig,
                            state,
                            ctx,
                            problem,
                            false,
-                           fill_valid_kernels,
                            ktn_runner,
                            ck_val_creator,
-                           mode_use_tf32,
-                           is_args_supported))
+                           mode_use_tf32))
         {
             return;
         }

@@ -322,43 +322,24 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     {
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
-            return loader.FillValidKernels(
-                CKSolverType::GrpConvBwd, p, p.GetInDataType(), try_tf32);
-        };
-
         auto ktn_runner = [this](const ExecutionContext& c, const ProblemDescription& p) {
             return RunKTNGeneric(*this, c, p);
         };
 
-        auto ck_val_creator = MakeCKValidatorCreator(
-            loader, CKSolverType::GrpConvBwd, problem.GetInDataType(), mode_use_tf32);
-
-        // Per-candidate applicability for the lazy (precomputed-vocab) fast path.
-        auto is_args_supported = [&loader, &problem, is_deterministic, mode_use_tf32](
-                                     const std::string& kernel_id, int split_k) {
-            if(is_deterministic && split_k != 1)
-                return false;
-            // Same split_k policy as the enumeration path's is_valid.
-            if(!k2DBwdSolverConfig.IsValidSplitK(split_k))
-                return false;
-            return loader.IsArgsSupported(CKSolverType::GrpConvBwd,
-                                          problem,
-                                          kernel_id,
-                                          problem.GetInDataType(),
-                                          mode_use_tf32);
-        };
+        auto ck_val_creator = MakeCKValidatorCreator(loader,
+                                                     CKSolverType::GrpConvBwd,
+                                                     problem.GetInDataType(),
+                                                     mode_use_tf32,
+                                                     k2DBwdSolverConfig.uses_split_k);
 
         if(RunAIHeuristics(k2DBwdSolverConfig,
                            state,
                            ctx,
                            problem,
                            is_deterministic,
-                           fill_valid_kernels,
                            ktn_runner,
                            ck_val_creator,
-                           mode_use_tf32,
-                           is_args_supported))
+                           mode_use_tf32))
         {
             return;
         }

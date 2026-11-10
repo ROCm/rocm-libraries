@@ -367,24 +367,11 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
 
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
-            return loader.FillValidKernels(
-                CKSolverType::GrpConv3dFwd, p, p.GetInDataType(), try_tf32);
-        };
-
-        auto ck_val_creator = MakeCKValidatorCreator(
-            loader, CKSolverType::GrpConv3dFwd, problem.GetInDataType(), mode_use_tf32);
-
-        // Per-candidate applicability for the lazy (precomputed-vocab) fast path (3D fwd: no
-        // split_k).
-        auto is_args_supported = [&loader, &problem, mode_use_tf32](const std::string& kernel_id,
-                                                                    int /*split_k*/) {
-            return loader.IsArgsSupported(CKSolverType::GrpConv3dFwd,
-                                          problem,
-                                          kernel_id,
-                                          problem.GetInDataType(),
-                                          mode_use_tf32);
-        };
+        auto ck_val_creator = MakeCKValidatorCreator(loader,
+                                                     CKSolverType::GrpConv3dFwd,
+                                                     problem.GetInDataType(),
+                                                     mode_use_tf32,
+                                                     k3DFwdSolverConfig.uses_split_k);
 
         // Note: No KTN runner needed for 3D (supports_ktn = false)
         if(RunAIHeuristics(k3DFwdSolverConfig,
@@ -392,11 +379,9 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
                            ctx,
                            problem,
                            false,
-                           fill_valid_kernels,
                            nullptr,
                            ck_val_creator,
-                           mode_use_tf32,
-                           is_args_supported))
+                           mode_use_tf32))
         {
             return;
         }
