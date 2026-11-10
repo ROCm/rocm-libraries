@@ -682,7 +682,7 @@ void runResampleFwdExecutorVsCpu()
         {X_UID, xTensor.rawHostData()},
         {Y_UID, cpuYTensor.rawHostData()},
         {INDEX_UID, cpuIndexTensor.rawHostData()}};
-    CpuReferenceGraphExecutor cpuExecutor;
+    CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), cpuVariantPack);
     cpuYTensor.markHostModified();
     cpuIndexTensor.markHostModified();
@@ -729,7 +729,7 @@ void runResampleBwdExecutorVsCpu()
     const std::unordered_map<int64_t, void*> cpuVariantPack{{DY_UID, dyTensor.rawHostData()},
                                                             {DX_UID, cpuDxTensor.rawHostData()},
                                                             {INDEX_UID, indexTensor.rawHostData()}};
-    CpuReferenceGraphExecutor cpuExecutor;
+    CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), cpuVariantPack);
     cpuDxTensor.markHostModified();
 
