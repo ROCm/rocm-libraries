@@ -2304,3 +2304,34 @@ BenchmarkProblems:
       TransposeA: True
       TransposeB: False
     - *sk_partial_tiles_fork
+
+  ########################################
+  # Non-TN PLSIN fused store. Needs a bf16 dest and MT128x192; the blocks above
+  # use DestDataType S and MT128x128, so they miss it. Sizes cover the tile
+  # exactly in M and N so the pre-loop guard takes the fused path.
+  ########################################
+  -
+    - <<: *sk_partial_tiles
+      DestDataType: B
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 6,  2, 2]   # MT128x192 wg2x2
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2432, 1920, 1, 3072]
+          - Exact: [3712, 1152, 1, 6656]
+          - Exact: [2432, 2304, 1, 1792]

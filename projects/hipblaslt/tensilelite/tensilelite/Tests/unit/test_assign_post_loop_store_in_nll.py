@@ -56,6 +56,8 @@ def state(**overrides):
             "HighPrecisionAccumulate": True,
             "MXBlockA": 32,
             "MXBlockB": 32,
+            "TransposeA": True,
+            "TransposeB": False,
         },
     }
     problemType = overrides.pop("ProblemType", {})
