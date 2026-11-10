@@ -11,7 +11,7 @@ import pytest
 
 import hipdnn_frontend as hipdnn
 
-from .graph_builders import build_pointwise_add_graph
+from .graph_builders import build_pointwise_add_graph, build_sdpa_graph
 from .helpers import NullHandle, build_all_plans
 
 
@@ -244,3 +244,117 @@ class TestGraphExecuteTimedExt:
             hipdnn.TimingQuality.DEVICE_ONLY,
             hipdnn.TimingQuality.UNSTALLED,
         )
+
+
+class TestCheckTensorUidsSet:
+    """Tests for Graph.checkTensorUidsSet()."""
+
+    def test_uids_set_after_graph_construction(self):
+        """Tensors created via Graph.pointwise() have auto-assigned UIDs."""
+        graph = _build_pointwise_add_graph([8, 16], [8, 16])
+        result = graph.checkTensorUidsSet()
+        assert result.is_good(), f"checkTensorUidsSet failed: {result.get_message()}"
+
+
+class TestGetTensorsByUidAndName:
+    """Tests for Graph.getTensorsByUid() and getTensorsByName()."""
+
+    def test_get_tensors_by_uid_returns_all_tensors(self):
+        """getTensorsByUid() returns a dict with an entry per tensor in the graph."""
+        graph = _build_pointwise_add_graph([8, 16], [8, 16])
+        tensors_by_uid = graph.getTensorsByUid()
+        # pointwise add has 2 inputs + 1 output = 3 tensors
+        assert isinstance(tensors_by_uid, dict)
+        assert len(tensors_by_uid) == 3
+
+    def test_get_tensors_by_name_returns_named_tensors(self):
+        """getTensorsByName() returns a dict keyed by tensor name."""
+        graph = _build_pointwise_add_graph([8, 16], [8, 16])
+        tensors_by_name = graph.getTensorsByName()
+        assert isinstance(tensors_by_name, dict)
+        assert "a" in tensors_by_name
+        assert "b" in tensors_by_name
+        assert "out" in tensors_by_name
+
+    def test_uid_and_name_maps_are_consistent(self):
+        """Both maps contain the same tensor objects."""
+        graph = _build_pointwise_add_graph([4, 8], [4, 8])
+        by_uid = graph.getTensorsByUid()
+        by_name = graph.getTensorsByName()
+        uid_objects = set(id(t) for t in by_uid.values())
+        name_objects = set(id(t) for t in by_name.values())
+        assert uid_objects == name_objects
+
+
+@pytest.mark.gpu
+class TestGraphBuild:
+    """Tests for Graph.build() one-shot lifecycle."""
+
+    def test_build_produces_executable_graph(self):
+        """build() validates, builds, creates plans, and finalizes in one call."""
+        graph, a, b, out = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+        handle = hipdnn.create_handle()
+        result = graph.build(handle)
+        assert result.is_good(), f"build() failed: {result.get_message()}"
+        # Graph should be ready for execution
+        assert graph.get_execution_plan_count() >= 1
+
+    def test_build_with_invalid_graph_fails(self):
+        """build() on an empty graph returns a bad error."""
+        graph = hipdnn.Graph()
+        handle = hipdnn.create_handle()
+        result = graph.build(handle)
+        assert result.is_bad()
+
+
+@pytest.mark.gpu
+class TestCompiledPlanSerialization:
+    """Tests for to_compiled_plan_binary() / from_compiled_plan_binary()."""
+
+    def test_compiled_plan_round_trip(self):
+        """Serialize a compiled plan and restore it on a fresh graph."""
+        graph, a, b, out = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+        handle = hipdnn.create_handle()
+        assert graph.build(handle).is_good()
+
+        plan_bytes = graph.to_compiled_plan_binary()
+        assert isinstance(plan_bytes, bytes)
+        assert len(plan_bytes) > 0
+
+        # Restore on a fresh graph
+        graph2, _, _, _ = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+        result = graph2.from_compiled_plan_binary(handle, plan_bytes)
+        assert result.is_good(), f"from_compiled_plan_binary failed: {result.get_message()}"
+
+    def test_to_compiled_plan_binary_without_build_raises(self):
+        """Calling to_compiled_plan_binary() before build() raises RuntimeError."""
+        graph = _build_pointwise_add_graph([8, 16], [8, 16])
+        with pytest.raises(RuntimeError):
+            graph.to_compiled_plan_binary()
+
+
+_sdpa_available = hasattr(hipdnn.Graph(), "set_override_shape_enabled")
+
+
+@pytest.mark.skipif(not _sdpa_available, reason="HIPDNN_ENABLE_SDPA not compiled in")
+class TestOverrideShapeEnabled:
+    """Tests for set_override_shape_enabled() / is_override_shape_enabled()."""
+
+    def test_default_is_disabled(self):
+        """Override shape mode is disabled by default."""
+        g = hipdnn.Graph()
+        assert not g.is_override_shape_enabled()
+
+    def test_enable_and_query(self):
+        """set_override_shape_enabled(True) enables the mode."""
+        g = hipdnn.Graph()
+        result = g.set_override_shape_enabled(True)
+        assert result is g  # fluent API returns self
+        assert g.is_override_shape_enabled()
+
+    def test_disable_after_enable(self):
+        """set_override_shape_enabled(False) disables the mode."""
+        g = hipdnn.Graph()
+        g.set_override_shape_enabled(True)
+        g.set_override_shape_enabled(False)
+        assert not g.is_override_shape_enabled()
