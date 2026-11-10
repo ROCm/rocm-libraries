@@ -128,6 +128,7 @@ class TestSmallSpecs(unittest.TestCase):
             (p, dict(waves=0), "waves and the output tile"),
             # out_h=0 and out_w=0 paths (waves=0 is covered above).
             (p, dict(out_h=0, out_w=16), "waves and the output tile"),
+            (p, dict(out_h=8, out_w=0), "waves and the output tile"),
             (p, dict(out_h=32, out_w=32), "LDS"),
             (_problem(C=64, K=8), dict(waves=1), "VGPRs"),
             # threads_per_block > 1024: waves=17 → 17*64=1088.
@@ -147,15 +148,23 @@ class TestSmallSpecs(unittest.TestCase):
             build_fwd_smallk_mfma,
         )
 
-        for build, spec in (
-            (build_fwd_smallc_mfma, FwdSmallcMfmaSpec(problem=_problem(), waves_k=0)),
+        for build, reason, spec in (
+            (
+                build_fwd_smallc_mfma,
+                fwd_smallc_mfma_reason,
+                FwdSmallcMfmaSpec(problem=_problem(), waves_k=0),
+            ),
             (
                 build_fwd_smallk_mfma,
+                fwd_smallk_mfma_reason,
                 FwdSmallkMfmaSpec(problem=_problem(C=64, K=4), waves=0),
             ),
         ):
-            with self.assertRaises(ValueError):
+            why = reason(spec)
+            self.assertIsNotNone(why)
+            with self.assertRaises(ValueError) as ctx:
                 build(spec)
+            self.assertIn(why, str(ctx.exception))
 
     def test_aot_grid(self):
         from kernels.conv.direct_aot_jobs import (
@@ -260,8 +269,9 @@ class TestSmallSpecs(unittest.TestCase):
             (_problem(C=64, K=8), dict(waves=1)),
             (_problem(KH=1, KW=7, PAD=0, pad_w=7, C=32, K=1), {}),
             (pk, dict(waves=0)),
-            # out_h=0 path of "waves and the output tile must be >= 1".
+            # out_h=0 and out_w=0 paths of "waves and the output tile must be >= 1".
             (pk, dict(out_h=0, out_w=16)),
+            (pk, dict(out_h=8, out_w=0)),
             (pk, dict(out_h=32, out_w=32)),
             (pk, dict(waves=17)),
             (pk, dict(waves=32)),
