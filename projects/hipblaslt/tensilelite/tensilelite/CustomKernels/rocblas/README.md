@@ -47,6 +47,10 @@ needs no bound: the tokens are staged in 128 KB of LDS (gfx950 has 160 KB per
 CU), and any past that are read from global memory, which is correct in this
 layout.
 
+Like the vLLM wvSplitK kernels, these reduce every row of D the same way and
+use no StaggerU, so they declare `uniformSummationOrder: true` in
+`custom.config` and hipBLASLt can select them under uniform summation order.
+
 ## Kernarg preload
 
 The kernels take 72 bytes of kernargs, which spill into a second 64-byte line.

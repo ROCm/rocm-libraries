@@ -46,7 +46,7 @@
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
-#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250XnackHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
@@ -345,7 +345,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     // covers final per-function code, while SW-prefetch owns its hints' XCnt
     // waits.
     constexpr bool kEnableXcntDrainProfile = false;
-    mpm.addPass(createGfx1250HazardModulePass(kEnableXcntDrainProfile));
+    mpm.addPass(createGfx1250XnackHazardModulePass(kEnableXcntDrainProfile));
 
     // Flatten callees + byte-layout tail (entry only, single linear stream).
     {

@@ -89,6 +89,35 @@ if(TENSILELITE_ENABLE_HOST_ASAN AND TENSILELITE_ENABLE_HOST_TSAN)
     message(FATAL_ERROR "ASAN and TSAN cannot be enabled simultaneously")
 endif()
 
+# One list of the host sources the MessagePack writer needs. tensilelite-host
+# compiles them, and the no-host / YAML writer links the same list.
+set(TENSILELITE_HOST_SOURCES
+    "${CMAKE_CURRENT_LIST_DIR}/src/Activation.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/AMDGPU.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/ContractionProblem.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/ContractionSolution.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/DataTypes.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/Debug.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/EmbeddedData.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/EmbeddedLibrary.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/KernelArguments.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/KernelLanguageTypes.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/MLFeatures.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/MLPNet.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/PerformanceMetricTypes.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/ScalarValueTypes.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/TensorDescriptor.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/TensorOps.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/Tensile.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/Utils.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/hip/HipHardware.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/hip/HipSolutionAdapter.cpp"
+)
+set(TENSILELITE_HOST_MSGPACK_SOURCES
+    "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/MessagePack.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/Writing.cpp"
+)
+
 add_subdirectory(rocisa)
 
 if(TENSILELITE_ENABLE_AUTOBUILD)

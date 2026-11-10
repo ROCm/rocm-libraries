@@ -198,7 +198,7 @@ def _restore_valid_parameters_isa():
     entry is gfx803. A gfx942 assignment that does not restore leaves the next
     test on this worker comparing against ``(9, 4, *)``.
     """
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved = validParameters.get("ISA")
     saved_isa = None if saved is None else list(saved)
@@ -361,7 +361,7 @@ def pytest_runtest_makereport(item, call):
 
     TheRock's gfx94X tensilelite job runs ``Tests/unit`` in one native process.
     Characterization tests still ask for gfx1250 assembly. The guard in
-    ``TensileCreateLibrary/Run.py`` raises because that host did not select the
+    ``create_library/run.py`` raises because that host did not select the
     stinkytofu backend. Skipping here leaves the guard a hard error when
     ``ROCISA_BACKEND`` is set and on hosts that report gfx1250.
     """
@@ -378,6 +378,30 @@ def pytest_runtest_makereport(item, call):
         filename,
         lineno,
         "Skipped: gfx1250 codegen uses the stinkytofu backend; this host is not gfx1250 and ROCISA_BACKEND is unset",
+    )
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Report how many logic-corpus-dependent tests ran in this lane and how many skipped.
+
+    Without this line a lane that lacks the corpus reads as covered as one that
+    has it, since these skips look like any other. See ``Tests/unit/logic_corpus.py``.
+    """
+    outcomes = {}
+    for category in ("passed", "failed", "error", "skipped"):
+        outcomes[category] = {
+            report.nodeid
+            for report in terminalreporter.stats.get(category, [])
+            if "needs_logic_corpus" in getattr(report, "keywords", {})
+        }
+    ran = outcomes["passed"] | outcomes["failed"] | outcomes["error"]
+    skipped = outcomes["skipped"] - ran
+    if not ran and not skipped:
+        return
+    terminalreporter.write_sep("-", "logic corpus")
+    terminalreporter.write_line(
+        f"needs_logic_corpus: {len(ran)} ran, {len(skipped)} skipped"
+        + (" (corpus not present; set HIPBLASLT_LOGIC_ROOT to point at it)" if skipped else "")
     )
 
 
@@ -410,7 +434,7 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 def useGlobalParameters(tensile_args):
     from tensilelite import Common
-    from tensilelite import Tensile as tensilelite
+    from tensilelite import run
     import argparse
 
     class gpUpdater:
@@ -419,7 +443,7 @@ def useGlobalParameters(tensile_args):
 
         def __enter__(self):
             argParser = argparse.ArgumentParser()
-            tensilelite.addCommonArguments(argParser)
+            run.addCommonArguments(argParser)
             args = argParser.parse_args(tensile_args)
 
             Common.restoreDefaultGlobalParameters()
@@ -428,7 +452,7 @@ def useGlobalParameters(tensile_args):
             isa = Common.detectGlobalCurrentISA(args.device)
             Common.assignGlobalParameters({}, isa)
 
-            overrideParameters = tensilelite.argUpdatedGlobalParameters(args)
+            overrideParameters = run.argUpdatedGlobalParameters(args)
             for key, value in overrideParameters.items():
                 Common.globalParameters[key] = value
 

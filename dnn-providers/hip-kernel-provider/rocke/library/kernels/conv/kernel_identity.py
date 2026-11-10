@@ -43,6 +43,10 @@ __all__ = [
 # AMD; x is capped the same way for symmetry with is_valid_spec_for_problem).
 _MAX_GRID_DIM = 65535
 
+# The convolution directions an identity names (``KernelIdentity.direction``,
+# the first token of its label).
+DIRECTIONS = ("fwd", "dgrad", "wgrad")
+
 
 def current_llvm_flavor() -> str:
     """LLVM IR flavor this process lowers to (the one ``compile_kernel`` uses).

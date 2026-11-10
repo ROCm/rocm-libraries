@@ -47,6 +47,7 @@
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* Forward declaration for the _new variant's guard helper (C++ only TU). */
 #include "rocke/error_boundary.hpp"
@@ -77,7 +78,7 @@ static void sp_load_row(rocke_ir_builder_t* bld,
                         rocke_value_t* c_half_bytes,
                         rocke_value_t* oob_sentinel,
                         rocke_value_t* c0,
-                        int is_bf16,
+                        const char* dtype,
                         rocke_value_t** out)
 {
     rocke_value_t* hi;
@@ -104,8 +105,7 @@ static void sp_load_row(rocke_ir_builder_t* bld,
     for(s_const = 0; s_const < KW; ++s_const)
     {
         rocke_value_t* safe_off = rocke_b_select(bld, row_ok, col_offs[s_const], oob_sentinel);
-        out[s_const] = is_bf16 ? rocke_b_buffer_load_bf16(bld, a_rsrc, safe_off, row_off)
-                               : rocke_b_buffer_load_f16(bld, a_rsrc, safe_off, row_off);
+        out[s_const] = rocke_dconv_scalar_load(bld, dtype, a_rsrc, safe_off, row_off);
     }
 }
 
@@ -120,7 +120,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     int WAVE, BLOCK_WAVES, THREADS;
     int Wo, c_stride_dw;
     int total_c, total_k;
-    int is_bf16;
+    const char* dtype;
 
     rocke_dconv_params_t params;
     rocke_value_t* A;
@@ -171,12 +171,16 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     }
 
     /* Validate */
+    /* spec.validate(), then is_valid_depthwise_spatial_spec -- both raise. */
+    if(rocke_direct_depthwise_spatial_validate(spec, reason, sizeof(reason)) != ROCKE_OK)
+    {
+        rocke_i_set_err(bld, ROCKE_ERR_VALUE, "%s", reason);
+        return NULL;
+    }
     if(!rocke_direct_depthwise_spatial_is_valid_spec(spec, arch, reason, sizeof(reason)))
     {
-        if(bld->status == ROCKE_OK)
-        {
-            bld->status = ROCKE_ERR_VALUE;
-        }
+        rocke_i_set_err(
+            bld, ROCKE_ERR_VALUE, "invalid DirectDepthwiseSpatialSpec for %s: %s", arch, reason);
         return NULL;
     }
 
@@ -195,14 +199,14 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     THREADS = rocke_direct_depthwise_spatial_threads_per_block(spec);
     c_stride_dw = p->stride > 0 ? p->stride : 1;
     Wo = sp_wo(p);
-    total_c = rocke_direct_conv_problem_total_c(p);
+    total_c = (int)rocke_direct_conv_problem_total_c(p);
     /* AOT: the output extents and the channel count live in kernargs now;
      * these stay only for the spec-validation arithmetic above. */
     (void)Wo;
     (void)total_c;
-    total_k = rocke_direct_conv_problem_total_k(p);
+    total_k = (int)rocke_direct_conv_problem_total_k(p);
 
-    is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? 1 : 0;
+    dtype = rocke_direct_conv_problem_dtype(p);
 
     rocke_attr_set_int(bld, &bld->kernel->attrs, "max_workgroup_size", THREADS);
     /* Two waves per SIMD: the KH x KW weights and the prefetch window push
@@ -212,8 +216,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     /* ---- parameters ---- */
     {
         /* The AOT kernarg block, in conv_abi order. */
-        rocke_dconv_emit_params(
-            bld, &params, "fwd", rocke_b_io_ir_type(bld, p->dtype ? p->dtype : "fp16"));
+        rocke_dconv_emit_params(bld, &params, "fwd", rocke_dconv_io_type(bld, dtype));
         A = params.A;
         Bp = params.Bp;
         D = params.D;
@@ -227,7 +230,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     c_wave = rocke_b_const_i32(bld, WAVE);
     /* AOT: the store guard bounds against the runtime output width. */
     c_Wo = params.p_Wo;
-    c_half_bytes = rocke_b_const_i32(bld, 2);
+    /* Element bytes (the name predates fp32 storage). */
+    c_half_bytes = rocke_b_const_i32(bld, rocke_dconv_elem_bytes(dtype));
     oob_sentinel = rocke_b_const_i32(bld, ((int64_t)1 << 31) - 1);
     zero_f32 = rocke_b_const_f32(bld, 0.0f);
 
@@ -309,8 +313,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
                 safe_w = rocke_b_select(
                     bld, w_valid, rocke_b_mul(bld, w_off, c_half_bytes), oob_sentinel);
-                w_h = is_bf16 ? rocke_b_buffer_load_bf16(bld, b_rsrc, safe_w, c0)
-                              : rocke_b_buffer_load_f16(bld, b_rsrc, safe_w, c0);
+                w_h = rocke_dconv_scalar_load(bld, dtype, b_rsrc, safe_w, c0);
                 weights_f32[r_const][s_const]
                     = rocke_b_select(bld, w_valid, rocke_b_cast_to_f32(bld, w_h), zero_f32);
             }
@@ -409,7 +412,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                             c_half_bytes,
                             oob_sentinel,
                             c0,
-                            is_bf16,
+                            dtype,
                             window + k * KW);
                 for(s_const = 0; s_const < KW; ++s_const)
                 {
@@ -482,7 +485,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                             c_half_bytes,
                             oob_sentinel,
                             c0,
-                            is_bf16,
+                            dtype,
                             window + PF * KW);
             }
             for(s_const = 0; s_const < KW; ++s_const)
@@ -542,12 +545,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
             safe_d = rocke_b_select(
                 bld, store_ok, rocke_b_mul(bld, d_off, c_half_bytes), oob_sentinel);
-            if(is_bf16)
-                rocke_b_buffer_store_bf16(
-                    bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_bf16(bld, acc_val));
-            else
-                rocke_b_buffer_store_f16(
-                    bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_f16(bld, acc_val));
+            rocke_dconv_scalar_store(bld, dtype, d_rsrc, safe_d, c0, acc_val);
 
             /* Unconditional static reset */
             new_accs[P_FLUSH_j] = zero_f32;

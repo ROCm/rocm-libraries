@@ -20,6 +20,7 @@ from rocke.helpers.split_k import (
     WGRAD_TARGET_WAVES_PER_CU,
     select_split_k_wgrad,
 )
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 # Per-group wgrad GEMM dims for the grouped conv shapes the library benchmarks
 # cover: (wg_M, wg_N, wg_K, groups). All are depthwise (cpg == kpg == 1) except
@@ -60,17 +61,24 @@ class TestUngroupedUnchanged(unittest.TestCase):
     """The legacy branch. These values predate the groups-aware path."""
 
     def test_default_groups_is_the_ck_formula(self):
-        # floor(waves_per_cu * num_cus / base_grid), num_cus(gfx950) = 256.
-        for tile, expected in [((64, 64, 64), 3), ((128, 128, 32), 14)]:
-            d = _pick("ungrouped", tile)
-            base_grid = math.ceil(256 / tile[0]) * math.ceil(2304 / tile[1])
-            self.assertEqual(d.base_grid, base_grid)
-            self.assertEqual(
-                d.split_k,
-                max(1, (WGRAD_ASSUMED_WAVES_PER_CU * 256) // base_grid),
-                f"ungrouped decision moved at tile {tile}",
-            )
-            self.assertEqual(d.split_k, expected)
+        # floor(waves_per_cu * num_cus / base_grid), num_cus(gfx942) = 304 and
+        # num_cus(gfx950) = 256.
+        expected_degrees = {
+            "gfx942": (304, [((64, 64, 64), 4), ((128, 128, 32), 16)]),
+            "gfx950": (256, [((64, 64, 64), 3), ((128, 128, 32), 14)]),
+        }
+        for arch, (num_cus, cases) in expected_degrees.items():
+            for tile, expected in cases:
+                with self.subTest(arch=arch, tile=tile):
+                    d = _pick("ungrouped", tile, arch=arch)
+                    base_grid = math.ceil(256 / tile[0]) * math.ceil(2304 / tile[1])
+                    self.assertEqual(d.base_grid, base_grid)
+                    self.assertEqual(
+                        d.split_k,
+                        max(1, (WGRAD_ASSUMED_WAVES_PER_CU * num_cus) // base_grid),
+                        f"ungrouped decision moved at tile {tile}",
+                    )
+                    self.assertEqual(d.split_k, expected)
 
     def test_groups_one_ignores_block_size(self):
         # block_size only feeds the grouped occupancy target. If it ever leaks
@@ -234,12 +242,30 @@ class TestGfx1250Policy(unittest.TestCase):
 
     def test_dtype_caps(self):
         # A 4-tile grid on a long reduction asks for far more than any cap:
-        # each 16-bit dtype takes its own cap, and fp32 the general one. fp16's
-        # cap of 1 keeps it unsplit even here, where the demand is highest.
+        # each 16-bit dtype takes its accuracy cap, and fp32 the general one.
         args = (24, 9 * 24, 42 * 240 * 320)
         self.assertEqual(self._pick(*args, dtype_d="bf16").split_k, 12)
-        self.assertEqual(self._pick(*args, dtype_d="fp16").split_k, 1)
+        self.assertEqual(self._pick(*args, dtype_d="fp16").split_k, 97)
         self.assertEqual(self._pick(*args, dtype_d="fp32").split_k, 128)
+
+    def test_fp16_policy(self):
+        # fp16 has its own gfx1250 policy: fill to 1024 CTAs (2048 grouped),
+        # K slices down to 512, up to its accuracy cap of 97.
+        # Fill: base grid 2 x 18 = 36 tiles -> floor(1024 / 36) = 28 (fp32
+        # fills to 2048 -> 56).
+        d = self._pick(128, 9 * 128, 42 * 120 * 160, dtype_d="fp16")
+        self.assertEqual(d.split_k, 28, d.reason)
+        # Slice depth: a 12288-deep reduction allows 12288 / 512 = 24 slices
+        # (fp32's 2048-element floor allows only 6).
+        d = self._pick(64, 9 * 64, 12288, dtype_d="fp16")
+        self.assertEqual(d.split_k, 24, d.reason)
+        self.assertEqual(self._pick(64, 9 * 64, 12288, dtype_d="fp32").split_k, 6)
+        # Grouped: 4 groups of a 1 x 3 tile grid -> floor(2048 / 12) = 170,
+        # capped at 97.
+        d = self._pick(16, 9 * 16, 42 * 240 * 320, tile=64, groups=4, dtype_d="fp16")
+        self.assertEqual(d.split_k, 97, d.reason)
+        d = self._pick(64, 9 * 64, 42 * 240 * 320, tile=64, groups=8, dtype_d="fp16")
+        self.assertEqual(d.split_k, 28, d.reason)
 
     def test_bf16_degree_stays_within_tolerance(self):
         # N=64, 64x64, C=K=16, 3x3: wg_M=16, wg_N=144, wg_K=262144. Fill and
@@ -275,6 +301,36 @@ class TestGfx1250Policy(unittest.TestCase):
         self.assertGreater(rel_err(16), 5e-2)
         cap = self._pick(24, 9 * 24, 42 * 240 * 320, dtype_d="bf16").split_k
         self.assertLessEqual(rel_err(cap), 5e-2)
+
+    def test_fp16_cap_holds_on_worst_case_partials(self):
+        # Pointwise wgrad, N=64, 32x32, C=K=16 on a 64x128x64 tile: wg_M=16,
+        # wg_N=16, wg_K=65536, one tile. Fill and slice depth both ask for
+        # 128. fp16's unit roundoff is 2**-11 (10 fraction bits): one 1.0
+        # partial followed by (degree - 1) partials of 2**-11 -- half an ulp at
+        # 1.0 each -- rounds back to 1.0 in a round-to-nearest-even fp16 sum.
+        # At 128 that loses 127/2048 (about 5.8%); the automatic degree must
+        # stay within the tolerance.
+        def rel_err(degree):
+            parts = [1.0] + [2.0**-11] * (degree - 1)
+            acc = 0.0
+            for p in parts:
+                acc = struct.unpack("<e", struct.pack("<e", acc + p))[0]
+            exact = sum(parts)
+            return abs(acc - exact) / exact
+
+        self.assertGreater(rel_err(128), 5e-2)
+        d = select_split_k_wgrad(
+            wg_M=16,
+            wg_N=16,
+            wg_K=64 * 32 * 32,
+            tile_m=64,
+            tile_n=128,
+            tile_k=64,
+            arch="gfx1250",
+            dtype_d="fp16",
+        )
+        self.assertEqual(d.split_k, 97, d.reason)
+        self.assertLessEqual(rel_err(d.split_k), 5e-2)
 
     def test_fill_boundary(self):
         # 2048 // 127 = 2048 // 128 = 16; one tile more drops the fill to 15.
@@ -323,21 +379,23 @@ class TestGfx1250Policy(unittest.TestCase):
         self.assertIn("CK formula", d.reason)
 
     def test_other_arches_ignore_dtype(self):
-        # The policy is gfx1250-only: gfx950 gives the same degree with or
-        # without a dtype.
-        kw = dict(
-            wg_M=128,
-            wg_N=9 * 128,
-            wg_K=42 * 120 * 160,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-            arch="gfx950",
-        )
-        self.assertEqual(
-            select_split_k_wgrad(**kw).split_k,
-            select_split_k_wgrad(**kw, dtype_d="bf16").split_k,
-        )
+        # The policy is gfx1250-only: gfx942 and gfx950 give the same degree
+        # with or without a dtype.
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                kw = dict(
+                    wg_M=128,
+                    wg_N=9 * 128,
+                    wg_K=42 * 120 * 160,
+                    tile_m=64,
+                    tile_n=64,
+                    tile_k=64,
+                    arch=arch,
+                )
+                self.assertEqual(
+                    select_split_k_wgrad(**kw).split_k,
+                    select_split_k_wgrad(**kw, dtype_d="bf16").split_k,
+                )
 
 
 if __name__ == "__main__":
