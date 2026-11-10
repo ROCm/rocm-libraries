@@ -339,22 +339,11 @@ class BatchPrefillCodegenTest(unittest.TestCase):
         self.assertEqual(len(kernels), _PAGE_TILE_KERNELS)
         self.assertFalse([k for k in kernels if "FmhaMasks::" in k.template])
 
-    def test_mixed_build_guards_the_gfx9_kernels(self):
-        _, gfx9 = _blobs(["gfx942"])
-        pool, kernels = _blobs(["gfx942", "gfx1250"])
-        page_tile = [k for k in kernels if k.F_pipeline.tag == _PAGE_TILE]
-        old = [k for k in kernels if k.F_pipeline.tag != _PAGE_TILE]
-        self.assertEqual(len(page_tile), _PAGE_TILE_KERNELS)
-        self.assertEqual(sorted(k.name for k in old), sorted(k.name for k in gfx9))
-        for k in old:
-            self.assertRegex(k.template, r"defined\(__gfx9(42)?__\)")
-        names = [k.filename for k in kernels]
-        self.assertEqual(len(names), len(set(names)))
-        for cond, trait in _arms(pool.api):
-            if "QRKSVS_TDM_SCHED" in trait:
-                self.assertIn('"gfx125"', cond)
-            else:
-                self.assertRegex(cond, r'device_name\.compare\(0, [46], "gfx9(42)?"\)')
+    def test_mixed_gfx9_and_gfx125_generation_is_refused(self):
+        # The dispatch has one head-dim chain per data type, so the generator refuses to
+        # build gfx9 and gfx125x kernels together instead of losing gfx9 fallbacks.
+        with self.assertRaisesRegex(ValueError, "separate builds"):
+            _blobs(["gfx942", "gfx1250"])
 
     def test_aiter_receipts_and_filter_keep_the_page_tile_kernels(self):
         for receipt in (200, 600):
