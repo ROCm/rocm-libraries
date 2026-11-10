@@ -34,6 +34,7 @@ add_executable(
     utilities/TestCpuFpReferenceMoeGroupedMatmul.cpp
     utilities/TestCpuFpReferenceMoeGroupedMatmulBwd.cpp
     utilities/TestCpuFpReferenceSoftmax.cpp
+    utilities/TestCpuFpReferencePagedCacheStore.cpp
     utilities/TestCpuFpReferenceGather.cpp
     utilities/TestCpuFpReferenceTopk.cpp
     utilities/TestCpuFpReferenceRope.cpp
@@ -99,6 +100,8 @@ add_executable(
     utilities/cpu_graph_executor/TestMoeGroupedMatmulBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestSoftmaxPlan.cpp
     utilities/cpu_graph_executor/TestSoftmaxSignatureKey.cpp
+    utilities/cpu_graph_executor/TestPagedCacheStorePlan.cpp
+    utilities/cpu_graph_executor/TestPagedCacheStoreSignatureKey.cpp
     utilities/cpu_graph_executor/TestGatherPlan.cpp
     utilities/cpu_graph_executor/TestGatherSignatureKey.cpp
     utilities/cpu_graph_executor/TestTopkPlan.cpp

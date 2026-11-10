@@ -867,7 +867,7 @@ TEST(TestEngineFeatures, EveryNodeTypePublishesItsOperands)
             EXPECT_GT(operands, 0U);
         }
     }
-    EXPECT_EQ(visited, 29U);
+    EXPECT_EQ(visited, 30U);
 }
 
 TEST(TestEngineFeatures, ConvolutionBackwardDataPublishesItsOperands)

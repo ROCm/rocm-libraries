@@ -85,6 +85,9 @@ add_executable(
     TestMoeGroupedMatmulBwdAttributes.cpp
     TestMoeGroupedMatmulBwdNode.cpp
     TestGraphMoeGroupedMatmulBwd.cpp
+    TestPagedCacheStoreAttributes.cpp
+    TestPagedCacheStoreNode.cpp
+    TestGraphPagedCacheStore.cpp
     TestGatherAttributes.cpp
     TestGatherNode.cpp
     TestGraphGather.cpp

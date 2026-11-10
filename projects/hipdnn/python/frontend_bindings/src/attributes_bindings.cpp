@@ -18,6 +18,7 @@
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/PagedCacheStoreAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
@@ -868,6 +869,37 @@ void attributesBindings(nb::module_& m)
         .def("get_k", &graph::TopkAttributes::get_k)
         .def("get_largest", &graph::TopkAttributes::get_largest);
 
+    // PagedCacheStoreAttributes
+    nb::class_<graph::PagedCacheStoreAttributes>(m, "PagedCacheStoreAttributes")
+        .def(nb::init<>())
+        .def("set_name",
+             &graph::PagedCacheStoreAttributes::set_name,
+             nb::rv_policy::reference_internal)
+        .def("get_name", &graph::PagedCacheStoreAttributes::get_name)
+        .def("set_compute_data_type",
+             &graph::PagedCacheStoreAttributes::set_compute_data_type,
+             nb::rv_policy::reference_internal)
+        .def("get_compute_data_type", &graph::PagedCacheStoreAttributes::get_compute_data_type)
+        .def("set_x",
+             static_cast<TensorSetter<graph::PagedCacheStoreAttributes>>(
+                 &graph::PagedCacheStoreAttributes::set_x),
+             nb::rv_policy::reference_internal)
+        .def("set_slot_mapping",
+             static_cast<TensorSetter<graph::PagedCacheStoreAttributes>>(
+                 &graph::PagedCacheStoreAttributes::set_slot_mapping),
+             nb::rv_policy::reference_internal)
+        .def("set_container",
+             static_cast<TensorSetter<graph::PagedCacheStoreAttributes>>(
+                 &graph::PagedCacheStoreAttributes::set_container),
+             nb::rv_policy::reference_internal)
+        .def("set_scale",
+             static_cast<TensorSetter<graph::PagedCacheStoreAttributes>>(
+                 &graph::PagedCacheStoreAttributes::set_scale),
+             nb::rv_policy::reference_internal)
+        .def("get_x", &graph::PagedCacheStoreAttributes::get_x)
+        .def("get_slot_mapping", &graph::PagedCacheStoreAttributes::get_slot_mapping)
+        .def("get_container", &graph::PagedCacheStoreAttributes::get_container)
+        .def("get_scale", &graph::PagedCacheStoreAttributes::get_scale);
     // PointwiseAttributes
     nb::class_<graph::PointwiseAttributes>(m, "PointwiseAttributes")
         .def(nb::init<>())

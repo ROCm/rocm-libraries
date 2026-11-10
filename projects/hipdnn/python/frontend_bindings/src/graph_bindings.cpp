@@ -19,6 +19,7 @@
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/PagedCacheStoreAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
@@ -734,6 +735,7 @@ void graphBindings(nb::module_& m)
                  const auto outputs = graph.topk(std::move(x), std::move(attributes));
                  return nb::make_tuple(outputs[0], outputs[1]);
              })
+        .def("paged_cache_store", &graph::Graph::paged_cache_store)
         .def("custom_op", &graph::Graph::custom_op)
 #ifdef HIPDNN_ENABLE_SDPA
         .def("sdpa",

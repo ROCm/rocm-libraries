@@ -1524,6 +1524,26 @@ typedef enum
     /** @} */
 
     /**
+     * @name Paged Cache Store Operation Attributes (4300-4399)
+     * Attributes for HIPDNN_BACKEND_OPERATION_PAGED_CACHE_STORE_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Token tensor [T, H, D] to store */
+    HIPDNN_ATTR_OPERATION_PAGED_CACHE_STORE_XDESC_EXT = 4300,
+
+    /** @brief Slot mapping tensor [T] (INT32 or INT64; negative slots are skipped) */
+    HIPDNN_ATTR_OPERATION_PAGED_CACHE_STORE_SLOT_MAPPING_DESC_EXT = 4301,
+
+    /** @brief Paged cache container [num_blocks, H, block_size, D] written in place */
+    HIPDNN_ATTR_OPERATION_PAGED_CACHE_STORE_CONTAINER_DESC_EXT = 4302,
+
+    /** @brief Optional FLOAT scalar scale (absent: 1) */
+    HIPDNN_ATTR_OPERATION_PAGED_CACHE_STORE_SCALE_DESC_EXT = 4303,
+
+    /** @} */
+
+    /**
      * @name Gather Operation Attributes (4200-4299)
      * Attributes for HIPDNN_BACKEND_OPERATION_GATHER_DESCRIPTOR_EXT
      * @{

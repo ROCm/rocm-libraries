@@ -25,6 +25,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/MatmulAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/MoeGroupedMatmulAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/MoeGroupedMatmulBwdAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/PagedCacheStoreAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/PointwiseAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/RMSNormAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/RMSNormBackwardAttributes.hpp>
@@ -69,6 +70,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::MoeGroupedMatmulAttributes, "MoeGroupedMatmulAttributes"},
      {NodeAttributes::MoeGroupedMatmulBwdAttributes, "MoeGroupedMatmulBwdAttributes"},
      {NodeAttributes::SoftmaxAttributes, "SoftmaxAttributes"},
+     {NodeAttributes::PagedCacheStoreAttributes, "PagedCacheStoreAttributes"},
      {NodeAttributes::GatherAttributes, "GatherAttributes"},
      {NodeAttributes::TopkAttributes, "TopkAttributes"},
      {NodeAttributes::GdnAttributes, "GdnAttributes"},
@@ -161,6 +163,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::SoftmaxAttributes:
         nodeJson = *node.attributes_as_SoftmaxAttributes();
+        break;
+    case data_objects::NodeAttributes::PagedCacheStoreAttributes:
+        nodeJson = *node.attributes_as_PagedCacheStoreAttributes();
         break;
     case data_objects::NodeAttributes::GatherAttributes:
         nodeJson = *node.attributes_as_GatherAttributes();
@@ -274,6 +279,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::MoeGroupedMatmulBwdAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::SoftmaxAttributes:
             return to<data_objects::SoftmaxAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::PagedCacheStoreAttributes:
+            return to<data_objects::PagedCacheStoreAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::GatherAttributes:
             return to<data_objects::GatherAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::TopkAttributes:

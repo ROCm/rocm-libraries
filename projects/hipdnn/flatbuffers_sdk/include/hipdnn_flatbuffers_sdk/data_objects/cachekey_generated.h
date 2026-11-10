@@ -175,6 +175,8 @@ inline void hashAppend(Hasher& hasher, const MoeGroupedMatmulBwdAttributes* valu
 inline bool logicallyEqual(const MoeGroupedMatmulBwdAttributes* a, const MoeGroupedMatmulBwdAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const Node* value, const UidCanon& canon);
 inline bool logicallyEqual(const Node* a, const Node* b, const UidCanon& aCanon, const UidCanon& bCanon);
+inline void hashAppend(Hasher& hasher, const PagedCacheStoreAttributes* value, const UidCanon& canon);
+inline bool logicallyEqual(const PagedCacheStoreAttributes* a, const PagedCacheStoreAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const PointwiseAttributes* value, const UidCanon& canon);
 inline bool logicallyEqual(const PointwiseAttributes* a, const PointwiseAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const RMSNormAttributes* value, const UidCanon& canon);
@@ -296,6 +298,9 @@ inline void hashAppend(Hasher& hasher, NodeAttributes type, const void* value, c
     case NodeAttributes::GatherAttributes:
         hashAppend(hasher, static_cast<const GatherAttributes*>(value), canon);
         break;
+    case NodeAttributes::PagedCacheStoreAttributes:
+        hashAppend(hasher, static_cast<const PagedCacheStoreAttributes*>(value), canon);
+        break;
     default:
         break;
     }
@@ -367,6 +372,8 @@ inline bool logicallyEqual(NodeAttributes aType, const void* a, NodeAttributes b
         return logicallyEqual(static_cast<const TopkAttributes*>(a), static_cast<const TopkAttributes*>(b), aCanon, bCanon);
     case NodeAttributes::GatherAttributes:
         return logicallyEqual(static_cast<const GatherAttributes*>(a), static_cast<const GatherAttributes*>(b), aCanon, bCanon);
+    case NodeAttributes::PagedCacheStoreAttributes:
+        return logicallyEqual(static_cast<const PagedCacheStoreAttributes*>(a), static_cast<const PagedCacheStoreAttributes*>(b), aCanon, bCanon);
     default:
         return true;
     }
@@ -2876,6 +2883,64 @@ inline bool logicallyEqual(const Node* a, const Node* b, const UidCanon& aCanon,
     if(!logicallyEqual(a->attributes_type(), a->attributes(), b->attributes_type(), b->attributes(), aCanon, bCanon))
     {
         return false;
+    }
+    return true;
+}
+
+inline void hashAppend(Hasher& hasher, const PagedCacheStoreAttributes* value, const UidCanon& canon)
+{
+    if(value == nullptr)
+    {
+        hasher.tag(0);
+        return;
+    }
+    hasher.tag(1);
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->slot_mapping_tensor_uid()));
+    hashAppend(hasher, canon(value->container_tensor_uid()));
+    {
+        const auto optional = value->scale_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+}
+
+inline bool logicallyEqual(const PagedCacheStoreAttributes* a, const PagedCacheStoreAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
+{
+    if(a == b)
+    {
+        return true;
+    }
+    if(a == nullptr || b == nullptr)
+    {
+        return false;
+    }
+    if(aCanon(a->x_tensor_uid()) != bCanon(b->x_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->slot_mapping_tensor_uid()) != bCanon(b->slot_mapping_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->container_tensor_uid()) != bCanon(b->container_tensor_uid()))
+    {
+        return false;
+    }
+    {
+        const auto aUid = a->scale_tensor_uid();
+        const auto bUid = b->scale_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
     }
     return true;
 }

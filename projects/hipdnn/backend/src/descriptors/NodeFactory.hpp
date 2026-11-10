@@ -20,6 +20,7 @@
 #include "MatmulOperationDescriptor.hpp"
 #include "MoeGroupedMatmulBwdOperationDescriptor.hpp"
 #include "MoeGroupedMatmulOperationDescriptor.hpp"
+#include "PagedCacheStoreOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
 #include "ReductionOperationDescriptor.hpp"

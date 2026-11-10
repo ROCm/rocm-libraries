@@ -240,6 +240,7 @@ The tool ships with validated configs for all current operations:
 | `moe_grouped_matmul.yaml` | MoE grouped matrix multiplication |
 | `moe_grouped_matmul_bwd.yaml` | MoE grouped matrix multiplication backward |
 | `topk.yaml` | Top-k selection along the last dim |
+| `paged_cache_store.yaml` | Paged KV-cache store into the SDPA paged container |
 | `rope.yaml` | Rotary position embedding (RoPE) forward |
 | `softmax.yaml` | Softmax over the last dim with optional log-sum-exp stats |
 | `sdpa.yaml` | Scaled dot-product attention |
