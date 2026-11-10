@@ -875,6 +875,7 @@ TEST(TestConvIgemmNchwLds, MirrorsTheKernelsArithmetic)
     fma.bn = 16;
     fma.bk = 8;
     fma.vec = 4;
+    fma.halo = 4;
     // 8 x ((128 + 4 + 4) + 16 channels x (8 taps + 4) + 4) floats.
     EXPECT_EQ(conv_igemm_nchw::ldsBytesOf(fma, 4), 8 * (136 + 16 * 12 + 4) * 4);
     // Two stages: two such tiles.
