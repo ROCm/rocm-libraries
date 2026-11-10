@@ -17,6 +17,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/GatherAttributes.hpp>
+#include <hipdnn_frontend/attributes/GdnAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
@@ -730,6 +731,24 @@ void graphBindings(nb::module_& m)
              })
         .def("gather", &graph::Graph::gather)
         .def("rope", &graph::Graph::rope)
+        .def("gdn",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> q,
+                std::shared_ptr<graph::TensorAttributes> k,
+                std::shared_ptr<graph::TensorAttributes> v,
+                std::shared_ptr<graph::TensorAttributes> g,
+                std::shared_ptr<graph::TensorAttributes> beta,
+                std::shared_ptr<graph::TensorAttributes> cuSeqlens,
+                graph::GdnAttributes attributes) {
+                 const auto outputs = graph.gdn(std::move(q),
+                                                std::move(k),
+                                                std::move(v),
+                                                std::move(g),
+                                                std::move(beta),
+                                                std::move(cuSeqlens),
+                                                std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
+             })
         .def("softmax",
              [](graph::Graph& graph,
                 std::shared_ptr<graph::TensorAttributes> p,

@@ -21,6 +21,7 @@
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_frontend/node/GatherNode.hpp>
+#include <hipdnn_frontend/node/GdnNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
@@ -128,6 +129,8 @@ namespace hipdnn_frontend::detail
         return {std::make_shared<graph::TopkNode>(graph::TopkAttributes{}, graphAttrs), {}};
     case HIPDNN_OPERATION_TYPE_ROPE_FWD_EXT:
         return {std::make_shared<graph::RopeNode>(graph::RopeAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_GDN_EXT:
+        return {std::make_shared<graph::GdnNode>(graph::GdnAttributes{}, graphAttrs), {}};
     case HIPDNN_OPERATION_TYPE_CAUSAL_CONV1D_EXT:
         return {
             std::make_shared<graph::CausalConv1dNode>(graph::CausalConv1dAttributes{}, graphAttrs),

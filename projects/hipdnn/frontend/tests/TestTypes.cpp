@@ -1143,3 +1143,28 @@ TEST(TestTypes, CausalConv1dActivationUnknownValueReturnsError)
     EXPECT_EQ(activation, CausalConv1dActivation::IDENTITY);
     EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
+
+TEST(TestTypes, GateDomainRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(const auto domain : {GateDomain::LOG, GateDomain::LINEAR})
+    {
+        const auto backendDomain = toBackendGateDomain(domain);
+        ASSERT_TRUE(backendDomain.has_value());
+        const auto [roundTripped, error] = fromHipdnnGateDomain(*backendDomain);
+        EXPECT_TRUE(error.is_good());
+        EXPECT_EQ(roundTripped, domain);
+    }
+    EXPECT_EQ(toBackendGateDomain(GateDomain::LOG), HIPDNN_GATE_DOMAIN_LOG_EXT);
+    EXPECT_EQ(toBackendGateDomain(GateDomain::LINEAR), HIPDNN_GATE_DOMAIN_LINEAR_EXT);
+}
+
+TEST(TestTypes, GateDomainUnknownValueReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    const auto [domain, error] = fromHipdnnGateDomain(static_cast<hipdnnGateDomain_t>(9999));
+    EXPECT_EQ(domain, GateDomain::LOG);
+    EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}

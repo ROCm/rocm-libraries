@@ -53,4 +53,5 @@ typedef enum
     HIPDNN_OPERATION_TYPE_MOE_ROUTING_EXT = 30, ///< MoE routing (expert counting sort)
     HIPDNN_OPERATION_TYPE_CAUSAL_CONV1D_EXT = 29, ///< Depthwise causal 1-D convolution with state
     HIPDNN_OPERATION_TYPE_ROPE_FWD_EXT = 24, ///< Rotary position embedding forward
+    HIPDNN_OPERATION_TYPE_GDN_EXT = 31, ///< Gated DeltaNet linear attention forward
 } hipdnnOperationType_ext_t;

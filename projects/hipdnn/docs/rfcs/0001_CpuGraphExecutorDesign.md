@@ -113,6 +113,7 @@ The Signature Key system provides unique identification for operation configurat
 │  - ConvolutionFwdSignatureKey                               │
 │  - ConvolutionBwdSignatureKey                               │
 │  - ConvolutionWrwSignatureKey                               │
+│  - GdnSignatureKey                                          │
 │  - LayernormFpropSignatureKey                               │
 │  - LayernormBpropSignatureKey                               │
 │  - MatmulSignatureKey                                       │

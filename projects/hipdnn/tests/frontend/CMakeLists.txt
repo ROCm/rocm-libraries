@@ -74,6 +74,8 @@ add_executable(
     IntegrationMoeRoutingDescriptorLowering.cpp
     IntegrationRopeDescriptorLifting.cpp
     IntegrationRopeDescriptorLowering.cpp
+    IntegrationGdnDescriptorLifting.cpp
+    IntegrationGdnDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
     IntegrationRaggedTensorDescriptorLowering.cpp

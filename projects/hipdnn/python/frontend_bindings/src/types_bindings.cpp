@@ -135,6 +135,10 @@ void typesBindings(nb::module_& m)
         .value("GATHER", MoeGroupedMatmulMode::GATHER)
         .value("SCATTER", MoeGroupedMatmulMode::SCATTER);
 
+    nb::enum_<GateDomain>(m, "GateDomain")
+        .value("LOG", GateDomain::LOG)
+        .value("LINEAR", GateDomain::LINEAR);
+
     nb::enum_<CausalConv1dActivation>(m, "CausalConv1dActivation")
         .value("IDENTITY", CausalConv1dActivation::IDENTITY)
         .value("SILU", CausalConv1dActivation::SILU);

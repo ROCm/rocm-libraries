@@ -120,6 +120,9 @@ typedef enum
     /** @brief Causal conv1d activation enumeration (hipdnnCausalConv1dActivation_t, extension) */
     HIPDNN_TYPE_CAUSAL_CONV1D_ACTIVATION_EXT = 32,
 
+    /** @brief Linear-attention gate domain enumeration (hipdnnGateDomain_t, extension) */
+    HIPDNN_TYPE_GATE_DOMAIN_EXT = 33,
+
     /**
      * @name Extension Types
      * hipDNN-specific extension types

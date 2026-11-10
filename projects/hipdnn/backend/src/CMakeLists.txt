@@ -56,6 +56,7 @@ add_library(
     descriptors/ResampleBwdOperationDescriptor.cpp
     descriptors/ResampleFwdOperationDescriptor.cpp
     descriptors/RopeOperationDescriptor.cpp
+    descriptors/GdnOperationDescriptor.cpp
     descriptors/ReductionOperationDescriptor.cpp
     descriptors/RMSNormBackwardOperationDescriptor.cpp
     descriptors/RMSNormOperationDescriptor.cpp
