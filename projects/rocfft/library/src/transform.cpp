@@ -443,15 +443,16 @@ void rocfft_plan_t::Execute(void*                                 in_buffer[],
     if(LOG_PLAN_ENABLED())
     {
         auto& os         = *LogSingleton::GetInstance().GetPlanOS();
-        auto  inPtrCount = desc.count_pointers(desc.inFields, desc.inArrayType, local_comm_rank);
+        auto  inPtrCount = desc.count_pointers(
+            desc.inFields, desc.input_layout.get_array_type(), local_comm_rank);
         for(size_t i = 0; i < inPtrCount; ++i)
         {
             os << "user input " << i << ": " << in_buffer[i] << std::endl;
         }
         if(placement == rocfft_placement_notinplace)
         {
-            auto outPtrCount
-                = desc.count_pointers(desc.outFields, desc.outArrayType, local_comm_rank);
+            auto outPtrCount = desc.count_pointers(
+                desc.outFields, desc.output_layout.get_array_type(), local_comm_rank);
             for(size_t i = 0; i < outPtrCount; ++i)
             {
                 os << "user output " << i << ": " << out_buffer[i] << std::endl;
