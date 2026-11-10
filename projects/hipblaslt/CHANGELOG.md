@@ -27,6 +27,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Tuned grid-based DGEMM library logic for gfx942 at 228 CUs (MI300A), covering all four transpose combinations.
 * Gemm-From-Anywhere (GFA) custom kernel framework, which lets hipBLASLt load and dispatch GEMM kernels written outside TensileLite (for example AITER, Composable Kernel, rocRoller, Wave, and Triton) through the existing solution-selection path. Each custom kernel's `.s` file embeds a `custom.config` YAML block in its `.amdgpu_metadata` section that records its provenance, supported features, and, for external kernels, its Tensile interface. The `Tensile.AddCustomConfig` tool injects that block, and `Tensile.ValidateMetadata` validates it.
 * BF16 TN skinny-GEMM kernels (`n` up to 4) for gfx950, adapted from rocBLAS `wvSpltK` and dispatched automatically through the GFA framework, for LLM decode shapes.
+* `HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT` scale mode (`1018`, `--scaleA`/`--scaleB` in `hipblaslt-bench`) and `HIPBLASLT_ORDER_COL256_R128_EXT` matrix order (`104`) for MXFP6 (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`) GEMMs whose A and B are pre-tiled and whose E8M0 scales are shuffled in tiles of 128 rows by 4 K blocks. Both orders and both scale modes are set together, with `opA = T` and `opB = N`.
 
 ### Changed
 

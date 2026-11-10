@@ -195,6 +195,15 @@ to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0``, the following restrictions app
 *  The scaling data pointed to by ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` must be stored in the same order as ``A``.
 *  The scaling data pointed to by ``HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER`` must be stored in the same order as ``B``.
 
+When ``HIPBLASLT_MATMUL_DESC_A_SCALE_MODE`` and ``HIPBLASLT_MATMUL_DESC_B_SCALE_MODE`` are both set
+to ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``, the following restrictions apply:
+
+*  Atype and Btype must each be ``HIP_R_6F_E2M3`` or ``HIP_R_6F_E3M2``.
+*  The order of ``A`` and ``B`` must be ``HIPBLASLT_ORDER_COL256_R128_EXT``. The caller stores ``A`` and ``B``
+   tiled in that order and the scales shuffled in tiles of 128 rows by 4 K blocks. The descriptions of
+   both enum values in ``hipblaslt.h`` give the byte offset of every element and scale.
+*  ``opA`` must be equal to ``T``, and ``opB`` must be equal to ``N``.
+
 hipblasLtMatrixTransformDescCreate()
 ------------------------------------------
 .. doxygenfunction:: hipblasLtMatrixTransformDescCreate
