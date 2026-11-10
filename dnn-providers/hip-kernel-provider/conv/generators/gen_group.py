@@ -14,7 +14,7 @@ def w(name, obj):
     (out / name).write_text(json.dumps(obj, indent=2) + "\n")
 
 
-FIELDS = ["direction", "dtype", "atom", "r", "s", "stride", "th", "wp", "cb"]
+FIELDS = ["direction", "dtype", "atom", "t", "r", "s", "stride", "th", "wp", "cb"]
 KNOBS = [f for f in FIELDS if f not in ("direction", "dtype")]
 STRINGS = {"direction", "dtype", "atom"}
 
@@ -27,7 +27,8 @@ ATOMS = {
 EB = {"HALF": 2, "BFLOAT16": 2, "FLOAT": 4}
 # (th, wp, cb): output rows, 16-column fragments and 16-channel blocks a workgroup.
 TILES = [(4, 2, 2), (4, 2, 4), (4, 4, 2), (8, 2, 2), (8, 1, 4), (2, 4, 4)]
-FILTERS = [(3, 3)]
+# (t, r, s): filter depth, rows and columns (depth 1 serves 2-D graphs too).
+FILTERS = [(1, 3, 3), (3, 3, 3)]
 
 
 def lds(eb, r, s, st, th, wp, cb):
@@ -52,7 +53,7 @@ w(
     {
         "version": "1.0",
         "id": umd,
-        "name": "kernel direction, dtype, atom (device), filter, stride, channel tile and LDS match the graph",
+        "name": "kernel direction, dtype, atom (device), filter (depth, rows, columns), stride, channel tile and LDS match the graph",
         "scope": "kernel",
         "match_symbol": "hipkernel.conv_group.kernel_match",
     },
@@ -87,7 +88,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
         i = 0
         for atom in atoms:
-            for r, s in FILTERS:
+            for t, r, s in FILTERS:
                 for st in strides:
                     for th, wp, cb in TILES:
                         # Backward data runs stride phases: ceil(R / st) taps at unit stride.
@@ -98,8 +99,11 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                         )
                         if lds(EB[dtype], kr, ks, kst, th, wp, cb) > 64 * 1024:
                             continue
-                        c = dict(atom=atom, r=r, s=s, stride=st, th=th, wp=wp, cb=cb)
-                        name = f"conv_group.{tag}.{dt}.{atom}.{r}x{s}.s{st}.t{th}x{wp}x{cb}"
+                        c = dict(
+                            atom=atom, t=t, r=r, s=s, stride=st, th=th, wp=wp, cb=cb
+                        )
+                        f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
+                        name = f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.t{th}x{wp}x{cb}"
                         kernels.append(
                             {
                                 "version": "1.0",

@@ -5,7 +5,7 @@
 // catalog config. The pack defines:
 //   CONV_GROUP_T        element type: float, _Float16, or unsigned short (bf16 bits)
 //   CONV_GROUP_ATOM     the 16x16 matrix-core atom (a K1 atom type)
-//   CONV_GROUP_R, _S    filter extent
+//   CONV_GROUP_FT, _R, _S  filter extent (the kernel's taps: depth 1 for 2-D)
 //   CONV_GROUP_ST       the gather's stride (both axes)
 //   CONV_GROUP_TH, _WP, _CB   output rows, 16-column fragments and 16-channel blocks a workgroup
 //   K1_BUFFER           0 (the K1 header's buffer loads are not used here)
@@ -19,6 +19,7 @@ extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGrou
 {
     k4ConvMma<CONV_GROUP_T,
               CONV_GROUP_ATOM,
+              CONV_GROUP_FT,
               CONV_GROUP_R,
               CONV_GROUP_S,
               CONV_GROUP_ST,

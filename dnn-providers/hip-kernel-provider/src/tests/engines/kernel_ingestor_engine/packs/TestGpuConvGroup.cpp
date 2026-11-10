@@ -39,8 +39,8 @@
  *
  * Every config of the installed catalog that the kernel match admits on this device runs on
  * every case, forward and backward data, in fp32, fp16 and bf16: groups of 2, 4, 8 and 16
- * channels, both layouts, stride 2 (backward data by stride phases), asymmetric padding, extents
- * that are not tile
+ * channels, both layouts, 2-D and 3-D (ResNeXt3D's 3x3x3 and 1x3x3 filters), stride 2 (backward
+ * data by stride phases, depth included), asymmetric padding, extents that are not tile
  * multiples, several channel blocks, and true convolution (the expansion reflects the filter).
  */
 namespace
@@ -309,6 +309,22 @@ std::vector<DeviceCase> deviceCases()
     convolution.groups = 8;
     convolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"NhwcGroups8ConvolutionMode", convolution});
+    // 3-D (ResNeXt3D): a 3x3x3 filter over planes, a 1x3x3 one, and stride 2 on every axis
+    // (backward data by phases over depth too), both layouts.
+    auto deep = dense(32, 32, {4, 7, 19}, {3, 3, 3}, {1, 1, 1}, true);
+    deep.groups = 8;
+    cases.push_back({"NdhwcGroups4", deep});
+    auto flat = dense(64, 64, {3, 6, 11}, {1, 3, 3}, {0, 1, 1}, false);
+    flat.groups = 8;
+    cases.push_back({"NcdhwGroups8Filter1x3x3", flat});
+    auto deepStrided = dense(32, 32, {5, 9, 18}, {3, 3, 3}, {1, 1, 1}, false);
+    deepStrided.groups = 4;
+    deepStrided.stride = {2, 2, 2};
+    cases.push_back({"NcdhwGroups8Stride2", deepStrided});
+    auto deepDepthStrided = dense(32, 32, {6, 7, 9}, {3, 3, 3}, {1, 1, 0}, true);
+    deepDepthStrided.groups = 16;
+    deepDepthStrided.stride = {2, 1, 1};
+    cases.push_back({"NdhwcGroups2DepthStride2", deepDepthStrided});
     return cases;
 }
 
@@ -501,8 +517,12 @@ TEST(TestConvGroupProblem, ServesSmallGroupsBothDirections)
         const auto& phase = problem->phases.front();
         EXPECT_EQ(phase.args.cg, 4);
         EXPECT_EQ(phase.args.c, 64);
+        EXPECT_EQ(problem->filterT, 1);
+        EXPECT_EQ(problem->kernelT, 1);
         EXPECT_EQ(problem->filterR, 3);
         EXPECT_EQ(problem->kernelR, 3);
+        EXPECT_EQ(phase.args.dout, 1);
+        EXPECT_EQ(phase.expand.tc, 1);
         EXPECT_EQ(phase.expand.swap, direction == ConvDirection::FORWARD ? 0 : 1);
         // Backward data reflects the taps: tap q reads filter tap 2 - q.
         EXPECT_EQ(phase.expand.rBase, direction == ConvDirection::FORWARD ? 0 : 2);
@@ -530,6 +550,31 @@ TEST(TestConvGroupProblem, ServesSmallGroupsBothDirections)
         EXPECT_EQ(phase.args.outH, 12);
         EXPECT_EQ(phase.args.ho, (12 - phase.args.ooh + 1) / 2);
         EXPECT_EQ(phase.expand.rStep, -2);
+    }
+    // 3-D: forward loops the depth taps at the graph's depth stride; backward data at depth
+    // stride 2 runs phases over depth too (2 x 2 x 2 of them, 2 depth taps each).
+    auto deep = dense(64, 64, {5, 12, 13}, {3, 3, 3}, {1, 1, 1}, true);
+    deep.groups = 16;
+    deep.stride = {2, 1, 1};
+    const auto deepForward = parsed(deep, ConvDirection::FORWARD);
+    ASSERT_TRUE(deepForward.has_value());
+    ASSERT_EQ(deepForward->phases.size(), 1u);
+    EXPECT_EQ(deepForward->kernelT, 3);
+    EXPECT_EQ(deepForward->phases.front().args.sd, 2);
+    EXPECT_EQ(deepForward->phases.front().args.dout, 3);
+    EXPECT_EQ(deepForward->phases.front().expand.tc, 3);
+    deep.stride = {2, 2, 2};
+    const auto deepBackward = parsed(deep, ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(deepBackward.has_value());
+    EXPECT_EQ(deepBackward->phases.size(), 8u);
+    EXPECT_EQ(deepBackward->kernelT, 2);
+    for(const auto& phase : deepBackward->phases)
+    {
+        EXPECT_EQ(phase.args.sd, 1);
+        EXPECT_EQ(phase.args.osd, 2);
+        EXPECT_EQ(phase.args.outD, 5);
+        EXPECT_EQ(phase.args.dout, (5 - phase.args.ood + 1) / 2);
+        EXPECT_EQ(phase.expand.tStep, -2);
     }
 }
 
@@ -559,11 +604,11 @@ TEST(TestConvGroupProblem, DeclinesEveryUnservedGraph)
         auto ragged = dense(40, 40, {12, 13}, {3, 3}, {1, 1}, true);
         ragged.groups = 10;
         EXPECT_FALSE(parsed(ragged, direction).has_value());
-        // 3-D.
-        auto deep = dense(64, 64, {4, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
-        deep.groups = 16;
-        EXPECT_FALSE(parsed(deep, direction).has_value());
-        // Dilation along either axis.
+        // Dilation along any axis.
+        auto dilatedD = dense(64, 64, {4, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
+        dilatedD.groups = 16;
+        dilatedD.dilation = {2, 1, 1};
+        EXPECT_FALSE(parsed(dilatedD, direction).has_value());
         auto dilatedH = resnext();
         dilatedH.dilation = {2, 1};
         EXPECT_FALSE(parsed(dilatedH, direction).has_value());
@@ -580,6 +625,12 @@ TEST(TestConvGroupProblem, DeclinesEveryUnservedGraph)
     strided.stride = {3, 3};
     EXPECT_TRUE(parsed(strided, ConvDirection::FORWARD).has_value());
     EXPECT_FALSE(parsed(strided, ConvDirection::BACKWARD_DATA).has_value());
+    // Backward data past depth stride 2; forward serves any depth stride.
+    auto deep = dense(64, 64, {7, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
+    deep.groups = 16;
+    deep.stride = {3, 1, 1};
+    EXPECT_TRUE(parsed(deep, ConvDirection::FORWARD).has_value());
+    EXPECT_FALSE(parsed(deep, ConvDirection::BACKWARD_DATA).has_value());
 }
 
 TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
@@ -602,7 +653,8 @@ TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
         const auto& kernels = catalog(direction);
         const auto base = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
             return kernel.getStringMetadata("atom") == "mfma16_f16"
-                   && kernel.getIntMetadata("stride") == 1 && kernel.getIntMetadata("cb") == 2;
+                   && kernel.getIntMetadata("t") == 1 && kernel.getIntMetadata("stride") == 1
+                   && kernel.getIntMetadata("cb") == 2;
         });
         ASSERT_NE(base, kernels.end());
         EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));
@@ -611,6 +663,8 @@ TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
             kernel.metadata[field] = value;
             return !matchesKernel(pack, fixture.context(), kernel, *bound);
         };
+        EXPECT_TRUE(declines("t", int64_t{3})); // a 2-D graph's filter is one tap deep
+        EXPECT_TRUE(declines("t", int64_t{0}));
         EXPECT_TRUE(declines("r", int64_t{5}));
         EXPECT_TRUE(declines("s", int64_t{1}));
         EXPECT_TRUE(declines("stride", int64_t{2}));
@@ -626,7 +680,8 @@ TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
 
 TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
 {
-    static constexpr std::array<const char*, 7> KNOBS{"atom", "r", "s", "stride", "th", "wp", "cb"};
+    static constexpr std::array<const char*, 8> KNOBS{
+        "atom", "t", "r", "s", "stride", "th", "wp", "cb"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
