@@ -143,7 +143,7 @@ _KERNEL_RESOURCE_BUDGETS = {
     },
     # gfx942 fp16 D128 tiled-2d (shipped default geometry): 2 waves/EU caps VGPR at
     # 256; the kernel wants 354, so it spills ~40 B to hold 2-wave occupancy.
-    "rocke_uattn2d_tiled_d128_b64_h32kv8_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2": {
+    "rocke_uattn2d_tiled_d128_b64_g4_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2": {
         "max_scratch_bytes": 64,
         "min_waves_per_simd": 2,
     },
@@ -1167,7 +1167,10 @@ class TestAttentionHelpers(unittest.TestCase):
             build_unified_attention_2d_tiled,
             build_unified_attention_3d_tiled,
         )
-        from kernels.common.attention_unified import _3d_signature, _attn_signature
+        from kernels.common.attention_unified import (
+            _tiled_2d_signature,
+            _tiled_3d_signatures,
+        )
 
         common = dict(
             head_size=64,
@@ -1184,11 +1187,8 @@ class TestAttentionHelpers(unittest.TestCase):
                 k = build_unified_attention_2d_tiled(
                     UnifiedAttention2DTiledSpec(**common, use_additive_bias=use_ab)
                 )
-                sig = _attn_signature(
-                    "bf16",
-                    include_bt_stride=True,
-                    include_qq_bias_stride=True,
-                    include_additive_bias=use_ab,
+                sig = _tiled_2d_signature(
+                    "gfx950", "bf16", include_additive_bias=use_ab
                 )
                 self.assertEqual([p.name for p in k.params], [a["name"] for a in sig])
                 self.assertEqual(
@@ -1200,7 +1200,9 @@ class TestAttentionHelpers(unittest.TestCase):
                         **common, num_segments=4, use_additive_bias=use_ab
                     )
                 )
-                sig = _3d_signature("bf16", include_additive_bias=use_ab)
+                sig, _ = _tiled_3d_signatures(
+                    "gfx950", "bf16", include_additive_bias=use_ab
+                )
                 self.assertEqual([p.name for p in seg.params], [a["name"] for a in sig])
 
     def test_unified_attention_additive_bias_must_be_bool(self):
@@ -3978,7 +3980,10 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import AttentionDenseSpec
 
-        shapes = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 4096))
+        # The cohort only needs three DISTINCT shapes; the sizes are incidental.
+        # Batch is capped at 32 because a ragged Q is bounded in bytes, and
+        # (64, 4096, 4096) at Hq=32 D=128 lands on exactly 2**31 B.
+        shapes = ((1, 512, 512), (8, 2048, 2048), (32, 4096, 4096))
         base = AttentionDenseSpec(
             **self._BASE_KWARGS,
             persistent=True,
@@ -4983,8 +4988,8 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         The policy now reads compile-time config only, so the exclusion is gone.
         Asserted in the strong direction, byte-level: the same body must lower for
         shapes on either side of the retired 4096 boundary. If someone reintroduces
-        a shape term in :func:`_use_exp2_fast`, the sha comparison fails here rather
-        than silently reopening the collision.
+        a shape term in :func:`default_use_exp2_fast`, the sha comparison fails here
+        rather than silently reopening the collision.
         """
         from dataclasses import replace
 
@@ -5001,7 +5006,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         self.assertEqual(
             lo.resolved_use_exp2_fast(),
             hi.resolved_use_exp2_fast(),
-            "_use_exp2_fast reads the problem shape again; a shape-dependent "
+            "default_use_exp2_fast reads the problem shape again; a shape-dependent "
             "policy collides two bodies in one cache slot under a single name",
         )
         self.assertEqual(self._ir_sha(lo), self._ir_sha(hi))
@@ -5883,6 +5888,65 @@ class TestDenseSpecPreflight(unittest.TestCase):
 
         ok, why = supports_attention_dense(
             self._spec(
+                batch=64,
+                seqlen_q=16128,
+                seqlen_kv=16128,
+                num_query_heads=8,
+                num_kv_heads=8,
+            ),
+            arch="gfx950",
+        )
+        self.assertTrue(ok, why)
+
+    def test_ragged_bounds_qo_in_bytes_not_elements(self):
+        """A ragged Q is read through a buffer resource whose num_records AND
+        voffset are i32 BYTES (``buffer_rsrc(q, B*Sq*Hq*D*2)`` fed by
+        ``buffer_load_vN(q_rsrc, mul(addr, 2))``), so its ceiling is half the
+        element count the ``global_load_vN`` paths get.
+
+        The two cases differ ONLY in ``ragged``, which is the point: an element
+        bound would accept both, and a bound that fired on every spec would
+        reject both. 2**30 <= qo_elems < 2**31 is exactly the window where the
+        unit matters, and K/V is held an order of magnitude under so the Q/O
+        marker proves which check fired.
+        """
+        from kernels.common.attention_dense_spec import INT32_LIMIT
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        # 40192 = 157*256 keeps the non-ragged tile multiple legal, so the same
+        # dims are constructible both ways.
+        dims = dict(
+            batch=8,
+            seqlen_q=40192,
+            seqlen_kv=40192,
+            num_query_heads=32,
+            num_kv_heads=8,
+        )
+        qo_elems = 8 * 40192 * 32 * 128
+        self.assertLess(qo_elems, INT32_LIMIT, "test setup error: element bound fires")
+        self.assertGreaterEqual(qo_elems * 2, INT32_LIMIT, "test setup error")
+        kv_bytes = 8 * 40192 * 8 * 128 * 2
+        self.assertLess(kv_bytes, INT32_LIMIT, "test setup error: K/V bound fires")
+
+        ok, why = supports_attention_dense(
+            self._spec(ragged=True, **dims), arch="gfx950"
+        )
+        self.assertFalse(ok, "ragged Q past the 32-bit BYTE limit must be rejected")
+        self.assertIn("Q/O", why, why)
+        self.assertIn("B,", why, f"the ragged refusal must name bytes: {why}")
+
+        ok, why = supports_attention_dense(self._spec(**dims), arch="gfx950")
+        self.assertTrue(ok, f"the same dims are in range when element-addressed: {why}")
+
+    def test_ragged_qo_extent_just_under_the_byte_limit_is_accepted(self):
+        """Paired with the rejection above, so tightening the ragged bound any
+        further would be caught. qo = 2113929216 B and kv = 2113929216 B are both
+        just under 2**31."""
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        ok, why = supports_attention_dense(
+            self._spec(
+                ragged=True,
                 batch=64,
                 seqlen_q=16128,
                 seqlen_kv=16128,

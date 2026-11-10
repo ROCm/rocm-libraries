@@ -454,4 +454,30 @@ TEST_F(TestBundleReferenceValidationHarness, DriftedReferenceOutputFailsNamingTh
         << messages;
 }
 
+// The reference is handed output buffers laid out like the golden data: an SDPA bundle whose
+// Stats sits [H,T] with a gap between its batches (L7d) allocates both outputs to the
+// elementSpace of the dense view, built with the node's seq_len lengths.
+TEST_F(TestBundleReferenceValidationHarness, RaggedSdpaOutputsTakeTheirLengthsFromSeqLen)
+{
+    ON_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t, const VariantPack& variantPack) {
+            auto variantPackCopy = variantPack;
+            fixtures::writeRaggedSdpaGappedOutputs(variantPackCopy, 0.0f);
+        });
+
+    const auto layout = fixtures::raggedSdpaGappedStatsCase();
+    const auto dir = _tempDir / layout.name;
+    fixtures::writeRaggedSdpaCase(dir, layout);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::loadWrittenBundle(dir, layout.name), dir, std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
 // NOLINTEND(readability-identifier-naming)

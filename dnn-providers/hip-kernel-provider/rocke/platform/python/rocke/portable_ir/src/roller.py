@@ -28,7 +28,7 @@ import copy
 from fractions import Fraction
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..utils.recipe_expand import magic_division_constants
+from rocke.core.intexpr import magic_division_constants
 
 
 # --------------------------------------------------------------------------
