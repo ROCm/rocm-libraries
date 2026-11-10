@@ -227,6 +227,20 @@ class BatchedGemmProblem:
         )
 
 
+def packed_strides(layout: str, M: int, N: int, K: int) -> Dict[str, int]:
+    """The strides ``dispatcher_run_batched`` derives for packed A, B and C of
+    ``layout`` (e.g. "rcr"; stride and batch-stride arguments of 0, as
+    ``GpuBatchedGemmRunner.run`` passes them without padding): each leading
+    stride is its operand's columns when row-major, its rows when
+    column-major, and each batch stride one whole matrix."""
+    out: Dict[str, int] = {}
+    for name, lay, rows, cols in (("A", layout[0], M, K), ("B", layout[1], K, N),
+                                  ("C", layout[2], M, N)):
+        out[f"stride_{name}"] = cols if lay == "r" else rows
+        out[f"batch_stride_{name}"] = rows * cols
+    return out
+
+
 @dataclass
 class BatchedGemmResult:
     output: np.ndarray
@@ -456,14 +470,45 @@ class GpuBatchedGemmRunner:
             )
 
         dtype = _gu._dtype_from_kernel_name(self._kernel_name)
-        la, lb, lc = _gu._layout_from_kernel_name(self._kernel_name)
-        C_shape = (batch, M, N) if lc == "r" else (batch, N, M)
-
+        la, lb, _ = _gu._layout_from_kernel_name(self._kernel_name)
         # A/B host buffers in the kernel's element dtype and per-batch layout; the
         # kernels of a sweep worker's shape reuse them (see _gu._sweep_inputs).
         A_h, B_h = _gu._encode_ab_cached(
             A, B, dtype, la, lb, self._use_ocp, self._kernel_name
         )
+        return self.run_encoded(
+            A_h, B_h, problem, k_batch, batch_pad_A, batch_pad_B, batch_pad_C,
+            warmup, repeat, flush_cache, rotating_count,
+        )
+
+    def run_encoded(
+        self,
+        A_h: np.ndarray,
+        B_h: np.ndarray,
+        problem: BatchedGemmProblem,
+        k_batch: int = 1,
+        batch_pad_A: int = 0,
+        batch_pad_B: int = 0,
+        batch_pad_C: int = 0,
+        warmup: int = 50,
+        repeat: int = 100,
+        flush_cache: bool = True,
+        rotating_count: int = 1000,
+    ) -> BatchedGemmResult:
+        """run() on host buffers in the kernel's element dtype and memory
+        order: per batch, a 'c' operand transposed (what run() encodes, and
+        what a search's host cache holds)."""
+        batch, M, N, K = problem.batch_count, problem.M, problem.N, problem.K
+        # The .so copies batch*M*K and batch*K*N elements from the host
+        # pointers whatever the arrays hold (see run()).
+        if A_h.size != batch * M * K or B_h.size != batch * K * N:
+            raise ValueError(
+                f"host buffers of {A_h.size} and {B_h.size} elements, expected "
+                f"{batch * M * K} and {batch * K * N} for problem {problem.to_dict()}"
+            )
+        dtype = _gu._dtype_from_kernel_name(self._kernel_name)
+        lc = _gu._layout_from_kernel_name(self._kernel_name)[2]
+        C_shape = (batch, M, N) if lc == "r" else (batch, N, M)
         out_dtype, c_np = _gu._c_numpy_dtype(dtype)
         # F6: the host C buffer is memcpy'd byte-for-byte to/from the device
         # buffer the kernel writes as CDataType, so the numpy element size MUST

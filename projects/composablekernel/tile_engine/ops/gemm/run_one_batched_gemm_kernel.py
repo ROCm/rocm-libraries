@@ -3,144 +3,22 @@
 # SPDX-License-Identifier: MIT
 """Worker script for running BATCHED GEMM kernels in an isolated subprocess.
 
-Batched counterpart of run_one_gemm_kernel.py:
-- Receives kernel config + batched problem via stdin as JSON
-- Loads the .so library ONLY inside this subprocess
-- Outputs timing results as JSON to stdout (one line per kernel, flushed)
-- A GPU fault kills only this process; the parent driver can continue
-
-Input JSON format:
-    Single: {"so_path": "...",
-             "problem": {"batch_count":.., "M":.., "N":.., "K":..},
-             "kernel_name": "...", "arch": "gfx942"}
-    Batch:  {"items": [{...}, ...]}
-
-``arch`` (optional) is the target the .so was built for; it fixes the fp8/bf8
-host encoding instead of probing the local GPU.
-
-Optional top-level keys ``verify`` (bool) and ``verify_tol`` (float) enable an
-fp32 reference check (per-batch A @ B on the inputs the kernel reads); when
-set, each OK result also carries ``verified`` and ``max_rel``.
+The batched worker is the GEMM worker (``run_one_gemm_kernel.py``): a problem
+with ``batch_count`` ({"batch_count":.., "M":.., "N":.., "K":..}) runs on
+``batched_gemm_utils.GpuBatchedGemmRunner``, with the same input and output
+JSON, ``verify`` (an fp32 per-batch ``A @ B`` reference on the inputs the
+kernel reads) and the adaptive search's options (``check_identity``, the host
+cache, ``prepare``). An item's or the payload's ``arch`` is the target the
+.so was built for; it fixes the fp8/bf8 host encoding instead of probing the
+local GPU.
 """
 
-import json
 import os
 import sys
 
-# Add dispatcher python paths from environment (os.pathsep-separated).
-gemm_pypath = os.environ.get("GEMM_PYPATH", "")
-if gemm_pypath:
-    for p in gemm_pypath.split(os.pathsep):
-        if p and p not in sys.path:
-            sys.path.insert(0, p)
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
-from batched_gemm_utils import (  # noqa: E402
-    BatchedGemmProblem,
-    GpuBatchedGemmRunner,
-)
-from gemm_utils import _sweep_inputs, _sweep_max_rel  # noqa: E402
-import numpy as np  # noqa: E402
-
-
-def _run_one(
-    idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2, arch=None
-):
-    """Run a single batched kernel and emit its result as one JSON line.
-
-    When ``verify`` is set, the batched output is checked against
-    ``runner.reference`` (per-batch fp32 ``A @ B`` on the kernel's inputs) using
-    the global relative metric
-    ``max|out - ref| / max|ref|``.
-    """
-    try:
-        problem = BatchedGemmProblem.from_dict(prob_dict)
-
-        # Drawn once per shape; kernels of the shape reuse their encoding and
-        # verify reference (gemm_utils._sweep_inputs).
-        b, M, N, K = problem.batch_count, problem.M, problem.N, problem.K
-        A, B = _sweep_inputs((b, M, K), (b, K, N))
-
-        # CRITICAL: load the library ONLY inside this subprocess.
-        runner = GpuBatchedGemmRunner(lib_path=so_path, arch=arch)
-        result = runner.run(A, B, problem)
-
-        if result.success:
-            non_zero = (
-                int(np.count_nonzero(result.output))
-                if result.output is not None
-                else 0
-            )
-            out = {
-                "idx": idx,
-                "ok": True,
-                "ms": result.time_ms,
-                "tflops": result.tflops,
-                "non_zero": non_zero,
-                "kernel": kernel_name,
-            }
-            if verify:
-                max_rel = _sweep_max_rel(runner, A, B, result.output)
-                out["max_rel"] = max_rel
-                out["verified"] = bool(max_rel <= verify_tol)
-            print(json.dumps(out), flush=True)
-        else:
-            print(
-                json.dumps(
-                    {
-                        "idx": idx,
-                        "ok": False,
-                        "error": f"kernel returned status {result.status}",
-                        "kernel": kernel_name,
-                    }
-                ),
-                flush=True,
-            )
-
-    except Exception as e:
-        print(
-            json.dumps(
-                {"idx": idx, "ok": False, "error": str(e), "kernel": kernel_name}
-            ),
-            flush=True,
-        )
-
-
-def main():
-    """Read JSON from stdin, run kernel(s), output results."""
-    try:
-        d = json.loads(sys.stdin.buffer.read())
-    except Exception as e:
-        print(
-            json.dumps({"idx": 0, "ok": False, "error": f"JSON parse error: {e}"}),
-            flush=True,
-        )
-        sys.exit(1)
-
-    verify = bool(d.get("verify", False))
-    verify_tol = float(d.get("verify_tol", 2e-2))
-
-    if "items" in d:
-        for i, item in enumerate(d["items"]):
-            _run_one(
-                i,
-                item["so_path"],
-                item["problem"],
-                item.get("kernel_name", "unknown"),
-                verify=verify,
-                verify_tol=verify_tol,
-                arch=item.get("arch"),
-            )
-    else:
-        _run_one(
-            0,
-            d["so_path"],
-            d["problem"],
-            d.get("kernel_name", "unknown"),
-            verify=verify,
-            verify_tol=verify_tol,
-            arch=d.get("arch"),
-        )
-
+from run_one_gemm_kernel import main  # noqa: E402
 
 if __name__ == "__main__":
     main()

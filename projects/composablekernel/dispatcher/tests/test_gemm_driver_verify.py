@@ -46,7 +46,6 @@ import gemm_full_benchmark as drv  # noqa: E402
 import gemm_search as GS  # noqa: E402
 import gemm_utils  # noqa: E402
 import host_cache as HC  # noqa: E402
-import run_one_batched_gemm_kernel  # noqa: E402
 import run_one_gemm_kernel  # noqa: E402
 import run_one_streamk_gemm_kernel  # noqa: E402
 from batched_gemm_utils import BatchedGemmProblem, GpuBatchedGemmRunner  # noqa: E402
@@ -190,7 +189,9 @@ def test_reference_follows_the_fp8_format():
 WORKERS = {
     "gemm": (run_one_gemm_kernel, GpuGemmRunner, PROBLEM),
     "streamk": (run_one_streamk_gemm_kernel, GpuGemmRunner, PROBLEM),
-    "batched": (run_one_batched_gemm_kernel, GpuBatchedGemmRunner, BATCHED_PROBLEM),
+    # run_one_batched_gemm_kernel.py is the GEMM worker: a problem with
+    # batch_count runs on GpuBatchedGemmRunner.
+    "batched": (run_one_gemm_kernel, GpuBatchedGemmRunner, BATCHED_PROBLEM),
 }
 
 
