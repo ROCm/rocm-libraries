@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT_DIR = Path(__file__).parent
 
@@ -993,7 +994,7 @@ def test_import_inputs_uid_canonicalized_by_name():
 def _inventory(root):
     """{relative path: file bytes, or None for a directory} under root."""
     return {
-        str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+        p.relative_to(root).as_posix(): p.read_bytes() if p.is_file() else None
         for p in sorted(root.rglob("*"))
     }
 
@@ -2417,6 +2418,37 @@ def _write_marked_sweep(bundle_dir, rel, graph, marker):
         sweep = {"version": 1, "import_mode": marker, "cases": sweep["cases"]}
     (out / "graph.template.json").write_text(json.dumps(template, indent=2) + "\n")
     (out / "sweep.json").write_text(json.dumps(sweep, indent=2) + "\n")
+
+
+def test_inventory_keys_are_forward_slash_normalized():
+    """_inventory() keys stay forward-slash even when relative_to() would use backslashes."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        nested = bundle_dir / "quick" / "Relu" / "Marked"
+        nested.mkdir(parents=True)
+        (nested / "sweep.json").write_bytes(b"{}")
+
+        class _BackslashRelPath:
+            def __init__(self, posix_str):
+                self._posix = posix_str
+
+            def __str__(self):
+                return self._posix.replace("/", "\\")
+
+            def as_posix(self):
+                return self._posix
+
+        real_relative_to = Path.relative_to
+
+        def fake_relative_to(self, *args, **kwargs):
+            return _BackslashRelPath(real_relative_to(self, *args, **kwargs).as_posix())
+
+        with patch.object(Path, "relative_to", fake_relative_to):
+            keys = _inventory(bundle_dir)
+        assert "quick/Relu/Marked/sweep.json" in keys, keys
+        assert not any("\\" in k for k in keys), keys
+        print("  PASS: inventory_keys_are_forward_slash_normalized")
 
 
 def test_grouped_default_mode_ignores_marked_sweep():
@@ -4284,6 +4316,7 @@ def main() -> int:
 
     tests = [
         test_skeleton_grouping,
+        test_inventory_keys_are_forward_slash_normalized,
         test_round_trip_expansion,
         test_resolve_plain_tensor_scoped_field_from_its_own_entry,
         test_case_ids,
