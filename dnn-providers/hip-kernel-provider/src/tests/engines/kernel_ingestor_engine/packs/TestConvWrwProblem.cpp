@@ -670,6 +670,24 @@ ConfigFields channelsLastFields()
     return f;
 }
 
+/// Channels-last with 3 output channels (a VAE's output layer): not whole vectors of 8.
+ConvShape unalignedKShape()
+{
+    auto shape = channelsLastShape();
+    shape.k = 3;
+    return shape;
+}
+
+/// The ring with dy units at any element (align 2), one 32-channel fragment of output channels.
+ConfigFields unalignedKFields()
+{
+    auto f = channelsLastFields();
+    f.align = 2;
+    f.bk = 32;
+    f.wk = 1;
+    return f;
+}
+
 ConvShape floatChannelsLastShape()
 {
     auto shape = floatShape();
@@ -779,6 +797,34 @@ std::vector<ConfigRefusal> configRefusals()
         {"DmaRingStagesOne", [](ConfigFields& f) { f.ns = 1; }, dmaFields, "gfx950"},
         {"StagesOnTheRing", [](ConfigFields& f) { f.ns = 2; }},
         {"AlignTwo", [](ConfigFields& f) { f.align = 2; }, alignedFields, "gfx942", alignedShape},
+        {"AlignThree", [](ConfigFields& f) { f.align = 3; }, alignedFields, "gfx942", alignedShape},
+        {"AlignTwoOnRows",
+         [](ConfigFields& f) { f.loop = 0; },
+         unalignedKFields,
+         "gfx942",
+         unalignedKShape},
+        {"AlignTwoTransposeReads",
+         [](ConfigFields& f) {
+             f.layout = 2;
+             f.atom = "mfma32x16_f16";
+             f.atomId = 10;
+             f.bq = 64;
+         },
+         [] {
+             auto f = unalignedKFields();
+             f.atom = "mfma32x16_f16";
+             f.atomId = 10;
+             f.bq = 64;
+             f.xcd = 1;
+             return f;
+         },
+         "gfx950",
+         unalignedKShape},
+        {"AlignZeroOnUnalignedK",
+         [](ConfigFields& f) { f.align = 0; },
+         unalignedKFields,
+         "gfx942",
+         unalignedKShape},
         {"AlignOnRows", [](ConfigFields& f) { f.loop = 0; }, alignedFields, "gfx942", alignedShape},
         {"AlignWidthStride2",
          [](ConfigFields& f) { f.align = 1; },
@@ -1007,6 +1053,17 @@ TEST(TestConvWrwKernelMatch, TheBaseConfigsServeTheBaseProblem)
     EXPECT_TRUE(admits(trFields(), "gfx950", channelsLastShape()));
     EXPECT_TRUE(admits(fmaFields(), "gfx1100", floatShape()));
     EXPECT_TRUE(admits(directFields(), "gfx950", channelsLastShape()));
+}
+
+TEST(TestConvWrwKernelMatch, UnalignedDyUnitsOnlyWhereOutputChannelsAreNotVectors)
+{
+    // Align 2 serves 3 output channels and declines 40 (whole vectors: the aligned configs).
+    EXPECT_TRUE(admits(unalignedKFields(), "gfx942", unalignedKShape()));
+    EXPECT_FALSE(admits(unalignedKFields(), "gfx942", channelsLastShape()));
+    // Input channels must still be whole vectors.
+    auto oddC = unalignedKShape();
+    oddC.c = 20;
+    EXPECT_FALSE(admits(unalignedKFields(), "gfx942", oddC));
 }
 
 TEST(TestConvWrwKernelMatch, TheDirectLoopServesItsOwnShapes)

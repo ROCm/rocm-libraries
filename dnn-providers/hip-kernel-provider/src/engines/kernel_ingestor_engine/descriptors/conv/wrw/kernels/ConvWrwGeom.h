@@ -167,13 +167,13 @@ constexpr long long k3LdsBytes(int loop,
     const bool tr = layout == 2;
     const int kv = layout == 1 ? 4 / eb : 1;
     const int win = (bq - 1) * sw + (s - 1) * dw + 1;
-    const int nbv = k3DivUp(win + (align ? vec - 1 : 0), vec);
+    const int nbv = k3DivUp(win + (align == 1 ? vec - 1 : 0), vec);
     const int phRaw = layout == 0 ? nbv * vec / sw : k3DivUp(win, sw);
     const int ph = k3DivUp(phRaw, kv) * kv;
     const int skew = 16 / eb;
     const int lda = tr ? k3TrPitch(bk) : bq + skew;
     const int ldb = tr ? k3TrPitch(bc) : k3DivUp(ph + 2, skew) * skew + skew;
-    const long long aElems = static_cast<long long>(tr ? bq : bk) * lda + (align ? vec : 0);
+    const long long aElems = static_cast<long long>(tr ? bq : bk) * lda + (align == 1 ? vec : 0);
     const long long bElems = static_cast<long long>(rows) * sw * (tr ? ph : bc) * ldb;
     return 2 * (aElems + bElems) * eb;
 }

@@ -315,6 +315,12 @@ std::vector<DeviceCase> deviceCases()
         {"Nchw3x3Aligned", conv(16, 32, {9, 16}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})},
         {"Nhwc3x3", conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)},
         {"Nhwc3x3Wide", conv(64, 96, {21, 70}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)},
+        // Output channels that are not whole vectors (dy units at any element), images whose
+        // last dy element ends mid-dword.
+        {"Nhwc3x3ThreeOutputChannels",
+         conv(32, 3, {21, 45}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)},
+        {"Nhwc1x1FiveOutputChannels",
+         conv(16, 5, {13, 37}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, true, 1, 3)},
         {"ThreeDNhwc3x3x3",
          conv(16, 32, {4, 6, 40}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true)},
         {"GroupedNchw3x3", conv(48, 32, {7, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 2)},

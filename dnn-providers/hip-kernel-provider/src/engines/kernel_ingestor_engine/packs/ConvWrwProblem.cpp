@@ -523,7 +523,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
             return std::nullopt;
         }
     }
-    else if(kg % config.vec != 0 || cg % config.vec != 0)
+    else if((kg % config.vec != 0 && config.align != 2) || cg % config.vec != 0)
     {
         return std::nullopt;
     }
@@ -576,7 +576,17 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    if(config.align != 0)
+    // Align 2: the ring's channels-last dy units at any element, for output channel counts that
+    // are not whole vectors (only there: whole vectors take the aligned configs).
+    if(config.align == 2)
+    {
+        if(config.loop != LOOP_RING || config.layout != LAYOUT_CHANNELS_LAST
+           || kg % config.vec == 0)
+        {
+            return std::nullopt;
+        }
+    }
+    else if(config.align != 0)
     {
         if(config.align != 1 || config.loop != LOOP_RING || !cf || config.sw != 1
            || a.inSpatial[2] % config.vec != 0 || a.outSpatial[2] % config.vec != 0)

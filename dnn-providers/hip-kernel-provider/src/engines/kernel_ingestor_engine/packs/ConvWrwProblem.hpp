@@ -112,7 +112,8 @@ struct WrwConfig
     int64_t vec = 0;
     /// 1: XCD-contiguous block order (gfx942, gfx950).
     int64_t xcd = 0;
-    /// 1: row-aligned units (loop 1, channels-first, width stride 1).
+    /// 1: row-aligned units (loop 1, channels-first, width stride 1); 2: dy units at any element
+    /// (loop 1, channels-last transposed into LDS, output channels not whole vectors).
     int64_t align = 0;
     /// LDS stages of loop 2 (2 to 4), ring slots of loop 5 (2 to 5); 0 for the other loops.
     int64_t ns = 0;
@@ -247,7 +248,9 @@ DirectPlan directPlanFor(int64_t tiles,
  * (wk = wc = 0; tk, tc multiples of 4 dividing bk, bc; bk, bc multiples of 4) and the vector (16
  * bytes; channels-first: bq whole vectors, vec whole width-stride phases); s, sw, dw equal to
  * the filter's width, its stride and dilation; fr >= 1; xcd 0, or 1 on gfx942 / gfx950 (loops
- * 0 to 2); align 0, or 1 for loop 1, channels-first, sw 1 and widths of x and dy whole vectors;
+ * 0 to 2); align 0, or 1 for loop 1, channels-first, sw 1 and widths of x and dy whole vectors,
+ * or 2 for loop 1, layout 1 and output channels per group not whole vectors (which the other
+ * configs require);
  * ns 2 to 4 for loop 2, else 0; the block within 1024 threads and its load passes within 32;
  * the LDS within the device's; images of at least one vector (channels-first); the grids within
  * the launch limits (x, and the reduce, 2^31 - 1; y and z 65535); bpu 1, 2 or 4. The splits follow
