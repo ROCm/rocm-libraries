@@ -36,7 +36,9 @@
 #
 # Per-family statuses, and which of them the gate lets exit zero, are the
 # GATE_PASS / GATE_FAIL maps below; the rule over them is gate_verdict(), unit-
-# tested host-only in test_gate_verdict.py next to this file.
+# tested host-only in test_gate_verdict.py next to this file; the golden
+# routing (golden_file_for and the checks over it) in
+# tests/instances/test_differential_golden_routing.py, which is installed.
 #
 # Build output goes to /tmp (repo tree is slow NFS). No git operations.
 
