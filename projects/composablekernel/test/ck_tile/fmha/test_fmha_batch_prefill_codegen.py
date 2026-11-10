@@ -32,6 +32,13 @@ _TAIL_SET = {(128, 64, 64, m) for m in ("s_no", "s_mask")}
 _QS = (64, 129, 512, 2048, 2051, 2179, 8192)
 _HQS = (1, 4, 8, 32, 64)
 _KVS = (1024, 4096, 16384, 32768)
+# One query head on both sides of each grid threshold of the dispatch (128, 256, 512 and 576 M128
+# workgroups on 256 CUs), WG = ceil(q / 128); the last query tile full, of 64 rows or of one row.
+_EDGE_QS = tuple(
+    q
+    for wg in (128, 129, 256, 257, 512, 513, 576, 577)
+    for q in (128 * wg, 128 * wg - 64, 128 * wg - 127)
+)
 _SPLIT = "a.num_splits == 2 && a.o_acc_ptr != nullptr && a.lse_acc_ptr != nullptr"
 # Dispatch order in a head-dim case: KV-split M128, KV-split M64 and query tail, M64, M128.
 _RANK = {(128, 2): 0, (64, 2): 1, (64, 1): 2, (128, 1): 3}
@@ -57,9 +64,26 @@ def _pick(page, dim, dense, wg, kv, q):
     return "m64" if wg <= 256 else "m128"
 
 
-def _holds(constraint, wg, q, num_splits, mask="no_mask", window_size_left=-1):
-    """Value of a rendered dispatch constraint for a B = 1 problem on a 256-CU device whose
-    caller asks for num_splits and passes the workspace; mask: the problem's mask_enum value."""
+def _pick_split(page, dim, dense, wg, q, batch=1):
+    """Split arm the dispatch takes when the caller asks for a KV split on a 256-CU gfx1250: the
+    query tail (P64 D128, one sequence, 512 < WG <= 576, a partial last query tile), the M128
+    split (not P128 D128; masked, or unmasked unless the M64 split takes it) or the M64 split
+    (unmasked); None where there is no split arm (masked P128 D128)."""
+    if page * dim == 128 * 128:
+        return "split_m64" if dense else None
+    tail_grid = 512 < wg <= 576
+    if (page, dim) == (64, 128) and batch == 1 and tail_grid and q % 128:
+        return "tail"
+    if not dense:
+        return "split_m128"
+    m64 = wg <= 128 or (dim == 64 and tail_grid and q % 128 == 0)
+    return "split_m64" if m64 else "split_m128"
+
+
+def _holds(constraint, wg, q, num_splits, mask="no_mask", window_size_left=-1, batch=1):
+    """Value of a rendered dispatch constraint for a problem of `batch` sequences on a 256-CU
+    device whose caller asks for num_splits and passes the workspace; mask: the problem's
+    mask_enum value."""
     e, bottom_right = constraint, str(mask == "mask_bottom_right")
     for cpp, value in (
         ("a.o_acc_ptr != nullptr", "True"),
@@ -71,7 +95,7 @@ def _holds(constraint, wg, q, num_splits, mask="no_mask", window_size_left=-1):
         ("get_num_blocks(128)", str(wg)),
         ("num_cus", "256"),
         ("a.max_seqlen_q", str(q)),
-        ("a.batch", "1"),
+        ("a.batch", str(batch)),
         ("&&", " and "),
         ("||", " or "),
         ("!(", " not ("),
@@ -303,12 +327,14 @@ class BatchPrefillCodegenTest(unittest.TestCase):
             )
             problem_mask = "no_mask" if mask == "s_no" else "mask_bottom_right"
 
-            def route(wg, q, num_splits):
+            def route(wg, q, num_splits, problem=problem_mask, left=-1, batch=1):
                 arm = next(
                     (
                         t
                         for t in arms
-                        if _holds(str(t.constraint), wg, q, num_splits, problem_mask)
+                        if _holds(
+                            str(t.constraint), wg, q, num_splits, problem, left, batch
+                        )
                     ),
                     None,
                 )
@@ -318,21 +344,40 @@ class BatchPrefillCodegenTest(unittest.TestCase):
                     return "tail"
                 return ("split_" if arm.kv_splits == 2 else "") + f"m{arm.bm0}"
 
-            for q, hq, kv in itertools.product(_QS, _HQS, _KVS):
+            for q, hq, kv in itertools.chain(
+                itertools.product(_QS, _HQS, _KVS),
+                itertools.product(_EDGE_QS, (1,), _KVS),
+            ):
                 wg = -(-q // 128) * hq
                 want = _pick(page, dim, mask == "s_no", wg, kv, q)
                 num_splits = 2 if want.startswith("split") or want == "tail" else 1
                 self.assertEqual(
                     route(wg, q, num_splits), want, (dim, page, mask, q, hq, kv)
                 )
-                # Asked for a split, the dispatch takes a split arm wherever this problem has one
-                # (only the masked P128 D128 has none) and never an unsplit arm.
-                split = route(wg, q, 2)
-                if (dim, page, mask) == (128, 128, "s_mask"):
-                    self.assertIsNone(split, (dim, page, mask, q, hq))
-                else:
-                    self.assertIn(split, ("split_m128", "split_m64", "tail"), (q, hq))
-                self.assertIn(route(wg, q, 1), ("m64", "m128"), (q, hq))
+                # Asked for a split, the dispatch takes the split arm of the grid (none for the
+                # masked P128 D128: it returns -1) and never an unsplit arm; the query tail is
+                # for one sequence only.
+                for batch in (1, 2):
+                    self.assertEqual(
+                        route(wg, q, 2, batch=batch),
+                        _pick_split(page, dim, mask == "s_no", wg, q, batch),
+                        (q, hq, batch),
+                    )
+                unsplit = "m64" if wg <= 256 else "m128"
+                self.assertEqual(route(wg, q, 1), unsplit, (q, hq))
+                # Masks outside the split's domain (top-left, a bottom-right window with a left
+                # size, generic windows) match no split arm and take the unsplit arms.
+                if mask == "s_mask":
+                    for other in (
+                        "mask_top_left",
+                        "mask_bottom_right",
+                        "window_generic",
+                    ):
+                        left = -1 if other == "mask_top_left" else 64
+                        self.assertIsNone(route(wg, q, 2, other, left), (other, q, hq))
+                        self.assertEqual(
+                            route(wg, q, 1, other, left), unsplit, (other, q, hq)
+                        )
 
     def test_generic_mask_impl_still_uses_simplified_page_tile_masks(self):
         pool, kernels = _blobs(["gfx1250"], mask_impl="generic")
