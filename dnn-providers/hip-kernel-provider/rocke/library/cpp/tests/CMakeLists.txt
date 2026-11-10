@@ -86,3 +86,8 @@ install(TARGETS rocke_conv_direct_wgrad_refusals_host
         RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
 set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
              rocke_conv_direct_wgrad_refusals_host)
+
+# YAML tier labels (ROCKE_ENGINE_test_categories_external.yaml lists every
+# test above). The labeler only reaches tests add_test()'d in the calling
+# directory, so platform/tests' own include does not cover them.
+include("${rocke_SOURCE_DIR}/tests/cmake/TestCategoryLabels.cmake")
