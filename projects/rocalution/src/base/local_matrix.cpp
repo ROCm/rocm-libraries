@@ -3118,7 +3118,6 @@ namespace rocalution
                 out->MoveToHost();
 
                 mat_host.ConvertToCSR();
-                mat_host.matrix_->LAnalyse(this->matrix_->LAnalyseDiagUnit());
 
                 if(mat_host.matrix_->LSolve(*vec_host.vector_, out->vector_) == false)
                 {
@@ -3212,7 +3211,6 @@ namespace rocalution
                 out->MoveToHost();
 
                 mat_host.ConvertToCSR();
-                mat_host.matrix_->UAnalyse(this->matrix_->UAnalyseDiagUnit());
 
                 if(mat_host.matrix_->USolve(*vec_host.vector_, out->vector_) == false)
                 {

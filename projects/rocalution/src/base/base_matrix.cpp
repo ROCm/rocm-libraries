@@ -631,12 +631,6 @@ namespace rocalution
     }
 
     template <typename ValueType>
-    bool BaseMatrix<ValueType>::LAnalyseDiagUnit(void) const
-    {
-        return false;
-    }
-
-    template <typename ValueType>
     void BaseMatrix<ValueType>::LAnalyseClear(void)
     {
         LOG_INFO("BaseMatrix<ValueType>::LAnalyseClear(void)");
@@ -681,12 +675,6 @@ namespace rocalution
         this->Info();
         LOG_INFO("The function is not implemented (yet)!");
         FATAL_ERROR(__FILE__, __LINE__);
-    }
-
-    template <typename ValueType>
-    bool BaseMatrix<ValueType>::UAnalyseDiagUnit(void) const
-    {
-        return false;
     }
 
     template <typename ValueType>

@@ -364,9 +364,6 @@ namespace rocalution
         * diag_unit == true the diag is 1;
         * diag_unit == false the diag is 0; */
         virtual void LAnalyse(bool diag_unit = false);
-        /** \brief Return the diag_unit of the last LAnalyse, the host fallback of LSolve
-        * analyses its copy with it */
-        virtual bool LAnalyseDiagUnit(void) const;
         /** \brief Delete the analysed data (see LAnalyse) L-party */
         virtual void LAnalyseClear(void);
         /** \brief Solve L out = in; if level-scheduling algorithm is provided then the
@@ -377,9 +374,6 @@ namespace rocalution
         * diag_unit == true the diag is 1;
         * diag_unit == false the diag is 0; */
         virtual void UAnalyse(bool diag_unit = false);
-        /** \brief Return the diag_unit of the last UAnalyse, the host fallback of USolve
-        * analyses its copy with it */
-        virtual bool UAnalyseDiagUnit(void) const;
         /** \brief Delete the analysed data (see UAnalyse) U-party */
         virtual void UAnalyseClear(void);
         /** \brief Solve U out = in; if level-scheduling algorithm is provided then the
