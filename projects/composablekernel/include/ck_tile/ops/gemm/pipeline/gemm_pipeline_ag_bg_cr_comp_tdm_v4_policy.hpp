@@ -6,7 +6,10 @@
 #include <type_traits>
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4_spec.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
+#include "ck_tile/ops/gemm/pipeline/tile_gemm_traits.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4_tuning.hpp"
 
 namespace ck_tile {
@@ -21,17 +24,34 @@ namespace ck_tile {
  *
  * BlockGemmShape is a TileGemmShape: block tile (tile_m, tile_n, tile_k), block warps 2x2x1,
  * 4x1x1 or 1x4x1 and warp tile 32x16x128 (FP4) or 16x16x128: the scaled WMMA atom.
+ *
+ * An MxGemmPipelineProblem with float accumulators, PassThrough element functions and E8M0
+ * scales per 32 K values, plus ODataType; kBlockSize follows its convention (warps x
+ * get_warp_size()).
  */
-template <typename ADataType_, typename BDataType_, typename ODataType_, typename BlockGemmShape_>
+template <typename ADataType_,
+          typename BDataType_,
+          typename ODataType_,
+          typename BlockGemmShape_,
+          typename Traits_ = TileGemmUniversalTraits<false,
+                                                     false,
+                                                     false,
+                                                     true,
+                                                     tensor_layout::gemm::RowMajor,
+                                                     tensor_layout::gemm::ColumnMajor,
+                                                     tensor_layout::gemm::RowMajor>>
 struct MxGemmTdmV4Problem
+    : MxGemmPipelineProblem<ADataType_, BDataType_, float, BlockGemmShape_, Traits_>
 {
-    using ADataType      = remove_cvref_t<ADataType_>;
-    using BDataType      = remove_cvref_t<BDataType_>;
-    using ODataType      = remove_cvref_t<ODataType_>;
-    using AccDataType    = float;
-    using BlockGemmShape = remove_cvref_t<BlockGemmShape_>;
+    using ODataType   = remove_cvref_t<ODataType_>;
+    using AccDataType = float;
 
-    static constexpr index_t kBlockSize = mx_tdm_v4::kWave * mx_tdm_v4::kWaves;
+    static_assert(
+        std::is_same_v<typename MxGemmTdmV4Problem::ALayout, tensor_layout::gemm::RowMajor> &&
+            std::is_same_v<typename MxGemmTdmV4Problem::BLayout,
+                           tensor_layout::gemm::ColumnMajor> &&
+            std::is_same_v<typename MxGemmTdmV4Problem::CLayout, tensor_layout::gemm::RowMajor>,
+        "comp_tdm_v4: A and B are K-contiguous and C row-major (RCR)");
 };
 
 namespace mx_tdm_v4 {

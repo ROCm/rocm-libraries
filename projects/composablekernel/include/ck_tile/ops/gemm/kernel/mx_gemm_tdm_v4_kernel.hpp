@@ -84,7 +84,7 @@ struct MxGemmTdmV4Kernel
                                           Traits::kEdgeN,
                                           Traits::kWideD>;
 
-    static constexpr index_t kBlockSize = Pipeline::kBlockSize;
+    static constexpr index_t kBlockSize = Pipeline::kThreads;
     static constexpr MxTdmV4Spec kSpec  = Pipeline::kSpec;
     static constexpr bool kHasCluster   = Pipeline::kHasCluster;
 

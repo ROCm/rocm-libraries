@@ -142,7 +142,9 @@ struct GemmPipelineAgBgCrCompTDMV4
                   "comp_tdm_v4: the Problem and tuning break a rule of rocKE's validate()");
     static constexpr MxTdmV4LdsLayout kLayout = Policy::template GetLdsLayout<Problem>();
 
-    static constexpr index_t kBlockSize   = Problem::kBlockSize;
+    static constexpr index_t kBlockSize = Problem::kBlockSize;
+    /// The workgroup's threads: kBlockSize of the device pass (4 waves of 32).
+    static constexpr index_t kThreads     = kSpec.block_size();
     static constexpr index_t kTileM       = kSpec.tile_m;
     static constexpr index_t kTileN       = kSpec.tile_n;
     static constexpr index_t kTileK       = kSpec.tile_k;
@@ -511,9 +513,9 @@ struct GemmPipelineAgBgCrCompTDMV4
                 constexpr index_t starts[4] = {
                     0, counts[0], counts[0] + counts[1], counts[0] + counts[1] + counts[2]};
                 constexpr index_t total = starts[3] + counts[3];
-                constexpr index_t pool  = kClusterX * kClusterY * kBlockSize;
+                constexpr index_t pool  = kClusterX * kClusterY * kThreads;
                 const index_t thread =
-                    kHasCluster ? (c.cluster_wx + c.cluster_wy * kClusterX) * kBlockSize + c.tid
+                    kHasCluster ? (c.cluster_wx + c.cluster_wy * kClusterX) * kThreads + c.tid
                                 : c.tid;
                 // A partial last tile has fewer K steps than the k_steps rows prefetched for it;
                 // a partial M/N tile has lines past the end.
