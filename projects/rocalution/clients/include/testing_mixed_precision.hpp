@@ -54,9 +54,9 @@ bool testing_mixed_precision(Arguments argus)
     LocalVector<T> rhs;
 
     // Generate A
-    int* csr_ptr = NULL;
-    int* csr_col = NULL;
-    T*   csr_val = NULL;
+    PtrType* csr_ptr = NULL;
+    int*     csr_col = NULL;
+    T*       csr_val = NULL;
 
     int nrow = 0;
     int ncol = 0;

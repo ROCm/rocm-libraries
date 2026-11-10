@@ -47,9 +47,9 @@ static void getLaplacianTestMatrix(Arguments argus, LocalMatrix<T>& matrix)
     int size = argus.size;
 
     // Generate A
-    int* csr_ptr = NULL;
-    int* csr_col = NULL;
-    T*   csr_val = NULL;
+    PtrType* csr_ptr = NULL;
+    int*     csr_col = NULL;
+    T*       csr_val = NULL;
 
     int nrow = gen_2d_laplacian(size, &csr_ptr, &csr_col, &csr_val);
     int ncol = nrow;

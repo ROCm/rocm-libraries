@@ -84,10 +84,13 @@ void testing_global_matrix_bad_args(void)
     GlobalMatrix<T> mat;
     GlobalVector<T> vec;
 
-    int* idata = nullptr;
-    T*   data  = nullptr;
+    int*     idata    = nullptr;
+    PtrType* pdata    = nullptr;
+    PtrType* null_ptr = nullptr;
+    T*       data     = nullptr;
 
     allocate_host(safe_size, &idata);
+    allocate_host(safe_size, &pdata);
     allocate_host(safe_size, &data);
 
     // SetDataPtrCSR
@@ -95,42 +98,42 @@ void testing_global_matrix_bad_args(void)
         int* null_int  = nullptr;
         T*   null_data = nullptr;
         ASSERT_DEATH(mat.SetDataPtrCSR(
-                         nullptr, &idata, &data, &idata, &idata, &data, "", safe_size, safe_size),
+                         nullptr, &idata, &data, &pdata, &idata, &data, "", safe_size, safe_size),
                      ".*Assertion.*local_row_offset != (NULL|__null)*");
         ASSERT_DEATH(mat.SetDataPtrCSR(
-                         &idata, nullptr, &data, &idata, &idata, &data, "", safe_size, safe_size),
+                         &pdata, nullptr, &data, &pdata, &idata, &data, "", safe_size, safe_size),
                      ".*Assertion.*local_col != (NULL|__null)*");
         ASSERT_DEATH(mat.SetDataPtrCSR(
-                         &idata, &idata, nullptr, &idata, &idata, &data, "", safe_size, safe_size),
+                         &pdata, &idata, nullptr, &pdata, &idata, &data, "", safe_size, safe_size),
                      ".*Assertion.*local_val != (NULL|__null)*");
         ASSERT_DEATH(mat.SetDataPtrCSR(
-                         &idata, &idata, &data, nullptr, &idata, &data, "", safe_size, safe_size),
+                         &pdata, &idata, &data, nullptr, &idata, &data, "", safe_size, safe_size),
                      ".*Assertion.*ghost_row_offset != (NULL|__null)*");
         ASSERT_DEATH(mat.SetDataPtrCSR(
-                         &idata, &idata, &data, &idata, nullptr, &data, "", safe_size, safe_size),
+                         &pdata, &idata, &data, &pdata, nullptr, &data, "", safe_size, safe_size),
                      ".*Assertion.*ghost_col != (NULL|__null)*");
         ASSERT_DEATH(mat.SetDataPtrCSR(
-                         &idata, &idata, &data, &idata, &idata, nullptr, "", safe_size, safe_size),
+                         &pdata, &idata, &data, &pdata, &idata, nullptr, "", safe_size, safe_size),
                      ".*Assertion.*ghost_val != (NULL|__null)*");
         ASSERT_DEATH(mat.SetDataPtrCSR(
-                         &null_int, &idata, &data, &idata, &idata, &data, "", safe_size, safe_size),
+                         &null_ptr, &idata, &data, &pdata, &idata, &data, "", safe_size, safe_size),
                      ".*Assertion.*local_row_offset != (NULL|__null)*");
         ASSERT_DEATH(mat.SetDataPtrCSR(
-                         &idata, &null_int, &data, &idata, &idata, &data, "", safe_size, safe_size),
+                         &pdata, &null_int, &data, &pdata, &idata, &data, "", safe_size, safe_size),
                      ".*Assertion.*local_col != (NULL|__null)*");
         ASSERT_DEATH(
             mat.SetDataPtrCSR(
-                &idata, &idata, &null_data, &idata, &idata, &data, "", safe_size, safe_size),
+                &pdata, &idata, &null_data, &pdata, &idata, &data, "", safe_size, safe_size),
             ".*Assertion.*local_val != (NULL|__null)*");
         ASSERT_DEATH(mat.SetDataPtrCSR(
-                         &idata, &idata, &data, &null_int, &idata, &data, "", safe_size, safe_size),
+                         &pdata, &idata, &data, &null_ptr, &idata, &data, "", safe_size, safe_size),
                      ".*Assertion.*ghost_row_offset != (NULL|__null)*");
         ASSERT_DEATH(mat.SetDataPtrCSR(
-                         &idata, &idata, &data, &idata, &null_int, &data, "", safe_size, safe_size),
+                         &pdata, &idata, &data, &pdata, &null_int, &data, "", safe_size, safe_size),
                      ".*Assertion.*ghost_col != (NULL|__null)*");
         ASSERT_DEATH(
             mat.SetDataPtrCSR(
-                &idata, &idata, &data, &idata, &idata, &null_data, "", safe_size, safe_size),
+                &pdata, &idata, &data, &pdata, &idata, &null_data, "", safe_size, safe_size),
             ".*Assertion.*ghost_val != (NULL|__null)*");
     }
 
@@ -184,15 +187,15 @@ void testing_global_matrix_bad_args(void)
         T*   null_data = nullptr;
         ASSERT_DEATH(mat.SetLocalDataPtrCSR(nullptr, &idata, &data, "", safe_size),
                      ".*Assertion.*row_offset != (NULL|__null)*");
-        ASSERT_DEATH(mat.SetLocalDataPtrCSR(&idata, nullptr, &data, "", safe_size),
+        ASSERT_DEATH(mat.SetLocalDataPtrCSR(&pdata, nullptr, &data, "", safe_size),
                      ".*Assertion.*col != (NULL|__null)*");
-        ASSERT_DEATH(mat.SetLocalDataPtrCSR(&idata, &idata, nullptr, "", safe_size),
+        ASSERT_DEATH(mat.SetLocalDataPtrCSR(&pdata, &idata, nullptr, "", safe_size),
                      ".*Assertion.*val != (NULL|__null)*");
-        ASSERT_DEATH(mat.SetLocalDataPtrCSR(&null_int, &idata, &data, "", safe_size),
+        ASSERT_DEATH(mat.SetLocalDataPtrCSR(&null_ptr, &idata, &data, "", safe_size),
                      ".*Assertion.*row_offset != (NULL|__null)*");
-        ASSERT_DEATH(mat.SetLocalDataPtrCSR(&idata, &null_int, &data, "", safe_size),
+        ASSERT_DEATH(mat.SetLocalDataPtrCSR(&pdata, &null_int, &data, "", safe_size),
                      ".*Assertion.*col != (NULL|__null)*");
-        ASSERT_DEATH(mat.SetLocalDataPtrCSR(&idata, &idata, &null_data, "", safe_size),
+        ASSERT_DEATH(mat.SetLocalDataPtrCSR(&pdata, &idata, &null_data, "", safe_size),
                      ".*Assertion.*val != (NULL|__null)*");
     }
 
@@ -202,15 +205,15 @@ void testing_global_matrix_bad_args(void)
         T*   null_data = nullptr;
         ASSERT_DEATH(mat.SetGhostDataPtrCSR(nullptr, &idata, &data, "", safe_size),
                      ".*Assertion.*row_offset != (NULL|__null)*");
-        ASSERT_DEATH(mat.SetGhostDataPtrCSR(&idata, nullptr, &data, "", safe_size),
+        ASSERT_DEATH(mat.SetGhostDataPtrCSR(&pdata, nullptr, &data, "", safe_size),
                      ".*Assertion.*col != (NULL|__null)*");
-        ASSERT_DEATH(mat.SetGhostDataPtrCSR(&idata, &idata, nullptr, "", safe_size),
+        ASSERT_DEATH(mat.SetGhostDataPtrCSR(&pdata, &idata, nullptr, "", safe_size),
                      ".*Assertion.*val != (NULL|__null)*");
-        ASSERT_DEATH(mat.SetGhostDataPtrCSR(&null_int, &idata, &data, "", safe_size),
+        ASSERT_DEATH(mat.SetGhostDataPtrCSR(&null_ptr, &idata, &data, "", safe_size),
                      ".*Assertion.*row_offset != (NULL|__null)*");
-        ASSERT_DEATH(mat.SetGhostDataPtrCSR(&idata, &null_int, &data, "", safe_size),
+        ASSERT_DEATH(mat.SetGhostDataPtrCSR(&pdata, &null_int, &data, "", safe_size),
                      ".*Assertion.*col != (NULL|__null)*");
-        ASSERT_DEATH(mat.SetGhostDataPtrCSR(&idata, &idata, &null_data, "", safe_size),
+        ASSERT_DEATH(mat.SetGhostDataPtrCSR(&pdata, &idata, &null_data, "", safe_size),
                      ".*Assertion.*val != (NULL|__null)*");
     }
 
@@ -255,22 +258,22 @@ void testing_global_matrix_bad_args(void)
         int* null_int  = nullptr;
         T*   null_data = nullptr;
         ASSERT_DEATH(
-            mat.LeaveDataPtrCSR(&idata, &null_int, &null_data, &null_int, &null_int, &null_data),
+            mat.LeaveDataPtrCSR(&pdata, &null_int, &null_data, &null_ptr, &null_int, &null_data),
             ".*Assertion.*local_row_offset == (NULL|__null)*");
         ASSERT_DEATH(
-            mat.LeaveDataPtrCSR(&null_int, &idata, &null_data, &null_int, &null_int, &null_data),
+            mat.LeaveDataPtrCSR(&null_ptr, &idata, &null_data, &null_ptr, &null_int, &null_data),
             ".*Assertion.*local_col == (NULL|__null)*");
         ASSERT_DEATH(
-            mat.LeaveDataPtrCSR(&null_int, &null_int, &data, &null_int, &null_int, &null_data),
+            mat.LeaveDataPtrCSR(&null_ptr, &null_int, &data, &null_ptr, &null_int, &null_data),
             ".*Assertion.*local_val == (NULL|__null)*");
         ASSERT_DEATH(
-            mat.LeaveDataPtrCSR(&null_int, &null_int, &null_data, &idata, &null_int, &null_data),
+            mat.LeaveDataPtrCSR(&null_ptr, &null_int, &null_data, &pdata, &null_int, &null_data),
             ".*Assertion.*ghost_row_offset == (NULL|__null)*");
         ASSERT_DEATH(
-            mat.LeaveDataPtrCSR(&null_int, &null_int, &null_data, &null_int, &idata, &null_data),
+            mat.LeaveDataPtrCSR(&null_ptr, &null_int, &null_data, &null_ptr, &idata, &null_data),
             ".*Assertion.*ghost_col == (NULL|__null)*");
         ASSERT_DEATH(
-            mat.LeaveDataPtrCSR(&null_int, &null_int, &null_data, &null_int, &null_int, &data),
+            mat.LeaveDataPtrCSR(&null_ptr, &null_int, &null_data, &null_ptr, &null_int, &data),
             ".*Assertion.*ghost_val == (NULL|__null)*");
     }
 
@@ -302,11 +305,11 @@ void testing_global_matrix_bad_args(void)
     {
         int* null_int  = nullptr;
         T*   null_data = nullptr;
-        ASSERT_DEATH(mat.LeaveLocalDataPtrCSR(&idata, &null_int, &null_data),
+        ASSERT_DEATH(mat.LeaveLocalDataPtrCSR(&pdata, &null_int, &null_data),
                      ".*Assertion.*row_offset == (NULL|__null)*");
-        ASSERT_DEATH(mat.LeaveLocalDataPtrCSR(&null_int, &idata, &null_data),
+        ASSERT_DEATH(mat.LeaveLocalDataPtrCSR(&null_ptr, &idata, &null_data),
                      ".*Assertion.*col == (NULL|__null)*");
-        ASSERT_DEATH(mat.LeaveLocalDataPtrCSR(&null_int, &null_int, &data),
+        ASSERT_DEATH(mat.LeaveLocalDataPtrCSR(&null_ptr, &null_int, &data),
                      ".*Assertion.*val == (NULL|__null)*");
     }
 
@@ -314,11 +317,11 @@ void testing_global_matrix_bad_args(void)
     {
         int* null_int  = nullptr;
         T*   null_data = nullptr;
-        ASSERT_DEATH(mat.LeaveGhostDataPtrCSR(&idata, &null_int, &null_data),
+        ASSERT_DEATH(mat.LeaveGhostDataPtrCSR(&pdata, &null_int, &null_data),
                      ".*Assertion.*row_offset == (NULL|__null)*");
-        ASSERT_DEATH(mat.LeaveGhostDataPtrCSR(&null_int, &idata, &null_data),
+        ASSERT_DEATH(mat.LeaveGhostDataPtrCSR(&null_ptr, &idata, &null_data),
                      ".*Assertion.*col == (NULL|__null)*");
-        ASSERT_DEATH(mat.LeaveGhostDataPtrCSR(&null_int, &null_int, &data),
+        ASSERT_DEATH(mat.LeaveGhostDataPtrCSR(&null_ptr, &null_int, &data),
                      ".*Assertion.*val == (NULL|__null)*");
     }
 
@@ -405,6 +408,7 @@ void testing_global_matrix_bad_args(void)
     }
 
     free_host(&idata);
+    free_host(&pdata);
     free_host(&data);
 
     // Stop rocALUTION
@@ -435,11 +439,19 @@ void testing_global_matrix_local_data_only(bool coo, bool use_acc)
     int n   = 100;
     int nnz = 3 * n - 2;
 
-    int* row = nullptr;
-    int* col = nullptr;
-    T*   val = nullptr;
+    int*     row        = nullptr;
+    PtrType* row_offset = nullptr;
+    int*     col        = nullptr;
+    T*       val        = nullptr;
 
-    allocate_host(coo ? nnz : n + 1, &row);
+    if(coo)
+    {
+        allocate_host(nnz, &row);
+    }
+    else
+    {
+        allocate_host(n + 1, &row_offset);
+    }
     allocate_host(nnz, &col);
     allocate_host(nnz, &val);
 
@@ -448,7 +460,7 @@ void testing_global_matrix_local_data_only(bool coo, bool use_acc)
     {
         if(!coo)
         {
-            row[i] = k;
+            row_offset[i] = k;
         }
 
         for(int j = std::max(i - 1, 0); j <= std::min(i + 1, n - 1); ++j)
@@ -466,7 +478,7 @@ void testing_global_matrix_local_data_only(bool coo, bool use_acc)
 
     if(!coo)
     {
-        row[n] = k;
+        row_offset[n] = k;
     }
 
     int zero_offset[1] = {0};
@@ -490,7 +502,7 @@ void testing_global_matrix_local_data_only(bool coo, bool use_acc)
     }
     else
     {
-        mat.SetLocalDataPtrCSR(&row, &col, &val, "mat", nnz);
+        mat.SetLocalDataPtrCSR(&row_offset, &col, &val, "mat", nnz);
     }
 
     EXPECT_EQ(mat.GetGhost().GetM(), n);
@@ -566,11 +578,19 @@ void testing_global_matrix_ghost_order(bool coo, bool use_acc, bool ghost_first)
     int n   = 100;
     int nnz = 3 * n - 2;
 
-    int* row = nullptr;
-    int* col = nullptr;
-    T*   val = nullptr;
+    int*     row        = nullptr;
+    PtrType* row_offset = nullptr;
+    int*     col        = nullptr;
+    T*       val        = nullptr;
 
-    allocate_host(coo ? nnz : n + 1, &row);
+    if(coo)
+    {
+        allocate_host(nnz, &row);
+    }
+    else
+    {
+        allocate_host(n + 1, &row_offset);
+    }
     allocate_host(nnz, &col);
     allocate_host(nnz, &val);
 
@@ -579,7 +599,7 @@ void testing_global_matrix_ghost_order(bool coo, bool use_acc, bool ghost_first)
     {
         if(!coo)
         {
-            row[i] = k;
+            row_offset[i] = k;
         }
 
         for(int j = std::max(i - 1, 0); j <= std::min(i + 1, n - 1); ++j)
@@ -597,26 +617,33 @@ void testing_global_matrix_ghost_order(bool coo, bool use_acc, bool ghost_first)
 
     if(!coo)
     {
-        row[n] = k;
+        row_offset[n] = k;
     }
 
     // Ghost entry of rank 1: local row 0, ghost column 0 (global column n - 1), value -1
     int  gst_nnz = (rank == 0) ? 0 : 1;
     bool gst_coo = coo && gst_nnz > 0;
 
-    int* gst_row = nullptr;
-    int* gst_col = nullptr;
-    T*   gst_val = nullptr;
+    int*     gst_row        = nullptr;
+    PtrType* gst_row_offset = nullptr;
+    int*     gst_col        = nullptr;
+    T*       gst_val        = nullptr;
 
-    allocate_host(gst_coo ? gst_nnz : n + 1, &gst_row);
-
-    gst_row[0] = 0;
-
-    if(!gst_coo)
+    if(gst_coo)
     {
+        allocate_host(gst_nnz, &gst_row);
+
+        gst_row[0] = 0;
+    }
+    else
+    {
+        allocate_host(n + 1, &gst_row_offset);
+
+        gst_row_offset[0] = 0;
+
         for(int i = 1; i <= n; ++i)
         {
-            gst_row[i] = gst_nnz;
+            gst_row_offset[i] = gst_nnz;
         }
     }
 
@@ -664,7 +691,7 @@ void testing_global_matrix_ghost_order(bool coo, bool use_acc, bool ghost_first)
         }
         else
         {
-            mat.SetLocalDataPtrCSR(&row, &col, &val, "mat", nnz);
+            mat.SetLocalDataPtrCSR(&row_offset, &col, &val, "mat", nnz);
         }
     };
 
@@ -675,7 +702,7 @@ void testing_global_matrix_ghost_order(bool coo, bool use_acc, bool ghost_first)
         }
         else
         {
-            mat.SetGhostDataPtrCSR(&gst_row, &gst_col, &gst_val, "mat", gst_nnz);
+            mat.SetGhostDataPtrCSR(&gst_row_offset, &gst_col, &gst_val, "mat", gst_nnz);
         }
     };
 

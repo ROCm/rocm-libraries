@@ -53,14 +53,17 @@ void testing_local_matrix_bad_args(void)
     LocalVector<int64_t> int641;
 
     // null pointers
-    int* null_int  = nullptr;
-    T*   null_data = nullptr;
+    int*     null_int  = nullptr;
+    PtrType* null_ptr  = nullptr;
+    T*       null_data = nullptr;
 
     // Valid pointers
-    int* vint  = nullptr;
-    T*   vdata = nullptr;
+    int*     vint  = nullptr;
+    PtrType* vptr  = nullptr;
+    T*       vdata = nullptr;
 
     allocate_host(safe_size, &vint);
+    allocate_host(safe_size, &vptr);
     allocate_host(safe_size, &vdata);
 
     // Valid matrices
@@ -152,14 +155,14 @@ void testing_local_matrix_bad_args(void)
     // CopyFrom functions
     {
         ASSERT_DEATH(mat1.UpdateValuesCSR(null_data), ".*Assertion.*val != (NULL|__null)*");
-        ASSERT_DEATH(mat1.CopyFromCSR(null_int, vint, vdata),
+        ASSERT_DEATH(mat1.CopyFromCSR(null_ptr, vint, vdata),
                      ".*Assertion.*row_offsets != (NULL|__null)*");
-        ASSERT_DEATH(mat3.CopyFromCSR(vint, null_int, vdata), ".*Assertion.*col != (NULL|__null)*");
-        ASSERT_DEATH(mat3.CopyFromCSR(vint, vint, null_data), ".*Assertion.*val != (NULL|__null)*");
-        ASSERT_DEATH(mat1.CopyToCSR(null_int, vint, vdata),
+        ASSERT_DEATH(mat3.CopyFromCSR(vptr, null_int, vdata), ".*Assertion.*col != (NULL|__null)*");
+        ASSERT_DEATH(mat3.CopyFromCSR(vptr, vint, null_data), ".*Assertion.*val != (NULL|__null)*");
+        ASSERT_DEATH(mat1.CopyToCSR(null_ptr, vint, vdata),
                      ".*Assertion.*row_offsets != (NULL|__null)*");
-        ASSERT_DEATH(mat3.CopyToCSR(vint, null_int, vdata), ".*Assertion.*col != (NULL|__null)*");
-        ASSERT_DEATH(mat3.CopyToCSR(vint, vint, null_data), ".*Assertion.*val != (NULL|__null)*");
+        ASSERT_DEATH(mat3.CopyToCSR(vptr, null_int, vdata), ".*Assertion.*col != (NULL|__null)*");
+        ASSERT_DEATH(mat3.CopyToCSR(vptr, vint, null_data), ".*Assertion.*val != (NULL|__null)*");
         ASSERT_DEATH(mat1.CopyFromCOO(null_int, vint, vdata), ".*Assertion.*row != (NULL|__null)*");
         ASSERT_DEATH(mat1.CopyFromCOO(vint, null_int, vdata), ".*Assertion.*col != (NULL|__null)*");
         ASSERT_DEATH(mat1.CopyFromCOO(vint, vint, null_data), ".*Assertion.*val != (NULL|__null)*");
@@ -167,13 +170,13 @@ void testing_local_matrix_bad_args(void)
         ASSERT_DEATH(mat1.CopyToCOO(vint, null_int, vdata), ".*Assertion.*col != (NULL|__null)*");
         ASSERT_DEATH(mat1.CopyToCOO(vint, vint, null_data), ".*Assertion.*val != (NULL|__null)*");
         ASSERT_DEATH(
-            mat1.CopyFromHostCSR(null_int, vint, vdata, "", safe_size, safe_size, safe_size),
+            mat1.CopyFromHostCSR(null_ptr, vint, vdata, "", safe_size, safe_size, safe_size),
             ".*Assertion.*row_offset != (NULL|__null)*");
         ASSERT_DEATH(
-            mat1.CopyFromHostCSR(vint, null_int, vdata, "", safe_size, safe_size, safe_size),
+            mat1.CopyFromHostCSR(vptr, null_int, vdata, "", safe_size, safe_size, safe_size),
             ".*Assertion.*col != (NULL|__null)*");
         ASSERT_DEATH(
-            mat1.CopyFromHostCSR(vint, vint, null_data, "", safe_size, safe_size, safe_size),
+            mat1.CopyFromHostCSR(vptr, vint, null_data, "", safe_size, safe_size, safe_size),
             ".*Assertion.*val != (NULL|__null)*");
     }
 
@@ -265,39 +268,39 @@ void testing_local_matrix_bad_args(void)
         ASSERT_DEATH(mat1.SetDataPtrCOO(&vint, &vint, nullptr, "", safe_size, safe_size, safe_size),
                      ".*Assertion.*val != (NULL|__null)*");
         ASSERT_DEATH(
-            mat1.SetDataPtrCSR(&null_int, &vint, &vdata, "", safe_size, safe_size, safe_size),
+            mat1.SetDataPtrCSR(&null_ptr, &vint, &vdata, "", safe_size, safe_size, safe_size),
             ".*Assertion.*row_offset != (NULL|__null)*");
         ASSERT_DEATH(
-            mat1.SetDataPtrCSR(&vint, &null_int, &vdata, "", safe_size, safe_size, safe_size),
+            mat1.SetDataPtrCSR(&vptr, &null_int, &vdata, "", safe_size, safe_size, safe_size),
             ".*Assertion.*col != (NULL|__null)*");
         ASSERT_DEATH(
-            mat1.SetDataPtrCSR(&vint, &vint, &null_data, "", safe_size, safe_size, safe_size),
+            mat1.SetDataPtrCSR(&vptr, &vint, &null_data, "", safe_size, safe_size, safe_size),
             ".*Assertion.*val != (NULL|__null)*");
         ASSERT_DEATH(
             mat1.SetDataPtrCSR(nullptr, &vint, &vdata, "", safe_size, safe_size, safe_size),
             ".*Assertion.*row_offset != (NULL|__null)*");
         ASSERT_DEATH(
-            mat1.SetDataPtrCSR(&vint, nullptr, &vdata, "", safe_size, safe_size, safe_size),
+            mat1.SetDataPtrCSR(&vptr, nullptr, &vdata, "", safe_size, safe_size, safe_size),
             ".*Assertion.*col != (NULL|__null)*");
-        ASSERT_DEATH(mat1.SetDataPtrCSR(&vint, &vint, nullptr, "", safe_size, safe_size, safe_size),
+        ASSERT_DEATH(mat1.SetDataPtrCSR(&vptr, &vint, nullptr, "", safe_size, safe_size, safe_size),
                      ".*Assertion.*val != (NULL|__null)*");
         ASSERT_DEATH(
-            mat1.SetDataPtrMCSR(&null_int, &vint, &vdata, "", safe_size, safe_size, safe_size),
+            mat1.SetDataPtrMCSR(&null_ptr, &vint, &vdata, "", safe_size, safe_size, safe_size),
             ".*Assertion.*row_offset != (NULL|__null)*");
         ASSERT_DEATH(
-            mat1.SetDataPtrMCSR(&vint, &null_int, &vdata, "", safe_size, safe_size, safe_size),
+            mat1.SetDataPtrMCSR(&vptr, &null_int, &vdata, "", safe_size, safe_size, safe_size),
             ".*Assertion.*col != (NULL|__null)*");
         ASSERT_DEATH(
-            mat1.SetDataPtrMCSR(&vint, &vint, &null_data, "", safe_size, safe_size, safe_size),
+            mat1.SetDataPtrMCSR(&vptr, &vint, &null_data, "", safe_size, safe_size, safe_size),
             ".*Assertion.*val != (NULL|__null)*");
         ASSERT_DEATH(
             mat1.SetDataPtrMCSR(nullptr, &vint, &vdata, "", safe_size, safe_size, safe_size),
             ".*Assertion.*row_offset != (NULL|__null)*");
         ASSERT_DEATH(
-            mat1.SetDataPtrMCSR(&vint, nullptr, &vdata, "", safe_size, safe_size, safe_size),
+            mat1.SetDataPtrMCSR(&vptr, nullptr, &vdata, "", safe_size, safe_size, safe_size),
             ".*Assertion.*col != (NULL|__null)*");
         ASSERT_DEATH(
-            mat1.SetDataPtrMCSR(&vint, &vint, nullptr, "", safe_size, safe_size, safe_size),
+            mat1.SetDataPtrMCSR(&vptr, &vint, nullptr, "", safe_size, safe_size, safe_size),
             ".*Assertion.*val != (NULL|__null)*");
         ASSERT_DEATH(
             mat1.SetDataPtrELL(&null_int, &vdata, "", safe_size, safe_size, safe_size, safe_size),
@@ -338,17 +341,17 @@ void testing_local_matrix_bad_args(void)
                      ".*Assertion.*col == (NULL|__null)*");
         ASSERT_DEATH(mat1.LeaveDataPtrCOO(&null_int, &null_int, &vdata),
                      ".*Assertion.*val == (NULL|__null)*");
-        ASSERT_DEATH(mat1.LeaveDataPtrCSR(&vint, &null_int, &null_data),
+        ASSERT_DEATH(mat1.LeaveDataPtrCSR(&vptr, &null_int, &null_data),
                      ".*Assertion.*row_offset == (NULL|__null)*");
-        ASSERT_DEATH(mat1.LeaveDataPtrCSR(&null_int, &vint, &null_data),
+        ASSERT_DEATH(mat1.LeaveDataPtrCSR(&null_ptr, &vint, &null_data),
                      ".*Assertion.*col == (NULL|__null)*");
-        ASSERT_DEATH(mat1.LeaveDataPtrCSR(&null_int, &null_int, &vdata),
+        ASSERT_DEATH(mat1.LeaveDataPtrCSR(&null_ptr, &null_int, &vdata),
                      ".*Assertion.*val == (NULL|__null)*");
-        ASSERT_DEATH(mat1.LeaveDataPtrMCSR(&vint, &null_int, &null_data),
+        ASSERT_DEATH(mat1.LeaveDataPtrMCSR(&vptr, &null_int, &null_data),
                      ".*Assertion.*row_offset == (NULL|__null)*");
-        ASSERT_DEATH(mat1.LeaveDataPtrMCSR(&null_int, &vint, &null_data),
+        ASSERT_DEATH(mat1.LeaveDataPtrMCSR(&null_ptr, &vint, &null_data),
                      ".*Assertion.*col == (NULL|__null)*");
-        ASSERT_DEATH(mat1.LeaveDataPtrMCSR(&null_int, &null_int, &vdata),
+        ASSERT_DEATH(mat1.LeaveDataPtrMCSR(&null_ptr, &null_int, &vdata),
                      ".*Assertion.*val == (NULL|__null)*");
         ASSERT_DEATH(mat1.LeaveDataPtrELL(&null_int, &vdata, val),
                      ".*Assertion.*val == (NULL|__null)*");
@@ -362,6 +365,7 @@ void testing_local_matrix_bad_args(void)
     }
 
     free_host(&vint);
+    free_host(&vptr);
     free_host(&vdata);
 
     // Stop rocALUTION
@@ -380,9 +384,9 @@ bool testing_local_matrix_conversions(Arguments argus)
     init_rocalution();
 
     // Generate A
-    int* csr_ptr = NULL;
-    int* csr_col = NULL;
-    T*   csr_val = NULL;
+    PtrType* csr_ptr = NULL;
+    int*     csr_col = NULL;
+    T*       csr_val = NULL;
 
     int nrow = 0;
     int ncol = 0;
@@ -589,7 +593,7 @@ bool testing_local_matrix_set_data_ptr(Arguments argus)
     // Testing allocating matrix types
     {
         LocalMatrix<T> A;
-        int*           row_offset = NULL;
+        PtrType*       row_offset = NULL;
         int*           col        = NULL;
         T*             val        = NULL;
 
@@ -611,7 +615,7 @@ bool testing_local_matrix_set_data_ptr(Arguments argus)
 
     {
         LocalMatrix<T> B;
-        int*           row_offset = NULL;
+        PtrType*       row_offset = NULL;
         int*           col        = NULL;
         T*             val        = NULL;
 
@@ -655,7 +659,7 @@ bool testing_local_matrix_set_data_ptr(Arguments argus)
 
     {
         LocalMatrix<T> E;
-        int*           row_offset = NULL;
+        PtrType*       row_offset = NULL;
         int*           col        = NULL;
         T*             val        = NULL;
 
@@ -720,9 +724,9 @@ LocalMatrix<T> getTestMatrix()
     LocalMatrix<T> matrix;
     matrix.AllocateCSR("TestMatrix", 4, 2, 2);
 
-    int row_offsets[3] = {0, 2, 4};
-    int col_indices[4] = {0, 1, 0, 1};
-    T   values[4]      = {1.0, 2.0, 3.0, 4.0};
+    PtrType row_offsets[3] = {0, 2, 4};
+    int     col_indices[4] = {0, 1, 0, 1};
+    T       values[4]      = {1.0, 2.0, 3.0, 4.0};
     matrix.CopyFromCSR(row_offsets, col_indices, values);
 
     return matrix;
@@ -735,9 +739,9 @@ void getTestMatrix(Arguments argus, LocalMatrix<T>& matrix, bool& is_invertible)
     std::string matrix_type = argus.matrix_type;
 
     // Generate A
-    int* csr_ptr = NULL;
-    int* csr_col = NULL;
-    T*   csr_val = NULL;
+    PtrType* csr_ptr = NULL;
+    int*     csr_col = NULL;
+    T*       csr_val = NULL;
 
     int nrow = 0;
     int ncol = 0;
@@ -789,9 +793,9 @@ void getMatrixVal(const LocalMatrix<T>& matrix, T* values)
     int64_t m   = matrix.GetM();
     int64_t nnz = matrix.GetNnz();
 
-    int* row_offsets   = new int[m + 1];
-    int* col_indices   = new int[nnz];
-    T*   matrix_values = new T[nnz];
+    PtrType* row_offsets   = new PtrType[m + 1];
+    int*     col_indices   = new int[nnz];
+    T*       matrix_values = new T[nnz];
 
     matrix.CopyToCSR(row_offsets, col_indices, matrix_values);
     for(int i = 0; i < nnz; ++i)
@@ -811,9 +815,9 @@ void getMatrixDiagVal(const LocalMatrix<T>& matrix, T* values)
     int64_t m   = matrix.GetM();
     int64_t nnz = matrix.GetNnz();
 
-    int* row_offsets   = new int[m + 1];
-    int* col_indices   = new int[nnz];
-    T*   matrix_values = new T[nnz];
+    PtrType* row_offsets   = new PtrType[m + 1];
+    int*     col_indices   = new int[nnz];
+    T*       matrix_values = new T[nnz];
 
     matrix.CopyToCSR(row_offsets, col_indices, matrix_values);
     for(int row = 0; row < m; ++row)
@@ -874,14 +878,14 @@ std::vector<std::vector<T>> extract_dense_matrix(const LocalMatrix<T>& matrix)
     int                         n   = matrix.GetN();
     int                         nnz = matrix.GetNnz();
     std::vector<std::vector<T>> dense(m, std::vector<T>(n, static_cast<T>(0)));
-    std::vector<int>            row_offsets(m + 1);
+    std::vector<PtrType>        row_offsets(m + 1);
     std::vector<int>            col_indices(nnz);
     std::vector<T>              values(nnz);
 
     matrix.CopyToCSR(row_offsets.data(), col_indices.data(), values.data());
     for(int row = 0; row < m; ++row)
     {
-        for(int idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
+        for(PtrType idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
         {
             int col         = col_indices[idx];
             dense[row][col] = values[idx];
@@ -897,14 +901,14 @@ std::vector<std::vector<bool>> extract_dense_pattern(const LocalMatrix<T>& matri
     int                            n   = matrix.GetN();
     int                            nnz = matrix.GetNnz();
     std::vector<std::vector<bool>> pattern(m, std::vector<bool>(n, false));
-    std::vector<int>               row_offsets(m + 1);
+    std::vector<PtrType>           row_offsets(m + 1);
     std::vector<int>               col_indices(nnz);
     std::vector<T>                 values(nnz);
 
     matrix.CopyToCSR(row_offsets.data(), col_indices.data(), values.data());
     for(int row = 0; row < m; ++row)
     {
-        for(int idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
+        for(PtrType idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
         {
             pattern[row][col_indices[idx]] = true;
         }
@@ -1729,7 +1733,7 @@ void testing_set_data_pointer()
     // CSR
     {
         LocalMatrix<T> mat         = getTestMatrix<T>();
-        int*           row_offsets = new int[3]{0, 2, 4};
+        PtrType*       row_offsets = new PtrType[3]{0, 2, 4};
         int*           col_indices = new int[4]{0, 1, 0, 1};
         T*             values      = new T[4]{1.0, 2.0, 3.0, 4.0};
 
@@ -1748,10 +1752,10 @@ void testing_set_data_pointer()
 template <typename T>
 void testing_leave_data_pointer()
 {
-    auto matrix      = getTestMatrix<T>();
-    int* row_offsets = nullptr;
-    int* col_indices = nullptr;
-    T*   values      = nullptr;
+    auto     matrix      = getTestMatrix<T>();
+    PtrType* row_offsets = nullptr;
+    int*     col_indices = nullptr;
+    T*       values      = nullptr;
 
     matrix.LeaveDataPtrCSR(&row_offsets, &col_indices, &values);
 
@@ -1921,9 +1925,9 @@ void testing_symbolic_power(Arguments argus)
     // Compute expected symbolic square pattern
     std::set<std::pair<int, int>> expected_pattern;
     {
-        int* row_offsets   = new int[matrix.GetM() + 1];
-        int* col_indices   = new int[matrix.GetNnz()];
-        T*   matrix_values = new T[matrix.GetNnz()];
+        PtrType* row_offsets   = new PtrType[matrix.GetM() + 1];
+        int*     col_indices   = new int[matrix.GetNnz()];
+        T*       matrix_values = new T[matrix.GetNnz()];
 
         matrix.CopyToCSR(row_offsets, col_indices, matrix_values);
 
@@ -1931,7 +1935,7 @@ void testing_symbolic_power(Arguments argus)
         std::set<std::pair<int, int>> original_pattern;
         for(int row = 0; row < matrix.GetM(); ++row)
         {
-            for(int idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
+            for(PtrType idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
                 original_pattern.insert({row, col_indices[idx]});
         }
 
@@ -1961,14 +1965,14 @@ void testing_symbolic_power(Arguments argus)
     // Extract new pattern
     std::set<std::pair<int, int>> new_pattern;
     {
-        int* row_offsets   = new int[matrix.GetM() + 1];
-        int* col_indices   = new int[matrix.GetNnz()];
-        T*   matrix_values = new T[matrix.GetNnz()];
+        PtrType* row_offsets   = new PtrType[matrix.GetM() + 1];
+        int*     col_indices   = new int[matrix.GetNnz()];
+        T*       matrix_values = new T[matrix.GetNnz()];
 
         matrix.CopyToCSR(row_offsets, col_indices, matrix_values);
         for(int row = 0; row < matrix.GetM(); ++row)
         {
-            for(int idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
+            for(PtrType idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
                 new_pattern.insert({row, col_indices[idx]});
         }
         delete[] row_offsets;
@@ -2431,9 +2435,9 @@ void testing_write_file_MTX()
     // [ 1.0  0.0  2.0 ]
     // [ 0.0  3.0  0.0 ]
     // [ 4.0  0.0  5.0 ]
-    int row_offsets[4] = {0, 2, 3, 5};
-    int col_indices[5] = {0, 2, 1, 0, 2};
-    T   values[5]      = {1.0, 2.0, 3.0, 4.0, 5.0};
+    PtrType row_offsets[4] = {0, 2, 3, 5};
+    int     col_indices[5] = {0, 2, 1, 0, 2};
+    T       values[5]      = {1.0, 2.0, 3.0, 4.0, 5.0};
     matrix.CopyFromCSR(row_offsets, col_indices, values);
 
     // Step 2: Write the matrix to a file in MTX format
@@ -2471,9 +2475,9 @@ void testing_write_file_RSIO()
     // [ 1.0  0.0  2.0 ]
     // [ 0.0  3.0  0.0 ]
     // [ 4.0  0.0  5.0 ]
-    int row_offsets[4] = {0, 2, 3, 5};
-    int col_indices[5] = {0, 2, 1, 0, 2};
-    T   values[5]      = {1.0, 2.0, 3.0, 4.0, 5.0};
+    PtrType row_offsets[4] = {0, 2, 3, 5};
+    int     col_indices[5] = {0, 2, 1, 0, 2};
+    T       values[5]      = {1.0, 2.0, 3.0, 4.0, 5.0};
     matrix.CopyFromCSR(row_offsets, col_indices, values);
 
     // Step 2: Write the matrix to a file in RSIO format
@@ -2569,9 +2573,9 @@ void testing_write_file_RSIO_close_failure()
     LocalMatrix<T> matrix;
     matrix.AllocateCSR("test", 5, 3, 3);
 
-    int row_offsets[4] = {0, 2, 3, 5};
-    int col_indices[5] = {0, 2, 1, 0, 2};
-    T   values[5]      = {1.0, 2.0, 3.0, 4.0, 5.0};
+    PtrType row_offsets[4] = {0, 2, 3, 5};
+    int     col_indices[5] = {0, 2, 1, 0, 2};
+    T       values[5]      = {1.0, 2.0, 3.0, 4.0, 5.0};
     matrix.CopyFromCSR(row_offsets, col_indices, values);
 
     EXPECT_EXIT(matrix.WriteFileRSIO(filename), ::testing::ExitedWithCode(1), "");
@@ -2592,14 +2596,14 @@ void testing_local_apply(Arguments argus)
 
     // Compute expected result
     std::vector<T> expected(y.GetSize(), 0);
-    int*           row_offsets = new int[matrix.GetM() + 1];
+    PtrType*       row_offsets = new PtrType[matrix.GetM() + 1];
     int*           col_indices = new int[matrix.GetNnz()];
     T*             values      = new T[matrix.GetNnz()];
     matrix.CopyToCSR(row_offsets, col_indices, values);
 
     for(int row = 0; row < matrix.GetM(); ++row)
     {
-        for(int idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
+        for(PtrType idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
             expected[row] += values[idx] * x[col_indices[idx]];
     }
 
@@ -2918,9 +2922,10 @@ void testing_local_add_scalar_off_diagonal(Arguments argus)
     diag_vec.MoveToHost();
     ASSERT_EQ(diag_vec.GetSize(), k);
 
-    LocalMatrix<T>   D;
-    std::vector<int> row_offsets(m + 1), col_indices(k);
-    std::vector<T>   values(k);
+    LocalMatrix<T>       D;
+    std::vector<PtrType> row_offsets(m + 1);
+    std::vector<int>     col_indices(k);
+    std::vector<T>       values(k);
     for(int i = 0; i <= m; ++i)
     {
         row_offsets[i] = std::min(i, k);
@@ -3028,9 +3033,9 @@ void testing_local_triple_matrix_product(Arguments argus)
     }
     else
     {
-        int* csr_ptr = NULL;
-        int* csr_col = NULL;
-        T*   csr_val = NULL;
+        PtrType* csr_ptr = NULL;
+        int*     csr_col = NULL;
+        T*       csr_val = NULL;
         gen_random(m, m, 6, &csr_ptr, &csr_col, &csr_val);
         int nnz = csr_ptr[m];
         matrixB.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "B", nnz, m, m);
@@ -3209,17 +3214,17 @@ void testing_local_compress(Arguments argus)
     EXPECT_NO_THROW(matrix.Compress(1e-8));
 
     // Extract values after compression
-    int64_t new_nnz     = matrix.GetNnz();
-    int     m           = matrix.GetM();
-    int*    row_offsets = new int[m + 1];
-    int*    col_indices = new int[new_nnz];
-    T*      new_values  = new T[new_nnz];
+    int64_t  new_nnz     = matrix.GetNnz();
+    int      m           = matrix.GetM();
+    PtrType* row_offsets = new PtrType[m + 1];
+    int*     col_indices = new int[new_nnz];
+    T*       new_values  = new T[new_nnz];
     matrix.CopyToCSR(row_offsets, col_indices, new_values);
 
     // All remaining off-diagonal values should have abs(value) > 1e-8
     for(int row = 0; row < m; ++row)
     {
-        for(int idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
+        for(PtrType idx = row_offsets[row]; idx < row_offsets[row + 1]; ++idx)
         {
             int col = col_indices[idx];
             if(row != col)

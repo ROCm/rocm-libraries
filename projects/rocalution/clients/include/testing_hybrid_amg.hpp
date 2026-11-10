@@ -70,9 +70,9 @@ bool testing_hybrid_amg(Arguments argus)
     LocalVector<T> e;
 
     // Generate A
-    int* csr_ptr = NULL;
-    int* csr_col = NULL;
-    T*   csr_val = NULL;
+    PtrType* csr_ptr = NULL;
+    int*     csr_col = NULL;
+    T*       csr_val = NULL;
 
     int nrow = 0;
     if(matrix_type == "Laplacian2D")

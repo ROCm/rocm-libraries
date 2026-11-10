@@ -66,9 +66,9 @@ bool testing_pairwise_amg(Arguments argus)
     LocalVector<T> e;
 
     // Generate A
-    int* csr_ptr = NULL;
-    int* csr_col = NULL;
-    T*   csr_val = NULL;
+    PtrType* csr_ptr = NULL;
+    int*     csr_col = NULL;
+    T*       csr_val = NULL;
 
     int nrow = gen_2d_laplacian(ndim, &csr_ptr, &csr_col, &csr_val);
     int nnz  = csr_ptr[nrow];
@@ -244,9 +244,9 @@ bool testing_pairwise_amg_2(Arguments argus)
     LocalVector<T> e;
 
     // Generate A
-    int* csr_ptr = NULL;
-    int* csr_col = NULL;
-    T*   csr_val = NULL;
+    PtrType* csr_ptr = NULL;
+    int*     csr_col = NULL;
+    T*       csr_val = NULL;
 
     int nrow = gen_2d_laplacian(ndim, &csr_ptr, &csr_col, &csr_val);
     int nnz  = csr_ptr[nrow];
@@ -415,9 +415,9 @@ bool testing_pairwise_amg_3(Arguments argus)
     int ndim = argus.size;
 
     // Generate A
-    int* csr_ptr = NULL;
-    int* csr_col = NULL;
-    T*   csr_val = NULL;
+    PtrType* csr_ptr = NULL;
+    int*     csr_col = NULL;
+    T*       csr_val = NULL;
 
     int nrow = gen_2d_laplacian(ndim, &csr_ptr, &csr_col, &csr_val);
     int nnz  = csr_ptr[nrow];

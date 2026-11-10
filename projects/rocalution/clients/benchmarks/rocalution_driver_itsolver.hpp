@@ -47,14 +47,14 @@ protected:
     //
     void Cache(int             m,
                int             n,
-               int             nnz,
-               const int*      csr_ptr,
+               int64_t         nnz,
+               const PtrType*  csr_ptr,
                const int*      csr_ind,
                const T*        csr_val,
                const params_t& parameters)
     {
         this->cache_csr_val = new T[nnz];
-        for(int i = 0; i < nnz; i++)
+        for(int64_t i = 0; i < nnz; i++)
         {
             this->cache_csr_val[i] = csr_val[i];
         }
@@ -114,7 +114,7 @@ public:
 
         case rocalution_enum_matrix_init::laplacian:
         {
-            int*      csr_ptr = NULL;
+            PtrType*  csr_ptr = NULL;
             int*      csr_col = NULL;
             T*        csr_val = NULL;
             const int ndim    = parameters.Get(params_t::ndim);
@@ -129,7 +129,7 @@ public:
 
         case rocalution_enum_matrix_init::permuted_identity:
         {
-            int*      csr_ptr = NULL;
+            PtrType*  csr_ptr = NULL;
             int*      csr_col = NULL;
             T*        csr_val = NULL;
             const int ndim    = parameters.Get(params_t::ndim);
@@ -172,12 +172,12 @@ public:
                     //
                     // Grab csr data.
                     //
-                    int* csr_ptr = NULL;
-                    int* csr_col = NULL;
-                    T*   csr_val = NULL;
-                    auto nrow    = A.GetM();
-                    auto ncol    = A.GetN();
-                    auto nnz     = A.GetNnz();
+                    PtrType* csr_ptr = NULL;
+                    int*     csr_col = NULL;
+                    T*       csr_val = NULL;
+                    auto     nrow    = A.GetM();
+                    auto     ncol    = A.GetN();
+                    auto     nnz     = A.GetNnz();
                     //
                     // Leave pointers, A is not usable after this until we re-set the pointers.
                     //

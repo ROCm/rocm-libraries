@@ -28,6 +28,8 @@
 #include <algorithm>
 #include <string>
 
+#include <rocalution/rocalution.hpp>
+
 #include "random.hpp"
 
 template <std::size_t N, typename T>
@@ -43,7 +45,7 @@ extern int device;
 /* ============================================================================================ */
 /*! \brief  Generate 2D laplacian on unit square in CSR format */
 template <typename T>
-int gen_2d_laplacian(int ndim, int** rowptr, int** col, T** val)
+int gen_2d_laplacian(int ndim, PtrType** rowptr, int** col, T** val)
 {
     if(ndim == 0)
     {
@@ -53,7 +55,7 @@ int gen_2d_laplacian(int ndim, int** rowptr, int** col, T** val)
     int n       = ndim * ndim;
     int nnz_mat = n * 5 - ndim * 4;
 
-    *rowptr = new int[n + 1];
+    *rowptr = new PtrType[n + 1];
     *col    = new int[nnz_mat];
     *val    = new T[nnz_mat];
 
@@ -108,7 +110,7 @@ int gen_2d_laplacian(int ndim, int** rowptr, int** col, T** val)
 /* ============================================================================================ */
 /*! \brief  Generate 3D laplacian on unit square in CSR format */
 template <typename T>
-int gen_3d_laplacian(int ndim, int** row_ptr, int** col_ind, T** val)
+int gen_3d_laplacian(int ndim, PtrType** row_ptr, int** col_ind, T** val)
 {
     // Do nothing
     if(ndim == 0)
@@ -121,7 +123,7 @@ int gen_3d_laplacian(int ndim, int** row_ptr, int** col_ind, T** val)
     // Approximate 27pt stencil
     int nnz_mat = 27 * n;
 
-    *row_ptr = new int[n + 1];
+    *row_ptr = new PtrType[n + 1];
     *col_ind = new int[nnz_mat];
     *val     = new T[nnz_mat];
 
@@ -179,7 +181,7 @@ int gen_3d_laplacian(int ndim, int** row_ptr, int** col_ind, T** val)
 /* ============================================================================================ */
 /*! \brief  Generate full rank identity matrix where the row order has been permuted */
 template <typename T>
-int gen_permuted_identity(int ndim, int** rowptr, int** col, T** val)
+int gen_permuted_identity(int ndim, PtrType** rowptr, int** col, T** val)
 {
     if(ndim == 0)
     {
@@ -189,7 +191,7 @@ int gen_permuted_identity(int ndim, int** rowptr, int** col, T** val)
     int n       = ndim * ndim;
     int nnz_mat = n;
 
-    *rowptr = new int[n + 1];
+    *rowptr = new PtrType[n + 1];
     *col    = new int[nnz_mat];
     *val    = new T[nnz_mat];
 
@@ -219,7 +221,7 @@ int gen_permuted_identity(int ndim, int** rowptr, int** col, T** val)
 /* ============================================================================================ */
 /*! \brief  Generate random sparse matrix */
 template <typename T>
-int gen_random(int m, int n, int max_nnz_per_row, int** rowptr, int** col, T** val)
+int gen_random(int m, int n, int max_nnz_per_row, PtrType** rowptr, int** col, T** val)
 {
     if(m == 0 || n == 0)
     {
@@ -234,7 +236,7 @@ int gen_random(int m, int n, int max_nnz_per_row, int** rowptr, int** col, T** v
         nnz += nnz_per_row[i];
     }
 
-    *rowptr = new int[m + 1];
+    *rowptr = new PtrType[m + 1];
     *col    = new int[nnz];
     *val    = new T[nnz];
 
@@ -254,13 +256,13 @@ int gen_random(int m, int n, int max_nnz_per_row, int** rowptr, int** col, T** v
 
     for(int i = 0; i < m; i++)
     {
-        int row_start = (*rowptr)[i];
-        int row_end   = (*rowptr)[i + 1];
+        PtrType row_start = (*rowptr)[i];
+        PtrType row_end   = (*rowptr)[i + 1];
 
         // Randomly select candidate entry point
         int idx = random_generator<int>(0, n - row_end + row_start);
 
-        for(int j = row_start; j < row_end; j++)
+        for(PtrType j = row_start; j < row_end; j++)
         {
             (*col)[j] = candidates[idx++];
             (*val)[j] = random_generator<T>();

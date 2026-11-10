@@ -72,11 +72,19 @@ void testing_global_amg_one_sided_coupling(const std::string& amg, bool coo, boo
     int n   = use_acc ? 100000 : 1000;
     int nnz = 3 * n - 2;
 
-    int* row = nullptr;
-    int* col = nullptr;
-    T*   val = nullptr;
+    int*     row        = nullptr;
+    PtrType* row_offset = nullptr;
+    int*     col        = nullptr;
+    T*       val        = nullptr;
 
-    allocate_host(coo ? nnz : n + 1, &row);
+    if(coo)
+    {
+        allocate_host(nnz, &row);
+    }
+    else
+    {
+        allocate_host(n + 1, &row_offset);
+    }
     allocate_host(nnz, &col);
     allocate_host(nnz, &val);
 
@@ -85,7 +93,7 @@ void testing_global_amg_one_sided_coupling(const std::string& amg, bool coo, boo
     {
         if(!coo)
         {
-            row[i] = k;
+            row_offset[i] = k;
         }
 
         for(int j = std::max(i - 1, 0); j <= std::min(i + 1, n - 1); ++j)
@@ -103,7 +111,7 @@ void testing_global_amg_one_sided_coupling(const std::string& amg, bool coo, boo
 
     if(!coo)
     {
-        row[n] = k;
+        row_offset[n] = k;
     }
 
     int zero_offset[1] = {0};
@@ -142,29 +150,37 @@ void testing_global_amg_one_sided_coupling(const std::string& amg, bool coo, boo
         }
         else
         {
-            mat.SetLocalDataPtrCSR(&row, &col, &val, "mat", nnz);
+            mat.SetLocalDataPtrCSR(&row_offset, &col, &val, "mat", nnz);
         }
     }
     else
     {
         // Ghost entry: local row 0, ghost column 0 (global column n - 1), value -1
-        int* gst_row = nullptr;
-        int* gst_col = nullptr;
-        T*   gst_val = nullptr;
+        int*     gst_row        = nullptr;
+        PtrType* gst_row_offset = nullptr;
+        int*     gst_col        = nullptr;
+        T*       gst_val        = nullptr;
 
-        allocate_host(coo ? 1 : n + 1, &gst_row);
-        allocate_host(1, &gst_col);
-        allocate_host(1, &gst_val);
-
-        gst_row[0] = 0;
-
-        if(!coo)
+        if(coo)
         {
+            allocate_host(1, &gst_row);
+
+            gst_row[0] = 0;
+        }
+        else
+        {
+            allocate_host(n + 1, &gst_row_offset);
+
+            gst_row_offset[0] = 0;
+
             for(int i = 1; i <= n; ++i)
             {
-                gst_row[i] = 1;
+                gst_row_offset[i] = 1;
             }
         }
+
+        allocate_host(1, &gst_col);
+        allocate_host(1, &gst_val);
 
         gst_col[0] = 0;
         gst_val[0] = static_cast<T>(-1);
@@ -175,7 +191,8 @@ void testing_global_amg_one_sided_coupling(const std::string& amg, bool coo, boo
         }
         else
         {
-            mat.SetDataPtrCSR(&row, &col, &val, &gst_row, &gst_col, &gst_val, "mat", nnz, 1);
+            mat.SetDataPtrCSR(
+                &row_offset, &col, &val, &gst_row_offset, &gst_col, &gst_val, "mat", nnz, 1);
         }
     }
 
