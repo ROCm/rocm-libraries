@@ -604,8 +604,9 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
         }
         Fmt::Vop3p if matches!(form, Form::Mai | Form::MaiScale) => {
             // The block-scaled form (VOP3PX2) starts with v_mfma_ld_scale_b32
-            // reading the A and B scales (the two VGPRs after C, byte 0 of
-            // each: op_sel and op_sel_hi clear); its MFMA half sets bit 11.
+            // reading the A and B scales (the two VGPRs after C); the byte of
+            // each it reads (controls 11:10 and 13:12) is op_sel (bit 0) and
+            // op_sel_hi (bit 1) of its source. Its MFMA half sets bit 11.
             let scaled = form == Form::MaiScale;
             if scaled {
                 // The A and B scales: two VGPRs (any two, not a pair).
@@ -642,7 +643,7 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             // The scaled form's scale byte selects (imm bits 13:10) went to the ld_scale word.
             let ctl = if scaled { inst.imm & !(15 << 10) } else { inst.imm };
             if !(0..1 << 10).contains(&ctl) {
-                return Err(bad(format!("{}: controls {ctl:#x} past cbsz, abid and blgp", name())));
+                return Err(bad(format!("{}: controls {:#x} past cbsz, abid and blgp", name(), inst.imm)));
             }
             let ctl = ctl as u32;
             if f64 && ctl >> 7 != 0 {
@@ -862,6 +863,18 @@ fn encode_blocks(f: &MFunc) -> Result<(Vec<u32>, Vec<u32>, Vec<(usize, usize)>),
     Ok((words, block_word, branches))
 }
 
+/// The word offset of each instruction, in block order, and of the end.
+pub fn inst_starts(f: &MFunc) -> Result<Vec<u32>, CompileError> {
+    let mut words = Vec::new();
+    let mut starts = Vec::with_capacity(f.blocks.iter().map(|b| b.insts.len()).sum::<usize>() + 1);
+    for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+        starts.push(words.len() as u32);
+        encode(inst, &mut words)?;
+    }
+    starts.push(words.len() as u32);
+    Ok(starts)
+}
+
 fn branch_delta(block_word: &[u32], at: usize, target: usize) -> Result<i64, CompileError> {
     let delta = block_word[target] as i64 - (at as i64 + 1);
     if !(-32768..32768).contains(&delta) {
@@ -1050,6 +1063,20 @@ mod tests {
     fn gfx9_only_rows_match_llvm_mc() {
         use t::Gfx9Op::*;
         let g = Opc::Gfx9;
+        // The fp6 x fp6 block-scaled MFMA reading byte `a` of its A scale and `b` of its B scale.
+        let scaled_fp6 = |a: i64, b: i64| {
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 6), v(24, 6), v(0, 16), v(32, 1), v(33, 1)])
+                .with_imm(2 | 2 << 7 | (a | b << 2) << super::super::mfma::SCALE_SEL_SHIFT)
+        };
+        // The block-scaled 16x16x128 MFMA as hipcc wrote it in a probe kernel: D a[d:d+3], A v[a:a+5] and
+        // B v[b:b+5] (fp6 or bf6), C the same AGPRs as D (None: the constant 0), the A scale in v98 and the
+        // B scale in v`sb`; cbsz and blgp `fmt`, and the A and B scale bytes.
+        let probe16 = |d: u16, a: u16, b: u16, c: Option<u16>, sb: u16, fmt: i64, (sa, sbyte): (i64, i64)| {
+            let c = c.map_or(Opnd::Imm(0), |c| v(AGPR0 + c, 4));
+            MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(AGPR0 + d, 4)], [v(a, 6), v(b, 6), c, v(98, 1), v(sb, 1)])
+                .with_imm(fmt | fmt << 7 | (sa | sbyte << 2) << super::super::mfma::SCALE_SEL_SHIFT)
+        };
+        let sel = |a: i64, b: i64| (a | b << 2) << super::super::mfma::SCALE_SEL_SHIFT;
         let cases: Vec<(MInst, Vec<u32>)> = vec![
             // v_pk_mul_f32 v[0:1], v[2:3], v[4:5]; op_sel_hi:[0,1] and [1,0];
             // an SGPR pair broadcast; neg_lo:[1,0] neg_hi:[1,0]
@@ -1122,7 +1149,8 @@ mod tests {
             (MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 4), v(0, 4)]).with_imm(2 | 4 << 7), vec![0xd3ad_0200, 0x8402_1904]),
             // Block-scaled (VOP3PX2), as llvm-mc encodes v_mfma_scale_f32_32x32x64_f8f6f4
             // v[0:15], v[16:23], v[24:31], v[0:15], v32, v33 / a[0:15], v[16:19], v[24:27], 0,
-            // v32, v33 cbsz:4 blgp:4 / v[0:15], v[16:21], a[24:31], v[0:15], v254, v255 cbsz:3.
+            // v32, v33 cbsz:4 blgp:4 / v[0:15], v[16:21], a[24:31], v[0:15], v254, v255 cbsz:3 /
+            // v[0:15], v[16:23], v[24:31], v[0:15], v40, v33.
             (
                 MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1), v(33, 1)]),
                 vec![0xd3ac_0000, 0x0002_4320, 0xd3ae_0800, 0x0402_3110],
@@ -1135,6 +1163,78 @@ mod tests {
                 MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 6), v(AGPR0 + 24, 8), v(0, 16), v(254, 1), v(255, 1)]).with_imm(3),
                 vec![0xd3ac_0000, 0x0003_fffe, 0xd3ae_0b00, 0x1402_3110],
             ),
+            (
+                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(40, 1), v(33, 1)]),
+                vec![0xd3ac_0000, 0x0002_4328, 0xd3ae_0800, 0x0402_3110],
+            ),
+            // Scale bytes (controls 11:10 for A, 13:12 for B), as llvm-mc encodes
+            // v[0:15], v[16:21], v[24:29], v[0:15], v32, v33 cbsz:2 blgp:2 with
+            // op_sel:[1,1,0] op_sel_hi:[1,1,0] / op_sel:[1,0,0] / op_sel_hi:[0,1,0] /
+            // op_sel_hi:[1,0,0] / op_sel:[0,1,0] / neither.
+            (scaled_fp6(3, 3), vec![0xd3ac_1800, 0x1802_4320, 0xd3ae_0a00, 0x4402_3110]),
+            (scaled_fp6(1, 0), vec![0xd3ac_0800, 0x0002_4320, 0xd3ae_0a00, 0x4402_3110]),
+            (scaled_fp6(0, 2), vec![0xd3ac_0000, 0x1002_4320, 0xd3ae_0a00, 0x4402_3110]),
+            (scaled_fp6(2, 0), vec![0xd3ac_0000, 0x0802_4320, 0xd3ae_0a00, 0x4402_3110]),
+            (scaled_fp6(0, 1), vec![0xd3ac_1000, 0x0002_4320, 0xd3ae_0a00, 0x4402_3110]),
+            (scaled_fp6(0, 0), vec![0xd3ac_0000, 0x0002_4320, 0xd3ae_0a00, 0x4402_3110]),
+            // Block-scaled 16x16x128, as hipcc encodes v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[2:7],
+            // v[44:49], a[0:3], v98, v99 op_sel_hi:[0,0,0] cbsz:2 blgp:2, the other fifteen pairs of scale
+            // bytes (op_sel holds bit 0 of the A and B bytes, op_sel_hi bit 1), four of them with cbsz:3
+            // blgp:3, and two with C the constant 0.
+            (probe16(0, 2, 44, Some(0), 99, 2, (0, 0)), vec![0xd3ac_0000, 0x0002_c762, 0xd3ad_8a00, 0x4402_5902]),
+            (probe16(4, 2, 50, Some(4), 99, 2, (0, 1)), vec![0xd3ac_1000, 0x0002_c762, 0xd3ad_8a04, 0x4412_6502]),
+            (probe16(8, 2, 62, Some(8), 99, 2, (0, 2)), vec![0xd3ac_0000, 0x1002_c762, 0xd3ad_8a08, 0x4422_7d02]),
+            (probe16(12, 2, 68, Some(12), 99, 2, (0, 3)), vec![0xd3ac_1000, 0x1002_c762, 0xd3ad_8a0c, 0x4432_8902]),
+            (probe16(48, 8, 74, Some(48), 101, 2, (1, 0)), vec![0xd3ac_0800, 0x0002_cb62, 0xd3ad_8a30, 0x44c2_9508]),
+            (probe16(44, 8, 80, Some(44), 101, 2, (1, 1)), vec![0xd3ac_1800, 0x0002_cb62, 0xd3ad_8a2c, 0x44b2_a108]),
+            (probe16(40, 8, 86, Some(40), 101, 2, (1, 2)), vec![0xd3ac_0800, 0x1002_cb62, 0xd3ad_8a28, 0x44a2_ad08]),
+            (probe16(36, 8, 92, Some(36), 101, 2, (1, 3)), vec![0xd3ac_1800, 0x1002_cb62, 0xd3ad_8a24, 0x4492_b908]),
+            (probe16(128, 14, 44, Some(128), 99, 2, (2, 0)), vec![0xd3ac_0000, 0x0802_c762, 0xd3ad_8a80, 0x4602_590e]),
+            (probe16(124, 14, 50, Some(124), 99, 2, (2, 1)), vec![0xd3ac_1000, 0x0802_c762, 0xd3ad_8a7c, 0x45f2_650e]),
+            (probe16(120, 14, 62, Some(120), 99, 2, (2, 2)), vec![0xd3ac_0000, 0x1802_c762, 0xd3ad_8a78, 0x45e2_7d0e]),
+            (probe16(116, 14, 68, Some(116), 99, 2, (2, 3)), vec![0xd3ac_1000, 0x1802_c762, 0xd3ad_8a74, 0x45d2_890e]),
+            (probe16(80, 20, 74, Some(80), 101, 2, (3, 0)), vec![0xd3ac_0800, 0x0802_cb62, 0xd3ad_8a50, 0x4542_9514]),
+            (probe16(76, 20, 80, Some(76), 101, 2, (3, 1)), vec![0xd3ac_1800, 0x0802_cb62, 0xd3ad_8a4c, 0x4532_a114]),
+            (probe16(72, 20, 86, Some(72), 101, 2, (3, 2)), vec![0xd3ac_0800, 0x1802_cb62, 0xd3ad_8a48, 0x4522_ad14]),
+            (probe16(68, 20, 92, Some(68), 101, 2, (3, 3)), vec![0xd3ac_1800, 0x1802_cb62, 0xd3ad_8a44, 0x4512_b914]),
+            (probe16(0, 2, 44, Some(0), 99, 3, (0, 0)), vec![0xd3ac_0000, 0x0002_c762, 0xd3ad_8b00, 0x6402_5902]),
+            (probe16(36, 8, 92, Some(36), 101, 3, (1, 3)), vec![0xd3ac_1800, 0x1002_cb62, 0xd3ad_8b24, 0x6492_b908]),
+            (probe16(120, 14, 62, Some(120), 99, 3, (2, 2)), vec![0xd3ac_0000, 0x1802_c762, 0xd3ad_8b78, 0x65e2_7d0e]),
+            (probe16(76, 20, 80, Some(76), 101, 3, (3, 1)), vec![0xd3ac_1800, 0x0802_cb62, 0xd3ad_8b4c, 0x6532_a114]),
+            (probe16(4, 2, 50, None, 99, 2, (0, 1)), vec![0xd3ac_1000, 0x0002_c762, 0xd3ad_8a04, 0x4202_6502]),
+            (probe16(68, 20, 92, None, 101, 2, (3, 3)), vec![0xd3ac_1800, 0x1802_cb62, 0xd3ad_8a44, 0x4202_b914]),
+            // And as llvm-mc encodes v[0:3], v[4:11], v[12:19], v[0:3], v20, v21 (fp8) / a[0:3], v[4:7], a[8:11],
+            // 0, v20, v21 op_sel:[1,0,0] op_sel_hi:[0,1,0] cbsz:4 blgp:4 / v[0:3], v[4:9], v[12:19], v[0:3],
+            // v254, v255 cbsz:2 / v[8:11], v[16:23], v[24:29], 1.0, v40, v33 op_sel:[0,1,0] op_sel_hi:[1,1,0]
+            // cbsz:1 blgp:3 / a[252:255], v[0:5], v[6:11], a[252:255], v12, v13 op_sel:[1,1,0] op_sel_hi:[1,1,0]
+            // cbsz:3 blgp:2.
+            (
+                MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4), v(20, 1), v(21, 1)]),
+                vec![0xd3ac_0000, 0x0002_2b14, 0xd3ad_0800, 0x0402_1904],
+            ),
+            (
+                MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(AGPR0, 4)], [v(4, 4), v(AGPR0 + 8, 4), Opnd::Imm(0), v(20, 1), v(21, 1)])
+                    .with_imm(4 | 4 << 7 | sel(1, 2)),
+                vec![0xd3ac_0800, 0x1002_2b14, 0xd3ad_8c00, 0x9202_1104],
+            ),
+            (
+                MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 8), v(0, 4), v(254, 1), v(255, 1)]).with_imm(2),
+                vec![0xd3ac_0000, 0x0003_fffe, 0xd3ad_0a00, 0x0402_1904],
+            ),
+            (
+                MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(8, 4)], [v(16, 8), v(24, 6), Opnd::Imm(0x3f80_0000), v(40, 1), v(33, 1)])
+                    .with_imm(1 | 3 << 7 | sel(2, 3)),
+                vec![0xd3ac_1000, 0x1802_4328, 0xd3ad_0908, 0x63ca_3110],
+            ),
+            (
+                MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(AGPR0 + 252, 4)], [v(0, 6), v(6, 6), v(AGPR0 + 252, 4), v(12, 1), v(13, 1)])
+                    .with_imm(3 | 2 << 7 | sel(3, 3)),
+                vec![0xd3ac_1800, 0x1802_1b0c, 0xd3ad_8bfc, 0x47f2_0d00],
+            ),
+            // The unscaled 16x16x128 with fp6 and bf6 operands (what literal zero scales select), as llvm-mc
+            // encodes v[0:3], v[4:9], v[12:17], v[0:3] cbsz:2 blgp:2 / a[0:3], v[4:9], v[12:17], a[0:3] cbsz:3 blgp:3.
+            (MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 6), v(0, 4)]).with_imm(2 | 2 << 7), vec![0xd3ad_0200, 0x4402_1904]),
+            (MInst::new(g(VMfma16x16x128F8f6f4), [v(AGPR0, 4)], [v(4, 6), v(12, 6), v(AGPR0, 4)]).with_imm(3 | 3 << 7), vec![0xd3ad_8300, 0x6402_1904]),
         ];
         for (inst, want) in cases {
             assert_eq!(words(inst.clone()), Ok(want), "{inst:?}");
@@ -1179,12 +1279,26 @@ mod tests {
             MInst::new(g(VMfma4x4x4F64), [v(0, 2)], [v(2, 2), v(4, 2), Opnd::Imm(0x3e22_f983)]),
             MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4)]).with_imm(2 << 3),
             MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4)]).with_imm(3 << 7),
-            // Block-scaled: scales not a VGPR pair (one register, SGPRs; llvm-mc
-            // refuses SGPR scales), abid, an A format whose size is not A's.
+            // Block-scaled: scales not one VGPR each (one register, a pair as
+            // one operand, SGPRs; llvm-mc refuses SGPR scales), abid, an A
+            // format whose size is not A's.
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1)]),
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), s(4, 2)]),
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 2)]),
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 2), v(34, 1)]),
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), s(4, 1), s(5, 1)]),
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1), v(33, 1)]).with_imm(1 << 3),
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1), v(33, 1)]).with_imm(4),
+            // Controls past the B scale byte; scale bytes on an MFMA without scales.
+            scaled_fp6(0, 0).with_imm(2 | 2 << 7 | 1 << 14),
+            MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 4), v(0, 4)]).with_imm(2 | 4 << 7 | 3 << 10),
+            // Block-scaled 16x16x128: abid, controls past the B scale byte, fp8 A of six dwords, the scales
+            // as one pair, D and C in different banks.
+            probe16(0, 2, 44, Some(0), 99, 2, (0, 0)).with_imm(2 | 2 << 7 | 1 << 3),
+            probe16(0, 2, 44, Some(0), 99, 2, (0, 0)).with_imm(2 | 2 << 7 | 1 << 14),
+            MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 8), v(0, 4), v(20, 1), v(21, 1)]),
+            MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4), v(20, 2)]),
+            MInst::new(g(VMfmaScale16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(AGPR0, 4), v(20, 1), v(21, 1)]),
         ];
         for inst in refused {
             assert!(words(inst.clone()).is_err(), "{inst:?}");

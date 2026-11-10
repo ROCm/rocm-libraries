@@ -79,7 +79,7 @@ pub fn combine(f: &mut MFunc) -> usize {
                 i += 1;
                 continue;
             }
-            let fused = MInst { op: fused_op, defs: add.defs, uses: Uses::from([src, other]), imm: mv.imm, mods: 0, mem: add.mem, scope: add.scope };
+            let fused = MInst { op: fused_op, defs: add.defs, uses: Uses::from([src, other]), imm: mv.imm, mods: 0, mem: add.mem, scope: add.scope, loc: add.loc };
             f.blocks[b].insts[k] = fused;
             f.blocks[b].insts.remove(i);
             folded += 1;

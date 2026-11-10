@@ -62,7 +62,13 @@ pub(super) fn const_key(line: &str) -> Option<(&str, &str)> {
     if j == i + 3 || !b[j..].starts_with(b" = arith.constant (  )") {
         return None;
     }
-    Some((&line[..i], &line[i..]))
+    Some((&line[..i], without_loc(&line[i..])))
+}
+
+/// A constant key without its `@loc`: constants that differ only in where
+/// they were written are one value, as they are without locs.
+pub(super) fn without_loc(key: &str) -> &str {
+    key.find(" @loc").map_or(key, |end| &key[..end])
 }
 
 #[derive(Clone, Copy)]

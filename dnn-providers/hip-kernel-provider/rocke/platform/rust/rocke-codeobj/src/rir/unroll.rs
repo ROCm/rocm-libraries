@@ -394,7 +394,7 @@ fn fold_select_offsets(kernel: &mut Kernel, facts: &Facts) -> bool {
                 let mut x = x;
                 if k > low {
                     // `x + (k - low)` stays below `x + k`: no wrap either.
-                    let high = constant(kernel, k - low, &mut out);
+                    let high = constant(kernel, k - low, &mut out, &op.loc);
                     let sum = kernel.new_value("%uadd", Type::Scalar(Scalar::I32));
                     out.push(Op {
                         kind: OpKind::Add,
@@ -403,10 +403,11 @@ fn fold_select_offsets(kernel: &mut Kernel, facts: &Facts) -> bool {
                         attrs: Vec::new(),
                         regions: Vec::new(),
                         block_args: Vec::new(),
+                        loc: op.loc.clone(),
                     });
                     x = sum;
                 }
-                let rest = constant(kernel, b - low, &mut out);
+                let rest = constant(kernel, b - low, &mut out, &op.loc);
                 let base = kernel.new_value("%usel", Type::Scalar(Scalar::I32));
                 let arms = if x_true { [c, x, rest] } else { [c, rest, x] };
                 out.push(Op {
@@ -416,6 +417,7 @@ fn fold_select_offsets(kernel: &mut Kernel, facts: &Facts) -> bool {
                     attrs: Vec::new(),
                     regions: Vec::new(),
                     block_args: Vec::new(),
+                    loc: op.loc.clone(),
                 });
                 op.operands[1] = base;
                 let offset = op.int_attr("offset").unwrap_or(0);
@@ -440,8 +442,8 @@ fn copy_facts(facts: &mut Facts, from: ValueId, to: ValueId) {
     facts.range[to.0 as usize] = facts.range[from.0 as usize];
 }
 
-/// Appends an i32 `arith.constant` of `value` to `out`; returns its value.
-fn constant(kernel: &mut Kernel, value: i64, out: &mut Vec<Op>) -> ValueId {
+/// Appends an i32 `arith.constant` of `value` at `loc` to `out`; returns its value.
+fn constant(kernel: &mut Kernel, value: i64, out: &mut Vec<Op>, loc: &Option<super::ast::Loc>) -> ValueId {
     let v = kernel.new_value("%uk", Type::Scalar(Scalar::I32));
     out.push(Op {
         kind: OpKind::Constant,
@@ -450,6 +452,7 @@ fn constant(kernel: &mut Kernel, value: i64, out: &mut Vec<Op>) -> ValueId {
         attrs: vec![("ity".into(), Attr::Str("i32".into())), ("value".into(), Attr::Int(value))],
         regions: Vec::new(),
         block_args: Vec::new(),
+        loc: loc.clone(),
     });
     v
 }
@@ -770,6 +773,7 @@ impl Unroller<'_> {
                 ],
                 regions: Vec::new(),
                 block_args: Vec::new(),
+                loc: op.loc.clone(),
             });
             let mut map = FxHashMap::default();
             map.insert(iv, value);
@@ -847,7 +851,7 @@ impl Unroller<'_> {
     fn clone_head(&mut self, op: &Op, map: &mut FxHashMap<ValueId, ValueId>) -> Op {
         let operands = op.operands.iter().map(|&v| self.mapped(map, v)).collect();
         let block_args = op.block_args.iter().map(|&v| self.fresh(v, map)).collect();
-        Op { kind: op.kind, results: Default::default(), operands, attrs: op.attrs.clone(), regions: Vec::new(), block_args }
+        Op { kind: op.kind, results: Default::default(), operands, attrs: op.attrs.clone(), regions: Vec::new(), block_args, loc: op.loc.clone() }
     }
 
     fn with_results(&mut self, mut copy: Op, op: &Op, map: &mut FxHashMap<ValueId, ValueId>) -> Op {

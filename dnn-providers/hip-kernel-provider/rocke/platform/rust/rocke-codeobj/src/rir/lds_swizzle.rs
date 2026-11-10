@@ -1578,6 +1578,7 @@ fn mk(kind: OpKind, results: &[ValueId], operands: &[ValueId], attrs: Vec<(Text,
         attrs,
         regions: Vec::new(),
         block_args: Vec::new(),
+        loc: None,
     }
 }
 

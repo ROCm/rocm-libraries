@@ -4,7 +4,8 @@
 //! Developer driver: `cargo run --release --example target_compile -- <gfx> <out-dir> [--max-vgprs N] <in.ir>...`.
 //! Compiles each input for `<gfx>` (`gfx1151`, or `gfx950`, which compiles
 //! through `rir::compile_any_target` until it is supported) to
-//! `<out-dir>/<stem>.hsaco` with its listing in `<stem>.s`, and prints one
+//! `<out-dir>/<stem>.hsaco` with its listing in `<stem>.s` (and, when the IR
+//! has `@loc`s, its source map in `<stem>.srcmap.json`), and prints one
 //! tab-separated line per input: `<stem> ok <instructions> <code bytes>
 //! <vgprs> <sgprs> <lds bytes>`, or `<stem> error <message>`.
 //! `--max-vgprs N` allocates within N VGPRs (`rir::compile_any_target_limited`),
@@ -66,6 +67,9 @@ fn main() {
             Ok(compiled) => {
                 std::fs::write(out_dir.join(format!("{stem}.hsaco")), &compiled.hsaco).expect("write the code object");
                 std::fs::write(out_dir.join(format!("{stem}.s")), compiled.listing()).expect("write the listing");
+                if let Some(srcmap) = &compiled.srcmap {
+                    std::fs::write(out_dir.join(format!("{stem}.srcmap.json")), srcmap).expect("write the source map");
+                }
                 let s = &compiled.stats;
                 let mut line = format!("{stem}\tok\t{}\t{}\t{}\t{}\t{}", s.instructions, s.code_bytes, s.vgprs, s.sgprs, s.lds_bytes);
                 if limit.is_some() {

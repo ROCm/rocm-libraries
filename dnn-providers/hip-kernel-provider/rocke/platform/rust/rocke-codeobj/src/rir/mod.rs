@@ -300,6 +300,155 @@ pub(crate) fn with_levers<T>(names: &[&str], f: impl FnOnce() -> T) -> T {
     out
 }
 
+/// Measurement override: `ROCKE_DIRECT_FORCE_ATTRS=dead_lanes,m0_fill,peep_waits,peep_shifts,ds_rebase`
+/// (any of `ast::Passes::NAMES`, and `m0_early`) turns those kernel attributes on in every kernel compiled,
+/// whatever its IR says, so the passes can be measured before a builder sets them. A name that is no such
+/// attribute is an error.
+fn force_attrs(kernel: &mut ast::Kernel) -> Result<(), CompileError> {
+    match std::env::var("ROCKE_DIRECT_FORCE_ATTRS") {
+        Ok(list) => force_attr_list(kernel, &list),
+        Err(_) => Ok(()),
+    }
+}
+
+/// `force_attrs` with the comma-separated attribute names `list`.
+fn force_attr_list(kernel: &mut ast::Kernel, list: &str) -> Result<(), CompileError> {
+    for name in list.split(',').map(str::trim).filter(|name| !name.is_empty()) {
+        if name == "m0_early" {
+            kernel.m0_early = true;
+        } else if !kernel.passes.set(name, true) {
+            return Err(CompileError::new("ROCKE_DIRECT_UNSUPPORTED", format!("ROCKE_DIRECT_FORCE_ATTRS: no kernel attribute {name:?}")));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod attr_tests {
+    use super::*;
+
+    #[test]
+    fn pass_attributes_parse_and_the_override_adds_to_them() {
+        let text = |attrs: &str| {
+            format!(
+                "ckdsl.ir v1\nkernel @k {{\n  attrs {{ max_workgroup_size = i:64{attrs} }}\n  params {{\n    %Y : ptr<f32,global>\n  }}\n  \
+                 region @entry {{\n    cf.return (  )\n  }}\n}}\n"
+            )
+        };
+        let parsed = |attrs: &str| parse::parse(&text(attrs)).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(parsed("").passes, ast::Passes::default());
+        let mut kernel = parsed(", m0_fill = b:true, ds_rebase = b:false");
+        assert_eq!(kernel.passes, ast::Passes { m0_fill: true, ..Default::default() });
+        force_attr_list(&mut kernel, " dead_lanes, peep_waits,,m0_early ").unwrap_or_else(|e| panic!("{e}"));
+        let ast::Passes { dead_lanes, m0_fill, peep_waits, peep_shifts, ds_rebase, .. } = kernel.passes;
+        assert_eq!((dead_lanes, m0_fill, peep_waits, peep_shifts, ds_rebase, kernel.m0_early), (true, true, true, false, false, true));
+        assert_eq!(kernel.passes, ast::Passes { dead_lanes: true, m0_fill: true, peep_waits: true, ..Default::default() });
+        // Only pass attributes are forced; a misspelt name is an error, as an unknown attribute is.
+        for bad in ["dead_lane", "lds_dma_explicit"] {
+            assert!(force_attr_list(&mut kernel, bad).is_err(), "{bad}");
+        }
+        assert!(parse::parse(&text(", dead_lane = b:true")).is_err());
+        for name in ast::Passes::NAMES {
+            let mut one = ast::Passes::default();
+            assert!(one.set(name, true) && one != ast::Passes::default(), "{name}");
+            assert_eq!(parsed(&format!(", {name} = b:true")).passes, one);
+        }
+    }
+}
+
+#[cfg(test)]
+mod preload_tests {
+    use super::*;
+    use crate::rir::mir::{Opc, Opnd, Phys};
+
+    /// `pointers` pointer parameters and an i32 `%n`: each lane stores,
+    /// through the last pointer at its global index, `%n`'s bits plus what
+    /// the others hold there.
+    fn kernel(pointers: usize, attrs: &str) -> String {
+        let mut t = format!("ckdsl.ir v1\nkernel @pre {{\n  attrs {{ max_workgroup_size = i:64{attrs} }}\n  params {{\n");
+        for p in 0..pointers {
+            t += &format!("    %P{p} : ptr<f32,global>\n");
+        }
+        t += "    %n : i32\n  }\n  region @entry {\n    %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n";
+        t += "    %bid : i32 = gpu.block_id (  ) { axis = s:\"x\" }\n    %c64 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:64 }\n";
+        t += "    %row : i32 = arith.mul ( %bid, %c64 )\n    %i : i32 = arith.add ( %row, %tid )\n";
+        t += "    %nf : f32 = arith.bitcast ( %n ) { target = s:\"f32\" }\n";
+        let mut sum = "%nf".to_string();
+        for p in 0..pointers - 1 {
+            t += &format!("    %x{p} : f32 = memref.global_load_typed ( %P{p}, %i ) {{ align = i:4, elem_type = s:\"f32\" }}\n");
+            t += &format!("    %s{p} : f32 = arith.fadd ( {sum}, %x{p} )\n");
+            sum = format!("%s{p}");
+        }
+        t + &format!(
+            "    memref.global_store_typed ( %P{}, %i, {sum} ) {{ align = i:4, elem_type = s:\"f32\" }}\n    cf.return (  )\n  }}\n}}\n",
+            pointers - 1
+        )
+    }
+
+    fn compiled(text: &str) -> CompiledKernel {
+        compile_any_target(text, Target::Gfx950).unwrap_or_else(|e| panic!("{e}\n{text}"))
+    }
+
+    /// The kernel descriptor in a code object: the 64 bytes with the
+    /// kernel's kernarg size, reserved bytes 12-15 zero and gfx950's kernel
+    /// code properties.
+    fn descriptor(hsaco: &[u8], kernarg_size: u32) -> [u8; 64] {
+        let at = (0..hsaco.len() - 64)
+            .step_by(4)
+            .find(|&i| hsaco[i + 8..i + 12] == kernarg_size.to_le_bytes() && hsaco[i + 12..i + 16] == [0; 4] && hsaco[i + 56..i + 58] == [8, 0])
+            .expect("a kernel descriptor");
+        hsaco[at..at + 64].try_into().unwrap()
+    }
+
+    fn smem_loads(f: &mir::MFunc) -> Vec<i64> {
+        let loads = |op: Opc| matches!(op, Opc::SLoadB32 | Opc::SLoadB64 | Opc::SLoadB128 | Opc::SLoadB256 | Opc::SLoadB512);
+        f.blocks.iter().flat_map(|b| &b.insts).filter(|i| loads(i.op)).map(|i| i.imm).collect()
+    }
+
+    /// `text` with every parameter `inreg`.
+    fn inreg(text: &str) -> String {
+        let param = |l: &str| l.starts_with("    %") && l.contains(" : ") && !l.contains(" = ");
+        text.lines().map(|l| if param(l) { format!("{l} {{ inreg = b:true }}\n") } else { format!("{l}\n") }).collect()
+    }
+
+    #[test]
+    fn the_attribute_preloads_as_every_parameter_inreg_would() {
+        // Five pointers and an i32: 44 bytes, 11 dwords preloaded into s2..s12.
+        let (on, off) = (compiled(&kernel(5, ", kernarg_preload = b:true")), compiled(&kernel(5, "")));
+        assert_eq!(on.hsaco, compiled(&inreg(&kernel(5, ""))).hsaco);
+        // The kernel proper loads no argument, and reads the workgroup id
+        // after the preloaded SGPRs (s13, against s2 without them).
+        assert!(smem_loads(&on.func).is_empty(), "{}", on.listing());
+        assert!(!smem_loads(&off.func).is_empty());
+        let reads = |f: &mir::MFunc, s: u16| f.blocks.iter().flat_map(|b| &b.insts).any(|i| i.uses.contains(&Opnd::P(Phys::S(s), 1)));
+        assert!(reads(&on.func, 13) && reads(&off.func, 2), "{}", on.listing());
+        // USER_SGPR_COUNT 13 against 2, the rest of RSRC2 alike; the preload
+        // length 11 from offset 0 against none; the 256-byte entry first.
+        let (d_on, d_off) = (descriptor(&on.hsaco, 44), descriptor(&off.hsaco, 44));
+        let rsrc2 = |d: &[u8; 64]| u32::from_le_bytes(d[52..56].try_into().unwrap());
+        assert_eq!((rsrc2(&d_on) >> 1 & 0x1f, rsrc2(&d_off) >> 1 & 0x1f), (13, 2));
+        assert_eq!(rsrc2(&d_on) & !(0x1f << 1), rsrc2(&d_off) & !(0x1f << 1));
+        assert_eq!((u16::from_le_bytes([d_on[58], d_on[59]]), u16::from_le_bytes([d_off[58], d_off[59]])), (11, 0));
+        let body = crate::target::gfx9::asm::assemble(&on.func).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(on.stats.code_bytes, 256 + body.len());
+    }
+
+    #[test]
+    fn arguments_past_the_user_sgprs_still_load_and_off_is_unchanged() {
+        // Eight pointers and an i32: 68 bytes; the first seven pointers fill
+        // the 14 dwords, the last pointer and %n still load.
+        let on = compiled(&kernel(8, ", kernarg_preload = b:true"));
+        let body = smem_loads(&on.func);
+        assert!(!body.is_empty() && body.iter().all(|&at| at >= 56), "{body:?}");
+        assert_eq!(u16::from_le_bytes(descriptor(&on.hsaco, 68)[58..60].try_into().unwrap()), 14);
+        // The attribute off is the code without it, byte for byte.
+        assert_eq!(compiled(&kernel(8, ", kernarg_preload = b:false")).hsaco, compiled(&kernel(8, "")).hsaco);
+        // gfx1151 has no kernarg preload.
+        let err = compile_any_target(&kernel(2, ", kernarg_preload = b:true"), Target::Gfx1151).err().expect("refused");
+        assert!(err.to_string().contains("kernarg preload"), "{err}");
+    }
+}
+
 #[cfg(test)]
 mod thread_tests {
     use super::*;
@@ -987,6 +1136,10 @@ pub struct CompiledKernel {
     func: mir::MFunc,
     /// Plain first-fit did not fit the hardware (see `compile`).
     tight: bool,
+    /// When the IR's ops carry `@loc`s (and then the code object carries
+    /// DWARF): the source map as JSON (`srcloc::SourceMap::json`), and as built.
+    pub srcmap: Option<String>,
+    pub source_map: Option<crate::srcloc::SourceMap>,
 }
 
 impl CompiledKernel {
@@ -1236,6 +1389,7 @@ fn compile_with(
         }
         parsed => parsed?,
     };
+    force_attrs(&mut kernel)?;
     kernel.wave = target.info().wave;
     opt::inherit_scopes(&mut kernel);
     if target == Target::Gfx950 {
@@ -1274,6 +1428,9 @@ fn compile_with(
     let mut sel = isel::select_for(target, &kernel, &facts, uniform, &lds, lds_size)?;
     sel.func.vgpr_limit = kernel.vgpr_limit;
     sel.func.agpr_limit = kernel.agpr_limit;
+    sel.func.lds_dma_explicit = kernel.lds_dma_explicit;
+    sel.func.m0_early = kernel.m0_early;
+    sel.func.passes = kernel.passes;
     if target == Target::Gfx950 {
         // Past the registers one workgroup's waves leave per SIMD, no workgroup fits a CU.
         let most = crate::target::gfx9::rules::workgroup_registers(target.info(), kernel.max_workgroup_size);
@@ -1368,18 +1525,22 @@ fn same_function(a: &mir::MFunc, b: &mir::MFunc) -> bool {
         class == y.class && size == y.size && align == y.align && fixed == y.fixed
     };
     let inst = |x: &mir::MInst, y: &mir::MInst| {
-        let mir::MInst { op, defs, uses, imm, mods, mem, scope } = x;
+        // Where an instruction came from does not change the code.
+        let mir::MInst { op, defs, uses, imm, mods, mem, scope, loc: _ } = x;
         *op == y.op && *defs == y.defs && *uses == y.uses && *imm == y.imm && *mods == y.mods && *mem == y.mem && *scope == y.scope
     };
     let block = |x: &mir::MBlock, y: &mir::MBlock| {
         let mir::MBlock { insts, loop_depth } = x;
         *loop_depth == y.loop_depth && insts.len() == y.insts.len() && insts.iter().zip(&y.insts).all(|(p, q)| inst(p, q))
     };
-    let mir::MFunc { blocks, vregs, target, vgpr_limit, agpr_limit, scopes } = a;
+    let mir::MFunc { blocks, vregs, target, vgpr_limit, agpr_limit, scopes, lds_dma_explicit, m0_early, passes, locs: _ } = a;
     *scopes == b.scopes
         && *target == b.target
         && *vgpr_limit == b.vgpr_limit
         && *agpr_limit == b.agpr_limit
+        && *lds_dma_explicit == b.lds_dma_explicit
+        && *m0_early == b.m0_early
+        && *passes == b.passes
         && vregs.len() == b.vregs.len()
         && vregs.iter().zip(&b.vregs).all(|(x, y)| reg(x, y))
         && blocks.len() == b.blocks.len()
@@ -1497,6 +1658,20 @@ fn complete(
         kernarg_preload: sel.preload as u16,
     };
     let hsaco = write_kernel_object(&spec).map_err(|e| CompileError::new("ROCKE_DIRECT_ELF", e))?;
+    // `sel.func`'s code starts after the kernarg preload entry.
+    let entry = if target == Target::Gfx950 && sel.preload > 0 { 256 } else { 0 };
+    let source_map = crate::srcloc::SourceMap::of(&sel.func, &kernel.name, entry)?;
+    let (hsaco, srcmap) = match &source_map {
+        None => (hsaco, None),
+        Some(map) => {
+            let debug = || {
+                let (text_vaddr, _) = crate::hsaco_writer::text_section(&hsaco)?;
+                Some((crate::hsaco_writer::with_sections(&hsaco, &map.dwarf(text_vaddr))?, map.json(text_vaddr)))
+            };
+            let (hsaco, json) = debug().ok_or_else(|| CompileError::new("ROCKE_DIRECT_ELF", "could not add the debug sections"))?;
+            (hsaco, Some(json))
+        }
+    };
     laps.lap("elf");
     let instructions = sel.func.blocks.iter().map(|b| b.insts.len()).sum();
     Ok(CompiledKernel {
@@ -1522,6 +1697,8 @@ fn complete(
         target: sel.func.target,
         func: sel.func,
         tight: alloc.tight && window <= 1,
+        srcmap,
+        source_map,
     })
 }
 

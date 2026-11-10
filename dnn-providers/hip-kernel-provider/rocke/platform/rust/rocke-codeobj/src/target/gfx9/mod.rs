@@ -44,15 +44,17 @@ pub mod m0_order;
 pub mod mask_splat;
 pub mod masks;
 pub mod legalize;
-pub mod m0_hoist;
-pub mod m0_fill;
 pub mod m0_cse;
+pub mod m0_early;
+pub mod m0_fill;
+pub mod m0_hoist;
 pub mod mfma;
 pub mod bitop3;
 pub mod minmax;
 pub mod minmax3;
 pub mod model;
 pub mod pack;
+pub mod peep;
 pub mod q38;
 pub mod relief;
 pub mod ro_loads;
@@ -124,9 +126,10 @@ pub fn prepare(f: &mut MFunc) {
 /// and conversions (the shared expansion: a gfx9 copy is the same moves),
 /// MFMAs read the zeros moved into their C as the constant
 /// (`zero_acc::after_allocation`; copied from zeros of an earlier block,
-/// `zero_wide`), the 64-bit shift fix, `s_waitcnt`, then
-/// the hazard `s_nop`s. gfx950 has no `s_delay_alu`, clauses, VOPD or VGPR
-/// release message, so none of the gfx11 passes that place them run.
+/// `zero_wide`), the 64-bit shift fix, `s_waitcnt`, the peepholes the
+/// kernel asks for (`peep`, `m0_cse`), its early M0 writes (`m0_early`, `m0_fill`),
+/// then the hazard `s_nop`s. gfx950 has no `s_delay_alu`, clauses, VOPD or
+/// VGPR release message, so none of the gfx11 passes that place them run.
 pub fn finish(func: &mut MFunc, num_vgprs: u32) -> Result<(), CompileError> {
     finish_lapped(func, num_vgprs, &mut |_| ())
 }
@@ -155,12 +158,10 @@ pub fn finish_lapped(func: &mut MFunc, num_vgprs: u32, lap: &mut dyn FnMut(&'sta
         inst.mods &= !crate::rir::mir::M_DMA_MANUAL;
     }
     lap("waitcnt");
-    if func.lever_anywhere("m0cse") {
-        m0_cse::run(func);
-    }
-    if func.lever_anywhere("m0fill") {
-        m0_fill::run(func);
-    }
+    peep::run(func);
+    m0_cse::run(func);
+    m0_early::run(func);
+    m0_fill::run(func);
     hazards::insert_nops(func);
     // rust-compiler-v2 lever `loopalign`: loop headers on 64 bytes.
     if func.lever_anywhere("loopalign") {

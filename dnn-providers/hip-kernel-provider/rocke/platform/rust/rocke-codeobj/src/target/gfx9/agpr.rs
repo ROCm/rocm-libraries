@@ -523,7 +523,10 @@ pub(super) fn rewrite(f: &mut MFunc, base_of: &[u32]) {
     for b in 0..f.blocks.len() {
         let old = std::mem::take(&mut f.blocks[b].insts);
         let mut out = Vec::with_capacity(old.len() + 8);
+        let mut served = (0, NO_LOC);
         for mut inst in old {
+            inherit_loc(&mut out, served.0, served.1);
+            served = (out.len(), inst.loc);
             if inst.op == Opc::Copy && (banked(&inst.defs[0]) || banked(&inst.uses[0])) {
                 let (dst, src) = (inst.defs[0], inst.uses[0]);
                 let side = |o: &Opnd| match *o {
@@ -606,6 +609,7 @@ pub(super) fn rewrite(f: &mut MFunc, base_of: &[u32]) {
             out.push(inst);
             out.extend(writes);
         }
+        inherit_loc(&mut out, served.0, served.1);
         f.blocks[b].insts = out;
     }
     loop {

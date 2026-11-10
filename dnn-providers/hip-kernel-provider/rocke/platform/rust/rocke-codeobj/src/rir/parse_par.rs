@@ -30,7 +30,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use super::ast::{Kernel, Op, OpKind, Operands, Param, Region, Results, Scalar, Type, ValueDef, ValueId};
+use super::ast::{Kernel, Op, OpKind, Operands, Param, Passes, Region, Results, Scalar, Type, ValueDef, ValueId};
 use super::hashcons::{key_hash, ConstTable};
 use super::parse::{expected_regions, for_args, name_hash, prologue, scan_op, shareable_before, Lines};
 use super::scan::Level;
@@ -441,6 +441,7 @@ pub(super) fn scan_chunk<'s>(
             attrs: scanned.attrs,
             regions: Vec::new(),
             block_args: Vec::new(),
+            loc: scanned.loc,
         };
         let regions = expected_regions(op.kind);
         if structured != (regions > 0) {
@@ -901,7 +902,8 @@ impl Shared {
         let _guard = FailOnPanic(self);
         self.scan_all(src)?;
         let w = self.walk()?;
-        let Header { name, max_workgroup_size, waves_per_eu, agpr_limit, params, mut values, mut names } = header;
+        let Header { name, max_workgroup_size, waves_per_eu, agpr_limit, lds_dma_explicit, m0_early, passes, params, mut values, mut names } =
+            header;
         let n = self.chunks();
         values.reserve_exact(w.vbase[n + 1] as usize - values.len());
         names.reserve_exact(w.nbase[n + 1] - names.len());
@@ -970,7 +972,21 @@ impl Shared {
         if !stack.is_empty() || values.len() != w.vbase[n + 1] as usize {
             return None;
         }
-        Some(Kernel { name, max_workgroup_size, waves_per_eu, wave: 32, vgpr_limit: None, agpr_limit, params, body: body?, values, names })
+        Some(Kernel {
+            name,
+            max_workgroup_size,
+            waves_per_eu,
+            wave: 32,
+            vgpr_limit: None,
+            agpr_limit,
+            lds_dma_explicit,
+            m0_early,
+            passes,
+            params,
+            body: body?,
+            values,
+            names,
+        })
     }
 }
 
@@ -980,6 +996,9 @@ pub(super) struct Header {
     max_workgroup_size: u32,
     waves_per_eu: (u32, u32),
     agpr_limit: Option<u32>,
+    lds_dma_explicit: bool,
+    m0_early: bool,
+    passes: Passes,
     params: Vec<Param>,
     values: Vec<ValueDef>,
     names: String,
@@ -999,6 +1018,9 @@ pub(super) fn header(text: &str) -> Option<(Header, Info, usize)> {
         max_workgroup_size: prologue.max_workgroup_size,
         waves_per_eu: prologue.waves_per_eu,
         agpr_limit: prologue.agpr_limit,
+        lds_dma_explicit: prologue.lds_dma_explicit,
+        m0_early: prologue.m0_early,
+        passes: prologue.passes,
         params: Vec::with_capacity(prologue.params.len()),
         values: Vec::new(),
         names: String::new(),
