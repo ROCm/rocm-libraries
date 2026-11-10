@@ -9,7 +9,7 @@ from rocisa.instruction import SMulI32, SAddU64, VMovB32, VAddU32, VAddCOU32, \
     SMulHIU32, SWaitCnt
 from rocisa.container import sgpr, vgpr, RegisterContainer, VCC, GLOBALModifiers, ContinuousRegister
 from rocisa.functions import vectorMultiply64Bpe, vectorMultiplyBpe, scalarMultiplyBpe, \
-    vectorStaticDivideAndRemainder, scalarStaticRemainder
+    scalarMultiply64Bpe, vectorStaticDivideAndRemainder, scalarStaticRemainder
 from rocisa.enum import TemporalHint, CacheScope
 from math import log2, ceil
 from ..Common.MxScaleLayout import mxFreeTile, mxGl2CoalescedDim
@@ -394,10 +394,29 @@ class GL2PrefetchLoad(GL2Prefetch):
             # MT offset (in units of bytes). Moved out of the tmp sgprs here because
             # resolving a pointer-array base below needs all four of them. SAddr
             # parks it in the scalar base, which the base is added to at the end.
-            mod.add(scalarMultiplyBpe(tmpSgprIdx0, tmpSgprIdx0, bpe))
-            if isMX or tlu:
+            if isMX:
+                # The 32-bit scale-unit offset above only feeds the edge limit; it
+                # wraps once Size * mxUnit reaches 2^32. Rebuild it in 64 bits from
+                # the tile's start element, which fits.
+                mod.add(SSubI32(sgpr(tmpSgprIdx0), sgpr(sgprTileWgName), sgpr(tmpSgprIdx3), \
+                    comment="cluster base tile"))
+                mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mt, comment=f"clusterBaseTile * MT({mt})"))
+                if mxTile > 1:
+                    mod.add(SLShiftRightB32(sgpr(tmpSgprIdx0), hex(int(log2(mxTile))), sgpr(tmpSgprIdx0),
+                                           f"MXS 2D: / MXBlockFree({mxTile})"))
+                if mxUnit != 1:
+                    mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
+                        sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx1),
+                        sgpr(tmpSgprIdx0), mxUnit,
+                        tmpVgprIdx, comment=f"scale row * mxUnit({mxUnit})"))
+                else:
+                    mod.add(SMovB32(sgpr(tmpSgprIdx1), 0, comment="MT offset hi"))
+                mod.add(scalarMultiply64Bpe(tmpSgprIdx0, tmpSgprIdx0, bpe, tmpSgprIdx2))
+            elif tlu:
                 mod.add(SMovB32(sgpr(tmpSgprIdx1), 0, comment="MT offset hi"))
+                mod.add(scalarMultiply64Bpe(tmpSgprIdx0, tmpSgprIdx0, bpe, tmpSgprIdx2))
             else:
+                mod.add(scalarMultiplyBpe(tmpSgprIdx0, tmpSgprIdx0, bpe))
                 mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
                     sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx1),
                     sgpr(tmpSgprIdx0), perpStride,
