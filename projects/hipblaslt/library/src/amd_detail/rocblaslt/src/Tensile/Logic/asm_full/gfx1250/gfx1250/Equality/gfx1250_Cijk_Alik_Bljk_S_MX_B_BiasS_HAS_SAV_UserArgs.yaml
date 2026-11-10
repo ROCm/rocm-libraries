@@ -1384,14 +1384,14 @@ Solutions:
 IndexOrder: [2, 3, 0, 1]
 ExactLogic:
 - - [4096, 4096, 1, 8192]
-  - [0, 464334.0]
+  - [0, 0.0]
 - - [6144, 6144, 1, 12288]
-  - [1, 470008.0]
+  - [1, 0.0]
 - - [8192, 8192, 1, 16384]
-  - [2, 415755.0]
+  - [2, 0.0]
 - - [12288, 12288, 1, 20480]
-  - [3, 481236.0]
+  - [3, 0.0]
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
-LibraryType: GridBased
+LibraryType: Equality  
