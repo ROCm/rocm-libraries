@@ -1,0 +1,461 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: False
+  BoundsCheck: 1
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  PruneSparseMode: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeBias: 3
+  DataInitTypeScaleAlphaVec: 3
+  DataInitTypeScaleA: 3
+  DataInitTypeScaleB: 3
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
+  Architecture: gfx1250-strict
+  CpuThreads: 1
+  KeepBuildTmp: True
+  PrintLevel: 2
+  CodeObjectVersion: "4"
+
+BenchmarkProblems:
+  ########################################
+  # Every TDMStoreInst level of the beta=0 epilogue with AdaptiveGemm 0 and 1, with A
+  # and B loaded by TDM (TDMInst 3) and without it (TDMInst 0): 1 stores the
+  # masked paths narrower than the store vector width with tensor_store_from_lds,
+  # 2 every edge path and 3 every path, also where ldd = M is not a multiple of 8,
+  # so that the columns of D do not start 16-byte aligned. The sizes have M-edge
+  # workgroups with M % 8 odd, 6, 4 and 0, N-edge-only workgroups and only NonEdge
+  # workgroups.
+  # The last size has NonEdge, M-edge, N-edge and corner workgroups and a leading
+  # dimension larger than M, so BoundsCheck also checks the gap between columns.
+  # DataInitTypeBeta is global, so the beta != 0 epilogue is checked in
+  # tdm_store_beta_gfx1250.yaml.
+  ########################################
+  -
+    - &problem_type_bf16 # ProblemType TN
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      UseBeta: True
+      Batched: True
+      TransposeA: True
+      TransposeB: False
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [0, 3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - AdaptiveGemm: [0, 1]
+        - TDMStoreInst: [0, 1, 2, 3]
+        - SourceSwap: [False, True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 128]
+          - Exact: [511, 512, 1, 128]
+          - Exact: [257, 512, 1, 128]
+          - Exact: [510, 512, 1, 128]
+          - Exact: [508, 512, 1, 128]
+          - Exact: [504, 512, 1, 128]
+          - Exact: [512, 509, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+  ########################################
+  # SIA4 (StinkyTofu keeps the staging wait) and the D cache policy:
+  # TemporalHintD -> th:, NonTemporalD -> scope:, NonVolatileD -> nv.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - Groups:
+          - - ScheduleIterAlg: [4]
+              TDMStoreInst: [0, 2]
+            - TDMStoreInst: [2]
+              TemporalHintD: [3, 7]
+              NonTemporalD: [2]
+            - TDMStoreInst: [2]
+              TemporalHintD: [1]
+              NonTemporalD: [1]
+              NonVolatileD: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+  ########################################
+  # fp16 output, with and without SourceSwap.
+  ########################################
+  -
+    - <<: *problem_type_bf16
+      DataType: h
+      DestDataType: h
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - TDMStoreInst: [0, 2]
+        - SourceSwap: [False, True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+  ########################################
+  # SourceSwap puts the MI output along N, so the store vector width is VectorWidthA:
+  # MIWaveTile0 = 2 gives StoreVectorWidth 2 with SourceSwap and 8 without, at every
+  # TDMStoreInst level and AdaptiveGemm. The sizes have NonEdge, M-edge (M odd and even),
+  # N-edge and corner workgroups and a leading dimension larger than M.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 8, 4, 1]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - AdaptiveGemm: [0, 1]
+        - TDMStoreInst: [0, 1, 2, 3]
+        - SourceSwap: [False, True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128]
+          - Exact: [255, 256, 1, 128]
+          - Exact: [254, 256, 1, 128]
+          - Exact: [256, 255, 1, 128]
+          - Exact: [255, 255, 2, 128, 264, 264, 128, 128]
+  ########################################
+  # bf16 at store vector width 1 on every TDMStoreInst level, with AdaptiveGemm 0 and 1:
+  # the store-width cascade has one masked block, which levels 1 and 2 store through
+  # the TDM block, and level 3 adds the NonEdge path. The sizes have M-edge-only,
+  # N-edge-only, corner and interior tiles and a leading dimension larger than M.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [1]
+        - GlobalSplitU: [1]
+        - AdaptiveGemm: [0, 1]
+        - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [512, 509, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+  ########################################
+  # StoreVectorWidth 4 at every level that uses the TDM block, which then stages
+  # 8-byte vectors. The sizes have NonEdge, M-edge, N-edge and corner workgroups
+  # and a leading dimension larger than M.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [4]
+        - GlobalSplitU: [1]
+        - TDMStoreInst: [1, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 128]
+          - Exact: [511, 512, 1, 128]
+          - Exact: [512, 509, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+  ########################################
+  # MacroTile0 512 over 4 waves: staging offsets above the 16-bit DS offset.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 4, 1]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - TDMStoreInst: [2]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1023, 256, 1, 128]
+  ########################################
+  # Non-atomic StreamK=3. Every tile, whole or completed by the fixup, is
+  # stored through the same edge blocks: the problems have NonEdge, M-edge,
+  # N-edge and corner tiles in two batches, and a leading dimension larger than
+  # M. On 256 CUs, K=256 gives one whole tile per workgroup; with K=1600 each
+  # workgroup's iterations span two tiles and every tile is completed by the fixup.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - WorkGroupMapping: [8]
+        - StreamK: [3]
+        - TDMStoreInst: [1, 2, 3]
+        - SourceSwap: [False, True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [505, 509, 2, 256, 520, 520, 256, 256]
+          - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
+  ########################################
+  # Bias, ScaleAlphaVec and activation along M, read by every store batch: with TDMStoreInst the
+  # staged D tile follows the vectors in LDS. GlobalSplitU=-1 runs GSU 1 for K=128 and GSU 2
+  # for the single-tile K=512 size, whose partials keep buffer_store.
+  ########################################
+  -
+    - &problem_type_bf16_epilogue
+      <<: *problem_type_bf16
+      UseBias: 1
+      UseScaleAlphaVec: 1
+      Activation: True
+      ActivationType: hipblaslt_all
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1, -1]
+        - TDMStoreInst: [0, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 128]
+          - Exact: [511, 512, 1, 128]
+          - Exact: [257, 512, 1, 128]
+          - Exact: [510, 512, 1, 128]
+          - Exact: [508, 512, 1, 128]
+          - Exact: [504, 512, 1, 128]
+          - Exact: [512, 509, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+          - Exact: [255, 253, 1, 512]
+        - BiasTypeArgs: ['s', 'b']
+        - ActivationArgs:
+          - [Enum: relu]
+          - [Enum: gelu]
+  ########################################
+  # The same epilogue with non-atomic StreamK=3. The three-batch size shares one bias
+  # vector across the batches: bias length x (batch - 1) = 1010 is more than the 512
+  # elements the client pads the bias with for BoundsCheck.
+  ########################################
+  -
+    - *problem_type_bf16_epilogue
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - WorkGroupMapping: [8]
+        - StreamK: [3]
+        - TDMStoreInst: [0, 2]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [505, 509, 2, 256, 520, 520, 256, 256]
+          - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
+          - Exact: [505, 509, 3, 256, 520, 520, 256, 256]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: gelu]
+  ########################################
+  # AdaptiveGemm 1 with bias and ScaleAlphaVec at every TDMStoreInst level, at
+  # store vector widths 8 and 1. The staged tile must not overlap the vectors: every store
+  # batch reads them, the later batches of an M-edge tile after the first has staged its D.
+  ########################################
+  -
+    - *problem_type_bf16_epilogue
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1, 1]
+        - AdaptiveGemm: [1]
+        - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: relu]
+  ########################################
+  # F8 input with ScaleAB Scalar (folded into alpha) and Vector (ScaleA and ScaleB in LDS).
+  ########################################
+  -
+    - &problem_type_f8_epilogue
+      <<: *problem_type_bf16_epilogue
+      DataType: F8
+      UseScaleAB: Scalar
+    - &solution_f8
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [128]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - TDMStoreInst: [2]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [512, 509, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: relu]
+  -
+    - <<: *problem_type_f8_epilogue
+      UseScaleAB: Vector
+    - *solution_f8
+  ########################################
+  # LocalSplitU=2, shaped like the LSU=2 kernels of the gfx1250 bf16 TN logic
+  # (MT64x128, WorkGroup [16, 4, 2], MIWaveGroup [1, 2], DepthU 128): after the LDS
+  # reduction each thread stages the elements it owns at coordinates that include
+  # the LSU offset (along M, or along N with SourceSwap), at every TDMStoreInst level
+  # and AdaptiveGemm. The sizes have NonEdge-only workgroups, M-edge workgroups with
+  # M % 8 odd and 4, an N-edge-only size whose last tile has waves with no column
+  # inside D, and a corner size in two batches with a leading dimension larger than M.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 4, 1, 2]
+        - WorkGroup: [[16, 4, 2]]
+        - WavefrontSize: [32]
+        - DepthU: [128]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - AdaptiveGemm: [0, 1]
+        - TDMStoreInst: [0, 1, 2, 3]
+        - SourceSwap: [False, True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [255, 256, 1, 256]
+          - Exact: [252, 256, 1, 256]
+          - Exact: [256, 296, 1, 256]
+          - Exact: [255, 253, 2, 256, 264, 264, 256, 256]
