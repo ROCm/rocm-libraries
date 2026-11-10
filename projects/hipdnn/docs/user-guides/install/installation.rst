@@ -211,6 +211,7 @@ This example demonstrates running the entire set of samples using ``ctest``:
 
 Replace ``/opt/rocm`` with your ROCm install folder when running this ``ctest`` command.
 The exact set of samples depends on the hipDNN version and build options. For example,
-builds with ``HIPDNN_ENABLE_CUDNN_COMPATIBILITY`` also install the ``hipdnn_sample_cudnn_shim_*`` samples.
+builds with ``HIPDNN_ENABLE_CUDNN_COMPATIBILITY`` also install the ``hipdnn_sample_cudnn_shim_*`` (cuDNN v9 graph API) and
+``hipdnn_sample_cudnn_compatibility_*_v8`` (v0.x builders) samples.
 
 See `hipDNN Samples <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/README.md>`_ for further details on running these sample programs and their operation.

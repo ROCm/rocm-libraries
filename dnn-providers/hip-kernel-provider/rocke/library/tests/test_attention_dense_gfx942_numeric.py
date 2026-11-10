@@ -66,8 +66,8 @@ _COHORT = [
     ("fp16", 128, 16, 4, False, True),  # flagship default (causal)
     ("fp16", 128, 16, 4, True, True),  # flagship persistent
     ("bf16", 128, 16, 4, True, True),  # bf16 D128 persistent (the VGPR-starved config)
-    # bf16 D128 default: the plain-exp2 arm -- the one config _use_exp2_fast turns
-    # off, and it does so on the grid, at every seqlen.
+    # bf16 D128 default: the plain-exp2 arm -- the one config default_use_exp2_fast
+    # turns off, and it does so on the grid, at every seqlen.
     ("bf16", 128, 16, 4, False, True),
     ("fp16", 64, 16, 16, False, True),  # D64 MHA default
     ("bf16", 64, 16, 4, True, True),  # D64 bf16 persistent (the wpe=4 config)
@@ -1654,7 +1654,9 @@ class TestDenseLseNumericGfx942:
     """Direct-runner LSE coverage on gfx942; no dispatcher or hipDNN feature implied.
 
     Every random-input row also requires O to be bitwise identical to the LSE-off
-    kernel: those rows have no keyless query, so LSE must not perturb O.
+    kernel: those rows have no keyless query, so LSE must not perturb O. The one
+    keyless shape (test_narrow_o_store) runs that comparison on a keyed twin shape,
+    since supports_attention_dense refuses the LSE-off kernel on keyless rows.
     """
 
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -1753,46 +1755,68 @@ class TestDenseLseNumericGfx942:
         "persistent", [False, True], ids=["ordinary", "persistent"]
     )
     def test_narrow_o_store(self, width, persistent):
-        """BF16 store widths 1/2: keyless rows are zero, keyed rows match LSE-off."""
+        """BF16 store widths 1/2: keyless rows are zero, keyed rows match the
+        reference, and on a keyed-only twin shape (Sq = Skv = 256) O is bitwise the
+        LSE-off kernel's at the same width. The keyless shape itself has no LSE-off
+        build: supports_attention_dense refuses a window that leaves rows keyless
+        unless the LSE path or sinks handle them."""
         from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
-        spec = dataclasses.replace(
-            tuning_spec_with_knobs(
-                AttentionRequest(
-                    batch=1,
-                    nhead_q=4,
-                    nhead_k=1,
-                    seqlen_q=256,
-                    seqlen_k=64,
-                    hdim_q=128,
-                    hdim_v=128,
-                    arch="gfx942",
-                    mask_type=1,
-                    dtype="bf16",
-                    sliding_window=64,
-                ),
-                "gfx942_dense",
-                {"persistent": bool(persistent), "o_store_width": width},
-            ).kernel_spec,
-            emit_lse=True,
-        )
+        def lse_spec(seqlen_k):
+            return dataclasses.replace(
+                tuning_spec_with_knobs(
+                    AttentionRequest(
+                        batch=1,
+                        nhead_q=4,
+                        nhead_k=1,
+                        seqlen_q=256,
+                        seqlen_k=seqlen_k,
+                        hdim_q=128,
+                        hdim_v=128,
+                        arch="gfx942",
+                        mask_type=1,
+                        dtype="bf16",
+                        sliding_window=64,
+                        emit_lse=True,
+                    ),
+                    "gfx942_dense",
+                    {"persistent": bool(persistent), "o_store_width": width},
+                ).kernel_spec,
+                emit_lse=True,
+            )
+
+        spec = lse_spec(64)
         assert spec.o_store_width == width
         scale = 0.5
         torch.manual_seed(17)
         q = torch.randn(1, 256, 4, 128, device="cuda", dtype=torch.bfloat16)
         k = torch.randn(1, 64, 1, 128, device=q.device, dtype=q.dtype)
         v = torch.randn_like(k)
-        out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+        out = torch.empty_like(q)
+        lse = torch.full((1, 4, 256, 1), float("nan"), device=q.device)
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=scale
+        )
+        torch.cuda.synchronize()
         ref, lse_ref = _lse_reference(q, k, v, scale, causal=True, window=64)
         # Rows 0..126 see at least one key; rows 127.. see none.
         assert (out[:, :127].float() - ref[:, :127]).abs().max().item() < _tolerance(
             "bf16"
         )
-        assert torch.equal(out[:, :127], off_out[:, :127])
         assert torch.equal(out[:, 127:], torch.zeros_like(out[:, 127:]))
         finite = torch.isfinite(lse_ref)
         assert (lse[finite] - lse_ref[finite]).abs().max().item() < _tolerance("bf16")
         assert torch.equal(torch.isneginf(lse), torch.isneginf(lse_ref))
+
+        # Keyed-only twin: the width-1/2 keyless-row mask must leave every keyed row
+        # exactly as the LSE-off kernel writes it.
+        # The same compiled kernel: seqlen is a runtime argument, so only the seed moves.
+        keyed = dataclasses.replace(spec, seqlen_kv=256)
+        assert keyed.o_store_width == width
+        k256 = torch.randn(1, 256, 1, 128, device=q.device, dtype=q.dtype)
+        v256 = torch.randn_like(k256)
+        keyed_out, _, keyed_off = _run_lse_and_off(keyed, q, k256, v256, scale)
+        assert torch.equal(keyed_out, keyed_off)
 
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize(
@@ -1821,6 +1845,7 @@ class TestDenseLseNumericGfx942:
                     dtype=dtype,
                     sliding_window=64,
                     use_sinks=with_sink,
+                    emit_lse=True,
                 ),
                 "gfx942_dense",
                 {"persistent": bool(persistent)},

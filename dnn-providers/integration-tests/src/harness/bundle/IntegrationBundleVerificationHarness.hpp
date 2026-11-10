@@ -36,6 +36,7 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
+#include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/bundle/VerificationOutcome.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
@@ -108,6 +109,7 @@ public:
         _bundle = std::move(bundle);
         _bundlePath = std::move(path);
         _claimLocator = std::move(claimLocator);
+        _raggedLengthUidsCache.reset();
 
         if(_bundle != nullptr && _bundle->metadata.seed.has_value())
         {
@@ -553,9 +555,26 @@ private:
     // nullopt when the inputs are ready; otherwise the outcome to return.
     std::optional<VerificationOutcome> prepareInputs();
     std::optional<VerificationOutcome> fillBundleInputs();
+    // Fails the test when a ragged tensor has no valid layout or reaches past its
+    // filled input buffer. Runs before any engine or reference reads the inputs.
+    std::optional<VerificationOutcome>
+        checkRaggedLayouts(const std::unordered_map<int64_t, int64_t>& lengthUids) const;
+    // raggedLengthUids(), computed once per bundle and reused by every later call site
+    // (the graph does not change once the bundle is set). Propagates the same exception
+    // raggedLengthUids() would throw; nothing is cached on a throwing call.
+    const std::unordered_map<int64_t, int64_t>& cachedRaggedLengthUids() const;
+    mutable std::optional<std::unordered_map<int64_t, int64_t>> _raggedLengthUidsCache;
 
     OutputTensors allocateSentinelOutputs(bool onDevice) const;
+    // The input set that a variant pack reads: the packed set for a device pack of a
+    // sub-byte graph, otherwise the unpacked set.
+    TensorMap& variantPackInputs(bool useDevice);
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs, bool useDevice);
+    // Moves the engine's pointers of the bundle's start_offsets tensors. Errors name the
+    // bundle.
+    detail::StartOffsetStaging stageStartOffsets(std::unordered_map<int64_t, void*>& variantPack,
+                                                 OutputTensors& outputs,
+                                                 bool useDevice);
     EngineRunResult runEngine(GraphSession& session);
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 

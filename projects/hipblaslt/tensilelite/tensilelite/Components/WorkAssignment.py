@@ -46,11 +46,15 @@ def _mailboxLds0Token(writer):
 
 
 def _emitMailboxAddressAndWave0Skip(writer, module, vLocalAddress, skipLabel,
-                                    preventOverflow=True):
+                                    preventOverflow=True, scratchSgprs=None):
     # Per-wave mailbox slot in LDS[0..124]: (Serial<<2) - (tid0<<2).
     # tid0 is firstlane(Serial). Serial is written at kernel start.
-    sTid0 = writer.sgprPool.checkOut(1, "MailboxFirstTid", preventOverflow=preventOverflow)
-    sBase = writer.sgprPool.checkOut(1, "MailboxWaveBase", preventOverflow=preventOverflow)
+    # scratchSgprs: optional two dead sgprs to use instead of checking out.
+    if scratchSgprs is None:
+        sTid0 = writer.sgprPool.checkOut(1, "MailboxFirstTid", preventOverflow=preventOverflow)
+        sBase = writer.sgprPool.checkOut(1, "MailboxWaveBase", preventOverflow=preventOverflow)
+    else:
+        sTid0, sBase = scratchSgprs
     module.add(VReadfirstlaneB32(dst=sgpr(sTid0), src=vgpr("Serial"),
                                  comment="wave first thread id from Serial"))
     module.add(VLShiftLeftB32(dst=vgpr(vLocalAddress), src=vgpr("Serial"), shiftHex=log2(4),
@@ -61,9 +65,11 @@ def _emitMailboxAddressAndWave0Skip(writer, module, vLocalAddress, skipLabel,
     module.add(SLShiftLeftB32(dst=sgpr(sBase), src=sgpr(sTid0), shiftHex=log2(4),
                               comment="wave base in bytes"))
     module.add(VSubU32(dst=vgpr(vLocalAddress), src0=vgpr(vLocalAddress), src1=sgpr(sBase)))
-    writer.sgprPool.checkIn(sBase)
+    if scratchSgprs is None:
+        writer.sgprPool.checkIn(sBase)
     module.add(SCmpEQU32(src0=sgpr(sTid0), src1=0, comment="Check for wave 0"))
-    writer.sgprPool.checkIn(sTid0)
+    if scratchSgprs is None:
+        writer.sgprPool.checkIn(sTid0)
     module.add(SCBranchSCC0(labelName=skipLabel.getLabelName(), comment="Skip work item"))
 
 
@@ -143,28 +149,60 @@ class WorkAssignment(Component):
         self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipSignal', electTag='PersistentMulticastElect')
         return module
 
-    def persistentClusterNextTileArrive(self, writer, kernel):
-        """Arrive for the next tile's first-load cluster wait.
-
-        Peers multicast the next tile's prefetch into each other's LDS, so each
-        workgroup arrives only after all of its waves are done with LDS for the
-        current tile. Peers own the same number of blocks, so the has-next-tile
-        test is uniform across the cluster and the last tile leaves no arrive.
-        """
-        module = Module('Persistent cluster next-tile arrive')
-        if not (persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)):
-            return module
-        assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
-        partition = Component.TileProcessingStrategy.find(writer).staticPartition()
-        skipArrive = Label(writer.labels.getNameInc('PersistentMC_SkipNextTileArrive'), '')
-        module.addComment0('cluster B-multicast: arrive for the next tile once this tile is done with LDS')
-        module.add(SCmpGeU32(src0=sgpr(partition.cursor), src1=sgpr(partition.bound), comment='no next tile: nothing to arrive for'))
-        module.add(SCBranchSCC1(labelName=skipArrive.getLabelName()))
-        module.add(SWaitCnt(dscnt=0, comment='LDS reads of this tile done'))
-        module.add(SBarrier(comment='all waves done with LDS before the cluster arrive'))
-        self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipTileSignal', electTag='PersistentMulticastTileElect')
-        module.add(skipArrive)
+    def persistentTileHandoff(self, writer, kernel):
+        """Emit both phases when the caller unconditionally re-enters."""
+        always, beforeReentry = self.splitPersistentTileHandoff(writer, kernel)
+        module = Module("Persistent tile handoff")
+        module.add(always)
+        module.add(beforeReentry)
         return module
+
+    def splitPersistentTileHandoff(self, writer, kernel):
+        """Return (always, beforeReentry) synchronization for this tile.
+
+        Emit always before checking for exit, then beforeReentry only when
+        re-entering the persistent loop. Keep compute, epilogue, queue and cluster
+        requirements together, outside the main-loop barrier planner.
+        """
+        always = Module("Persistent tile completion")
+        beforeReentry = Module("Persistent tile handoff")
+        debug = kernel.get("DebugPersistentKernelLoopForever", False)
+        tdm = ((kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False))
+               and kernel["NumThreads"] > kernel["WavefrontSize"])
+        epilogue = (kernel.get("_PersistentVectorEpilogueLds", False)
+                    and not kernel["PrefetchAcrossPersistent"])
+        cluster = persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)
+        # Hybrid calls the concrete assignment's closeLoop. Debug bypasses the queue.
+        queue = self.kernel["WorkAssignment"] == "DynamicWorkQueue" and not debug
+        if not (tdm or epilogue or cluster or queue):
+            return always, beforeReentry
+
+        # Preserve the epilogue's exit fence; it also covers re-entry.
+        fence = always if epilogue else beforeReentry
+        if tdm or epilogue or cluster:
+            # DS-only: disjoint PAP tensor loads need not complete at this boundary.
+            fence.add(SWaitCnt(dscnt=0, comment="finish LDS reads before next persistent tile"))
+        barrier = SBarrier(comment="hand epilogue LDS back to persistent compute" if epilogue
+                           else "hand compute LDS back to persistent TDM prefetch" if tdm
+                           else "Sync before persistent re-entry")
+        if epilogue:
+            barrier.setMemToken(MemTokenData([writer.states.memTokenEpilogue]))
+        fence.add(barrier)
+
+        if cluster:
+            assert writer.states.asmCaps.get('HasClusterBarrier', False), 'persistent cluster handoff requires HasClusterBarrier'
+            if debug:
+                # Debug forces re-entry even after exhaustion. Keep its local
+                # fence above, but do not signal a nonexistent next cluster tile.
+                partition = Component.TileProcessingStrategy.find(writer).staticPartition()
+                skipArrive = Label(writer.labels.getNameInc('PersistentMC_SkipNextTileArrive'), '')
+                beforeReentry.add(SCmpGeU32(src0=sgpr(partition.cursor), src1=sgpr(partition.bound), comment='no next tile: nothing to arrive for'))
+                beforeReentry.add(SCBranchSCC1(labelName=skipArrive.getLabelName()))
+            # Normal StaticGrid re-entry is already guarded by its exit check.
+            self._clusterElectArriveSignal(writer, beforeReentry, labelBase='PersistentMC_SkipTileSignal', electTag='PersistentMulticastTileElect')
+            if debug:
+                beforeReentry.add(skipArrive)
+        return always, beforeReentry
 
     def persistentMulticastZeroIterClusterWait(self, writer, kernel):
         module = Module('Persistent multicast zero-iteration cluster wait')
@@ -1032,9 +1070,16 @@ class StaticGrid(WorkAssignment):
 
     def closeLoop(self, writer, kernel):
         module = Module("StaticGrid closeLoop")
+        always, beforeReentry = self.splitPersistentTileHandoff(writer, kernel)
+        module.add(always)
         partition = Component.TileProcessingStrategy.find(writer).staticPartition()
+        done = Label(writer.labels.getNameInc("StaticGrid_CloseDone"), "")
         module.add(SCmpGeU32(src0=sgpr(partition.cursor), src1=sgpr(partition.bound), comment="Check whether assigned work is exhausted"))
-        module.add(writer.longBranchScc0(Label(writer.rapPersistentLoopEntryLabel(kernel), ""), posNeg=-1))
+        module.add(SCBranchSCC1(labelName=done.getLabelName()))
+        module.add(beforeReentry)
+        with writer.allocTmpSgpr(3, tag="StaticGrid_closeLoop") as tmp:
+            module.add(SLongBranchNegative(Label(writer.rapPersistentLoopEntryLabel(kernel), ""), tmp))
+        module.add(done)
         return module
 
 
@@ -1113,7 +1158,7 @@ class DynamicWorkQueue(WorkAssignment):
 
     def closeLoop(self, writer, kernel):
         module = Module("DynamicWorkQueue closeLoop")
-        module.add(SBarrier(comment="Sync before work-queue persistent re-entry"))
+        module.add(self.persistentTileHandoff(writer, kernel))
         with writer.allocTmpSgpr(3, tag="DynamicWorkQueue_closeLoop") as tmp:
             module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmp))
         return module

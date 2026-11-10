@@ -129,8 +129,6 @@ typedef struct rocke_gfx950_attn_tiled_3d_config
     int BLOCK_M; /* spec.block_m (== 16)                                 */
     int BLOCK_Q; /* spec.block_q                                         */
     int NQK; /* spec.num_queries_per_kv                              */
-    int NUM_KV; /* spec.num_kv_heads                                    */
-    int NUM_QH; /* spec.num_query_heads                                 */
     int NUM_SEG; /* spec.num_segments                                    */
     int SLIDING_WINDOW; /* spec.sliding_window                                  */
     bool USE_SOFTCAP; /* spec.has_softcap                                     */
@@ -153,7 +151,6 @@ typedef struct rocke_gfx950_attn_tiled_3d_config
     int PV_N_TILES; /* HD // MFMA_N                                         */
 
     int THREADS; /* 64 */
-    int binary_search_iters; /* spec.binary_search_iters */
 
     /* ---- async / fp8 KV feed geometry (lines 565-643) ---- */
     int ASYNC_LDS_DWORDS; /* 4 (CDNA4) */
@@ -161,8 +158,6 @@ typedef struct rocke_gfx950_attn_tiled_3d_config
     int KV_HALVES_PER_CALL; /* THREADS * 8 */
     int kv_calls_per_tile; /* (T*HD) // KV_HALVES_PER_CALL */
     int bytes_per_call; /* KV_HALVES_PER_CALL * 2 */
-    int kv_stride_blk_b; /* BS*NUM_KV*HD*KV_BYTES */
-    int kv_stride_tok_b; /* NUM_KV*HD*KV_BYTES */
     int kv_stride_h_b; /* HD*KV_BYTES */
     int bytes_per_buf; /* T*HD*2 */
     int N_BLOCKS_PER_TILE; /* T // BS (multi-page tile when > 1) */
@@ -252,6 +247,10 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     rocke_value_t* num_seqs_p; /* I32 num_seqs                                */
     rocke_value_t* bt_stride_p; /* I32 block_table_stride                      */
     rocke_value_t* qq_bias_stride0_p; /* I32 qq_bias_stride_0                        */
+    /* RUNTIME_KERNARG_FIELDS params, in declaration order. */
+    rocke_value_t* num_qh_p; /* I32 num_query_heads                          */
+    rocke_value_t* num_kv_p; /* I32 num_kv_heads                             */
+    rocke_value_t* sliding_window_p; /* I32 sliding_window                        */
 
     /* ---------- grid ids + thread (lines 360-363) ---------- */
     rocke_value_t* q_block_global_idx; /* block_id_x()                              */
@@ -284,7 +283,7 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     rocke_value_t* one_f; /* const_f32(1.0)                            */
     rocke_value_t* rcp_ln2; /* const_f32(1.4426950408889634)             */
     rocke_value_t* qk_scale; /* scale_p * rcp_ln2                         */
-    rocke_value_t* sw_const; /* const_i32(SLIDING_WINDOW)                 */
+    rocke_value_t* sw_const; /* the sliding_window kernarg               */
     rocke_value_t* z8; /* zero_vec(dtype, 8)                        */
 
     /* ---------- lane decode (lines 533-534) ---------- */
@@ -326,8 +325,14 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     rocke_value_t* first_page_ids[8]; /* tile_start's page ids (PAGE_IDS; N <= 8) */
     rocke_value_t* seg_first_page; /* tile_start * N_BLOCKS_PER_TILE (WAVE_PAGE_ID_LOAD) */
     rocke_value_t* first_page_id_window; /* the first 64-page id window (WAVE_PAGE_ID_LOAD) */
-    rocke_value_t*
-        kv_block_bytes_c; /* const_i32(kv_stride_blk_b): 1-block buffer bound (i64 path) */
+    /* K/V byte strides; they scale with the runtime kv head count. */
+    rocke_value_t* kv_stride_tok_b; /* num_kv_p * HD * KV_BYTES                  */
+    rocke_value_t* kv_stride_blk_b; /* kv_stride_tok_b * BS                      */
+    rocke_value_t* kv_block_bytes_c; /* kv_stride_blk_b: 1-block buffer bound (i64 path) */
+    /* Each call's token offset within a page (PAGE_IDS), indexed by
+     * tok0 / tokens_per_call; [0] stays NULL (no offset). */
+    rocke_value_t* call_tok_b[64];
+    rocke_value_t* kv_stride_blk_i64; /* zext(kv_stride_blk_b) (PAGE_IDS && I64_KV_ADDR) */
 
     /* ---------- online-softmax loop init carry (lines 536-562, 717-718) ---------- *
      * m_init: the lane's query row (l starts at one_f). acc_inits: PV_N_TILES

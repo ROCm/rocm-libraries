@@ -406,7 +406,10 @@ APIs, logging, and bad-argument cases. Results are compared to host reference BL
 **What requires GPU hardware.** Essentially all client integration tests.
 
 **What runs on PRs.** PR pipelines run standard pre-checkin-class sets (via Math CI, or
-TheRock using `rocblas_rtest.py` / CTest `standard`). HMM and stress suites are outside that
+TheRock using `rocblas_rtest.py` / CTest). TheRock invokes the generic
+[`test/therock/test_runner.py`](../../test/therock/test_runner.py), which runs `ctest -L $TEST_TYPE`
+from the install tree; `TEST_TYPE` defaults to `quick` (smoke), and the value each TheRock lane
+uses is configured in TheRock, not in this repository. HMM and stress suites are outside that
 default set — apply the GitHub labels in [CI Label Suggestions](#ci-label-suggestions).
 Math CI currently exceeds most capabilities and flexibility of that offered by TheRock CI runners.
 

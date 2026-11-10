@@ -271,6 +271,66 @@ BenchmarkProblems:
           - [Enum: none]
 
   ########################################
+  # FP16FP8_HHS packed tail read
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeB: F8N
+      DestDataType: h
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      BiasDataTypeList: [s,b]
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   4, 9,  4,1 ]  # 256x144
+        - DepthU: [ 64 ]
+        # An even ASEM with GRVWB 2 makes the tail read two FP8 B elements per load.
+        - AssertSummationElementMultiple: [32]
+        - AssertFree0ElementMultiple: [8]
+        - PrefetchGlobalRead: [2]
+        - VectorWidthA: [4]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [2]
+        - ExpandPointerSwap: [false]
+        - TransposeLDS: [1]
+        - LdsBlockSizePerPadA: [4096]
+        - LdsBlockSizePerPadB: [128]
+        - LdsPadA: [16]
+        - LdsPadB: [16]
+        - WaveSeparateGlobalReadA: [2]
+        - WaveSeparateGlobalReadB: [1]
+        - 1LDSBuffer: [1]
+        - StaggerU: [4]
+        - StaggerUMapping: [1]
+        - GlobalSplitU: [1]
+        - StoreVectorWidth: [4]
+        - SourceSwap: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # K % DepthU == 32 runs the tail loop; K = 128 has no tail.
+          - Exact: [256,   144, 1, 32]
+          - Exact: [256,   144, 1, 96]
+          - Exact: [256,   144, 1, 160]
+          - Exact: [256,   144, 1, 224]
+          - Exact: [256,   144, 1, 128]
+          - Exact: [264,   150, 1, 160]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
   # FP8FP16_HHS
   ########################################
   -

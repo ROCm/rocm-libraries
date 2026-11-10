@@ -2,25 +2,38 @@
 
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
-under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two producers' bundles:
+under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
+`FlyDSL/<op>/` bundles.
 
-- Four rocKE bundles: `rocKE/gfx950_attention_dense/`, `rocKE/gfx950_attention_unified_2d/`
-  and `rocKE/gfx950_attention_unified_3d/`, whose KDPs are stored in DVC (see
-  [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below) and declare gfx950
-  only, and `rocKE/gfx1151_wmma_attention/`, whose KDP is in git and declares the gfx11 and
-  gfx12 RDNA targets. They pack for a build that has rocKE enabled
-  (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk) and whose
-  GPU targets include an arch one of those KDPs declares; for gfx950 the DVC KDPs must also
-  have been pulled.
-- `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
-  their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in
-  that target's KDP. Each `<target>/` directory is a DVC output on the same `ingestor`
-  remote (`<target>.dvc` in git), fetched and checked like rocKE's (below). The
-  target is a concrete arch or an LLVM generic target such as `gfx11-generic`, whose UKDs
-  list every member arch, so the same objects pack into each member's shard. A bundle
-  packs for a build whose GPU targets include one of its arches and that has FlyDSL
-  enabled (`HIPKERNELPROVIDER_ENABLE_FLYDSL`, OFF by default; TheRock turns it on). The objects and descriptors are
-  generated, not hand-written: see `flydsl/REGEN.md` in the provider tree.
+| Bundle | Engine | Native pack |
+|---|---|---|
+| `rocKE/gfx950_attention_dense/` | `hipkernel:Gfx950AttentionDense` | `packs/Gfx950AttentionDenseNative.cpp` |
+| `rocKE/gfx950_attention_unified_2d/` | `hipkernel:Gfx950AttentionUnified2D` | `packs/Gfx950AttentionUnified2DNative.cpp` |
+| `rocKE/gfx950_attention_unified_3d/` | `hipkernel:Gfx950AttentionUnified3D` | `packs/Gfx950AttentionUnified3DNative.cpp` |
+| `rocKE/gfx942_attention_unified_3d/` | `hipkernel:Gfx942AttentionUnified3d` | `packs/Gfx942AttentionUnified3dNative.cpp` |
+| `rocKE/gfx942_attention_dense/` | `hipkernel:Gfx942AttentionDense` | `packs/Gfx942AttentionDenseNative.cpp` (shares `packs/AttentionDenseNative.cpp` with gfx950) |
+| `rocKE/gfx1151_wmma_attention/` | `hipkernel:Gfx1151WmmaAttention` | `packs/Gfx1151WmmaAttentionNative.cpp` |
+| `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
+| `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/Gfx950ConvDgradNative.cpp` |
+
+The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
+`gfx942_attention_unified_3d`, `gfx942_attention_dense` and `gfx950_conv_dgrad_aot` KDPs are
+stored in DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below)
+and declare gfx950 or gfx942 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in
+git and declare the gfx11 and gfx12 RDNA targets. Each bundle packs for a build that has
+rocKE enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the
+walk) and whose GPU targets include an arch its KDP declares; for gfx950 and gfx942 the
+DVC KDPs must also have been pulled.
+
+`FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
+their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in
+that target's KDP. Each `<target>/` directory is a DVC output on the same `ingestor`
+remote (`<target>.dvc` in git), fetched and checked like rocKE's (below). The
+target is a concrete arch or an LLVM generic target such as `gfx11-generic`, whose UKDs
+list every member arch, so the same objects pack into each member's shard. A bundle
+packs for a build whose GPU targets include one of its arches and that has FlyDSL
+enabled (`HIPKERNELPROVIDER_ENABLE_FLYDSL`, OFF by default; TheRock turns it on). The objects and descriptors are
+generated, not hand-written: see `flydsl/REGEN.md` in the provider tree.
 
 For any other build the root has nothing to pack and production packaging is dormant,
 unless the cache variable below is pointed elsewhere.
@@ -102,21 +115,23 @@ rocKE/<bundle>/
   artifacts/                                                     git-ignored, from DVC
     <name>.kdp.json
     *.co
-  heuristics.dvc                                                 in git (only if the bundle has heuristic models)
-  heuristics/                                                    git-ignored, from DVC
-    <id>/.../model.bin
+  heuristics/<id>/<role>/<arch>/<metric>/                        one folder per trained model (only if the bundle has any)
+    heuristic.uhd.json, model.bin.dvc, .gitignore                in git
+    model.bin                                                    git-ignored, from DVC
 ```
 
 One pointer per bundle keeps the pointer count and the pull small, and the whole bundle
 updates atomically. Files are stored uncompressed, one blob each. `gfx950_attention_dense`
-uses this layout. A single large file with its own `<name>.kdp.json.dvc` pointer is also
+and `gfx942_attention_unified_3d` use this layout. A single large file with its own `<name>.kdp.json.dvc` pointer is also
 accepted.
 
-**Heuristic models.** A heuristic model file is binary and does not belong in git. Track it
-like the other large files: keep the `heuristics/` tree where the bundle expects it and add
-one pointer for that folder (`dvc add heuristics`), or place the files in `artifacts/` when
-nothing refers to them by path. A `.dvc` pointer anywhere under `rocKE/` is checked at
-configure.
+**Heuristic models.** A heuristic model file is binary and does not belong in git. Each
+one is its own DVC output: `heuristics/<ued-id>/<role>/<arch>/<metric>/model.bin` has a
+`model.bin.dvc` pointer and a one-line `.gitignore` (`/model.bin`) beside its
+`heuristic.uhd.json`, the layout FlyDSL uses. `uhd_gen promote` copies the model there;
+add the pointer with `dvc add model.bin` in that folder, then append `remote: ingestor`
+to it as for any new pointer (below). A model file that nothing refers to by path can
+instead sit in `artifacts/`. Any `.dvc` pointer under `rocKE/` is checked at configure.
 
 A KDP in `artifacts/` packs correctly: the packer walks the root recursively and computes
 each packed kernel's archive path from the descriptor's depth (`../../../kpack/...` here).
@@ -128,8 +143,15 @@ The small descriptors name each other by id, not by path, so moving a KDP needs 
   `dvc pull -r ingestor <path-to-pointer>.dvc`.
 - **`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`:** if a DVC output is missing or differs from its
   pointer (file size, or file count for a folder), configure prints a warning and the
-  shipped bundle is not packed. Builds and tests still run, so a build without a `dvc pull`
-  works, for example a shallow clone or an ASAN run. The warning prints the `dvc pull`
+  whole bundle is left out of the pack, git-tracked descriptors included (a UED in git may
+  name a UHD that lives in `heuristics/`). Builds and tests still run, so a build without a
+  `dvc pull` works, for example a shallow clone or an ASAN run. A heuristic model is the
+  same, one `model.bin.dvc` pointer each, but finer-grained: configure warns, and the pack
+  ships the rest of the bundle without that model's UHD and logs `warning: not shipping
+  UHD ...` with the `dvc pull` command. The UED still names the model; the loader reads
+  the dangling id as that role being off for the architecture, so the engine stays
+  available and falls back to its other rankers. A missing model with no `.dvc` pointer
+  beside it is a bug and still fails the pack. Every warning prints the `dvc pull`
   command. A build that sets `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` elsewhere is not
   checked. Set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` (default OFF) to make this
   an error. Release builds should set it.

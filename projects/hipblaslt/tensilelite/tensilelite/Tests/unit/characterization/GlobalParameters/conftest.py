@@ -11,16 +11,6 @@ import copy
 
 import pytest
 
-from tensilelite.Common.Architectures import SUPPORTED_ISA
-from tensilelite.Common.Capabilities import makeIsaInfoMap
-from tensilelite.Toolchain.Validators import validateToolchain
-
-
-@pytest.fixture(scope="session")
-def isa_info_map():
-    return makeIsaInfoMap(SUPPORTED_ISA, validateToolchain("amdclang++"))
-
-
 @pytest.fixture
 def isolate_globals():
     from tensilelite.Common.GlobalParameters import globalParameters

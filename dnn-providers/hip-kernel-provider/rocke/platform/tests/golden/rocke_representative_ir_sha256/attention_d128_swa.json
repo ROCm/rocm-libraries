@@ -5,10 +5,10 @@
       "cases": {
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
           "arch": "gfx942",
-          "bytes": 398218,
+          "bytes": 398438,
           "family": "attention_d128_swa",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
-          "sha256": "d07edfd2a3dc52bd1e53d9aafa9a08a7d02a3a0a3a146ee75b278cd833abba53",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_g4_bf16_sw_wpe2_mw32_4wgqa_fold",
+          "sha256": "27332106786c2556edbe87534f3c3091f416744e1f4bdc8574d0f9955a5307e7",
           "status": "ok"
         }
       },
@@ -18,10 +18,10 @@
       "cases": {
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
           "arch": "gfx942",
-          "bytes": 398225,
+          "bytes": 398445,
           "family": "attention_d128_swa",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
-          "sha256": "f3c8eebff4d56db447aed23d80287e9db624f0839acb03331552b77f53fa5665",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_g4_bf16_sw_wpe2_mw32_4wgqa_fold",
+          "sha256": "f21f758dd2fce376bbbc2cfed37875427c90f87f71cd7b556e361cc3ccfbf280",
           "status": "ok"
         }
       },
@@ -31,10 +31,10 @@
       "cases": {
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
           "arch": "gfx942",
-          "bytes": 398289,
+          "bytes": 398509,
           "family": "attention_d128_swa",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
-          "sha256": "055026137da184d8640ca006fbe17d0d7de439ecbbd846af4d63d07adbad3141",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_g4_bf16_sw_wpe2_mw32_4wgqa_fold",
+          "sha256": "2c844b7c30e23d370aa5057b645020505ccca11954963fd905fc896bc64b67be",
           "status": "ok"
         }
       },
@@ -44,10 +44,10 @@
       "cases": {
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
           "arch": "gfx942",
-          "bytes": 398289,
+          "bytes": 398509,
           "family": "attention_d128_swa",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
-          "sha256": "055026137da184d8640ca006fbe17d0d7de439ecbbd846af4d63d07adbad3141",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_g4_bf16_sw_wpe2_mw32_4wgqa_fold",
+          "sha256": "2c844b7c30e23d370aa5057b645020505ccca11954963fd905fc896bc64b67be",
           "status": "ok"
         }
       },

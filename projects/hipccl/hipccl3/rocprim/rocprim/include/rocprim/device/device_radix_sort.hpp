@@ -798,6 +798,13 @@ hipError_t
     {
         return hipErrorInvalidValue;
     }
+    if constexpr(::rocprim::is_signed<Size>::value)
+    {
+        if(size < 0)
+        {
+            return hipErrorInvalidValue;
+        }
+    }
     unsigned int single_sort_items_per_block
         = block_sort_config::block_size * block_sort_config::items_per_thread;
     if(size <= static_cast<decltype(size)>(single_sort_items_per_block))

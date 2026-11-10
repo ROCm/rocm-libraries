@@ -394,22 +394,55 @@ def extractPathsFromBeforeDeps(emittedModules) -> Tuple[int, List[List[int]], Li
         if bi is not None and bi in nonMfmaSet:
             preMfmaTarget = bi
 
-    # Each non-MFMA module has at most one predecessor, and each predecessor
-    # has at most one child, so paths are simple chains.
-    pred: List[int] = [-1 for _ in range(n)]
-    child: List[int] = [-1 for _ in range(n)]
+    # Each non-MFMA module has at most one predecessor (its `before` link), but a
+    # predecessor may be referenced by more than one child (e.g. single-partition
+    # PGR2+PLR0, where the MFMA's wait_lr and the GR-prefetch LDS-swap chain both
+    # depend on the same local read). The downstream slot placer requires simple
+    # linear chains, so at a branch point only ONE child may continue the chain;
+    # the others must start their own paths.
+    #
+    # Crucially, keep the branch that leads to the MFMA's dependency
+    # (preMfmaTarget) attached, so that branch — and only that branch — is
+    # classified pre-MFMA. The other branches (notably the GR-prefetch
+    # buffer_loads, which the MFMA does NOT depend on) are detached into their own
+    # regular paths so `spreadBufferLoads` can interleave them across the MFMA
+    # stream. The real wait/barrier instructions inside each branch still enforce
+    # the LDS read-before-write ordering at runtime, so detaching only drops a
+    # scheduling hint, not a correctness guarantee.
+    raw_pred: List[int] = [-1 for _ in range(n)]
+    children_of: List[List[int]] = [[] for _ in range(n)]
     for i in nonMfmaIds:
-        parent = -1
         b = emittedModules[i].before
         if b is not None:
             bi = idToIdx.get(b)
             if bi is not None and bi != i and bi in nonMfmaSet:
-                parent = bi
-        pred[i] = parent
-        if parent != -1:
-            assert child[parent] == -1, \
-                f"extractPathsFromBeforeDeps expects unique child per predecessor, got {child[parent]} and {i} for {parent}"
-            child[parent] = i
+                raw_pred[i] = bi
+                children_of[bi].append(i)
+
+    # For each node on preMfmaTarget's ancestor chain, record which child
+    # continues toward the target so we keep that branch attached.
+    preferredChild = {}
+    if preMfmaTarget is not None:
+        c = preMfmaTarget
+        guard = 0
+        while raw_pred[c] != -1 and guard < n:
+            preferredChild[raw_pred[c]] = c
+            c = raw_pred[c]
+            guard += 1
+
+    pred: List[int] = [-1 for _ in range(n)]
+    child: List[int] = [-1 for _ in range(n)]
+    for p in nonMfmaIds:
+        kids = children_of[p]
+        if not kids:
+            continue
+        primary = preferredChild.get(p, kids[0])
+        if primary not in kids:
+            primary = kids[0]
+        # Only the primary child continues p's chain; others become path heads
+        # (their pred stays -1), detaching those subtrees into separate paths.
+        child[p] = primary
+        pred[primary] = p
 
     def _findHead(mid: int) -> int:
         cur = mid

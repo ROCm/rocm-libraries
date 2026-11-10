@@ -10,6 +10,7 @@
 # with the C emitter conv_implicit_gemm_emit.c.
 from kernels.common.conv_implicit_gemm import (
     ConvAccumulatorEpilogue,
+    ConvDataSpec,
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
@@ -601,6 +602,8 @@ def _spec_raw(idx: int):
         )
     if 40 <= idx <= 53:
         return _split_k_spec(idx)
+    if 54 <= idx <= 65:
+        return _tf32_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -703,6 +706,66 @@ def _split_k_spec(idx: int):
     return (
         ImplicitGemmConvSpec(problem=_cp(**prob), **cfg),
         {49: "gfx950", 53: "gfx1201"}.get(idx, "gfx1250"),
+    )
+
+
+# TF32 compute (ConvDataSpec(mma_dtype="tf32")): fp32 storage, each LDS
+# fragment bitcast to vec<tf32xN> for the arch's TF32 atom -- native XF32 on
+# gfx942 (16x16x8, 32x32x4), BF16x3 emulation on gfx950 (16x16x32, 32x32x16).
+# 64x64x32 tile, 2x2 warps. Keep in lockstep with make_cfg_tf32() in
+# conv_implicit_gemm_emit.c.
+#   54: gfx950 16x16x32, 2-D, mem/cshuffle
+#   55: gfx950 32x32x16, 2-D, compv4/default (the scheduling-hint counts)
+#   56: gfx942 16x16x8, 2-D, compv3/cshuffle
+#   57: gfx942 32x32x4, 2-D, compv4/default
+#   58: gfx950 16x16x32, 3-D, compv3/cshuffle
+#   59: gfx942 16x16x8, 3-D, mem/default
+#   60: gfx950 32x32x16, 2-D, async_dma mem/cshuffle
+#   61: gfx942 32x32x4, 2-D, unroll_k compv4/cshuffle
+#   62: gfx950 16x16x32, 2-D, basic/default
+#   63: gfx942 16x16x8, depthwise group_merge=4, mem/cshuffle
+#   64: gfx942 16x16x32 (gfx950's atom): rejected by both engines
+#   65: gfx950 16x16x32 with lds_k_pad=2 (misaligned row stride): rejected
+_TF32 = ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
+_TF32_2D = dict(N=2, Hi=14, Wi=14, C=32, K=64, fy=3, fx=3, pH=1, pW=1)
+_TF32_3D = dict(
+    N=1, Hi=6, Wi=6, C=32, K=32, fy=3, fx=3, pH=1, pW=1, Di=4, Z=3, sD=1, pD=1, dD=1
+)
+_TF32_DW = dict(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)
+
+
+def _tf32_spec(idx: int):
+    prob, arch, m, k, pipeline, epilogue, kw = {
+        54: (_TF32_2D, "gfx950", 16, 32, "mem", "cshuffle", {}),
+        55: (_TF32_2D, "gfx950", 32, 16, "compv4", "default", {}),
+        56: (_TF32_2D, "gfx942", 16, 8, "compv3", "cshuffle", {}),
+        57: (_TF32_2D, "gfx942", 32, 4, "compv4", "default", {}),
+        58: (_TF32_3D, "gfx950", 16, 32, "compv3", "cshuffle", {}),
+        59: (_TF32_3D, "gfx942", 16, 8, "mem", "default", {}),
+        60: (_TF32_2D, "gfx950", 32, 16, "mem", "cshuffle", dict(async_dma=True)),
+        61: (_TF32_2D, "gfx942", 32, 4, "compv4", "cshuffle", dict(unroll_k=True)),
+        62: (_TF32_2D, "gfx950", 16, 32, "basic", "default", {}),
+        63: (_TF32_DW, "gfx942", 16, 8, "mem", "cshuffle", dict(group_merge=4)),
+        64: (_TF32_2D, "gfx942", 16, 32, "mem", "cshuffle", {}),
+        65: (_TF32_2D, "gfx950", 16, 32, "mem", "cshuffle", dict(lds_k_pad=2)),
+    }[idx]
+    return (
+        ImplicitGemmConvSpec(
+            problem=_cp(**prob),
+            data=_TF32,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=m,
+            warp_tile_n=m,
+            warp_tile_k=k,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            **kw,
+        ),
+        arch,
     )
 
 
