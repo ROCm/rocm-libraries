@@ -488,8 +488,8 @@ about which compiler built it.
 
 ## 5. Checking the vendored sources against upstream
 
-`kernels_src/` is a vendored copy of 23 kernel modules from three upstreams.
-Fourteen come from FlyDSL; the RDNA attention kernel comes from AITER, which carries
+`kernels_src/` is a vendored copy of 27 kernel modules from three upstreams.
+Eighteen come from FlyDSL; the RDNA attention kernel comes from AITER, which carries
 FlyDSL kernels upstream FlyDSL does not; and eight come from AOTriton: the RDNA4 attention package
 (`attention_rdna4/`, six modules) and two SDPA backward modules
 (`attention_bwd_cdna/fmha_{common,abi}_gfx1201.py`; the gfx11 kernels import the first). The other files of
@@ -551,7 +551,7 @@ AOTriton at the pinned commit b5e8cfb909e5
   …
 === kernels/norm/rmsnorm_kernel.py
   …
-8/23 vendored files identical to upstream after normalization; 15 differ, 0 absent upstream, 0 not compared
+12/27 vendored files identical to upstream after normalization; 15 differ, 0 absent upstream, 0 not compared
 ```
 
 Without `--aiter` or `--aotriton`, that upstream's files are reported as not compared
