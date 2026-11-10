@@ -231,8 +231,8 @@ TEST_F(CDNA5ReadyQueueTest, QueueFillConsumerSlackUsesResolvedWmmaLatencies) {
         queueFillConsumerSlackAllows(wmmaWindowStartCycle(f4, 22), kDsReadyCycle, kSafetyMargin));
 }
 
-TEST_F(CDNA5ReadyQueueTest, ExperimentalQueueFillTailSizeKeepsDsFreeRegionEnabled) {
-    EXPECT_TRUE(experimentalQueueFillTailSizeAllows(
+TEST_F(CDNA5ReadyQueueTest, ExperimentalQueueFillTailSizeRejectsDsFreeRegion) {
+    EXPECT_FALSE(experimentalQueueFillTailSizeAllows(
         /*remainingWmmas=*/5, /*burstWmmas=*/5, /*remainingDsLoads=*/0,
         /*hardwareQueueDepth=*/5));
 }
