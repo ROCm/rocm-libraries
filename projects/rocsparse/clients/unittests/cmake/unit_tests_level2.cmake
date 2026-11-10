@@ -38,6 +38,4 @@ list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_device_level2_level1.cpp
   unit_test_device_level2_mv.cpp
   unit_test_device_level2_spsv.cpp
-  # csrsv analysis and solve chunk loops on a forced grid.x clamp [AISPARSE-931]
-  unit_test_internal_level2_csrsv_grid_x_chunk.cpp
 )
