@@ -403,15 +403,33 @@ public:
         std::string s;
 
         s += fmt::format("Num Sizes: {}\n", sizes.size());
+
         for(size_t i = 0; i < sizes.size(); i++)
         {
-            s += fmt::format("  {} bytes", sizes[i]);
+            // find the array name
+            std::string name;
+            for(auto it : indices)
+            {
+                if(it.second == i)
+                {
+                    name = it.first;
+                    break;
+                }
+            }
+
+            if(name.length() > 0)
+                s += fmt::format("  {}: {} bytes", name, sizes[i]);
+            else
+                s += fmt::format("  {} bytes", sizes[i]);
+
             if(i < pointers.size())
                 s += fmt::format(" ({})", (void*)pointers[i + has_scalars_r + has_scalars_c]);
             if(i >= num_excl)
                 s += " shared";
+
             s += "\n";
         }
+
         s += fmt::format("Total Size (Self): {}\n", size_excl + size_shared);
         if(nested.size() > 0)
         {
@@ -419,9 +437,19 @@ public:
             s += fmt::format("Total Size (Self+Nested): {}\n", get_internal_size(&unused, &unused));
         }
         if(has_scalars_r)
-            s += "Scalar array requested\n";
+        {
+            s += "Scalar array requested";
+            if(pointers.size() > 0)
+                s += fmt::format(" ({})", (void*)pointers[0]);
+            s += "\n";
+        }
         if(has_scalars_c)
-            s += "Complex scalar array requested\n";
+        {
+            s += "Complex scalar array requested";
+            if(pointers.size() > has_scalars_r)
+                s += fmt::format(" ({})", (void*)pointers[has_scalars_r]);
+            s += "\n";
+        }
 
         fmt::print(std::cerr, s);
     }
