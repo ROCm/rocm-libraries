@@ -144,6 +144,12 @@ std::vector<AcceptCase> acceptCases()
     heightOnly.input = {4, 37};
     heightOnly.stride = {2, 4};
     cases.push_back({"StrideOnHeightOnly", heightOnly});
+    auto dilated = baseShape();
+    dilated.filter = {1, 7};
+    dilated.stride = {1, 1};
+    dilated.dilation = {1, 5};
+    dilated.prePadding = dilated.postPadding = {0, 15};
+    cases.push_back({"WidthDilatedAtStride1", dilated});
     auto heightPadOnly = baseShape();
     heightPadOnly.prePadding = {1, 2};
     heightPadOnly.postPadding = {1, 2};
@@ -415,7 +421,7 @@ struct ConfigFields
     std::string atom = "wmma11_f16";
     int64_t atomId = 7;
     int64_t bmq = 64, bn = 32, bk = 32, wm = 2, wn = 1, wp = 4;
-    int64_t tq = 0, tc = 0, vec = 8, stride = 4, taps = 2, stages = 1, flat = 0;
+    int64_t tq = 0, tc = 0, vec = 8, stride = 4, taps = 2, stages = 1, flat = 0, halo = 8;
 };
 
 ConfigFields fmaFields()
@@ -430,6 +436,7 @@ ConfigFields fmaFields()
     f.tq = 8;
     f.tc = 1;
     f.vec = 4;
+    f.halo = 4;
     return f;
 }
 
@@ -453,7 +460,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"stride", f.stride},
                        {"taps", f.taps},
                        {"stages", f.stages},
-                       {"flat", f.flat}};
+                       {"flat", f.flat},
+                       {"halo", f.halo}};
     return kernel;
 }
 
@@ -534,6 +542,9 @@ std::vector<ConfigRefusal> configRefusals()
         {"FmaTcZero", [](ConfigFields& f) { f.tc = 0; }, true},
         {"FmaBkZero", [](ConfigFields& f) { f.bk = 0; }, true},
         {"FlatNegative", [](ConfigFields& f) { f.flat = -1; }},
+        {"HaloNotWholeVectors", [](ConfigFields& f) { f.halo = 12; }},
+        {"HaloBelowTheVector", [](ConfigFields& f) { f.halo = 0; }},
+        {"FmaWideHaloPastStride1", [](ConfigFields& f) { f.halo = 8; }, true},
         {"FmaVecNotDividingBmq",
          [](ConfigFields& f) {
              f.bmq = 66;
@@ -781,6 +792,69 @@ TEST(TestConvIgemmNchwKernelMatch, FlatNeedsAFlatProblem)
     EXPECT_TRUE(admits(rows, "gfx1100", straddle));
 }
 
+/// A 1-D stride-1 convolution with a dilated filter: S 7, dilation 5 (HiFi-GAN), NCHW fp16.
+ConvShape dilatedShape()
+{
+    auto shape = baseShape();
+    shape.input = {1, 300};
+    shape.filter = {1, 7};
+    shape.prePadding = shape.postPadding = {0, 15};
+    shape.stride = {1, 1};
+    shape.dilation = {1, 5};
+    return shape;
+}
+
+ConfigFields stride1Fields()
+{
+    auto f = ConfigFields{};
+    f.bmq = 64;
+    f.bn = 32;
+    f.wm = 2;
+    f.wn = 2;
+    f.wp = 1;
+    f.stride = 1;
+    f.taps = 7;
+    f.halo = 32; // reach (7 - 1) x 5 = 30
+    return f;
+}
+
+TEST(TestConvIgemmNchwKernelMatch, StrideOneTapsShiftByTheDilation)
+{
+    EXPECT_TRUE(admits(stride1Fields(), "gfx1100", dilatedShape()));
+    // The halo must reach the farthest tap: 30 elements back.
+    auto shortHalo = stride1Fields();
+    shortHalo.halo = 24;
+    EXPECT_FALSE(admits(shortHalo, "gfx1100", dilatedShape()));
+    // Unit dilation: the short halo serves.
+    auto unit = dilatedShape();
+    unit.dilation = {1, 1};
+    unit.prePadding = unit.postPadding = {0, 3};
+    EXPECT_TRUE(admits(shortHalo, "gfx1100", unit));
+    // The FMA kernel's one-vector halo is a register window: unit dilation, taps within the
+    // vector. A wider halo serves dilation and long filters at stride 1.
+    auto fma = fmaFields();
+    fma.stride = 1;
+    fma.taps = 3;
+    fma.bmq = 128;
+    auto three = dilatedShape();
+    three.filter = {1, 3};
+    three.prePadding = three.postPadding = {0, 1};
+    three.dilation = {1, 1};
+    EXPECT_TRUE(admits(fma, "gfx1100", three, "FLOAT"));
+    three.dilation = {1, 2};
+    three.prePadding = three.postPadding = {0, 2};
+    EXPECT_FALSE(admits(fma, "gfx1100", three, "FLOAT"));
+    auto wide = fma;
+    wide.halo = 8;
+    EXPECT_TRUE(admits(wide, "gfx1100", three, "FLOAT"));
+    auto seven = fmaFields();
+    seven.stride = 1;
+    seven.taps = 7;
+    seven.bmq = 128;
+    seven.halo = 32;
+    EXPECT_TRUE(admits(seven, "gfx1100", dilatedShape(), "FLOAT"));
+}
+
 TEST(TestConvIgemmNchwLds, MirrorsTheKernelsArithmetic)
 {
     NchwConfig mma;
@@ -792,6 +866,7 @@ TEST(TestConvIgemmNchwLds, MirrorsTheKernelsArithmetic)
     mma.stride = 4;
     mma.taps = 2;
     mma.stages = 1;
+    mma.halo = 8;
     // A (72 rows of 40, 9 skews of 8) + B (8 taps x 32 channels x 40), or the 32 x 264 epilogue.
     EXPECT_EQ(conv_igemm_nchw::ldsBytesOf(mma, 2), (72 * 40 + 9 * 8 + 8 * 32 * 40) * 2);
     NchwConfig fma = mma;
@@ -800,6 +875,7 @@ TEST(TestConvIgemmNchwLds, MirrorsTheKernelsArithmetic)
     fma.bn = 16;
     fma.bk = 8;
     fma.vec = 4;
+    fma.halo = 4;
     // 8 x ((128 + 4 + 4) + 16 channels x (8 taps + 4) + 4) floats.
     EXPECT_EQ(conv_igemm_nchw::ldsBytesOf(fma, 4), 8 * (136 + 16 * 12 + 4) * 4);
     // Two stages: two such tiles.

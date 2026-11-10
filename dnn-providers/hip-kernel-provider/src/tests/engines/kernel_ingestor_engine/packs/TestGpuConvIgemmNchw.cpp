@@ -261,6 +261,13 @@ ConvShape strideRows(ConvShape shape,
     return shape;
 }
 
+/// @p shape with dilation @p dilation along the width.
+ConvShape dilateWidth(ConvShape shape, int64_t dilation)
+{
+    shape.dilation.back() = dilation;
+    return shape;
+}
+
 // Channel counts are not multiples of the channel tiles; widths are not multiples of the dx
 // tiles, and the 600-wide case spans several of them.
 std::vector<DeviceCase> deviceCases()
@@ -301,6 +308,14 @@ std::vector<DeviceCase> deviceCases()
         {"Rows3S1K4S2", strideRows(upsample(16, 24, {7}, 26, 4, 2, 1, 1), {3}, {1}, {1})},
         {"ThreeD3x3x3S2",
          strideRows(upsample(16, 20, {7, 9}, 18, 3, 2, 1, 1), {3, 3}, {2, 2}, {1, 1})},
+        // Stride 1 along the width, dilated (HiFi-GAN residual blocks): every tap shifts by the
+        // dilation.
+        {"S1K3", upsample(24, 40, {}, 77, 3, 1, 1, 1)},
+        {"S1K3D5", dilateWidth(upsample(24, 40, {2}, 77, 3, 1, 5, 5), 5)},
+        {"S1K7D5", dilateWidth(upsample(17, 33, {}, 90, 7, 1, 15, 15), 5)},
+        {"S1K11D5", dilateWidth(upsample(16, 24, {2}, 130, 11, 1, 25, 25), 5)},
+        {"S1K11", upsample(40, 16, {}, 61, 11, 1, 3, 7)},
+        {"S1K7D3Unpadded", dilateWidth(upsample(16, 16, {}, 45, 7, 1, 0, 0), 3)},
         {"ThreeD3x3x3S2Unpadded",
          strideRows(upsample(8, 12, {9, 8}, 21, 3, 2, 0, 0), {3, 3}, {2, 2}, {0, 0})},
     };
@@ -446,7 +461,7 @@ TEST(TestConvIgemmNchwCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 14> KNOBS{"atom_id",
+    static constexpr std::array<const char*, 15> KNOBS{"atom_id",
                                                        "bmq",
                                                        "bn",
                                                        "bk",
@@ -459,7 +474,8 @@ TEST(TestConvIgemmNchwCatalog, KnobsTellApartEveryConfigOfAGraph)
                                                        "stride",
                                                        "taps",
                                                        "stages",
-                                                       "flat"};
+                                                       "flat",
+                                                       "halo"};
     std::set<std::vector<int64_t>> seen[3];
     for(const auto& kernel : catalog())
     {
@@ -491,14 +507,15 @@ TEST(TestConvIgemmNchwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsLds)
         config.stride = kernel.getIntMetadata("stride");
         config.taps = kernel.getIntMetadata("taps");
         config.stages = kernel.getIntMetadata("stages");
+        config.halo = kernel.getIntMetadata("halo");
         EXPECT_EQ(conv_igemm_nchw::atomIdOf(config.atom), config.atomId);
         EXPECT_EQ(stringOf(kernel, "direction"), "BWD");
         const int elementBytes = stringOf(kernel, "dtype") == "FLOAT" ? 4 : 2;
         EXPECT_LE(conv_igemm_nchw::ldsBytesOf(config, elementBytes), 65536);
         strides.insert(config.stride);
     }
-    // Every stride of the vocoder ConvTranspose1d family ships.
-    EXPECT_EQ(strides, (std::set<int64_t>{2, 3, 4, 5, 6, 8}));
+    // Every stride of the vocoder ConvTranspose1d family ships, and stride 1 (1-D, dilated).
+    EXPECT_EQ(strides, (std::set<int64_t>{1, 2, 3, 4, 5, 6, 8}));
 }
 
 } // namespace

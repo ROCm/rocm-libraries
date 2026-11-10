@@ -592,7 +592,8 @@ template <class T,
           int VEC,
           int ST,
           int TAPS,
-          int FLAT = 0>
+          int FLAT = 0,
+          int HALOK = VEC>
 __device__ void k7DgradMma(const K7Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -607,9 +608,10 @@ __device__ void k7DgradMma(const K7Args& a)
     static_assert(FLAT > 0 || ST % WP == 0, "K7 phase groups");
     constexpr int KV = sizeof(T) == 2 ? 2 : 1;
     constexpr int LDK = BK + 16 / static_cast<int>(sizeof(T));
-    constexpr int HALO = TAPS - 1;
-    // The window: q0 - HALO .. q0 + BMQ (the phases below r reach one further), whole vectors.
-    constexpr int WQ = BMQ + VEC;
+    // The window: q0 - halo .. q0 + BMQ (the phases below r reach one further), whole vectors,
+    // halo = (TAPS - 1) dil: HALOK past the tile (the launcher checks it covers the reach).
+    constexpr int WQ = BMQ + HALOK;
+    static_assert(HALOK % VEC == 0, "K7 window in whole vectors");
     constexpr int SMAX = ST * TAPS;
     typedef K7Tiles<T, VEC, KV, BK, WQ, BN, SMAX, THREADS, (FLAT > 0)> Tiles;
     constexpr int A_LDS = Tiles::template aRow<LDK>(WQ);
@@ -618,7 +620,7 @@ __device__ void k7DgradMma(const K7Args& a)
     constexpr int OUT_LDS = BN * OLD;
     constexpr int LDS = A_LDS + B_LDS > OUT_LDS ? A_LDS + B_LDS : OUT_LDS;
     static_assert(WTQ % DIM == 0 && WTN % DIM == 0 && BK % Atom::KA == 0, "K7 wave tile");
-    static_assert(TAPS <= VEC && (BMQ * ST) % VEC == 0, "K7 window and epilogue");
+    static_assert((BMQ * ST) % VEC == 0, "K7 epilogue");
 
     __shared__ __attribute__((aligned(16))) T lds[LDS];
     T* As = lds;
@@ -639,8 +641,11 @@ __device__ void k7DgradMma(const K7Args& a)
     // The wave's phases are p0 .. p0 + PW - 1.
     const int p0 = wp * PW;
 
+    // Tap shifts: the dilation at stride 1, unit otherwise.
+    const int dil = ST == 1 ? a.dil : 1;
+    const int halo = (TAPS - 1) * dil;
     Tiles tiles;
-    tiles.init(a, b, tid, HALO);
+    tiles.init(a, b, tid, halo);
     if constexpr(FLAT > 0)
         tiles.flatten(a);
 
@@ -655,8 +660,8 @@ __device__ void k7DgradMma(const K7Args& a)
 
     const int fragRow = lane % DIM;
     const int kb = Atom::template kBase<Atom::KPL>(lane);
-    // The lane's A row at tile index i, shift d: aRow0 + i DIM + d.
-    const int aRow0 = wq * WTQ + fragRow + HALO;
+    // The lane's A row at tile index i, shift d: aRow0 + i DIM + d dil.
+    const int aRow0 = wq * WTQ + fragRow + halo;
     const T* bBase = Bs + (wn * WTN + fragRow) * LDK + kb;
 
     const int iters = tiles.start(a) * b.nD * b.nH;
@@ -692,8 +697,8 @@ __device__ void k7DgradMma(const K7Args& a)
                 typename Atom::frag af[FQ];
 #pragma unroll
                 for(int i = 0; i < FQ; ++i)
-                    af[i] = k1Frag<Atom>(As + Tiles::template aRow<LDK>(aRow0 + i * DIM + d) + kk
-                                         + kb);
+                    af[i] = k1Frag<Atom>(As + Tiles::template aRow<LDK>(aRow0 + i * DIM + d * dil)
+                                         + kk + kb);
 #pragma unroll
                 for(int p = 0; p < PW; ++p)
                 {
@@ -794,6 +799,7 @@ template <class T,
           int R,
           bool FULL,
           int NP,
+          int HALOK,
           class Tiles>
 // Inlined at all 2 ST call sites: out of line, acc (passed by reference) would live in scratch.
 __device__ __attribute__((always_inline)) inline void
@@ -801,7 +807,7 @@ __device__ __attribute__((always_inline)) inline void
 {
     constexpr int TX = BN / TC;
     constexpr int HALO = TAPS - 1;
-    constexpr int WQ = BMQ + VEC;
+    constexpr int WQ = BMQ + HALOK;
     constexpr int SMAX = ST * TAPS;
     constexpr int PADE = 16 / static_cast<int>(sizeof(T));
     constexpr int LDA = WQ + PADE;
@@ -811,9 +817,38 @@ __device__ __attribute__((always_inline)) inline void
     const int tx = static_cast<int>(threadIdx.x) % TX, ty = static_cast<int>(threadIdx.x) / TX;
     // Phases whose last tap is inside the filter: p + ST (TAPS - 1) < S.
     const int lastPhases = a.fs - ST * HALO;
+    // HALOK past the vector (stride 1): each tap reads its own shifted window values, (TAPS - 1 -
+    // j) dil into the window, so any filter width and dilation fit.
+    const int dil = a.dil;
 
     // The FMAs of one k-step on the tiles at As (BK x LDA) and Bs (BK x LDB).
     auto multiply = [&](const T* As, const T* Bs) {
+        if constexpr(HALOK > VEC)
+        {
+            static_assert(ST == 1 && NP == 1, "K7 FMA wide halo: stride 1");
+#pragma unroll 2
+            for(int kk = 0; kk < BK; ++kk)
+            {
+#pragma unroll
+                for(int j = 0; j < TAPS; ++j)
+                {
+                    const T* row = As + kk * LDA + ty * TQ + (TAPS - 1 - j) * dil;
+                    float av[TQ];
+#pragma unroll
+                    for(int i = 0; i < TQ; ++i)
+                        av[i] = K1Elem<T>::load(row[i]);
+#pragma unroll
+                    for(int c = 0; c < TC; ++c)
+                    {
+                        const float bv = K1Elem<T>::load(Bs[kk * LDB + (tx + c * TX) * CP + j]);
+#pragma unroll
+                        for(int i = 0; i < TQ; ++i)
+                            acc[c][i][0] = __builtin_fmaf(av[i], bv, acc[c][i][0]);
+                    }
+                }
+            }
+            return;
+        }
 #pragma unroll 2
         for(int kk = 0; kk < BK; ++kk)
         {
@@ -899,19 +934,21 @@ template <class T,
           int ST,
           int TAPS,
           int STAGES,
-          int FLAT = 0>
+          int FLAT = 0,
+          int HALOK = VEC>
 __device__ void k7DgradFma(const K7Args& a)
 {
     constexpr int TX = BN / TC, TY = BMQ / TQ;
     constexpr int THREADS = TX * TY;
-    constexpr int HALO = TAPS - 1;
-    constexpr int WQ = BMQ + VEC;
+    // The window: one vector past the tile (taps within the vector, unit dilation), or HALOK.
+    constexpr int WQ = BMQ + HALOK;
     constexpr int SMAX = ST * TAPS;
     constexpr int PADE = 16 / static_cast<int>(sizeof(T));
     constexpr int LDA = WQ + PADE;
     constexpr int CP = k7FmaPitch(SMAX, PADE);
     constexpr int LDB = BN * CP + PADE;
-    static_assert(BN % TC == 0 && BMQ % TQ == 0 && TAPS <= VEC, "K7 FMA tile");
+    static_assert(BN % TC == 0 && BMQ % TQ == 0 && HALOK % VEC == 0, "K7 FMA tile");
+    static_assert(HALOK > VEC || TAPS <= VEC, "K7 FMA: a register window within the vector");
     static_assert(STAGES == 1 || STAGES == 2, "K7 FMA stages");
 
     __shared__ __attribute__((aligned(16))) T lds[STAGES * BK * (LDA + LDB)];
@@ -927,7 +964,7 @@ __device__ void k7DgradFma(const K7Args& a)
     const int tx = tid % TX, ty = tid / TX;
 
     K7Tiles<T, VEC, 1, BK, WQ, BN, SMAX, THREADS, (FLAT > 0)> tiles;
-    tiles.init(a, b, tid, HALO);
+    tiles.init(a, b, tid, (TAPS - 1) * (ST == 1 ? a.dil : 1));
     if constexpr(FLAT > 0)
         tiles.flatten(a);
 
@@ -948,17 +985,17 @@ __device__ void k7DgradFma(const K7Args& a)
     const bool full = a.fs == ST * TAPS;
     switch(b.r)
     {
-#define K7_FMA_R(R)                                                                      \
-    case R:                                                                              \
-        if constexpr(R < ST)                                                             \
-        {                                                                                \
-            if(full)                                                                     \
-                k7FmaSteps<T, BMQ, BN, BK, TQ, TC, VEC, ST, TAPS, STAGES, R, true, NP>(  \
-                    a, b, tiles, lds, acc);                                              \
-            else                                                                         \
-                k7FmaSteps<T, BMQ, BN, BK, TQ, TC, VEC, ST, TAPS, STAGES, R, false, NP>( \
-                    a, b, tiles, lds, acc);                                              \
-        }                                                                                \
+#define K7_FMA_R(R)                                                                             \
+    case R:                                                                                     \
+        if constexpr(R < ST)                                                                    \
+        {                                                                                       \
+            if(full)                                                                            \
+                k7FmaSteps<T, BMQ, BN, BK, TQ, TC, VEC, ST, TAPS, STAGES, R, true, NP, HALOK>(  \
+                    a, b, tiles, lds, acc);                                                     \
+            else                                                                                \
+                k7FmaSteps<T, BMQ, BN, BK, TQ, TC, VEC, ST, TAPS, STAGES, R, false, NP, HALOK>( \
+                    a, b, tiles, lds, acc);                                                     \
+        }                                                                                       \
         break;
         K7_FMA_R(0)
         K7_FMA_R(1)

@@ -118,8 +118,9 @@ std::optional<NchwProblem>
             return std::nullopt;
         }
     }
-    // Width: the convolution.
-    if(a.dilation[2] != 1 || a.stride[2] < 1 || a.prePadding[2] < 0 || a.filter[2] < 1)
+    // Width: the convolution; dilation only at stride 1 (the taps then shift by the dilation).
+    if(a.dilation[2] < 1 || (a.dilation[2] != 1 && a.stride[2] != 1) || a.stride[2] < 1
+       || a.prePadding[2] < 0 || a.filter[2] < 1)
     {
         return std::nullopt;
     }
@@ -144,6 +145,7 @@ std::optional<NchwProblem>
                                  a.filter[2],
                                  a.prePadding[2],
                                  a.stride[2],
+                                 a.dilation[2],
                                  a.prePadding[0],
                                  a.prePadding[1],
                                  a.stride[0],
@@ -171,7 +173,8 @@ std::optional<NchwProblem>
     problem.stride = a.stride[2];
     // Flat also reads dy as one buffer (32-bit byte offsets) and numbers the outputs of every
     // image's channel plane (n rows Wx) in 32 bits.
-    problem.flat = a.filter[2] <= a.stride[2] && a.n * *dyImage <= INT_LIMIT / elementBytes
+    problem.flat = a.filter[2] <= a.stride[2] && a.dilation[2] == 1
+                   && a.n * *dyImage <= INT_LIMIT / elementBytes
                    && a.n * rows * a.inSpatial[2] <= INT_LIMIT;
     for(int axis = 0; axis < 3; ++axis)
     {
@@ -202,6 +205,7 @@ std::optional<NchwProblem>
     k7.ph = static_cast<int>(a.prePadding[1]);
     k7.fh = static_cast<int>(a.filter[1]);
     k7.fStride = static_cast<int>(filterRun);
+    k7.dil = static_cast<int>(a.dilation[2]);
     k7.dyImage = *dyImage;
     k7.dxImage = *dxImage;
     problem.base = std::move(*base);
@@ -217,10 +221,10 @@ int64_t atomIdOf(std::string_view atom)
 int64_t ldsBytesOf(const NchwConfig& config, int elementBytes)
 {
     const int64_t pad = 16 / elementBytes;
-    const int64_t wq = config.bmq + config.vec;
     const int64_t smax = config.stride * config.taps;
     if(config.atom == "fma")
     {
+        const int64_t wq = config.bmq + config.halo;
         const int64_t lda = wq + pad;
         // k7FmaPitch: an odd number of 16-byte chunks.
         const int64_t chunks = divUp(smax, pad);
@@ -228,6 +232,7 @@ int64_t ldsBytesOf(const NchwConfig& config, int elementBytes)
         const int64_t ldb = config.bn * cp + pad;
         return config.stages * config.bk * (lda + ldb) * elementBytes;
     }
+    const int64_t wq = config.bmq + config.halo;
     const int64_t ldk = config.bk + pad;
     const int64_t aTile = wq * ldk + (config.vec > 0 ? wq / config.vec : 0) * pad;
     const int64_t bTile = smax * config.bn * ldk;
@@ -259,9 +264,20 @@ std::optional<NchwLaunch> nchwLaunchFor(const NchwProblem& problem, const NchwCo
         return std::nullopt;
     }
     // Stride and taps: the problem's stride (the kernels unroll at most MAX_STRIDE phases), and
-    // exactly the taps of the fullest phase, within the window's reach.
+    // exactly the taps of the fullest phase.
     if(config.stride != problem.stride || config.stride > MAX_STRIDE || config.taps < 1
-       || config.taps > config.vec || divUp(a.fs, config.stride) != config.taps)
+       || divUp(a.fs, config.stride) != config.taps)
+    {
+        return std::nullopt;
+    }
+    // The window's halo: whole vectors past the tile that reach the farthest tap, (taps - 1)
+    // dilation back, and one further for the phases below pad mod stride. The FMA kernel with a
+    // one-vector halo unrolls its taps over a register window (unit dilation); a wider halo reads
+    // each tap's window from LDS (stride 1).
+    const int64_t reach = (config.taps - 1) * a.dil + (config.stride > 1 ? 1 : 0);
+    if(config.halo < config.vec || config.halo % config.vec != 0 || reach > config.halo
+       || (fma && config.halo == config.vec && (config.taps > config.vec || a.dil != 1))
+       || (fma && config.halo > config.vec && config.stride != 1))
     {
         return std::nullopt;
     }
