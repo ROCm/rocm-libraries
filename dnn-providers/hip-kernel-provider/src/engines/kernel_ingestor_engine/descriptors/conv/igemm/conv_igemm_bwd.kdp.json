@@ -36,7 +36,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 1000
     },
@@ -67,7 +68,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 999
     },
@@ -98,7 +100,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 998
     },
@@ -129,7 +132,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 997
     },
@@ -160,7 +164,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 996
     },
@@ -191,7 +196,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 995
     },
@@ -222,7 +228,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 994
     },
@@ -253,7 +260,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 993
     },
@@ -284,7 +292,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 992
     },
@@ -315,7 +324,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 991
     },
@@ -346,7 +356,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 990
     },
@@ -377,7 +388,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 989
     },
@@ -408,7 +420,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 988
     },
@@ -439,7 +452,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 987
     },
@@ -470,7 +484,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 986
     },
@@ -501,7 +516,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 985
     },
@@ -532,7 +548,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 984
     },
@@ -563,7 +580,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 983
     },
@@ -594,7 +612,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 982
     },
@@ -625,7 +644,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 981
     },
@@ -656,7 +676,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 980
     },
@@ -687,9 +708,266 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 979
+    },
+    {
+      "version": "1.0",
+      "id": "ea878a27-9f58-5ec6-ad60-40f9f0205e72",
+      "name": "conv_igemm.bwd.f16.mfma32x16_f16.native.256x256x32.w2x4.t0.v8.s1.xcd.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32x16_f16",
+        "math": "native",
+        "bm": 256,
+        "bn": 256,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 978
+    },
+    {
+      "version": "1.0",
+      "id": "c1580405-4a00-54ad-9c07-a2fb0825633b",
+      "name": "conv_igemm.bwd.f16.mfma32x16_f16.native.256x256x32.w2x4.t0.v8.s1.xcd.swz.dma3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32x16_f16",
+        "math": "native",
+        "bm": 256,
+        "bn": 256,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 3
+      },
+      "priority": 977
+    },
+    {
+      "version": "1.0",
+      "id": "b6de45ed-2edf-56f3-95fd-c25b34cc4500",
+      "name": "conv_igemm.bwd.f16.mfma32x16_f16.native.256x128x64.w4x2.t0.v8.s1.xcd.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32x16_f16",
+        "math": "native",
+        "bm": 256,
+        "bn": 128,
+        "bk": 64,
+        "wm": 4,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 976
+    },
+    {
+      "version": "1.0",
+      "id": "7f72ec3f-3842-5661-b93a-c044151b4694",
+      "name": "conv_igemm.bwd.f16.mfma32x16_f16.native.256x256x64.w4x2.t0.v8.s1.xcd.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32x16_f16",
+        "math": "native",
+        "bm": 256,
+        "bn": 256,
+        "bk": 64,
+        "wm": 4,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 975
+    },
+    {
+      "version": "1.0",
+      "id": "7fbe5af2-3d12-525d-a2a6-38ff6bf538bb",
+      "name": "conv_igemm.bwd.f16.mfma32x16_f16.native.128x128x64.w2x2.t0.v8.s1.xcd.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32x16_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 64,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 974
+    },
+    {
+      "version": "1.0",
+      "id": "fed76a93-9d68-5888-a13d-f027c211def9",
+      "name": "conv_igemm.bwd.f16.mfma32x16_f16.native.128x128x32.w2x2.t0.v8.s1.xcd.swz.dma3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32x16_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 3
+      },
+      "priority": 973
+    },
+    {
+      "version": "1.0",
+      "id": "57bebd78-5d8f-5b78-9f44-4e9a58ead918",
+      "name": "conv_igemm.bwd.f16.mfma16x32_f16.native.128x128x64.w2x2.t0.v8.s1.xcd.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16x32_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 64,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 972
+    },
+    {
+      "version": "1.0",
+      "id": "9316543a-5e13-568d-9a70-4367574a2635",
+      "name": "conv_igemm.bwd.f16.mfma32_f16.native.128x128x32.w2x2.t0.v8.s1.xcd.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 971
     },
     {
       "version": "1.0",
@@ -718,9 +996,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 978
+      "priority": 970
     },
     {
       "version": "1.0",
@@ -749,9 +1028,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 977
+      "priority": 969
     },
     {
       "version": "1.0",
@@ -780,9 +1060,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 976
+      "priority": 968
     },
     {
       "version": "1.0",
@@ -811,9 +1092,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 975
+      "priority": 967
     },
     {
       "version": "1.0",
@@ -842,9 +1124,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 974
+      "priority": 966
     },
     {
       "version": "1.0",
@@ -873,9 +1156,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 973
+      "priority": 965
     },
     {
       "version": "1.0",
@@ -904,9 +1188,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 972
+      "priority": 964
     },
     {
       "version": "1.0",
@@ -935,9 +1220,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 971
+      "priority": 963
     },
     {
       "version": "1.0",
@@ -966,9 +1252,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 970
+      "priority": 962
     },
     {
       "version": "1.0",
@@ -997,9 +1284,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 969
+      "priority": 961
     },
     {
       "version": "1.0",
@@ -1028,9 +1316,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 968
+      "priority": 960
     },
     {
       "version": "1.0",
@@ -1059,9 +1348,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 967
+      "priority": 959
     },
     {
       "version": "1.0",
@@ -1090,9 +1380,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 966
+      "priority": 958
     },
     {
       "version": "1.0",
@@ -1121,9 +1412,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 965
+      "priority": 957
     },
     {
       "version": "1.0",
@@ -1152,9 +1444,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 964
+      "priority": 956
     },
     {
       "version": "1.0",
@@ -1183,9 +1476,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 963
+      "priority": 955
     },
     {
       "version": "1.0",
@@ -1214,9 +1508,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 962
+      "priority": 954
     },
     {
       "version": "1.0",
@@ -1245,9 +1540,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 961
+      "priority": 953
     },
     {
       "version": "1.0",
@@ -1276,9 +1572,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 960
+      "priority": 952
     },
     {
       "version": "1.0",
@@ -1307,9 +1604,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 959
+      "priority": 951
     },
     {
       "version": "1.0",
@@ -1338,9 +1636,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 958
+      "priority": 950
     },
     {
       "version": "1.0",
@@ -1369,9 +1668,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 957
+      "priority": 949
     },
     {
       "version": "1.0",
@@ -1400,9 +1700,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 956
+      "priority": 948
     },
     {
       "version": "1.0",
@@ -1431,9 +1732,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 955
+      "priority": 947
     },
     {
       "version": "1.0",
@@ -1462,9 +1764,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 954
+      "priority": 946
     },
     {
       "version": "1.0",
@@ -1493,9 +1796,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 953
+      "priority": 945
     },
     {
       "version": "1.0",
@@ -1524,9 +1828,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 952
+      "priority": 944
     },
     {
       "version": "1.0",
@@ -1555,9 +1860,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 951
+      "priority": 943
     },
     {
       "version": "1.0",
@@ -1586,9 +1892,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 950
+      "priority": 942
     },
     {
       "version": "1.0",
@@ -1617,9 +1924,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 949
+      "priority": 941
     },
     {
       "version": "1.0",
@@ -1648,9 +1956,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 948
+      "priority": 940
     },
     {
       "version": "1.0",
@@ -1679,9 +1988,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 947
+      "priority": 939
     },
     {
       "version": "1.0",
@@ -1710,9 +2020,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 946
+      "priority": 938
     },
     {
       "version": "1.0",
@@ -1741,9 +2052,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 945
+      "priority": 937
     },
     {
       "version": "1.0",
@@ -1772,9 +2084,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 944
+      "priority": 936
     },
     {
       "version": "1.0",
@@ -1803,9 +2116,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 943
+      "priority": 935
     },
     {
       "version": "1.0",
@@ -1834,9 +2148,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 942
+      "priority": 934
     },
     {
       "version": "1.0",
@@ -1865,9 +2180,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 941
+      "priority": 933
     },
     {
       "version": "1.0",
@@ -1896,9 +2212,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 940
+      "priority": 932
     },
     {
       "version": "1.0",
@@ -1927,9 +2244,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 939
+      "priority": 931
     },
     {
       "version": "1.0",
@@ -1958,9 +2276,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 938
+      "priority": 930
     },
     {
       "version": "1.0",
@@ -1989,9 +2308,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 937
+      "priority": 929
     },
     {
       "version": "1.0",
@@ -2020,9 +2340,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 936
+      "priority": 928
     },
     {
       "version": "1.0",
@@ -2051,9 +2372,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 935
+      "priority": 927
     },
     {
       "version": "1.0",
@@ -2082,9 +2404,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 934
+      "priority": 926
     },
     {
       "version": "1.0",
@@ -2113,9 +2436,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 933
+      "priority": 925
     },
     {
       "version": "1.0",
@@ -2144,9 +2468,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 932
+      "priority": 924
     },
     {
       "version": "1.0",
@@ -2175,9 +2500,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 931
+      "priority": 923
     },
     {
       "version": "1.0",
@@ -2206,9 +2532,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 930
+      "priority": 922
     },
     {
       "version": "1.0",
@@ -2237,9 +2564,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 929
+      "priority": 921
     },
     {
       "version": "1.0",
@@ -2268,9 +2596,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 928
+      "priority": 920
     },
     {
       "version": "1.0",
@@ -2299,9 +2628,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 927
+      "priority": 919
     },
     {
       "version": "1.0",
@@ -2330,9 +2660,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 926
+      "priority": 918
     },
     {
       "version": "1.0",
@@ -2361,9 +2692,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 925
+      "priority": 917
     },
     {
       "version": "1.0",
@@ -2392,9 +2724,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 924
+      "priority": 916
     },
     {
       "version": "1.0",
@@ -2423,9 +2756,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 923
+      "priority": 915
     },
     {
       "version": "1.0",
@@ -2454,9 +2788,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 922
+      "priority": 914
     },
     {
       "version": "1.0",
@@ -2485,9 +2820,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 921
+      "priority": 913
     },
     {
       "version": "1.0",
@@ -2516,9 +2852,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 920
+      "priority": 912
     },
     {
       "version": "1.0",
@@ -2547,9 +2884,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 919
+      "priority": 911
     },
     {
       "version": "1.0",
@@ -2578,9 +2916,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 918
+      "priority": 910
     },
     {
       "version": "1.0",
@@ -2609,9 +2948,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 917
+      "priority": 909
     },
     {
       "version": "1.0",
@@ -2640,9 +2980,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 916
+      "priority": 908
     },
     {
       "version": "1.0",
@@ -2671,9 +3012,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 915
+      "priority": 907
     },
     {
       "version": "1.0",
@@ -2702,9 +3044,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 914
+      "priority": 906
     },
     {
       "version": "1.0",
@@ -2733,9 +3076,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 913
+      "priority": 905
     },
     {
       "version": "1.0",
@@ -2764,9 +3108,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 912
+      "priority": 904
     },
     {
       "version": "1.0",
@@ -2795,9 +3140,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 911
+      "priority": 903
     },
     {
       "version": "1.0",
@@ -2826,9 +3172,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 910
+      "priority": 902
     },
     {
       "version": "1.0",
@@ -2857,9 +3204,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 909
+      "priority": 901
     },
     {
       "version": "1.0",
@@ -2888,9 +3236,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 908
+      "priority": 900
     },
     {
       "version": "1.0",
@@ -2919,9 +3268,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 907
+      "priority": 899
     },
     {
       "version": "1.0",
@@ -2950,9 +3300,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 906
+      "priority": 898
     },
     {
       "version": "1.0",
@@ -2981,9 +3332,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 905
+      "priority": 897
     },
     {
       "version": "1.0",
@@ -3012,9 +3364,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 904
+      "priority": 896
     },
     {
       "version": "1.0",
@@ -3043,9 +3396,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 903
+      "priority": 895
     },
     {
       "version": "1.0",
@@ -3074,9 +3428,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 902
+      "priority": 894
     },
     {
       "version": "1.0",
@@ -3105,9 +3460,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 901
+      "priority": 893
     },
     {
       "version": "1.0",
@@ -3136,9 +3492,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 900
+      "priority": 892
     },
     {
       "version": "1.0",
@@ -3167,9 +3524,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 899
+      "priority": 891
     },
     {
       "version": "1.0",
@@ -3198,9 +3556,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 898
+      "priority": 890
     },
     {
       "version": "1.0",
@@ -3229,9 +3588,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 897
+      "priority": 889
     },
     {
       "version": "1.0",
@@ -3260,9 +3620,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 896
+      "priority": 888
     },
     {
       "version": "1.0",
@@ -3291,9 +3652,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 895
+      "priority": 887
     },
     {
       "version": "1.0",
@@ -3322,9 +3684,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 894
+      "priority": 886
     },
     {
       "version": "1.0",
@@ -3353,9 +3716,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 893
+      "priority": 885
     },
     {
       "version": "1.0",
@@ -3384,9 +3748,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 892
+      "priority": 884
     },
     {
       "version": "1.0",
@@ -3415,9 +3780,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 891
+      "priority": 883
     },
     {
       "version": "1.0",
@@ -3446,9 +3812,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 890
+      "priority": 882
     },
     {
       "version": "1.0",
@@ -3477,9 +3844,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 889
+      "priority": 881
     },
     {
       "version": "1.0",
@@ -3508,9 +3876,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 888
+      "priority": 880
     },
     {
       "version": "1.0",
@@ -3539,9 +3908,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 887
+      "priority": 879
     },
     {
       "version": "1.0",
@@ -3570,9 +3940,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 886
+      "priority": 878
     },
     {
       "version": "1.0",
@@ -3601,9 +3972,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 885
+      "priority": 877
     },
     {
       "version": "1.0",
@@ -3632,9 +4004,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 884
+      "priority": 876
     },
     {
       "version": "1.0",
@@ -3663,9 +4036,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 883
+      "priority": 875
     },
     {
       "version": "1.0",
@@ -3694,9 +4068,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 882
+      "priority": 874
     },
     {
       "version": "1.0",
@@ -3725,9 +4100,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 881
+      "priority": 873
     },
     {
       "version": "1.0",
@@ -3756,9 +4132,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 880
+      "priority": 872
     },
     {
       "version": "1.0",
@@ -3787,9 +4164,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 879
+      "priority": 871
     },
     {
       "version": "1.0",
@@ -3818,9 +4196,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 878
+      "priority": 870
     },
     {
       "version": "1.0",
@@ -3849,9 +4228,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 877
+      "priority": 869
     },
     {
       "version": "1.0",
@@ -3880,9 +4260,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 876
+      "priority": 868
     },
     {
       "version": "1.0",
@@ -3911,9 +4292,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 875
+      "priority": 867
     },
     {
       "version": "1.0",
@@ -3942,9 +4324,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 874
+      "priority": 866
     },
     {
       "version": "1.0",
@@ -3973,9 +4356,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 873
+      "priority": 865
     },
     {
       "version": "1.0",
@@ -4004,9 +4388,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 872
+      "priority": 864
     },
     {
       "version": "1.0",
@@ -4035,9 +4420,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 871
+      "priority": 863
     },
     {
       "version": "1.0",
@@ -4066,9 +4452,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 870
+      "priority": 862
     },
     {
       "version": "1.0",
@@ -4097,9 +4484,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 869
+      "priority": 861
     },
     {
       "version": "1.0",
@@ -4128,9 +4516,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 868
+      "priority": 860
     },
     {
       "version": "1.0",
@@ -4159,9 +4548,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 867
+      "priority": 859
     },
     {
       "version": "1.0",
@@ -4190,9 +4580,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 866
+      "priority": 858
     },
     {
       "version": "1.0",
@@ -4221,9 +4612,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 865
+      "priority": 857
     },
     {
       "version": "1.0",
@@ -4252,9 +4644,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 864
+      "priority": 856
     },
     {
       "version": "1.0",
@@ -4283,9 +4676,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 863
+      "priority": 855
     },
     {
       "version": "1.0",
@@ -4314,9 +4708,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 862
+      "priority": 854
     },
     {
       "version": "1.0",
@@ -4345,9 +4740,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 861
+      "priority": 853
     },
     {
       "version": "1.0",
@@ -4376,9 +4772,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 860
+      "priority": 852
     },
     {
       "version": "1.0",
@@ -4407,9 +4804,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 859
+      "priority": 851
     },
     {
       "version": "1.0",
@@ -4438,9 +4836,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 858
+      "priority": 850
     },
     {
       "version": "1.0",
@@ -4469,9 +4868,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 857
+      "priority": 849
     },
     {
       "version": "1.0",
@@ -4500,9 +4900,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 856
+      "priority": 848
     },
     {
       "version": "1.0",
@@ -4531,9 +4932,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 855
+      "priority": 847
     },
     {
       "version": "1.0",
@@ -4562,9 +4964,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 854
+      "priority": 846
     },
     {
       "version": "1.0",
@@ -4593,9 +4996,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 853
+      "priority": 845
     },
     {
       "version": "1.0",
@@ -4624,9 +5028,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 852
+      "priority": 844
     },
     {
       "version": "1.0",
@@ -4655,9 +5060,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 851
+      "priority": 843
     },
     {
       "version": "1.0",
@@ -4686,9 +5092,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 850
+      "priority": 842
     },
     {
       "version": "1.0",
@@ -4717,9 +5124,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 849
+      "priority": 841
     },
     {
       "version": "1.0",
@@ -4748,9 +5156,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 848
+      "priority": 840
     },
     {
       "version": "1.0",
@@ -4779,9 +5188,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 847
+      "priority": 839
     },
     {
       "version": "1.0",
@@ -4810,9 +5220,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 846
+      "priority": 838
     },
     {
       "version": "1.0",
@@ -4841,9 +5252,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 845
+      "priority": 837
     },
     {
       "version": "1.0",
@@ -4872,9 +5284,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 844
+      "priority": 836
     },
     {
       "version": "1.0",
@@ -4903,9 +5316,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 843
+      "priority": 835
     },
     {
       "version": "1.0",
@@ -4934,9 +5348,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 842
+      "priority": 834
     },
     {
       "version": "1.0",
@@ -4965,9 +5380,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 841
+      "priority": 833
     },
     {
       "version": "1.0",
@@ -4996,9 +5412,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 840
+      "priority": 832
     },
     {
       "version": "1.0",
@@ -5027,9 +5444,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 839
+      "priority": 831
     },
     {
       "version": "1.0",
@@ -5058,9 +5476,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 838
+      "priority": 830
     },
     {
       "version": "1.0",
@@ -5089,9 +5508,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 837
+      "priority": 829
     },
     {
       "version": "1.0",
@@ -5120,9 +5540,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 836
+      "priority": 828
     },
     {
       "version": "1.0",
@@ -5151,9 +5572,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 835
+      "priority": 827
     },
     {
       "version": "1.0",
@@ -5182,9 +5604,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 834
+      "priority": 826
     },
     {
       "version": "1.0",
@@ -5213,9 +5636,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 833
+      "priority": 825
     },
     {
       "version": "1.0",
@@ -5244,9 +5668,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 832
+      "priority": 824
     },
     {
       "version": "1.0",
@@ -5275,9 +5700,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 831
+      "priority": 823
     },
     {
       "version": "1.0",
@@ -5306,9 +5732,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 830
+      "priority": 822
     },
     {
       "version": "1.0",
@@ -5337,9 +5764,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 829
+      "priority": 821
     },
     {
       "version": "1.0",
@@ -5368,9 +5796,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 828
+      "priority": 820
     },
     {
       "version": "1.0",
@@ -5399,9 +5828,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 827
+      "priority": 819
     },
     {
       "version": "1.0",
@@ -5430,9 +5860,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 826
+      "priority": 818
     },
     {
       "version": "1.0",
@@ -5461,9 +5892,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 825
+      "priority": 817
     },
     {
       "version": "1.0",
@@ -5492,9 +5924,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 824
+      "priority": 816
     },
     {
       "version": "1.0",
@@ -5523,9 +5956,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 823
+      "priority": 815
     },
     {
       "version": "1.0",
@@ -5554,9 +5988,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 822
+      "priority": 814
     },
     {
       "version": "1.0",
@@ -5585,9 +6020,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 821
+      "priority": 813
     },
     {
       "version": "1.0",
@@ -5616,9 +6052,266 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 820
+      "priority": 812
+    },
+    {
+      "version": "1.0",
+      "id": "ca13d09e-1bf8-5a68-abe3-7e03dae4f514",
+      "name": "conv_igemm.bwd.f16.mfma32x16_f16.native.256x256x32.w2x4.t0.v8.s1.xcd.cf.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32x16_f16",
+        "math": "native",
+        "bm": 256,
+        "bn": 256,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 811
+    },
+    {
+      "version": "1.0",
+      "id": "0a0734f4-6e08-50e8-a70b-c2d2d48aa8a2",
+      "name": "conv_igemm.bwd.f16.mfma32x16_f16.native.256x256x32.w2x4.t0.v8.s1.xcd.cf.swz.dma3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32x16_f16",
+        "math": "native",
+        "bm": 256,
+        "bn": 256,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 3
+      },
+      "priority": 810
+    },
+    {
+      "version": "1.0",
+      "id": "75d6a68e-2964-5be0-ad78-d536ad71aa20",
+      "name": "conv_igemm.bwd.f16.mfma32x16_f16.native.256x128x64.w4x2.t0.v8.s1.xcd.cf.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32x16_f16",
+        "math": "native",
+        "bm": 256,
+        "bn": 128,
+        "bk": 64,
+        "wm": 4,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 809
+    },
+    {
+      "version": "1.0",
+      "id": "8c723272-de5d-5029-9b8b-0afa025bdc93",
+      "name": "conv_igemm.bwd.f16.mfma32x16_f16.native.256x256x64.w4x2.t0.v8.s1.xcd.cf.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32x16_f16",
+        "math": "native",
+        "bm": 256,
+        "bn": 256,
+        "bk": 64,
+        "wm": 4,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 808
+    },
+    {
+      "version": "1.0",
+      "id": "dbc2ab8e-d4e4-541d-a83f-c3a58b9129aa",
+      "name": "conv_igemm.bwd.f16.mfma32x16_f16.native.128x128x64.w2x2.t0.v8.s1.xcd.cf.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32x16_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 64,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 807
+    },
+    {
+      "version": "1.0",
+      "id": "acee423a-eb8a-55f3-b2d8-8f11fd491b46",
+      "name": "conv_igemm.bwd.f16.mfma32x16_f16.native.128x128x32.w2x2.t0.v8.s1.xcd.cf.swz.dma3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32x16_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 3
+      },
+      "priority": 806
+    },
+    {
+      "version": "1.0",
+      "id": "dfb7fea5-eaab-5b89-90cc-bbe0cd8bdae4",
+      "name": "conv_igemm.bwd.f16.mfma16x32_f16.native.128x128x64.w2x2.t0.v8.s1.xcd.cf.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16x32_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 64,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 805
+    },
+    {
+      "version": "1.0",
+      "id": "f16f9a87-8292-5efb-8a86-bcdb0501493d",
+      "name": "conv_igemm.bwd.f16.mfma32_f16.native.128x128x32.w2x2.t0.v8.s1.xcd.cf.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma32_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 804
     },
     {
       "version": "1.0",
@@ -5647,9 +6340,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 819
+      "priority": 803
     },
     {
       "version": "1.0",
@@ -5678,9 +6372,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 818
+      "priority": 802
     },
     {
       "version": "1.0",
@@ -5709,9 +6404,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 817
+      "priority": 801
     },
     {
       "version": "1.0",
@@ -5740,9 +6436,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 816
+      "priority": 800
     },
     {
       "version": "1.0",
@@ -5771,9 +6468,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 815
+      "priority": 799
     },
     {
       "version": "1.0",
@@ -5802,9 +6500,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 814
+      "priority": 798
     },
     {
       "version": "1.0",
@@ -5833,9 +6532,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 813
+      "priority": 797
     },
     {
       "version": "1.0",
@@ -5864,9 +6564,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 812
+      "priority": 796
     },
     {
       "version": "1.0",
@@ -5895,9 +6596,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 811
+      "priority": 795
     },
     {
       "version": "1.0",
@@ -5926,9 +6628,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 810
+      "priority": 794
     },
     {
       "version": "1.0",
@@ -5957,9 +6660,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 809
+      "priority": 793
     },
     {
       "version": "1.0",
@@ -5988,9 +6692,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 808
+      "priority": 792
     },
     {
       "version": "1.0",
@@ -6019,9 +6724,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 807
+      "priority": 791
     },
     {
       "version": "1.0",
@@ -6050,9 +6756,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 806
+      "priority": 790
     },
     {
       "version": "1.0",
@@ -6081,9 +6788,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 805
+      "priority": 789
     },
     {
       "version": "1.0",
@@ -6112,9 +6820,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 804
+      "priority": 788
     },
     {
       "version": "1.0",
@@ -6143,9 +6852,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 803
+      "priority": 787
     },
     {
       "version": "1.0",
@@ -6174,9 +6884,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 802
+      "priority": 786
     },
     {
       "version": "1.0",
@@ -6205,9 +6916,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 801
+      "priority": 785
     },
     {
       "version": "1.0",
@@ -6236,9 +6948,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 800
+      "priority": 784
     },
     {
       "version": "1.0",
@@ -6267,9 +6980,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 799
+      "priority": 783
     },
     {
       "version": "1.0",
@@ -6298,9 +7012,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 798
+      "priority": 782
     },
     {
       "version": "1.0",
@@ -6329,9 +7044,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 797
+      "priority": 781
     },
     {
       "version": "1.0",
@@ -6360,9 +7076,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 796
+      "priority": 780
     },
     {
       "version": "1.0",
@@ -6391,9 +7108,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 795
+      "priority": 779
     },
     {
       "version": "1.0",
@@ -6422,9 +7140,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 794
+      "priority": 778
     },
     {
       "version": "1.0",
@@ -6453,9 +7172,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 793
+      "priority": 777
     },
     {
       "version": "1.0",
@@ -6484,9 +7204,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 792
+      "priority": 776
     },
     {
       "version": "1.0",
@@ -6515,9 +7236,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 791
+      "priority": 775
     },
     {
       "version": "1.0",
@@ -6546,9 +7268,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 790
+      "priority": 774
     },
     {
       "version": "1.0",
@@ -6577,9 +7300,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 789
+      "priority": 773
     },
     {
       "version": "1.0",
@@ -6608,9 +7332,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 788
+      "priority": 772
     },
     {
       "version": "1.0",
@@ -6639,9 +7364,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 787
+      "priority": 771
     },
     {
       "version": "1.0",
@@ -6670,9 +7396,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 786
+      "priority": 770
     },
     {
       "version": "1.0",
@@ -6701,9 +7428,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 785
+      "priority": 769
     },
     {
       "version": "1.0",
@@ -6732,9 +7460,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 784
+      "priority": 768
     },
     {
       "version": "1.0",
@@ -6763,9 +7492,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 783
+      "priority": 767
     },
     {
       "version": "1.0",
@@ -6794,9 +7524,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 782
+      "priority": 766
     },
     {
       "version": "1.0",
@@ -6825,9 +7556,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 781
+      "priority": 765
     },
     {
       "version": "1.0",
@@ -6856,9 +7588,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 780
+      "priority": 764
     },
     {
       "version": "1.0",
@@ -6887,9 +7620,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 779
+      "priority": 763
     },
     {
       "version": "1.0",
@@ -6918,9 +7652,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 778
+      "priority": 762
     },
     {
       "version": "1.0",
@@ -6949,9 +7684,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 777
+      "priority": 761
     },
     {
       "version": "1.0",
@@ -6980,9 +7716,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 776
+      "priority": 760
     },
     {
       "version": "1.0",
@@ -7011,9 +7748,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 775
+      "priority": 759
     },
     {
       "version": "1.0",
@@ -7042,9 +7780,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 774
+      "priority": 758
     },
     {
       "version": "1.0",
@@ -7073,9 +7812,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 773
+      "priority": 757
     },
     {
       "version": "1.0",
@@ -7104,9 +7844,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 772
+      "priority": 756
     },
     {
       "version": "1.0",
@@ -7135,9 +7876,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 771
+      "priority": 755
     },
     {
       "version": "1.0",
@@ -7166,9 +7908,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 770
+      "priority": 754
     },
     {
       "version": "1.0",
@@ -7197,9 +7940,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 769
+      "priority": 753
     },
     {
       "version": "1.0",
@@ -7228,9 +7972,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 768
+      "priority": 752
     },
     {
       "version": "1.0",
@@ -7259,9 +8004,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 767
+      "priority": 751
     },
     {
       "version": "1.0",
@@ -7290,9 +8036,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 766
+      "priority": 750
     },
     {
       "version": "1.0",
@@ -7321,9 +8068,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 765
+      "priority": 749
     },
     {
       "version": "1.0",
@@ -7352,9 +8100,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 764
+      "priority": 748
     },
     {
       "version": "1.0",
@@ -7383,9 +8132,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 763
+      "priority": 747
     },
     {
       "version": "1.0",
@@ -7414,9 +8164,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 762
+      "priority": 746
     },
     {
       "version": "1.0",
@@ -7445,9 +8196,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 761
+      "priority": 745
     },
     {
       "version": "1.0",
@@ -7476,9 +8228,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 760
+      "priority": 744
     },
     {
       "version": "1.0",
@@ -7507,9 +8260,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 759
+      "priority": 743
     },
     {
       "version": "1.0",
@@ -7538,9 +8292,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 758
+      "priority": 742
     },
     {
       "version": "1.0",
@@ -7569,9 +8324,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 757
+      "priority": 741
     },
     {
       "version": "1.0",
@@ -7600,9 +8356,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 756
+      "priority": 740
     },
     {
       "version": "1.0",
@@ -7631,9 +8388,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 755
+      "priority": 739
     },
     {
       "version": "1.0",
@@ -7662,9 +8420,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 754
+      "priority": 738
     },
     {
       "version": "1.0",
@@ -7693,9 +8452,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 753
+      "priority": 737
     },
     {
       "version": "1.0",
@@ -7724,9 +8484,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 752
+      "priority": 736
     },
     {
       "version": "1.0",
@@ -7755,9 +8516,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 751
+      "priority": 735
     },
     {
       "version": "1.0",
@@ -7786,9 +8548,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 750
+      "priority": 734
     },
     {
       "version": "1.0",
@@ -7817,9 +8580,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 749
+      "priority": 733
     },
     {
       "version": "1.0",
@@ -7848,9 +8612,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 748
+      "priority": 732
     },
     {
       "version": "1.0",
@@ -7879,9 +8644,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 747
+      "priority": 731
     },
     {
       "version": "1.0",
@@ -7910,9 +8676,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 746
+      "priority": 730
     },
     {
       "version": "1.0",
@@ -7941,7 +8708,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 1000
     },
@@ -7972,7 +8740,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 999
     },
@@ -8003,7 +8772,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 998
     },
@@ -8034,7 +8804,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 997
     },
@@ -8065,7 +8836,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 996
     },
@@ -8096,7 +8868,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 995
     },
@@ -8127,7 +8900,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 994
     },
@@ -8158,7 +8932,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 993
     },
@@ -8189,7 +8964,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 992
     },
@@ -8220,7 +8996,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 991
     },
@@ -8251,7 +9028,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 990
     },
@@ -8282,7 +9060,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 989
     },
@@ -8313,7 +9092,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 988
     },
@@ -8344,7 +9124,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 987
     },
@@ -8375,7 +9156,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 986
     },
@@ -8406,7 +9188,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 985
     },
@@ -8437,7 +9220,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 984
     },
@@ -8468,7 +9252,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 983
     },
@@ -8499,7 +9284,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 982
     },
@@ -8530,7 +9316,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 981
     },
@@ -8561,7 +9348,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 980
     },
@@ -8592,9 +9380,266 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 979
+    },
+    {
+      "version": "1.0",
+      "id": "17014fc8-1b80-5467-b791-7b7fb941ed25",
+      "name": "conv_igemm.bwd.bf16.mfma32x16_bf16.native.256x256x32.w2x4.t0.v8.s1.xcd.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32x16_bf16",
+        "math": "native",
+        "bm": 256,
+        "bn": 256,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 978
+    },
+    {
+      "version": "1.0",
+      "id": "355267b1-1f37-519a-bd66-93704f21c0cf",
+      "name": "conv_igemm.bwd.bf16.mfma32x16_bf16.native.256x256x32.w2x4.t0.v8.s1.xcd.swz.dma3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32x16_bf16",
+        "math": "native",
+        "bm": 256,
+        "bn": 256,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 3
+      },
+      "priority": 977
+    },
+    {
+      "version": "1.0",
+      "id": "74175d48-fb40-5076-a6bd-a09f3a0ca651",
+      "name": "conv_igemm.bwd.bf16.mfma32x16_bf16.native.256x128x64.w4x2.t0.v8.s1.xcd.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32x16_bf16",
+        "math": "native",
+        "bm": 256,
+        "bn": 128,
+        "bk": 64,
+        "wm": 4,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 976
+    },
+    {
+      "version": "1.0",
+      "id": "4a56da8b-8ebe-5c80-a5c5-99aeb4dec107",
+      "name": "conv_igemm.bwd.bf16.mfma32x16_bf16.native.256x256x64.w4x2.t0.v8.s1.xcd.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32x16_bf16",
+        "math": "native",
+        "bm": 256,
+        "bn": 256,
+        "bk": 64,
+        "wm": 4,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 975
+    },
+    {
+      "version": "1.0",
+      "id": "104541bb-ce45-53ca-9335-1b14f1f2166a",
+      "name": "conv_igemm.bwd.bf16.mfma32x16_bf16.native.128x128x64.w2x2.t0.v8.s1.xcd.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32x16_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 64,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 974
+    },
+    {
+      "version": "1.0",
+      "id": "dd5b3eac-309f-5882-862b-a0bca8652647",
+      "name": "conv_igemm.bwd.bf16.mfma32x16_bf16.native.128x128x32.w2x2.t0.v8.s1.xcd.swz.dma3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32x16_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 3
+      },
+      "priority": 973
+    },
+    {
+      "version": "1.0",
+      "id": "6511ae2b-f877-570c-8ac9-0c68b2900e0b",
+      "name": "conv_igemm.bwd.bf16.mfma16x32_bf16.native.128x128x64.w2x2.t0.v8.s1.xcd.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 64,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 972
+    },
+    {
+      "version": "1.0",
+      "id": "36bdec7a-d31f-5b5e-b4e4-b686d139bedf",
+      "name": "conv_igemm.bwd.bf16.mfma32_bf16.native.128x128x32.w2x2.t0.v8.s1.xcd.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 0,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 971
     },
     {
       "version": "1.0",
@@ -8623,9 +9668,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 978
+      "priority": 970
     },
     {
       "version": "1.0",
@@ -8654,9 +9700,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 977
+      "priority": 969
     },
     {
       "version": "1.0",
@@ -8685,9 +9732,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 976
+      "priority": 968
     },
     {
       "version": "1.0",
@@ -8716,9 +9764,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 975
+      "priority": 967
     },
     {
       "version": "1.0",
@@ -8747,9 +9796,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 974
+      "priority": 966
     },
     {
       "version": "1.0",
@@ -8778,9 +9828,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 973
+      "priority": 965
     },
     {
       "version": "1.0",
@@ -8809,9 +9860,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 972
+      "priority": 964
     },
     {
       "version": "1.0",
@@ -8840,9 +9892,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 971
+      "priority": 963
     },
     {
       "version": "1.0",
@@ -8871,9 +9924,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 970
+      "priority": 962
     },
     {
       "version": "1.0",
@@ -8902,9 +9956,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 969
+      "priority": 961
     },
     {
       "version": "1.0",
@@ -8933,9 +9988,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 968
+      "priority": 960
     },
     {
       "version": "1.0",
@@ -8964,9 +10020,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 967
+      "priority": 959
     },
     {
       "version": "1.0",
@@ -8995,9 +10052,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 966
+      "priority": 958
     },
     {
       "version": "1.0",
@@ -9026,9 +10084,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 965
+      "priority": 957
     },
     {
       "version": "1.0",
@@ -9057,9 +10116,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 964
+      "priority": 956
     },
     {
       "version": "1.0",
@@ -9088,9 +10148,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 963
+      "priority": 955
     },
     {
       "version": "1.0",
@@ -9119,9 +10180,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 962
+      "priority": 954
     },
     {
       "version": "1.0",
@@ -9150,9 +10212,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 961
+      "priority": 953
     },
     {
       "version": "1.0",
@@ -9181,9 +10244,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 960
+      "priority": 952
     },
     {
       "version": "1.0",
@@ -9212,9 +10276,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 959
+      "priority": 951
     },
     {
       "version": "1.0",
@@ -9243,9 +10308,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 958
+      "priority": 950
     },
     {
       "version": "1.0",
@@ -9274,9 +10340,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 957
+      "priority": 949
     },
     {
       "version": "1.0",
@@ -9305,9 +10372,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 956
+      "priority": 948
     },
     {
       "version": "1.0",
@@ -9336,9 +10404,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 955
+      "priority": 947
     },
     {
       "version": "1.0",
@@ -9367,9 +10436,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 954
+      "priority": 946
     },
     {
       "version": "1.0",
@@ -9398,9 +10468,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 953
+      "priority": 945
     },
     {
       "version": "1.0",
@@ -9429,9 +10500,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 952
+      "priority": 944
     },
     {
       "version": "1.0",
@@ -9460,9 +10532,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 951
+      "priority": 943
     },
     {
       "version": "1.0",
@@ -9491,9 +10564,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 950
+      "priority": 942
     },
     {
       "version": "1.0",
@@ -9522,9 +10596,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 949
+      "priority": 941
     },
     {
       "version": "1.0",
@@ -9553,9 +10628,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 948
+      "priority": 940
     },
     {
       "version": "1.0",
@@ -9584,9 +10660,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 947
+      "priority": 939
     },
     {
       "version": "1.0",
@@ -9615,9 +10692,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 946
+      "priority": 938
     },
     {
       "version": "1.0",
@@ -9646,9 +10724,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 945
+      "priority": 937
     },
     {
       "version": "1.0",
@@ -9677,9 +10756,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 944
+      "priority": 936
     },
     {
       "version": "1.0",
@@ -9708,9 +10788,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 943
+      "priority": 935
     },
     {
       "version": "1.0",
@@ -9739,9 +10820,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 942
+      "priority": 934
     },
     {
       "version": "1.0",
@@ -9770,9 +10852,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 941
+      "priority": 933
     },
     {
       "version": "1.0",
@@ -9801,9 +10884,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 940
+      "priority": 932
     },
     {
       "version": "1.0",
@@ -9832,9 +10916,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 939
+      "priority": 931
     },
     {
       "version": "1.0",
@@ -9863,9 +10948,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 938
+      "priority": 930
     },
     {
       "version": "1.0",
@@ -9894,9 +10980,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 937
+      "priority": 929
     },
     {
       "version": "1.0",
@@ -9925,9 +11012,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 936
+      "priority": 928
     },
     {
       "version": "1.0",
@@ -9956,9 +11044,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 935
+      "priority": 927
     },
     {
       "version": "1.0",
@@ -9987,9 +11076,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 934
+      "priority": 926
     },
     {
       "version": "1.0",
@@ -10018,9 +11108,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 933
+      "priority": 925
     },
     {
       "version": "1.0",
@@ -10049,9 +11140,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 932
+      "priority": 924
     },
     {
       "version": "1.0",
@@ -10080,9 +11172,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 931
+      "priority": 923
     },
     {
       "version": "1.0",
@@ -10111,9 +11204,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 930
+      "priority": 922
     },
     {
       "version": "1.0",
@@ -10142,9 +11236,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 929
+      "priority": 921
     },
     {
       "version": "1.0",
@@ -10173,9 +11268,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 928
+      "priority": 920
     },
     {
       "version": "1.0",
@@ -10204,9 +11300,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 927
+      "priority": 919
     },
     {
       "version": "1.0",
@@ -10235,9 +11332,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 926
+      "priority": 918
     },
     {
       "version": "1.0",
@@ -10266,9 +11364,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 925
+      "priority": 917
     },
     {
       "version": "1.0",
@@ -10297,9 +11396,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 924
+      "priority": 916
     },
     {
       "version": "1.0",
@@ -10328,9 +11428,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 923
+      "priority": 915
     },
     {
       "version": "1.0",
@@ -10359,9 +11460,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 922
+      "priority": 914
     },
     {
       "version": "1.0",
@@ -10390,9 +11492,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 921
+      "priority": 913
     },
     {
       "version": "1.0",
@@ -10421,9 +11524,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 920
+      "priority": 912
     },
     {
       "version": "1.0",
@@ -10452,9 +11556,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 919
+      "priority": 911
     },
     {
       "version": "1.0",
@@ -10483,9 +11588,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 918
+      "priority": 910
     },
     {
       "version": "1.0",
@@ -10514,9 +11620,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 917
+      "priority": 909
     },
     {
       "version": "1.0",
@@ -10545,9 +11652,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 916
+      "priority": 908
     },
     {
       "version": "1.0",
@@ -10576,9 +11684,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 915
+      "priority": 907
     },
     {
       "version": "1.0",
@@ -10607,9 +11716,10 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 914
+      "priority": 906
     },
     {
       "version": "1.0",
@@ -10638,9 +11748,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 913
+      "priority": 905
     },
     {
       "version": "1.0",
@@ -10669,9 +11780,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 912
+      "priority": 904
     },
     {
       "version": "1.0",
@@ -10700,9 +11812,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 911
+      "priority": 903
     },
     {
       "version": "1.0",
@@ -10731,9 +11844,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 910
+      "priority": 902
     },
     {
       "version": "1.0",
@@ -10762,9 +11876,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 909
+      "priority": 901
     },
     {
       "version": "1.0",
@@ -10793,9 +11908,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 908
+      "priority": 900
     },
     {
       "version": "1.0",
@@ -10824,9 +11940,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 907
+      "priority": 899
     },
     {
       "version": "1.0",
@@ -10855,9 +11972,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 906
+      "priority": 898
     },
     {
       "version": "1.0",
@@ -10886,9 +12004,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 905
+      "priority": 897
     },
     {
       "version": "1.0",
@@ -10917,9 +12036,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 904
+      "priority": 896
     },
     {
       "version": "1.0",
@@ -10948,9 +12068,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 903
+      "priority": 895
     },
     {
       "version": "1.0",
@@ -10979,9 +12100,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 902
+      "priority": 894
     },
     {
       "version": "1.0",
@@ -11010,9 +12132,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 901
+      "priority": 893
     },
     {
       "version": "1.0",
@@ -11041,9 +12164,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 900
+      "priority": 892
     },
     {
       "version": "1.0",
@@ -11072,9 +12196,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 899
+      "priority": 891
     },
     {
       "version": "1.0",
@@ -11103,9 +12228,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 898
+      "priority": 890
     },
     {
       "version": "1.0",
@@ -11134,9 +12260,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 897
+      "priority": 889
     },
     {
       "version": "1.0",
@@ -11165,9 +12292,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 896
+      "priority": 888
     },
     {
       "version": "1.0",
@@ -11196,9 +12324,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 895
+      "priority": 887
     },
     {
       "version": "1.0",
@@ -11227,9 +12356,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 894
+      "priority": 886
     },
     {
       "version": "1.0",
@@ -11258,9 +12388,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 893
+      "priority": 885
     },
     {
       "version": "1.0",
@@ -11289,9 +12420,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 892
+      "priority": 884
     },
     {
       "version": "1.0",
@@ -11320,9 +12452,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 891
+      "priority": 883
     },
     {
       "version": "1.0",
@@ -11351,9 +12484,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 890
+      "priority": 882
     },
     {
       "version": "1.0",
@@ -11382,9 +12516,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 889
+      "priority": 881
     },
     {
       "version": "1.0",
@@ -11413,9 +12548,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 888
+      "priority": 880
     },
     {
       "version": "1.0",
@@ -11444,9 +12580,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 887
+      "priority": 879
     },
     {
       "version": "1.0",
@@ -11475,9 +12612,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 886
+      "priority": 878
     },
     {
       "version": "1.0",
@@ -11506,9 +12644,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 885
+      "priority": 877
     },
     {
       "version": "1.0",
@@ -11537,9 +12676,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 884
+      "priority": 876
     },
     {
       "version": "1.0",
@@ -11568,9 +12708,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 883
+      "priority": 875
     },
     {
       "version": "1.0",
@@ -11599,9 +12740,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 882
+      "priority": 874
     },
     {
       "version": "1.0",
@@ -11630,9 +12772,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 881
+      "priority": 873
     },
     {
       "version": "1.0",
@@ -11661,9 +12804,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 880
+      "priority": 872
     },
     {
       "version": "1.0",
@@ -11692,9 +12836,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 879
+      "priority": 871
     },
     {
       "version": "1.0",
@@ -11723,9 +12868,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 878
+      "priority": 870
     },
     {
       "version": "1.0",
@@ -11754,9 +12900,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 877
+      "priority": 869
     },
     {
       "version": "1.0",
@@ -11785,9 +12932,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 876
+      "priority": 868
     },
     {
       "version": "1.0",
@@ -11816,9 +12964,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 875
+      "priority": 867
     },
     {
       "version": "1.0",
@@ -11847,9 +12996,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 874
+      "priority": 866
     },
     {
       "version": "1.0",
@@ -11878,9 +13028,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 873
+      "priority": 865
     },
     {
       "version": "1.0",
@@ -11909,9 +13060,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 872
+      "priority": 864
     },
     {
       "version": "1.0",
@@ -11940,9 +13092,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 871
+      "priority": 863
     },
     {
       "version": "1.0",
@@ -11971,9 +13124,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 870
+      "priority": 862
     },
     {
       "version": "1.0",
@@ -12002,9 +13156,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 869
+      "priority": 861
     },
     {
       "version": "1.0",
@@ -12033,9 +13188,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 868
+      "priority": 860
     },
     {
       "version": "1.0",
@@ -12064,9 +13220,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 867
+      "priority": 859
     },
     {
       "version": "1.0",
@@ -12095,9 +13252,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 866
+      "priority": 858
     },
     {
       "version": "1.0",
@@ -12126,9 +13284,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 865
+      "priority": 857
     },
     {
       "version": "1.0",
@@ -12157,9 +13316,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 864
+      "priority": 856
     },
     {
       "version": "1.0",
@@ -12188,9 +13348,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 863
+      "priority": 855
     },
     {
       "version": "1.0",
@@ -12219,9 +13380,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 862
+      "priority": 854
     },
     {
       "version": "1.0",
@@ -12250,9 +13412,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 861
+      "priority": 853
     },
     {
       "version": "1.0",
@@ -12281,9 +13444,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 860
+      "priority": 852
     },
     {
       "version": "1.0",
@@ -12312,9 +13476,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 859
+      "priority": 851
     },
     {
       "version": "1.0",
@@ -12343,9 +13508,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 858
+      "priority": 850
     },
     {
       "version": "1.0",
@@ -12374,9 +13540,10 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 857
+      "priority": 849
     },
     {
       "version": "1.0",
@@ -12405,9 +13572,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 856
+      "priority": 848
     },
     {
       "version": "1.0",
@@ -12436,9 +13604,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 855
+      "priority": 847
     },
     {
       "version": "1.0",
@@ -12467,9 +13636,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 854
+      "priority": 846
     },
     {
       "version": "1.0",
@@ -12498,9 +13668,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 853
+      "priority": 845
     },
     {
       "version": "1.0",
@@ -12529,9 +13700,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 852
+      "priority": 844
     },
     {
       "version": "1.0",
@@ -12560,9 +13732,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 851
+      "priority": 843
     },
     {
       "version": "1.0",
@@ -12591,9 +13764,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 850
+      "priority": 842
     },
     {
       "version": "1.0",
@@ -12622,9 +13796,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 849
+      "priority": 841
     },
     {
       "version": "1.0",
@@ -12653,9 +13828,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 848
+      "priority": 840
     },
     {
       "version": "1.0",
@@ -12684,9 +13860,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 847
+      "priority": 839
     },
     {
       "version": "1.0",
@@ -12715,9 +13892,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 846
+      "priority": 838
     },
     {
       "version": "1.0",
@@ -12746,9 +13924,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 845
+      "priority": 837
     },
     {
       "version": "1.0",
@@ -12777,9 +13956,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 844
+      "priority": 836
     },
     {
       "version": "1.0",
@@ -12808,9 +13988,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 843
+      "priority": 835
     },
     {
       "version": "1.0",
@@ -12839,9 +14020,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 842
+      "priority": 834
     },
     {
       "version": "1.0",
@@ -12870,9 +14052,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 841
+      "priority": 833
     },
     {
       "version": "1.0",
@@ -12901,9 +14084,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 840
+      "priority": 832
     },
     {
       "version": "1.0",
@@ -12932,9 +14116,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 839
+      "priority": 831
     },
     {
       "version": "1.0",
@@ -12963,9 +14148,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 838
+      "priority": 830
     },
     {
       "version": "1.0",
@@ -12994,9 +14180,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 837
+      "priority": 829
     },
     {
       "version": "1.0",
@@ -13025,9 +14212,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 836
+      "priority": 828
     },
     {
       "version": "1.0",
@@ -13056,9 +14244,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 835
+      "priority": 827
     },
     {
       "version": "1.0",
@@ -13087,9 +14276,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 834
+      "priority": 826
     },
     {
       "version": "1.0",
@@ -13118,9 +14308,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 833
+      "priority": 825
     },
     {
       "version": "1.0",
@@ -13149,9 +14340,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 832
+      "priority": 824
     },
     {
       "version": "1.0",
@@ -13180,9 +14372,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 831
+      "priority": 823
     },
     {
       "version": "1.0",
@@ -13211,9 +14404,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 830
+      "priority": 822
     },
     {
       "version": "1.0",
@@ -13242,9 +14436,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 829
+      "priority": 821
     },
     {
       "version": "1.0",
@@ -13273,9 +14468,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 828
+      "priority": 820
     },
     {
       "version": "1.0",
@@ -13304,9 +14500,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 827
+      "priority": 819
     },
     {
       "version": "1.0",
@@ -13335,9 +14532,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 826
+      "priority": 818
     },
     {
       "version": "1.0",
@@ -13366,9 +14564,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 825
+      "priority": 817
     },
     {
       "version": "1.0",
@@ -13397,9 +14596,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 824
+      "priority": 816
     },
     {
       "version": "1.0",
@@ -13428,9 +14628,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 823
+      "priority": 815
     },
     {
       "version": "1.0",
@@ -13459,9 +14660,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 822
+      "priority": 814
     },
     {
       "version": "1.0",
@@ -13490,9 +14692,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 821
+      "priority": 813
     },
     {
       "version": "1.0",
@@ -13521,9 +14724,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 820
+      "priority": 812
     },
     {
       "version": "1.0",
@@ -13552,9 +14756,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 819
+      "priority": 811
     },
     {
       "version": "1.0",
@@ -13583,9 +14788,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 818
+      "priority": 810
     },
     {
       "version": "1.0",
@@ -13614,9 +14820,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 817
+      "priority": 809
     },
     {
       "version": "1.0",
@@ -13645,9 +14852,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 816
+      "priority": 808
     },
     {
       "version": "1.0",
@@ -13676,9 +14884,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 815
+      "priority": 807
     },
     {
       "version": "1.0",
@@ -13707,9 +14916,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 814
+      "priority": 806
     },
     {
       "version": "1.0",
@@ -13738,9 +14948,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 813
+      "priority": 805
     },
     {
       "version": "1.0",
@@ -13769,9 +14980,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 812
+      "priority": 804
     },
     {
       "version": "1.0",
@@ -13800,9 +15012,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 811
+      "priority": 803
     },
     {
       "version": "1.0",
@@ -13831,9 +15044,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 810
+      "priority": 802
     },
     {
       "version": "1.0",
@@ -13862,9 +15076,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 809
+      "priority": 801
     },
     {
       "version": "1.0",
@@ -13893,9 +15108,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 808
+      "priority": 800
     },
     {
       "version": "1.0",
@@ -13924,9 +15140,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 807
+      "priority": 799
     },
     {
       "version": "1.0",
@@ -13955,9 +15172,266 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 806
+      "priority": 798
+    },
+    {
+      "version": "1.0",
+      "id": "518fe7af-68aa-567d-8b31-4e959b28849b",
+      "name": "conv_igemm.bwd.bf16.mfma32x16_bf16.native.256x256x32.w2x4.t0.v8.s1.xcd.cf.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32x16_bf16",
+        "math": "native",
+        "bm": 256,
+        "bn": 256,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 797
+    },
+    {
+      "version": "1.0",
+      "id": "326c6c39-2f56-579f-a9c0-243c99a548df",
+      "name": "conv_igemm.bwd.bf16.mfma32x16_bf16.native.256x256x32.w2x4.t0.v8.s1.xcd.cf.swz.dma3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32x16_bf16",
+        "math": "native",
+        "bm": 256,
+        "bn": 256,
+        "bk": 32,
+        "wm": 2,
+        "wn": 4,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 3
+      },
+      "priority": 796
+    },
+    {
+      "version": "1.0",
+      "id": "2821800b-6d00-5822-bc3d-05020578c092",
+      "name": "conv_igemm.bwd.bf16.mfma32x16_bf16.native.256x128x64.w4x2.t0.v8.s1.xcd.cf.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32x16_bf16",
+        "math": "native",
+        "bm": 256,
+        "bn": 128,
+        "bk": 64,
+        "wm": 4,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 795
+    },
+    {
+      "version": "1.0",
+      "id": "6f68a00a-165d-582a-b125-9a3f116674ae",
+      "name": "conv_igemm.bwd.bf16.mfma32x16_bf16.native.256x256x64.w4x2.t0.v8.s1.xcd.cf.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32x16_bf16",
+        "math": "native",
+        "bm": 256,
+        "bn": 256,
+        "bk": 64,
+        "wm": 4,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 794
+    },
+    {
+      "version": "1.0",
+      "id": "87144a90-8866-5ce4-a690-919a9f567ce8",
+      "name": "conv_igemm.bwd.bf16.mfma32x16_bf16.native.128x128x64.w2x2.t0.v8.s1.xcd.cf.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32x16_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 64,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 793
+    },
+    {
+      "version": "1.0",
+      "id": "5f8ab779-6ccb-5680-8dae-49f915ddd11b",
+      "name": "conv_igemm.bwd.bf16.mfma32x16_bf16.native.128x128x32.w2x2.t0.v8.s1.xcd.cf.swz.dma3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32x16_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 3
+      },
+      "priority": 792
+    },
+    {
+      "version": "1.0",
+      "id": "78d0b5a8-310b-580b-b424-5535d852c9de",
+      "name": "conv_igemm.bwd.bf16.mfma16x32_bf16.native.128x128x64.w2x2.t0.v8.s1.xcd.cf.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16x32_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 64,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 791
+    },
+    {
+      "version": "1.0",
+      "id": "a2c17fee-9f16-5f7c-8aab-2783a1c7fef7",
+      "name": "conv_igemm.bwd.bf16.mfma32_bf16.native.128x128x32.w2x2.t0.v8.s1.xcd.cf.swz.dma2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma32_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 128,
+        "bk": 32,
+        "wm": 2,
+        "wn": 2,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 1,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 0,
+        "cf": 1,
+        "swz": 1,
+        "dma": 2
+      },
+      "priority": 790
     },
     {
       "version": "1.0",
@@ -13986,9 +15460,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 805
+      "priority": 789
     },
     {
       "version": "1.0",
@@ -14017,9 +15492,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 804
+      "priority": 788
     },
     {
       "version": "1.0",
@@ -14048,9 +15524,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 803
+      "priority": 787
     },
     {
       "version": "1.0",
@@ -14079,9 +15556,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 802
+      "priority": 786
     },
     {
       "version": "1.0",
@@ -14110,9 +15588,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 801
+      "priority": 785
     },
     {
       "version": "1.0",
@@ -14141,9 +15620,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 800
+      "priority": 784
     },
     {
       "version": "1.0",
@@ -14172,9 +15652,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 799
+      "priority": 783
     },
     {
       "version": "1.0",
@@ -14203,9 +15684,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 798
+      "priority": 782
     },
     {
       "version": "1.0",
@@ -14234,9 +15716,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 797
+      "priority": 781
     },
     {
       "version": "1.0",
@@ -14265,9 +15748,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 796
+      "priority": 780
     },
     {
       "version": "1.0",
@@ -14296,9 +15780,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 795
+      "priority": 779
     },
     {
       "version": "1.0",
@@ -14327,9 +15812,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 794
+      "priority": 778
     },
     {
       "version": "1.0",
@@ -14358,9 +15844,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 793
+      "priority": 777
     },
     {
       "version": "1.0",
@@ -14389,9 +15876,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 792
+      "priority": 776
     },
     {
       "version": "1.0",
@@ -14420,9 +15908,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 791
+      "priority": 775
     },
     {
       "version": "1.0",
@@ -14451,9 +15940,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 790
+      "priority": 774
     },
     {
       "version": "1.0",
@@ -14482,9 +15972,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 789
+      "priority": 773
     },
     {
       "version": "1.0",
@@ -14513,9 +16004,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 788
+      "priority": 772
     },
     {
       "version": "1.0",
@@ -14544,9 +16036,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 787
+      "priority": 771
     },
     {
       "version": "1.0",
@@ -14575,9 +16068,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 786
+      "priority": 770
     },
     {
       "version": "1.0",
@@ -14606,9 +16100,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 785
+      "priority": 769
     },
     {
       "version": "1.0",
@@ -14637,9 +16132,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 784
+      "priority": 768
     },
     {
       "version": "1.0",
@@ -14668,9 +16164,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 783
+      "priority": 767
     },
     {
       "version": "1.0",
@@ -14699,9 +16196,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 782
+      "priority": 766
     },
     {
       "version": "1.0",
@@ -14730,9 +16228,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 781
+      "priority": 765
     },
     {
       "version": "1.0",
@@ -14761,9 +16260,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 780
+      "priority": 764
     },
     {
       "version": "1.0",
@@ -14792,9 +16292,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 779
+      "priority": 763
     },
     {
       "version": "1.0",
@@ -14823,9 +16324,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 778
+      "priority": 762
     },
     {
       "version": "1.0",
@@ -14854,9 +16356,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 777
+      "priority": 761
     },
     {
       "version": "1.0",
@@ -14885,9 +16388,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 776
+      "priority": 760
     },
     {
       "version": "1.0",
@@ -14916,9 +16420,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 775
+      "priority": 759
     },
     {
       "version": "1.0",
@@ -14947,9 +16452,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 774
+      "priority": 758
     },
     {
       "version": "1.0",
@@ -14978,9 +16484,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 773
+      "priority": 757
     },
     {
       "version": "1.0",
@@ -15009,9 +16516,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 772
+      "priority": 756
     },
     {
       "version": "1.0",
@@ -15040,9 +16548,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 771
+      "priority": 755
     },
     {
       "version": "1.0",
@@ -15071,9 +16580,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 770
+      "priority": 754
     },
     {
       "version": "1.0",
@@ -15102,9 +16612,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 769
+      "priority": 753
     },
     {
       "version": "1.0",
@@ -15133,9 +16644,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 768
+      "priority": 752
     },
     {
       "version": "1.0",
@@ -15164,9 +16676,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 767
+      "priority": 751
     },
     {
       "version": "1.0",
@@ -15195,9 +16708,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 766
+      "priority": 750
     },
     {
       "version": "1.0",
@@ -15226,9 +16740,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 765
+      "priority": 749
     },
     {
       "version": "1.0",
@@ -15257,9 +16772,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 764
+      "priority": 748
     },
     {
       "version": "1.0",
@@ -15288,9 +16804,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 763
+      "priority": 747
     },
     {
       "version": "1.0",
@@ -15319,9 +16836,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 762
+      "priority": 746
     },
     {
       "version": "1.0",
@@ -15350,9 +16868,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 761
+      "priority": 745
     },
     {
       "version": "1.0",
@@ -15381,9 +16900,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 760
+      "priority": 744
     },
     {
       "version": "1.0",
@@ -15412,9 +16932,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 759
+      "priority": 743
     },
     {
       "version": "1.0",
@@ -15443,9 +16964,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 758
+      "priority": 742
     },
     {
       "version": "1.0",
@@ -15474,9 +16996,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 757
+      "priority": 741
     },
     {
       "version": "1.0",
@@ -15505,9 +17028,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 756
+      "priority": 740
     },
     {
       "version": "1.0",
@@ -15536,9 +17060,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 755
+      "priority": 739
     },
     {
       "version": "1.0",
@@ -15567,9 +17092,10 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
-      "priority": 754
+      "priority": 738
     },
     {
       "version": "1.0",
@@ -15598,9 +17124,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 753
+      "priority": 737
     },
     {
       "version": "1.0",
@@ -15629,9 +17156,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 752
+      "priority": 736
     },
     {
       "version": "1.0",
@@ -15660,9 +17188,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 751
+      "priority": 735
     },
     {
       "version": "1.0",
@@ -15691,9 +17220,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 750
+      "priority": 734
     },
     {
       "version": "1.0",
@@ -15722,9 +17252,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 749
+      "priority": 733
     },
     {
       "version": "1.0",
@@ -15753,9 +17284,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 748
+      "priority": 732
     },
     {
       "version": "1.0",
@@ -15784,9 +17316,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 747
+      "priority": 731
     },
     {
       "version": "1.0",
@@ -15815,9 +17348,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 746
+      "priority": 730
     },
     {
       "version": "1.0",
@@ -15846,9 +17380,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 745
+      "priority": 729
     },
     {
       "version": "1.0",
@@ -15877,9 +17412,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 744
+      "priority": 728
     },
     {
       "version": "1.0",
@@ -15908,9 +17444,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 743
+      "priority": 727
     },
     {
       "version": "1.0",
@@ -15939,9 +17476,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 742
+      "priority": 726
     },
     {
       "version": "1.0",
@@ -15970,9 +17508,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 741
+      "priority": 725
     },
     {
       "version": "1.0",
@@ -16001,9 +17540,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 740
+      "priority": 724
     },
     {
       "version": "1.0",
@@ -16032,9 +17572,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 739
+      "priority": 723
     },
     {
       "version": "1.0",
@@ -16063,9 +17604,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 738
+      "priority": 722
     },
     {
       "version": "1.0",
@@ -16094,9 +17636,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 737
+      "priority": 721
     },
     {
       "version": "1.0",
@@ -16125,9 +17668,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 736
+      "priority": 720
     },
     {
       "version": "1.0",
@@ -16156,9 +17700,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 735
+      "priority": 719
     },
     {
       "version": "1.0",
@@ -16187,9 +17732,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 734
+      "priority": 718
     },
     {
       "version": "1.0",
@@ -16218,9 +17764,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 733
+      "priority": 717
     },
     {
       "version": "1.0",
@@ -16249,9 +17796,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 732
+      "priority": 716
     },
     {
       "version": "1.0",
@@ -16280,9 +17828,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 731
+      "priority": 715
     },
     {
       "version": "1.0",
@@ -16311,9 +17860,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 730
+      "priority": 714
     },
     {
       "version": "1.0",
@@ -16342,9 +17892,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 729
+      "priority": 713
     },
     {
       "version": "1.0",
@@ -16373,9 +17924,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 728
+      "priority": 712
     },
     {
       "version": "1.0",
@@ -16404,9 +17956,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 727
+      "priority": 711
     },
     {
       "version": "1.0",
@@ -16435,9 +17988,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 726
+      "priority": 710
     },
     {
       "version": "1.0",
@@ -16466,9 +18020,10 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 1
+        "swz": 1,
+        "dma": 0
       },
-      "priority": 725
+      "priority": 709
     },
     {
       "version": "1.0",
@@ -16497,7 +18052,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 1000
     },
@@ -16528,7 +18084,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 999
     },
@@ -16559,7 +18116,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 998
     },
@@ -16590,7 +18148,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 997
     },
@@ -16621,7 +18180,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 996
     },
@@ -16652,7 +18212,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 995
     },
@@ -16683,7 +18244,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 994
     },
@@ -16714,7 +18276,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 993
     },
@@ -16745,7 +18308,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 992
     },
@@ -16776,7 +18340,8 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 991
     },
@@ -16807,7 +18372,8 @@
         "wdirect": 0,
         "pack": 1,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 990
     },
@@ -16838,7 +18404,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 989
     },
@@ -16869,7 +18436,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 988
     },
@@ -16900,7 +18468,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 987
     },
@@ -16931,7 +18500,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 986
     },
@@ -16962,7 +18532,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 985
     },
@@ -16993,7 +18564,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 984
     },
@@ -17024,7 +18596,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 983
     },
@@ -17055,7 +18628,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 982
     },
@@ -17086,7 +18660,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 981
     },
@@ -17117,7 +18692,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 980
     },
@@ -17148,7 +18724,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 979
     },
@@ -17179,7 +18756,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 978
     },
@@ -17210,7 +18788,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 977
     },
@@ -17241,7 +18820,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 976
     },
@@ -17272,7 +18852,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 975
     },
@@ -17303,7 +18884,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 974
     },
@@ -17334,7 +18916,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 973
     },
@@ -17365,7 +18948,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 972
     },
@@ -17396,7 +18980,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 971
     },
@@ -17427,7 +19012,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 970
     },
@@ -17458,7 +19044,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 969
     },
@@ -17489,7 +19076,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 968
     },
@@ -17520,7 +19108,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 967
     },
@@ -17551,7 +19140,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 966
     },
@@ -17582,7 +19172,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 965
     },
@@ -17613,7 +19204,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 964
     },
@@ -17644,7 +19236,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 963
     },
@@ -17675,7 +19268,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 962
     },
@@ -17706,7 +19300,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 961
     },
@@ -17737,7 +19332,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 960
     },
@@ -17768,7 +19364,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 959
     },
@@ -17799,7 +19396,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 958
     },
@@ -17830,7 +19428,8 @@
         "wdirect": 0,
         "pack": 2,
         "cf": 0,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 957
     },
@@ -17861,7 +19460,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 956
     },
@@ -17892,7 +19492,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 955
     },
@@ -17923,7 +19524,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 954
     },
@@ -17954,7 +19556,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 953
     },
@@ -17985,7 +19588,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 952
     },
@@ -18016,7 +19620,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 951
     },
@@ -18047,7 +19652,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 950
     },
@@ -18078,7 +19684,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 949
     },
@@ -18109,7 +19716,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 948
     },
@@ -18140,7 +19748,8 @@
         "wdirect": 1,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 947
     },
@@ -18171,7 +19780,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 946
     },
@@ -18202,7 +19812,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 945
     },
@@ -18233,7 +19844,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 944
     },
@@ -18264,7 +19876,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 943
     },
@@ -18295,7 +19908,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 942
     },
@@ -18326,7 +19940,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 941
     },
@@ -18357,7 +19972,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 940
     },
@@ -18388,7 +20004,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 939
     },
@@ -18419,7 +20036,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 938
     },
@@ -18450,7 +20068,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 937
     },
@@ -18481,7 +20100,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 936
     },
@@ -18512,7 +20132,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 935
     },
@@ -18543,7 +20164,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 934
     },
@@ -18574,7 +20196,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 933
     },
@@ -18605,7 +20228,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 932
     },
@@ -18636,7 +20260,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 931
     },
@@ -18667,7 +20292,8 @@
         "wdirect": 0,
         "pack": 0,
         "cf": 1,
-        "swz": 0
+        "swz": 0,
+        "dma": 0
       },
       "priority": 930
     }
