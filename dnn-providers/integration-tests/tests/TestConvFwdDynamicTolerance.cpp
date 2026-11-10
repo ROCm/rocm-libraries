@@ -69,9 +69,8 @@ struct GraphSpec
     std::optional<float> bakedScale; ///< the scale is a constant stored in the graph
     bool withBias = false; ///< ADD(previous result, bias) after the multiply
     bool bakeScaleAsFloat32 = false; ///< a baked value of the wrong type for a half tensor
-    DataType convOutputType
-        = DataType::FLOAT; ///< the type of the convolution's result when virtual
-    DataType intermediateType = DataType::FLOAT; ///< the type of the multiplies' virtual outputs
+    DataType convOutputType = DataType::FLOAT; ///< the type of the convolution's result
+    DataType intermediateType = DataType::FLOAT; ///< the type of the multiplies' results
     DataType pointwiseCompute = DataType::FLOAT; ///< the compute type of every pointwise node
 };
 
@@ -86,14 +85,15 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
     const std::vector<int64_t> ones = {1, 1, 1, 1};
 
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    // Graph inputs and outputs are half; virtual tensors are float unless a test says otherwise.
+    // Graph inputs and outputs are half. A tensor one node writes and another reads is float
+    // unless a test says otherwise.
     const auto addTensor = [&](int64_t uid,
                                const char* name,
                                const std::vector<int64_t>& dims,
                                bool isVirtual,
-                               DataType virtualType = DataType::FLOAT) {
-        tensors.push_back(CreateTensorAttributesDirect(
-            b, uid, name, isVirtual ? virtualType : DataType::HALF, &ones, &dims, isVirtual));
+                               DataType type = DataType::HALF) {
+        tensors.push_back(
+            CreateTensorAttributesDirect(b, uid, name, type, &ones, &dims, isVirtual));
     };
     addTensor(Y_UID, "y", yDims, spec.convOutputVirtual, spec.convOutputType);
     addTensor(W_UID, "w", spec.wDims, false);
@@ -115,7 +115,9 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
         addTensor(X_UID,
                   "x",
                   xDims,
-                  spec.preConvRelu ? spec.producedXIsVirtual : spec.virtualXWithoutProducer);
+                  spec.preConvRelu ? spec.producedXIsVirtual : spec.virtualXWithoutProducer,
+                  spec.preConvRelu || spec.virtualXWithoutProducer ? DataType::FLOAT
+                                                                   : DataType::HALF);
     }
     if(spec.preConvRelu)
     {
@@ -429,15 +431,45 @@ TEST(TestConvFwdDynamicTolerance, NonFloatAccumulatorIsNotModeled)
     }
 }
 
-// The model has one rounding, of the final result. A convolution result kept in a type other
-// than float (half, bfloat16, an unset type) is one more rounding, so the fixed default applies.
+// The model has one rounding, of the final result. A convolution result that another node reads
+// and that is kept in a type other than float (half, bfloat16, an unset type) is one more
+// rounding, so the fixed default applies.
 TEST(TestConvFwdDynamicTolerance, VirtualConvolutionResultNotStoredInFloatIsNotModeled)
 {
     for(const auto type : {DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE, DataType::UNSET})
     {
         GraphSpec spec;
+        spec.withBias = true;
         spec.convOutputType = type;
         EXPECT_FALSE(errorScale(spec).has_value()) << EnumNameDataType(type);
+    }
+}
+
+// Virtual or not, a tensor that one node writes and another reads is rounded to its own type:
+// bfloat16 results 1 and 1.0078125 differ by one step, and after adding -1 they are 0 and
+// 0.0078125, which no relative term covers.
+TEST(TestConvFwdDynamicTolerance, NonVirtualConvolutionResultReadByANodeIsNotModeled)
+{
+    for(const auto type : {DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE, DataType::UNSET})
+    {
+        GraphSpec spec;
+        spec.convOutputVirtual = false;
+        spec.withBias = true;
+        spec.convOutputType = type;
+        EXPECT_FALSE(errorScale(spec).has_value()) << EnumNameDataType(type);
+    }
+}
+
+// A convolution result that no node reads is the graph's output: rounded once, to the output
+// type, which is what the model describes.
+TEST(TestConvFwdDynamicTolerance, ConvolutionResultNoNodeReadsMayBeStoredInLowPrecision)
+{
+    for(const auto type : {DataType::HALF, DataType::BFLOAT16})
+    {
+        GraphSpec spec;
+        spec.convOutputVirtual = false;
+        spec.convOutputType = type;
+        EXPECT_TRUE(errorScale(spec).has_value()) << EnumNameDataType(type);
     }
 }
 

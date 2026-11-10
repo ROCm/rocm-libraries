@@ -121,13 +121,15 @@ The function is `calculateConvFpropOutputTolerance<T>()` in
 `convFwdErrorScale()` applies the model only when the graph has exactly one
 `ConvolutionFwd` node, with float compute type, and its `x` and `w` are graph
 inputs: not virtual, and not written by another node. Every pointwise node
-must compute in float and every virtual tensor (the convolution's result and
-the pointwise intermediates) must be stored as float; an unset type does not
-count as float. The model has one rounding, of the final result to the output
-type; an intermediate stored or computed in half or bfloat16 adds roundings it
-does not describe (ALMIOPEN-3239 tracks that), so such a graph uses the per-op
-default. A bundle whose virtual tensors take the case's data type is outside
-the model in half and bfloat16. A `MUL` node with one
+must compute in float, and every intermediate must be stored as float: a tensor
+that one node writes and another reads (the convolution's result, the pointwise
+results), virtual or not; an unset type does not count as float. A result that
+no node reads is a graph output and is rounded once, as the model assumes. The
+model has one rounding, of the final result to the output type; an intermediate
+stored or computed in half or bfloat16 adds roundings it does not describe
+(ALMIOPEN-3239 tracks that), so such a graph uses the per-op default. A bundle
+whose intermediates take the case's data type is outside the model in half and
+bfloat16. A `MUL` node with one
 operand from the convolution and the other a graph input (in either operand
 order) scales `sigma` by that input's largest magnitude, and the scales of
 several multiplies multiply; a `MUL` of anything else (the result with itself,

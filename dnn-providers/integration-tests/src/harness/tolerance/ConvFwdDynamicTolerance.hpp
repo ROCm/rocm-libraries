@@ -31,9 +31,10 @@
 // calibration are in docs/tolerances.md.
 //
 // It applies only to a graph whose convolution and pointwise nodes compute in float and whose
-// virtual tensors are float: the model has one rounding, of the final result to the output
-// type, and the roundings of intermediates stored in half or bfloat16 are not modelled
-// (ALMIOPEN-3239). Such a graph keeps the per-op default.
+// intermediates (the tensors one node writes and another reads, virtual or not) are float: the
+// model has one rounding, of the final result to the output type, and the roundings of
+// intermediates stored in half or bfloat16 are not modelled (ALMIOPEN-3239). Such a graph keeps
+// the per-op default.
 
 namespace hipdnn_integration_tests::tolerance
 {
@@ -202,12 +203,13 @@ inline std::optional<InputMoments>
 /// moment that is not finite makes the inputs unavailable, whichever source it came from.
 ///
 /// nullopt when the graph is outside the model: no or several convolutions, a non-float
-/// accumulator, a pointwise node computing in a type other than float, a virtual tensor (the
-/// convolution's result and the pointwise intermediates) stored as a type other than float, an x
-/// or w that is not a graph input, a multiply that does not pair the convolution's result with
-/// one graph input, or inputs whose moments are not available. An unset type counts as not float.
-/// The model has one rounding of the final result to the output type; the roundings of
-/// intermediates stored in half or bfloat16 are not modelled (ALMIOPEN-3239).
+/// accumulator, a pointwise node computing in a type other than float, an intermediate (a tensor
+/// one node writes and another reads, virtual or not: the convolution's result and the pointwise
+/// results) stored as a type other than float, an x or w that is not a graph input, a multiply
+/// that does not pair the convolution's result with one graph input, or inputs whose moments are
+/// not available. An unset type counts as not float. The model has one rounding, of the final
+/// result to the output type; the roundings of intermediates stored in half or bfloat16 are not
+/// modelled (ALMIOPEN-3239).
 inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     convFwdErrorScale(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
                       const InputMomentsLookup& momentsFor)
@@ -217,6 +219,8 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     const data::ConvolutionFwdAttributes* conv = nullptr;
     // Every tensor some node writes, as opposed to a graph input.
     std::set<int64_t> produced;
+    // Every tensor some node reads.
+    std::set<int64_t> consumed;
     for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
     {
         const auto& node = wrapper.getNode(i);
@@ -228,6 +232,8 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
             }
             conv = node.attributes_as_ConvolutionFwdAttributes();
             produced.insert(conv->y_tensor_uid());
+            consumed.insert(conv->x_tensor_uid());
+            consumed.insert(conv->w_tensor_uid());
         }
         else if(node.attributes_type() == data::NodeAttributes::PointwiseAttributes)
         {
@@ -235,7 +241,16 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
             {
                 return std::nullopt;
             }
-            produced.insert(node.attributes_as_PointwiseAttributes()->out_0_tensor_uid());
+            const auto* pointwise = node.attributes_as_PointwiseAttributes();
+            produced.insert(pointwise->out_0_tensor_uid());
+            consumed.insert(pointwise->in_0_tensor_uid());
+            for(const auto operand : {pointwise->in_1_tensor_uid(), pointwise->in_2_tensor_uid()})
+            {
+                if(operand.has_value())
+                {
+                    consumed.insert(*operand);
+                }
+            }
         }
     }
     if(conv == nullptr)
@@ -244,9 +259,16 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     }
 
     const auto& attrs = wrapper.getTensorMap();
-    for(const auto& entry : attrs)
+    // An intermediate, one node writes and another reads, is rounded to its own type, virtual or
+    // not. The graph's outputs, which no node reads, are rounded once and are the model's.
+    for(const auto uid : produced)
     {
-        if(entry.second->virtual_() && entry.second->data_type() != data::DataType::FLOAT)
+        if(consumed.count(uid) == 0)
+        {
+            continue;
+        }
+        const auto it = attrs.find(uid);
+        if(it == attrs.end() || it->second->data_type() != data::DataType::FLOAT)
         {
             return std::nullopt;
         }
