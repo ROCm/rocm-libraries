@@ -206,6 +206,37 @@ TEST(ClientAlphaMode, RejectsReservedScalarOnlyAndUnknownSupportModes)
     }
 }
 
+// A random alpha or beta is drawn once for the problem and again for the launch, so a
+// draw of +-1 here must not restrict the problem to a value-specialized solution: the
+// launch would then throw "Alpha value X doesn't match that set in problem".
+TEST(ClientScalarRestriction, RandomAlphaAndBetaAreUnrestricted)
+{
+    auto args = makeMinimalClientArgs(0);
+    setOption(args, "init-alpha", TensileLite::Client::InitMode::Random);
+    setOption(args, "init-beta", TensileLite::Client::InitMode::Random);
+    // Each draw is in [-1000, 1000]; 4000 problems draw +-1 with probability 1 - e^-8.
+    for(int i = 0; i < 4000; ++i)
+    {
+        TensileLite::Client::ClientProblemFactory factory(args);
+        auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(factory.problems()[0]);
+        ASSERT_NE(problem, nullptr);
+        ASSERT_EQ(problem->alphaRestriction(), TensileLite::ScalarValue::Any) << "problem " << i;
+        ASSERT_EQ(problem->betaRestriction(), TensileLite::ScalarValue::Any) << "problem " << i;
+    }
+}
+
+TEST(ClientScalarRestriction, FixedAlphaAndBetaKeepTheirRestriction)
+{
+    auto args = makeMinimalClientArgs(0);
+    setOption(args, "init-alpha", TensileLite::Client::InitMode::One);
+    setOption(args, "init-beta", TensileLite::Client::InitMode::One);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(factory.problems()[0]);
+    ASSERT_NE(problem, nullptr);
+    EXPECT_EQ(problem->alphaRestriction(), TensileLite::ScalarValue::One);
+    EXPECT_EQ(problem->betaRestriction(), TensileLite::ScalarValue::One);
+}
+
 TEST(ClientProblemFactoryDefaults, DisablesOmittedOptionalOutputsAndScales)
 {
     using namespace TensileLite::Client;
