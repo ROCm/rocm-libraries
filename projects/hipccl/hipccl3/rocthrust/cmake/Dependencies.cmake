@@ -307,11 +307,17 @@ endif()
 
 # Search for libhipcxx if requested (default: ON)
 if(${ROCTHRUST_USE_LIBHIPCXX})
-  find_package(libhipcxx)
+  # In the hipCCL superbuild, libhipcxx is added in-tree before rocThrust and already
+  # provides libhipcxx::libhipcxx. Only search for an installed copy if it doesn't exist.
+  if (NOT TARGET libhipcxx::libhipcxx)
+    find_package(libhipcxx)
+  endif()
   if (NOT TARGET libhipcxx::libhipcxx)
     message(STATUS "libhipcxx installation not found. Using deprecated rocThrust fallback implementation.  Please switch to using libhipcxx.")
   endif()
 endif()
+
+
 
 # Test dependencies
 if(USER_BUILD_TEST OR BUILD_HIPSTDPAR_TEST)

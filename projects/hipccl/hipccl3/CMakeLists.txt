@@ -138,6 +138,32 @@ if(HIPCCL_BUILD_ALL)
     set(HIPCCL_BUILD_ROCTHRUST ON CACHE BOOL "" FORCE)
 endif()
 
+if(HIPCCL_BUILD_LIBHIPCXX)
+    # NOTE(hipccl3): libhipcxx is a git submodule (see ../.gitmodules) - an
+    # uninitialized submodule leaves this directory present but empty, which
+    # would otherwise surface as a confusing failure deep inside
+    # add_subdirectory(libhipcxx) (e.g. "add_subdirectory given source
+    # ... which is not an existing directory" or a missing-CMakeLists.txt
+    # error with no obvious cause). Check for a file only present once the
+    # submodule is actually checked out, and fail with an actionable message
+    # instead.
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libhipcxx/CMakeLists.txt")
+        message(FATAL_ERROR
+            "HIPCCL_BUILD_LIBHIPCXX is ON, but the libhipcxx submodule "
+            "(projects/hipccl/hipccl3/libhipcxx) does not look initialized. "
+            "Run 'git submodule update --init projects/hipccl/hipccl3/libhipcxx' "
+            "(or 'git submodule update --init --recursive' from the "
+            "repository root) and re-configure."
+        )
+    endif()
+    set(libhipcxx_ENABLE_INSTALL_RULES ON CACHE BOOL "Enable installation of libhipxx" FORCE)
+    add_subdirectory_with_message(
+        COMPONENT libhipcxx
+        PREFIX_PATH .
+        EXPECT_TARGET libhipcxx::libhipcxx
+    )
+endif()
+
 if(HIPCCL_BUILD_ROCPRIM)
     add_subdirectory_with_message(
         COMPONENT rocprim
@@ -159,32 +185,6 @@ if(HIPCCL_BUILD_ROCTHRUST)
         COMPONENT rocthrust
         PREFIX_PATH .
         EXPECT_TARGET rocthrust
-    )
-endif()
-
-if(HIPCCL_BUILD_LIBHIPCXX)
-    # NOTE(hipccl3): libhipcxx is a git submodule (see ../.gitmodules) - an
-    # uninitialized submodule leaves this directory present but empty, which
-    # would otherwise surface as a confusing failure deep inside
-    # add_subdirectory(libhipcxx) (e.g. "add_subdirectory given source
-    # ... which is not an existing directory" or a missing-CMakeLists.txt
-    # error with no obvious cause). Check for a file only present once the
-    # submodule is actually checked out, and fail with an actionable message
-    # instead.
-    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libhipcxx/CMakeLists.txt")
-        message(FATAL_ERROR
-            "HIPCCL_BUILD_LIBHIPCXX is ON, but the libhipcxx submodule "
-            "(projects/hipccl/hipccl3/libhipcxx) does not look initialized. "
-            "Run 'git submodule update --init projects/hipccl/hipccl3/libhipcxx' "
-            "(or 'git submodule update --init --recursive' from the "
-            "repository root) and re-configure."
-        )
-    endif()
-
-    add_subdirectory_with_message(
-        COMPONENT libhipcxx
-        PREFIX_PATH .
-        EXPECT_TARGET libhipcxx::libhipcxx
     )
 endif()
 
