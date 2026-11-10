@@ -4642,7 +4642,9 @@ class GlobalWriteBatchWriter:
     # A rotating ring hands the next store a different quad, so there is nothing
     # left for this wait state to fence.
     if not self._pairPackRotating():
-      module.add(SNop(waitState=0, comment="1 wait state: WAR hazard between store src and next pack dst"))
+      # gfx940+ store-data WAR: 2 wait states for a VALU overwriting a >8B store's vdata
+      # (LLVM checkVALUHazardsHelper: hasGFX940Insts()?2:1); the next pair's v_cvt overwrites vPack.
+      module.add(SNop(waitState=1, comment="2 wait states (gfx940+): next pack VALU overwrites the >8B store's vdata"))
 
     assert not any(isinstance(i, SBarrier) for i in module.flatitems()), \
       "PostLoopStoreInNll Phase2 must be barrier-free (no s_barrier in the MFMA-interleaved store)"
@@ -4866,7 +4868,10 @@ class GlobalWriteBatchWriter:
                  comment=f"{tag}: all-lanes coalesced store (8 full 128B lines)"))
       if _soffTmp is not None:
         self._epilogScratchFree(_soffTmp)
-      phase2Mod.add(SNop(waitState=0, comment="WAR: latch store src before next coalesce store"))
+      # gfx940+ store-data WAR: a VALU that overwrites a >8B store's vdata needs 2 wait states
+      # (LLVM checkVALUHazardsHelper: hasGFX940Insts()?2:1). The next coalesced store's blend
+      # overwrites vCoalesceStoreData, which this store reads, so s_nop 1 (= 2 wait states).
+      phase2Mod.add(SNop(waitState=1, comment="WAR: 2 wait states (gfx940+) before a VALU overwrites the >8B store's vdata"))
 
     # PLSIN weave gap B (role="store"): between the two coalesced stores, it hides store-1's
     # memory latency behind terminal MFMAs -- the latency-hiding the un-coalesced woven store had.
@@ -4997,7 +5002,9 @@ class GlobalWriteBatchWriter:
     if _soffTmp is not None:
       self._epilogScratchFree(_soffTmp)
     # WAR: the store reads vPack; the next same-buffer pack (2 groups later) overwrites it.
-    module.add(SNop(waitState=0, comment="1 wait state: WAR store src -> next same-buffer pack dst"))
+    # gfx940+ store-data WAR: 2 wait states for a VALU overwriting a >8B store's vdata
+    # (LLVM checkVALUHazardsHelper: hasGFX940Insts()?2:1); the next same-buffer pack overwrites vPack.
+    module.add(SNop(waitState=1, comment="2 wait states (gfx940+): next same-buffer pack overwrites the >8B store's vdata"))
     return module
 
   def _emitPlsinStageBoundary(self, module: Module, element):
