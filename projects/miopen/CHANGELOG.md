@@ -88,6 +88,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the kernels that support it, instead of staging fp32 and casting. With
   `MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC` set, only kernels that accumulate into dW atomically
   are rejected.
+* [Conv] `ConvHipConv` is not applicable on a GPU whose architecture libMIOpen was built without,
+  such as gfx950 in a gfx942-only build. Previously MIOpen selected the solver on such a GPU and
+  the launch failed.
 
 ### Removed
 * Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
