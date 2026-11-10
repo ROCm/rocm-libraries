@@ -70,7 +70,7 @@ jobs:
     name: HipDNN Windows Superbuild
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: azure-windows-scale-rocm
+    runs-on: az-windows-scale-rocm-default-prod
     defaults:
       run:
         shell: bash
@@ -376,7 +376,7 @@ jobs:
     name: HipDNN Linux Superbuild
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: azure-linux-scale-rocm
+    runs-on: az-linux-scale-rocm-default-prod
     env:
       # Feeds both -DGPU_TARGETS and the multi-arch nightly device extra
       # (rocm[...,device-<GPU_TARGET>]), both of which need a concrete gfx target rather
@@ -511,8 +511,8 @@ jobs:
       #
       # The other Linux lane in this repo (component-ci-miopen.yml) calls
       # `dvc pull` with no install step, but it runs inside a container image
-      # that ships DVC. This job runs on a bare azure-linux-scale-rocm runner,
-      # which does not.
+      # that ships DVC. This job runs on a bare runner, whose image is not
+      # guaranteed to.
       - uses: iterative/setup-dvc@4bdfd2b0f6f1ad7e08afadb03b1a895c352a5239 # v2.0.0
         with:
           version: '3.62.0'
