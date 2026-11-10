@@ -76,6 +76,7 @@ inline constexpr int64_t LOOP_ROWS = 0; ///< output rows, any stride
 inline constexpr int64_t LOOP_RING = 1; ///< row ring, height stride 1
 inline constexpr int64_t LOOP_RING_DMA = 2; ///< row ring with LDS DMA (gfx950)
 inline constexpr int64_t LOOP_RING_FMA = 3; ///< row ring on FMA (exact fp32)
+inline constexpr int64_t LOOP_ROWS_FMA = 4; ///< output rows on FMA (exact fp32, any stride)
 
 /// The activation layouts (CONV_K3_LAYOUT): the graph's x and dy are channels-first (0) or
 /// channels-last (1: transposed into LDS; 2: kept channels-last, read with LDS transpose reads).
@@ -94,7 +95,7 @@ struct WrwConfig
     int64_t bk = 0;
     int64_t bc = 0;
     int64_t bq = 0;
-    /// Filter rows per block (loop 0); the filter height (loops 1 to 3).
+    /// Filter rows per block (loops 0 and 4); the filter height (loops 1 to 3).
     int64_t fr = 0;
     /// The filter width, its stride and its dilation.
     int64_t s = 0;

@@ -711,7 +711,8 @@ std::vector<ConfigRefusal> configRefusals()
              f.atom = "wmma11_f16";
              f.atomId = 12;
          }},
-        {"LoopUnknown", [](ConfigFields& f) { f.loop = 4; }},
+        {"LoopUnknown", [](ConfigFields& f) { f.loop = 5; }},
+        {"LoopNegative", [](ConfigFields& f) { f.loop = -1; }},
         {"LayoutNotTheGraphs", [](ConfigFields& f) { f.layout = 1; }},
         {"LayoutUnknown", [](ConfigFields& f) { f.layout = 3; }},
         {"TkSetOnMatrixCores", [](ConfigFields& f) { f.tk = 4; }},
@@ -977,6 +978,60 @@ TEST(TestConvWrwKernelMatch, TheFmaRingNeedsUnitWidthStrideAndWholeVectorRows)
     oddIn.input = {10, 13};
     oddIn.postPadding = {1, 0};
     EXPECT_FALSE(admits(fmaFields(), "gfx1100", oddIn));
+}
+
+TEST(TestConvWrwKernelMatch, TheFmaRowsTakeAnyStrideAndScalarUnits)
+{
+    // Width stride 2 (x 16, dy 8): the FMA output rows (one filter row per block, so the
+    // windows fit gfx1100's LDS) serve it, the FMA ring does not.
+    auto strided = widthStride2Shape();
+    strided.dataType = DataType::FLOAT;
+    auto rows = fmaFields();
+    rows.loop = 4;
+    rows.fr = 1;
+    rows.sw = 2;
+    EXPECT_TRUE(admits(rows, "gfx1100", strided));
+    auto ring = rows;
+    ring.loop = 3;
+    ring.fr = 3;
+    EXPECT_FALSE(admits(ring, "gfx1100", strided));
+    // Height stride 2: the output rows, not the ring.
+    auto tall = floatShape();
+    tall.stride = {2, 1};
+    auto rowsTall = fmaFields();
+    rowsTall.loop = 4;
+    rowsTall.fr = 1;
+    EXPECT_TRUE(admits(rowsTall, "gfx1100", tall));
+    EXPECT_FALSE(admits(fmaFields(), "gfx1100", tall));
+    // Rows not whole vectors of 4 (x 13): scalar units serve them, vectors of 4 do not; the
+    // ring takes no scalar units.
+    auto odd = floatShape();
+    odd.input = {10, 13};
+    EXPECT_FALSE(admits(rowsTall, "gfx1100", odd));
+    auto scalar = rowsTall;
+    scalar.vec = 1;
+    EXPECT_TRUE(admits(scalar, "gfx1100", odd));
+    auto ringScalar = fmaFields();
+    ringScalar.vec = 1;
+    EXPECT_FALSE(admits(ringScalar, "gfx1100", floatShape()));
+    // Channels-last rows need no whole vectors: vectors of 4 channels serve x 13.
+    auto oddNhwc = odd;
+    oddNhwc.channelsLast = true;
+    auto rowsNhwc = rowsTall;
+    rowsNhwc.layout = 1;
+    EXPECT_TRUE(admits(rowsNhwc, "gfx1100", oddNhwc));
+    // Width stride 3 on vectors of 4 (x 24, dy 8): the output rows need no vector of whole
+    // stride phases.
+    auto stride3 = floatShape();
+    stride3.input = {10, 24};
+    stride3.stride = {1, 3};
+    auto rows3 = rowsTall;
+    rows3.sw = 3;
+    EXPECT_TRUE(admits(rows3, "gfx1100", stride3));
+    // A loop past the last is refused.
+    auto past = rowsTall;
+    past.loop = 5;
+    EXPECT_FALSE(admits(past, "gfx1100", floatShape()));
 }
 
 TEST(TestConvWrwKernelMatch, AlignedUnitsNeedWholeVectorRowsOfXAndDy)
@@ -1477,6 +1532,13 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
     // (ceil(34 / 4) + 1) x 4 = 40 positions x (64 + 4), fp32.
     auto fma = configOf(fmaFields());
     EXPECT_EQ(conv_wrw::ldsBytesOf(fma, 4), (4 * 32 * 36 + 2 * 40 * 68) * 4);
+    // FMA output rows: two buffers of the dy chunk (32 x 36) and 3 windows of
+    // (ceil(34 / 4) + 1) x 4 = 40 positions x 68, fp32; scalar units take no extra vector.
+    auto fmaRows = fmaFields();
+    fmaRows.loop = 4;
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(fmaRows), 4), 2 * (32 * 36 + 3 * 40 * 68) * 4);
+    fmaRows.vec = 1;
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(fmaRows), 4), 2 * (32 * 36 + 3 * 34 * 68) * 4);
 }
 
 TEST(TestConvWrwDefines, EveryFieldIsADefine)

@@ -44,7 +44,8 @@
  *
  * Every config of the installed catalog that the kernel match admits on this device runs on
  * every case, in fp32, fp16 and bf16 (matrix-core loops, gfx950's DMA ring and transpose reads,
- * and the fp32 FMA ring wherever widths are whole vectors): channels-first and channels-last, 1-D, 2-D and 3-D,
+ * the fp32 FMA ring wherever widths are whole vectors, and the fp32 FMA output rows for any
+ * stride and any width): channels-first and channels-last, 1-D, 2-D and 3-D,
  * groups, stride 2, dilation (2, 3 along the width, 12 for the deeplab rows), padding below, at
  * and past the filter, odd channel counts and partial tiles, both dw layouts under either
  * activation layout, and true convolution. Each compiled config's static LDS is checked against
@@ -604,7 +605,11 @@ TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures
         EXPECT_EQ(kernel.source.entryPoint, "ConvWrw");
         const auto dtype = stringOf(kernel, "dtype");
         const int elementBytes = dtype == "FLOAT" ? 4 : 2;
-        EXPECT_EQ(config.vec * elementBytes, 16);
+        // 16-byte vectors; the FMA output rows also take scalar units.
+        if(config.loop != conv_wrw::LOOP_ROWS_FMA || config.vec != 1)
+        {
+            EXPECT_EQ(config.vec * elementBytes, 16);
+        }
         int archs = 0;
         for(const char* arch : ARCHS)
         {
@@ -622,7 +627,7 @@ TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures
         EXPECT_GT(archs, 0) << "a config no architecture runs";
         loops.insert(config.loop);
     }
-    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3}));
+    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4}));
 }
 
 } // namespace

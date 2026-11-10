@@ -22,7 +22,7 @@ constexpr int k3DivUp(int a, int b)
 }
 
 /// Static LDS bytes of a config. loop 0/1 matrix core (K3Tiles, two buffers), 2 LDS DMA (NS
-/// slots), 3 FMA (an R + 1 row dy ring and two x windows). eb: element bytes; wave: lanes per
+/// slots), 4 FMA output rows (two buffers of a dy chunk and FR windows), 3 FMA (an R + 1 row dy ring and two x windows). eb: element bytes; wave: lanes per
 /// wave; fr: the filter rows a loop-0 block stages, the filter height otherwise.
 constexpr long long k3LdsBytes(int loop,
                                int layout,
@@ -42,6 +42,14 @@ constexpr long long k3LdsBytes(int loop,
                                int align,
                                int ns)
 {
+    if(loop == 4)
+    {
+        const int win = (bq - 1) * sw + (s - 1) * dw + 1;
+        const int nbv = k3DivUp(win, vec) + (vec > 1 ? 1 : 0);
+        const long long aElems = static_cast<long long>(bq) * (bk + 4);
+        const long long bElems = static_cast<long long>(fr) * nbv * vec * (bc + 4);
+        return 2 * (aElems + bElems) * eb;
+    }
     if(loop == 3)
     {
         const int win = bq + (s - 1) * dw;
