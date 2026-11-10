@@ -733,6 +733,25 @@ TEST(TestConvStemBwdKernelMatch, TheBaseConfigsServeTheBaseProblem)
         matchesKernel(PACK, fixture.context(), kernelOf(ConfigFields{}, "BFLOAT16"), *bound));
 }
 
+TEST(TestConvStemBwdKernelMatch, FmaTakes16BitOnlyWithoutAMatrixCoreForIt)
+{
+    // 16-bit FMA (8-element vectors, chunks of 16): gfx906 and gfx900 (no matrix core) only.
+    auto f = fmaFields();
+    f.vec = 8;
+    f.kc = 16;
+    EXPECT_TRUE(admits(f, "gfx906"));
+    EXPECT_TRUE(admits(f, "gfx900"));
+    EXPECT_FALSE(admits(f, "gfx942"));
+    EXPECT_FALSE(admits(f, "gfx1100"));
+    auto bf16 = baseShape();
+    bf16.dataType = DataType::BFLOAT16;
+    EXPECT_TRUE(admits(f, "gfx906", bf16));
+    EXPECT_FALSE(admits(f, "gfx908", bf16)); // gfx908's own bf16 atom
+    EXPECT_FALSE(conv_stem_bwd::runsMatrixAtomFor("f16", "gfx906:sramecc+:xnack-"));
+    EXPECT_TRUE(conv_stem_bwd::runsMatrixAtomFor("bf16", "gfx908"));
+    EXPECT_FALSE(conv_stem_bwd::runsMatrixAtomFor("f32", "gfx1201"));
+}
+
 TEST(TestConvStemBwdKernelMatch, ChannelsFirstVectorsNeedWholeVectorRowsOfDy)
 {
     auto shape = baseShape();

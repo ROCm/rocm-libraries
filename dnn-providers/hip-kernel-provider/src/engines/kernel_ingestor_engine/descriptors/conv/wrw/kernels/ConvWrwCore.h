@@ -1583,6 +1583,29 @@ __device__ void k3WrwRing(const K3Args& a)
         a, acc, g, t * a.fr + r0, a.ft * a.fr, k0, c0, wk, wc, lane, bz, phases, (t + 1) * a.fr);
 }
 
+/// An FMA thread's run of TC (a multiple of 4) input channels' partials from channel c of the
+/// row o (o[c]): 16-byte stores when the run is whole within cg and cg is a whole number of
+/// quads (so the run is 16-byte aligned), else element by element up to cg. Lanes hold
+/// consecutive runs, so a wave writes one contiguous stretch (single-float stores 16 bytes
+/// apart made FCN-32s's conv kernel ~5x slower on gfx906).
+template <int TC>
+__device__ inline void k3StoreFmaRun(float* o, int c, int cg, const float (&v)[TC])
+{
+    typedef float f4 __attribute__((ext_vector_type(4)));
+    static_assert(TC % 4 == 0, "K3 FMA runs are whole quads");
+    if(cg % 4 == 0 && c + TC <= cg)
+    {
+#pragma unroll
+        for(int y = 0; y < TC; y += 4)
+            *reinterpret_cast<f4*>(o + c + y) = f4{v[y], v[y + 1], v[y + 2], v[y + 3]};
+        return;
+    }
+#pragma unroll
+    for(int y = 0; y < TC; ++y)
+        if(c + y < cg)
+            o[c + y] = v[y];
+}
+
 // ---------------------------------------------------------------------------------------------
 // FMA row-ring kernel (exact fp32 where no fp32 matrix core exists: RDNA). The row-ring loop of
 // k3WrwRing with vector-ALU outer products: LDS tiles are [position][channel] rows, so a
@@ -1987,13 +2010,8 @@ __device__ void k3WrwRingFma(const K3Args& a)
                 const int k = k0 + tk * TK + x;
                 float* o = out + static_cast<long long>((t * R + r) * S + s) * kc
                            + static_cast<long long>(k) * cg;
-#pragma unroll
-                for(int y = 0; y < TC; ++y)
-                {
-                    const int c = c0 + tc * TC + y;
-                    if(k < kg && c < cg)
-                        o[c] = acc[r * S + s][x][y];
-                }
+                if(k < kg)
+                    k3StoreFmaRun<TC>(o, c0 + tc * TC, cg, acc[r * S + s][x]);
             }
 }
 
@@ -2368,13 +2386,8 @@ __device__ void k3WrwRowsFma(const K3Args& a)
                 const int k = k0 + tk * TK + x;
                 float* o = out + static_cast<long long>((fr0 + f) * S + s) * kc
                            + static_cast<long long>(k) * cg;
-#pragma unroll
-                for(int y = 0; y < TC; ++y)
-                {
-                    const int c = c0 + tc * TC + y;
-                    if(k < kg && c < cg)
-                        o[c] = acc[f * S + s][x][y];
-                }
+                if(k < kg)
+                    k3StoreFmaRun<TC>(o, c0 + tc * TC, cg, acc[f * S + s][x]);
             }
     }
 }
@@ -3036,9 +3049,53 @@ __device__ void k3WrwRingDmaTr(const K3Args& a)
 /// 256 threads are 64 four-channel quads of dw by 4 split groups; group j adds splits j, j + 4,
 /// j + 8, ... in order, and the four group sums are added in group order through LDS. The
 /// association depends only on the split count, so the result is bitwise reproducible.
+///
+/// K C T R S filters (a.rows): a block is one output channel's run of K3_REDUCE_ROW_CHANNELS
+/// channels by all taps, contiguous in dw. Each element sums its splits in split order (reads:
+/// consecutive threads take consecutive channels of one tap), the sums are transposed in LDS,
+/// and the run is written contiguously; the quad blocks would write it a channel apart, taps
+/// elements between neighbours.
+template <class T>
+__device__ inline void k3ReduceRows(const K3ReduceArgs& a)
+{
+    constexpr int CB = K3_REDUCE_ROW_CHANNELS;
+    __shared__ float tile[CB * K3_REDUCE_ROW_MAX_TAPS];
+    const int cTiles = (a.cg + CB - 1) / CB;
+    const long long gk = blockIdx.x / cTiles; // g kg + k
+    const int c0 = static_cast<int>(blockIdx.x % cTiles) * CB;
+    const int cn = a.cg - c0 < CB ? a.cg - c0 : CB;
+    const int k = static_cast<int>(gk % a.kg);
+    const long long g = gk / a.kg;
+    const int taps = a.taps;
+    for(int e = threadIdx.x; e < CB * taps; e += blockDim.x)
+    {
+        const int tap = e / CB, cl = e % CB;
+        if(cl >= cn)
+            continue;
+        const float* src
+            = a.partial + ((g * taps + tap) * a.kg + k) * static_cast<long long>(a.cg) + c0 + cl;
+        float sum = 0.0f;
+        for(int sp = 0; sp < a.splits; ++sp)
+            sum += __builtin_nontemporal_load(src + sp * a.partialElems);
+        tile[cl * taps + tap] = sum;
+    }
+    __syncthreads();
+    T* o = static_cast<T*>(a.dw) + gk * a.wk + static_cast<long long>(c0) * taps;
+    for(int e = threadIdx.x; e < cn * taps; e += blockDim.x)
+    {
+        const int cl = e / taps, tap = e - cl * taps;
+        o[cl * taps + (a.flip ? taps - 1 - tap : tap)] = K1Elem<T>::store(tile[e]);
+    }
+}
+
 template <class T>
 __device__ inline void k3Reduce(const K3ReduceArgs& a)
 {
+    if(a.rows)
+    {
+        k3ReduceRows<T>(a);
+        return;
+    }
     typedef float f4 __attribute__((ext_vector_type(4)));
     __shared__ f4 part[3][64];
     T* dw = static_cast<T*>(a.dw);

@@ -1260,16 +1260,54 @@ TEST(TestConvWrwKernelMatch, TransposeReadsServeEveryMatrixLoopOnGfx950)
     EXPECT_FALSE(admits(f, "gfx950", baseShape()));
 }
 
-TEST(TestConvWrwKernelMatch, TheFmaRingTakesFp32Only)
+TEST(TestConvWrwKernelMatch, TheFmaLoopsTake16BitOnlyWithoutAMatrixCoreForIt)
 {
-    // A 16-bit FMA config otherwise whole (8-element vectors, a 16-wide row).
+    // A 16-bit FMA config otherwise whole (8-element vectors, a 16-wide row): only where no
+    // matrix atom takes the type (gfx906, gfx900); fp32 everywhere.
     auto shape = alignedShape();
     auto f = fmaFields();
     f.vec = 8;
     EXPECT_FALSE(admits(f, "gfx1100", shape));
+    EXPECT_FALSE(admits(f, "gfx942", shape));
+    EXPECT_FALSE(admits(f, "gfx908", shape));
+    EXPECT_TRUE(admits(f, "gfx906", shape));
+    EXPECT_TRUE(admits(f, "gfx906:sramecc+:xnack-", shape));
+    EXPECT_TRUE(admits(f, "gfx900", shape));
+    auto bf16 = shape;
+    bf16.dataType = DataType::BFLOAT16;
+    EXPECT_TRUE(admits(f, "gfx906", bf16));
+    EXPECT_FALSE(admits(f, "gfx908", bf16)); // gfx908's own bf16 atom
+    EXPECT_FALSE(admits(f, "gfx1201", bf16));
     shape.dataType = DataType::FLOAT;
     f.vec = 4;
     EXPECT_TRUE(admits(f, "gfx1100", shape));
+    EXPECT_TRUE(admits(f, "gfx906", shape));
+    EXPECT_FALSE(conv_wrw::runsMatrixAtomFor("f16", "gfx906"));
+    EXPECT_FALSE(conv_wrw::runsMatrixAtomFor("f32", "gfx1100"));
+    EXPECT_TRUE(conv_wrw::runsMatrixAtomFor("bf16", "gfx908"));
+    EXPECT_TRUE(conv_wrw::runsMatrixAtomFor("f16", "gfx1201"));
+}
+
+TEST(TestConvWrwKernelMatch, FmaTilesAreWholeVectorsOfChannels)
+{
+    // 16-bit vectors of 8 on gfx906: a 4-channel tile (one thread quad) is not one; fp32's 4 is.
+    auto shape = alignedShape();
+    shape.c = 4;
+    auto f = fmaFields();
+    f.vec = 8;
+    f.bc = 8;
+    EXPECT_TRUE(admits(f, "gfx906", shape));
+    f.bc = 4;
+    EXPECT_FALSE(admits(f, "gfx906", shape));
+    f.bc = 8;
+    f.bk = 36;
+    f.tk = 4;
+    EXPECT_FALSE(admits(f, "gfx906", shape));
+    shape.dataType = DataType::FLOAT;
+    f.vec = 4;
+    f.bk = 32;
+    f.bc = 4;
+    EXPECT_TRUE(admits(f, "gfx906", shape));
 }
 
 TEST(TestConvWrwKernelMatch, TheFmaRingNeedsUnitWidthStrideAndWholeVectorRows)
@@ -1617,8 +1655,9 @@ TEST(TestConvWrwLaunch, TheRingFillsTracksStepsSplitsAndTheWorkspace)
     EXPECT_EQ(a.partialElems, 9 * 40 * 24);
     EXPECT_EQ(launch->workspaceBytes, size_t{6} * 9 * 40 * 24 * 4);
     EXPECT_EQ(launch->kernelType, "K1AtomMfma32F16");
-    // The reduce: 9 taps x 40 k x 6 quads of c, 64 per block.
-    EXPECT_EQ(launch->reduceGrid, (9u * 40 * 6 + 63) / 64);
+    // The reduce: K C R S, so row blocks: 40 k x one run of up to 64 channels' 9 taps.
+    EXPECT_EQ(launch->reduceGrid, 40u);
+    EXPECT_EQ(launch->reduce.rows, 1);
     EXPECT_EQ(launch->reduceBlock, 256u);
     EXPECT_EQ(launch->reduce.elems, 40 * 24 * 9);
     EXPECT_EQ(launch->reduce.partialElems, a.partialElems);
@@ -1718,6 +1757,38 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     EXPECT_EQ(krsc->reduce.wk, 24 * 9);
     EXPECT_EQ(krsc->reduce.wc, 1);
     EXPECT_EQ(krsc->reduce.wtap, 24);
+    // K C T R S of 2 to 64 taps reduces by rows (a run of channels' taps, contiguous in dw);
+    // K T R S C, one tap, or more than 64 taps by quads of channels.
+    EXPECT_EQ(kcrs->reduce.rows, 1);
+    EXPECT_EQ(kcrs->reduceGrid, 40u); // 40 output channels x one run of 24 channels
+    EXPECT_EQ(krsc->reduce.rows, 0);
+    EXPECT_EQ(krsc->reduceGrid, (9u * 40 * 6 + 63) / 64); // 9 taps x 40 k x 6 quads, 64 a block
+    auto wide = baseShape();
+    wide.c = 136; // three runs of 64 channels
+    wide.k = 8;
+    const auto runs = launchOf(rowsFields(), wide);
+    ASSERT_TRUE(runs.has_value());
+    EXPECT_EQ(runs->reduce.rows, 1);
+    EXPECT_EQ(runs->reduceGrid, 8u * 3);
+    auto many = baseShape();
+    many.input = {10, 12};
+    many.filter = {9, 9}; // 81 taps
+    many.prePadding = many.postPadding = {4, 4};
+    auto f81 = rowsFields();
+    f81.s = 9;
+    f81.fr = 1;
+    const auto quadsOnly = launchOf(f81, many);
+    ASSERT_TRUE(quadsOnly.has_value());
+    EXPECT_EQ(quadsOnly->reduce.rows, 0);
+    auto pointwise = baseShape();
+    pointwise.filter = {1, 1};
+    pointwise.prePadding = pointwise.postPadding = {0, 0};
+    auto f1 = rowsFields();
+    f1.s = 1;
+    f1.fr = 1;
+    const auto oneTap = launchOf(f1, pointwise);
+    ASSERT_TRUE(oneTap.has_value());
+    EXPECT_EQ(oneTap->reduce.rows, 0);
 
     auto convolution = baseShape();
     convolution.mode = ConvMode::CONVOLUTION;
