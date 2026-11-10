@@ -250,12 +250,12 @@ namespace
                         opt.boost_tol_float = float_tol;
                         opt.boost_device    = device;
                         check_csr_matrix<Kind::ilu, T>(handle,
-                                                         a,
-                                                         opt,
-                                                         "n " + std::to_string(a.n) + " tol "
-                                                             + std::to_string(tol) + " float_tol "
-                                                             + std::to_string(float_tol)
-                                                             + " device " + std::to_string(device));
+                                                       a,
+                                                       opt,
+                                                       "n " + std::to_string(a.n) + " tol "
+                                                           + std::to_string(tol) + " float_tol "
+                                                           + std::to_string(float_tol) + " device "
+                                                           + std::to_string(device));
                     }
                 }
             }
@@ -292,11 +292,11 @@ TEST_F(PrecondGeneric, spilu0_numeric_boost_float_tolerance)
             opt.boost_val       = 1.0;
             opt.boost_tol_float = float_tol;
             opt.boost_device    = device;
-            check_csr_matrix<Kind::ilu, float>(
-                handle,
-                a,
-                opt,
-                std::string(float_tol ? "float" : "double") + (device ? " device" : " host"));
+            check_csr_matrix<Kind::ilu, float>(handle,
+                                               a,
+                                               opt,
+                                               std::string(float_tol ? "float" : "double")
+                                                   + (device ? " device" : " host"));
         }
     }
 }
