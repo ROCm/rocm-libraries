@@ -52,6 +52,8 @@ struct TDMConfig
 
 union TDM_GROUP0
 {
+    CK_TILE_DEVICE constexpr TDM_GROUP0() : bitfield{0, 0, 0, 0} {}
+
     CK_TILE_DEVICE TDM_GROUP0(uintptr_t lds_addr_in,
                               uintptr_t global_addr_in,
                               uint32_t gather_idx_size_in,
@@ -70,6 +72,12 @@ union TDM_GROUP0
     {
         global_addr_lo = value & 0xFFFFFFFF;
         global_addr_hi = (value >> 32);
+    }
+
+    /// The 57-bit global address that globalAddr() stored.
+    CK_TILE_DEVICE uint64_t getGlobalAddr() const
+    {
+        return (static_cast<uint64_t>(global_addr_hi) << 32) | global_addr_lo;
     }
 
     struct
