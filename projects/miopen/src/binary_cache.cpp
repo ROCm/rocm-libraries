@@ -83,8 +83,9 @@ static fs::path ComputeUserCachePath()
             const auto fallback = fs::temp_directory_path() / ".cache" / "miopen" / version;
             MIOPEN_LOG_NQ_(miopen::LoggingLevel::Warning,
                            "Kernel cache path '"
-                               << p << "' is on a network filesystem. " << "Redirecting to '"
-                               << fallback << "'; cached kernels may not persist. "
+                               << p.string() << "' is on a network filesystem. "
+                               << "Redirecting to '" << fallback.string()
+                               << "'; cached kernels may not persist. "
                                << "Set MIOPEN_CUSTOM_CACHE_DIR to node-local storage.");
             p = fallback;
         }
@@ -93,7 +94,7 @@ static fs::path ComputeUserCachePath()
         {
             MIOPEN_LOG_NQ_(miopen::LoggingLevel::Warning,
                            "Kernel cache path '"
-                               << p << "' is on a network filesystem. "
+                               << p.string() << "' is on a network filesystem. "
                                << "This may cause slow algorithm finds or timeouts. "
                                << "Set MIOPEN_CUSTOM_CACHE_DIR to node-local storage.");
         }

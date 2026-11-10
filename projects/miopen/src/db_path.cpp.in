@@ -161,14 +161,13 @@ fs::path PrepareUserDbPath()
     if(GetFilesystemChecker().IsNetworkedFilesystem(result))
     {
 #if !MIOPEN_BUILD_DEV
-        // Only the default path may be redirected; explicit overrides are preserved.
         if(p.empty())
         {
             const auto fallback = fs::temp_directory_path() / ".config" / "miopen";
             MIOPEN_LOG_NQ_(miopen::LoggingLevel::Warning,
                 "User find/performance database path '"
-                << result << "' is on a network filesystem. Redirecting to '" << fallback
-                << "'; tuning results may not persist. "
+                << result.string() << "' is on a network filesystem. Redirecting to '"
+                << fallback.string() << "'; tuning results may not persist. "
                 << "Set MIOPEN_USER_DB_PATH to node-local storage.");
             result = fallback;
         }
@@ -177,7 +176,7 @@ fs::path PrepareUserDbPath()
         {
             MIOPEN_LOG_NQ_(miopen::LoggingLevel::Warning,
                 "User find/performance database path '"
-                << result << "' is on a network filesystem. "
+                << result.string() << "' is on a network filesystem. "
                 << "This may cause slow database access, lock waits, or timeouts. "
                 << "Set MIOPEN_USER_DB_PATH to node-local storage.");
         }

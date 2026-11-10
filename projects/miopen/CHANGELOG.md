@@ -32,9 +32,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   does the weight tensor in every case.
 
 ### Added
-* [DB] Added warnings for network-backed user kernel caches and find/performance databases,
-  including explicit overrides and quiet warmup, while preserving default-path temporary
-  fallbacks and initializing shared kernel-cache paths once.
+* [DB] Added a warning when the user kernel cache or find/performance database path is on a
+  network filesystem.
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.

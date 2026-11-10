@@ -9,34 +9,27 @@ Kernel cache
 MIOpen caches binary kernels to disk so they don't need to be compiled the next time you run the
 application. This cache is stored in ``$HOME/.cache/miopen`` by default, but you can change this at
 build time by setting the ``MIOPEN_CACHE_DIR`` CMake variable.
-At runtime, ``MIOPEN_CUSTOM_CACHE_DIR`` overrides this location. MIOpen appends a version-specific
-subdirectory to the selected kernel cache directory.
+At runtime, ``MIOPEN_CUSTOM_CACHE_DIR`` overrides this location.
 
 .. _cache-storage:
 
 Choosing cache and database storage
 ====================================================
 
-Prefer node-local storage for the writable kernel cache and user find/performance databases.
-Network filesystems can cause slow finds or tuning, lock waits, and timeouts.
+Prefer node-local storage for the kernel cache and user find/performance databases. Network
+filesystems can cause slow finds, lock waits, and timeouts.
 
 .. code:: bash
 
    export MIOPEN_CUSTOM_CACHE_DIR="/local/scratch/$USER/miopen/cache"
    export MIOPEN_USER_DB_PATH="/local/scratch/$USER/miopen/db"
 
-Replace ``/local/scratch`` with verified node-local storage. ``/tmp`` and ``$TMPDIR`` are
-not necessarily local.
+Replace ``/local/scratch`` with node-local storage; ``/tmp`` is not necessarily local.
 
-MIOpen warns about recognized network-backed paths, including explicit overrides, which
-remain unchanged. Non-development builds redirect network-backed default paths to
-``.cache/miopen/<version>`` (kernels) or ``.config/miopen`` (find/performance databases)
-under the temporary directory; cached kernels and tuning results may not persist.
-Development builds warn without redirecting.
-
-Warnings honor ``MIOPEN_LOG_LEVEL``, including during quiet warmup. SQLite-backed caches
-also have `network-filesystem limitations <https://www.sqlite.org/useovernet.html>`_;
-in particular, `WAL mode is not supported over network filesystems <https://www.sqlite.org/wal.html>`_.
+MIOpen warns when these paths are on a recognized network filesystem. Explicit overrides are used
+as given. Non-development builds redirect network-backed default paths to the temporary directory,
+so cached kernels and tuning results may not persist. SQLite also
+`does not support WAL mode over network filesystems <https://www.sqlite.org/wal.html>`_.
 
 
 Clear the cache
