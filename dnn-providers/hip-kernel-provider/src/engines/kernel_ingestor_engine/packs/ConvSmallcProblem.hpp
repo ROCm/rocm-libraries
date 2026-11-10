@@ -44,7 +44,8 @@ std::optional<SmallcProblem>
 /// A catalog config: compile-time filter geometry and tile, read from its metadata.
 struct Config
 {
-    std::string atom; ///< conv_igemm 16x16 atom name
+    std::string atom; ///< conv_igemm 16x16 atom name, or "fma" for the FMA kernel
+    bool fma = false;
     std::string_view kernelType; ///< K1Atom* type
     std::string archs; ///< ship list
     int wave = 0;
@@ -59,13 +60,14 @@ struct Config
     int sp() const;
     /// Formatted weight row length: cmax kd r sp rounded up to whole MMA steps.
     int kpl() const;
+    /// Output channels per block: 16 fn wn (MMA), 16 wn (FMA).
     int blockColumns() const
     {
-        return wn * fn * 16;
+        return fma ? wn * 16 : wn * fn * 16;
     }
     int blockThreads() const
     {
-        return wm * wq * wn * wave;
+        return fma ? 256 : wm * wq * wn * wave;
     }
 };
 

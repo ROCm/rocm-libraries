@@ -401,7 +401,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     // after it keeps the next tile's DMA out of the slots.
     constexpr int GP = FN * DIM * static_cast<int>(sizeof(TO)) / 16; // granules per pixel
     constexpr bool STAGED = EPI == 1 && sizeof(TO) == 2 && PP == 0 && (GP & (GP - 1)) == 0
-                            && GP <= 8 && DIM * GP * NW <= NG;
+                            && GP <= 8 && WAVE / GP <= DIM && DIM * GP * NW <= NG;
     auto storeStaged = [&](Raw16 * slotBase, const Tile& tc, int nb) __attribute__((always_inline))
     {
         Raw16* slot = slotBase + wave * DIM * GP;

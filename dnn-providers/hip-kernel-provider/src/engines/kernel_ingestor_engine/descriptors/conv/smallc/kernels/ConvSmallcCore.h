@@ -415,7 +415,9 @@ __device__ __attribute__((always_inline)) void smallcConvFma(const SmallcArgs& a
     }
     __syncthreads();
 
-    const int g = tid % NG, run = tid / NG;
+    // Channel group per run of RUNS threads (a whole wave or more when RUNS >= the wave), so a
+    // wave's weight reads are one address (an LDS broadcast).
+    const int g = tid / RUNS, run = tid % RUNS;
     const int prow = run / (TW / FM), pcol = (run % (TW / FM)) * FM;
     float acc[FM][FN];
 #pragma unroll
@@ -425,11 +427,17 @@ __device__ __attribute__((always_inline)) void smallcConvFma(const SmallcArgs& a
             acc[p][j] = 0.0f;
     const T* xb = win + prow * SH * WCOLS + pcol * SW;
     const float* wb = wl + g * FN;
+    // A filter row's taps for FM adjacent outputs span XS window columns: read them once.
+    constexpr int XS = (FM - 1) * SW + (S - 1) * DW + 1;
     for(int rho = 0; rho < ROWS; ++rho)
     {
         const int r = rho % R, ct = rho / R;
         const int t = ct % KD, c = ct / KD;
         const T* xr = xb + c * CS + t * TS + r * DH * WCOLS;
+        float xv[XS];
+#pragma unroll
+        for(int q = 0; q < XS; ++q)
+            xv[q] = K1Elem<T>::load(xr[q]);
 #pragma unroll
         for(int s = 0; s < S; ++s)
         {
@@ -438,15 +446,11 @@ __device__ __attribute__((always_inline)) void smallcConvFma(const SmallcArgs& a
 #pragma unroll
             for(int j = 0; j < FN; ++j)
                 wv[j] = wp[j];
-            float xv[FM];
-#pragma unroll
-            for(int p = 0; p < FM; ++p)
-                xv[p] = K1Elem<T>::load(xr[p * SW + s * DW]);
 #pragma unroll
             for(int p = 0; p < FM; ++p)
 #pragma unroll
                 for(int j = 0; j < FN; ++j)
-                    acc[p][j] = __builtin_fmaf(xv[p], wv[j], acc[p][j]);
+                    acc[p][j] = __builtin_fmaf(xv[p * SW + s * DW], wv[j], acc[p][j]);
         }
     }
 

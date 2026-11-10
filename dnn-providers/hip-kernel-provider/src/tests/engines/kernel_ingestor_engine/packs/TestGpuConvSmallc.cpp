@@ -382,12 +382,13 @@ void runCase(ConvShape shape)
         });
         EXPECT_EQ(mismatches, 0);
     }
+    // fp32 has FMA configs everywhere; 16-bit has MMA configs on the matrix-core GPUs (no bf16
+    // ones on gfx908).
     const auto arch = std::string(currentDeviceProperties().gcnArchName);
-    const bool mma = arch.rfind("gfx9", 0) == 0 && arch.rfind("gfx906", 0) != 0;
-    const bool rdna16
-        = (arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0) && !std::is_same_v<T, float>;
+    const bool mma = (arch.rfind("gfx9", 0) == 0 && arch.rfind("gfx906", 0) != 0)
+                     || arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0;
     const bool bf16On908 = arch.rfind("gfx908", 0) == 0 && std::is_same_v<T, BFloat16>;
-    if((mma || rdna16) && !bf16On908)
+    if(std::is_same_v<T, float> || (mma && !bf16On908))
     {
         EXPECT_GE(ran, 1) << "no catalog config serves this case";
     }

@@ -82,6 +82,8 @@ constexpr std::array<AtomStep, 9> ATOMS{{
     {"wmma12_bf16", 16},
 }};
 
+constexpr int FMA_THREADS = 256;
+
 int atomStep(std::string_view atom)
 {
     for(const auto& entry : ATOMS)
@@ -241,14 +243,24 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     }
     config.atom = *atom;
     config.archs = *archs;
-    const auto info = conv_igemm::atomNamed(config.atom);
-    config.ka = atomStep(config.atom);
-    if(!info.has_value() || info->wave == 0 || config.ka == 0)
+    // "fma": the FMA kernel (256 threads, step 1); otherwise a 16x16 MMA atom.
+    config.fma = config.atom == "fma";
+    if(config.fma)
     {
-        return std::nullopt;
+        config.ka = 1;
+        config.wave = 0;
     }
-    config.kernelType = info->kernelType;
-    config.wave = info->wave;
+    else
+    {
+        const auto info = conv_igemm::atomNamed(config.atom);
+        config.ka = atomStep(config.atom);
+        if(!info.has_value() || info->wave == 0 || config.ka == 0)
+        {
+            return std::nullopt;
+        }
+        config.kernelType = info->kernelType;
+        config.wave = info->wave;
+    }
     int atomId = 0;
     const std::array<std::pair<const char*, int*>, 18> ints{{{"atom_id", &atomId},
                                                              {"cmax", &config.cmax},
@@ -303,6 +315,17 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         {
             return std::nullopt;
         }
+    }
+    if(config.fma)
+    {
+        // 256 threads cover the tile exactly: NG = BN / FN channel groups x FM-column runs.
+        const int bn = config.blockColumns(), tw = config.wq * 16;
+        if(bn % config.fn != 0 || FMA_THREADS % (bn / config.fn) != 0 || tw % config.fm != 0
+           || FMA_THREADS / (bn / config.fn) * config.fm != config.wm * tw)
+        {
+            return std::nullopt;
+        }
+        return config;
     }
     // A lane's k run and the filter rows align: one divides the other.
     const int kpl = config.wave == 64 ? config.ka / 4 : config.ka;
@@ -437,7 +460,9 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     if(!problem.has_value() || *dtype != data_objects::EnumNameDataType(problem->base.dataType)
        || !conv_igemm::atomRunsOn(config->atom, context.deviceProperties.gcnArchName)
        || !shipsTo(config->archs, context.deviceProperties.gcnArchName)
-       || conv_igemm::atomElement(config->atom) != conv_igemm::dataElement(problem->base.dataType))
+       || (!config->fma
+           && conv_igemm::atomElement(config->atom)
+                  != conv_igemm::dataElement(problem->base.dataType)))
     {
         return std::nullopt;
     }
@@ -552,7 +577,11 @@ public:
         const auto& config = run->config;
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         options.add("CONV_SMALLC_T", elementTypeFor(run->problem.base.dataType));
-        options.add("CONV_SMALLC_ATOM", std::string(config.kernelType));
+        options.add("CONV_SMALLC_FMA", std::string(config.fma ? "1" : "0"));
+        if(!config.fma)
+        {
+            options.add("CONV_SMALLC_ATOM", std::string(config.kernelType));
+        }
         const std::array<std::pair<const char*, int>, 15> fields{{{"CMAX", config.cmax},
                                                                   {"KD", config.kd},
                                                                   {"R", config.r},

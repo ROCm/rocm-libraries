@@ -248,6 +248,40 @@ TEST(TestConvSmallcKernel, DeclinesEachMalformedField)
     }
 }
 
+TEST(TestConvSmallcKernel, FmaConfigsRunAnywhereWhenTheirThreadsCoverTheTile)
+{
+    Fields f;
+    f.atom = "fma";
+    f.archs = "any";
+    f.dtype = "FLOAT";
+    f.atomId = 0;
+    f.wave = 0;
+    f.ka = 1;
+    f.fm = 4;
+    f.fn = 8;
+    f.wm = 4;
+    f.wq = 2;
+    f.wn = 4;
+    auto fp32 = stemShape();
+    fp32.dataType = DataType::FLOAT;
+    EXPECT_TRUE(admits(f, "gfx1201", fp32));
+    EXPECT_TRUE(admits(f, "gfx906", fp32));
+    EXPECT_TRUE(admits(f, "gfx942", fp32));
+    auto half = f;
+    half.dtype = "HALF";
+    EXPECT_TRUE(admits(half, "gfx1100"));
+    // 256 threads must cover the tile exactly.
+    auto under = f;
+    under.fm = 2;
+    EXPECT_FALSE(admits(under, "gfx1201", fp32));
+    auto ragged = f;
+    ragged.fn = 3;
+    EXPECT_FALSE(admits(ragged, "gfx1201", fp32));
+    auto wave = f;
+    wave.wave = 32;
+    EXPECT_FALSE(admits(wave, "gfx1201", fp32));
+}
+
 // ---------------------------------------------------------------------------
 // Plan
 // ---------------------------------------------------------------------------
