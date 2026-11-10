@@ -3391,29 +3391,16 @@ def _feedsCell(em, cellSources) -> bool:
         for inst in em.instructions if _isDsRead(inst))
 
 
-def _scheduleHalfDisjointCell(
-        emittedModules, pathOrders, preMfmaOrders, mfmas,
-        minGapDsReadToWait, earliestWriteShadow=None, mfmaBase=0,
-        tailScaleReads=0):
-    """Schedule one partition of a half-disjoint body.
+def _splitHalfDisjointCell(emittedModules, pathOrders, preMfmaOrders, mfmas):
+    """Sort a half-disjoint cell's paths into what each placement step takes.
 
-    The VMEM wait, local-read drain, and barrier that open a half follow
-    the first MFMA, so wave skew hides behind it.  Reads the cell's own
-    MFMAs consume and the MFMA's local-read wait stay ahead of that MFMA;
-    when such a read needs the barrier, as the epoch's scale reads do, the
-    barrier stays ahead of the MFMA too.  Every other ds_read and
-    direct-to-LDS request follows the barrier.  A barrier placed after
-    MFMA 0 keeps that MFMA gap to itself while the cell has intervals to
-    spare, since anything sharing the gap stalls behind the wave skew.
-    Reads keep their chain order and go first.  Requests keep their order
-    and are spaced evenly over the MFMA gaps after the barrier that the
-    reads left free, so a load issues alone.  When too few gaps are free,
-    only the requests left over take gaps with the fewest reads; when no
-    such placement fits, requests are spaced over every gap after the
-    barrier.  tailScaleReads scale reads are appended after the cell, two
-    per gap; the gaps they need stay free of requests.
+    Returns (syncItems, prefix, reads, requests, others) as lists of
+    (moduleId, instruction). syncItems is the half's opening VMEM wait,
+    drain and barrier. prefix stays ahead of MFMA 0: the cell's local-read
+    wait, the reads the cell's own MFMAs consume, and the opener when such
+    a read needs it. reads, requests and others are the paths that carry a
+    local read, a global read, or neither.
     """
-    spi = _MXFP8_FOLLOWER_SLOTS
     cellSources = set()
     for mfma in mfmas:
         for name in ("a", "b", "mxsa", "mxsb"):
@@ -3443,6 +3430,45 @@ def _scheduleHalfDisjointCell(
                 prefix.extend(items)
             else:
                 dest.extend(items)
+    return syncItems, prefix, reads, requests, others
+
+
+def _requestBundles(requests):
+    """Split a request stream after each load: (bundles, trailing items)."""
+    bundles, pending = [], []
+    for item in requests:
+        pending.append(item)
+        if _isBufferLoad(item[1]):
+            bundles.append(pending)
+            pending = []
+    return bundles, pending
+
+
+def _scheduleHalfDisjointCell(
+        emittedModules, pathOrders, preMfmaOrders, mfmas,
+        minGapDsReadToWait, earliestWriteShadow=None, mfmaBase=0,
+        tailScaleReads=0):
+    """Schedule one partition of a half-disjoint body.
+
+    The VMEM wait, local-read drain, and barrier that open a half follow
+    the first MFMA, so wave skew hides behind it.  Reads the cell's own
+    MFMAs consume and the MFMA's local-read wait stay ahead of that MFMA;
+    when such a read needs the barrier, as the epoch's scale reads do, the
+    barrier stays ahead of the MFMA too.  Every other ds_read and
+    direct-to-LDS request follows the barrier.  A barrier placed after
+    MFMA 0 keeps that MFMA gap to itself while the cell has intervals to
+    spare, since anything sharing the gap stalls behind the wave skew.
+    Reads keep their chain order and go first.  Requests keep their order
+    and are spaced evenly over the MFMA gaps after the barrier that the
+    reads left free, so a load issues alone.  When too few gaps are free,
+    only the requests left over take gaps with the fewest reads; when no
+    such placement fits, requests are spaced over every gap after the
+    barrier.  tailScaleReads scale reads are appended after the cell, two
+    per gap; the gaps they need stay free of requests.
+    """
+    spi = _MXFP8_FOLLOWER_SLOTS
+    syncItems, prefix, reads, requests, others = _splitHalfDisjointCell(
+        emittedModules, pathOrders, preMfmaOrders, mfmas)
 
     if len(mfmas) < 2:
         result = Module()
@@ -3491,12 +3517,7 @@ def _scheduleHalfDisjointCell(
                 reads, rules.earliestWriteShadow, mfmaBase),
             startLimit=opened)
 
-    bundles, pending = [], []
-    for item in requests:
-        pending.append(item)
-        if _isBufferLoad(item[1]):
-            bundles.append(pending)
-            pending = []
+    bundles, pending = _requestBundles(requests)
     intervals = len(mfmas) - 1
     firstInterval = opened // spi
 
