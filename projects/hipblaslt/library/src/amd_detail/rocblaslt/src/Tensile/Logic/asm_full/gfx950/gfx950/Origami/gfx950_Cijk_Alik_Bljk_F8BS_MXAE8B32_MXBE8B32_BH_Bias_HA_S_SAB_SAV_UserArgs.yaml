@@ -15030,6 +15030,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -15308,6 +15309,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -15586,6 +15588,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -15863,6 +15866,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -16140,6 +16144,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -16418,6 +16423,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -16696,6 +16702,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -16973,6 +16980,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -17250,6 +17258,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -17528,6 +17537,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -17805,6 +17815,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -18082,6 +18093,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -18360,6 +18372,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -18638,6 +18651,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -18916,6 +18930,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -19194,6 +19209,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -19472,6 +19488,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -19750,6 +19767,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -20028,6 +20046,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -20306,6 +20325,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -20584,6 +20604,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -20862,6 +20883,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -21140,6 +21162,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -21418,6 +21441,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -21696,6 +21720,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -21974,6 +21999,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -22252,6 +22278,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -22530,6 +22557,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -22808,6 +22836,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -23086,6 +23115,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -23364,6 +23394,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -23642,6 +23673,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -23920,6 +23952,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -24198,6 +24231,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -24475,6 +24509,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -24752,6 +24787,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -25030,6 +25066,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -25308,6 +25345,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -25585,6 +25623,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -25863,6 +25902,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -26141,6 +26181,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -26419,6 +26460,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -26696,6 +26738,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -26974,6 +27017,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -27251,6 +27295,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -27529,6 +27574,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -27806,6 +27852,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -28084,6 +28131,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -28361,6 +28409,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -28639,6 +28688,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -28916,6 +28966,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -29194,6 +29245,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -29471,6 +29523,7 @@ Solutions:
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -29748,6 +29801,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [16, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -30026,6 +30080,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [32, 4, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
@@ -30304,6 +30359,7 @@ Solutions:
   WavefrontSize: 64
   WorkGroup: [16, 8, 1]
   WorkGroupMapping: 0
+  WorkGroupMappingXCC: -1
   WorkspaceCheck: [4, 0, 0]
   _ABTilePairA: AB_B8
   _ABTilePairB: AB_B8
