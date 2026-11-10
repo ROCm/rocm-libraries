@@ -26,6 +26,8 @@ ROCKE_WGRAD_REFUSAL("img_wave64", "image_per_block is implemented for wave32 (gf
 ROCKE_WGRAD_REFUSAL("img_waves_q", "image_per_block walks every wo tile itself; waves_q must be 1 (got 2)")
 ROCKE_WGRAD_REFUSAL("img_vgpr_budget", "image_per_block body needs ~1344 VGPRs for accumulators and fragments (> 224)")
 ROCKE_WGRAD_REFUSAL("w32_arch", "wave32 direct wgrad needs a wave32 target with TDM and ds_load_tr16_b128 (got gfx1151)")
+ROCKE_WGRAD_REFUSAL("w32_f32", "fp32-storage direct wgrad is wave64 only: the wave32 WMMA variants read 16-bit tiles through ds_load_tr16_b128 (got dtype=tf32)")
+ROCKE_WGRAD_REFUSAL("sc_f32", "fp32-storage direct wgrad is wave64 only: the wave32 WMMA variants read 16-bit tiles through ds_load_tr16_b128 (got dtype=fp32)")
 ROCKE_WGRAD_REFUSAL("sc_and_img", "small_c and image_per_block are separate variants")
 ROCKE_WGRAD_REFUSAL("sc_wave64", "small_c is implemented for wave32 (gfx1250) only (got wave_size=64)")
 ROCKE_WGRAD_REFUSAL("sc_mfma_k", "direct wgrad on wave32 needs mfma_k=32 (WMMA 16x16x32); got mfma_k=16")

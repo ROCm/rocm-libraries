@@ -165,6 +165,9 @@ static const wgrad_case_t k_wgrad_cases[] = {
      "gfx1250"},
     /* ---- is_valid_wgrad_spec: the wave32 arch gate */
     {"w32_arch", BASE_W32, [](W*) {}, "gfx1151"},
+    /* ---- is_valid_wgrad_spec: fp32 storage is wave64 only */
+    {"w32_f32", BASE_W32, [](W* s) { s->problem.dtype = "tf32"; }, "gfx1250"},
+    {"sc_f32", BASE_SC, [](W* s) { s->problem.dtype = "fp32"; }, "gfx1250"},
     /* ---- _wgrad_small_c_reason */
     {"sc_and_img", BASE_SC, [](W* s) { s->image_per_block = 1; }, "gfx1250"},
     {"sc_wave64", BASE_SC, [](W* s) { s->wave_size = 64; }, "gfx950"},

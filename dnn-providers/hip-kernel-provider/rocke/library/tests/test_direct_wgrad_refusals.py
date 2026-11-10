@@ -83,6 +83,9 @@ _CASES = [
     ("img_vgpr_budget", "img", {"wave_tiles_k": 4, "wave_tiles_c": 4}, {}, "gfx1250"),
     # ---- is_valid_wgrad_spec: the wave32 arch gate
     ("w32_arch", "w32", {}, {}, "gfx1151"),
+    # ---- is_valid_wgrad_spec: fp32 storage is wave64 only
+    ("w32_f32", "w32", {}, {"dtype": "tf32"}, "gfx1250"),
+    ("sc_f32", "sc", {}, {"dtype": "fp32"}, "gfx1250"),
     # ---- _wgrad_small_c_reason
     ("sc_and_img", "sc", {"image_per_block": True}, {}, "gfx1250"),
     ("sc_wave64", "sc", {"wave_size": 64}, {}, "gfx950"),
