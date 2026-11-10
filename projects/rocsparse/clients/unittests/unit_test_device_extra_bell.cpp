@@ -128,20 +128,27 @@ namespace
 
 TEST_F(ExtraBell, no_stored_blocks_scales_C)
 {
-    for(rocsparse_operation opA : {rocsparse_operation_none, rocsparse_operation_transpose})
+    // mb and kb differ. For trans_A != none, C has A.cols rows. The quick
+    // return used to scale A.rows, so kb < mb writes the padding past the
+    // last row of C and kb > mb leaves rows of C unscaled. Conjugate
+    // transpose shares that quick return. ldc = Mc + 2 keeps the extra
+    // write inside the allocation.
+    const rocsparse_operation ops[] = {rocsparse_operation_none,
+                                       rocsparse_operation_transpose,
+                                       rocsparse_operation_conjugate_transpose};
+    const int64_t             kbs[] = {2, 5};
+    for(rocsparse_operation opA : ops)
         for(bool device : {false, true})
-        {
-            BellRun r;
-            r.opA    = opA;
-            r.device = device;
-            // The transposed quick return scales a k x n block, so only
-            // a square block grid keeps it inside C (AISPARSE-924).
-            if(opA == rocsparse_operation_transpose)
-                r.kb = r.mb;
-            run_empty_bell(handle, r);
-            if(HasFatalFailure())
-                return;
-        }
+            for(int64_t kb : kbs)
+            {
+                BellRun r;
+                r.opA    = opA;
+                r.device = device;
+                r.kb     = kb;
+                run_empty_bell(handle, r);
+                if(HasFatalFailure())
+                    return;
+            }
 }
 
 namespace

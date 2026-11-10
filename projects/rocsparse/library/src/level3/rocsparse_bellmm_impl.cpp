@@ -196,27 +196,21 @@ namespace rocsparse
 
         if(mb == 0 || n == 0 || kb == 0 || bell_cols == 0)
         {
+            // mb is the block-row count of C for every trans_A (rocsparse_spmm
+            // passes mat_C->rows / block_dim). kb is the K dimension of op(A),
+            // which is A.rows when A is transposed, not the row count of C.
             const int64_t m = mb * bell_block_dim;
-            const int64_t k = kb * bell_block_dim;
 
             // matrix never accessed however still need to update C matrix
-            const int64_t Csize = (trans_A == rocsparse_operation_none) ? m * n : k * n;
+            const int64_t Csize = m * n;
             if(Csize > 0)
             {
                 if(dense_C == nullptr || beta == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
                 }
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::scale_2d_array(handle,
-                                              (trans_A == rocsparse_operation_none) ? m : k,
-                                              n,
-                                              ldc,
-                                              batch_count_C,
-                                              batch_stride_C,
-                                              beta,
-                                              dense_C,
-                                              order_C));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_2d_array(
+                    handle, m, n, ldc, batch_count_C, batch_stride_C, beta, dense_C, order_C));
             }
 
             return rocsparse_status_success;
