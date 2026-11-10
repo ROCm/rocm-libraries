@@ -6,12 +6,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
-* [DB] Fixed a shutdown use-after-free when exit handlers read the SQLite kernel cache;
-  synchronized path state is retained until process termination.
-* [DB] Fixed filesystem detection for missing relative cache and database paths by checking
-  the current working directory when no named ancestor exists.
-* [DB] Fixed the SQLite kernel-cache shutdown regression test for build and temporary directory
-  paths containing spaces.
+* [DB] Fixed a SQLite kernel-cache shutdown use-after-free and network-filesystem detection
+  for missing relative cache and database paths.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
@@ -38,8 +34,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   does the weight tensor in every case.
 
 ### Added
-* [DB] Added a warning when the user kernel cache or find/performance database path is on a
-  network filesystem.
+* [DB] Added warnings for user kernel caches and find/performance databases on network filesystems.
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.
