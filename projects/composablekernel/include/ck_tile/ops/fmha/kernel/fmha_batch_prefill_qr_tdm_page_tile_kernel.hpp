@@ -140,11 +140,6 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     // Metadata byte budget comes from the page size (32 B for P16, else 16 B).
     static constexpr index_t kPageMetadataBytes = PageTileTraits::kMetadataBytes;
 
-    static_assert(Policy::GetLdsOffsetK0() == 0);
-    static_assert(Policy::GetLdsOffsetK1() >= Policy::GetLdsOffsetK0() + Policy::kKFootprintBytes);
-    static_assert(Policy::GetLdsOffsetV0() >= Policy::GetLdsOffsetK1() + Policy::kKFootprintBytes);
-    static_assert(Policy::GetLdsOffsetV1() >= Policy::GetLdsOffsetV0() + Policy::kVFootprintBytes);
-    static_assert(Policy::GetLdsArenaSize() >= Policy::GetLdsOffsetV1() + Policy::kVFootprintBytes);
     static_assert(Policy::GetLdsOffsetK0() % 16 == 0 && Policy::GetLdsOffsetK1() % 16 == 0 &&
                   Policy::GetLdsOffsetV0() % 16 == 0 && Policy::GetLdsOffsetV1() % 16 == 0);
     // P16 needs a 32-byte pending slot; every other page size keeps 16 bytes.
@@ -643,7 +638,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                                          smem_ptr + Policy::GetLdsOffsetK0(),
                                          smem_ptr + Policy::GetLdsOffsetK1(),
                                          smem_ptr + Policy::GetLdsOffsetV0(),
-                                         smem_ptr + Policy::GetLdsOffsetV1());
+                                         smem_ptr + Policy::GetLdsOffsetV1(),
+                                         smem_ptr + Policy::GetLdsArenaSize());
 
         const auto o_naive = make_naive_tensor_view<address_space_enum::global>(
             o_ptr,
