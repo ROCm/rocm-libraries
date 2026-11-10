@@ -173,16 +173,8 @@ struct GemmPipelineAgBgCrCompTDMV4
     static constexpr index_t kWait0       = Policy::template GetDscntWait<Problem>(0);
     static constexpr index_t kWait1       = Policy::template GetDscntWait<Problem>(1);
     static constexpr index_t kLatePending = Policy::template GetLatePendingReads<Problem>();
-    // Scaled WMMA matrix formats: fp8 0, bf8 1, fp4 4.
-    static constexpr int kFmtA = kSpec.a_dtype == MxTdmV4Dtype::Fp4   ? 4
-                                 : kSpec.a_dtype == MxTdmV4Dtype::Bf8 ? 1
-                                                                      : 0;
-    static constexpr int kFmtB = kSpec.b_dtype == MxTdmV4Dtype::Fp4   ? 4
-                                 : kSpec.b_dtype == MxTdmV4Dtype::Bf8 ? 1
-                                                                      : 0;
-
-    using AFrag   = int32x16_t;
-    using BFrag   = std::conditional_t<kMma32, int32x8_t, int32x16_t>;
+    using AFrag                           = int32x16_t;
+    using BFrag                           = std::conditional_t<kMma32, int32x8_t, int32x16_t>;
     using RowFrag = std::conditional_t<kRowWords == 8, int32x8_t, int32x16_t>;
     using CVec    = std::conditional_t<kMma32, fp32x16_t, fp32x8_t>;
 
@@ -244,15 +236,31 @@ struct GemmPipelineAgBgCrCompTDMV4
         BRegs b;
     };
 
+    /// A fragment as an operand of Op: the fragment itself, or the 8 data words of an fp4 one
+    /// padded to 16 (core pads it again).
+    template <typename Operand, typename Frag>
+    CK_TILE_DEVICE static Operand MmaOperand(const Frag& f)
+    {
+        if constexpr(sizeof(Operand) == sizeof(Frag))
+            return bit_cast<Operand>(f);
+        else
+            return bit_cast<Operand>(__builtin_shufflevector(f, f, 0, 1, 2, 3, 4, 5, 6, 7));
+    }
+
     CK_TILE_DEVICE static void Mma(CVec& c, const AFrag& a, const BFrag& b, int32_t as, int32_t bs)
     {
 #if defined(__gfx125__)
-        if constexpr(kMma32)
-            c = __builtin_amdgcn_wmma_scale_f32_32x16x128_f4(
-                a, b, 0, c, 1, 0, as, 0, 0, bs, false, false);
-        else
-            c = __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(
-                kFmtA, a, kFmtB, b, 0, c, 0, 0, as, 0, 0, bs, false, false);
+        using Op     = core::arch::mma::amdgcn_mma<typename Problem::ADataType,
+                                                   typename Problem::BDataType,
+                                                   fp32_t,
+                                                   kAtomM,
+                                                   kAtomN,
+                                                   128u,
+                                                   decltype(core::arch::get_compiler_target()),
+                                                   core::arch::mma::MmaOpFamily::SCALE>;
+        using Params = std::conditional_t<kMma32, OpSelA<1>, OpSelA<0>>;
+        c            = Op::template exec<Params>(
+            MmaOperand<typename Op::AVecType>(a), MmaOperand<typename Op::BVecType>(b), c, as, bs);
 #else
         ignore = c;
         ignore = a;
