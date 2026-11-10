@@ -21,7 +21,8 @@
 # its ratio and any batch. rocKE's
 # test_head_counts_and_batch_are_ir_neutral_at_a_fixed_gqa_ratio
 # (rocke/library/tests/test_attention_tiled_2d_head_counts_gfx942.py) proves the head
-# counts and num_seqs IR-neutral for every codepath shipped here.
+# counts and num_seqs IR-neutral for one tuning candidate per codepath (narrow, transposed
+# x8, wide 32x8).
 #
 # Mask: the gfx942 tiled 2D body computes the bottom-right causal band only, so every
 # kernel is bottom-right causal. hipDNN's top-left causal mask is the same computation

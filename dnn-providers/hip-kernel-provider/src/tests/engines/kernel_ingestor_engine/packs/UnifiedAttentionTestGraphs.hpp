@@ -274,11 +274,12 @@ template <typename Spec>
 class BasicGraph
 {
 public:
-    explicit BasicGraph(const Spec& spec = Spec{})
+    /// @p gcnArchName is the device the MatchContext reports.
+    explicit BasicGraph(const Spec& spec = Spec{}, const char* gcnArchName = "gfx950")
         : _builder(buildSdpaGraph(spec))
         , _graph(_builder.GetBufferPointer(), _builder.GetSize())
     {
-        _properties.gcnArchName = "gfx950";
+        _properties.gcnArchName = gcnArchName;
         _properties.warpSize = 64;
     }
 

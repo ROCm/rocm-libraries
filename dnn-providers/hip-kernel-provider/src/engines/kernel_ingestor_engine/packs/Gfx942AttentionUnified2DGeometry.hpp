@@ -29,9 +29,6 @@
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
-inline constexpr const UnifiedAttentionArchTraits& GFX942_UNIFIED_2D_TRAITS
-    = GFX942_UNIFIED_ATTENTION_TRAITS;
-
 /// Lanes per wave64 wave: a CTA has `num_warps * 64` threads
 /// (`AttentionTuningSpec.launch_block`).
 inline constexpr int64_t GFX942_UNIFIED_2D_WAVE_LANES = GFX942_UNIFIED_ATTENTION_TRAITS.waveLanes;

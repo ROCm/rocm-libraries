@@ -149,9 +149,9 @@ TEST(TestGfx942AttentionUnified2DMatchers, LeavesDecodeToTheSplitKvEngineAtTheRa
 TEST(TestGfx942AttentionUnified2DMatchers, DeclinesAnyOperandThatIsNotDenseBshd)
 {
     std::vector<DeclineCase> cases;
-    for(const auto layout : {Layout::BHSD, Layout::PADDED_BSHD})
+    for(const auto layout : {SdpaLayout::BHSD, SdpaLayout::PADDED_BSHD})
     {
-        const std::string spelling = layout == Layout::BHSD ? "BHSD" : "padded BSHD";
+        const std::string spelling = layout == SdpaLayout::BHSD ? "BHSD" : "padded BSHD";
         GraphSpec q;
         q.qLayout = layout;
         cases.push_back({"Q " + spelling, q});
@@ -191,10 +191,10 @@ TEST(TestGfx942AttentionUnified2DMatchers, AcceptsASingleHeadInEitherSpelling)
     GraphSpec spec;
     spec.numQueryHeads = 1;
     spec.numKvHeads = 1;
-    spec.qLayout = Layout::BHSD;
-    spec.kLayout = Layout::BHSD;
-    spec.vLayout = Layout::BHSD;
-    spec.oLayout = Layout::BHSD;
+    spec.qLayout = SdpaLayout::BHSD;
+    spec.kLayout = SdpaLayout::BHSD;
+    spec.vLayout = SdpaLayout::BHSD;
+    spec.oLayout = SdpaLayout::BHSD;
     EXPECT_TRUE(graphMatches(spec));
 }
 

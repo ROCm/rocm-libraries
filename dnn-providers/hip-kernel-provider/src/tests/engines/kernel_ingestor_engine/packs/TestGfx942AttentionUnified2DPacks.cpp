@@ -4,6 +4,8 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -63,71 +65,84 @@ struct ExpectedInventory
 /// cannot be filed under a concrete id.
 constexpr const char* ARCH_WILDCARD = "*";
 
+// The emitted inventory's names, one pair of arrays per architecture row. The rows
+// build their sets from these at run time: a braced std::set<std::string> initializer
+// constructs every name inside one function, which takes the compiler impractically
+// long for a catalog of tens of thousands of kernels.
+// clang-format off
+
+// "gfx942"
+constexpr std::array<const char*, 1> ARCH0_PACK_NAMES = {
+    "hipkernel:gfx942_attention_unified_2d",
+};
+constexpr std::array<const char*, 53> ARCH0_KERNEL_NAMES = {
+    "attention_unified_2d.bf16_d128_g16_m2_bs16_t32_nw2_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d128_g16_m2_bs16_t32_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d128_g1_m2_bs16_t16_nw2_mw16_x00.gfx942",
+    "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw2_mw32_x00.gfx942",
+    "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw2_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw4_mw16_x00.gfx942",
+    "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d128_g2_m2_bs16_t32_nw2_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d128_g2_m2_bs16_t32_nw4_mw16_x00.gfx942",
+    "attention_unified_2d.bf16_d128_g2_m2_bs16_t32_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d128_g4_m2_bs16_t16_nw2_mw16_x00.gfx942",
+    "attention_unified_2d.bf16_d128_g4_m2_bs16_t32_nw2_mw32_x00.gfx942",
+    "attention_unified_2d.bf16_d128_g4_m2_bs16_t32_nw2_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d128_g4_m2_bs16_t32_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d128_g8_m2_bs16_t16_nw2_mw16_x00.gfx942",
+    "attention_unified_2d.bf16_d128_g8_m2_bs16_t32_nw2_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d128_g8_m2_bs16_t32_nw4_mw16_x00.gfx942",
+    "attention_unified_2d.bf16_d128_g8_m2_bs16_t32_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d64_g16_m2_bs16_t64_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw2_mw16_x00.gfx942",
+    "attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw4_mw32_x00.gfx942",
+    "attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d64_g2_m2_bs16_t64_nw2_mw16_x00.gfx942",
+    "attention_unified_2d.bf16_d64_g2_m2_bs16_t64_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d64_g4_m2_bs16_t64_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d64_g8_m2_bs16_t64_nw2_mw16_x00.gfx942",
+    "attention_unified_2d.bf16_d64_g8_m2_bs16_t64_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.bf16_d64_g8_m2_bs16_t64_nw8_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d128_g16_m2_bs16_t32_nw2_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d128_g16_m2_bs16_t32_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d128_g1_m2_bs16_t16_nw2_mw16_x00.gfx942",
+    "attention_unified_2d.fp16_d128_g1_m2_bs16_t32_nw2_mw32_x00.gfx942",
+    "attention_unified_2d.fp16_d128_g1_m2_bs16_t32_nw2_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d128_g1_m2_bs16_t32_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d128_g2_m2_bs16_t32_nw2_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d128_g2_m2_bs16_t32_nw4_mw16_x00.gfx942",
+    "attention_unified_2d.fp16_d128_g2_m2_bs16_t32_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d128_g4_m2_bs16_t16_nw2_mw16_x00.gfx942",
+    "attention_unified_2d.fp16_d128_g4_m2_bs16_t32_nw2_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d128_g4_m2_bs16_t32_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d128_g8_m2_bs16_t16_nw2_mw16_x00.gfx942",
+    "attention_unified_2d.fp16_d128_g8_m2_bs16_t32_nw2_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d128_g8_m2_bs16_t32_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d64_g16_m2_bs16_t64_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d64_g1_m2_bs16_t64_nw2_mw16_x00.gfx942",
+    "attention_unified_2d.fp16_d64_g1_m2_bs16_t64_nw4_mw16_x00.gfx942",
+    "attention_unified_2d.fp16_d64_g1_m2_bs16_t64_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d64_g2_m2_bs16_t64_nw2_mw16_x00.gfx942",
+    "attention_unified_2d.fp16_d64_g2_m2_bs16_t64_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d64_g4_m2_bs16_t64_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d64_g8_m2_bs16_t64_nw2_mw16_x00.gfx942",
+    "attention_unified_2d.fp16_d64_g8_m2_bs16_t64_nw4_mw32_x11.gfx942",
+    "attention_unified_2d.fp16_d64_g8_m2_bs16_t64_nw8_mw32_x11.gfx942",
+};
+// clang-format on
+
+template <std::size_t N>
+std::set<std::string> nameSet(const std::array<const char*, N>& names)
+{
+    return std::set<std::string>(names.begin(), names.end());
+}
+
 /// The emitted inventory, keyed by architecture.
 const std::map<std::string, ExpectedInventory>& expectedByArch()
 {
     static const std::map<std::string, ExpectedInventory> s_expected = {
-        {"gfx942",
-         ExpectedInventory{
-             {
-                 "hipkernel:gfx942_attention_unified_2d",
-             },
-             {
-                 "attention_unified_2d.bf16_d128_g16_m2_bs16_t32_nw2_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d128_g16_m2_bs16_t32_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d128_g1_m2_bs16_t16_nw2_mw16_x00.gfx942",
-                 "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw2_mw32_x00.gfx942",
-                 "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw2_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw4_mw16_x00.gfx942",
-                 "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d128_g2_m2_bs16_t32_nw2_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d128_g2_m2_bs16_t32_nw4_mw16_x00.gfx942",
-                 "attention_unified_2d.bf16_d128_g2_m2_bs16_t32_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d128_g4_m2_bs16_t16_nw2_mw16_x00.gfx942",
-                 "attention_unified_2d.bf16_d128_g4_m2_bs16_t32_nw2_mw32_x00.gfx942",
-                 "attention_unified_2d.bf16_d128_g4_m2_bs16_t32_nw2_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d128_g4_m2_bs16_t32_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d128_g8_m2_bs16_t16_nw2_mw16_x00.gfx942",
-                 "attention_unified_2d.bf16_d128_g8_m2_bs16_t32_nw2_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d128_g8_m2_bs16_t32_nw4_mw16_x00.gfx942",
-                 "attention_unified_2d.bf16_d128_g8_m2_bs16_t32_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d64_g16_m2_bs16_t64_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw2_mw16_x00.gfx942",
-                 "attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw4_mw32_x00.gfx942",
-                 "attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d64_g2_m2_bs16_t64_nw2_mw16_x00.gfx942",
-                 "attention_unified_2d.bf16_d64_g2_m2_bs16_t64_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d64_g4_m2_bs16_t64_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d64_g8_m2_bs16_t64_nw2_mw16_x00.gfx942",
-                 "attention_unified_2d.bf16_d64_g8_m2_bs16_t64_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.bf16_d64_g8_m2_bs16_t64_nw8_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d128_g16_m2_bs16_t32_nw2_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d128_g16_m2_bs16_t32_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d128_g1_m2_bs16_t16_nw2_mw16_x00.gfx942",
-                 "attention_unified_2d.fp16_d128_g1_m2_bs16_t32_nw2_mw32_x00.gfx942",
-                 "attention_unified_2d.fp16_d128_g1_m2_bs16_t32_nw2_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d128_g1_m2_bs16_t32_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d128_g2_m2_bs16_t32_nw2_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d128_g2_m2_bs16_t32_nw4_mw16_x00.gfx942",
-                 "attention_unified_2d.fp16_d128_g2_m2_bs16_t32_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d128_g4_m2_bs16_t16_nw2_mw16_x00.gfx942",
-                 "attention_unified_2d.fp16_d128_g4_m2_bs16_t32_nw2_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d128_g4_m2_bs16_t32_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d128_g8_m2_bs16_t16_nw2_mw16_x00.gfx942",
-                 "attention_unified_2d.fp16_d128_g8_m2_bs16_t32_nw2_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d128_g8_m2_bs16_t32_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d64_g16_m2_bs16_t64_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d64_g1_m2_bs16_t64_nw2_mw16_x00.gfx942",
-                 "attention_unified_2d.fp16_d64_g1_m2_bs16_t64_nw4_mw16_x00.gfx942",
-                 "attention_unified_2d.fp16_d64_g1_m2_bs16_t64_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d64_g2_m2_bs16_t64_nw2_mw16_x00.gfx942",
-                 "attention_unified_2d.fp16_d64_g2_m2_bs16_t64_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d64_g4_m2_bs16_t64_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d64_g8_m2_bs16_t64_nw2_mw16_x00.gfx942",
-                 "attention_unified_2d.fp16_d64_g8_m2_bs16_t64_nw4_mw32_x11.gfx942",
-                 "attention_unified_2d.fp16_d64_g8_m2_bs16_t64_nw8_mw32_x11.gfx942",
-             },
-         }},
+        {"gfx942", ExpectedInventory{nameSet(ARCH0_PACK_NAMES), nameSet(ARCH0_KERNEL_NAMES)}},
     };
     return s_expected;
 }
@@ -264,9 +279,10 @@ TEST_F(TestGfx942AttentionUnified2DPacks, RanksThroughItsRegisteredScoreSymbol)
         ingestor::ScoreRegistry::isRegistered("hipkernel.gfx942_attention_unified_2d.score"));
 }
 
-/// UMD policy, this engine's shape: a SINGLE-pack engine carries no graph-scoped
-/// criterion -- its own graph_match admits the node type and validates shape. Mirrors
-/// TestConvFwdPack.cpp's HasAGraphMatchAndOneKernelMatcher.
+/// UMD policy, this engine's shape: a SINGLE-pack engine, or one catalog sharded across
+/// packs that declare no discriminator, carries no graph-scoped criterion -- its own
+/// graph_match admits the node type and validates shape. Mirrors TestConvFwdPack.cpp's
+/// HasAGraphMatchAndOneKernelMatcher.
 TEST_F(TestGfx942AttentionUnified2DPacks, CarriesNoGraphScopedMatcher)
 {
     EXPECT_FALSE(_set->engine.graphMatchNativeSymbol.empty());
