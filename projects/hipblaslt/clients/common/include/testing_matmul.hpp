@@ -1784,8 +1784,7 @@ hipDataType derive_unset_bias_type(const Arguments& arg)
         }
     }
 
-    // The default follows D, which may be a type no bias supports; it only
-    // matters when there is a bias.
+    // A valid D type may be unsupported for bias, which matters only when bias is used.
     if(arg.bias_vector && supported_bias_types.count(real_bias_type) == 0)
         throw std::invalid_argument("Invalid bias type "
                                     + std::string(hip_datatype_to_string(real_bias_type)));
