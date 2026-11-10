@@ -673,6 +673,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.conv_depthwise_rows.dispatch",
         "hipkernel.conv_igemm.dispatch",
         "hipkernel.conv_igemm_nchw.dispatch",
+        "hipkernel.conv_wrw.dispatch",
         "hipkernel.conv_winograd.dispatch",
         "hipkernel.conv_direct.dispatch",
 #endif

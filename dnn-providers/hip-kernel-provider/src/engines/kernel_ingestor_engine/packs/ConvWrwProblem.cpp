@@ -1,0 +1,626 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
+#include "engines/kernel_ingestor_engine/packs/ConvWrwProblem.hpp"
+
+// The kernels' LDS arithmetic, shared verbatim with them; some of its parameters serve only
+// some loops.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#include "engines/kernel_ingestor_engine/descriptors/conv/wrw/kernels/ConvWrwGeom.h"
+#pragma GCC diagnostic pop
+
+#include <algorithm>
+#include <limits>
+#include <stdexcept>
+#include <utility>
+
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
+
+#include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
+#include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
+
+namespace hip_kernel_provider::kernel_ingestor_engine::conv_wrw
+{
+
+namespace
+{
+
+namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+using conv_naive::ConvDirection;
+
+constexpr int64_t INT_LIMIT = std::numeric_limits<int>::max();
+constexpr int64_t UINT_LIMIT = std::numeric_limits<unsigned int>::max();
+constexpr int64_t MAX_GRID_YZ = 65535;
+constexpr int64_t MAX_BLOCK = 1024;
+/// The kernel tracks each thread's load passes in a 32-bit mask.
+constexpr int64_t MAX_PASSES = 32;
+/// Positions past an output row a block's chunk may reach (bq at most 512).
+constexpr int64_t CHUNK_MARGIN = 512;
+/// The reduce: 256 threads, 64 four-channel quads of dw per block.
+constexpr int64_t REDUCE_QUADS_PER_BLOCK = 64;
+
+int64_t divUp(int64_t value, int64_t divisor)
+{
+    return (value + divisor - 1) / divisor;
+}
+
+/// True when @p strides are packed for @p extents with the axes in @p order (slowest first);
+/// extent-1 axes may carry any stride.
+bool packedInOrder(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
+                   const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents,
+                   const std::array<size_t, CONV_NAIVE_TENSOR_DIMS>& order)
+{
+    long long expected = 1;
+    for(size_t i = CONV_NAIVE_TENSOR_DIMS; i-- > 0;)
+    {
+        const size_t axis = order[i];
+        if(extents[axis] != 1 && strides[axis] != expected)
+        {
+            return false;
+        }
+        expected *= extents[axis];
+    }
+    return true;
+}
+
+constexpr std::array<size_t, CONV_NAIVE_TENSOR_DIMS> CHANNELS_FIRST_ORDER{0, 1, 2, 3, 4};
+constexpr std::array<size_t, CONV_NAIVE_TENSOR_DIMS> CHANNELS_LAST_ORDER{0, 2, 3, 4, 1};
+
+/// Packed element strides (n, c, d, h, w) of an operand of @p extents in a layout.
+void packedStrides(const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents,
+                   bool channelsLast,
+                   long long (&strides)[5])
+{
+    const auto& order = channelsLast ? CHANNELS_LAST_ORDER : CHANNELS_FIRST_ORDER;
+    long long running = 1;
+    for(size_t i = CONV_NAIVE_TENSOR_DIMS; i-- > 0;)
+    {
+        strides[order[i]] = running;
+        running *= extents[order[i]];
+    }
+}
+
+/// The atoms' shapes (DIM, KA, KPL), in ATOMS order.
+constexpr std::array<AtomShape, ATOMS.size()> SHAPES{{
+    {16, 16, 4}, // mfma16_f16: v_mfma_f32_16x16x16_f16
+    {16, 16, 4}, // mfma16_bf16: v_mfma_f32_16x16x16_bf16 (1k)
+    {16, 8, 2}, // mfma16_bf16_908: v_mfma_f32_16x16x8_bf16
+    {16, 4, 1}, // mfma16_f32: v_mfma_f32_16x16x4_f32
+    {32, 8, 4}, // mfma32_f16
+    {32, 8, 4}, // mfma32_bf16
+    {32, 4, 2}, // mfma32_bf16_908
+    {32, 2, 1}, // mfma32_f32
+    {16, 32, 8}, // mfma16x32_f16 (gfx950)
+    {16, 32, 8}, // mfma16x32_bf16 (gfx950)
+    {32, 16, 8}, // mfma32x16_f16 (gfx950)
+    {32, 16, 8}, // mfma32x16_bf16 (gfx950)
+    {16, 16, 16}, // wmma11_f16
+    {16, 16, 16}, // wmma11_bf16
+    {16, 16, 8}, // wmma12_f16
+    {16, 16, 8}, // wmma12_bf16
+    {0, 0, 0}, // fma: no matrix core
+}};
+
+} // namespace
+
+std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context)
+{
+    auto base = conv_naive::parseConvNaiveProblem(context, ConvDirection::BACKWARD_WEIGHTS);
+    if(!base.has_value())
+    {
+        return std::nullopt;
+    }
+    int elementBytes = 0;
+    switch(base->dataType)
+    {
+    case data_objects::DataType::FLOAT:
+        elementBytes = 4;
+        break;
+    case data_objects::DataType::HALF:
+    case data_objects::DataType::BFLOAT16:
+        elementBytes = 2;
+        break;
+    default:
+        return std::nullopt;
+    }
+    const auto& a = base->args;
+    const long long cg = a.c / a.groups;
+    // x and dy: both packed channels-first or both packed channels-last.
+    const std::array<long long, CONV_NAIVE_TENSOR_DIMS> xExtents{
+        a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]};
+    const std::array<long long, CONV_NAIVE_TENSOR_DIMS> yExtents{
+        a.n, a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]};
+    const std::array<long long, CONV_NAIVE_TENSOR_DIMS> wExtents{
+        a.k, cg, a.filter[0], a.filter[1], a.filter[2]};
+    const bool channelsFirst = packedInOrder(a.xStrides, xExtents, CHANNELS_FIRST_ORDER)
+                               && packedInOrder(a.yStrides, yExtents, CHANNELS_FIRST_ORDER);
+    const bool channelsLast = packedInOrder(a.xStrides, xExtents, CHANNELS_LAST_ORDER)
+                              && packedInOrder(a.yStrides, yExtents, CHANNELS_LAST_ORDER);
+    if(!channelsFirst && !channelsLast)
+    {
+        return std::nullopt;
+    }
+    // dw: packed K C T R S or K T R S C (the reduce writes either through its strides).
+    const bool filterChannelsFirst = packedInOrder(a.wStrides, wExtents, CHANNELS_FIRST_ORDER);
+    const bool filterChannelsLast = packedInOrder(a.wStrides, wExtents, CHANNELS_LAST_ORDER);
+    if(!filterChannelsFirst && !filterChannelsLast)
+    {
+        return std::nullopt;
+    }
+    // The kernel's argument block holds the batch in 32 bits.
+    if(a.n > INT_LIMIT)
+    {
+        return std::nullopt;
+    }
+    // Per axis, the positions the kernel forms in 32 bits: an output position (with a chunk's
+    // margin) times the stride, plus the filter's reach and the padding. Bounds every extent,
+    // padding, stride and dilation (all non-negative after the base parse).
+    for(int axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
+    {
+        const auto outReach
+            = pack_features::checkedMultiply(a.outSpatial[axis] + CHUNK_MARGIN, a.stride[axis]);
+        const auto filterReach = pack_features::checkedMultiply(a.filter[axis], a.dilation[axis]);
+        if(!outReach.has_value() || !filterReach.has_value() || *outReach > INT_LIMIT - *filterReach
+           || *outReach + *filterReach > INT_LIMIT - a.prePadding[axis])
+        {
+            return std::nullopt;
+        }
+    }
+    const auto taps = pack_features::checkedProduct({a.filter[0], a.filter[1], a.filter[2]});
+    if(!taps.has_value() || *taps > INT_LIMIT)
+    {
+        return std::nullopt;
+    }
+    // One image of x and of dy is one 32-bit-addressed buffer.
+    const auto xImage
+        = pack_features::checkedProduct({a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]});
+    const auto yImage
+        = pack_features::checkedProduct({a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]});
+    if(!xImage.has_value() || !yImage.has_value() || *xImage > INT_LIMIT / elementBytes
+       || *yImage > INT_LIMIT / elementBytes)
+    {
+        return std::nullopt;
+    }
+    WrwProblem problem;
+    problem.elementBytes = elementBytes;
+    problem.channelsFirst = channelsFirst;
+    problem.channelsLast = channelsLast;
+    problem.filterChannelsLast = !filterChannelsFirst;
+    problem.taps = *taps;
+    problem.xUid = base->operands.x;
+    problem.dyUid = base->operands.y;
+    problem.dwUid = base->operands.w;
+    problem.base = std::move(*base);
+    return problem;
+}
+
+int64_t atomIdOf(std::string_view atom)
+{
+    const auto it = std::find(ATOMS.begin(), ATOMS.end(), atom);
+    return it == ATOMS.end() ? -1 : static_cast<int64_t>(it - ATOMS.begin());
+}
+
+AtomShape atomShapeOf(std::string_view atom)
+{
+    const auto id = atomIdOf(atom);
+    return id < 0 ? AtomShape{} : SHAPES[static_cast<size_t>(id)];
+}
+
+int64_t ldsBytesOf(const WrwConfig& config, int elementBytes)
+{
+    // Every field as int, as the kernels instantiate it; a field outside int declines first.
+    for(const int64_t value : {config.loop,
+                               config.layout,
+                               config.bk,
+                               config.bc,
+                               config.bq,
+                               config.fr,
+                               config.s,
+                               config.sw,
+                               config.dw,
+                               config.wk,
+                               config.wc,
+                               config.tk,
+                               config.tc,
+                               config.vec,
+                               config.align,
+                               config.ns})
+    {
+        if(value < 0 || value > INT_LIMIT)
+        {
+            return std::numeric_limits<int64_t>::max();
+        }
+    }
+    const auto i = [](int64_t value) { return static_cast<int>(value); };
+    return k3LdsBytes(i(config.loop),
+                      i(config.layout),
+                      elementBytes,
+                      i(config.bk),
+                      i(config.bc),
+                      i(config.bq),
+                      i(config.fr),
+                      i(config.s),
+                      i(config.sw),
+                      i(config.dw),
+                      i(config.wk),
+                      i(config.wc),
+                      i(config.tk),
+                      i(config.tc),
+                      i(config.vec),
+                      i(config.align),
+                      i(config.ns));
+}
+
+int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
+{
+    const int64_t vec = config.vec;
+    if(config.loop == LOOP_RING_FMA)
+    {
+        // K3FmaTiles: channels-first units are 4 channels by a vector of positions; channels-last
+        // units a position's vector of channels; over the dy chunk and the aligned x window.
+        const int64_t threads = (config.bk / config.tk) * (config.bc / config.tc);
+        const int64_t win = config.bq + (config.s - 1) * config.dw;
+        const int64_t nbv = divUp(win, vec) + 1;
+        const bool cf = config.layout == LAYOUT_CHANNELS_FIRST;
+        const int64_t aUnits
+            = cf ? (config.bk / 4) * (config.bq / vec) : config.bq * (config.bk / vec);
+        const int64_t bUnits = cf ? (config.bc / 4) * nbv : nbv * vec * (config.bc / vec);
+        return std::max(divUp(aUnits, threads), divUp(bUnits, threads));
+    }
+    const int64_t waves = config.wk * config.wc;
+    if(config.loop == LOOP_RING_DMA)
+    {
+        // K3DmaGeom / K3DmaTrGeom: 64-unit groups of 16 bytes over the waves.
+        const int64_t win = config.bq + (config.s - 1) * config.dw;
+        int64_t aGroups = 0;
+        int64_t bGroups = 0;
+        if(config.layout == LAYOUT_CHANNELS_LAST_TR)
+        {
+            aGroups = divUp(config.bq * (k3TrPitch(static_cast<int>(config.bk)) / 8), 64);
+            bGroups = divUp(win * (k3TrPitch(static_cast<int>(config.bc)) / 8), 64);
+        }
+        else
+        {
+            const int64_t v = 16 / elementBytes;
+            aGroups = divUp(config.bk * (config.bq / v + 1), 64);
+            bGroups = divUp(config.bc * (divUp(win + 2, v) | 1), 64);
+        }
+        return std::max(divUp(aGroups, waves), divUp(bGroups, waves));
+    }
+    // K3Tiles: channels-first units are a vector of positions of one channel row; channels-last
+    // ones KV positions (1 for layout 2) by a vector of channels.
+    const int64_t threads = waves * wave;
+    const bool cf = config.layout == LAYOUT_CHANNELS_FIRST;
+    const int64_t kv = config.layout == LAYOUT_CHANNELS_LAST ? 4 / elementBytes : 1;
+    const int64_t rows = config.loop == LOOP_ROWS ? config.fr : 1;
+    const int64_t win = (config.bq - 1) * config.sw + (config.s - 1) * config.dw + 1;
+    const int64_t nbv = divUp(win + (config.align != 0 ? vec - 1 : 0), vec);
+    const int64_t phRaw = cf ? nbv * vec / config.sw : divUp(win, config.sw);
+    const int64_t ph = divUp(phRaw, kv) * kv;
+    const int64_t aUnits
+        = cf ? config.bk * (config.bq / vec) : (config.bq / kv) * (config.bk / vec);
+    const int64_t bUnits
+        = cf ? rows * config.bc * nbv : rows * config.sw * (ph / kv) * (config.bc / vec);
+    return std::max(divUp(aUnits, threads), divUp(bUnits, threads));
+}
+
+int64_t ldsLimitOf(std::string_view gcnArchName)
+{
+    return hipdnn_plugin_sdk::stripArchFeatures(gcnArchName) == "gfx950" ? 160 * 1024 : 64 * 1024;
+}
+
+int64_t splitsWanted(int64_t blocksXY,
+                     int64_t blocksPerUnit,
+                     int64_t steps,
+                     int64_t partialElems,
+                     int64_t dispatchUnits)
+{
+    int64_t wanted
+        = divUp(std::max<int64_t>(dispatchUnits, 1) * std::max<int64_t>(blocksPerUnit, 1),
+                std::max<int64_t>(blocksXY, 1));
+    wanted = std::min({wanted, std::max<int64_t>(1, steps / 4), MAX_GRID_YZ});
+    const int64_t splitBytes = std::max<int64_t>(partialElems, 1) * int64_t{sizeof(float)};
+    wanted = std::min(wanted, std::max<int64_t>(1, MAX_WORKSPACE_BYTES / splitBytes));
+    return std::max<int64_t>(wanted, 1);
+}
+
+std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
+                                      const WrwConfig& config,
+                                      const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
+{
+    // The atom: known, its id, on this device, taking the graph's element type. "fma" is the
+    // FMA ring's, which takes fp32 only (16-bit runs on the matrix cores everywhere).
+    const auto atomId = atomIdOf(config.atom);
+    const auto info = conv_igemm::atomNamed(config.atom);
+    if(atomId < 0 || atomId != config.atomId || !info.has_value())
+    {
+        return std::nullopt;
+    }
+    const bool fma = config.loop == LOOP_RING_FMA;
+    if(fma != (info->wave == 0))
+    {
+        return std::nullopt;
+    }
+    const std::string_view arch = device.gcnArchName;
+    const auto element = conv_igemm::dataElement(problem.base.dataType);
+    if(!conv_igemm::atomRunsOn(config.atom, arch)
+       || (fma ? element != "f32" : conv_igemm::atomElement(config.atom) != element))
+    {
+        return std::nullopt;
+    }
+    const auto shape = atomShapeOf(config.atom);
+    const auto& a = problem.base.args;
+    const int eb = problem.elementBytes;
+    const int64_t kg = a.k / a.groups;
+    const int64_t cg = a.c / a.groups;
+    const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx950";
+
+    // Loop and layout.
+    if(config.loop < LOOP_ROWS || config.loop > LOOP_RING_FMA)
+    {
+        return std::nullopt;
+    }
+    const bool cf = config.layout == LAYOUT_CHANNELS_FIRST;
+    const bool tr = config.layout == LAYOUT_CHANNELS_LAST_TR;
+    const bool cl = config.layout == LAYOUT_CHANNELS_LAST || tr;
+    if(!(cf && problem.channelsFirst) && !(cl && problem.channelsLast))
+    {
+        return std::nullopt;
+    }
+    // Transpose reads: gfx950 and an atom whose lanes hold 8 positions (16-bit atoms only).
+    if(tr && (!gfx950 || shape.kpl != 8))
+    {
+        return std::nullopt;
+    }
+    // The vector and the tile.
+    if(config.vec * eb != 16 || config.bk < 1 || config.bc < 1 || config.bq < 1)
+    {
+        return std::nullopt;
+    }
+    int64_t threads = 0;
+    if(fma)
+    {
+        // Thread tiles of whole channel quads dividing the tile (so bk and bc are quads too).
+        if(config.wk != 0 || config.wc != 0 || config.tk < 4 || config.tc < 4 || config.tk % 4 != 0
+           || config.tc % 4 != 0 || config.bk % config.tk != 0 || config.bc % config.tc != 0)
+        {
+            return std::nullopt;
+        }
+        threads = (config.bk / config.tk) * (config.bc / config.tc);
+    }
+    else
+    {
+        if(config.wk < 1 || config.wc < 1 || config.tk != 0 || config.tc != 0)
+        {
+            return std::nullopt;
+        }
+        if(config.bk % (config.wk * shape.dim) != 0 || config.bc % (config.wc * shape.dim) != 0
+           || config.bq % shape.ka != 0)
+        {
+            return std::nullopt;
+        }
+        threads = config.wk * config.wc * info->wave;
+    }
+    // The filter width, its stride and dilation are compile-time.
+    if(config.s != a.filter[2] || config.sw != a.stride[2] || config.dw != a.dilation[2]
+       || config.fr < 1)
+    {
+        return std::nullopt;
+    }
+    if(cf)
+    {
+        if(config.bq % config.vec != 0 || config.vec % config.sw != 0)
+        {
+            return std::nullopt;
+        }
+    }
+    else if(kg % config.vec != 0 || cg % config.vec != 0)
+    {
+        return std::nullopt;
+    }
+    // The row rings: height stride 1, the whole filter height per block.
+    if(config.loop != LOOP_ROWS && (a.stride[1] != 1 || config.fr != a.filter[1]))
+    {
+        return std::nullopt;
+    }
+    if(config.loop == LOOP_RING_DMA)
+    {
+        if(!gfx950 || config.layout == LAYOUT_CHANNELS_LAST || config.sw != 1 || config.ns < 2
+           || config.ns > 4)
+        {
+            return std::nullopt;
+        }
+    }
+    else if(config.ns != 0)
+    {
+        return std::nullopt;
+    }
+    // The FMA ring: unit width stride, rows of whole vectors (units wholly in or out of a row).
+    if(fma
+       && (config.sw != 1 || a.inSpatial[2] % config.vec != 0 || a.outSpatial[2] % config.vec != 0
+           || config.bq % config.vec != 0))
+    {
+        return std::nullopt;
+    }
+    if(config.align != 0)
+    {
+        if(config.align != 1 || config.loop != LOOP_RING || !cf || config.sw != 1
+           || a.inSpatial[2] % config.vec != 0 || a.outSpatial[2] % config.vec != 0)
+        {
+            return std::nullopt;
+        }
+    }
+    if(config.xcd != 0 && (config.xcd != 1 || fma || !conv_igemm::hasXcds(arch)))
+    {
+        return std::nullopt;
+    }
+    if(config.bpu != 1 && config.bpu != 2 && config.bpu != 4)
+    {
+        return std::nullopt;
+    }
+    // The block, its load passes and its LDS.
+    if(threads > MAX_BLOCK || loadPassesOf(config, eb, info->wave) > MAX_PASSES
+       || ldsBytesOf(config, eb) > ldsLimitOf(arch))
+    {
+        return std::nullopt;
+    }
+    // Channels-first runs are loaded whole from within an image.
+    const int64_t xImage = a.c * a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2];
+    const int64_t yImage = a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+    if(cf && (xImage < config.vec || yImage < config.vec))
+    {
+        return std::nullopt;
+    }
+    const int64_t units = device_units::dispatchUnits(device);
+    if(units < 1)
+    {
+        return std::nullopt;
+    }
+
+    // Grid and reduction steps.
+    const int64_t gridX = divUp(kg, config.bk) * divUp(cg, config.bc);
+    const int64_t frows = a.filter[0] * a.filter[1];
+    const int64_t gridY
+        = a.groups * (config.loop == LOOP_ROWS ? divUp(frows, config.fr) : a.filter[0]);
+    const int64_t chunks = divUp(a.outSpatial[2], config.bq);
+    const int64_t trackLen = divUp(a.outSpatial[1], a.dilation[1]) + a.filter[1] - 1;
+    const auto steps
+        = config.loop == LOOP_ROWS
+              ? pack_features::checkedProduct({a.n, a.outSpatial[0], a.outSpatial[1], chunks})
+              : pack_features::checkedProduct(
+                    {a.n, a.outSpatial[0], a.dilation[1], chunks, trackLen});
+    const auto partialElems = pack_features::checkedProduct({a.groups, problem.taps, kg, cg});
+    if(gridX < 1 || gridX > INT_LIMIT || gridY < 1 || gridY > MAX_GRID_YZ || !steps.has_value()
+       || *steps < 1 || !partialElems.has_value() || trackLen > INT_LIMIT || chunks > INT_LIMIT)
+    {
+        return std::nullopt;
+    }
+    const int64_t wanted = splitsWanted(gridX * gridY, config.bpu, *steps, *partialElems, units);
+    const int64_t stepsPerSplit = divUp(*steps, wanted);
+    const int64_t splits = divUp(*steps, stepsPerSplit);
+    const auto workspace
+        = pack_features::checkedProduct({splits, *partialElems, int64_t{sizeof(float)}});
+    const int64_t quads = a.groups * problem.taps * kg * divUp(cg, 4);
+    const int64_t reduceGrid = divUp(quads, REDUCE_QUADS_PER_BLOCK);
+    if(splits > MAX_GRID_YZ || !workspace.has_value() || reduceGrid > INT_LIMIT
+       || (config.xcd != 0 && gridX * gridY * splits > UINT_LIMIT))
+    {
+        return std::nullopt;
+    }
+
+    WrwLaunch launch;
+    launch.gridX = static_cast<unsigned int>(gridX);
+    launch.gridY = static_cast<unsigned int>(gridY);
+    launch.gridZ = static_cast<unsigned int>(splits);
+    launch.block = static_cast<unsigned int>(threads);
+    launch.reduceGrid = static_cast<unsigned int>(reduceGrid);
+    launch.kernelType = info->kernelType;
+    launch.workspaceBytes = static_cast<size_t>(*workspace);
+    auto& k3 = launch.args;
+    k3.n = static_cast<int>(a.n);
+    k3.c = static_cast<int>(a.c);
+    k3.k = static_cast<int>(a.k);
+    k3.groups = static_cast<int>(a.groups);
+    k3.di = static_cast<int>(a.inSpatial[0]);
+    k3.hi = static_cast<int>(a.inSpatial[1]);
+    k3.wi = static_cast<int>(a.inSpatial[2]);
+    k3.dout = static_cast<int>(a.outSpatial[0]);
+    k3.ho = static_cast<int>(a.outSpatial[1]);
+    k3.wo = static_cast<int>(a.outSpatial[2]);
+    k3.ft = static_cast<int>(a.filter[0]);
+    k3.fr = static_cast<int>(a.filter[1]);
+    k3.fs = static_cast<int>(a.filter[2]);
+    k3.sd = static_cast<int>(a.stride[0]);
+    k3.sh = static_cast<int>(a.stride[1]);
+    k3.sw = static_cast<int>(a.stride[2]);
+    k3.pd = static_cast<int>(a.prePadding[0]);
+    k3.ph = static_cast<int>(a.prePadding[1]);
+    k3.pw = static_cast<int>(a.prePadding[2]);
+    k3.dd = static_cast<int>(a.dilation[0]);
+    k3.dh = static_cast<int>(a.dilation[1]);
+    k3.dw = static_cast<int>(a.dilation[2]);
+    k3.chunks = static_cast<int>(chunks);
+    k3.splits = static_cast<int>(splits);
+    k3.steps = *steps;
+    k3.stepsPerSplit = stepsPerSplit;
+    k3.trackLen = config.loop == LOOP_ROWS ? 0 : static_cast<int>(trackLen);
+    const bool channelsLast = !cf;
+    packedStrides({a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]}, channelsLast, k3.xs);
+    packedStrides(
+        {a.n, a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]}, channelsLast, k3.ys);
+    k3.xImage = xImage;
+    k3.yImage = yImage;
+    k3.partialElems = *partialElems;
+
+    auto& r = launch.reduce;
+    r.elems = a.k * cg * problem.taps;
+    r.partialElems = *partialElems;
+    r.splits = static_cast<int>(splits);
+    r.groups = static_cast<int>(a.groups);
+    r.kg = static_cast<int>(kg);
+    r.cg = static_cast<int>(cg);
+    r.taps = static_cast<int>(problem.taps);
+    r.flip = a.flipFilter != 0 ? 1 : 0;
+    // dw packed K C T R S (taps contiguous per channel) or K T R S C (channels contiguous).
+    r.wk = cg * problem.taps;
+    r.wc = problem.filterChannelsLast ? 1 : problem.taps;
+    r.wtap = problem.filterChannelsLast ? cg : 1;
+    return launch;
+}
+
+std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects::DataType dataType,
+                                                                   const WrwConfig& config,
+                                                                   std::string_view kernelType)
+{
+    std::string element;
+    switch(dataType)
+    {
+    case data_objects::DataType::FLOAT:
+        element = "float";
+        break;
+    case data_objects::DataType::HALF:
+        element = "_Float16";
+        break;
+    case data_objects::DataType::BFLOAT16:
+        element = "unsigned short"; // bf16 bits
+        break;
+    default:
+        throw std::invalid_argument("conv_wrw: unsupported element type");
+    }
+    std::vector<std::pair<std::string, std::string>> defines{{"CONV_K3_T", element}};
+    if(!kernelType.empty())
+    {
+        defines.emplace_back("CONV_K3_ATOM", std::string(kernelType));
+    }
+    const std::array<std::pair<const char*, int64_t>, 17> fields{{{"LOOP", config.loop},
+                                                                  {"LAYOUT", config.layout},
+                                                                  {"BK", config.bk},
+                                                                  {"BC", config.bc},
+                                                                  {"BQ", config.bq},
+                                                                  {"FR", config.fr},
+                                                                  {"S", config.s},
+                                                                  {"SW", config.sw},
+                                                                  {"DW", config.dw},
+                                                                  {"WK", config.wk},
+                                                                  {"WC", config.wc},
+                                                                  {"TK", config.tk},
+                                                                  {"TC", config.tc},
+                                                                  {"VEC", config.vec},
+                                                                  {"XCD", config.xcd},
+                                                                  {"ALIGN", config.align},
+                                                                  {"NS", config.ns}}};
+    for(const auto& [name, value] : fields)
+    {
+        defines.emplace_back(std::string("CONV_K3_") + name, std::to_string(value));
+    }
+    return defines;
+}
+
+} // namespace hip_kernel_provider::kernel_ingestor_engine::conv_wrw
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

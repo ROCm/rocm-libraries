@@ -128,6 +128,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvIgemm.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvIgemmNchwProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvIgemmNchw.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvWrwProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvWrw.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvWinogradProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvWinograd.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDirectProblem.cpp
