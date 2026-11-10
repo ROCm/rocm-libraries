@@ -2763,6 +2763,8 @@ class KernelWriterAssembly(KernelWriter):
         msg = "decoupled PGR thick-wait not covered in the emitted assembly"
       elif self.states.overflowedResources == 12:
         msg = "tail LDS reset has one block stride and a divergent pair has two"
+      elif self.states.overflowedResources == 13:
+        msg = "decoupled-PGR cluster handshake missing or broken"
       else:
         msg = "unknown"
 
@@ -13682,7 +13684,7 @@ class KernelWriterAssembly(KernelWriter):
   def _tdmDecoupledBlocks(self, kernel, tc):
     """(number of LDS copies, stride) for one tensor under the decoupled layout."""
     _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
-    if dcpLdsSide(tc) == "A":
+    if dcpLdsSide(tc, kernel) == "A":
       return numLdsBlkA, kernel["LdsOffsetBlkA"]
     return numLdsBlkB, kernel["LdsOffsetBlkB"]
 
@@ -23692,12 +23694,7 @@ class KernelWriterAssembly(KernelWriter):
   def _tdmMulticastMask(self, kernel, tc):
     """The multicast mask SGPR ClusterLoadTDM ORs into `tc`'s Group1 word 0, or None."""
     clusterComp = ClusterLoadTDM.find(self)
-    if not clusterComp or not (kernel["Multicast"] and clusterEnabled(kernel["ClusterDim"])):
-      return None
-    mask = clusterComp.maskSgprName(kernel, tc, waveSeparated=True)
-    if clusterComp.persistentDropsSelfOnlyMaskA(kernel) and mask == "MulticastMaskA":
-      return None
-    return mask
+    return clusterComp.descriptorMaskSgprName(kernel, tc, waveSeparated=True) if clusterComp else None
 
   def _tdmScaleFields(self, kernel, tP) -> dict:
     """The Group1 values a scale's descriptor holds that can differ from the other scale's.
@@ -23775,7 +23772,11 @@ class KernelWriterAssembly(KernelWriter):
       if self.tdmDescriptorSetOwner(kernel, tdmWaveResident(kernel, tc)) != owner:
         continue
       tP = self._tdmTp(tc)
-      comp.setMemToken([self.states.ldsTensorTokenIdx])
+      if self.states.dcpTokenGate:
+        # Token waits are per LDS side, so the stash carries the token of the side it fills.
+        comp.setMemToken([self._dcpCurrentToken("Tensor", tc)])
+      else:
+        comp.setMemToken([self.states.ldsTensorTokenIdx])
       if self.states.inTailLoop and not kernel["1LDSBuffer"] and isPersistent(kernel):
         ldsAddrSgprName = comp.getLdsAddrSgprName(f"tdm{tc}Group0")
         if self.isPrefetchAcrossPersistentEnabled(kernel):

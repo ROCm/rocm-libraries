@@ -12,7 +12,8 @@ Capability-selected (``HasTDM`` + ``TDMInst == 3``), like ``TensorDataMoverLoad`
 from ..Component import ClusterLoad
 from ..Common import clusterEnabled, persistentSpatialCluster, \
     persistentMulticast
-from .TDMFuse import tdmMemberIsLive, tdmWavePartition
+from .DecouplePGR import DCP_LDS_SIDE, DCP_PEER_AXIS, dcpLdsSide, dcpThinSideAndAxis
+from .TDMFuse import tdmMemberIsLive, tdmStashedMembers, tdmWavePartition, tdmWaveResident
 from typing import Mapping
 from rocisa.code import Module, Label
 from rocisa.container import sgpr
@@ -109,6 +110,21 @@ class ClusterLoadTDM(ClusterLoad):
         """
         return self.persistentRefreshesMask(kernel) and kernel["ClusterDim"][1] == 1
 
+    def stashedRewriteMasks(self, kernel: Mapping) -> set[str]:
+        """The multicast mask SGPRs the stashed members' Group1 rewrites name.
+
+        ``KernelWriterAssembly._tdmRewriteScaleFields`` swaps a stashed member's mask
+        (``tdmStashedMembers``) with its wave's resident's when the two differ. The stashed loads
+        issue after ``undeclareSgprs`` runs, so these SGPRs must stay declared.
+        """
+        masks = set()
+        for tc in tdmStashedMembers(kernel):
+            pair = {self.descriptorMaskSgprName(kernel, member, waveSeparated=True)
+                    for member in (tdmWaveResident(kernel, tc), tc)}
+            if len(pair) == 2:
+                masks |= pair - {None}
+        return masks
+
     def undeclareSgprs(self, writer: "KernelWriter", kernel: Mapping) -> Module:
         """Free the ``MulticastMask*`` SGPRs."""
         mod = Module()
@@ -117,14 +133,15 @@ class ClusterLoadTDM(ClusterLoad):
         tdmM: bool = kernel["enableTDMMetadata"]
         refresh: bool = self.persistentRefreshesMask(kernel)
         dropMaskA: bool = self.persistentDropsSelfOnlyMaskA(kernel)
+        stashMasks: set[str] = self.stashedRewriteMasks(kernel)
         if self.usesCombinedMask(kernel):
             mod.add(writer.undefineSgpr("MulticastMask"))
         else:
             # A persistent A mask stays live unless it is self-only (freed then).
-            if not refresh or dropMaskA:
+            if (not refresh or dropMaskA) and "MulticastMaskA" not in stashMasks:
                 mod.add(writer.undefineSgpr("MulticastMaskA"))
             # A persistent B broadcast mask is re-applied every tile: keep live.
-            if not refresh:
+            if not refresh and "MulticastMaskB" not in stashMasks:
                 mod.add(writer.undefineSgpr("MulticastMaskB"))
         # Sparse metadata descriptors are also rebuilt for every tile.
         if tdmM and not refresh:
@@ -222,24 +239,41 @@ class ClusterLoadTDM(ClusterLoad):
 
     # -- descriptor attach ---------------------------------------------------
 
+    def descriptorMaskSgprName(self, kernel: Mapping, tc: str, *, subtile: bool = False,
+                               waveSeparated: bool = False) -> str | None:
+        """The multicast mask SGPR ``applyToDescriptor`` ORs into ``tc``'s ``Group1[word0]``, or None.
+
+        The stashed-member rewrite XORs these names in and out of a set's Group1, so it must use them too.
+        """
+        if not (kernel["Multicast"] and clusterEnabled(kernel["ClusterDim"])):
+            return None
+        mask = self.maskSgprName(kernel, tc, subtile=subtile, waveSeparated=waveSeparated)
+        thin = dcpThinSideAndAxis(kernel)
+        if thin is not None and tc in DCP_LDS_SIDE and dcpLdsSide(tc, kernel) == thin[0]:
+            assert kernel["ClusterDim"][thin[1]] == 1, \
+                "%s is single-buffered, so its multicast mask must stay self-only" % tc
+            # A scale riding the single-buffered set would multicast along its own tensor's axis.
+            if kernel["ClusterDim"][DCP_PEER_AXIS[DCP_LDS_SIDE[tc]]] != 1:
+                return None
+        # A persistent self-only A-side mask SGPR is freed (see
+        # persistentDropsSelfOnlyMaskA): with Ck == 1 the A mask carries no
+        # multicast peers, so re-applying it is a no-op. Skip it so the freed
+        # SGPR is not referenced across the persistent-loop refresh.
+        if self.persistentDropsSelfOnlyMaskA(kernel) and mask == "MulticastMaskA":
+            return None
+        return mask
+
     def applyToDescriptor(self, writer: "KernelWriterAssembly", kernel: Mapping,
                           group1: int | str, tc: str, *, subtile: bool = False,
                           waveSeparated: bool = False) -> Module:
-        """OR the multicast mask into descriptor ``Group1[word0]``.
+        """OR the multicast mask ``descriptorMaskSgprName`` names into descriptor ``Group1[word0]``.
 
-        Folds the ``Multicast and enableCluster`` gate, mask-name choice, and the
-        ``SOrB32`` attach; returns an empty ``Module`` when the gate is not met.
+        Returns an empty ``Module`` when it names none.
         """
         from .TensorDataMover import TensorDataMoverLoad
         mod = Module()
-        if kernel["Multicast"] and clusterEnabled(kernel["ClusterDim"]):
-            mask = self.maskSgprName(kernel, tc, subtile=subtile, waveSeparated=waveSeparated)
-            # A persistent self-only A-side mask SGPR is freed (see
-            # persistentDropsSelfOnlyMaskA): with Ck == 1 the A mask carries no
-            # multicast peers, so re-applying it is a no-op. Skip it so the freed
-            # SGPR is not referenced across the persistent-loop refresh.
-            if self.persistentDropsSelfOnlyMaskA(kernel) and mask == "MulticastMaskA":
-                return mod
+        mask = self.descriptorMaskSgprName(kernel, tc, subtile=subtile, waveSeparated=waveSeparated)
+        if mask is not None:
             tdm = TensorDataMoverLoad.find(writer)
             mod.add(tdm.setMulticastMask(group1, mask, writer))
         return mod
