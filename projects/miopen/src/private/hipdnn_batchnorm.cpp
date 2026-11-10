@@ -19,9 +19,12 @@
 #include <hipdnn_frontend.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -242,6 +245,34 @@ miopenStatus_t CheckScaleFactors(const void* alpha, const void* beta, miopenStat
     return miopenStatusSuccess;
 }
 
+// True when MIOPEN_FIND_ENFORCE asks for DbUpdate, SearchDbUpdate or DbClean,
+// the actions a Search policy does not include.
+bool FindEnforceOverridesSearch()
+{
+    const char* raw = std::getenv("MIOPEN_FIND_ENFORCE");
+    if(raw == nullptr)
+        return false;
+    std::string value = raw;
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if(value == "db_update" || value == "search_db_update" || value == "db_clean")
+        return true;
+    // Parsed as MIOpen and the provider parse it: std::stoul skips leading
+    // whitespace and ignores trailing characters. MIOpen throws for a value it
+    // cannot parse and the provider treats it as unset, so it is not declined here.
+    try
+    {
+        const unsigned long action = std::stoul(value);
+        // DbUpdate, SearchDbUpdate and DbClean in MIOpen's FindEnforceAction.
+        return action == 2 || action == 4 || action == 5;
+    }
+    catch(const std::exception&)
+    {
+        return false;
+    }
+}
+
 // The provider runs MIOpen on a handle of its own, so a tuning policy set on the
 // caller's handle never reaches it. The spatial training and backward solvers
 // read that policy (Search tunes, DbClean drops the perf-db entry), so the
@@ -253,8 +284,13 @@ miopenStatus_t CheckScaleFactors(const void* alpha, const void* beta, miopenStat
 // inference and per-activation solvers are not tunable and ignore the policy,
 // so inference with the estimates skips this check and per-activation runs as
 // under None. Inference without them runs training, so it gets this check.
-// MIOPEN_FIND_ENFORCE needs no check: it is process-wide, so the provider's
-// handle sees it too.
+// MIOPEN_FIND_ENFORCE is process-wide, so it reaches the provider's handle too,
+// but the two sides rank it differently against Search. MIOpen lets a handle
+// policy other than None win over the variable. The provider sets None whenever
+// the variable is set, so there the variable wins. They agree unless the handle
+// is Search and the variable asks for an action Search does not include, so that
+// case is declined; under DB_CLEAN the forwarded call would drop the perf-db entry
+// that MIOpen would tune.
 miopenStatus_t CheckTuningPolicy(miopenHandle_t handle, BnProblem& problem)
 {
     miopenTuningPolicy_t policy = miopenTuningPolicyNone;
@@ -268,6 +304,11 @@ miopenStatus_t CheckTuningPolicy(miopenHandle_t handle, BnProblem& problem)
                              "hipDNN batchnorm cannot apply the handle's tuning policy; "
                              "only miopenTuningPolicyNone and miopenTuningPolicySearch "
                              "are forwarded");
+    if(policy == miopenTuningPolicySearch && FindEnforceOverridesSearch())
+        return RecordFailure(miopenStatusUnsupportedOp,
+                             "hipDNN batchnorm cannot apply miopenTuningPolicySearch while "
+                             "MIOPEN_FIND_ENFORCE asks for DB_UPDATE, SEARCH_DB_UPDATE or "
+                             "DB_CLEAN; the provider would let the variable win");
     problem.benchmark = policy == miopenTuningPolicySearch;
     return miopenStatusSuccess;
 }

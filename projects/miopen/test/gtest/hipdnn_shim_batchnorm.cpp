@@ -23,12 +23,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace hs = hipdnn_shim_test;
 
+MIOPEN_LIB_ENV_VAR(MIOPEN_FIND_ENFORCE)
 MIOPEN_LIB_ENV_VAR(MIOPEN_WARN_SEARCH)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_DISABLE_USER_DB)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_DISABLE_SYSTEM_DB)
@@ -1238,6 +1241,39 @@ struct ScopedHandleTuningPolicy
     miopenTuningPolicy_t saved = miopenTuningPolicyNone;
 };
 
+// Sets MIOPEN_FIND_ENFORCE in the process environment, which the shim and the
+// provider read, and in MIOpen's own copy, which MIOpen reads once and keeps.
+// Pinning MIOpen's copy first means MIOpen never reads the value set here, so it
+// cannot keep it after the test.
+struct ScopedFindEnforce
+{
+    explicit ScopedFindEnforce(const std::string& value) : miopen_copy(MIOPEN_FIND_ENFORCE, value)
+    {
+        if(const char* prev = std::getenv("MIOPEN_FIND_ENFORCE"))
+            saved = prev;
+        Set(value.c_str());
+    }
+    ~ScopedFindEnforce() { Set(saved ? saved->c_str() : nullptr); }
+
+    ScopedFindEnforce(const ScopedFindEnforce&)            = delete;
+    ScopedFindEnforce& operator=(const ScopedFindEnforce&) = delete;
+
+    static void Set(const char* value)
+    {
+#ifdef _WIN32
+        _putenv_s("MIOPEN_FIND_ENFORCE", value != nullptr ? value : "");
+#else
+        if(value != nullptr)
+            setenv("MIOPEN_FIND_ENFORCE", value, 1);
+        else
+            unsetenv("MIOPEN_FIND_ENFORCE");
+#endif
+    }
+
+    const ScopedEnvironment<std::string> miopen_copy;
+    std::optional<std::string> saved;
+};
+
 // Used by no test that runs under None, because a tuning policy caches its tuned
 // invoker on the handle under the shape's network config, and in the disabled run
 // alone that would change what later tests run.
@@ -1381,6 +1417,40 @@ TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyIsDeclined)
         d.SetUpImpl(TuningCase(), miopenBNSpatial, miopenTensorNCHW, false);
         const auto result = hs::CaptureCall([&] { return InferV1(handle, d, false); });
         if(RecordOutcome("tuning_policy_dbupdate_infer", result, reason))
+            CheckInfer(handle, d);
+    }
+}
+
+// MIOpen lets a Search handle win over MIOPEN_FIND_ENFORCE, but the provider sets
+// None on its handle whenever the variable is set, so the variable would win
+// there. Under DB_CLEAN the forwarded call would drop the perf-db entry MIOpen
+// tunes, so the shim declines it. DB_UPDATE and SEARCH_DB_UPDATE are declined the
+// same way.
+TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
+{
+    auto&& handle = get_handle();
+    const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicySearch);
+    const ScopedFindEnforce find_enforce("DB_CLEAN");
+    const char* reason = "MIOPEN_FIND_ENFORCE";
+
+    {
+        SCOPED_TRACE("train");
+        TrainData d;
+        if(RecordOutcome("find_enforce_db_clean_train", TrainUnderPolicy(handle, d), reason))
+            CheckTrain(handle, d, true, false);
+    }
+    {
+        SCOPED_TRACE("bwd");
+        BwdData d;
+        if(RecordOutcome("find_enforce_db_clean_bwd", BwdUnderPolicy(handle, d), reason))
+            CheckBwd(handle, d);
+    }
+    {
+        SCOPED_TRACE("infer");
+        InferData d;
+        d.SetUpImpl(TuningCase(), miopenBNSpatial, miopenTensorNCHW, false);
+        const auto result = hs::CaptureCall([&] { return InferV1(handle, d, false); });
+        if(RecordOutcome("find_enforce_db_clean_infer", result, reason))
             CheckInfer(handle, d);
     }
 }
