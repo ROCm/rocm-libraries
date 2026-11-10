@@ -56,26 +56,6 @@ struct Coords
     index_t cluster_wy;
 };
 
-/// rocKE's address arithmetic on non-negative i32 values: a power-of-2 divisor is a logical shift
-/// or a mask, any other one a signed divide.
-template <index_t D>
-CK_TILE_HOST_DEVICE constexpr index_t div_c(index_t x)
-{
-    if constexpr((D & (D - 1)) == 0)
-        return static_cast<index_t>(static_cast<uint32_t>(x) >> __builtin_ctz(D));
-    else
-        return x / D;
-}
-
-template <index_t D>
-CK_TILE_HOST_DEVICE constexpr index_t mod_c(index_t x)
-{
-    if constexpr((D & (D - 1)) == 0)
-        return x & (D - 1);
-    else
-        return x % D;
-}
-
 // sched_barrier mask: VALU (0x2), SALU (0x4) and TRANS (0x400) may cross; WMMAs and memory
 // operations may not.
 inline constexpr int kSchedAluOnly = 0x2 | 0x4 | 0x400;
@@ -150,15 +130,6 @@ CK_TILE_DEVICE void cluster_wait()
 {
 #if defined(__gfx125__)
     asm volatile("s_barrier_wait -3" ::: "memory");
-#endif
-}
-
-CK_TILE_DEVICE uint32_t uniform(uint32_t v)
-{
-#if defined(__gfx125__)
-    return static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int>(v)));
-#else
-    return v;
 #endif
 }
 
@@ -393,14 +364,13 @@ struct GemmPipelineAgBgCrCompTDMV4
     {
         mx_tdm_v4::Coords c{};
         c.tid       = static_cast<index_t>(threadIdx.x);
-        c.lane      = mx_tdm_v4::mod_c<mx_tdm_v4::kWave>(c.tid);
-        c.lane_col  = mx_tdm_v4::mod_c<16>(c.lane);
-        c.lane_half = mx_tdm_v4::div_c<16>(c.lane);
+        c.lane      = integer_modulo_nonnegative<mx_tdm_v4::kWave>(c.tid);
+        c.lane_col  = integer_modulo_nonnegative<16>(c.lane);
+        c.lane_half = integer_divide_nonnegative<16>(c.lane);
         // Wave-uniform, so the TDM descriptors built from it stay scalar.
-        c.wave =
-            static_cast<index_t>(mx_tdm_v4::uniform(mx_tdm_v4::div_c<mx_tdm_v4::kWave>(c.tid)));
-        c.wave_n  = mx_tdm_v4::mod_c<kWarpN>(c.wave);
-        c.wave_m  = mx_tdm_v4::div_c<kWarpN>(c.wave);
+        c.wave    = amd_wave_read_first_lane(integer_divide_nonnegative<mx_tdm_v4::kWave>(c.tid));
+        c.wave_n  = integer_modulo_nonnegative<kWarpN>(c.wave);
+        c.wave_m  = integer_divide_nonnegative<kWarpN>(c.wave);
         c.block_m = static_cast<index_t>(blockIdx.y) * kTileM;
         c.block_n = static_cast<index_t>(blockIdx.x) * kTileN;
         if constexpr(kHasCluster)
@@ -490,9 +460,9 @@ struct GemmPipelineAgBgCrCompTDMV4
               c(c_),
               smem(smem_),
               smem_addr(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(smem_))),
-              packed_k(mx_tdm_v4::div_c<kKPerByte>(p_.K)),
+              packed_k(integer_divide_nonnegative<kKPerByte>(p_.K)),
               // The last K step is partial (and its scales zero-padded) only with a K tail.
-              k_atoms(mx_tdm_v4::div_c<mx_tdm_v4::kAtomK>(
+              k_atoms(integer_divide_nonnegative<mx_tdm_v4::kAtomK>(
                   Traits::kHasTail ? p_.K + mx_tdm_v4::kAtomK - 1 : p_.K)),
               a_scale_stride(mx_tdm_v4::opaque_scalar(p_.M * 4)),
               b_scale_stride(mx_tdm_v4::opaque_scalar(p_.N * 4))
@@ -569,7 +539,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                     // ceil(rows left / tile_rows), at least one: with no rows left, tensor_dim1 0
                     // keeps that one off memory.
                     const index_t held = max(min(rows_left, L.rows), 1);
-                    iterations         = mx_tdm_v4::div_c<tile_rows>(held + tile_rows - 1);
+                    iterations = integer_divide_nonnegative<tile_rows>(held + tile_rows - 1);
                 }
                 d.g2[0] = 0;
                 d.g2[1] = static_cast<uint32_t>(L.iterate_stride);
@@ -616,17 +586,10 @@ struct GemmPipelineAgBgCrCompTDMV4
         /// Both descriptors for tile 0, buffer 0, selected by wave parity; every word uniform.
         CK_TILE_DEVICE void Hoist()
         {
-            const bool even         = mx_tdm_v4::mod_c<2>(c.wave) == 0;
-            const index_t component = mx_tdm_v4::div_c<2>(c.wave);
+            const bool even         = integer_modulo_nonnegative<2>(c.wave) == 0;
+            const index_t component = integer_divide_nonnegative<2>(c.wave);
             const auto select = [&](const mx_tdm_v4::TdmDesc& b, const mx_tdm_v4::TdmDesc& a) {
-                mx_tdm_v4::TdmDesc d{};
-                for(int i = 0; i < 4; ++i)
-                    d.g0[i] = mx_tdm_v4::uniform(even ? b.g0[i] : a.g0[i]);
-                for(int i = 0; i < 8; ++i)
-                    d.g1[i] = mx_tdm_v4::uniform(even ? b.g1[i] : a.g1[i]);
-                for(int i = 0; i < 4; ++i)
-                    d.g2[i] = mx_tdm_v4::uniform(even ? b.g2[i] : a.g2[i]);
-                return d;
+                return amd_wave_read_first_lane(even ? b : a);
             };
             data      = select(DataDescriptor<false>(component), DataDescriptor<true>(component));
             scale     = select(ScaleDescriptor<false>(component), ScaleDescriptor<true>(component));
@@ -640,7 +603,7 @@ struct GemmPipelineAgBgCrCompTDMV4
         /// This wave's data and scale loads of the tile at k0 into buffer parity.
         CK_TILE_DEVICE void Issue(index_t k0, index_t parity) const
         {
-            const index_t k_byte      = mx_tdm_v4::div_c<kKPerByte>(k0);
+            const index_t k_byte      = integer_divide_nonnegative<kKPerByte>(k0);
             const index_t remaining_k = packed_k - k_byte;
             mx_tdm_v4::TdmDesc d      = data;
             mx_tdm_v4::tdm_address(d.g0,
@@ -648,7 +611,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                                    data_global + static_cast<uint32_t>(k_byte));
             mx_tdm_v4::tdm_patch_remaining_k(d, static_cast<uint32_t>(remaining_k));
             mx_tdm_v4::tensor_load(d);
-            const index_t k_step     = mx_tdm_v4::div_c<mx_tdm_v4::kAtomK>(k0);
+            const index_t k_step     = integer_divide_nonnegative<mx_tdm_v4::kAtomK>(k0);
             const index_t steps_left = k_atoms - k_step;
             mx_tdm_v4::TdmDesc s     = scale;
             mx_tdm_v4::tdm_address(s.g0,
@@ -683,7 +646,7 @@ struct GemmPipelineAgBgCrCompTDMV4
             {
                 constexpr index_t line       = mx_tdm_v4::kGl2LineBytes;
                 k_ahead                      = k_ahead < p.K ? k_ahead : p.K - kTileK;
-                const index_t k_byte         = mx_tdm_v4::div_c<kKPerByte>(k_ahead);
+                const index_t k_byte         = integer_divide_nonnegative<kKPerByte>(k_ahead);
                 constexpr index_t data_lines = kLayout.row_bytes / line == 0 && AheadParity == 0
                                                    ? 1
                                                    : kLayout.row_bytes / line;
@@ -711,7 +674,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                                 : c.tid;
                 // A partial last tile has fewer K steps than the k_steps rows prefetched for it;
                 // a partial M/N tile has lines past the end.
-                const index_t k_step = mx_tdm_v4::div_c<mx_tdm_v4::kAtomK>(k_ahead);
+                const index_t k_step = integer_divide_nonnegative<mx_tdm_v4::kAtomK>(k_ahead);
 
                 const auto address = [&](auto cat, index_t index) -> const uint8_t* {
                     constexpr index_t kCat = decltype(cat)::value;
@@ -720,11 +683,15 @@ struct GemmPipelineAgBgCrCompTDMV4
                         constexpr bool is_a = kCat == 0;
                         constexpr bool edge = is_a ? Traits::kEdgeM : Traits::kEdgeN;
                         constexpr bool wide = is_a ? Traits::kWideA : Traits::kWideB;
-                        const index_t row0  = is_a ? cluster_m0 : cluster_n0;
-                        const index_t row   = LastInside<edge>(
-                            row0 + mx_tdm_v4::div_c<data_lines>(index), is_a ? p.M : p.N);
-                        const index_t offset = k_byte + mx_tdm_v4::mod_c<data_lines>(index) * line;
-                        const uint8_t* base  = is_a ? p.a : p.b;
+                        // Dependent on kCat: a tile without data lines (data_lines 0) never
+                        // instantiates the divide.
+                        constexpr index_t lines = is_a ? data_lines : data_lines;
+                        const index_t row0      = is_a ? cluster_m0 : cluster_n0;
+                        const index_t row       = LastInside<edge>(
+                            row0 + integer_divide_nonnegative<lines>(index), is_a ? p.M : p.N);
+                        const index_t offset =
+                            k_byte + integer_modulo_nonnegative<lines>(index) * line;
+                        const uint8_t* base = is_a ? p.a : p.b;
                         if constexpr(wide)
                             return base + (static_cast<uint64_t>(static_cast<uint32_t>(row)) *
                                                static_cast<uint32_t>(packed_k) +
@@ -740,9 +707,10 @@ struct GemmPipelineAgBgCrCompTDMV4
                         constexpr index_t lines_per_row = is_a ? a_lines_per_row : b_lines_per_row;
                         const index_t row_bytes         = is_a ? a_scale_stride : b_scale_stride;
                         const index_t mn0               = is_a ? cluster_m0 : cluster_n0;
-                        const index_t row = k_step + mx_tdm_v4::div_c<lines_per_row>(index);
+                        const index_t row =
+                            k_step + integer_divide_nonnegative<lines_per_row>(index);
                         const index_t offset =
-                            mn0 * 4 + mx_tdm_v4::mod_c<lines_per_row>(index) * line;
+                            mn0 * 4 + integer_modulo_nonnegative<lines_per_row>(index) * line;
                         const index_t element =
                             LastInside<clamp>(row * row_bytes + offset, k_atoms * row_bytes);
                         return (is_a ? p.a_scale : p.b_scale) + static_cast<uint32_t>(element);
@@ -752,9 +720,10 @@ struct GemmPipelineAgBgCrCompTDMV4
                 static_for<0, (total + pool - 1) / pool, 1>{}([&](auto round) {
                     constexpr index_t round_start = decltype(round)::value * pool;
                     constexpr index_t remaining   = total - round_start;
-                    const index_t index           = remaining >= pool
-                                                        ? thread + round_start
-                                                        : mx_tdm_v4::mod_c<remaining>(thread) + round_start;
+                    const index_t index =
+                        remaining >= pool
+                            ? thread + round_start
+                            : integer_modulo_nonnegative<remaining>(thread) + round_start;
                     // Ranges are visited last to first, so each lane ends up with the first
                     // range whose end lies above its index.
                     const uint8_t* pointer = nullptr;
@@ -1179,7 +1148,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                 carry.head = ReadHead(BufferBase(0), 0);
                 ReadB<0, kRn>(carry.b, BufferBase(0), 0);
             }
-            const index_t full_tiles = mx_tdm_v4::div_c<kTileK>(p.K);
+            const index_t full_tiles = integer_divide_nonnegative<kTileK>(p.K);
             constexpr index_t kOdd   = Traits::kOddTiles;
             // The loop runs tile pairs, one tile per buffer, so buffer offsets fold. A known odd
             // tile count peels tile 0 before the loop, as rocKE; an unknown one runs the odd
@@ -1191,8 +1160,9 @@ struct GemmPipelineAgBgCrCompTDMV4
                 start = kTileK;
             }
             constexpr index_t kFirst = kOdd == 1 ? 1 : 0;
-            const index_t loop_end   = kOdd < 0 ? mx_tdm_v4::div_c<2>(full_tiles) * (2 * kTileK)
-                                                : (Traits::kHasTail ? full_tiles * kTileK : p.K);
+            const index_t loop_end   = kOdd < 0
+                                           ? integer_divide_nonnegative<2>(full_tiles) * (2 * kTileK)
+                                           : (Traits::kHasTail ? full_tiles * kTileK : p.K);
             for(index_t k0 = start; k0 < loop_end; k0 += 2 * kTileK)
             {
                 Tile<kKSteps, kFirst>(acc, carry, k0, kFirst);
@@ -1200,7 +1170,7 @@ struct GemmPipelineAgBgCrCompTDMV4
             }
             if constexpr(kOdd < 0)
             {
-                if(mx_tdm_v4::mod_c<2>(full_tiles))
+                if(integer_modulo_nonnegative<2>(full_tiles))
                     Tile<kKSteps, 0>(acc, carry, loop_end, 0);
             }
             if constexpr(Traits::kHasTail)
@@ -1210,11 +1180,11 @@ struct GemmPipelineAgBgCrCompTDMV4
                 // GL2 prefetch takes it as even, which only changes which lines are hinted.
                 static_assert(Traits::kTailSteps < kKSteps, "comp_tdm_v4: tail steps < k_steps");
                 constexpr index_t kTailParity = kOdd < 0 ? 0 : kOdd;
-                Tile<Traits::kTailSteps, kTailParity>(acc,
-                                                      carry,
-                                                      full_tiles * kTileK,
-                                                      kOdd < 0 ? mx_tdm_v4::mod_c<2>(full_tiles)
-                                                               : kTailParity);
+                Tile<Traits::kTailSteps, kTailParity>(
+                    acc,
+                    carry,
+                    full_tiles * kTileK,
+                    kOdd < 0 ? integer_modulo_nonnegative<2>(full_tiles) : kTailParity);
             }
             // No workgroup may exit while a TDM load into its LDS is in flight: with multicast,
             // peers' loads write here too.
