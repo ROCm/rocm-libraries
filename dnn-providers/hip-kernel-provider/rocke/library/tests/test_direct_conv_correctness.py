@@ -2581,21 +2581,25 @@ class TestDirectConvValidation(unittest.TestCase):
 # rather than reusing _SKIP_REASON: that one is empty on gfx942, so every case
 # would come back as a per-subtest validator rejection and the suite would
 # report green without ever compiling or launching a kernel.
-_WGRAD_ARCHES = ("gfx950", "gfx1250")
 
 
-def _wgrad_skip_reason() -> str:
+def _wgrad_skip_reason(arch: Optional[str], has_torch: bool) -> str:
     # Not _SKIP_REASON: that one requires an MFMA arch, and gfx1250 is WMMA.
-    if not GPU_ARCH:
+    # The arch scope is derived from the AOT grid (asked of grid_caches_variant)
+    # rather than a local tuple so new wave32 wgrad targets are covered
+    # automatically.
+    if not arch:
         return "no ROCm GPU detected"
-    if not _HAS_TORCH:
+    if not has_torch:
         return "torch not importable"
-    if GPU_ARCH not in _WGRAD_ARCHES:
-        return f"wgrad needs one of {_WGRAD_ARCHES}, got {GPU_ARCH!r}"
+    from kernels.conv.direct_aot_jobs import grid_caches_variant
+
+    if not grid_caches_variant("direct_wgrad", arch):
+        return f"the AOT grid caches no direct_wgrad kernel for {arch!r}"
     return ""
 
 
-_WGRAD_SKIP_REASON = _wgrad_skip_reason()
+_WGRAD_SKIP_REASON = _wgrad_skip_reason(GPU_ARCH, _HAS_TORCH)
 
 
 _WGRAD_SHAPES: List[_Shape] = [
@@ -2938,6 +2942,22 @@ def _run_dw_wgrad_one(
     if not rel_err < tol:
         return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
     return True, ""
+
+
+class TestDirectWgradGate(unittest.TestCase):
+    """CPU: the wgrad numeric test runs on every arch the AOT grid caches
+    ``direct_wgrad`` for (gfx950 and gfx1250 today), not on others."""
+
+    def test_runs_where_the_grid_caches_it(self):
+        for arch in ("gfx950", "gfx1250"):
+            with self.subTest(arch=arch):
+                self.assertEqual(_wgrad_skip_reason(arch, True), "")
+
+    def test_skips_elsewhere_with_a_reason(self):
+        self.assertIn("caches no", _wgrad_skip_reason("gfx942", True))
+        self.assertIn("caches no", _wgrad_skip_reason("gfx1201", True))
+        self.assertEqual(_wgrad_skip_reason(None, True), "no ROCm GPU detected")
+        self.assertEqual(_wgrad_skip_reason("gfx950", False), "torch not importable")
 
 
 @unittest.skipUnless(not _WGRAD_SKIP_REASON, _WGRAD_SKIP_REASON or "no GPU")
@@ -3396,15 +3416,14 @@ def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
 def _dw_wgrad_skip_reason(arch: Optional[str], has_torch: bool) -> str:
     """Why the depthwise wgrad numeric test cannot run on ``arch`` ("" when it
     can). It runs wherever the direct-conv AOT grid caches the kernel (asked
-    of the grid, not listed here: the wave32 targets), and on the
-    ``_WGRAD_ARCHES``, where it ran before."""
+    of the grid, not listed here: the wave32 targets)."""
     if not arch:
         return "no ROCm GPU detected"
     if not has_torch:
         return "torch not importable"
     from kernels.conv.direct_aot_jobs import grid_caches_variant
 
-    if arch in _WGRAD_ARCHES or grid_caches_variant("direct_depthwise_wgrad", arch):
+    if grid_caches_variant("direct_depthwise_wgrad", arch):
         return ""
     return f"the AOT grid caches no direct_depthwise_wgrad kernel for {arch!r}"
 
@@ -3418,12 +3437,13 @@ class TestDirectDepthwiseWgradGate(unittest.TestCase):
     arches of the other wgrad tests."""
 
     def test_runs_where_the_grid_caches_it(self):
-        for arch in ("gfx1151", "gfx1201", "gfx1250", "gfx950"):
+        for arch in ("gfx1151", "gfx1201", "gfx1250"):
             with self.subTest(arch=arch):
                 self.assertEqual(_dw_wgrad_skip_reason(arch, True), "")
 
     def test_skips_elsewhere_with_a_reason(self):
         self.assertIn("caches no", _dw_wgrad_skip_reason("gfx942", True))
+        self.assertIn("caches no", _dw_wgrad_skip_reason("gfx950", True))
         self.assertEqual(_dw_wgrad_skip_reason(None, True), "no ROCm GPU detected")
         self.assertEqual(
             _dw_wgrad_skip_reason("gfx1151", False), "torch not importable"
