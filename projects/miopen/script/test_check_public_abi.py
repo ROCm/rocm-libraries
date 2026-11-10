@@ -23,6 +23,7 @@ is needed and the module runs in a lint lane:
     python -m pytest projects/miopen/script/test_check_public_abi.py
 """
 
+import hashlib
 import struct
 import subprocess
 import sys
@@ -1035,6 +1036,10 @@ def test_a_linux_soname_does_not_pass_for_a_dll(capsys):
     assert "expected 'MIOpen.dll'" in capsys.readouterr().out
 
 
+def test_a_linux_soname_is_matched_with_case(capsys):
+    assert abi.check_soname(wrapper_elf(soname="libmiopen.so.1")) is False
+
+
 def test_a_dll_without_the_private_import_fails(capsys):
     wrapper = wrapper_dll(needed=("KERNEL32.dll",))
     assert abi.check_private_dep(wrapper, expect_present=True) is False
@@ -1089,9 +1094,25 @@ def pe_image(
     delay_imports=(),
     version=None,
     pe32_plus=True,
+    ordinal_base=1,
+    reverse_functions=False,
+    old_delay_layout=False,
+    decoy_resources=(),
+    named_resource_entry=False,
+    version_signature=0xFEEF04BD,
+    text_vsize=None,
 ):
-    """Return a DLL image. `exports` maps a name to "code", "data" or "forward"."""
+    """Return a DLL image.
+
+    `exports` maps a name to "code", "data" or "forward", or to "padding_code" or
+    "bss_code" for code past `text_vsize` or past the raw data. `reverse_functions`
+    lays the function table out in .def order, as a .def-file link does, with
+    `ordinal_base` as the first ordinal. `old_delay_layout` (PE32 only) writes
+    delay-import names as addresses. `decoy_resources` adds resource types around
+    RT_VERSION.
+    """
     rdata = bytearray()
+    image_base = 0x180000000 if pe32_plus else 0x10000000
 
     def put(data):
         rva = RDATA_RVA + len(rdata)
@@ -1112,16 +1133,22 @@ def pe_image(
         name_table = put(b"\0" * 4 * len(names))
         ordinals = put(b"\0" * 2 * len(names))
         own_name = cstr(dll_name)
+        code_targets = {
+            "code": lambda i: TEXT_RVA + 16 * i,
+            "padding_code": lambda i: TEXT_RVA + 0x180,
+            "bss_code": lambda i: TEXT_RVA + 0x300,
+        }
         for i, name in enumerate(names):
-            if exports[name] == "code":
-                target = TEXT_RVA + 16 * i
+            if exports[name] in code_targets:
+                target = code_targets[exports[name]](i)
             elif exports[name] == "data":
                 target = data_target
             else:
                 target = cstr("KERNEL32.GetTickCount")
-            struct.pack_into("<I", rdata, functions - RDATA_RVA + 4 * i, target)
+            slot = len(names) - 1 - i if reverse_functions else i
+            struct.pack_into("<I", rdata, functions - RDATA_RVA + 4 * slot, target)
             struct.pack_into("<I", rdata, name_table - RDATA_RVA + 4 * i, cstr(name))
-            struct.pack_into("<H", rdata, ordinals - RDATA_RVA + 2 * i, i)
+            struct.pack_into("<H", rdata, ordinals - RDATA_RVA + 2 * i, slot)
         end = RDATA_RVA + len(rdata)
         struct.pack_into(
             "<IIHHIIIIIII",
@@ -1132,7 +1159,7 @@ def pe_image(
             0,
             0,
             own_name,
-            1,
+            ordinal_base,
             len(names),
             len(names),
             functions,
@@ -1151,11 +1178,18 @@ def pe_image(
         directories[1] = (table, 20 * (len(imports) + 1))
 
     if delay_imports:
+        assert not (old_delay_layout and pe32_plus)
         descriptors = []
         for name in delay_imports:
             thunks = put(b"\0" * 8)
+            if old_delay_layout:
+                attributes, name_field = 0, cstr(name) + image_base
+            else:
+                attributes, name_field = 1, cstr(name)
             descriptors.append(
-                struct.pack("<IIIIIIII", 1, cstr(name), 0, thunks, thunks, 0, 0, 0)
+                struct.pack(
+                    "<IIIIIIII", attributes, name_field, 0, thunks, thunks, 0, 0, 0
+                )
             )
         table = put(b"".join(descriptors) + b"\0" * 32)
         directories[13] = (table, 32 * (len(delay_imports) + 1))
@@ -1163,20 +1197,40 @@ def pe_image(
     if version:
         high = version[0] << 16 | version[1]
         low = version[2] << 16 | version[3]
-        fixed = struct.pack("<13I", 0xFEEF04BD, 0x10000, high, low, high, low, *[0] * 7)
+        fixed = struct.pack(
+            "<13I", version_signature, 0x10000, high, low, high, low, *[0] * 7
+        )
         key = "VS_VERSION_INFO\0".encode("utf-16-le")
         info = struct.pack("<HHH", 40 + len(fixed), len(fixed), 0) + key + b"\0\0"
-        info_rva = put(info + fixed)
-
-        def directory(ident, target):
-            return struct.pack("<IIHHHHII", 0, 0, 0, 0, 0, 1, ident, target)
-
-        tree = (
-            directory(16, 0x80000000 | 24)  # type RT_VERSION -> name directory
-            + directory(1, 0x80000000 | 48)  # name 1 -> language directory
-            + directory(0x409, 72)  # language -> data entry
-            + struct.pack("<IIII", info_rva, len(info + fixed), 0, 0)
+        # Decoy data is all zeros, so reading it as a version finds none.
+        subtrees = sorted(
+            [(16, put(info + fixed), len(info + fixed))]
+            + [(kind, put(b"\0" * 64), 64) for kind in decoy_resources]
         )
+
+        def directory(entries, named=0):
+            header = struct.pack("<IIHHHH", 0, 0, 0, 0, named, len(entries) - named)
+            return header + b"".join(struct.pack("<II", *entry) for entry in entries)
+
+        # Each type gets its own name directory, language directory and data entry
+        # (64 bytes) after the root.
+        root_size = 16 + 8 * (len(subtrees) + named_resource_entry)
+
+        def subtree_at(k):
+            return root_size + 64 * k
+
+        root_entries = [
+            (kind, 0x80000000 | subtree_at(k))
+            for k, (kind, _, _) in enumerate(subtrees)
+        ]
+        if named_resource_entry:
+            # Named entries come before the ID entries.
+            root_entries.insert(0, (0x80000000, 0x80000000 | subtree_at(0)))
+        tree = directory(root_entries, named=int(named_resource_entry))
+        for k, (_, data_rva, data_size) in enumerate(subtrees):
+            tree += directory([(1, 0x80000000 | (subtree_at(k) + 24))])
+            tree += directory([(0x409, subtree_at(k) + 48)])
+            tree += struct.pack("<IIII", data_rva, data_size, 0, 0)
         directories[2] = (put(tree), len(tree))
 
     rdata.extend(b"\0" * (-len(rdata) % 0x200))
@@ -1185,13 +1239,27 @@ def pe_image(
     dir_offset = 112 if pe32_plus else 96
     optional = bytearray(dir_offset + 16 * 8)
     struct.pack_into("<H", optional, 0, 0x20B if pe32_plus else 0x10B)
+    if pe32_plus:
+        struct.pack_into("<Q", optional, 24, image_base)
+    else:
+        struct.pack_into("<I", optional, 28, image_base)
     struct.pack_into("<I", optional, dir_offset - 4, 16)
     for index, (rva, size) in directories.items():
         struct.pack_into("<II", optional, dir_offset + 8 * index, rva, size)
 
-    def section(name, rva, raw_offset, size, flags):
+    def section(name, rva, raw_offset, raw_size, flags, virtual_size=None):
         return struct.pack(
-            "<8sIIIIIIHHI", name, size, rva, size, raw_offset, 0, 0, 0, 0, flags
+            "<8sIIIIIIHHI",
+            name,
+            virtual_size or raw_size,
+            rva,
+            raw_size,
+            raw_offset,
+            0,
+            0,
+            0,
+            0,
+            flags,
         )
 
     machine = 0x8664 if pe32_plus else 0x14C
@@ -1202,7 +1270,7 @@ def pe_image(
         + b"PE\0\0"
         + struct.pack("<HHIIIHH", machine, 2, 0, 0, 0, len(optional), 0x2022)
         + bytes(optional)
-        + section(b".text", TEXT_RVA, TEXT_RAW, len(text), 0x60000020)
+        + section(b".text", TEXT_RVA, TEXT_RAW, len(text), 0x60000020, text_vsize)
         + section(b".rdata", RDATA_RVA, RDATA_RAW, len(rdata), 0x40000040)
     )
     return headers.ljust(TEXT_RAW, b"\0") + text + bytes(rdata)
@@ -1274,11 +1342,209 @@ def test_a_truncated_pe_is_an_error(tmp_path):
         read_dll(tmp_path, image[:0x200]).defined_dynamic_functions()
 
 
+@pytest.mark.parametrize("pe32_plus", [True, False], ids=["PE32+", "PE32"])
+def test_pe_reader_reads_the_image_base(tmp_path, pe32_plus):
+    lib = read_dll(tmp_path, pe_image("MIOpen.dll", pe32_plus=pe32_plus))
+    assert lib.image_base == (0x180000000 if pe32_plus else 0x10000000)
+
+
+def test_pe_exports_are_matched_through_the_ordinal_table(tmp_path):
+    """A .def-file link lays the function table out in .def order, so a name's
+    function is the one its ordinal picks, not the one at its own position."""
+    image = pe_image(
+        "MIOpen.dll",
+        exports={"miopenA": "code", "miopenB": "data"},
+        reverse_functions=True,
+        ordinal_base=5,
+    )
+    assert read_dll(tmp_path, image).defined_dynamic_functions() == {"miopenA"}
+
+
+@pytest.mark.parametrize("pe32_plus", [True, False], ids=["PE32+", "PE32"])
+def test_pe_reader_walks_every_delay_import(tmp_path, pe32_plus):
+    """The backend is the second descriptor here: reading past the first one needs
+    the descriptor's full size."""
+    image = pe_image(
+        "MIOpen.dll",
+        delay_imports=["SHLWAPI.dll", "hipdnn_backend.dll"],
+        pe32_plus=pe32_plus,
+    )
+    assert read_dll(tmp_path, image).needed() == ["SHLWAPI.dll", "hipdnn_backend.dll"]
+
+
+def test_pe_delay_import_names_in_the_old_layout_are_addresses(tmp_path):
+    """Only a PE32 image can hold the old layout, whose names are image-base
+    relative addresses rather than RVAs."""
+    image = pe_image(
+        "MIOpen.dll",
+        delay_imports=["hipdnn_backend.dll"],
+        pe32_plus=False,
+        old_delay_layout=True,
+    )
+    assert read_dll(tmp_path, image).needed() == ["hipdnn_backend.dll"]
+
+
+def test_pe_version_is_found_among_other_resources(tmp_path):
+    """RT_VERSION sits between types that sort before and after it, behind a named
+    entry."""
+    image = pe_image(
+        "MIOpen.dll",
+        version=(3, 5, 1, 0),
+        decoy_resources=(10, 24),
+        named_resource_entry=True,
+    )
+    assert read_dll(tmp_path, image).file_version() == "3.5.1.0"
+
+
+def test_pe_version_without_the_fixed_file_info_signature_is_ignored(tmp_path):
+    image = pe_image("MIOpen.dll", version=(3, 5, 1, 0), version_signature=0)
+    assert read_dll(tmp_path, image).file_version() == ""
+
+
+@pytest.mark.parametrize(
+    "kind, text_vsize",
+    [("padding_code", 0x100), ("bss_code", 0x400)],
+    ids=["past the virtual size", "past the raw data"],
+)
+def test_pe_code_counts_when_only_one_size_of_its_section_reaches_it(
+    tmp_path, kind, text_vsize
+):
+    """A section is as large as the bigger of its virtual size and raw data."""
+    image = pe_image("MIOpen.dll", exports={"miopenFoo": kind}, text_vsize=text_vsize)
+    assert read_dll(tmp_path, image).defined_dynamic_functions() == {"miopenFoo"}
+
+
+@pytest.mark.parametrize(
+    "needle, read",
+    [
+        (b"MIOpen.dll\0", lambda lib: lib.soname()),
+        (b"miopenFoo\0", lambda lib: lib.defined_dynamic_functions()),
+        (b"MIOpen_private.dll\0", lambda lib: lib.needed()),
+    ],
+    ids=["DLL name", "export name", "import name"],
+)
+def test_a_pe_cut_inside_a_name_is_an_error(tmp_path, needle, read):
+    image = pe_image(
+        "MIOpen.dll",
+        exports={"miopenFoo": "code"},
+        imports=["MIOpen_private.dll"],
+    )
+    cut = image.index(needle) + 3
+    with pytest.raises(abi.AbiError, match="truncated PE file"):
+        read(read_dll(tmp_path, image[:cut]))
+
+
 def test_an_elf_file_still_gets_the_elf_reader(tmp_path):
     path = tmp_path / "libMIOpen.so.1.0"
     path.write_bytes(b"\x7fELF" + b"\0" * 60)
     with pytest.raises(abi.AbiError, match="ELF has no section headers"):
         abi.open_library(str(path), "library")
+
+
+# --------------------------------------------------------------------------
+# The commands on real DLL images
+#
+# open_library is not stubbed here, so the commands run the format detection and
+# the readers as well as the checks.
+# --------------------------------------------------------------------------
+
+
+def write_flag_off_dll(tmp_path, imports=("KERNEL32.dll",), extra_exports=()):
+    path = tmp_path / "MIOpen.dll"
+    path.write_bytes(
+        pe_image(
+            "MIOpen.dll",
+            exports={"miopenFoo": "code", "miopenBar": "code"}
+            | {name: "code" for name in extra_exports},
+            imports=imports,
+            version=(3, 5, 1, 0),
+        )
+    )
+    baseline = tmp_path / "public_symbols.baseline"
+    baseline.write_text("miopenFoo\nmiopenBar\n")
+    return path, baseline
+
+
+def test_check_passes_a_flag_off_dll(tmp_path, capsys):
+    dll, baseline = write_flag_off_dll(tmp_path)
+    assert abi.main(["check", str(dll), "--baseline", str(baseline)]) == 0
+    assert "public-abi symbol check: PASS" in capsys.readouterr().out
+
+
+def test_check_fails_a_flag_off_dll_that_imports_the_private_dll(tmp_path, capsys):
+    dll, baseline = write_flag_off_dll(
+        tmp_path, imports=("KERNEL32.dll", "MIOpen_private.dll")
+    )
+    assert abi.main(["check", str(dll), "--baseline", str(baseline)]) == 1
+    out = capsys.readouterr().out
+    assert "flag-off MIOpen.dll has import of MIOpen_private" in out
+    assert "public-abi symbol check: FAIL" in out
+
+
+def test_check_fails_a_flag_off_dll_with_a_different_export_set(tmp_path, capsys):
+    dll, baseline = write_flag_off_dll(tmp_path)
+    baseline.write_text("miopenFoo\nmiopenBar\nmiopenBaz\n")
+    assert abi.main(["check", str(dll), "--baseline", str(baseline)]) == 1
+    assert "public-abi symbol check: FAIL" in capsys.readouterr().out
+
+
+def test_check_fails_a_flag_off_dll_that_exports_an_impl_symbol(tmp_path, capsys):
+    dll, baseline = write_flag_off_dll(tmp_path, extra_exports=("miopenFoo_impl",))
+    assert abi.main(["check", str(dll), "--baseline", str(baseline)]) == 1
+    assert "*_impl symbols (private rename leaked)" in capsys.readouterr().out
+
+
+def test_dump_symbols_prints_the_public_exports_of_a_dll(tmp_path, capsys):
+    dll, _ = write_flag_off_dll(tmp_path)
+    assert abi.main(["dump-symbols", str(dll)]) == 0
+    assert capsys.readouterr().out == "miopenBar\nmiopenFoo\n"
+
+
+def test_dump_symbols_writes_the_file_it_is_given(tmp_path, capsys):
+    dll, _ = write_flag_off_dll(tmp_path)
+    out = tmp_path / "symbols.txt"
+    assert abi.main(["dump-symbols", str(dll), "-o", str(out)]) == 0
+    assert out.read_text() == "miopenBar\nmiopenFoo\n"
+
+
+def test_dump_writes_the_symbols_name_imports_and_hash_of_a_dll(tmp_path):
+    dll, _ = write_flag_off_dll(tmp_path)
+    prefix = tmp_path / "dumped"
+    assert abi.main(["dump", str(dll), str(prefix)]) == 0
+    assert (tmp_path / "dumped.symbols").read_text() == "miopenBar\nmiopenFoo\n"
+    assert (tmp_path / "dumped.soname").read_text() == "MIOpen.dll\n"
+    assert (tmp_path / "dumped.needed").read_text() == "KERNEL32.dll\n"
+    assert (tmp_path / "dumped.sha256").read_text() == (
+        hashlib.sha256(dll.read_bytes()).hexdigest() + "\n"
+    )
+
+
+def test_check_wrapper_rejects_a_dll_wrapper_with_an_elf_private_library(
+    tmp_path, monkeypatch, capsys
+):
+    assert run_check_wrapper(tmp_path, monkeypatch, wrapper_dll(), good_private()) == 2
+    assert "different formats" in capsys.readouterr().err
+
+
+def test_check_wrapper_rejects_an_elf_wrapper_with_a_dll_private_library(
+    tmp_path, monkeypatch, capsys
+):
+    assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), private_dll()) == 2
+    assert "different formats" in capsys.readouterr().err
+
+
+def test_a_needed_baseline_cannot_be_used_with_a_dll(tmp_path, monkeypatch, capsys):
+    needed = tmp_path / "wrapper_needed.baseline"
+    needed.write_text("MIOpen_private.dll\n")
+    result = run_check_wrapper(
+        tmp_path,
+        monkeypatch,
+        wrapper_dll(),
+        private_dll(),
+        extra=("--needed-baseline", str(needed)),
+    )
+    assert result == 2
+    assert "cannot be used with a DLL" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------

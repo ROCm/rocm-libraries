@@ -423,7 +423,9 @@ class Pe:
 
     def _cstr(self, rva: int) -> str:
         off = self._offset(rva)
-        end = self.data.index(b"\x00", off)
+        end = self.data.find(b"\x00", off)
+        if end < 0:
+            raise AbiError(f"truncated PE file: {self.path}")
         return self.data[off:end].decode("utf-8", "replace")
 
     def _directory(self, index: int) -> tuple[int, int]:
@@ -1312,6 +1314,11 @@ def check_no_backend_dep(lib: Library) -> bool:
 
 def check_needed_baseline(lib: Library, baseline_path: str) -> bool:
     naming = lib.naming
+    if naming is PE_NAMING:
+        raise AbiError(
+            "--needed-baseline lists ELF DT_NEEDED entries and cannot be used with "
+            f"a DLL: {lib.path}"
+        )
     expected = read_symbol_list(baseline_path, "DT_NEEDED baseline")
     got = set(lib.needed())
     if got == expected:
@@ -1822,6 +1829,11 @@ def cmd_check_wrapper(args) -> int:
         ok &= check_wrapper_only_not_public(wrapper_only, args.public_header)
     if args.private_lib:
         private = open_library(args.private_lib, "private library")
+        if private.naming is not lib.naming:
+            raise AbiError(
+                "wrapper and private library are different formats (ELF and DLL): "
+                f"{lib.path}, {private.path}"
+            )
         ok &= check_excluded_on_private(excluded, private)
         ok &= check_coversioned(lib, private)
         ok &= check_impl_superset(lib, private)

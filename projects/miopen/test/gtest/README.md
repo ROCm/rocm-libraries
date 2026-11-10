@@ -80,6 +80,8 @@ Why it is set up this way:
   `wrapper_abi_check_ex_gpu_gfx110X`, so TheRock's GPU jobs run them. `miopen_add_wrapper_check`
   registers the build-tree entries and `miopen_append_installed_wrapper_check` the packaged ones.
   Select the bare entry by name with `ctest -R '^wrapper_abi_check$'`.
+  The per-architecture entries use the same label list as the parity entries, so an architecture
+  gets them only while it has an enabled suite.
   `check_wrapper_registration.py` fails CI when an entry is missing or mislabelled, in the build
   tree and the packaged list, comparing against the labels the shared parser gives for
   `test_categories.yaml`; `test_check_wrapper_registration` covers the check itself.
