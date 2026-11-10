@@ -138,6 +138,9 @@ struct Isel<'a> {
     uniform: Vec<bool>,
     f: MFunc,
     cur: usize,
+    /// The `MInst::loc` of the op being selected, and the ids of the locations seen.
+    cur_loc: u32,
+    loc_ids: FxHashMap<super::ast::Loc, u32>,
     vals: Vec<Option<Val>>,
     lds: &'a FxHashMap<ValueId, u32>,
     depth: u32,
@@ -178,21 +181,25 @@ struct Isel<'a> {
     /// What gfx950's LDS DMA selection reads of the kernel's LDS addresses
     /// (empty on gfx1151).
     lds_dma: crate::target::gfx9::lds_dma::Facts,
-    /// Lever `dsrebase`: per block, an LDS address register plus a 64 KiB-aligned constant, and where in the
-    /// block it was written (`lds_addr`).
+    /// Lever `dsrebase` (the kernel's `ds_rebase`): per block, an LDS address register plus a 64 KiB-aligned
+    /// constant, and where in the block it was written (`lds_addr`).
     ds_bases: FxHashMap<(usize, Opnd, i64), (Opnd, usize)>,
     /// rustgemm lever `dshoist` (with `dsrebase`): the uniform loops being selected, innermost last, and the rebased
     /// LDS addresses put in their preheaders, by (preheader block, address register, 64 KiB part).
     loop_frames: Vec<LoopFrame>,
     ds_hoisted: FxHashMap<(usize, Opnd, i64), Opnd>,
-    /// Lever `u16zext` (PLAN decision 18): VGPRs a zero-extending 16-bit load wrote (`buffer_load_ushort`,
-    /// `ds_read_u16`): their high half is already zero, so a zero extension of their low half is the register itself
-    /// (LLVM folds the `and 0xffff`), and no `v_and` waits for the load right after it issues.
+    /// Lever `u16zext` (PLAN decision 18; the kernel's `u16_zext`, `ds_read_u16` only): VGPRs a zero-extending
+    /// 16-bit load wrote (`buffer_load_ushort`, `ds_read_u16`): their high half is already zero, so a zero extension
+    /// of their low half is the register itself (LLVM folds the `and 0xffff`), and no `v_and` waits for the load
+    /// right after it issues.
     zero_hi16: crate::rir::fx::FxHashSet<u32>,
     /// rust-compiler-v2: allocations marked `dma_sync = "manual"` (their reads skip the waits for DMA into them).
     dma_manual: FxHashSet<ValueId>,
     /// kernel-agent lever `dmamanualringw`: the LDS writes of those allocations skip the DMA waits too.
     dma_manual_writes: bool,
+    /// The kernel's `acc_init_keep`: per register of an `arith.constant_vec`,
+    /// the block and the place in it right after the moves that set it.
+    const_vecs: FxHashMap<u32, (usize, usize)>,
 }
 
 /// rustgemm: a uniform `scf.for` being selected (lever `dshoist`): its preheader block, where in it hoisted
@@ -309,6 +316,9 @@ impl<'a> Isel<'a> {
 
     fn emit(&mut self, mut inst: MInst) {
         inst.scope = self.scope;
+        if inst.loc == NO_LOC {
+            inst.loc = self.cur_loc;
+        }
         self.f.blocks[self.cur].insts.push(inst);
     }
 
@@ -323,6 +333,41 @@ impl<'a> Isel<'a> {
         }
         self.f.scopes.push(std::sync::Arc::new(delta));
         (self.f.scopes.len() - 1) as u16
+    }
+
+    /// Makes `op`'s location the one the instructions emitted for it get; an
+    /// op the optimizer made without one gets none, so `srcloc` attributes
+    /// them as compiler-made. Returns the enclosing op's.
+    fn enter_loc(&mut self, op: &Op) -> u32 {
+        let old = self.cur_loc;
+        self.cur_loc = match &op.loc {
+            Some(loc) => {
+                let next = self.f.locs.len() as u32 + 1;
+                let id = *self.loc_ids.entry(loc.clone()).or_insert(next);
+                if id == next {
+                    self.f.locs.push(loc.clone());
+                }
+                id
+            }
+            None => NO_LOC,
+        };
+        old
+    }
+
+    /// Gives the current location to the instructions without one emitted
+    /// since `(block, length, blocks)`, including those target helpers push
+    /// straight into the blocks.
+    fn stamp_since(&mut self, (block, len, blocks): (usize, usize, usize)) {
+        if self.cur_loc == NO_LOC {
+            return;
+        }
+        let loc = self.cur_loc;
+        let (before, new) = self.f.blocks.split_at_mut(blocks);
+        let first = before[block].insts.iter_mut().skip(len);
+        let rest = new.iter_mut().flat_map(|b| b.insts.iter_mut());
+        for inst in first.chain(rest).filter(|i| i.loc == NO_LOC) {
+            inst.loc = loc;
+        }
     }
 
     fn new_block(&mut self) -> usize {
@@ -513,9 +558,9 @@ impl<'a> Isel<'a> {
                 if (wide && !shift_amount) || literal.is_some_and(|l| l != v) {
                     let n = if wide && !shift_amount { 2 } else { 1 };
                     let dst = self.sreg(n);
-                    self.f.blocks[self.cur].insts.push(MInst::new(Opc::Copy, [r(sub(dst, 0, 1))], [Opnd::Imm(v)]));
+                    self.emit(MInst::new(Opc::Copy, [r(sub(dst, 0, 1))], [Opnd::Imm(v)]));
                     if n == 2 {
-                        self.f.blocks[self.cur].insts.push(MInst::new(Opc::Copy, [r(sub(dst, 1, 1))], [Opnd::Imm(0)]));
+                        self.emit(MInst::new(Opc::Copy, [r(sub(dst, 1, 1))], [Opnd::Imm(0)]));
                     }
                     *s = r(dst);
                 } else {
@@ -941,6 +986,8 @@ impl<'a> Isel<'a> {
         let mut i = 0;
         while i < region.ops.len() {
             let run = region.ops[i..].iter().take_while(|op| op.kind == OpKind::KernArg).count();
+            let outer = self.enter_loc(&region.ops[i]);
+            let mark = (self.cur, self.f.blocks[self.cur].insts.len(), self.f.blocks.len());
             if run > 1 {
                 self.kernargs(&region.ops[i..i + run]);
                 i += run;
@@ -952,6 +999,8 @@ impl<'a> Isel<'a> {
                 }
                 i += 1;
             }
+            self.stamp_since(mark);
+            self.cur_loc = outer;
         }
         Ok(())
     }
@@ -1499,6 +1548,9 @@ impl<'a> Isel<'a> {
                 for i in 0..n {
                     self.copy(sub(dst, i, 1), Opnd::Imm(bits));
                 }
+                if self.k.passes.acc_init_keep {
+                    self.const_vecs.insert(dst.reg, (self.cur, self.f.blocks[self.cur].insts.len()));
+                }
                 self.set(v, Val::T(dst));
             }
             TruncF32To if self.k.ty(res.unwrap()).elem() == Scalar::BF16 => {
@@ -1695,7 +1747,17 @@ impl<'a> Isel<'a> {
                     5 => Some((self.w(op.operands[3])?, self.w(op.operands[4])?)),
                     _ => None,
                 };
-                let d = crate::target::gfx9::mfma::select(&mut self.f, self.cur, op.str_attr("op_id").unwrap_or(""), a, b, c, scales)?;
+                // The bytes of the A and B scales a block-scaled MFMA reads.
+                let scale_sel = match op.attr("scale_sel") {
+                    None => None,
+                    Some(super::ast::Attr::List(v)) => match v.as_slice() {
+                        [super::ast::Attr::Int(sa), super::ast::Attr::Int(sb)] => Some((*sa, *sb)),
+                        _ => return Err(unsupported(format!("tile.mma scale_sel {v:?}: two byte indices"))),
+                    },
+                    Some(other) => return Err(unsupported(format!("tile.mma scale_sel {other:?}: two byte indices"))),
+                };
+                let op_id = op.str_attr("op_id").unwrap_or("");
+                let d = crate::target::gfx9::mfma::select(&mut self.f, self.cur, op_id, a, b, c, scales, scale_sel)?;
                 self.set(op.results[0], Val::T(d));
             }
             Mma if op.str_attr("op_id") == Some("wmma_f32_16x16x16_bf16") => {
@@ -3147,6 +3209,7 @@ impl<'a> Isel<'a> {
                 if inst.op.flags() & F_BRANCH != 0 {
                     inst.imm = at[inst.imm as usize] as i64;
                 }
+                inst.loc = self.cur_loc;
                 self.f.blocks[at[block]].insts.push(inst);
             }
         }
@@ -4737,6 +4800,20 @@ impl<'a> Isel<'a> {
         }
     }
 
+    /// `dma_tag` for a load with instruction offset `offset`, which may
+    /// write up to `offset` bytes past its allocation.
+    fn dma_tag_at(&self, lds: ValueId, offset: i64) -> u16 {
+        let alloc = self.lds_dma.provenance.get(&lds).copied();
+        match alloc.map(|a| (a, self.vals[a.0 as usize])) {
+            _ if offset == 0 => self.dma_tag(lds),
+            Some((a, Some(Val::L(base)))) => {
+                let bytes = crate::target::gfx9::lds_dma::alloc_bytes(self.k.ty(a));
+                crate::target::gfx9::lds_dma::tag(base, bytes.saturating_add(offset as u32))
+            }
+            _ => super::alias::ANY,
+        }
+    }
+
     /// A buffer load into LDS (gfx950, `lds_dma::select`).
     #[inline(never)]
     fn buffer_load_lds(&mut self, op: &Op) -> Result<(), CompileError> {
@@ -4746,11 +4823,11 @@ impl<'a> Isel<'a> {
         let voff = self.w(op.operands[2])?;
         let voffset = self.to_v(voff);
         let soffset = self.soffset(op.operands[3])?;
-        let (dwords, aux, tag) = (op.int_attr("dwords").unwrap_or(0) as u8, op.int_attr("aux").unwrap_or(0), self.dma_tag(op.operands[1]));
+        let offset = op.int_attr("offset").unwrap_or(0);
+        let (dwords, aux, tag) = (op.int_attr("dwords").unwrap_or(0) as u8, op.int_attr("aux").unwrap_or(0), self.dma_tag_at(op.operands[1], offset));
         // rustgemm lever `m0share` (`rir::reassoc::share_m0`): a DMA that reads a neighbour's LDS address keeps the LDS
         // range of its own allocation.
         let tag = op.int_attr("dma_tag").map_or(tag, |t| t as u16);
-        let offset = op.int_attr("offset").unwrap_or(0);
         let dma = Dma { source: Source::Buffer { rsrc, voffset, soffset }, lds, dwords, aux, tag, offset };
         crate::target::gfx9::lds_dma::select(&mut self.f, self.cur, dma)
     }
@@ -4787,10 +4864,13 @@ impl<'a> Isel<'a> {
             return Ok((self.to_v(a), total));
         }
         let va = self.to_v(a);
-        // Lever `dsrebase`: an offset past the 16-bit field splits into a 64 KiB-aligned part added once per
-        // block and address (shared by the accesses near it, as COMGR's rebased LDS pointers) and the field.
-        if crate::rir::lever("dsrebase") && (65536..1 << 31).contains(&total) {
-            let (hi, lo) = (total & !0xffff, total & 0xffff);
+        // Lever `dsrebase` (the kernel's `ds_rebase`): an offset past the 16-bit field splits into a 64 KiB-aligned
+        // part added once per block and address (shared by the accesses near it, as COMGR's rebased LDS pointers)
+        // and the field, unless EXEC was written in between (the sum holds only the lanes active where it was made).
+        // With `ds_rebase` the field keeps room for the dwords of an access split into several instructions.
+        let (hi, lo) = (total & !0xffff, total & 0xffff);
+        let room = !self.k.passes.ds_rebase || lo <= 0xff00;
+        if (self.k.passes.ds_rebase || crate::rir::lever("dsrebase")) && (65536..1 << 31).contains(&total) && room {
             if crate::rir::lever("dshoist") {
                 if let Some(sum) = self.hoisted_ds_base(va, hi) {
                     return Ok((sum, lo));
@@ -4900,7 +4980,7 @@ impl<'a> Isel<'a> {
         }
         if bytes == 2 {
             self.emit(MInst::new(Opc::DsLoadU16, [r(dst)], [addr]).with_imm(offset));
-            if super::lever("u16zext") {
+            if self.k.passes.u16_zext || super::lever("u16zext") {
                 self.zero_hi16.insert(dst.reg);
             }
         } else {
@@ -5112,12 +5192,25 @@ impl<'a> Isel<'a> {
         self.copy(iv, lb);
         self.set(op.block_args[0], Val::W(r(iv)));
         let mut carried = Vec::new();
+        // `acc_init_keep`: copies of constant vectors of this block, by where
+        // the constant was set.
+        let mut kept: Vec<(usize, Vec<MInst>)> = Vec::new();
         for (i, &arg) in op.block_args.iter().enumerate().skip(1) {
             let ty = self.k.ty(arg).clone();
             let (reg, view) = self.carried(&ty, self.uni(arg));
+            let from = self.f.blocks[self.cur].insts.len();
             self.copy_into(reg, op.operands[2 + i])?;
+            if let Some(Val::T(t)) = self.vals[op.operands[2 + i].0 as usize] {
+                let cur = self.cur;
+                if let Some(at) = self.const_vecs.get(&t.reg).filter(|&&(b, _)| b == cur).map(|&(_, at)| at) {
+                    kept.push((at, self.f.blocks[cur].insts.drain(from..).collect()));
+                }
+            }
             self.set(arg, view);
             carried.push(reg);
+        }
+        if !kept.is_empty() {
+            self.keep_init_copies(kept);
         }
         let always_runs = match (self.facts.range_of(lb_v), self.facts.range_of(ub_v)) {
             (Some(l), Some(u)) => l.hi < u.lo,
@@ -5189,6 +5282,29 @@ impl<'a> Isel<'a> {
             self.set(res, view);
         }
         Ok(())
+    }
+
+    /// `acc_init_keep`: puts each group of a loop's copies of a constant
+    /// vector (into the registers it carries, which nothing else writes
+    /// before the loop) where the constant was set in the current block, so
+    /// that the kernel's placement of the constant holds for them too.
+    fn keep_init_copies(&mut self, mut kept: Vec<(usize, Vec<MInst>)>) {
+        let cur = self.cur;
+        kept.sort_by_key(|&(at, _)| std::cmp::Reverse(at));
+        for (at, copies) in kept {
+            let n = copies.len();
+            self.f.blocks[cur].insts.splice(at..at, copies);
+            for (b, k) in self.const_vecs.values_mut() {
+                if *b == cur && *k > at {
+                    *k += n;
+                }
+            }
+            for ((b, _, _), (_, k)) in self.ds_bases.iter_mut() {
+                if *b == cur && *k > at {
+                    *k += n;
+                }
+            }
+        }
     }
 
     /// `scf.for` whose bounds differ between lanes, as an EXEC-masked loop:
@@ -6182,6 +6298,8 @@ pub fn select_for(
         uniform,
         f: MFunc { target, ..MFunc::default() },
         cur: 0,
+        cur_loc: NO_LOC,
+        loc_ids: FxHashMap::default(),
         vals: vec![None; kernel.values.len()],
         lds,
         depth: 0,
@@ -6215,6 +6333,7 @@ pub fn select_for(
         zero_hi16: Default::default(),
         dma_manual: manual_dma_allocs(kernel),
         dma_manual_writes: manual_dma_writes(kernel),
+        const_vecs: FxHashMap::default(),
     };
     // With lever scopes every op of the source has one (`opt::inherit_scopes`; outside every scope the empty
     // one): scope 0 is left to the ops passes made, whose instructions take their neighbours' (`MFunc::fill_scopes`).
@@ -7629,5 +7748,118 @@ mod dword_quad_tests {
         let store = "        tile.smem_store_vN_f32 ( %red, %c0, %row, %x ) { elem_type = s:\"f32\", rank = i:2, vec = i:1 }\n";
         assert_eq!(lds_loads(&reduction(0, 4, store), Target::Gfx1151), (0, 4));
         assert_eq!(lds_loads(&reduction(0, 8, ""), Target::Gfx950).0, 0);
+    }
+
+    /// Four dword loads through one address, 64 KiB and more into an LDS
+    /// allocation of 80 KiB, summed.
+    fn far_loads(attrs: &str) -> String {
+        let mut body = String::from(
+            "    %lds : smem<f32, [20480]> = tile.smem_alloc (  )\n    \
+             %x : f32 = memref.global_load_typed ( %F, %tid ) { align = i:4, elem_type = s:\"f32\" }\n    \
+             tile.smem_store_vN_f32 ( %lds, %tid, %x ) { elem_type = s:\"f32\", rank = i:1, vec = i:1 }\n    tile.sync (  )\n",
+        );
+        let mut sum = String::from("%e0");
+        for j in 0..4 {
+            body += &format!(
+                "    %k{j} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{} }}\n    %i{j} : i32 = arith.add ( %tid, %k{j} )\n    \
+                 %l{j} : vec<f32x1> = tile.smem_load_vN_f32 ( %lds, %i{j} ) {{ elem_type = s:\"f32\", rank = i:1, vec = i:1 }}\n    \
+                 %e{j} : f32 = vector.extract ( %l{j} ) {{ index = i:0 }}\n",
+                16384 + 64 * j
+            );
+            if j > 0 {
+                body += &format!("    %s{j} : f32 = arith.fadd ( {sum}, %e{j} )\n");
+                sum = format!("%s{j}");
+            }
+        }
+        format!(
+            "ckdsl.ir v1\nkernel @far {{\n  attrs {{ max_workgroup_size = i:64{attrs} }}\n  params {{\n    %F : ptr<f32,global>\n  }}\n  \
+             region @entry {{\n    %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n{body}    \
+             memref.global_store_typed ( %F, %tid, {sum} ) {{ align = i:4, elem_type = s:\"f32\" }}\n    cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
+    #[test]
+    fn ds_rebase_adds_the_64k_part_once_per_address() {
+        // The adds of an offset past 64 KiB, and the loads' offset fields.
+        let far = |attrs: &str| {
+            let compiled = super::super::compile_any_target(&far_loads(attrs), Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+            let insts: Vec<MInst> = compiled.func.blocks.into_iter().flat_map(|b| b.insts).collect();
+            let adds = insts.iter().filter(|i| i.uses.iter().any(|u| matches!(u, Opnd::Imm(0x10000..=0x1ffff)))).count();
+            let loads = insts.iter().filter(|i| i.op.flags() & F_LDS != 0 && i.defs.len() == 1);
+            let mut offsets: Vec<i64> = loads.map(|i| i.imm).collect();
+            offsets.sort_unstable();
+            (adds, offsets)
+        };
+        assert_eq!(far(""), (4, vec![0, 0, 0, 0]));
+        assert_eq!(far(", ds_rebase = b:true"), (1, vec![0, 256, 512, 768]));
+    }
+
+    /// Two 32x32 MFMA accumulators carried through a loop from zero vectors
+    /// (one value) defined before a wait and a barrier, which come before
+    /// the loop.
+    fn zero_carried(attrs: &str) -> String {
+        format!(
+            "ckdsl.ir v1\nkernel @acc {{\n  attrs {{ max_workgroup_size = i:256{attrs} }}\n  params {{\n    %X : ptr<f32,global>\n    \
+             %Y : ptr<f32,global>\n    %n : i32\n  }}\n  region @entry {{\n    %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n    \
+             %c0 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:0 }}\n    \
+             %c1 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:1 }}\n    \
+             %c4 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:4 }}\n    \
+             %z : vec<f32x16> = arith.constant_vec (  ) {{ elem = s:\"f32\", fill = f:0.0, vec = i:16 }}\n    \
+             %z2 : vec<f32x16> = arith.constant_vec (  ) {{ elem = s:\"f32\", fill = f:0.0, vec = i:16 }}\n    \
+             tile.s_waitcnt (  ) {{ expcnt = i:-1, lgkmcnt = i:0, vmcnt = i:-1 }}\n    \
+             tile.s_barrier_bare (  )\n    \
+             %r : vec<f32x16>, %r2 : vec<f32x16> = scf.for ( %c0, %n, %c1, %z, %z2 ) {{ iter_args = l:[ {{ name = s:\"%acc\", type = s:\"vec<f32x16>\" }}, \
+             {{ name = s:\"%acc2\", type = s:\"vec<f32x16>\" }} ], iv = s:\"%k\", iv_type = s:\"i32\", num_iter_args = i:2, unroll = b:false }}\n      region @body {{\n    \
+             %t : i32 = arith.add ( %k, %tid )\n    %o : i32 = arith.mul ( %t, %c4 )\n    \
+             %x : vec<f32x4> = memref.global_load_vN ( %X, %o ) {{ align = i:16, elem_type = s:\"f32\", vec = i:4 }}\n    \
+             %a : vec<f16x8> = arith.bitcast ( %x ) {{ target = s:\"vec<f16x8>\" }}\n    \
+             %d : vec<f32x16> = tile.mma ( %a, %a, %acc ) {{ op_id = s:\"mfma_f32_32x32x16_f16\" }}\n    \
+             %d2 : vec<f32x16> = tile.mma ( %a, %a, %acc2 ) {{ op_id = s:\"mfma_f32_32x32x16_f16\" }}\n    \
+             scf.yield ( %d, %d2 ) {{ num = i:2 }}\n      }}\n    \
+             %p : f32 = vector.extract ( %r ) {{ index = i:15 }}\n    %p2 : f32 = vector.extract ( %r2 ) {{ index = i:15 }}\n    \
+             %s : f32 = arith.fadd ( %p, %p2 )\n    \
+             memref.global_store_typed ( %Y, %tid, %s ) {{ align = i:4, elem_type = s:\"f32\" }}\n    cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
+    #[test]
+    fn acc_init_keep_sets_the_carried_zeros_where_the_constant_is() {
+        // Moves into VGPRs or AGPRs before and after the barrier.
+        let moves = |attrs: &str| {
+            let compiled = super::super::compile_any_target(&zero_carried(attrs), Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+            let listing = compiled.listing();
+            let lines: Vec<&str> = listing.lines().map(str::trim_start).collect();
+            let bar = lines.iter().position(|l| l.starts_with("s_barrier")).unwrap_or_else(|| panic!("{listing}"));
+            let is_move = |l: &&&str| l.starts_with("v_mov_b32") || l.starts_with("v_accvgpr_write_b32");
+            (lines[..bar].iter().filter(is_move).count(), lines[bar..].iter().filter(is_move).count(), listing)
+        };
+        let (before_off, after_off, off) = moves("");
+        let (before_on, after_on, on) = moves(", acc_init_keep = b:true");
+        assert!(before_on >= before_off + 16 && after_on + 16 <= after_off, "{off}\n{on}");
+        assert_eq!(moves(", acc_init_keep = b:false").2, off);
+    }
+
+    /// An f16 read from LDS (`ds_read_u16`), its bits zero-extended to i32
+    /// and stored.
+    fn u16_widened(attrs: &str) -> String {
+        format!(
+            "ckdsl.ir v1\nkernel @zext {{\n  attrs {{ max_workgroup_size = i:64{attrs} }}\n  params {{\n    %Y : ptr<i32,global>\n  }}\n  \
+             region @entry {{\n    %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n    \
+             %lds : smem<f16, [64]> = tile.smem_alloc (  )\n    \
+             %h : vec<f16x1> = tile.smem_load_vN ( %lds, %tid ) {{ elem_type = s:\"f16\", rank = i:1, vec = i:1 }}\n    \
+             %e : f16 = vector.extract ( %h ) {{ index = i:0 }}\n    \
+             %b : i16 = arith.bitcast ( %e ) {{ target = s:\"i16\" }}\n    \
+             %w : i32 = arith.zext ( %b )\n    \
+             memref.global_store_typed ( %Y, %tid, %w ) {{ align = i:4, elem_type = s:\"i32\" }}\n    cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
+    #[test]
+    fn u16_zext_reads_the_zero_extended_lds_load_as_is() {
+        let listing = |attrs: &str| super::super::compile_any_target(&u16_widened(attrs), Target::Gfx950).unwrap_or_else(|e| panic!("{e}")).listing();
+        let and16 = |l: &str| l.lines().any(|x| x.trim_start().starts_with("v_and_b32") && x.contains("0xffff"));
+        let (off, on) = (listing(""), listing(", u16_zext = b:true"));
+        assert!(off.contains("ds_read_u16") && and16(&off), "{off}");
+        assert!(on.contains("ds_read_u16") && !and16(&on), "{on}");
     }
 }

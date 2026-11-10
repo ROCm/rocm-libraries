@@ -604,8 +604,9 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
         }
         Fmt::Vop3p if matches!(form, Form::Mai | Form::MaiScale) => {
             // The block-scaled form (VOP3PX2) starts with v_mfma_ld_scale_b32
-            // reading the A and B scales (the two VGPRs after C, byte 0 of
-            // each: op_sel and op_sel_hi clear); its MFMA half sets bit 11.
+            // reading the A and B scales (the two VGPRs after C); the byte of
+            // each it reads (controls 11:10 and 13:12) is op_sel (bit 0) and
+            // op_sel_hi (bit 1) of its source. Its MFMA half sets bit 11.
             let scaled = form == Form::MaiScale;
             if scaled {
                 // The A and B scales: two VGPRs (any two, not a pair).
@@ -642,7 +643,7 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             // The scaled form's scale byte selects (imm bits 13:10) went to the ld_scale word.
             let ctl = if scaled { inst.imm & !(15 << 10) } else { inst.imm };
             if !(0..1 << 10).contains(&ctl) {
-                return Err(bad(format!("{}: controls {ctl:#x} past cbsz, abid and blgp", name())));
+                return Err(bad(format!("{}: controls {:#x} past cbsz, abid and blgp", name(), inst.imm)));
             }
             let ctl = ctl as u32;
             if f64 && ctl >> 7 != 0 {
@@ -862,6 +863,18 @@ fn encode_blocks(f: &MFunc) -> Result<(Vec<u32>, Vec<u32>, Vec<(usize, usize)>),
     Ok((words, block_word, branches))
 }
 
+/// The word offset of each instruction, in block order, and of the end.
+pub fn inst_starts(f: &MFunc) -> Result<Vec<u32>, CompileError> {
+    let mut words = Vec::new();
+    let mut starts = Vec::with_capacity(f.blocks.iter().map(|b| b.insts.len()).sum::<usize>() + 1);
+    for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+        starts.push(words.len() as u32);
+        encode(inst, &mut words)?;
+    }
+    starts.push(words.len() as u32);
+    Ok(starts)
+}
+
 fn branch_delta(block_word: &[u32], at: usize, target: usize) -> Result<i64, CompileError> {
     let delta = block_word[target] as i64 - (at as i64 + 1);
     if !(-32768..32768).contains(&delta) {
@@ -1050,6 +1063,11 @@ mod tests {
     fn gfx9_only_rows_match_llvm_mc() {
         use t::Gfx9Op::*;
         let g = Opc::Gfx9;
+        // The fp6 x fp6 block-scaled MFMA reading byte `a` of its A scale and `b` of its B scale.
+        let scaled_fp6 = |a: i64, b: i64| {
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 6), v(24, 6), v(0, 16), v(32, 1), v(33, 1)])
+                .with_imm(2 | 2 << 7 | (a | b << 2) << super::super::mfma::SCALE_SEL_SHIFT)
+        };
         let cases: Vec<(MInst, Vec<u32>)> = vec![
             // v_pk_mul_f32 v[0:1], v[2:3], v[4:5]; op_sel_hi:[0,1] and [1,0];
             // an SGPR pair broadcast; neg_lo:[1,0] neg_hi:[1,0]
@@ -1122,7 +1140,8 @@ mod tests {
             (MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 4), v(0, 4)]).with_imm(2 | 4 << 7), vec![0xd3ad_0200, 0x8402_1904]),
             // Block-scaled (VOP3PX2), as llvm-mc encodes v_mfma_scale_f32_32x32x64_f8f6f4
             // v[0:15], v[16:23], v[24:31], v[0:15], v32, v33 / a[0:15], v[16:19], v[24:27], 0,
-            // v32, v33 cbsz:4 blgp:4 / v[0:15], v[16:21], a[24:31], v[0:15], v254, v255 cbsz:3.
+            // v32, v33 cbsz:4 blgp:4 / v[0:15], v[16:21], a[24:31], v[0:15], v254, v255 cbsz:3 /
+            // v[0:15], v[16:23], v[24:31], v[0:15], v40, v33.
             (
                 MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1), v(33, 1)]),
                 vec![0xd3ac_0000, 0x0002_4320, 0xd3ae_0800, 0x0402_3110],
@@ -1135,6 +1154,20 @@ mod tests {
                 MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 6), v(AGPR0 + 24, 8), v(0, 16), v(254, 1), v(255, 1)]).with_imm(3),
                 vec![0xd3ac_0000, 0x0003_fffe, 0xd3ae_0b00, 0x1402_3110],
             ),
+            (
+                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(40, 1), v(33, 1)]),
+                vec![0xd3ac_0000, 0x0002_4328, 0xd3ae_0800, 0x0402_3110],
+            ),
+            // Scale bytes (controls 11:10 for A, 13:12 for B), as llvm-mc encodes
+            // v[0:15], v[16:21], v[24:29], v[0:15], v32, v33 cbsz:2 blgp:2 with
+            // op_sel:[1,1,0] op_sel_hi:[1,1,0] / op_sel:[1,0,0] / op_sel_hi:[0,1,0] /
+            // op_sel_hi:[1,0,0] / op_sel:[0,1,0] / neither.
+            (scaled_fp6(3, 3), vec![0xd3ac_1800, 0x1802_4320, 0xd3ae_0a00, 0x4402_3110]),
+            (scaled_fp6(1, 0), vec![0xd3ac_0800, 0x0002_4320, 0xd3ae_0a00, 0x4402_3110]),
+            (scaled_fp6(0, 2), vec![0xd3ac_0000, 0x1002_4320, 0xd3ae_0a00, 0x4402_3110]),
+            (scaled_fp6(2, 0), vec![0xd3ac_0000, 0x0802_4320, 0xd3ae_0a00, 0x4402_3110]),
+            (scaled_fp6(0, 1), vec![0xd3ac_1000, 0x0002_4320, 0xd3ae_0a00, 0x4402_3110]),
+            (scaled_fp6(0, 0), vec![0xd3ac_0000, 0x0002_4320, 0xd3ae_0a00, 0x4402_3110]),
         ];
         for (inst, want) in cases {
             assert_eq!(words(inst.clone()), Ok(want), "{inst:?}");
@@ -1179,12 +1212,19 @@ mod tests {
             MInst::new(g(VMfma4x4x4F64), [v(0, 2)], [v(2, 2), v(4, 2), Opnd::Imm(0x3e22_f983)]),
             MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4)]).with_imm(2 << 3),
             MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4)]).with_imm(3 << 7),
-            // Block-scaled: scales not a VGPR pair (one register, SGPRs; llvm-mc
-            // refuses SGPR scales), abid, an A format whose size is not A's.
+            // Block-scaled: scales not one VGPR each (one register, a pair as
+            // one operand, SGPRs; llvm-mc refuses SGPR scales), abid, an A
+            // format whose size is not A's.
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1)]),
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), s(4, 2)]),
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 2)]),
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 2), v(34, 1)]),
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), s(4, 1), s(5, 1)]),
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1), v(33, 1)]).with_imm(1 << 3),
             MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1), v(33, 1)]).with_imm(4),
+            // Controls past the B scale byte; scale bytes on an MFMA without scales.
+            scaled_fp6(0, 0).with_imm(2 | 2 << 7 | 1 << 14),
+            MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 4), v(0, 4)]).with_imm(2 | 4 << 7 | 3 << 10),
         ];
         for inst in refused {
             assert!(words(inst.clone()).is_err(), "{inst:?}");

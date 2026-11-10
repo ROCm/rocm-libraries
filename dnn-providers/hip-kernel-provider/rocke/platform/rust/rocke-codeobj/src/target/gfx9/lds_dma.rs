@@ -5,8 +5,11 @@
 //! `tile.smem_ptr_add`) and the buffer loads into LDS
 //! (`tile.async_buffer_load_lds_addr`, `tile.async_buffer_load_lds`), as
 //! rocKE's LLVM lowering defines them: `ptrtoint` of the allocation, an i64
-//! add, and `llvm.amdgcn.raw.ptr.buffer.load.lds` with an instruction
-//! offset of 0.
+//! add, and `llvm.amdgcn.raw.ptr.buffer.load.lds` with the instruction
+//! offset of the op's `offset` attribute (0..4095, default 0). The hardware
+//! adds that offset to the global address and to the LDS address
+//! (M0 + offset + 4 * dwords * lane), so DMA loads whose LDS and global
+//! addresses both differ by it can share one M0 (`m0_cse`).
 //!
 //! An LDS address is an i64, but LDS pointers are 32 bits: only the low
 //! dword addresses LDS. Where every use of an address reads no more than its
@@ -480,6 +483,21 @@ mod tests {
     }
 
     #[test]
+    fn lds_dma_explicit_leaves_the_dma_waits_to_the_kernel() {
+        let text = dma_kernel("", false, 0)
+            .replace("max_workgroup_size = i:256 }", "max_workgroup_size = i:256, lds_dma_explicit = b:true }");
+        let l = listing(&text);
+        assert_eq!(wait_before(&l, "ds_read_b32"), None, "{l}");
+        // The kernel's own waits still go where it puts them.
+        let explicit = "    tile.s_waitcnt (  ) { expcnt = i:-1, lgkmcnt = i:-1, vmcnt = i:0 }\n    tile.s_barrier_bare (  )\n";
+        let l = listing(&dma_kernel(explicit, false, 0).replace(
+            "max_workgroup_size = i:256 }",
+            "max_workgroup_size = i:256, lds_dma_explicit = b:true }",
+        ));
+        assert_eq!(wait_before(&l, "s_barrier"), Some((0, 15)), "{l}");
+    }
+
+    #[test]
     fn addresses_used_as_lds_pointers_compute_their_low_dword_only() {
         let kernel = rir::parse::parse(&dma_kernel("", false, 0)).unwrap_or_else(|e| panic!("{e}"));
         let facts = Facts::of(&kernel);
@@ -521,6 +539,7 @@ mod tests {
                 attrs: Vec::new(),
                 regions: Vec::new(),
                 block_args: Vec::new(),
+                loc: None,
             };
             op.set_attr("template", crate::rir::ast::Attr::Str(template.to_string().into()));
             op.set_attr("constraints", crate::rir::ast::Attr::Str(constraints.to_string().into()));
@@ -537,6 +556,47 @@ mod tests {
             ["ds_read_b96 $0, $1 offset:48", "ds_read_b96_tr_b6 $0, $1", "ds_read_b64_tr_b4 $0, $1 offset:8", "ds_read_b96_tr_b4 $0, $1"].map(|t| op(t, "=v,v"))
         });
         assert_eq!(b96, [Some((3, 48)), Some((3, 0)), Some((2, 8)), None]);
+    }
+
+    /// `dma_kernel` whose waves each load three 1 KiB parts of `%A` through
+    /// one LDS address, with instruction offsets 0, 1024 and 2048 (the
+    /// global offsets move with them); `attrs` adds kernel attributes.
+    fn offset_kernel(attrs: &str, offsets: [i64; 3]) -> String {
+        let one = |o: i64| format!("    tile.async_buffer_load_lds_addr ( %rsrc, %a1, %voff, %c0 ) {{ aux = i:0, dwords = i:4, offset = i:{o} }}\n");
+        let loads: String = offsets.iter().map(|&o| one(o)).collect();
+        dma_kernel("", false, 0)
+            .replace("max_workgroup_size = i:256 }", &format!("max_workgroup_size = i:256{attrs} }}"))
+            .replace("%A_smem : smem<f32, [1024]>", "%A_smem : smem<f32, [4096]>")
+            .replace("%slab : i32 = arith.mul ( %wave, %c1024 )", "%c3072 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:3072 }\n    %slab : i32 = arith.mul ( %wave, %c3072 )")
+            .replace("    tile.async_buffer_load_lds_addr ( %rsrc, %a1, %voff, %c0 ) { aux = i:0, dwords = i:4 }\n", &loads)
+    }
+
+    #[test]
+    fn the_instruction_offset_goes_into_the_mubuf_offset_field() {
+        let l = listing(&offset_kernel("", [0, 1024, 4095]));
+        let loads: Vec<&str> = l.lines().filter(|x| x.contains("buffer_load_dwordx4")).collect();
+        assert_eq!(loads.len(), 3, "{l}");
+        // As llvm-mc -mcpu=gfx950 encodes "buffer_load_dwordx4 vA, s[R:R+3], 0 offen offset:1024 lds":
+        // E05D1400; offset:4095 is E05D1FFF.
+        let first: Vec<u32> = loads.iter().map(|x| words(x, "buffer_load_dwordx4")[0]).collect();
+        assert_eq!(first, [0xE05D1000, 0xE05D1400, 0xE05D1FFF], "{l}");
+        // Past the 12-bit field, and from global memory, there is no offset.
+        for bad in [4096, -16] {
+            let error = rir::compile_any_target(&offset_kernel("", [0, 0, bad]), Target::Gfx950).err().expect("refused");
+            assert!(error.to_string().contains("instruction offset"), "{error}");
+        }
+    }
+
+    #[test]
+    fn m0_cse_keeps_one_m0_write_for_dma_loads_that_share_an_address() {
+        let m0_writes = |l: &str| l.lines().filter(|x| x.contains("s_mov_b32 m0")).count();
+        let off = listing(&offset_kernel("", [0, 1024, 2048]));
+        let on = listing(&offset_kernel(", m0_cse = b:true", [0, 1024, 2048]));
+        // The three %A loads and the %B load.
+        assert_eq!((m0_writes(&off), m0_writes(&on)), (4, 2), "{off}\n{on}");
+        let nops = |l: &str| l.lines().filter(|x| x.trim_start().starts_with("s_nop")).count();
+        assert!(nops(&on) + 2 <= nops(&off), "{off}\n{on}");
+        assert_eq!(listing(&offset_kernel(", m0_cse = b:false", [0, 1024, 2048])), off);
     }
 
     #[test]

@@ -101,7 +101,7 @@ pub fn run(f: &mut MFunc) -> usize {
             }
             for &(k, op) in &found {
                 let sel = &f.blocks[b].insts[k];
-                f.blocks[b].insts[k] = MInst { op, defs: sel.defs, uses: Uses::from([x, y]), imm: 0, mods: 0, mem: sel.mem, scope: sel.scope };
+                f.blocks[b].insts[k] = MInst { op, defs: sel.defs, uses: Uses::from([x, y]), imm: 0, mods: 0, mem: sel.mem, scope: sel.scope, loc: sel.loc };
             }
             f.blocks[b].insts.remove(i);
             done += 1;

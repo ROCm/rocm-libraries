@@ -464,6 +464,7 @@ fn store_region(kernel: &mut Kernel, defs: &Defs, region: &mut Region) -> bool {
                 attrs: Vec::new(),
                 regions: Vec::new(),
                 block_args: Vec::new(),
+                loc: template.loc.clone(),
             });
             let mut store = template.clone();
             store.operands = address.iter().copied().chain([packed]).collect();
@@ -784,6 +785,7 @@ mod tests {
                         attrs: Vec::new(),
                         regions: Vec::new(),
                         block_args: Vec::new(),
+                        loc: template.loc.clone(),
                     });
                     let mut store = template.clone();
                     store.operands = address.iter().copied().chain([packed]).collect();

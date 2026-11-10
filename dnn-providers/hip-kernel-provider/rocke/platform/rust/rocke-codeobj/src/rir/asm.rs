@@ -485,6 +485,18 @@ fn encode_blocks(f: &MFunc) -> Result<(Vec<u32>, Vec<u32>, Vec<(usize, usize)>),
     Ok((e.words, block_word, branches))
 }
 
+/// The word offset of each instruction, in block order, and of the end.
+pub fn inst_starts(f: &MFunc) -> Result<Vec<u32>, CompileError> {
+    let mut e = Enc { words: Vec::new() };
+    let mut starts = Vec::with_capacity(f.blocks.iter().map(|b| b.insts.len()).sum::<usize>() + 1);
+    for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+        starts.push(e.words.len() as u32);
+        encode(inst, &mut e)?;
+    }
+    starts.push(e.words.len() as u32);
+    Ok(starts)
+}
+
 /// Word offset from the branch at word `at` to block `target`.
 fn branch_delta(block_word: &[u32], at: usize, target: usize) -> Result<i64, CompileError> {
     let delta = block_word[target] as i64 - (at as i64 + 1);

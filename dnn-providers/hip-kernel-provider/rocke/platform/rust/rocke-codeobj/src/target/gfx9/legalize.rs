@@ -48,12 +48,13 @@ pub fn run(f: &mut MFunc) {
             // copies too.
             let here = block.loop_depth > 0 || f.lever(&inst, "litreuse");
             (cache.reuse, cache.copies) = (reuse && here, copy_reuse && here);
-            let (from, scope) = (out.len(), inst.scope);
+            let (from, scope, loc) = (out.len(), inst.scope, inst.loc);
             legalize(f, inst, &mut out, &mut cache);
             // What legalizing made (literal moves, copies) is in the instruction's lever scope.
             for made in &mut out[from..] {
                 made.scope = scope;
             }
+            inherit_loc(&mut out, from, loc);
         }
         block.insts = out;
     }

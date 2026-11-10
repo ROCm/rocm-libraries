@@ -163,6 +163,7 @@ impl Rw<'_> {
             attrs: vec![("ity".into(), Attr::Str("i32".into())), ("value".into(), Attr::Int(k as i32 as i64))],
             regions: Vec::new(),
             block_args: Vec::new(),
+            loc: None,
         });
         v
     }
@@ -176,6 +177,7 @@ impl Rw<'_> {
             attrs: vec![("wrap".into(), Attr::Str("modular".into()))],
             regions: Vec::new(),
             block_args: Vec::new(),
+            loc: None,
         });
         v
     }
@@ -521,16 +523,16 @@ impl Rw<'_> {
         let d64 = self.kernel.new_value("%rsd", Type::Scalar(Scalar::I64));
         self.defs.push(None);
         self.home.push(0);
-        out.push(Op { kind: OpKind::Sext, results: [d64].into(), operands: [d32].into(), attrs: Vec::new(), regions: Vec::new(), block_args: Vec::new() });
+        out.push(Op { kind: OpKind::Sext, results: [d64].into(), operands: [d32].into(), attrs: Vec::new(), regions: Vec::new(), block_args: Vec::new(), loc: None });
         let pty = self.kernel.ty(ptr).clone();
         let p = self.kernel.new_value("%rsp", pty);
         self.defs.push(None);
         self.home.push(0);
-        out.push(Op { kind: OpKind::GlobalPtrAdd, results: [p].into(), operands: [ptr, d64].into(), attrs: Vec::new(), regions: Vec::new(), block_args: Vec::new() });
+        out.push(Op { kind: OpKind::GlobalPtrAdd, results: [p].into(), operands: [ptr, d64].into(), attrs: Vec::new(), regions: Vec::new(), block_args: Vec::new(), loc: None });
         let r = self.kernel.new_value("%rsr", Type::Vec(Scalar::I32, 4));
         self.defs.push(None);
         self.home.push(0);
-        out.push(Op { kind: OpKind::BufferRsrc, results: [r].into(), operands: [p, records].into(), attrs: Vec::new(), regions: Vec::new(), block_args: Vec::new() });
+        out.push(Op { kind: OpKind::BufferRsrc, results: [r].into(), operands: [p, records].into(), attrs: Vec::new(), regions: Vec::new(), block_args: Vec::new(), loc: None });
         r
     }
 }

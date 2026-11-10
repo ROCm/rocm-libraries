@@ -14,7 +14,7 @@
 use crate::rir::mir::{Fmt, Opc};
 
 /// FNV-1a 64 of the description (line endings as LF) this file was generated from.
-pub const DESCRIPTION_DIGEST: u64 = 0x94a90e3ef30add03;
+pub const DESCRIPTION_DIGEST: u64 = 0xab912eb75fbf1138;
 
 // ----- operand codes -----
 

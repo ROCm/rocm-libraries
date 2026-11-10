@@ -30,7 +30,8 @@ fn unsupported(message: String) -> CompileError {
 }
 
 /// One MFMA: the instruction, the dwords per lane of A and B and of C and
-/// D, and its controls (cbsz in bits 2:0, abid in 6:3, blgp in 9:7).
+/// D, and its controls (cbsz in bits 2:0, abid in 6:3, blgp in 9:7; a
+/// block-scaled MFMA's A and B scale bytes in 11:10 and 13:12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Shape {
     pub op: Gfx9Op,
@@ -88,6 +89,15 @@ pub fn scaled(op_id: &str) -> Option<(Shape, u8, u8)> {
 
 pub fn is_scaled(op_id: &str) -> bool {
     scaled(op_id).is_some()
+}
+
+/// The control bits of a block-scaled MFMA's scale bytes: which byte of its
+/// A and of its B scale VGPR each lane reads (the `scale_sel` attribute; the
+/// intrinsic's `opsel_a` and `opsel_b`). Byte 0 when absent.
+pub const SCALE_SEL_SHIFT: u32 = 10;
+
+pub fn scale_sel_ctl((a, b): (i64, i64)) -> Option<i64> {
+    ((0..4).contains(&a) && (0..4).contains(&b)).then_some((a | b << 2) << SCALE_SEL_SHIFT)
 }
 
 /// The bf16 atom a BF16x3-emulated TF32 op id runs on.
@@ -157,16 +167,14 @@ impl Emit<'_> {
     }
 
     /// The block-scaled MFMA: A and B are the first `na` and `nb` dwords of
-    /// their 8, and the two scales go to one VGPR pair (A's low), which the
-    /// instruction reads after C.
+    /// their 8, and the A and B scales one VGPR each, which the instruction
+    /// reads after C.
     fn scaled_mfma(&mut self, shape: Shape, (na, nb): (u8, u8), a: VRef, b: VRef, c: VRef, (sa, sb): (Opnd, Opnd)) -> VRef {
         let (a, b) = (self.in_vgprs(a), self.in_vgprs(b));
         // The scales: copied into a fresh VGPR pair, or with lever `scalesep` (the rust track) read where
         // they are when they are single VGPRs already (no move and no VALU-to-MFMA wait per MFMA).
-        let vgpr1 = |e: &Self, o: Opnd| matches!(o, Opnd::R(v) if v.n == 1 && e.f.vregs[v.reg as usize].class == Class::V);
         let (sa, sb) = if crate::rir::lever("scalesep") {
-            let one = |e: &mut Self, o: Opnd| if vgpr1(e, o) { o } else { let t = e.reg(Class::V, 1); e.copy(t, o); Opnd::R(t) };
-            (one(self, sa), one(self, sb))
+            (Opnd::R(self.scale_vgpr(sa)), Opnd::R(self.scale_vgpr(sb)))
         } else {
             let pair = self.reg(Class::V, 2);
             self.copy(VRef { n: 1, ..pair }, sa);
@@ -179,6 +187,18 @@ impl Emit<'_> {
         let uses = [Opnd::R(a), Opnd::R(b), Opnd::R(d), sa, sb];
         self.push(MInst::new(Opc::Gfx9(shape.op), [Opnd::R(d)], uses).with_imm(shape.ctl));
         d
+    }
+
+    /// A scale operand as one VGPR: a VGPR as it is, anything else copied to one.
+    fn scale_vgpr(&mut self, s: Opnd) -> VRef {
+        if let Opnd::R(v) = s {
+            if v.n == 1 && self.f.vregs[v.reg as usize].class == Class::V {
+                return v;
+            }
+        }
+        let dst = self.reg(Class::V, 1);
+        self.copy(dst, s);
+        dst
     }
 
     /// The BF16x3 split of the f32 vector `x`: (big, small) as packed bf16
@@ -263,17 +283,29 @@ pub fn select_mx(
 }
 
 /// Selects `tile.mma` `op_id` over the tuples A, B and C (and a block-scaled
-/// atom's A and B scales) into block `block` of `f`, and returns D.
-pub fn select(f: &mut MFunc, block: usize, op_id: &str, a: VRef, b: VRef, c: VRef, scales: Option<(Opnd, Opnd)>) -> Result<VRef, CompileError> {
+/// atom's A and B scales, and the bytes of them it reads) into block `block`
+/// of `f`, and returns D.
+pub fn select(
+    f: &mut MFunc,
+    block: usize,
+    op_id: &str,
+    a: VRef,
+    b: VRef,
+    c: VRef,
+    scales: Option<(Opnd, Opnd)>,
+    scale_sel: Option<(i64, i64)>,
+) -> Result<VRef, CompileError> {
     let mut emit = Emit { f, block };
     if let Some((s, na, nb)) = scaled(op_id) {
         let scales = scales.ok_or_else(|| unsupported(format!("tile.mma {op_id} without its A and B scales")))?;
         if (a.n, b.n, c.n) != (s.ab, s.ab, s.cd) {
             return Err(unsupported(format!("tile.mma {op_id}: operands of {}, {} and {} dwords where gfx950 takes 8, 8 and 16", a.n, b.n, c.n)));
         }
-        return Ok(emit.scaled_mfma(s, (na, nb), a, b, c, scales));
+        let sel = scale_sel_ctl(scale_sel.unwrap_or((0, 0)))
+            .ok_or_else(|| unsupported(format!("tile.mma {op_id}: scale_sel {scale_sel:?} names a byte past 3")))?;
+        return Ok(emit.scaled_mfma(Shape { ctl: s.ctl | sel, ..s }, (na, nb), a, b, c, scales));
     }
-    if scales.is_some() {
+    if scales.is_some() || scale_sel.is_some() {
         return Err(unsupported(format!("tile.mma {op_id} with scales on gfx950")));
     }
     let sizes = |s: Shape, ab: u8| {
@@ -369,6 +401,19 @@ mod tests {
         }
     }
 
+    /// Instructions `select` pushes into the block itself carry the op's location.
+    #[test]
+    fn selected_mfmas_carry_the_ops_location() {
+        let text = kernel("mfma_f32_16x16x32_f16", "vec<f16x8>", 4, 4, &ones(4));
+        let compiled = rir::compile_any_target(&crate::srcloc::with_test_locs(&text), Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(compiled.listing(), rir::compile_any_target(&text, Target::Gfx950).unwrap().listing());
+        let map = compiled.source_map.expect("a source map");
+        let mfma = map.rows.iter().find(|r| r.mnemonic.starts_with("v_mfma")).expect("the MFMA");
+        assert!(!mfma.synthetic, "{mfma:?}");
+        let mma_line = text.lines().position(|l| l.contains("tile.mma")).expect("the mma op") as u32;
+        assert_eq!(map.chains[mfma.chain.unwrap()][0].line, mma_line);
+    }
+
     #[test]
     fn d_is_a_copy_of_c_updated_in_place() {
         let mut f = MFunc { target: Target::Gfx950, ..MFunc::default() };
@@ -378,7 +423,7 @@ mod tests {
             VRef { reg: f.vregs.len() as u32 - 1, off: 0, n }
         };
         let (a, c, s) = (reg(Class::V, 4), reg(Class::V, 4), reg(Class::S, 4));
-        let d = select(&mut f, 0, "mfma_f32_16x16x32_f16", a, s, c, None).unwrap_or_else(|e| panic!("{e}"));
+        let d = select(&mut f, 0, "mfma_f32_16x16x32_f16", a, s, c, None, None).unwrap_or_else(|e| panic!("{e}"));
         let insts = &f.blocks[0].insts;
         // B from SGPRs is copied to VGPRs first; then D = C, then D = A * B + D.
         assert_eq!(insts.len(), 3);
@@ -456,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn block_scaled_atoms_read_their_formats_and_a_scale_pair() {
+    fn block_scaled_atoms_read_their_formats_and_scales() {
         let text = "ckdsl.ir v1\nkernel @scaled {\n  attrs { max_workgroup_size = i:64 }\n  params {\n    %X : ptr<i32,global>\n    \
                     %S : ptr<i32,global>\n    %Y : ptr<f32,global>\n  }\n  region @entry {\n    \
                     %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n    \
@@ -476,11 +521,33 @@ mod tests {
         let ops = operands(lines[0].split(" imm:").next().unwrap());
         assert_eq!(ops.iter().map(|o| span(o)).collect::<Vec<_>>(), [16, 6, 4, 16, 1, 1], "{}", lines[0]);
         assert_eq!(ops[0], ops[3]);
+        // With lever `scalesep` each scale is read where it is (here both the same VGPR).
+        let listing = rir::with_levers(&["scalesep"], || rir::compile_any_target(text, Target::Gfx950)).unwrap_or_else(|e| panic!("{e}")).listing();
+        let sep = mfma_lines(&listing);
+        let ops = operands(sep[0].split(" imm:").next().unwrap());
+        assert_eq!((&ops[0], &ops[4]), (&ops[3], &ops[5]), "{}", sep[0]);
         assert!(lines[0].ends_with(&format!("imm:{}", 2 | 4 << 7)), "{}", lines[0]);
         assert_eq!(scaled("mfma_gfx950_f32_32x32x64_bf8_bf6_scale_e8m0_e8m0_k32").map(|(s, a, b)| (s.ctl, a, b)), Some((1 | 3 << 7, 8, 6)));
         assert!(!is_scaled("mfma_gfx950_f32_32x32x64_fp9_fp8_scale_e8m0_e8m0_k32") && !is_scaled("mfma_f32_32x32x16_f16"));
         // The scales are only taken with a scaled atom.
         assert!(rir::compile_any_target(&text.replace("fp6_fp4_scale_e8m0_e8m0_k32", "fp6_fp4"), Target::Gfx950).is_err());
+
+        // `scale_sel`: byte 3 of the A scale and byte 1 of the B scale, in the
+        // controls above blgp and as the ld_scale half's op_sel / op_sel_hi.
+        let sel = |s: &str| text.replace("_k32\" }", &format!("_k32\", scale_sel = {s} }}"));
+        let compiled = rir::compile_any_target(&sel("l:[ i:3, i:1 ]"), Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        let listing = compiled.listing();
+        let line = listing.lines().find(|l| l.contains("v_mfma")).expect("one MFMA");
+        assert!(line.split("//").next().unwrap().trim().ends_with(&format!("imm:{}", 2 | 4 << 7 | (3 | 1 << 2) << SCALE_SEL_SHIFT)), "{line}");
+        let words: Vec<u32> = line.split(": ").last().unwrap().split_whitespace().map(|w| u32::from_str_radix(w, 16).unwrap()).collect();
+        assert_eq!((words[0] >> 11 & 3, words[1] >> 27 & 3), (0b11, 0b01), "{line}");
+        assert_eq!(scale_sel_ctl((0, 0)), Some(0));
+        for bad in ["l:[ i:4, i:0 ]", "l:[ i:1 ]", "i:3"] {
+            assert!(rir::compile_any_target(&sel(bad), Target::Gfx950).is_err(), "{bad}");
+        }
+        // Scale bytes are only taken with a scaled atom.
+        let plain = kernel("mfma_f32_16x16x32_f16", "vec<f16x8>", 4, 4, &ones(4)).replace("\" }\n    %e", "\", scale_sel = l:[ i:0, i:0 ] }\n    %e");
+        assert!(plain.contains("scale_sel") && rir::compile_any_target(&plain, Target::Gfx950).is_err());
     }
 
     #[test]

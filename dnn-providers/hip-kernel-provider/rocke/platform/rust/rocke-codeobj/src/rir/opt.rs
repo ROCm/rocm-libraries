@@ -298,6 +298,18 @@ fn mk_op(
         attrs: attrs.into(),
         regions: Vec::new(),
         block_args: Vec::new(),
+        loc: None,
+    }
+}
+
+/// Gives the ops made for an op (`out[start..]`) its location, where they have none.
+fn stamp(out: &mut [Op], start: usize, loc: &Option<super::ast::Loc>) {
+    if loc.is_some() {
+        for op in out.get_mut(start..).unwrap_or_default() {
+            if op.loc.is_none() {
+                op.loc = loc.clone();
+            }
+        }
     }
 }
 
@@ -657,10 +669,11 @@ impl<'k> Simplifier<'k> {
         loop {
             let top = regions.last_mut().expect("the body stays open until the end");
             while let Some(op) = top.input.pop_front() {
-                let (entered, from) = (enter_scope(&op), top.out.len());
+                let (entered, from, loc) = (enter_scope(&op), top.out.len(), op.loc.clone());
                 let visited = self.visit(op, &mut top.out);
                 leave_scope(entered, &mut top.out, from);
                 visited?;
+                stamp(&mut top.out, from, &loc);
                 if self.failure.is_some() || !matches!(self.step, Step::Done) {
                     break;
                 }
@@ -2903,7 +2916,9 @@ impl<'k> Legalizer<'k> {
             let mut nested = None;
             for op in top.input.by_ref() {
                 if op.regions.is_empty() {
+                    let (start, loc) = (top.out.len(), op.loc.clone());
                     self.op(op, &mut top.out)?;
+                    stamp(&mut top.out, start, &loc);
                 } else {
                     nested = Some(op);
                     break;
@@ -2926,7 +2941,9 @@ impl<'k> Legalizer<'k> {
                     stack.push(Rebuild::new(next, scope));
                     continue;
                 }
+                let (start, loc) = (parent.out.len(), op.loc.clone());
                 self.op(op, &mut parent.out)?;
+                stamp(&mut parent.out, start, &loc);
                 continue;
             };
             let first = std::mem::take(&mut op.regions[0]);

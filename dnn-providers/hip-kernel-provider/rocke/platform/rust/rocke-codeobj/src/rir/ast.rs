@@ -903,7 +903,14 @@ pub struct Op {
     /// Values a region defines on entry: the induction variable and iteration
     /// arguments of `scf.for`.
     pub block_args: Vec<ValueId>,
+    /// The `@loc "..."` the op was printed with (`file:line:col:func` frames,
+    /// `;`-separated, innermost first; `crate::srcloc`), unescaped. Never
+    /// compared: it does not change what the op computes.
+    pub loc: Option<Loc>,
 }
+
+/// An op's source location chain, shared by the ops cloned from it.
+pub type Loc = std::sync::Arc<str>;
 
 impl Op {
     pub fn attr(&self, key: &str) -> Option<&Attr> {
@@ -1039,11 +1046,96 @@ pub struct Kernel {
     /// AGPRs the allocation may use when fewer than the target's:
     /// `agpr_alloc = [0, 0]` (LLVM's `amdgpu-agpr-alloc`) allows none.
     pub agpr_limit: Option<u32>,
+    /// `lds_dma_explicit = b:true`: the kernel's own `tile.s_waitcnt`s and
+    /// barriers order its LDS DMA, so LDS accesses do not wait for DMA loads.
+    pub lds_dma_explicit: bool,
+    /// `m0_early = b:true`: each M0 write moves up until a wait state lies
+    /// between it and its LDS DMA load (`target::gfx9::m0_early`).
+    pub m0_early: bool,
+    /// The optional passes its attributes turn on.
+    pub passes: Passes,
     pub params: Vec<Param>,
     pub body: Region,
     pub values: Vec<ValueDef>,
     /// Storage of the value names.
     pub names: String,
+}
+
+/// Optional gfx950 passes a kernel turns on with `name = b:true`
+/// attributes; none runs by default, so a kernel without them compiles as
+/// before they existed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Passes {
+    /// `dead_lanes`: copies keep only the dwords something reads, such as
+    /// all but the zero padding of a loop-carried FP6 MFMA operand
+    /// (`rir::post::remove_dead_copies`).
+    pub dead_lanes: bool,
+    /// `m0_fill`: an M0 write right before its LDS DMA load moves above the
+    /// independent instruction before it (`target::gfx9::m0_fill`).
+    pub m0_fill: bool,
+    /// `peep_waits`: adjacent `s_waitcnt`s become one (`target::gfx9::peep`).
+    pub peep_waits: bool,
+    /// `peep_shifts`: two shifts left of one SGPR become one
+    /// (`target::gfx9::peep`).
+    pub peep_shifts: bool,
+    /// `ds_rebase`: the LDS accesses through one address register past the
+    /// 16-bit offset field of a block share one add of the 64 KiB part
+    /// (`rir::isel`).
+    pub ds_rebase: bool,
+    /// `m0_cse`: a move into M0 of the value M0 already holds goes, as for
+    /// LDS DMA loads that share their LDS base and differ in their
+    /// instruction offset (`target::gfx9::m0_cse`).
+    pub m0_cse: bool,
+    /// `pin_vmem`: VMEM accesses (LDS DMA loads included) keep their program
+    /// order with the MFMAs, so each stays in the MFMA slot the kernel put it
+    /// in (`rir::post::block_dag`).
+    pub pin_vmem: bool,
+    /// `acc_init_keep`: a loop's carried values that start as a constant
+    /// vector are set where the constant is defined, not at the loop
+    /// (`rir::isel`).
+    pub acc_init_keep: bool,
+    /// `lds_waw`: an LDS load may overwrite the registers of an LDS load
+    /// still in flight without a wait while no scalar load is outstanding:
+    /// LDS returns in issue order (`target::gfx9::waitcnt`).
+    pub lds_waw: bool,
+    /// `u16_zext`: the zero extension of a `ds_read_u16` result is the
+    /// register itself, whose high half the load already zeroed (`rir::isel`).
+    pub u16_zext: bool,
+}
+
+impl Passes {
+    /// The attribute names, as `set` takes them.
+    pub const NAMES: [&'static str; 10] = [
+        "dead_lanes",
+        "m0_fill",
+        "peep_waits",
+        "peep_shifts",
+        "ds_rebase",
+        "m0_cse",
+        "pin_vmem",
+        "acc_init_keep",
+        "lds_waw",
+        "u16_zext",
+    ];
+
+    /// Turns pass `name` on or off; false when no pass has that name.
+    pub fn set(&mut self, name: &str, on: bool) -> bool {
+        let flag = match name {
+            "dead_lanes" => &mut self.dead_lanes,
+            "m0_fill" => &mut self.m0_fill,
+            "peep_waits" => &mut self.peep_waits,
+            "peep_shifts" => &mut self.peep_shifts,
+            "ds_rebase" => &mut self.ds_rebase,
+            "m0_cse" => &mut self.m0_cse,
+            "pin_vmem" => &mut self.pin_vmem,
+            "acc_init_keep" => &mut self.acc_init_keep,
+            "lds_waw" => &mut self.lds_waw,
+            "u16_zext" => &mut self.u16_zext,
+            _ => return false,
+        };
+        *flag = on;
+        true
+    }
 }
 
 impl Kernel {

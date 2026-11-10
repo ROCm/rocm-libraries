@@ -557,7 +557,7 @@ impl Isel<'_> {
         for &u in &vals[nd..] {
             uses.push(u);
         }
-        self.emit(MInst { op: opc, defs, uses, imm: 0, mods: 0, mem: 0, scope: 0 });
+        self.emit(MInst { op: opc, defs, uses, imm: 0, mods: 0, mem: 0, scope: 0, loc: crate::rir::mir::NO_LOC });
         Ok(None)
     }
 }

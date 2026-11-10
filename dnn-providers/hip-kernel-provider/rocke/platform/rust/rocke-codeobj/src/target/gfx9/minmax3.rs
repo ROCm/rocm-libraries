@@ -134,7 +134,7 @@ pub fn run(f: &mut MFunc) -> usize {
                     }
                 };
                 let Some((op, srcs)) = fused else { continue };
-                let new = MInst { op, defs: outer.defs, uses: Uses::from(srcs), imm: 0, mods: 0, mem: outer.mem, scope: outer.scope };
+                let new = MInst { op, defs: outer.defs, uses: Uses::from(srcs), imm: 0, mods: 0, mem: outer.mem, scope: outer.scope, loc: outer.loc };
                 f.blocks[b].insts[k] = new;
                 dead[i] = true;
                 folded += 1;
