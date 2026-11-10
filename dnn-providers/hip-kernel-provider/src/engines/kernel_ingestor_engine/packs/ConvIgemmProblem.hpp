@@ -64,6 +64,14 @@ struct IgemmProblem
 /// operands keep their order in the workspace.
 IgemmProblem withoutFilterStaging(const IgemmProblem& problem);
 
+/// Whether @p problem's output (forward y, backward data dx) is packed channels-first, so a
+/// channels-first-output config writes it in place of the staging transpose.
+bool outputChannelsFirst(const IgemmProblem& problem);
+
+/// @p problem without the output staging, for a channels-first-output config: the remaining
+/// staged operands keep their order in the workspace.
+IgemmProblem withoutOutputStaging(const IgemmProblem& problem);
+
 /**
  * @brief The convolution @p context's graph describes in @p direction, or nullopt when the
  *        implicit-GEMM kernels do not serve it.
@@ -85,6 +93,10 @@ struct AtomInfo
     std::string_view kernelType; ///< K1Atom* type name; empty for the FMA kernel
     int wave = 0; ///< 64 MFMA, 32 WMMA, 0 FMA (block from `threads`)
     bool tf32 = false; ///< Rounds fp32 operands (xf32): served only with TF32 permission
+    /// 16-bit fragments of 8, 16 or 32 bytes, which the swizzled-tile (swz) configs read in
+    /// 16-byte chunks: the k-step those reads span (8-byte fragments two atom k-steps), which
+    /// the config's k-step must be a multiple of; 0: no swizzled tiles.
+    int swizzleK = 0;
 };
 
 /// The atom @p name names, or nullopt for an unknown one.
@@ -136,17 +148,23 @@ struct SplitPlan
 /// splits, and the partials under 1 GiB. Under-filled is fewer than two blocks per CU on gfx9,
 /// keeping at least two k-iterations per split; fewer than one block per WGP on gfx10+
 /// (device_units), keeping at least 64. A device that reports no units gets no split (the
-/// kernel match declines it). @p packTaps: the config's k-steps span whole taps (tap packing),
-/// so a k-step covers bk / (reduction channels) taps.
+/// kernel match declines it). @p pack: 1 the config's k-steps span whole taps (tap packing), so
+/// a k-step covers bk / (reduction channels) taps; 2 the reduction runs flat (taps x channels in
+/// k-steps of bk).
 SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bm,
                        int64_t bn,
                        int64_t bk,
                        const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
-                       bool packTaps = false);
+                       int64_t pack = 0);
 
 /// Whether tap packing serves @p problem with a @p bk k-step: the reduction channels per tap
 /// are fewer than bk and divide it.
 bool packFits(const IgemmProblem& problem, int64_t bk);
+
+/// Whether the flat reduction (pack 2) serves @p problem with a @p bk k-step: whole taps of
+/// reduction channels would pad (bk does not divide them), so running the taps end to end saves
+/// k-steps. The channel vector dividing the reduction channels is the kernel match's own check.
+bool flatFits(const IgemmProblem& problem, int64_t bk);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::conv_igemm

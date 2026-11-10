@@ -741,6 +741,126 @@ __device__ inline long long
     }
 }
 
+// Walks the channels-first output positions of consecutive GEMM rows (one column): the row's
+// position along each axis (count[] per image), the output step per row along it, and the
+// channel planes between images. Starts by division once, then steps by additions.
+struct K1CfWalk
+{
+    int count[3]; // positions per image along d, h, w
+    long long step[3]; // output elements per position along d, h, w
+    long long image; // output elements from a position to the same one in the next image
+    int j[3];
+    long long o;
+
+    template <int DIR>
+    __device__ void init(const K1Args& a, const K1Gather& gather)
+    {
+        for(int i = 0; i < 3; ++i)
+            count[i] = gather.out[i];
+        if constexpr(DIR == K1_FORWARD)
+        {
+            step[2] = 1;
+            step[1] = a.wo;
+            step[0] = static_cast<long long>(a.ho) * a.wo;
+            image = static_cast<long long>(a.k) * a.dout * step[0];
+        }
+        else
+        {
+            step[2] = a.sw;
+            step[1] = static_cast<long long>(a.sh) * a.wi;
+            step[0] = static_cast<long long>(a.sd) * a.hi * a.wi;
+            image = static_cast<long long>(a.c) * a.di * a.hi * a.wi;
+        }
+    }
+
+    // Row m's element (column index @p o0 from k1OutIndexCf) and its axis positions.
+    __device__ void start(long long m, long long o0)
+    {
+        const int spatial = count[0] * count[1] * count[2];
+        int rest = static_cast<int>(m % spatial);
+        j[2] = rest % count[2];
+        rest /= count[2];
+        j[1] = rest % count[1];
+        j[0] = rest / count[1];
+        o = o0;
+    }
+
+    // The next row's element.
+    __device__ void next()
+    {
+        o += step[2];
+        if(++j[2] < count[2])
+            return;
+        j[2] = 0;
+        o += step[1] - count[2] * step[2];
+        if(++j[1] < count[1])
+            return;
+        j[1] = 0;
+        o += step[0] - count[1] * step[1];
+        if(++j[0] < count[0])
+            return;
+        j[0] = 0;
+        // Back to the image's first position, then on to the next image's plane.
+        o += image - count[0] * step[0];
+    }
+};
+
+// The same element in a packed channels-first output (CF 1): forward y[img][g kg + n][pos],
+// backward data dx[img][g cg + n][the phase's input position].
+template <int DIR>
+__device__ inline long long
+    k1OutIndexCf(const K1Args& a, const K1Gather& gather, int g, int phase, long long m, int n)
+{
+    if constexpr(DIR == K1_FORWARD)
+    {
+        const long long spatial = static_cast<long long>(a.dout) * a.ho * a.wo;
+        const long long img = m / spatial;
+        return (img * a.k + static_cast<long long>(g) * (a.k / a.groups) + n) * spatial
+               + (m - img * spatial);
+    }
+    else
+    {
+        const int pw = phase % a.sw;
+        const int ph = (phase / a.sw) % a.sh;
+        const int pd = phase / (a.sw * a.sh);
+        const int spatial = gather.out[0] * gather.out[1] * gather.out[2];
+        const long long img = m / spatial;
+        int rest = static_cast<int>(m - img * spatial);
+        const int jw = rest % gather.out[2];
+        rest /= gather.out[2];
+        const int jh = rest % gather.out[1];
+        const int jd = rest / gather.out[1];
+        const int iw = ((pw - a.pw) % a.sw + a.sw) % a.sw + jw * a.sw;
+        const int ih = ((ph - a.ph) % a.sh + a.sh) % a.sh + jh * a.sh;
+        const int id = ((pd - a.pd) % a.sd + a.sd) % a.sd + jd * a.sd;
+        return ((img * a.c + static_cast<long long>(g) * (a.c / a.groups) + n) * a.di + id) * a.hi
+                   * a.wi
+               + static_cast<long long>(ih) * a.wi + iw;
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// XOR-swizzled row-major LDS tiles (SWZ 1): rows of BK 16-bit elements, no padding, each row's
+// 16-byte chunks permuted by an XOR key that changes every 128 bytes of rows, so the eight lanes
+// a 16-byte LDS access serves at once (eight consecutive rows, one chunk) hit 32 distinct banks.
+// Element offset of (row, k): the chunk k / 8 moves to chunk (k / 8) ^ key(row).
+template <int BK>
+struct K1Swz
+{
+    static constexpr int CPR = BK / 8; // 16-byte chunks per row
+    static constexpr int RPL = CPR >= 8 ? 1 : 8 / CPR; // rows per 128 bytes
+    static_assert(CPR >= 2 && (CPR & (CPR - 1)) == 0 && CPR <= 8, "swizzled rows");
+    __device__ static int key(int row)
+    {
+        return (row / RPL) & (CPR - 1);
+    }
+    // Offset of the chunk holding k (a multiple of 8) of a row with key @p key.
+    __device__ static int at(int row, int key, int k)
+    {
+        return row * BK + (((k >> 3) ^ key) << 3);
+    }
+};
+
 // ---------------------------------------------------------------------------------------------
 // Global tile loads. A: VEC reduction channels of PASSES gathered rows, each row's origin decoded
 // once. B: VEC reduction channels of PASSES filter rows, contiguous along the reduction:
@@ -757,6 +877,9 @@ __device__ inline long long
 // PACK 1: a k-step spans BK / cgroup taps when the reduction channels per tap (cgroup) divide BK,
 // instead of padding each tap to BK. A thread's VEC channels sit in sub-tap kv / cgroup at
 // channel kv % cgroup, so its tap cursor is its own.
+// PACK 2 (flat): the reduction is the taps' channels end to end (taps x cgroup, cgroup a multiple
+// of VEC), cut into k-steps of BK whatever cgroup is, so no tap pads to a whole k-step; each
+// thread's cursor is its own (tap, channel), stepped BK channels on per k-step.
 
 template <class T, int BM, int BN, int BK, int VEC, int THREADS, int DIR, int WD = 0, int PACK = 0>
 struct K1Tiles
@@ -932,12 +1055,16 @@ struct K1Tiles
                                      + static_cast<long long>(n) * rowStride;
             }
         }
-        if constexpr(PACK != 0)
+        if constexpr(PACK == 1)
         {
             // Whole taps per k-step (the launcher checks cgroup divides BK).
             packTaps = BK / gather.cgroup;
             packSub = kv / gather.cgroup;
             packChan = kv - packSub * gather.cgroup;
+            cChunks = 1;
+        }
+        else if constexpr(PACK == 2)
+        {
             cChunks = 1;
         }
 #if K1_BUFFER
@@ -951,9 +1078,13 @@ struct K1Tiles
 
     __device__ int iterations() const
     {
-        if constexpr(PACK != 0)
+        if constexpr(PACK == 1)
         {
             return (nTaps + packTaps - 1) / packTaps;
+        }
+        else if constexpr(PACK == 2)
+        {
+            return static_cast<int>((static_cast<long long>(nTaps) * gather.cgroup + BK - 1) / BK);
         }
         return nTaps * cChunks;
     }
@@ -961,6 +1092,20 @@ struct K1Tiles
     /// Loads start at iteration @p first; those at or past @p end read zeros.
     __device__ void cursorInit(int first, int end)
     {
+        if constexpr(PACK == 2)
+        {
+            // This thread's flat reduction index, as (tap, channel).
+            const long long f = static_cast<long long>(first) * BK + kv;
+            const int q = static_cast<int>(f / gather.cgroup);
+            packChan = static_cast<int>(f - static_cast<long long>(q) * gather.cgroup);
+            curIt = first;
+            endIt = end;
+            curC = 0;
+            curQs = q % gather.taps[2];
+            curQr = (q / gather.taps[2]) % gather.taps[1];
+            curQt = q / (gather.taps[2] * gather.taps[1]);
+            return;
+        }
         const int q = PACK != 0 ? first * packTaps + packSub : first / cChunks;
         curIt = first;
         endIt = end;
@@ -976,8 +1121,27 @@ struct K1Tiles
         const int it = curIt;
         const int c0 = curC * BK;
         const int qs = curQs, qr = curQr, qt = curQt;
+        const int chan = packChan;
         ++curIt;
-        if constexpr(PACK != 0)
+        if constexpr(PACK == 2)
+        {
+            // BK channels on, carried through the taps (several when cgroup < BK).
+            packChan += BK;
+            while(packChan >= gather.cgroup)
+            {
+                packChan -= gather.cgroup;
+                if(++curQs == gather.taps[2])
+                {
+                    curQs = 0;
+                    if(++curQr == gather.taps[1])
+                    {
+                        curQr = 0;
+                        ++curQt;
+                    }
+                }
+            }
+        }
+        else if constexpr(PACK != 0)
         {
             // packTaps taps on, carried through the tap extents.
             curQs += packTaps;
@@ -1008,7 +1172,7 @@ struct K1Tiles
         const long long delta
             = ((static_cast<long long>(td) * gather.in[1] + th) * gather.in[2] + tw) * gather.chans;
         // PACK: this thread's channel in its own tap, valid while the tap is.
-        const int c = PACK != 0 ? packChan : c0 + kv;
+        const int c = PACK != 0 ? chan : c0 + kv;
         const bool cOk = (PACK != 0 ? qt < gather.taps[0] : c < gather.cgroup) && it < endIt;
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
@@ -1164,6 +1328,27 @@ struct K1Tiles
                     d[e * ld] = v[e];
             }
         }
+    }
+
+    // Swizzled row-major LDS tiles (K1Swz): As[m][k], Bs[n][k], 16-bit, VEC 8.
+    __device__ void storeRowsSwz(T* As, T* Bs) const
+    {
+        typedef K1Swz<BK> Swz;
+        static_assert(VEC * sizeof(T) == 16 && !DIRECT && PACK == 0, "swizzled tiles");
+#pragma unroll
+        for(int p = 0; p < A_PASSES; ++p)
+            if(aRow(p))
+            {
+                const int r = row + p * ROWS_PER_PASS;
+                *reinterpret_cast<Raw*>(As + Swz::at(r, Swz::key(r), kv)) = ra[p];
+            }
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+            if(bRow(p))
+            {
+                const int r = row + p * ROWS_PER_PASS;
+                *reinterpret_cast<Raw*>(Bs + Swz::at(r, Swz::key(r), kv)) = rb[p];
+            }
     }
 
     // Row-major LDS tiles: As[m][k], Bs[n][k], ld elements per row.
@@ -1387,6 +1572,11 @@ __device__ inline void k1XcdOrder(unsigned& bx, unsigned& by, unsigned& bz)
 // order. HALO 1: the halo A loop (the launcher checks k1HaloFits with K1_HALO_CAP rows; STAGES 1).
 // WD 1: backward data reads the graph's K T R S C/g filter directly (K1Tiles). PACK 1: k-steps of
 // whole taps when the reduction channels per tap divide BK (K1Tiles; not with the halo loop).
+// CF 1: the output (forward y, backward data dx) is written packed channels-first straight from
+// the epilogue (and the split-K partials indexed alike), so it needs no staging transpose.
+// SWZ 1: XOR-swizzled, unpadded LDS tiles (K1Swz) read in whole 16-byte chunks, 8-byte fragments
+// two k-steps at a time: no LDS bank conflicts on the fragment reads (16-bit, VEC 8, no halo,
+// direct filter or tap packing).
 
 template <class T,
           class Atom,
@@ -1402,7 +1592,9 @@ template <class T,
           int XCD = 0,
           int HALO = 0,
           int WD = 0,
-          int PACK = 0>
+          int PACK = 0,
+          int CF = 0,
+          int SWZ = 0>
 __device__ void k1ConvMma(const K1Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -1410,7 +1602,7 @@ __device__ void k1ConvMma(const K1Args& a)
     constexpr bool SPLIT = MATH == K1_MATH_BF16X3;
     // Tiles of the multiply's element type: T, or bf16 planes (hi, lo) for three-bf16.
     typedef typename K1If<SPLIT, unsigned short, T>::type S;
-    constexpr int LD = BK + 16 / static_cast<int>(sizeof(S));
+    constexpr int LD = SWZ ? BK : BK + 16 / static_cast<int>(sizeof(S));
     constexpr int WTM = BM / WM, WTN = BN / WN;
     constexpr int DIM = Atom::DIM;
     constexpr int FM = WTM / DIM, FN = WTN / DIM;
@@ -1420,7 +1612,10 @@ __device__ void k1ConvMma(const K1Args& a)
                           / static_cast<int>(sizeof(T)); // in T
     // Epilogue: each wave stages 16 rows of its tile at a time.
     constexpr int OLD = WTN + 16 / static_cast<int>(sizeof(T));
-    constexpr int OUT = WM * WN * DIM * OLD;
+    // Channels-first epilogue (CF 1): each wave stages DIM columns x CFR rows, column-major.
+    constexpr int CFR = WTM < 64 ? WTM : 64;
+    constexpr int OLDC = CFR + 16 / static_cast<int>(sizeof(T));
+    constexpr int OUT = CF ? WM * WN * DIM * OLDC : WM * WN * DIM * OLD;
     // Halo: A is [PLANES][AROWS][LD], the staged rows and one zero row, then one B tile.
     constexpr int HRPP = THREADS / (BK / VEC);
     constexpr int HROWS = (BM + K1_HALO_CAP + HRPP - 1) / HRPP * HRPP;
@@ -1438,6 +1633,9 @@ __device__ void k1ConvMma(const K1Args& a)
     // STAGES 2 raced on gfx11 while backward data stored its B tile with transposed 2-byte LDS
     // writes (a barrier hid it, a fence did not); with vector row stores only it passes.
     static_assert(STAGES == 1 || STAGES == 2, "stages");
+    static_assert(
+        SWZ == 0 || (!SPLIT && HALO == 0 && WD == 0 && PACK == 0 && sizeof(T) == 2 && VEC == 8),
+        "swizzled tiles: 16-bit native, no halo, direct filter or tap packing");
 
     __shared__ __attribute__((aligned(16))) T lds[LDS];
 
@@ -1487,8 +1685,93 @@ __device__ void k1ConvMma(const K1Args& a)
     for(int i = 0; i < FM; ++i)
         arow[i] = wm * WTM + i * DIM + fragRow;
 
+    // Swizzled tiles: each fragment read is whole 16-byte chunks. 8-byte fragments are read in
+    // pairs (two k-steps per chunk; A and B permute k alike, so the products are unchanged).
+    typedef K1Swz<BK> Swz;
+    constexpr int FB = Atom::KPL * static_cast<int>(sizeof(T)); // fragment bytes
+    constexpr int PAIR = SWZ && FB == 8 ? 2 : 1;
+    int aKey[FM], bKey[FN];
+    if constexpr(SWZ != 0)
+    {
+#pragma unroll
+        for(int i = 0; i < FM; ++i)
+            aKey[i] = Swz::key(arow[i]);
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+            bKey[j] = Swz::key(wn * WTN + j * DIM + fragRow);
+    }
+    const int kbp = Atom::template kBase<Atom::KPL * PAIR>(lane);
+    auto multiplySwz = [&](const S* As, const S* Bs) {
+        if constexpr(SWZ != 0)
+        {
+            typedef typename K1Raw<16>::type Chunk;
+            static_assert(FB == 8 || FB == 16 || FB == 32, "fragment size");
+            static_assert(BK % (Atom::KA * PAIR) == 0, "chunked reads span whole k-steps");
+#pragma unroll
+            for(int kk = 0; kk < BK; kk += Atom::KA * PAIR)
+            {
+                typename Atom::frag af[FM][PAIR], bf[FN][PAIR];
+                auto read = [&](const S* base, int r, int key, typename Atom::frag* f) {
+                    if constexpr(FB == 32)
+                    {
+                        typedef unsigned Two __attribute__((ext_vector_type(8)));
+                        const Chunk c0
+                            = *reinterpret_cast<const Chunk*>(base + Swz::at(r, key, kk + kbp));
+                        const Chunk c1
+                            = *reinterpret_cast<const Chunk*>(base + Swz::at(r, key, kk + kbp + 8));
+                        Two t;
+#pragma unroll
+                        for(int e = 0; e < 4; ++e)
+                        {
+                            t[e] = c0[e];
+                            t[e + 4] = c1[e];
+                        }
+                        f[0] = __builtin_bit_cast(typename Atom::frag, t);
+                    }
+                    else if constexpr(FB == 16)
+                    {
+                        const Chunk c
+                            = *reinterpret_cast<const Chunk*>(base + Swz::at(r, key, kk + kbp));
+                        f[0] = __builtin_bit_cast(typename Atom::frag, c);
+                    }
+                    else
+                    {
+                        typedef typename K1Raw<8>::type Half;
+                        const Chunk c
+                            = *reinterpret_cast<const Chunk*>(base + Swz::at(r, key, kk + kbp));
+                        Half lo, hi;
+                        lo[0] = c[0];
+                        lo[1] = c[1];
+                        hi[0] = c[2];
+                        hi[1] = c[3];
+                        f[0] = __builtin_bit_cast(typename Atom::frag, lo);
+                        f[1] = __builtin_bit_cast(typename Atom::frag, hi);
+                    }
+                };
+#pragma unroll
+                for(int i = 0; i < FM; ++i)
+                    read(As, arow[i], aKey[i], af[i]);
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+                    read(Bs, wn * WTN + j * DIM + fragRow, bKey[j], bf[j]);
+#pragma unroll
+                for(int q = 0; q < PAIR; ++q)
+#pragma unroll
+                    for(int i = 0; i < FM; ++i)
+#pragma unroll
+                        for(int j = 0; j < FN; ++j)
+                            acc[i][j] = Atom::mma(af[i][q], bf[j][q], acc[i][j]);
+            }
+        }
+    };
+
     // A planes at As (hi) and As + APL (lo); B planes at Bs and Bs + BN * LD.
     auto multiply = [&](const S* As, const S* Bs) {
+        if constexpr(SWZ != 0)
+        {
+            multiplySwz(As, Bs);
+            return;
+        }
 #pragma unroll
         for(int kk = 0; kk < BK; kk += Atom::KA)
         {
@@ -1653,6 +1936,10 @@ __device__ void k1ConvMma(const K1Args& a)
             {
                 tiles.storeRowsSplit(base, base + 2 * BM * LD, LD, BM * LD, BN * LD);
             }
+            else if constexpr(SWZ != 0)
+            {
+                tiles.storeRowsSwz(base, base + BM * LD);
+            }
             else
             {
                 tiles.storeRows(base, base + BM * LD, LD);
@@ -1711,9 +1998,78 @@ __device__ void k1ConvMma(const K1Args& a)
                     const long long m = m0 + wm * WTM + i * DIM + Atom::dRow(lane, e);
                     if(m < gather.rows && nn < ncols)
                     {
-                        partial[k1OutIndex<DIR>(a, gather, g, phase, m, nn)] = acc[i][j][e];
+                        partial[CF ? k1OutIndexCf<DIR>(a, gather, g, phase, m, nn)
+                                   : k1OutIndex<DIR>(a, gather, g, phase, m, nn)]
+                            = acc[i][j][e];
                     }
                 }
+            }
+        return;
+    }
+
+    T* out = static_cast<T*>(DIR == K1_FORWARD ? a.y : a.x);
+    typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
+    if constexpr(CF != 0)
+    {
+        // Channels-first epilogue: per DIM-column slab and CFR-row chunk, accumulators to the
+        // wave's column-major LDS strip, then runs of VEC rows (consecutive positions of one
+        // channel) to global; single elements where a run is not contiguous in the output (an
+        // image boundary, a stride phase) or past the last row.
+        __syncthreads();
+        T* strip = lds + wave * DIM * OLDC;
+        constexpr int RUNS = CFR / VEC;
+        K1CfWalk walk;
+        walk.template init<DIR>(a, gather);
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+#pragma unroll
+            for(int rc = 0; rc < WTM / CFR; ++rc)
+            {
+#pragma unroll
+                for(int i = 0; i < CFR / DIM; ++i)
+#pragma unroll
+                    for(int e = 0; e < Atom::ACC; ++e)
+                        strip[(lane % DIM) * OLDC + i * DIM + Atom::dRow(lane, e)]
+                            = K1Elem<T>::store(acc[rc * (CFR / DIM) + i][j][e]);
+                __builtin_amdgcn_wave_barrier();
+                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
+                __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
+                for(int v = lane; v < DIM * RUNS; v += WAVE)
+                {
+                    const int col = v / RUNS;
+                    const int run = v - col * RUNS;
+                    const long long m = m0 + wm * WTM + rc * CFR + run * VEC;
+                    const int nn = n0 + wn * WTN + j * DIM + col;
+                    if(m >= gather.rows || nn >= ncols)
+                    {
+                        continue;
+                    }
+                    const T* src = strip + col * OLDC + run * VEC;
+                    const long long o = k1OutIndexCf<DIR>(a, gather, g, phase, m, nn);
+                    walk.start(m, o);
+                    long long at[VEC];
+#pragma unroll
+                    for(int e = 0; e < VEC; ++e)
+                    {
+                        at[e] = walk.o;
+                        walk.next();
+                    }
+                    // Positions only increase with m, so a span of VEC - 1 means contiguous.
+                    if(m + VEC <= gather.rows && o % VEC == 0 && at[VEC - 1] == o + VEC - 1)
+                    {
+                        *reinterpret_cast<Raw*>(out + o) = *reinterpret_cast<const Raw*>(src);
+                    }
+                    else
+                    {
+#pragma unroll
+                        for(int e = 0; e < VEC; ++e)
+                            if(m + e < gather.rows)
+                                out[at[e]] = src[e];
+                    }
+                }
+                __builtin_amdgcn_wave_barrier();
+                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
+                __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
             }
         return;
     }
@@ -1722,8 +2078,6 @@ __device__ void k1ConvMma(const K1Args& a)
     // to global (single columns past the last full vector).
     __syncthreads();
     T* strip = lds + wave * DIM * OLD;
-    T* out = static_cast<T*>(DIR == K1_FORWARD ? a.y : a.x);
-    typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
     constexpr int ROW_VECS = WTN / VEC;
 #pragma unroll
     for(int i = 0; i < FM; ++i)
@@ -1893,40 +2247,115 @@ __device__ inline void k1StridedCopy(const ConvIgemmCopyArgs& a)
     }
 }
 
-// Batched 2-D transpose through a 32 x 33 LDS tile: coalesced reads and writes. A 1-D grid of
-// (column tile, row tile, batch), column tiles fastest; 256 threads.
+// Batched 2-D transpose through a TT x TT LDS tile (CONV_IGEMM_TRANSPOSE_TILE): a 1-D grid of
+// (column tile, row tile, batch), column tiles fastest; 256 threads. Reads are 16-byte vectors
+// along the source rows when the columns are whole vectors and the source 16-byte aligned, and
+// writes 16-byte vectors along the destination rows (gathered from LDS) when the rows are whole
+// vectors and the destination aligned; otherwise one element per access. A thread issues all its
+// loads before storing any (clamped in-range addresses, no per-load branch).
 template <class E>
 __device__ inline void k1TransposeTile(const ConvIgemmTransposeArgs& a,
                                        long long tileCol,
                                        long long tileRow,
                                        long long b)
 {
-    __shared__ E tile[32][33];
+    constexpr int TT = CONV_IGEMM_TRANSPOSE_TILE;
+    constexpr int V = 16 / static_cast<int>(sizeof(E));
+    constexpr int RV = TT / V; // vectors per tile row
+    constexpr int VPT = TT * RV / 256; // vectors per thread
+    constexpr int EPT = TT * TT / 256; // elements per thread
+    constexpr int P = TT + (sizeof(E) == 2 ? 2 : 1); // LDS pitch: rows on different banks
+    static_assert(VPT >= 1 && EPT >= 1, "tile");
+    typedef typename K1Raw<16>::type Raw;
+    __shared__ E tile[TT * P];
     const E* src = static_cast<const E*>(a.src) + b * a.rows * a.cols;
     E* dst = static_cast<E*>(a.dst) + b * a.rows * a.cols;
-    const int tx = threadIdx.x % 32, ty = threadIdx.x / 32;
-    const long long r0 = tileRow * 32, c0 = tileCol * 32;
-    for(int r = ty; r < 32; r += 8)
+    const long long r0 = tileRow * TT, c0 = tileCol * TT;
+    const int tid = threadIdx.x;
+    const bool vecIn = a.cols % V == 0 && (reinterpret_cast<unsigned long long>(a.src) & 15) == 0;
+    const bool vecOut = a.rows % V == 0 && (reinterpret_cast<unsigned long long>(a.dst) & 15) == 0;
+    if(vecIn)
     {
-        if(r0 + r < a.rows && c0 + tx < a.cols)
-            tile[r][tx] = src[(r0 + r) * a.cols + c0 + tx];
+        Raw v[VPT];
+#pragma unroll
+        for(int k = 0; k < VPT; ++k)
+        {
+            const int i = tid + k * 256, r = i / RV, c = (i - r * RV) * V;
+            const long long rr = r0 + r < a.rows ? r0 + r : a.rows - 1;
+            const long long cc = c0 + c < a.cols ? c0 + c : a.cols - V;
+            v[k] = *reinterpret_cast<const Raw*>(src + rr * a.cols + cc);
+        }
+#pragma unroll
+        for(int k = 0; k < VPT; ++k)
+        {
+            const int i = tid + k * 256, r = i / RV, c = (i - r * RV) * V;
+            const E* e = reinterpret_cast<const E*>(&v[k]);
+#pragma unroll
+            for(int j = 0; j < V; ++j)
+                tile[r * P + c + j] = e[j];
+        }
+    }
+    else
+    {
+        E v[EPT];
+#pragma unroll
+        for(int k = 0; k < EPT; ++k)
+        {
+            const int i = tid + k * 256, r = i / TT, c = i - r * TT;
+            const long long rr = r0 + r < a.rows ? r0 + r : a.rows - 1;
+            const long long cc = c0 + c < a.cols ? c0 + c : a.cols - 1;
+            v[k] = src[rr * a.cols + cc];
+        }
+#pragma unroll
+        for(int k = 0; k < EPT; ++k)
+        {
+            const int i = tid + k * 256, r = i / TT, c = i - r * TT;
+            tile[r * P + c] = v[k];
+        }
     }
     __syncthreads();
-    for(int c = ty; c < 32; c += 8)
+    if(vecOut)
     {
-        if(c0 + c < a.cols && r0 + tx < a.rows)
-            dst[(c0 + c) * a.rows + r0 + tx] = tile[tx][c];
+#pragma unroll
+        for(int k = 0; k < VPT; ++k)
+        {
+            const int i = tid + k * 256, c = i / RV, r = (i - c * RV) * V;
+            if(c0 + c < a.cols && r0 + r < a.rows)
+            {
+                Raw v;
+                E* e = reinterpret_cast<E*>(&v);
+#pragma unroll
+                for(int j = 0; j < V; ++j)
+                    e[j] = tile[(r + j) * P + c];
+                *reinterpret_cast<Raw*>(dst + (c0 + c) * a.rows + r0 + r) = v;
+            }
+        }
+    }
+    else
+    {
+#pragma unroll
+        for(int k = 0; k < EPT; ++k)
+        {
+            const int i = tid + k * 256, c = i / TT, r = i - c * TT;
+            if(c0 + c < a.cols && r0 + r < a.rows)
+                dst[(c0 + c) * a.rows + r0 + r] = tile[r * P + c];
+        }
     }
 }
 
 __device__ inline void k1Transpose(const ConvIgemmTransposeArgs& a)
 {
-    const long long colTiles = (a.cols + 31) / 32;
-    const long long rowTiles = (a.rows + 31) / 32;
+    constexpr int TT = CONV_IGEMM_TRANSPOSE_TILE;
+    const long long colTiles = (a.cols + TT - 1) / TT;
+    const long long rowTiles = (a.rows + TT - 1) / TT;
     const long long block = blockIdx.x;
     const long long tileCol = block % colTiles;
     const long long tileRow = (block / colTiles) % rowTiles;
     const long long b = block / (colTiles * rowTiles);
+    if(b >= a.batches)
+    {
+        return;
+    }
     if(a.elementBytes == 4)
         k1TransposeTile<unsigned>(a, tileCol, tileRow, b);
     else

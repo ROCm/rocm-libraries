@@ -11,7 +11,10 @@
 //   CONV_IGEMM_XCD      1: XCD-contiguous block order (gfx942, gfx950)
 //   CONV_IGEMM_HALO     1: the halo A loop (stride-1 convolutions whose shift range fits)
 //   CONV_IGEMM_WD       1: backward data reads the K T R S C/g filter directly (no transposed copy)
-//   CONV_IGEMM_PACK     1: k-steps of whole taps (reduction channels per tap divide BK)
+//   CONV_IGEMM_PACK     1: k-steps of whole taps (reduction channels per tap divide BK); 2: the
+//                       flat reduction (taps x channels in k-steps of BK)
+//   CONV_IGEMM_CF       1: the output is written packed channels-first (matrix-core kernel only)
+//   CONV_IGEMM_SWZ      1: XOR-swizzled LDS tiles read in whole 16-byte chunks (16-bit, VEC 8)
 //   K1_BUFFER           0 when a block's rows could span 2^31 bytes (64-bit global loads)
 
 #include "ConvIgemmCore.h"
@@ -27,6 +30,12 @@
 #endif
 #ifndef CONV_IGEMM_PACK
 #define CONV_IGEMM_PACK 0
+#endif
+#ifndef CONV_IGEMM_CF
+#define CONV_IGEMM_CF 0
+#endif
+#ifndef CONV_IGEMM_SWZ
+#define CONV_IGEMM_SWZ 0
 #endif
 
 #if CONV_IGEMM_FMA
@@ -62,7 +71,9 @@ extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) ConvIgemm(K1Args 
               CONV_IGEMM_XCD,
               CONV_IGEMM_HALO,
               CONV_IGEMM_WD,
-              CONV_IGEMM_PACK>(a);
+              CONV_IGEMM_PACK,
+              CONV_IGEMM_CF,
+              CONV_IGEMM_SWZ>(a);
 #endif
 }
 

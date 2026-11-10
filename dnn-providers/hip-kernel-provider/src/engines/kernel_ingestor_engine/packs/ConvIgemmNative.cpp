@@ -221,24 +221,24 @@ constexpr std::array<std::string_view, 7> GFX11{
 constexpr std::array<std::string_view, 7> GFX12{"gfx1200", "gfx1201"};
 
 constexpr std::array<AtomEntry, 21> ATOMS{{
-    {{"mfma16_f16", "K1AtomMfmaF16", 64, false}, "f16", CDNA},
-    {{"mfma32_f16", "K1AtomMfma32F16", 64, false}, "f16", CDNA},
-    {{"mfma16_bf16", "K1AtomMfmaBf16", 64, false}, "bf16", CDNA_BF16_1K},
-    {{"mfma32_bf16", "K1AtomMfma32Bf16", 64, false}, "bf16", CDNA_BF16_1K},
+    {{"mfma16_f16", "K1AtomMfmaF16", 64, false, 32}, "f16", CDNA},
+    {{"mfma32_f16", "K1AtomMfma32F16", 64, false, 16}, "f16", CDNA},
+    {{"mfma16_bf16", "K1AtomMfmaBf16", 64, false, 32}, "bf16", CDNA_BF16_1K},
+    {{"mfma32_bf16", "K1AtomMfma32Bf16", 64, false, 16}, "bf16", CDNA_BF16_1K},
     {{"mfma16_bf16_908", "K1AtomMfmaBf16Gfx908", 64, false}, "bf16", GFX908},
     {{"mfma32_bf16_908", "K1AtomMfma32Bf16Gfx908", 64, false}, "bf16", GFX908},
     {{"mfma16_f32", "K1AtomMfmaF32", 64, false}, "f32", CDNA},
     {{"mfma32_f32", "K1AtomMfma32F32", 64, false}, "f32", CDNA},
     {{"mfma16_xf32", "K1AtomMfmaXf32", 64, true}, "f32", GFX942},
     {{"mfma32_xf32", "K1AtomMfma32Xf32", 64, true}, "f32", GFX942},
-    {{"mfma16x32_f16", "K1AtomMfmaF16X32", 64, false}, "f16", GFX950},
-    {{"mfma16x32_bf16", "K1AtomMfmaBf16X32", 64, false}, "bf16", GFX950},
-    {{"mfma32x16_f16", "K1AtomMfma32F16X16", 64, false}, "f16", GFX950},
-    {{"mfma32x16_bf16", "K1AtomMfma32Bf16X16", 64, false}, "bf16", GFX950},
-    {{"wmma11_f16", "K1AtomWmma11F16", 32, false}, "f16", GFX11},
-    {{"wmma11_bf16", "K1AtomWmma11Bf16", 32, false}, "bf16", GFX11},
-    {{"wmma12_f16", "K1AtomWmma12F16", 32, false}, "f16", GFX12},
-    {{"wmma12_bf16", "K1AtomWmma12Bf16", 32, false}, "bf16", GFX12},
+    {{"mfma16x32_f16", "K1AtomMfmaF16X32", 64, false, 32}, "f16", GFX950},
+    {{"mfma16x32_bf16", "K1AtomMfmaBf16X32", 64, false, 32}, "bf16", GFX950},
+    {{"mfma32x16_f16", "K1AtomMfma32F16X16", 64, false, 16}, "f16", GFX950},
+    {{"mfma32x16_bf16", "K1AtomMfma32Bf16X16", 64, false, 16}, "bf16", GFX950},
+    {{"wmma11_f16", "K1AtomWmma11F16", 32, false, 16}, "f16", GFX11},
+    {{"wmma11_bf16", "K1AtomWmma11Bf16", 32, false, 16}, "bf16", GFX11},
+    {{"wmma12_f16", "K1AtomWmma12F16", 32, false, 16}, "f16", GFX12},
+    {{"wmma12_bf16", "K1AtomWmma12Bf16", 32, false, 16}, "bf16", GFX12},
     {{"fma", "", 0, false}, "any", {}},
     // Unused slots keep the table's size fixed while atoms are added.
     {{"", "", 0, false}, "", {}},
@@ -555,12 +555,34 @@ IgemmProblem withoutFilterStaging(const IgemmProblem& problem)
     return direct;
 }
 
+bool outputChannelsFirst(const IgemmProblem& problem)
+{
+    const auto& output = problem.direction == ConvDirection::FORWARD ? problem.y : problem.x;
+    return output.needed && output.transpose;
+}
+
+IgemmProblem withoutOutputStaging(const IgemmProblem& problem)
+{
+    IgemmProblem direct = problem;
+    (problem.direction == ConvDirection::FORWARD ? direct.y : direct.x) = Staging{};
+    layOutWorkspace(direct);
+    return direct;
+}
+
 bool packFits(const IgemmProblem& problem, int64_t bk)
 {
     const auto& a = problem.args;
     const long long reduction
         = problem.direction == ConvDirection::FORWARD ? a.c / a.groups : a.k / a.groups;
     return reduction < bk && bk % reduction == 0;
+}
+
+bool flatFits(const IgemmProblem& problem, int64_t bk)
+{
+    const auto& a = problem.args;
+    const long long reduction
+        = problem.direction == ConvDirection::FORWARD ? a.c / a.groups : a.k / a.groups;
+    return reduction % bk != 0;
 }
 
 bool haloFits(const IgemmProblem& problem, int64_t bm)
@@ -629,7 +651,7 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bn,
                        int64_t bk,
                        const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
-                       bool packTaps)
+                       int64_t pack)
 {
     // Blocks per dispatch unit below which the grid splits, and k-iterations each split keeps.
     // gfx9: 2 per CU, 2 iterations. gfx10+ (units are WGPs): 1 per WGP, 64 iterations -- there a
@@ -654,8 +676,9 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     const long long reduction = forward ? a.c / a.groups : a.k / a.groups;
     const long long taps = static_cast<long long>(a.ft) * a.fr * a.fs;
     const long long phaseTaps = std::max<long long>(1, divUp(taps, problem.phases));
-    const long long iterations = packTaps && reduction < bk ? divUp(phaseTaps, bk / reduction)
-                                                            : phaseTaps * divUp(reduction, bk);
+    const long long iterations = pack == 1 && reduction < bk ? divUp(phaseTaps, bk / reduction)
+                                 : pack == 2                 ? divUp(phaseTaps * reduction, bk)
+                                                             : phaseTaps * divUp(reduction, bk);
     const long long wanted = device_units::dispatchUnits(device) * blocksPerUnit;
     long long splits
         = tiles >= wanted
@@ -763,7 +786,9 @@ struct Tile
     int64_t xcd = 0; ///< XCD-contiguous block order
     int64_t halo = 0; ///< the halo A loop
     int64_t wdirect = 0; ///< backward data reads the K T R S C/g filter directly
-    int64_t pack = 0; ///< k-steps of whole taps
+    int64_t pack = 0; ///< 1 k-steps of whole taps, 2 the flat reduction
+    int64_t cf = 0; ///< the output written packed channels-first from the epilogue
+    int64_t swz = 0; ///< XOR-swizzled LDS tiles read in 16-byte chunks
 
     int64_t blockThreads() const
     {
@@ -795,11 +820,20 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.halo = kernel.getIntMetadata("halo");
     tile.wdirect = kernel.getIntMetadata("wdirect");
     tile.pack = kernel.getIntMetadata("pack");
+    tile.cf = kernel.getIntMetadata("cf");
+    tile.swz = kernel.getIntMetadata("swz");
     if(tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1
        || (tile.xcd != 0 && tile.xcd != 1) || (tile.halo != 0 && tile.halo != 1)
        || (tile.halo != 0 && (tile.info.wave == 0 || tile.stages != 1))
-       || (tile.wdirect != 0 && tile.wdirect != 1) || (tile.pack != 0 && tile.pack != 1)
-       || (tile.pack != 0 && (tile.halo != 0 || tile.wdirect != 0)))
+       || (tile.wdirect != 0 && tile.wdirect != 1) || tile.pack < 0 || tile.pack > 2
+       || (tile.pack != 0 && (tile.halo != 0 || tile.wdirect != 0))
+       || (tile.cf != 0 && tile.cf != 1) || (tile.cf != 0 && tile.info.wave == 0)
+       || (tile.swz != 0 && tile.swz != 1)
+       || (tile.swz != 0
+           && (tile.info.wave == 0 || tile.split || tile.halo != 0 || tile.wdirect != 0
+               || tile.pack != 0 || tile.vec != 8
+               || (tile.bk != 16 && tile.bk != 32 && tile.bk != 64) || tile.info.swizzleK == 0
+               || tile.bk % tile.info.swizzleK != 0)))
     {
         return std::nullopt;
     }
@@ -813,7 +847,12 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
 /// several XCDs (elsewhere it is its plain twin), a halo config only where the problem fits
 /// the halo loop. A direct-filter config serves backward data whose filter is packed K T R S C/g
 /// with its input channels a multiple of the vector (16-bit: output channels even); a tap-packing
-/// config only reductions shorter than its k-step that divide it.
+/// config only reductions shorter than its k-step that divide it, a flat-reduction config (pack
+/// 2) only reductions its k-step does not divide. A channels-first-output config
+/// serves outputs (forward y, backward data dx) that are packed channels-first. A swizzled-tile
+/// config (16-bit atoms with 8-, 16- or 32-byte fragments and a k-step the chunked reads divide,
+/// vector 8, no halo, direct filter or tap packing; checked in tileOf) serves whatever its plain
+/// twin serves.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -869,15 +908,23 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    if(tile->pack != 0 && !conv_igemm::packFits(*problem, tile->bk))
+    if(tile->pack == 1 && !conv_igemm::packFits(*problem, tile->bk))
+    {
+        return false;
+    }
+    if(tile->pack == 2 && !conv_igemm::flatFits(*problem, tile->bk))
+    {
+        return false;
+    }
+    if(tile->cf != 0 && !conv_igemm::outputChannelsFirst(*problem))
     {
         return false;
     }
     return conv_igemm::gridFor(*problem, tile->bm, tile->bn).has_value();
 }
 
-/// The problem a config runs: a direct-filter config reads the graph's filter, so nothing stages
-/// it.
+/// The problem a config runs: a direct-filter config reads the graph's filter, and a
+/// channels-first-output config writes the graph's output, so nothing stages them.
 std::optional<IgemmProblem>
     problemFor(const MatchContext& context, ConvDirection direction, const Tile& tile)
 {
@@ -885,6 +932,10 @@ std::optional<IgemmProblem>
     if(problem.has_value() && tile.wdirect != 0)
     {
         problem = conv_igemm::withoutFilterStaging(*problem);
+    }
+    if(problem.has_value() && tile.cf != 0)
+    {
+        problem = conv_igemm::withoutOutputStaging(*problem);
     }
     return problem;
 }
@@ -1024,12 +1075,8 @@ public:
         {
             return 0;
         }
-        return conv_igemm::splitPlanFor(*problem,
-                                        tile->bm,
-                                        tile->bn,
-                                        tile->bk,
-                                        context.deviceProperties,
-                                        tile->pack != 0)
+        return conv_igemm::splitPlanFor(
+                   *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack)
             .workspaceBytes;
     }
 
@@ -1082,6 +1129,8 @@ public:
         options.add("CONV_IGEMM_HALO", std::to_string(tile->halo));
         options.add("CONV_IGEMM_WD", std::to_string(tile->wdirect));
         options.add("CONV_IGEMM_PACK", std::to_string(tile->pack));
+        options.add("CONV_IGEMM_CF", std::to_string(tile->cf));
+        options.add("CONV_IGEMM_SWZ", std::to_string(tile->swz));
         options.add("CONV_IGEMM_DIR",
                     std::string(*direction == ConvDirection::FORWARD ? "0" : "1"));
         // 32-bit buffer loads while a block's rows and the filter stay under 2^31 bytes.
@@ -1092,7 +1141,7 @@ public:
         options.add("K1_BUFFER", std::string(buffer ? "1" : "0"));
 
         const auto plan = conv_igemm::splitPlanFor(
-            *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack != 0);
+            *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack);
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, convSignature());
         conv.setBlockSize(static_cast<unsigned int>(tile->blockThreads()), 1, 1);
@@ -1132,9 +1181,10 @@ public:
             long long blocks = 0;
             if(transpose)
             {
-                // One block per 32 x 32 tile of each image.
+                // One block per tile of each image.
                 const auto& t = stagings[i]->transposeArgs;
-                blocks = (t.cols + 31) / 32 * ((t.rows + 31) / 32) * t.batches;
+                constexpr long long TILE = CONV_IGEMM_TRANSPOSE_TILE;
+                blocks = (t.cols + TILE - 1) / TILE * ((t.rows + TILE - 1) / TILE) * t.batches;
                 if(blocks > std::numeric_limits<int>::max())
                 {
                     throw hipdnn_plugin_sdk::HipdnnPluginException(

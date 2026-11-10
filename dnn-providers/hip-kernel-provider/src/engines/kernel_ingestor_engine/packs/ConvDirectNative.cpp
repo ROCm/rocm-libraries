@@ -1066,9 +1066,10 @@ public:
             long long blocks = 0;
             if(transpose)
             {
-                // One block per 32 x 32 tile of each image.
+                // One block per tile of each image.
                 const auto& t = stagings[i]->transposeArgs;
-                blocks = (t.cols + 31) / 32 * ((t.rows + 31) / 32) * t.batches;
+                constexpr long long TILE = CONV_IGEMM_TRANSPOSE_TILE;
+                blocks = (t.cols + TILE - 1) / TILE * ((t.rows + TILE - 1) / TILE) * t.batches;
                 if(blocks > std::numeric_limits<int>::max())
                 {
                     throw hipdnn_plugin_sdk::HipdnnPluginException(

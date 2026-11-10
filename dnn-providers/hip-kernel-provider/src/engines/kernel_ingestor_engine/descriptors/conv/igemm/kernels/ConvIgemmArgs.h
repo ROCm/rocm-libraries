@@ -62,6 +62,9 @@ struct ConvIgemmCopyArgs
     int elementBytes;
 };
 
+/// The transpose's square tile: one 256-thread block per tile of each batch.
+#define CONV_IGEMM_TRANSPOSE_TILE 64
+
 /// A batched 2-D transpose of `elementBytes`-byte elements: dst[b][j][i] = src[b][i][j], the
 /// source `rows` x `cols` row-major. Stages packed channels-first activations to channels-last
 /// (rows = C, cols = D H W) and back (rows = D H W, cols = C).
