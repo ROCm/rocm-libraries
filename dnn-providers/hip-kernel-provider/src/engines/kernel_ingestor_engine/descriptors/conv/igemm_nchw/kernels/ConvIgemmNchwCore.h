@@ -198,6 +198,20 @@ __device__ inline typename K1Raw<VEC * sizeof(T)>::type k7LoadStrided(
     return v;
 }
 
+/// A compile-time flag for generic lambdas (HIPRTC has no standard headers).
+template <bool B>
+struct K7Flag
+{
+    static constexpr bool value = B;
+};
+
+/// Byte offset @p bytes when @p ok, else one the buffer's range check zeroes: arithmetic, not a
+/// select the compiler may lower to a branch per load (with its own vmcnt(0)).
+__device__ inline unsigned k7Offset(unsigned bytes, bool ok)
+{
+    return bytes | (static_cast<unsigned>(!ok) << 31);
+}
+
 /// The block's global loads and their LDS stores. A: the dy window, WQ positions of BK
 /// k rows from q0w. B: the filter run of BN channels by S taps (run = BN * S positions from
 /// bStart = c0 * S) of BK k rows. A unit is KV consecutive k rows by VEC positions; positions
@@ -301,15 +315,17 @@ struct K7Tiles
     /// The k loop over every (dy row, filter row) pair: iteration it loads pair it / kIters,
     /// k rows from (it mod kIters) BK.
     int kIters, kIt, pi;
+    template <bool FAST = false>
     __device__ int start(const K7Args& a)
     {
         kIters = (a.k + BK - 1) / BK;
         kIt = 0;
         pi = 0;
-        load(0);
+        load<FAST>(0);
         return kIters;
     }
     /// Loads the iteration after the last loaded one.
+    template <bool FAST = false>
     __device__ void loadNext(const K7Args& a, const K7Block& b)
     {
         if(++kIt == kIters)
@@ -318,7 +334,16 @@ struct K7Tiles
             ++pi;
             k7PairOf(a, b, pi, row, toff);
         }
-        load(kIt * BK);
+        load<FAST>(kIt * BK);
+    }
+
+    /// Whether the block's loads take the fast form: its dy window inside the row (or flat) and
+    /// its filter run contiguous and inside the filter (every channel of the tile real), so every
+    /// load is a whole vector, only the k tail and idle units read zeros (branch-free offsets).
+    __device__ bool fastLoads(const K7Args& a) const
+    {
+        const bool aIn = FLAT || (q0w >= 0 && q0w + WQ <= wy);
+        return aIn && fStride == taps && c0 + BN <= cEnd;
     }
 
     /// FLAT: dy read as P = rowsY Wy positions per k row and image, positions g over all
@@ -379,8 +404,48 @@ struct K7Tiles
     }
 
     /// Registers for the k rows from k0.
+    template <bool FAST = false>
     __device__ void load(int k0)
     {
+        if constexpr(FAST)
+        {
+#pragma unroll
+            for(int p = 0; p < A_PASSES; ++p)
+            {
+                const bool active = aActive(p, tid);
+                const int q = q0w + aV(p, tid) * VEC;
+#pragma unroll
+                for(int j = 0; j < KV; ++j)
+                {
+                    const int kk = k0 + aK(p, tid) * KV + j;
+                    const bool ok = active && kk < k;
+                    unsigned bytes;
+                    if constexpr(FLAT)
+                        bytes = k7Offset(static_cast<unsigned>(aOff[p] + kk * wy) * sizeof(T),
+                                         ok && aOff[p] >= 0);
+                    else
+                        bytes = k7Offset(
+                            static_cast<unsigned>((kk * rows + row) * wy + q) * sizeof(T), ok);
+                    ra[p * KV + j] = k1BufferLoad<Raw>(aRsrc, bytes);
+                }
+            }
+#pragma unroll
+            for(int p = 0; p < B_PASSES; ++p)
+            {
+                const bool active = bActive(p);
+                const int pos = bStart + bPos[p];
+#pragma unroll
+                for(int j = 0; j < KV; ++j)
+                {
+                    const int kk = k0 + bK[p] * KV + j;
+                    rb[p * KV + j] = k1BufferLoad<Raw>(
+                        bRsrc,
+                        k7Offset(static_cast<unsigned>(kk * cs + pos) * sizeof(T),
+                                 active && kk < k));
+                }
+            }
+            return;
+        }
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
@@ -684,75 +749,85 @@ __device__ void k7DgradMma(const K7Args& a)
     const T* bBase
         = KMAJOR ? Bs + kb * LDB + (wn * WTN + fragRow) * CP : Bs + (wn * WTN + fragRow) * LDK + kb;
 
-    const int iters = tiles.start(a) * b.nD * b.nH;
-    for(int it = 0; it < iters; ++it)
-    {
-        __syncthreads();
-        if constexpr(KMAJOR)
-            tiles.template storeColumns<LDA, LDB, CP>(As, Bs);
-        else
-            tiles.template storeRows<LDK>(As, Bs);
-        __syncthreads();
-        if(it + 1 < iters)
+    // The k loop, in two forms: whole-vector loads with branch-free offsets for a block whose
+    // window and filter run lie inside the tensors (the rule), edge-checked loads otherwise.
+    auto mainLoop = [&](auto fastFlag) {
+        constexpr bool FAST = decltype(fastFlag)::value;
+        const int iters = tiles.template start<FAST>(a) * b.nD * b.nH;
+        for(int it = 0; it < iters; ++it)
         {
-            tiles.loadNext(a, b);
-        }
-        // Phase p at tile index i reads dy[q0 + i + below(p) - j] for its tap p + ST j: the A
-        // fragments shifted by d = below(p) - j serve every (p, j) pair with that shift.
-#pragma unroll
-        for(int kk = 0; kk < BK; kk += Atom::KA)
-        {
-#pragma unroll
-            for(int d = 1 - TAPS; d <= 1; ++d)
+            __syncthreads();
+            if constexpr(KMAJOR)
+                tiles.template storeColumns<LDA, LDB, CP>(As, Bs);
+            else
+                tiles.template storeRows<LDK>(As, Bs);
+            __syncthreads();
+            if(it + 1 < iters)
             {
-                // Whether any of the wave's phases has a tap at this shift (wave-uniform).
-                bool used = false;
+                tiles.template loadNext<FAST>(a, b);
+            }
+            // Phase p at tile index i reads dy[q0 + i + below(p) - j] for its tap p + ST j: the A
+            // fragments shifted by d = below(p) - j serve every (p, j) pair with that shift.
 #pragma unroll
-                for(int p = 0; p < PW; ++p)
-                {
-                    const int j = (p0 + p < b.r ? 1 : 0) - d;
-                    used = used || (j >= 0 && j < TAPS && p0 + p + j * ST < taps);
-                }
-                if(!used)
-                {
-                    continue;
-                }
-                typename Atom::frag af[FQ];
+            for(int kk = 0; kk < BK; kk += Atom::KA)
+            {
 #pragma unroll
-                for(int i = 0; i < FQ; ++i)
+                for(int d = 1 - TAPS; d <= 1; ++d)
                 {
-                    if constexpr(KMAJOR)
-                        af[i] = As[(kk + kb) * LDA + aRow0 + i * DIM + d * dil];
-                    else
-                        af[i] = k1Frag<Atom>(
-                            As + Tiles::template aRow<LDK>(aRow0 + i * DIM + d * dil) + kk + kb);
-                }
+                    // Whether any of the wave's phases has a tap at this shift (wave-uniform).
+                    bool used = false;
 #pragma unroll
-                for(int p = 0; p < PW; ++p)
-                {
-                    const int j = (p0 + p < b.r ? 1 : 0) - d;
-                    const int s = p0 + p + j * ST;
-                    if(j >= 0 && j < TAPS && s < taps)
+                    for(int p = 0; p < PW; ++p)
                     {
-                        typename Atom::frag bf[FN];
+                        const int j = (p0 + p < b.r ? 1 : 0) - d;
+                        used = used || (j >= 0 && j < TAPS && p0 + p + j * ST < taps);
+                    }
+                    if(!used)
+                    {
+                        continue;
+                    }
+                    typename Atom::frag af[FQ];
 #pragma unroll
-                        for(int n = 0; n < FN; ++n)
+                    for(int i = 0; i < FQ; ++i)
+                    {
+                        if constexpr(KMAJOR)
+                            af[i] = As[(kk + kb) * LDA + aRow0 + i * DIM + d * dil];
+                        else
+                            af[i] = k1Frag<Atom>(
+                                As + Tiles::template aRow<LDK>(aRow0 + i * DIM + d * dil) + kk
+                                + kb);
+                    }
+#pragma unroll
+                    for(int p = 0; p < PW; ++p)
+                    {
+                        const int j = (p0 + p < b.r ? 1 : 0) - d;
+                        const int s = p0 + p + j * ST;
+                        if(j >= 0 && j < TAPS && s < taps)
                         {
-                            if constexpr(KMAJOR)
-                                bf[n] = bBase[kk * LDB + n * DIM * CP + s];
-                            else
-                                bf[n] = k1Frag<Atom>(bBase + (s * BN + n * DIM) * LDK + kk);
-                        }
-#pragma unroll
-                        for(int i = 0; i < FQ; ++i)
+                            typename Atom::frag bf[FN];
 #pragma unroll
                             for(int n = 0; n < FN; ++n)
-                                acc[p][i][n] = Atom::mma(af[i], bf[n], acc[p][i][n]);
+                            {
+                                if constexpr(KMAJOR)
+                                    bf[n] = bBase[kk * LDB + n * DIM * CP + s];
+                                else
+                                    bf[n] = k1Frag<Atom>(bBase + (s * BN + n * DIM) * LDK + kk);
+                            }
+#pragma unroll
+                            for(int i = 0; i < FQ; ++i)
+#pragma unroll
+                                for(int n = 0; n < FN; ++n)
+                                    acc[p][i][n] = Atom::mma(af[i], bf[n], acc[p][i][n]);
+                        }
                     }
                 }
             }
         }
-    }
+    };
+    if(tiles.fastLoads(a))
+        mainLoop(K7Flag<true>{});
+    else
+        mainLoop(K7Flag<false>{});
 
     // Epilogue: the tile into LDS as Os[c][x - x0], then each channel's contiguous dx run out in
     // vectors.
@@ -910,42 +985,50 @@ __device__ __attribute__((always_inline)) inline void
         }
     };
 
-    const int iters = tiles.start(a) * b.nD * b.nH;
-    if constexpr(STAGES == 2)
-    {
-        tiles.template storeColumns<LDA, LDB, CP>(lds, lds + BK * LDA);
-        __syncthreads();
-        for(int it = 0; it < iters; ++it)
+    // Two forms of the k loop, as the matrix-core kernel's (fast: whole-vector, branch-free loads).
+    auto mainLoop = [&](auto fastFlag) {
+        constexpr bool FAST = decltype(fastFlag)::value;
+        const int iters = tiles.template start<FAST>(a) * b.nD * b.nH;
+        if constexpr(STAGES == 2)
         {
-            if(it + 1 < iters)
-            {
-                tiles.loadNext(a, b);
-            }
-            const T* cur = lds + (it & 1) * STAGE;
-            multiply(cur, cur + BK * LDA);
-            if(it + 1 < iters)
-            {
-                // The other tile was last read before the previous barrier.
-                T* next = lds + ((it + 1) & 1) * STAGE;
-                tiles.template storeColumns<LDA, LDB, CP>(next, next + BK * LDA);
-            }
-            __syncthreads();
-        }
-    }
-    else
-    {
-        for(int it = 0; it < iters; ++it)
-        {
-            __syncthreads();
             tiles.template storeColumns<LDA, LDB, CP>(lds, lds + BK * LDA);
             __syncthreads();
-            if(it + 1 < iters)
+            for(int it = 0; it < iters; ++it)
             {
-                tiles.loadNext(a, b);
+                if(it + 1 < iters)
+                {
+                    tiles.template loadNext<FAST>(a, b);
+                }
+                const T* cur = lds + (it & 1) * STAGE;
+                multiply(cur, cur + BK * LDA);
+                if(it + 1 < iters)
+                {
+                    // The other tile was last read before the previous barrier.
+                    T* next = lds + ((it + 1) & 1) * STAGE;
+                    tiles.template storeColumns<LDA, LDB, CP>(next, next + BK * LDA);
+                }
+                __syncthreads();
             }
-            multiply(lds, lds + BK * LDA);
         }
-    }
+        else
+        {
+            for(int it = 0; it < iters; ++it)
+            {
+                __syncthreads();
+                tiles.template storeColumns<LDA, LDB, CP>(lds, lds + BK * LDA);
+                __syncthreads();
+                if(it + 1 < iters)
+                {
+                    tiles.template loadNext<FAST>(a, b);
+                }
+                multiply(lds, lds + BK * LDA);
+            }
+        }
+    };
+    if(tiles.fastLoads(a))
+        mainLoop(K7Flag<true>{});
+    else
+        mainLoop(K7Flag<false>{});
 }
 
 template <class T,
