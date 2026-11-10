@@ -624,6 +624,17 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
     return ab_single, db, two_buf
 
 
+def _gemm_arches_with(flag: str) -> str:
+    """The arches whose ``gemm`` capabilities set ``flag``, comma-joined in
+    :func:`~rocke.core.arch.known_arches` order, for a reject message to say
+    where the rejected feature is admitted. The C++ engine lists the same arches
+    in the same order (``rocke_gemm_arches_with`` in ``gemm_spec.cpp``)."""
+    from ...core.arch import ArchTarget, known_arches
+
+    arches = [g for g in known_arches() if getattr(ArchTarget.from_gfx(g).gemm, flag)]
+    return ", ".join(arches) or "none"
+
+
 def _tdm_pipelined(trait: "TraitSpec") -> bool:
     """Whether the TDM path ping-pongs two LDS buffers.
 
@@ -686,7 +697,10 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     if (
         spec.data.dtype_a in _FP8_AB_DTYPES or spec.data.dtype_b in _FP8_AB_DTYPES
     ) and not target.gemm.fp8_ab:
-        return False, f"fp8/bf8 A/B GEMM is not supported on {arch}"
+        return False, (
+            f"fp8/bf8 A/B GEMM is not supported on {arch} "
+            f"(supported on: {_gemm_arches_with('fp8_ab')})"
+        )
 
     # MMA atom must be in the target's catalog for this dtype combo. The
     # family is selected from the target's wave size: CDNA (wave64) uses MFMA,
@@ -767,7 +781,8 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         if spec.trait.epilogue != "default" and not target.gemm.wmma_cshuffle:
             return False, (
                 f"WMMA path does not support the {spec.trait.epilogue!r} "
-                f"epilogue on {arch}"
+                f"epilogue on {arch} "
+                f"(supported on: {_gemm_arches_with('wmma_cshuffle')})"
             )
         # ``lds_swizzle`` is rejected for the whole family, not only the load
         # paths that structurally cannot express it. It XORs the LDS *column*

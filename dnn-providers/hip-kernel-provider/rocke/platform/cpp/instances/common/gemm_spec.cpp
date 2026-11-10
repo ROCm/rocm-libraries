@@ -718,6 +718,37 @@ static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
     }
 }
 
+/* The gemm capability flags a reject message can name. */
+typedef enum rocke_gemm_cap_flag
+{
+    ROCKE_GEMM_CAP_FP8_AB,
+    ROCKE_GEMM_CAP_WMMA_CSHUFFLE,
+} rocke_gemm_cap_flag_t;
+
+/* The arches whose gemm capabilities set `flag`, ", "-joined in registry order
+ * (the same order as Python known_arches()), or "none": for a reject message to
+ * say where the rejected feature is admitted. Mirrors Python _gemm_arches_with. */
+static const char* rocke_gemm_arches_with(rocke_gemm_cap_flag_t flag, char* out, size_t cap)
+{
+    size_t used = 0;
+    out[0] = '\0';
+    for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const rocke_ati_arch_row_t* row = &rocke_ati_arch_registry[i];
+        const rocke_ati_gemm_caps_t* caps = rocke_ati_gemm_caps(row->target);
+        const bool set = (flag == ROCKE_GEMM_CAP_FP8_AB) ? caps->fp8_ab : caps->wmma_cshuffle;
+        if(!set)
+            continue;
+        const int n = snprintf(out + used, cap - used, "%s%s", used ? ", " : "", row->gfx);
+        if(n < 0 || (size_t)n >= cap - used)
+            break;
+        used += (size_t)n;
+    }
+    if(used == 0)
+        snprintf(out, cap, "none");
+    return out;
+}
+
 /* ===================================================================== *
  *  is_valid_spec(spec, arch) -> (ok, reason).
  *
@@ -794,7 +825,10 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
     if((rocke_gemm_is_fp8_ab(spec->data.dtype_a) || rocke_gemm_is_fp8_ab(spec->data.dtype_b))
        && !gemm_caps->fp8_ab)
     {
-        CK_GEMM_REJECT("fp8/bf8 A/B GEMM is not supported on %s", arch);
+        char supported[128];
+        CK_GEMM_REJECT("fp8/bf8 A/B GEMM is not supported on %s (supported on: %s)",
+                       arch,
+                       rocke_gemm_arches_with(ROCKE_GEMM_CAP_FP8_AB, supported, sizeof(supported)));
     }
 
     /* MMA atom must be in the target's catalog for this dtype combo. */
@@ -904,8 +938,12 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
          * they have gate configs of their own. */
         if(strcmp(spec->trait.epilogue, "default") != 0 && !gemm_caps->wmma_cshuffle)
         {
+            char supported[128];
             CK_GEMM_REJECT(
-                "WMMA path does not support the '%s' epilogue on %s", spec->trait.epilogue, arch);
+                "WMMA path does not support the '%s' epilogue on %s (supported on: %s)",
+                spec->trait.epilogue,
+                arch,
+                rocke_gemm_arches_with(ROCKE_GEMM_CAP_WMMA_CSHUFFLE, supported, sizeof(supported)));
         }
         /* The Python loop walks (flag, label) in this fixed order and rejects on
          * the first set flag. */
