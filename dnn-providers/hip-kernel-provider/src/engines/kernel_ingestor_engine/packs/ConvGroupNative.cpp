@@ -687,7 +687,7 @@ public:
         options.add("CONV_GROUP_T", elementTypeFor(problem->igemm.base.dataType));
         if(tile->fma)
         {
-            options.add("CONV_GROUP_FMA", "1");
+            options.add("CONV_GROUP_FMA", std::string("1"));
             options.add("CONV_GROUP_CG", std::to_string(tile->cg));
             options.add("CONV_GROUP_OC", std::to_string(tile->oc));
             options.add("CONV_GROUP_PX", std::to_string(tile->px));
