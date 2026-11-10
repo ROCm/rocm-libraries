@@ -15,15 +15,17 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
 | `rocKE/gfx1151_wmma_attention/` | `hipkernel:Gfx1151WmmaAttention` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/Gfx950ConvDgradNative.cpp` |
+| `rocKE/gfx950_conv_wgrad_aot/` | `hipkernel:Gfx950ConvWgradAot` | `packs/Gfx950ConvWgradNative.cpp` |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
-`gfx942_attention_unified_3d`, `gfx942_attention_dense` and `gfx950_conv_dgrad_aot` KDPs are
-stored in DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below)
-and declare gfx950 or gfx942 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in
-git and declare the gfx11 and gfx12 RDNA targets. Each bundle packs for a build that has
-rocKE enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the
-walk) and whose GPU targets include an arch its KDP declares; for gfx950 and gfx942 the
-DVC KDPs must also have been pulled.
+`gfx942_attention_unified_3d`, `gfx942_attention_dense`, `gfx950_conv_dgrad_aot` and
+`gfx950_conv_wgrad_aot` KDPs are stored in DVC (see [Large rocKE files live in
+DVC](#large-rocke-files-live-in-dvc) below) and declare gfx950 or gfx942 only;
+`gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in git and declare the
+gfx11 and gfx12 RDNA targets. Each bundle packs for a build that has rocKE enabled
+(`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk) and whose
+GPU targets include an arch its KDP declares; for gfx950 and gfx942 the DVC KDPs must also
+have been pulled.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in

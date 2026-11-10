@@ -78,9 +78,9 @@ from benchmarks.common.batched_timing import add_timing_arg  # noqa: E402
 from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg  # noqa: E402
 
 _DTYPES = ("fp16", "bf16")
-_DIRECTIONS = ("fwd", "dgrad")
+_DIRECTIONS = ("fwd", "dgrad", "wgrad")
 # MIOpen -F bit (and ckProfiler direction) of each pass.
-_FORW_BIT = {"fwd": 1, "dgrad": 2}
+_FORW_BIT = {"fwd": 1, "dgrad": 2, "wgrad": 4}
 
 
 # ---------------------------------------------------------------------------
@@ -675,7 +675,7 @@ def _verify(rt, run, out_dev, out_t, ref_out, name: str, dump_fail, u8):
     return True, False
 
 
-def _run_case(args, cache, problem, dtype: str, sel) -> int:
+def _run_case(args, cache, problem, dtype: str, sel, sink: list | None = None) -> int:
     import ctypes
     import struct
 
@@ -702,29 +702,63 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
 
     x_shape = (p.N, p.Hi, p.Wi, p.C)
     y_shape = (p.N, p.Ho, p.Wo, p.K)
-    W_t = _make(p.K, p.Y, p.X, p.C // p.groups)
-    if direction == "fwd":
-        in_name, out_name = "x", "y"
-        In_t, Out_t = _make(*x_shape), torch.empty(*y_shape, dtype=torch_dt)
+    w_shape = (p.K, p.Y, p.X, p.C // p.groups)
+    # wgrad binds dY to A, X to B, dW to D (_OPERANDS["wgrad"] in
+    # dispatch.grouped_convolution) -- two activation-shaped inputs and a
+    # filter-shaped output, unlike fwd/dgrad's one activation-shaped input
+    # against a fixed weight operand. second_name/Second_t carry that extra
+    # input; fwd/dgrad leave them None and keep using the fixed "w" operand.
+    second_name: str | None = None
+    if direction == "wgrad":
+        in_name, out_name = "dy", "dw"
+        second_name = "x"
+        In_t, Second_t = _make(*y_shape), _make(*x_shape)
+        Out_t = torch.empty(*w_shape, dtype=torch_dt)
     else:
-        in_name, out_name = "dy", "dx"
-        In_t, Out_t = _make(*y_shape), torch.empty(*x_shape, dtype=torch_dt)
+        W_t = _make(*w_shape)
+        if direction == "fwd":
+            in_name, out_name = "x", "y"
+            In_t, Out_t = _make(*x_shape), torch.empty(*y_shape, dtype=torch_dt)
+        else:
+            in_name, out_name = "dy", "dx"
+            In_t, Out_t = _make(*y_shape), torch.empty(*x_shape, dtype=torch_dt)
     flop = float(p.flops)
-    bytes_xfer = float(In_t.nbytes + W_t.nbytes + Out_t.nbytes)
+    bytes_xfer = float(
+        In_t.nbytes + Out_t.nbytes + (Second_t.nbytes if second_name else W_t.nbytes)
+    )
 
     ref_out = None
     if args.verify or args.dump_fail:
-        from builders.common.conv_reference import conv_reference, dgrad_reference
+        from builders.common.conv_reference import (
+            conv_reference,
+            dgrad_reference,
+            wgrad_reference,
+        )
 
         if direction == "fwd":
             ref_out = conv_reference(In_t.cuda(), W_t.cuda(), p, out_dtype=torch_dt)
-        else:
+        elif direction == "dgrad":
             # Rounded to the output dtype, as conv_reference's out_dtype does.
             ref_out = dgrad_reference(In_t, W_t, p).to(torch_dt).float()
+        else:
+            ref_out = wgrad_reference(Second_t, In_t, p).to(torch_dt).float()
 
     plans = {r.spec.name: launch_plan_for(r.request, r.spec) for r in sel.results}
     rt = Runtime()
-    sizes = {in_name: In_t.nbytes, "w": W_t.nbytes, out_name: Out_t.nbytes}
+    # The direct wgrad pipelines write an fp32 dW (conv_abi's direct wgrad D)
+    # whatever the activation dtype, so dW is allocated at that width and each
+    # instance is verified against the dtype it writes; a 16-bit buffer would
+    # take an fp32 store past its end.
+    out_f32 = None
+    if direction == "wgrad" and any(r.spec.is_direct for r in sel.results):
+        out_f32 = torch.empty(*w_shape, dtype=torch.float32)
+    sizes = {
+        in_name: In_t.nbytes,
+        out_name: max(Out_t.nbytes, out_f32.nbytes if out_f32 is not None else 0),
+    }
+    sizes[second_name if second_name else "w"] = (
+        Second_t.nbytes if second_name else W_t.nbytes
+    )
     # Scratch is sized for the largest plan and shared, as benchmark_direct_conv
     # does; it needs no initial contents.
     for plan in plans.values():
@@ -732,7 +766,8 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
             sizes[name] = max(sizes.get(name, 0), nbytes)
     ptrs = {name: rt.alloc(nbytes) for name, nbytes in sizes.items()}
     rt.memcpy_h2d(ptrs[in_name], _u8(In_t), In_t.nbytes)
-    rt.memcpy_h2d(ptrs["w"], _u8(W_t), W_t.nbytes)
+    second_t = Second_t if second_name else W_t
+    rt.memcpy_h2d(ptrs[second_name if second_name else "w"], _u8(second_t), second_t.nbytes)
 
     stop = EarlyStop.for_case(args, p, dtype, direction)
     measured: list[_Measured] = []
@@ -812,7 +847,15 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
                     n_skipped += 1
                     continue
 
-                def run(bound=bound):
+                # What the plan accumulates into -- dW under the packed
+                # split-K atomic, the f32 scratch under two-stage wgrad -- is
+                # cleared before every run, not once: a repeated
+                # (warmup/iters/verify) run would otherwise add onto the
+                # previous call's result. Queued on the launch stream, so a
+                # timed run is not drained for it.
+                def run(bound=bound, zero=plan.zero):
+                    for name in zero:
+                        rt.memset_async(ptrs[name], 0, sizes[name], 0)
                     for launch in bound:
                         launch()
 
@@ -822,7 +865,7 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
                         rt,
                         run,
                         ptrs[out_name],
-                        Out_t,
+                        out_f32 if out_f32 is not None and spec.is_direct else Out_t,
                         ref_out,
                         spec.name,
                         args.dump_fail,
@@ -925,6 +968,22 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
     print(
         f"\nBest: {best.tflops:.1f} TFLOPS — {best.name}  {best.ms:.3f} ms", flush=True
     )
+    if sink is not None:
+        sink.append(
+            {
+                "problem": problem,
+                "dtype": dtype,
+                "direction": direction,
+                "best_name": best.name,
+                "best_ms": best.ms,
+                "best_tflops": best.tflops,
+                "n_admitted": sel.n_admitted,
+                "n_ranked": len(ranked),
+                "split_k": plans[best.name].split_k,
+                "verify_failed": n_failed,
+                "verify_passed": any(m.passed for m in ranked) if args.verify else None,
+            }
+        )
     return rc
 
 
@@ -940,7 +999,7 @@ def _list_case(sel) -> None:
     for r in sel.results:
         mark = "*" if r.spec.name == sel.default_pick else " "
         helpers = (
-            f" (after {len(r.spec.helpers)} weight transforms)"
+            f" (with {len(r.spec.helpers)} helper kernel(s))"
             if r.spec.helpers
             else ""
         )

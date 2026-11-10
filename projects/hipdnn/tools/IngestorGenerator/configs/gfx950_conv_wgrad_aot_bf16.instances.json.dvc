@@ -1,0 +1,6 @@
+outs:
+- md5: 39ddb5371d47b0172188138cf3df5d1b
+  size: 115123
+  hash: md5
+  path: gfx950_conv_wgrad_aot_bf16.instances.json
+  remote: ingestor

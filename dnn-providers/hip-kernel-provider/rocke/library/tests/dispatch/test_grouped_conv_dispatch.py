@@ -36,7 +36,11 @@ from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common import kernel_sweep as ks
 from benchmarks.common.grouped_conv import instance_list
 from dispatch import grouped_convolution as gc
-from kernels.conv.direct_variants import direct_spec_takes_target_wave
+from kernels.conv.direct_variants import (
+    DIRECT_WAVE_PARAMETRIC,
+    DIRECT_WGRAD_FOLDED,
+    direct_spec_takes_target_wave,
+)
 from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.dispatch.core import PinRefused
@@ -60,7 +64,7 @@ def _instance_flavor(monkeypatch):
     """
     flavors = {
         s.identity.llvm_flavor
-        for direction in ("fwd", "dgrad")
+        for direction in ("fwd", "dgrad", "wgrad")
         for s in gc.registered_conv_grouped_instances(direction=direction)
     }
     assert len(flavors) == 1
@@ -148,15 +152,44 @@ _DGRAD_SHAPES = {
     "depthwise7x7": dict(C=96, K=96, G=96, Y=7, X=7, pad_h=3, pad_w=3),
 }
 
+# Shapes that reach every registered wgrad family: dense (implicit GEMM,
+# direct_wgrad, direct_wgrad_tiled), depthwise (direct_wgrad_dw /
+# _dw_mfma), a tiny-C stem (direct_wgrad_dw_cols, C=3 11x11), a dense-C
+# shape narrow enough for the gather kernel's per-tap GEMM
+# (direct_wgrad_gather) and a small-group one for the grouped MFMA kernel
+# (direct_wgrad_grouped_mfma). Kept small (N=2..4, 28..56 spatial) so the
+# implicit-GEMM instances' resolved split-K stays comparable in scale to
+# dgrad's shapes -- _cache_side_plan resolves the same degree independently
+# (see resolve_conv_split_k below), so this is not a constraint on the
+# degree itself, just on keeping the sweep CPU-cheap.
+_WGRAD_SHAPES = {
+    "dense3x3": dict(N=2, C=64, K=64, Hi=28, Wi=28, Y=3, X=3, pad_h=1, pad_w=1),
+    "dense_stride2": dict(
+        N=2, C=64, K=128, Hi=28, Wi=28, Y=3, X=3, pad_h=1, pad_w=1,
+        stride_h=2, stride_w=2,
+    ),
+    "grouped_cpg4": dict(N=2, C=512, K=512, G=128, Hi=28, Wi=28, Y=3, X=3, pad_h=1, pad_w=1),
+    "depthwise3x3": dict(N=4, C=64, K=64, G=64, Hi=56, Wi=56, Y=3, X=3, pad_h=1, pad_w=1),
+    "stem_c3_11x11": dict(
+        N=4, C=3, K=3, G=3, Hi=64, Wi=64, Y=11, X=11, pad_h=5, pad_w=5,
+    ),
+    "gather_c24": dict(N=4, C=24, K=128, Hi=56, Wi=56, Y=3, X=3, pad_h=1, pad_w=1),
+    "grouped_mfma_cpg4": dict(
+        N=4, C=16, K=16, G=4, Hi=56, Wi=56, Y=3, X=3, pad_h=1, pad_w=1,
+    ),
+}
+
+_SHAPES_BY_DIRECTION = {"fwd": _SHAPES, "dgrad": _DGRAD_SHAPES, "wgrad": _WGRAD_SHAPES}
+
 _CASES = [
     pytest.param(arch, direction, shape, id=f"{arch}-{direction}-{shape}")
     for arch, direction in sorted(gc._INSTANCE_LISTS)
-    for shape in sorted(_SHAPES if direction == "fwd" else _DGRAD_SHAPES)
+    for shape in sorted(_SHAPES_BY_DIRECTION[direction])
 ]
 
 
 def _case_req(arch: str, direction: str, shape: str) -> gc.ConvGroupedRequest:
-    shapes = _SHAPES if direction == "fwd" else _DGRAD_SHAPES
+    shapes = _SHAPES_BY_DIRECTION[direction]
     return _req(arch=arch, direction=direction, **shapes[shape])
 
 
@@ -173,13 +206,13 @@ def test_registry_is_exactly_the_instance_lists():
         got = gc.registered_conv_grouped_instances(arch, direction=direction)
         assert {s.name for s in got} == set(names)
         assert len(got) == len(names)
-    for direction in ("fwd", "dgrad"):
+    for direction in ("fwd", "dgrad", "wgrad"):
         for candidate in gc.conv_grouped_candidates(direction):
             assert candidate.spec_id == candidate.name
             assert len(candidate.capability.arches) == 1
 
 
-@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
+@pytest.mark.parametrize("direction", ["fwd", "dgrad", "wgrad"])
 def test_every_instance_is_a_canonical_name(direction):
     arches = {arch for arch, d in gc._INSTANCE_LISTS if d == direction}
     for spec in gc.registered_conv_grouped_instances(direction=direction):
@@ -193,7 +226,7 @@ def test_every_instance_is_a_canonical_name(direction):
         assert spec.algorithm == spec.identity.algorithm
 
 
-@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
+@pytest.mark.parametrize("direction", ["fwd", "dgrad", "wgrad"])
 def test_every_instance_has_the_aot_build_job_compile_all_uses(direction):
     """``--compile-all`` builds each instance (and the helpers it launches) from
     its family's job; a name the generators cannot reproduce would be an
@@ -210,18 +243,22 @@ def test_every_instance_has_the_aot_build_job_compile_all_uses(direction):
 def test_execution_registries_only_hold_buildable_candidates():
     """The sweep registries refuse a candidate without a ``build``, as
     attention's do, and every registered instance has one."""
-    for registry in (gc.CONV_FWD_EXECUTION_REGISTRY, gc.CONV_DGRAD_EXECUTION_REGISTRY):
+    for registry in (
+        gc.CONV_FWD_EXECUTION_REGISTRY,
+        gc.CONV_DGRAD_EXECUTION_REGISTRY,
+        gc.CONV_WGRAD_EXECUTION_REGISTRY,
+    ):
         assert registry.require_build
         assert registry.candidates()
         assert all(c.build is not None for c in registry.candidates())
 
 
-@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
+@pytest.mark.parametrize("direction", ["fwd", "dgrad", "wgrad"])
 def test_every_swept_family_builds_the_kernel_compile_all_builds(direction):
     """``result.build()`` of a sweep result is the IR of the cached binary: the
     kernel ``--compile-all`` builds from the identity's job. One result per
     family the shapes reach."""
-    shapes = _SHAPES if direction == "fwd" else _DGRAD_SHAPES
+    shapes = _SHAPES_BY_DIRECTION[direction]
     picked = {}
     for kw in shapes.values():
         req = _req(direction=direction, **kw)
@@ -254,7 +291,7 @@ def test_an_instance_builds_only_for_its_own_arch():
         (dict(arch="gfx942"), "arch 'gfx942'"),
         (dict(arch="gfx1250"), "arch 'gfx1250'"),
         (dict(arch="gfx1250", llvm_flavor="llvm23"), "arch 'gfx1250'"),
-        (dict(direction="wgrad"), "no 'wgrad' instances"),
+        (dict(direction="idk"), "no 'idk' instances"),
         (dict(dtype="fp32"), "fp16 or bf16 only"),
         (dict(C=63, G=2), "divisible by G"),
         (dict(Di=8, Z=3, stride_d=1, pad_d=1, dilation_d=1), "3-D capability"),
@@ -282,14 +319,14 @@ def test_nothing_outside_the_lists_dispatches(kw, match):
         assert not results
 
 
-def test_only_wgrad_has_no_candidates():
-    assert gc.conv_grouped_candidates("wgrad") == ()
-    assert gc.registered_conv_grouped_instances(direction="wgrad") == ()
+def test_an_unregistered_direction_has_no_candidates():
+    assert gc.conv_grouped_candidates("idk") == ()
     assert gc.conv_grouped_candidates("dgrad")
+    assert gc.conv_grouped_candidates("wgrad")
 
 
 def test_dispatch_stays_in_the_requested_direction():
-    for direction in ("fwd", "dgrad"):
+    for direction in ("fwd", "dgrad", "wgrad"):
         results = gc.dispatch_conv_grouped_all(_req(direction=direction))
         assert results
         assert {r.spec.direction for r in results} == {direction}
@@ -320,7 +357,7 @@ def test_another_llvm_flavor_admits_nothing():
 def test_default_llvm_flavor_is_the_registered_one():
     flavors = {
         s.identity.llvm_flavor
-        for direction in ("fwd", "dgrad")
+        for direction in ("fwd", "dgrad", "wgrad")
         for s in gc.registered_conv_grouped_instances(direction=direction)
     }
     assert flavors == {gc.DEFAULT_LLVM_FLAVOR}
@@ -451,7 +488,17 @@ def _cache_side_admits(spec, req) -> bool:
         from benchmarks.common.benchmark_implicit_gemm_conv import _launch_problem
 
         problem = _launch_problem(spec.direction, _implicit_problem(req))
-        return KernelCache.supports_problem(ident, problem)[0]
+        if not KernelCache.supports_problem(ident, problem)[0]:
+            return False
+        if ident.direction == "wgrad" and ident.two_stage:
+            # A two-stage binary launches only at a degree >= 2 into a scratch
+            # its i32 ws_bytes can address; the resolution the run path calls
+            # raises for any other shape.
+            try:
+                _wgrad_degree(ident, problem)
+            except ValueError:
+                return False
+        return True
     if req.stride_h != req.stride_w or req.pad_h != req.pad_w:
         return False
     if ident.algorithm == "direct_nongrouped" and req.G != 1:
@@ -474,9 +521,9 @@ def test_admission_matches_the_aot_run_path(arch, direction, shape):
     assert admitted, f"{arch} {shape}: no registered instance runs it"
 
 
-@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
+@pytest.mark.parametrize("direction", ["fwd", "dgrad", "wgrad"])
 def test_the_shapes_reach_every_registered_family(direction):
-    shapes = _SHAPES if direction == "fwd" else _DGRAD_SHAPES
+    shapes = _SHAPES_BY_DIRECTION[direction]
     families = {
         s.algorithm
         for s in gc.registered_conv_grouped_instances(_ARCH, direction=direction)
@@ -501,11 +548,81 @@ class _UploadRecorder:
     def alloc(self, nbytes):
         return self.PTR
 
+    def memset(self, ptr, value, nbytes):
+        pass
+
     def memcpy_h2d(self, dst, src, nbytes):
         import numpy as np
 
         raw = ctypes.string_at(src, nbytes)
         self.table = tuple(int(v) for v in np.frombuffer(raw, dtype=np.int32))
+
+
+def _wgrad_degree(ident, problem) -> int:
+    """The split-K degree the run path launches a split wgrad binary at,
+    resolved here independently of gc._wgrad_split_k (not through it), so the
+    comparison stays a cross-check of the dispatcher's wiring rather than a
+    tautology."""
+    from kernels.common.conv_split_k import resolve_conv_split_k
+
+    return resolve_conv_split_k(
+        "wgrad",
+        problem,
+        arch=ident.arch,
+        dtype=ident.dtype_d,
+        tile_m=ident.tile_m,
+        tile_n=ident.tile_n,
+        tile_k=ident.tile_k,
+        block_size=ident.warp_m * ident.warp_n * ident.wave_size,
+        group_merge=ident.group_merge,
+        ws_replicas=ident.ws_replicas,
+        reduction="workspace" if ident.two_stage else "atomic",
+        epilogue=None if ident.two_stage else ident.epilogue,
+        allow_unsplit=not ident.two_stage,
+    ).split_k
+
+
+def _stage2_step(ident, problem, ptrs, sizes):
+    """The two-stage Stage 2 the implicit-GEMM run path launches after a cached
+    two-stage binary (_stage2_reduce / _stage2_launch), with the cached
+    shape-independent fold as its identity."""
+    from benchmarks.common.benchmark_implicit_gemm_conv import (
+        _stage2_launch,
+        _ws_replicas_of,
+    )
+    from kernels.common.conv_wgrad_workspace_reduce import (
+        WgradReduceSpec,
+        wgrad_reduce_signature,
+    )
+
+    s2 = WgradReduceSpec(
+        problem=problem,
+        dtype_d=ident.dtype_d,
+        groups=problem.groups,
+        ws_replicas=_ws_replicas_of(ident),
+    )
+    values, config = _stage2_launch(
+        s2,
+        ws_ptr=ptrs["ws"],
+        ws_bytes=sizes["ws"],
+        dw_ptr=ptrs["dw"],
+        dw_bytes=sizes["dw"],
+    )
+    (want,) = gc._instance_helpers(ident)
+    assert (want.direction, want.algorithm, json.loads(want.knobs), want.dtype_d) == (
+        "direct_wgrad_helper",
+        "direct_wgrad_ws_reduce",
+        {"ws_replicas": _ws_replicas_of(ident)},
+        ident.dtype_d,
+    )
+    return (
+        want,
+        tuple(config.grid),
+        tuple(config.block),
+        [a["name"] for a in wgrad_reduce_signature(s2)],
+        ("ws", None, "dw"),
+        values,
+    )
 
 
 def _cache_side_plan(spec, req, ptrs, sizes):
@@ -522,7 +639,27 @@ def _cache_side_plan(spec, req, ptrs, sizes):
     if not ident.is_direct:
         problem = _launch_problem(direction, _implicit_problem(req))
         rt = _UploadRecorder()
-        extras, grid = _extras_and_grid(direction, problem, ident, rt, ident.dtype_a)
+        split_k = None
+        if direction == "wgrad":
+            # _extras_and_grid's own default (ident.split_k) is what a baked
+            # split_k == 1 instance is held to -- that binary was built with
+            # no atomic-accumulate epilogue at all (WgradConvSpec's
+            # _needs_atomic), so it may never be launched at a dynamically
+            # resolved degree > 1. A baked split_k > 1 instance's real launch
+            # degree is resolved from the shape, by the same cost model the
+            # builder calls on split_k=-1. Resolved here independently of
+            # gc._wgrad_split_k (not through it), so this stays a cross-check
+            # of the dispatcher's wiring rather than a tautology.
+            split_k = 1 if ident.split_k == 1 else _wgrad_degree(ident, problem)
+        extras, grid = _extras_and_grid(
+            direction, problem, ident, rt, ident.dtype_a, split_k=split_k
+        )
+        workspaces = {}
+        if "ws_ptr" in extras:
+            # The run path allocates the scratch itself; the dispatcher names
+            # it "ws" and leaves the allocation to its caller.
+            workspaces = {"ws": extras["ws_bytes"]}
+            extras = {**extras, "ws_ptr": ptrs["ws"], "ws_bytes": sizes["ws"]}
         buffers = gc._OPERANDS[direction]
         values = ks._launch_values_for(
             direction,
@@ -540,7 +677,9 @@ def _cache_side_plan(spec, req, ptrs, sizes):
             buffers,
             values,
         )
-        return [step], {}, rt.table
+        if not workspaces:
+            return [step], {}, rt.table
+        return [step, _stage2_step(ident, problem, ptrs, sizes)], workspaces, rt.table
     plan, why, helpers = _direct_plan(spec, req)
     assert plan is not None, why
     steps = [
@@ -552,10 +691,13 @@ def _cache_side_plan(spec, req, ptrs, sizes):
             step.buffers,
             dks.launch_values(step, ptrs, sizes),
         )
-        # The split-C reduction runs after the conv pass; every other helper
-        # (the MFMA dgrad weight transforms) before it.
+        # The split-C reduction and the wgrad partial-slot fold both run
+        # after the conv pass; every other helper (the MFMA dgrad weight
+        # transforms) before it.
         for identity, step in zip(
-            (ident, *helpers) if gc._split_c(ident) > 1 else (*helpers, ident),
+            (ident, *helpers)
+            if gc._split_c(ident) > 1 or ident.algorithm in DIRECT_WGRAD_FOLDED
+            else (*helpers, ident),
             plan.steps,
             strict=True,
         )
@@ -565,7 +707,9 @@ def _cache_side_plan(spec, req, ptrs, sizes):
 
 _PTRS = {
     name: 0x1000 * (i + 1)
-    for i, name in enumerate(("x", "w", "y", "dy", "dx", "ws_t", "ws_coa", "ws_split"))
+    for i, name in enumerate(
+        ("x", "w", "y", "dy", "dx", "dw", "ws", "ws_t", "ws_coa", "ws_split")
+    )
 }
 _PTRS["sub_gemms"] = _UploadRecorder.PTR
 _SIZES = {name: 100 + i for i, name in enumerate(_PTRS)}
@@ -594,8 +738,16 @@ def test_launch_plan_matches_the_aot_run_path(arch, direction, shape):
         assert dict(plan.workspaces) == workspaces, name
         assert plan.sub_gemm_table == table, name
         # The dispatch result describes the instance's own kernel: the last
-        # step, but for a split-C instance, whose reduction runs after it.
-        own = plan.steps[0 if gc._split_c(result.spec.identity) > 1 else -1]
+        # step, except a split-C, wgrad-fold or two-stage wgrad instance,
+        # whose reduction runs after it (first step).
+        _ident = result.spec.identity
+        own = plan.steps[
+            0
+            if gc._split_c(_ident) > 1
+            or _ident.algorithm in DIRECT_WGRAD_FOLDED
+            or _ident.needs_stage2
+            else -1
+        ]
         assert own.identity == result.spec.identity, name
         assert (result.grid, result.block) == (own.grid, own.block), name
         assert result.signature == own.signature, name
@@ -770,6 +922,22 @@ def test_default_pick_is_the_first_admitted_instance_by_label_order():
     }
     for kw in _DGRAD_SHAPES.values():
         req = _req(direction="dgrad", **kw)
+        admitted = [r.spec.name for r in gc.dispatch_conv_grouped_all(req)]
+        assert admitted == sorted(admitted, key=order.__getitem__)
+        assert gc.dispatch_conv_grouped(req).spec.name == admitted[0]
+        assert [s.name for s in gc.conv_grouped_sweep_space(req)] == admitted
+
+
+def test_wgrad_default_pick_is_the_first_admitted_instance_by_label_order():
+    """wgrad is in ``gc._SET_SEMANTICS_DIRECTIONS`` too: its catalog is a
+    generation sweep's output, not a hand-tuned priority list, so it gets the
+    same deterministic sorted-by-label default as dgrad."""
+    order = {
+        name: i
+        for i, name in enumerate(sorted(_listed_names(_LISTS[(_ARCH, "wgrad")])))
+    }
+    for kw in _WGRAD_SHAPES.values():
+        req = _req(direction="wgrad", **kw)
         admitted = [r.spec.name for r in gc.dispatch_conv_grouped_all(req)]
         assert admitted == sorted(admitted, key=order.__getitem__)
         assert gc.dispatch_conv_grouped(req).spec.name == admitted[0]
@@ -979,3 +1147,167 @@ def test_instance_list_tool_adds_labels_and_rebuilds_lists(tmp_path, capsys):
     instance_list.main(["format", "--check", str(path)])
     lst = gc.load_instance_list(path)
     assert lst.defaults == gc.load_instance_list(_LIST).defaults
+
+
+# ---------------------------------------------------------------------------
+# wgrad (Phase 0: wiring the catalog into the dispatcher)
+# ---------------------------------------------------------------------------
+
+
+def test_wgrad_catalog_has_446_instances_across_all_8_families():
+    """``final_wgrad_instances_1pct.txt``'s whole catalog, with nothing
+    silently dropped: one of each of the 8 wgrad kernel families."""
+    insts = gc.registered_conv_grouped_instances(_ARCH, direction="wgrad")
+    assert len(insts) == 446
+    assert {i.identity.algorithm for i in insts} == {
+        "direct_wgrad",
+        "direct_wgrad_dw",
+        "direct_wgrad_dw_cols",
+        "direct_wgrad_dw_mfma",
+        "direct_wgrad_gather",
+        "direct_wgrad_grouped_mfma",
+        "direct_wgrad_tiled",
+        "implicit_gemm",
+    }
+    assert len(gc.conv_grouped_candidates("wgrad")) == 446
+
+
+def test_a_wgrad_request_resolves_for_each_of_the_8_families():
+    """Every wgrad family the catalog carries reaches a real, launchable
+    instance for at least one representative shape -- the Phase 0 wiring
+    this test file's shapes were picked to exercise."""
+    reached = set()
+    for kw in _WGRAD_SHAPES.values():
+        req = _req(direction="wgrad", **kw)
+        for result in gc.dispatch_conv_grouped_all(req):
+            reached.add(result.spec.algorithm)
+            plan = gc.launch_plan_for(req, result.spec)
+            assert plan.steps
+    assert reached == {
+        "direct_wgrad",
+        "direct_wgrad_dw",
+        "direct_wgrad_dw_cols",
+        "direct_wgrad_dw_mfma",
+        "direct_wgrad_gather",
+        "direct_wgrad_grouped_mfma",
+        "direct_wgrad_tiled",
+        "implicit_gemm",
+    }
+
+
+@pytest.mark.parametrize("shape", sorted(_WGRAD_SHAPES))
+def test_wgrad_implicit_gemm_split_k_matches_resolve_conv_split_k(shape):
+    """The split-K degree ``_grid`` / ``launch_plan_for`` use for an
+    implicit-GEMM wgrad instance is exactly what calling the shared resolver
+    directly, with the same arguments the dispatcher passes, returns --
+    *except* for an instance whose catalog-baked ``split_k`` is ``1``: that
+    binary was built with ``WgradConvSpec``'s ``_needs_atomic`` false, i.e. no
+    atomic-accumulate epilogue compiled in at all (``kernels.conv.aot_jobs``:
+    "split_k=1 (direct store, no atomics) is a structurally different
+    kernel"), so it is held to degree 1 regardless of what the resolver would
+    otherwise pick for the shape -- handing it a resolved degree > 1 would
+    have every grid-z block overwrite ``dW`` instead of accumulating into it."""
+    from kernels.common.conv_split_k import resolve_conv_split_k
+
+    req = _case_req(_ARCH, "wgrad", shape)
+    problem = gc._conv_problem(req)
+    for spec in gc.registered_conv_grouped_instances(_ARCH, direction="wgrad"):
+        ident = spec.identity
+        if ident.algorithm != "implicit_gemm":
+            continue
+        ok, _ = gc._admits(ident, req)
+        if not ok:
+            continue
+        if ident.split_k == 1:
+            assert gc._wgrad_split_k(ident, req) == 1
+            plan = gc.launch_plan_for(req, spec)
+            assert plan.split_k == 1
+            continue
+        want = resolve_conv_split_k(
+            "wgrad",
+            problem,
+            arch=ident.arch,
+            dtype=ident.dtype_d,
+            tile_m=ident.tile_m,
+            tile_n=ident.tile_n,
+            tile_k=ident.tile_k,
+            block_size=ident.warp_m * ident.warp_n * ident.wave_size,
+            group_merge=ident.group_merge,
+            ws_replicas=ident.ws_replicas,
+            reduction="workspace" if ident.two_stage else "atomic",
+            epilogue=None if ident.two_stage else ident.epilogue,
+            allow_unsplit=not ident.two_stage,
+        ).split_k
+        assert gc._wgrad_split_k(ident, req) == want
+        assert want >= 1
+        plan = gc.launch_plan_for(req, spec)
+        assert plan.split_k == want
+
+
+def _two_stage_results(req):
+    return [r for r in gc.dispatch_conv_grouped_all(req) if r.spec.identity.two_stage]
+
+
+def test_two_stage_wgrad_serves_odd_and_even_dw_rows():
+    """The two-stage scratch path has no dW-row parity rule (the packed 16-bit
+    atomic does): it is admitted for odd C/groups and even alike, and every
+    plan clears its scratch -- not dW -- and folds it with the shared reduce."""
+    for C in (33, 64):
+        req = _req(direction="wgrad", N=32, C=C, K=64, Hi=20, Wi=20, Y=3, X=3, pad_h=1, pad_w=1)
+        results = _two_stage_results(req)
+        assert results, f"C={C}: no two-stage instance admitted"
+        for r in results:
+            plan = gc.launch_plan_for(r.request, r.spec)
+            assert plan.split_k >= 2
+            assert plan.zero == ("ws",)
+            conv, fold = plan.steps
+            assert conv.workspace == "ws" and fold.buffers == ("ws", None, "dw")
+            assert fold.identity == r.spec.helpers[0]
+            assert {a["name"] for a in conv.signature} >= {"ws_ptr", "ws_bytes"}
+
+
+def test_one_stage_split_wgrad_zeroes_dw():
+    req = _req(direction="wgrad", N=32, C=64, K=64, Hi=20, Wi=20, Y=3, X=3, pad_h=1, pad_w=1)
+    for r in gc.dispatch_conv_grouped_all(req):
+        ident = r.spec.identity
+        if ident.is_direct or ident.two_stage:
+            continue
+        plan = gc.launch_plan_for(r.request, r.spec)
+        assert plan.zero == (("dw",) if plan.split_k > 1 else ())
+        assert not plan.workspaces
+
+
+def test_two_stage_wgrad_refuses_a_single_k_tile():
+    """N * Ho * Wo within one K tile leaves nothing to split, and a two-stage
+    binary has no unsplit form: refused by name, never planned at degree 1."""
+    req = _req(
+        direction="wgrad", N=1, C=64, K=64, Hi=2, Wi=2, Y=1, X=1, pad_h=0, pad_w=0
+    )
+    assert not _two_stage_results(req)
+    ident = next(
+        s.identity
+        for s in gc.registered_conv_grouped_instances(_ARCH, direction="wgrad")
+        if s.identity.two_stage and s.identity.dtype_a == "fp16"
+    )
+    ok, why = gc._admits(ident, req)
+    assert not ok and why.startswith("two-stage wgrad:"), why
+
+
+def test_two_stage_workspace_matches_the_kernel_scratch_size():
+    from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
+        wgrad_two_stage_workspace_nbytes,
+    )
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+    req = _req(direction="wgrad", N=8, C=96, K=96, G=24, Hi=24, Wi=24, Y=3, X=3, pad_h=1, pad_w=1)
+    results = _two_stage_results(req)
+    assert results
+    for r in results:
+        plan = gc.launch_plan_for(r.request, r.spec)
+        spec = WgradConvSpec(
+            problem=gc._conv_problem(r.request),
+            split_k=plan.split_k,
+            two_stage=True,
+            ws_replicas=gc._ws_replicas(r.spec.identity),
+        )
+        assert plan.workspaces == {"ws": wgrad_two_stage_workspace_nbytes(spec)}

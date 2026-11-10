@@ -781,6 +781,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_mma_operand_roles.py"
         "tests/library/tests/test_wgrad_cached_candidate_filter.py"
         "tests/library/tests/test_conv_wgrad_prefetch_addr.py"
+        "tests/library/tests/test_conv_wgrad_prefetch_regs.py"
         "tests/library/tests/test_conv_dgrad_spec_policy.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
@@ -813,7 +814,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_capability_keys.py"
         "tests/library/tests/test_module_cache.py"
         "tests/library/tests/test_run_conv_shards.py"
-        "tests/library/tests/test_convolution_backward_data_aot_packaging.py")
+        "tests/library/tests/test_convolution_backward_data_aot_packaging.py"
+        "tests/library/tests/test_convolution_backward_filter_aot_packaging.py")
     set(_ROCKE_LIBRARY_CONV_TESTS "")
     foreach(_rocke_conv_test ${_ROCKE_LIBRARY_CONV_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_CONV_TESTS

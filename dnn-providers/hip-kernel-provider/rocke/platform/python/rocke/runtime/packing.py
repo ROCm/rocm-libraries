@@ -56,6 +56,29 @@ def _as_i32_bits(v: int) -> int:
     return v
 
 
+def _as_i32_bits(v: int) -> int:
+    """Reinterpret an i32 kernarg as the two's-complement bit pattern
+    ``struct``'s ``'i'`` format packs.
+
+    Some i32 kernargs (e.g. an AMDGPU buffer-descriptor NUM_RECORDS field,
+    such as a conv kernel's ``A_bytes``/``D_bytes``) hold an unsigned byte
+    count the kernel reads back as raw bits, not a signed scalar -- the same
+    reasoning ``_magic_as_i32`` in ``kernels/common/conv_args.py`` applies to
+    magic-number multipliers, and what the ``kernelParams`` path's
+    ``ctypes.c_int32`` already does implicitly. A value that is a genuine
+    negative i32 is already inside ``struct``'s signed range, so wrapping
+    only changes values that could never have been a real negative number.
+    """
+    if v >= (1 << 31):
+        if v >= (1 << 32):
+            # struct.error, not ValueError: callers packing a tensor's byte count
+            # (e.g. benchmark_grouped_conv._run_case) catch struct.error to skip
+            # an over-sized case rather than aborting the whole sweep.
+            raise struct.error(f"i32 kernarg value {v} does not fit in 32 bits")
+        return v - (1 << 32)
+    return v
+
+
 def pack_args(
     signature: Sequence[Mapping[str, Any]], values: Mapping[str, Any]
 ) -> bytes:

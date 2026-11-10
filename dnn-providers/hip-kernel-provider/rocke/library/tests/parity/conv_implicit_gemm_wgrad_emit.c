@@ -70,6 +70,23 @@
  *         is compv3 + prefetch_addr with register_prefetch left at its
  *         default false, so it is NOT this loop. Must match the Python
  *         emitter's _PFA_BASES.
+ *  73-74  71-72's register_prefetch=false siblings: the plain prefetch_addr +
+ *         compv3 prologue rewrite on the same two bases (11, 15). Must match
+ *         the Python emitter's _PFA_BASES.
+ *  75-86  prefetch_regs=true on a base config: mem/cshuffle M-outer and
+ *         K-outer, compv3 packed fp16 atomic, compv4 two-stage fp16 dW,
+ *         two-stage bf16 dW, packed bf16 atomic, the 16x16x32 atom on a
+ *         128x128 compv3 tile, and with async_dma / unroll_k / prefetch_addr /
+ *         WMMA / stream-K, which both engines must reject. Must match the
+ *         Python emitter's _PFR_BASES.
+ *  87-91  prefetch_regs=true, continued: bf16 A/B operands on the K-outer
+ *         cshuffle base (87), compv4 two-stage into bf16 dW (88) and scalar
+ *         loads (89); fp16 scalar loads with tile_k=256, 64 loads per thread
+ *         per operand, which both engines must reject (90), and tile_k=128,
+ *         exactly the 32 allowed (91). Must match the Python _PFR_BASES.
+ *  92-93  the packed 16-bit split-K atomic at dW width 2 on the K-outer
+ *         cshuffle base, fp16 (92) and bf16 (93) dW. Must match the Python
+ *         _ATOMIC_VEC_C_BASES.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -128,13 +145,106 @@ static int streamk_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, con
     return 0;
 }
 
+/* prefetch_regs configs 75-91 (Python _PFR_BASES). */
+static int make_pfr_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    static const int bases[] = {1, 11, 11, 15, 15, 11, 11, 12, 18, 0, 5, 21, 11, 15, 11, 11, 11};
+    if(make_base_cfg(bases[idx - 75], spec, arch) != 0)
+        return -1;
+    spec->prefetch_regs = true;
+    switch(idx)
+    {
+    case 77:
+        spec->split_k = 2; /* packed fp16 atomic */
+        spec->pipeline = "compv3";
+        break;
+    case 78:
+        /* two-stage, fp16 dW */
+        spec->pipeline = "compv4";
+        break;
+    case 79:
+        /* two-stage, bf16 dW */
+        spec->dtype_d = "bf16";
+        break;
+    case 80:
+        spec->split_k = 2; /* packed bf16 atomic */
+        spec->dtype_d = "bf16";
+        break;
+    case 81:
+        /* The 16x16x32 atom on a 128x128 tile, compv3. */
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->pipeline = "compv3";
+        break;
+    case 84:
+        /* + prefetch_addr: rejected */
+        spec->prefetch_addr = true;
+        break;
+    case 87:
+        /* bf16 A/B operands, bf16 dW. */
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        break;
+    case 88:
+        /* bf16 A/B, compv4 two-stage into bf16 dW, K-outer. */
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        spec->pipeline = "compv4";
+        spec->lds_k_outer = true;
+        break;
+    case 89:
+        /* bf16 A/B, scalar loads. */
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 1;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 1;
+        break;
+    case 90:
+    case 91:
+        /* Scalar loads: 64 per thread per operand (rejected), then 32. */
+        spec->tile_k = idx == 90 ? 256 : 128;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 1;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 1;
+        break;
+    default:
+        break;
+    }
+    return 0;
+}
+
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
+    if(idx >= 75 && idx <= 91)
+        return make_pfr_cfg(idx, spec, arch);
+    if(idx == 92 || idx == 93)
+    {
+        /* Packed 16-bit split-K atomic at dW width 2 (Python
+         * _ATOMIC_VEC_C_BASES): fp16 (92) and bf16 (93) dW. */
+        if(make_base_cfg(11, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 2;
+        if(idx == 93)
+            spec->dtype_d = "bf16";
+        return 0;
+    }
     int base = pfa_base(idx);
     if(idx == 71 || idx == 72)
         base = idx == 71 ? 11 : 15;
+    if(idx == 73 || idx == 74)
+        base = idx == 73 ? 11 : 15;
     if(base < 0)
         return make_base_cfg(idx, spec, arch);
     if(make_base_cfg(base, spec, arch) != 0)
@@ -142,14 +252,16 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
     spec->prefetch_addr = true;
     if(idx == 36)
         spec->split_k = 2; /* split-K packed fp16 atomic on the K-outer cshuffle base */
-    if(idx == 43 || idx == 71 || idx == 72)
+    if(idx == 43 || idx == 71 || idx == 72 || idx == 73 || idx == 74)
         spec->pipeline = "compv3";
     /* 71-72 opt into the register-prefetch compv3 K loop explicitly: config
      * 43 above leaves register_prefetch at its default false, so it stays on
-     * the plain prefetch_addr loop every other pipeline shares. */
+     * the plain prefetch_addr loop every other pipeline shares. 73-74 are
+     * 71-72's register_prefetch=false siblings: the plain prefetch_addr +
+     * compv3 prologue rewrite on the same two bases. */
     if(idx == 71 || idx == 72)
         spec->register_prefetch = true;
-    if(idx == 71)
+    if(idx == 71 || idx == 73)
         spec->split_k = 2; /* packed fp16 atomic on the K-outer cshuffle base */
     if(idx == 48)
     {

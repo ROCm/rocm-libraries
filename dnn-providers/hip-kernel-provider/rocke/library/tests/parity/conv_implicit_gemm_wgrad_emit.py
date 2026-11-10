@@ -90,8 +90,29 @@
 #         compv3 + prefetch_addr with register_prefetch left at its default
 #         False, so it is NOT this loop): split-K packed fp16 atomic on the
 #         K-outer cshuffle base, and two-stage
+#   73-74 -- prefetch_addr + compv3, register_prefetch left at its default
+#         False (the carried-offset prologue rewrite alone, no register
+#         prefetch): split-K packed fp16 atomic on the K-outer cshuffle base
+#         (73, sibling of 71), and two-stage (74, sibling of 72)
+#   75-86 -- prefetch_regs=True on a base config (see _PFR_BASES): the
+#         register-prefetch K loop across mem/compv3/compv4, M-outer and
+#         K-outer, the cshuffle epilogue with split_k = 1 and the packed fp16 /
+#         bf16 atomic, two-stage into fp16 and bf16 dW, and the 16x16x32 atom
+#         on a 128x128 tile; 82-86 pair it with async_dma, unroll_k,
+#         prefetch_addr, WMMA and stream-K, which both engines must reject.
+#   87-91 -- more prefetch_regs=True (see _PFR_BASES): bf16 A/B operands on
+#         the K-outer cshuffle base (87), compv4 two-stage into bf16 dW (88)
+#         and scalar loads (89, vector_size_a = vector_size_b = 1), so the
+#         carried values and their LDS stores are bfloat-typed; then the
+#         staged-load limit on fp16 scalar loads: tile_k = 256 needs 64 loads
+#         per thread per operand, which both engines must reject (90), and
+#         tile_k = 128 needs exactly the 32 allowed (91).
+#   92-93 -- the packed 16-bit split-K atomic at dW width 2 (one <2 x dtype>
+#         pair per lane, lane-contiguous) on the K-outer cshuffle base, fp16
+#         (92) and bf16 (93) dW: the width the gfx950 AOT grid builds them at.
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
-#    loader has no elem_dtype, so no other case loads bf16 operands: the
+#    loader has no elem_dtype, so apart from 67 and 87-89 no case loads bf16
+#    operands: the
 #    async loop's copy carries no element type, only its zero-fill does. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
 #    rejected with stream-K, and so is prefetch_addr.)
@@ -106,7 +127,7 @@
 #   107 -- streamk with unroll_k (must raise ValueError)
 #   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-72, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-93, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -147,6 +168,70 @@ _PFA_BASES = {
         {"split_k": 2, "pipeline": "compv3", "register_prefetch": True},
     ),  # compv3, packed fp16 atomic
     72: (15, {"pipeline": "compv3", "register_prefetch": True}),  # compv3, two-stage
+    # 73-74 are 71-72's register_prefetch=False siblings: the plain
+    # prefetch_addr + compv3 prologue rewrite on the same two bases.
+    73: (11, {"split_k": 2, "pipeline": "compv3"}),  # compv3, packed fp16 atomic
+    74: (15, {"pipeline": "compv3"}),  # compv3, two-stage
+}
+
+
+# prefetch_regs configs: index -> (base config index, extra overrides).
+_PFR_BASES = {
+    75: (1, {}),  # mem/cshuffle, M-outer
+    76: (11, {}),  # mem/cshuffle, K-outer
+    77: (11, {"split_k": 2, "pipeline": "compv3"}),  # packed fp16 atomic
+    78: (15, {"pipeline": "compv4"}),  # two-stage, fp16 dW
+    79: (15, {"dtype_d": "bf16"}),  # two-stage, bf16 dW
+    80: (11, {"split_k": 2, "dtype_d": "bf16"}),  # packed bf16 atomic
+    # The 16x16x32 atom on a 128x128 tile, compv3.
+    81: (
+        11,
+        {
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16,
+            "warp_tile_k": 32,
+            "pipeline": "compv3",
+        },
+    ),
+    82: (12, {}),  # + async_dma: rejected
+    83: (18, {}),  # + unroll_k: rejected
+    84: (0, {"prefetch_addr": True}),  # + prefetch_addr: rejected
+    85: (5, {}),  # WMMA gfx1151: rejected
+    86: (21, {}),  # stream-K: rejected
+    # bf16 A/B operands: bfloat-typed carried values and LDS stores.
+    87: (11, {"dtype_a": "bf16", "dtype_b": "bf16", "dtype_d": "bf16"}),
+    88: (
+        15,
+        {
+            "dtype_a": "bf16",
+            "dtype_b": "bf16",
+            "dtype_d": "bf16",
+            "pipeline": "compv4",
+            "lds_k_outer": True,
+        },
+    ),
+    89: (
+        11,
+        {
+            "dtype_a": "bf16",
+            "dtype_b": "bf16",
+            "vector_size_a": 1,
+            "vector_size_b": 1,
+        },
+    ),
+    # Scalar loads: 64 loads per thread per operand, over the limit: rejected.
+    90: (11, {"tile_k": 256, "vector_size_a": 1, "vector_size_b": 1}),
+    # Scalar loads at the limit (32 per thread per operand): builds.
+    91: (11, {"tile_k": 128, "vector_size_a": 1, "vector_size_b": 1}),
+}
+
+
+# Packed 16-bit split-K atomic at dW width 2: index -> (base, extra overrides).
+_ATOMIC_VEC_C_BASES = {
+    92: (11, {"split_k": 2, "vector_size_c": 2}),  # fp16 dW
+    93: (11, {"split_k": 2, "vector_size_c": 2, "dtype_d": "bf16"}),  # bf16 dW
 }
 
 
@@ -158,6 +243,29 @@ def _spec(idx: int):
     illustrative of the validator contract; no differential harness consumes
     them (see the module header).
     """
+    if idx in _ATOMIC_VEC_C_BASES:
+        from dataclasses import replace
+
+        base_idx, extra = _ATOMIC_VEC_C_BASES[idx]
+        spec, arch = _spec(base_idx)
+        extra = dict(extra)
+        if "dtype_d" in extra:
+            extra["data"] = replace(spec.data, dtype_d=extra.pop("dtype_d"))
+        return replace(spec, **extra), arch
+
+    if idx in _PFR_BASES:
+        from dataclasses import replace
+
+        base_idx, extra = _PFR_BASES[idx]
+        spec, arch = _spec(base_idx)
+        extra = dict(extra)
+        dtypes = {
+            k: extra.pop(k) for k in ("dtype_a", "dtype_b", "dtype_d") if k in extra
+        }
+        if dtypes:
+            extra["data"] = replace(spec.data, **dtypes)
+        return replace(spec, prefetch_regs=True, **extra), arch
+
     if idx in _PFA_BASES:
         from dataclasses import replace
 
