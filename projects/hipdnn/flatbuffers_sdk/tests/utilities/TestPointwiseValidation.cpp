@@ -169,6 +169,7 @@ TEST(TestPointwiseValidation, KnownImplementedBinaryOperations)
     const std::set<PointwiseMode> expectedImplementedBinary = {PointwiseMode::ADD,
                                                                PointwiseMode::SUB,
                                                                PointwiseMode::MUL,
+                                                               PointwiseMode::DIV,
                                                                PointwiseMode::CMP_GT,
                                                                PointwiseMode::RELU_BWD,
                                                                PointwiseMode::SIGMOID_BWD,

@@ -213,6 +213,9 @@ private:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::Multiply<ComputeType>{});
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::DIV:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Divide<ComputeType>{});
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MAX_OP:
             policy.executeBinaryBroadcast(input1, input2, output, pointwise::Max<ComputeType>{});
             break;

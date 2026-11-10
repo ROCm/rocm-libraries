@@ -52,6 +52,17 @@ struct Multiply
 };
 
 template <typename ComputeType, typename OutputType = ComputeType>
+struct Divide
+{
+    template <typename X0, typename X1>
+    OutputType operator()(const X0& x0, const X1& x1) const
+    {
+        auto result = static_cast<ComputeType>(x0) / static_cast<ComputeType>(x1);
+        return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType, typename OutputType = ComputeType>
 struct Max
 {
     template <typename X0, typename X1>
