@@ -184,6 +184,9 @@ struct PassFeatureConfig {
         /// Mirrors ModuleOptions::WarGateWmmas. WMMAs a ds_load waits before
         /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.
         int warGateWmmas = 0;
+        /// Mirrors ModuleOptions::DsRefillGate. A derived WmmaVgprSrcToDsWrite distance is the
+        /// WMMA count that hides the va_vdst wait (HWModel::WaitHide), not latency / issue.
+        bool dsRefillGate = false;
     };
 
     LoopConfig loopConfig;

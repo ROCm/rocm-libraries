@@ -191,14 +191,6 @@ inline bool waitHideSatisfied(unsigned count, unsigned step, int required) {
     return count >= static_cast<unsigned>(required) * step;
 }
 
-// Row matching a form's cost latency and destination width, or nullptr if none.
-inline const HWModel::WaitHide::Form* waitHideForm(const HWModel::WaitHide& wh, int costLatency,
-                                                   int dstVgprs) {
-    for (const auto& form : wh.forms)
-        if (form.costLatency == costLatency && form.dstVgprs == dstVgprs) return &form;
-    return nullptr;
-}
-
 // Largest value xdlSince is compared against, at the largest step it can take.
 inline unsigned computeXdlSinceCap(const HWModel::WaitHide& wh) {
     int maxHide = 0;
@@ -266,13 +258,6 @@ inline void forEachVGPR(const std::vector<StinkyRegister>& regs, HalfFn&& halfFn
         ++opIdx;
         for (uint16_t off = 0; off < reg.reg.num; ++off) fn(reg.reg.idx + off, half);
     }
-}
-
-inline int wmmaDstVgprs(const StinkyInstruction& inst) {
-    for (const auto& r : inst.getDestRegs())
-        if (r.dataType == StinkyRegister::Type::Register && r.reg.type == RegType::V)
-            return static_cast<int>(r.reg.num);
-    return 0;
 }
 
 // EXEC writes invalidate any non-zero VA_VDST wait (skipped VALUs don't bump
@@ -407,10 +392,9 @@ class WaitcntBrackets {
 
     // Latch this matrix op's hide counts, or note a second form so the rules switch off.
     void latchXdlForm(const StinkyInstruction& inst, unsigned inc) {
-        const auto* form =
-            ctx->waitHide == nullptr
-                ? nullptr
-                : waitHideForm(*ctx->waitHide, inst.latencyCycles, wmmaDstVgprs(inst));
+        const auto* form = ctx->waitHide == nullptr
+                               ? nullptr
+                               : ctx->waitHide->formFor(inst.latencyCycles, matrixDstVgprs(inst));
         const int hideXdl = form != nullptr ? form->xdlVaVdst : 0;
         const int hideCsmacc = form != nullptr ? form->csmaccVaVdst : 0;
         if (!xdlIncSeen) {

@@ -217,8 +217,9 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--wait-alu-hold-strict-count=") ||
                 arg == "--wait-alu-scoreboard" || arg.starts_with("--prefetch-lead-wmmas=") ||
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
-                arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
-                arg.starts_with("--vgpr-msb-mode=") || arg.starts_with("--checkpoint-after=") ||
+                arg.starts_with("--war-gate-wmmas=") || arg == "--ds-refill-gate" ||
+                arg == "--ds-slot-first" || arg.starts_with("--vgpr-msb-mode=") ||
+                arg.starts_with("--checkpoint-after=") ||
                 arg.starts_with("--checkpoint-dump-dir=") ||
                 arg.starts_with("--checkpoint-load-dir=") || arg == "--from-label" ||
                 arg == "--to-label" || isKernelConfigArg(arg))
@@ -668,6 +669,8 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas = std::stoi(a.substr(32));
         } else if (a.starts_with("--war-gate-wmmas=")) {
             passFeatureConfig.dagFeatures.warGateWmmas = std::stoi(a.substr(17));
+        } else if (a == "--ds-refill-gate") {
+            passFeatureConfig.dagFeatures.dsRefillGate = true;
         } else if (a.starts_with("--merge-barrier-threshold=")) {
             passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
         }

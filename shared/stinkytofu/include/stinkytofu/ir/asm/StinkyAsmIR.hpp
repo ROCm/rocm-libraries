@@ -782,6 +782,15 @@ inline bool isMatrixInstruction(const StinkyInstruction& inst) {
     return isMFMA(inst) || isSMFMA(inst) || isWMMA(inst) || isSWMMA(inst) || isMXWMMA(inst);
 }
 
+/// Width of a matrix op's VGPR destination, which with its cost latency picks its
+/// HWModel::WaitHide row; 0 when it writes no VGPR.
+inline int matrixDstVgprs(const StinkyInstruction& inst) {
+    for (const auto& r : inst.getDestRegs())
+        if (r.dataType == StinkyRegister::Type::Register && r.reg.type == RegType::V)
+            return static_cast<int>(r.reg.num);
+    return 0;
+}
+
 inline bool isHasSideEffect(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_HasSideEffect);
 }

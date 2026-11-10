@@ -129,6 +129,13 @@ struct HWModel {
         /// One row per form the arch issues. A form with no row never satisfies a
         /// va_vdst wait, so its producers are always waited on.
         std::span<const Form> forms;
+
+        /// The row of a matrix op with this cost latency and destination width, or nullptr.
+        const Form* formFor(int costLatency, int dstVgprs) const {
+            for (const Form& form : forms)
+                if (form.costLatency == costLatency && form.dstVgprs == dstVgprs) return &form;
+            return nullptr;
+        }
         /// Same-class reads after a read that satisfy its vm_vsrc wait; a class at 0 always waits.
         int vmVsrcLds;
         int vmVsrcTex;

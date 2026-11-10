@@ -152,6 +152,7 @@
     X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */    \
     X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \
     X(DsRefillSink, int, 0)               /* ds_load refills: 0 off, 1 report, 2 sink */           \
+    X(DsRefillGate, bool, false)          /* WAR gate distance from the va_vdst hide table */      \
     X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                     \
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \

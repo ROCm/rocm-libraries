@@ -2930,15 +2930,22 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
         }
     }
     // Resolve each PipeOps rule's distance: table value, else arch policy, else derived
-    // from this BB's WMMA cost.
+    // from this BB's WMMA. With DsRefillGate the derived distance is the WMMA count
+    // InsertWaitAlu hides the wait with, counted in instructions like the gate's lane.
+    const auto& gateFeatures = getPassContext().getPassFeatureConfig().dagFeatures;
+    const HWModel::WaitHide::Form* hideForm =
+        gateFeatures.dsRefillGate && formWmma_
+            ? hw_.waitHide.formFor(static_cast<int>(formWmma_->latencyCycles),
+                                   matrixDstVgprs(*formWmma_))
+            : nullptr;
     for (int ruleIdx = 0; ruleIdx < hw_.hazards.numRules; ++ruleIdx) {
         const HazardRule& rule = hw_.hazards.rules[ruleIdx];
         if (rule.unit != HazardUnit::PipeOps) continue;
-        const int warGateOverride =
-            getPassContext().getPassFeatureConfig().dagFeatures.warGateWmmas;
+        const int warGateOverride = gateFeatures.warGateWmmas;
         int distance = rule.distance > 0     ? rule.distance
                        : warGateOverride > 0 ? warGateOverride
                                              : config_.warGateWmmas;
+        if (distance <= 0 && hideForm && hideForm->xdlVaVdst > 0) distance = hideForm->xdlVaVdst;
         if (distance <= 0)
             distance = deriveWarGateWmmas(wmmaIssueConfig.latency, wmmaIssueConfig.issueCycles);
         pipeOpDistance_[ruleIdx] = distance;
