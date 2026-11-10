@@ -316,6 +316,23 @@ std::vector<DeviceCase> deviceCases()
         {"S1K11D5", dilateWidth(upsample(16, 24, {2}, 130, 11, 1, 25, 25), 5)},
         {"S1K11", upsample(40, 16, {}, 61, 11, 1, 3, 7)},
         {"S1K5", upsample(24, 32, {}, 70, 5, 1, 2, 2)},
+        // Depth and height dilated at stride 1 (ASPP-like 3x3, both axes dilated).
+        {"Rows3x3Dilated",
+         [] {
+             auto shape = dilateWidth(
+                 strideRows(upsample(24, 40, {21}, 50, 3, 1, 3, 3), {3}, {1}, {3}), 3);
+             shape.dilation[0] = 3;
+             shape.postPadding[0] = 3;
+             return shape;
+         }()},
+        {"Rows3x3HeightDilated2Width5",
+         [] {
+             auto shape = dilateWidth(
+                 strideRows(upsample(17, 16, {13}, 47, 3, 1, 5, 5), {3}, {1}, {1}), 5);
+             shape.dilation[0] = 2;
+             shape.postPadding[0] = 1;
+             return shape;
+         }()},
         {"S1K7", upsample(17, 40, {2}, 66, 7, 1, 3, 3)},
         {"S1K7D3Unpadded", dilateWidth(upsample(16, 16, {}, 45, 7, 1, 0, 0), 3)},
         {"ThreeD3x3x3S2Unpadded",

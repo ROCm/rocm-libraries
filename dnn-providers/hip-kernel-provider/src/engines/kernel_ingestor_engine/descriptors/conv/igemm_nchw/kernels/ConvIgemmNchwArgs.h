@@ -9,8 +9,8 @@
 /// Backward data of a convolution along the width, read and written in place: dy packed
 /// N K (rows) Wy, the filter packed K C T R S, dx packed N C (rows) Wx, where (rows) are the depth
 /// and height positions. A dx row (d, h) takes dy row (qd, qh) through filter row (td, th) for
-/// every d + pd = sd * qd + td and h + ph = sh * qh + th with the filter row inside the filter and
-/// the dy row inside dy; a dx row with none is zero. The identity (extent 1, stride 1, no padding)
+/// every d + pd = sd * qd + dd * td and h + ph = sh * qh + dh * th (a dilation only at stride 1)
+/// with the filter row inside the filter and the dy row inside dy; a dx row with none is zero. The identity (extent 1, stride 1, no padding)
 /// is the 1-D case.
 /// Shapes are runtime; only the tile, the stride and the taps per phase are compile-time.
 ///
@@ -40,7 +40,8 @@ struct K7Args
     int sh, ph, fh; ///< height: stride, pre-padding, filter extent (R)
     int fStride; ///< filter elements per (k, c): T * R * S
     int dil; ///< dilation along the width (stride 1 only; else 1)
-    int padding0;
+    int dd, dh; ///< dilation along depth and height (stride 1 on that axis only; else 1)
+    int padding0, padding1;
     long long dyImage; ///< dy elements per image
     long long dxImage; ///< dx elements per image
 };

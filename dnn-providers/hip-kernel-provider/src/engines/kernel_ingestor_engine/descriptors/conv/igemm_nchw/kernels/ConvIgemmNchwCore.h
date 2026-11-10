@@ -70,12 +70,15 @@ struct K7Block
     bool live;
 };
 
-/// The jd range of one axis: filter rows t0 + s j < f, dy rows q0 - j in [0, extent).
-__device__ inline void k7AxisTaps(int q0, int t0, int s, int f, int extent, int& lo, int& count)
+/// The j range of one axis: filter rows t0 + s j < f, dy rows q0 - step j in [0, extent) (step:
+/// the dilation, at stride 1; 1 otherwise).
+__device__ inline void
+    k7AxisTaps(int q0, int t0, int s, int step, int f, int extent, int& lo, int& count)
 {
     const int hiFilter = t0 < f ? (f - t0 + s - 1) / s : 0; // j < hiFilter
-    const int hiDy = q0 + 1; // q0 - j >= 0
-    lo = q0 - extent + 1 > 0 ? q0 - extent + 1 : 0; // q0 - j < extent
+    const int hiDy = q0 / step + 1; // q0 - step j >= 0
+    const int over = q0 - extent + 1; // q0 - step j < extent: j >= over / step, rounded up
+    lo = over > 0 ? (over + step - 1) / step : 0;
     const int hi = hiFilter < hiDy ? hiFilter : hiDy;
     count = hi > lo ? hi - lo : 0;
 }
@@ -86,7 +89,7 @@ __device__ inline void k7PairOf(const K7Args& a, const K7Block& b, int pi, int& 
     const int i = pi / b.nH;
     const int jd = b.jdLo + i;
     const int jh = b.jhLo + pi - i * b.nH;
-    rowY = (b.qd0 - jd) * a.hy + b.qh0 - jh;
+    rowY = (b.qd0 - jd * a.dd) * a.hy + b.qh0 - jh * a.dh;
     toff = ((b.td0 + a.sd * jd) * a.fh + b.th0 + a.sh * jh) * a.fs;
 }
 
@@ -108,8 +111,8 @@ __device__ inline K7Block k7Block(const K7Args& a, int bmq, int bn)
     b.qh0 = nh / a.sh;
     b.td0 = nd - b.qd0 * a.sd;
     b.th0 = nh - b.qh0 * a.sh;
-    k7AxisTaps(b.qd0, b.td0, a.sd, a.fd, a.dyDepth, b.jdLo, b.nD);
-    k7AxisTaps(b.qh0, b.th0, a.sh, a.fh, a.hy, b.jhLo, b.nH);
+    k7AxisTaps(b.qd0, b.td0, a.sd, a.dd, a.fd, a.dyDepth, b.jdLo, b.nD);
+    k7AxisTaps(b.qh0, b.th0, a.sh, a.dh, a.fh, a.hy, b.jhLo, b.nH);
     b.live = b.nD * b.nH > 0;
     b.rowY = 0;
     b.toff = 0;
@@ -193,6 +196,20 @@ __device__ inline typename K1Raw<VEC * sizeof(T)>::type k7LoadStrided(
         }
     }
     return v;
+}
+
+/// A compile-time flag for generic lambdas (HIPRTC has no standard headers).
+template <bool B>
+struct K7Flag
+{
+    static constexpr bool value = B;
+};
+
+/// Byte offset @p bytes when @p ok, else one the buffer's range check zeroes: arithmetic, not a
+/// select the compiler may lower to a branch per load (with its own vmcnt(0)).
+__device__ inline unsigned k7Offset(unsigned bytes, bool ok)
+{
+    return bytes | (static_cast<unsigned>(!ok) << 31);
 }
 
 /// The block's global loads and their LDS stores. A: the dy window, WQ positions of BK
@@ -298,15 +315,17 @@ struct K7Tiles
     /// The k loop over every (dy row, filter row) pair: iteration it loads pair it / kIters,
     /// k rows from (it mod kIters) BK.
     int kIters, kIt, pi;
+    template <bool FAST = false>
     __device__ int start(const K7Args& a)
     {
         kIters = (a.k + BK - 1) / BK;
         kIt = 0;
         pi = 0;
-        load(0);
+        load<FAST>(0);
         return kIters;
     }
     /// Loads the iteration after the last loaded one.
+    template <bool FAST = false>
     __device__ void loadNext(const K7Args& a, const K7Block& b)
     {
         if(++kIt == kIters)
@@ -315,7 +334,16 @@ struct K7Tiles
             ++pi;
             k7PairOf(a, b, pi, row, toff);
         }
-        load(kIt * BK);
+        load<FAST>(kIt * BK);
+    }
+
+    /// Whether the block's loads take the fast form: its dy window inside the row (or flat) and
+    /// its filter run contiguous and inside the filter (every channel of the tile real), so every
+    /// load is a whole vector, only the k tail and idle units read zeros (branch-free offsets).
+    __device__ bool fastLoads(const K7Args& a) const
+    {
+        const bool aIn = FLAT || (q0w >= 0 && q0w + WQ <= wy);
+        return aIn && fStride == taps && c0 + BN <= cEnd;
     }
 
     /// FLAT: dy read as P = rowsY Wy positions per k row and image, positions g over all
@@ -376,8 +404,48 @@ struct K7Tiles
     }
 
     /// Registers for the k rows from k0.
+    template <bool FAST = false>
     __device__ void load(int k0)
     {
+        if constexpr(FAST)
+        {
+#pragma unroll
+            for(int p = 0; p < A_PASSES; ++p)
+            {
+                const bool active = aActive(p, tid);
+                const int q = q0w + aV(p, tid) * VEC;
+#pragma unroll
+                for(int j = 0; j < KV; ++j)
+                {
+                    const int kk = k0 + aK(p, tid) * KV + j;
+                    const bool ok = active && kk < k;
+                    unsigned bytes;
+                    if constexpr(FLAT)
+                        bytes = k7Offset(static_cast<unsigned>(aOff[p] + kk * wy) * sizeof(T),
+                                         ok && aOff[p] >= 0);
+                    else
+                        bytes = k7Offset(
+                            static_cast<unsigned>((kk * rows + row) * wy + q) * sizeof(T), ok);
+                    ra[p * KV + j] = k1BufferLoad<Raw>(aRsrc, bytes);
+                }
+            }
+#pragma unroll
+            for(int p = 0; p < B_PASSES; ++p)
+            {
+                const bool active = bActive(p);
+                const int pos = bStart + bPos[p];
+#pragma unroll
+                for(int j = 0; j < KV; ++j)
+                {
+                    const int kk = k0 + bK[p] * KV + j;
+                    rb[p * KV + j] = k1BufferLoad<Raw>(
+                        bRsrc,
+                        k7Offset(static_cast<unsigned>(kk * cs + pos) * sizeof(T),
+                                 active && kk < k));
+                }
+            }
+            return;
+        }
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
@@ -574,6 +642,15 @@ __device__ inline void k7ZeroTile(const K7Args& a, const K7Block& b)
     }
 }
 
+/// The FMA filter tile's pitch per channel, in elements: the taps rounded up to an odd number of
+/// 16-byte chunks, so the lanes' per-channel tap vectors (channels one pitch apart) spread over
+/// the banks.
+__host__ __device__ constexpr int k7FmaPitch(int smax, int pade)
+{
+    const int chunks = (smax + pade - 1) / pade;
+    return (chunks % 2 == 0 ? chunks + 1 : chunks) * pade;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Matrix-core kernel. Block: WM x WN x WP waves (phase indices x channels x phase groups); tile
 // BMQ phase indices (all ST phases) x BN channels; k-step BK. Each wave holds FQ x FN fragments
@@ -614,8 +691,15 @@ __device__ void k7DgradMma(const K7Args& a)
     static_assert(HALOK % VEC == 0, "K7 window in whole vectors");
     constexpr int SMAX = ST * TAPS;
     typedef K7Tiles<T, VEC, KV, BK, WQ, BN, SMAX, THREADS, (FLAT > 0)> Tiles;
-    constexpr int A_LDS = Tiles::template aRow<LDK>(WQ);
-    constexpr int B_LDS = SMAX * BN * LDK;
+    // One k per lane (the fp32 atoms): the operands need no k-contiguous runs, so the tiles are
+    // k-major as the FMA kernel's (As[k][q], Bs[k][c][tap]), stored as whole vectors, untransposed.
+    constexpr bool KMAJOR = Atom::KPL == 1;
+    constexpr int PADE = 16 / static_cast<int>(sizeof(T));
+    constexpr int LDA = WQ + PADE;
+    constexpr int CP = k7FmaPitch(SMAX, PADE);
+    constexpr int LDB = BN * CP + PADE;
+    constexpr int A_LDS = KMAJOR ? BK * LDA : Tiles::template aRow<LDK>(WQ);
+    constexpr int B_LDS = KMAJOR ? BK * LDB : SMAX * BN * LDK;
     constexpr int OLD = BMQ * ST + 16 / static_cast<int>(sizeof(T));
     constexpr int OUT_LDS = BN * OLD;
     constexpr int LDS = A_LDS + B_LDS > OUT_LDS ? A_LDS + B_LDS : OUT_LDS;
@@ -662,64 +746,88 @@ __device__ void k7DgradMma(const K7Args& a)
     const int kb = Atom::template kBase<Atom::KPL>(lane);
     // The lane's A row at tile index i, shift d: aRow0 + i DIM + d dil.
     const int aRow0 = wq * WTQ + fragRow + halo;
-    const T* bBase = Bs + (wn * WTN + fragRow) * LDK + kb;
+    const T* bBase
+        = KMAJOR ? Bs + kb * LDB + (wn * WTN + fragRow) * CP : Bs + (wn * WTN + fragRow) * LDK + kb;
 
-    const int iters = tiles.start(a) * b.nD * b.nH;
-    for(int it = 0; it < iters; ++it)
-    {
-        __syncthreads();
-        tiles.template storeRows<LDK>(As, Bs);
-        __syncthreads();
-        if(it + 1 < iters)
+    // The k loop, in two forms: whole-vector loads with branch-free offsets for a block whose
+    // window and filter run lie inside the tensors (the rule), edge-checked loads otherwise.
+    auto mainLoop = [&](auto fastFlag) {
+        constexpr bool FAST = decltype(fastFlag)::value;
+        const int iters = tiles.template start<FAST>(a) * b.nD * b.nH;
+        for(int it = 0; it < iters; ++it)
         {
-            tiles.loadNext(a, b);
-        }
-        // Phase p at tile index i reads dy[q0 + i + below(p) - j] for its tap p + ST j: the A
-        // fragments shifted by d = below(p) - j serve every (p, j) pair with that shift.
-#pragma unroll
-        for(int kk = 0; kk < BK; kk += Atom::KA)
-        {
-#pragma unroll
-            for(int d = 1 - TAPS; d <= 1; ++d)
+            __syncthreads();
+            if constexpr(KMAJOR)
+                tiles.template storeColumns<LDA, LDB, CP>(As, Bs);
+            else
+                tiles.template storeRows<LDK>(As, Bs);
+            __syncthreads();
+            if(it + 1 < iters)
             {
-                // Whether any of the wave's phases has a tap at this shift (wave-uniform).
-                bool used = false;
+                tiles.template loadNext<FAST>(a, b);
+            }
+            // Phase p at tile index i reads dy[q0 + i + below(p) - j] for its tap p + ST j: the A
+            // fragments shifted by d = below(p) - j serve every (p, j) pair with that shift.
 #pragma unroll
-                for(int p = 0; p < PW; ++p)
-                {
-                    const int j = (p0 + p < b.r ? 1 : 0) - d;
-                    used = used || (j >= 0 && j < TAPS && p0 + p + j * ST < taps);
-                }
-                if(!used)
-                {
-                    continue;
-                }
-                typename Atom::frag af[FQ];
+            for(int kk = 0; kk < BK; kk += Atom::KA)
+            {
 #pragma unroll
-                for(int i = 0; i < FQ; ++i)
-                    af[i] = k1Frag<Atom>(As + Tiles::template aRow<LDK>(aRow0 + i * DIM + d * dil)
-                                         + kk + kb);
-#pragma unroll
-                for(int p = 0; p < PW; ++p)
+                for(int d = 1 - TAPS; d <= 1; ++d)
                 {
-                    const int j = (p0 + p < b.r ? 1 : 0) - d;
-                    const int s = p0 + p + j * ST;
-                    if(j >= 0 && j < TAPS && s < taps)
+                    // Whether any of the wave's phases has a tap at this shift (wave-uniform).
+                    bool used = false;
+#pragma unroll
+                    for(int p = 0; p < PW; ++p)
                     {
-                        typename Atom::frag bf[FN];
+                        const int j = (p0 + p < b.r ? 1 : 0) - d;
+                        used = used || (j >= 0 && j < TAPS && p0 + p + j * ST < taps);
+                    }
+                    if(!used)
+                    {
+                        continue;
+                    }
+                    typename Atom::frag af[FQ];
 #pragma unroll
-                        for(int n = 0; n < FN; ++n)
-                            bf[n] = k1Frag<Atom>(bBase + (s * BN + n * DIM) * LDK + kk);
+                    for(int i = 0; i < FQ; ++i)
+                    {
+                        if constexpr(KMAJOR)
+                            af[i] = As[(kk + kb) * LDA + aRow0 + i * DIM + d * dil];
+                        else
+                            af[i] = k1Frag<Atom>(
+                                As + Tiles::template aRow<LDK>(aRow0 + i * DIM + d * dil) + kk
+                                + kb);
+                    }
 #pragma unroll
-                        for(int i = 0; i < FQ; ++i)
+                    for(int p = 0; p < PW; ++p)
+                    {
+                        const int j = (p0 + p < b.r ? 1 : 0) - d;
+                        const int s = p0 + p + j * ST;
+                        if(j >= 0 && j < TAPS && s < taps)
+                        {
+                            typename Atom::frag bf[FN];
 #pragma unroll
                             for(int n = 0; n < FN; ++n)
-                                acc[p][i][n] = Atom::mma(af[i], bf[n], acc[p][i][n]);
+                            {
+                                if constexpr(KMAJOR)
+                                    bf[n] = bBase[kk * LDB + n * DIM * CP + s];
+                                else
+                                    bf[n] = k1Frag<Atom>(bBase + (s * BN + n * DIM) * LDK + kk);
+                            }
+#pragma unroll
+                            for(int i = 0; i < FQ; ++i)
+#pragma unroll
+                                for(int n = 0; n < FN; ++n)
+                                    acc[p][i][n] = Atom::mma(af[i], bf[n], acc[p][i][n]);
+                        }
                     }
                 }
             }
         }
-    }
+    };
+    if(tiles.fastLoads(a))
+        mainLoop(K7Flag<true>{});
+    else
+        mainLoop(K7Flag<false>{});
 
     // Epilogue: the tile into LDS as Os[c][x - x0], then each channel's contiguous dx run out in
     // vectors.
@@ -767,15 +875,6 @@ __device__ void k7DgradMma(const K7Args& a)
 // FMA kernel: every arch and dtype (fp32 on RDNA, everything on gfx906). Threads TX (channels)
 // x TY (tile indices); each computes TQ consecutive tile indices, all ST phases, of TC channels
 // TX apart. Tile BMQ = TY TQ by BN = TX TC; k-step BK.
-
-/// The FMA filter tile's pitch per channel, in elements: the taps rounded up to an odd number of
-/// 16-byte chunks, so the lanes' per-channel tap vectors (channels one pitch apart) spread over
-/// the banks.
-__host__ __device__ constexpr int k7FmaPitch(int smax, int pade)
-{
-    const int chunks = (smax + pade - 1) / pade;
-    return (chunks % 2 == 0 ? chunks + 1 : chunks) * pade;
-}
 
 /// The FMA main loop for r = pad mod ST = R: phase p's tap p + ST j reads shift below(p) - j,
 /// below(p) = p < R, so every register index is compile-time. The launcher checks the filter
@@ -886,42 +985,50 @@ __device__ __attribute__((always_inline)) inline void
         }
     };
 
-    const int iters = tiles.start(a) * b.nD * b.nH;
-    if constexpr(STAGES == 2)
-    {
-        tiles.template storeColumns<LDA, LDB, CP>(lds, lds + BK * LDA);
-        __syncthreads();
-        for(int it = 0; it < iters; ++it)
+    // Two forms of the k loop, as the matrix-core kernel's (fast: whole-vector, branch-free loads).
+    auto mainLoop = [&](auto fastFlag) {
+        constexpr bool FAST = decltype(fastFlag)::value;
+        const int iters = tiles.template start<FAST>(a) * b.nD * b.nH;
+        if constexpr(STAGES == 2)
         {
-            if(it + 1 < iters)
-            {
-                tiles.loadNext(a, b);
-            }
-            const T* cur = lds + (it & 1) * STAGE;
-            multiply(cur, cur + BK * LDA);
-            if(it + 1 < iters)
-            {
-                // The other tile was last read before the previous barrier.
-                T* next = lds + ((it + 1) & 1) * STAGE;
-                tiles.template storeColumns<LDA, LDB, CP>(next, next + BK * LDA);
-            }
-            __syncthreads();
-        }
-    }
-    else
-    {
-        for(int it = 0; it < iters; ++it)
-        {
-            __syncthreads();
             tiles.template storeColumns<LDA, LDB, CP>(lds, lds + BK * LDA);
             __syncthreads();
-            if(it + 1 < iters)
+            for(int it = 0; it < iters; ++it)
             {
-                tiles.loadNext(a, b);
+                if(it + 1 < iters)
+                {
+                    tiles.template loadNext<FAST>(a, b);
+                }
+                const T* cur = lds + (it & 1) * STAGE;
+                multiply(cur, cur + BK * LDA);
+                if(it + 1 < iters)
+                {
+                    // The other tile was last read before the previous barrier.
+                    T* next = lds + ((it + 1) & 1) * STAGE;
+                    tiles.template storeColumns<LDA, LDB, CP>(next, next + BK * LDA);
+                }
+                __syncthreads();
             }
-            multiply(lds, lds + BK * LDA);
         }
-    }
+        else
+        {
+            for(int it = 0; it < iters; ++it)
+            {
+                __syncthreads();
+                tiles.template storeColumns<LDA, LDB, CP>(lds, lds + BK * LDA);
+                __syncthreads();
+                if(it + 1 < iters)
+                {
+                    tiles.template loadNext<FAST>(a, b);
+                }
+                multiply(lds, lds + BK * LDA);
+            }
+        }
+    };
+    if(tiles.fastLoads(a))
+        mainLoop(K7Flag<true>{});
+    else
+        mainLoop(K7Flag<false>{});
 }
 
 template <class T,

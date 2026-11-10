@@ -979,6 +979,13 @@ __device__ inline void v5_gather_bwd(const T* __restrict__ A,
     valu_from_f32(acc, D[o]);
 }
 
+/// A compile-time flag for generic lambdas (HIPRTC has no standard headers).
+template <bool B>
+struct DwFlag
+{
+    static constexpr bool value = B;
+};
+
 // ---- v6 — backward data by stride phase blocks; stride S compile-time, unit dilation ----
 // A thread owns the S x S dx pixels sharing
 // (qy, qx) = ((y + ph) / S, (x + pw) / S), one per phase (ry, rx). They all read the dy window
@@ -1018,83 +1025,87 @@ __device__ inline void v6_phase_block_nhwc(const T* __restrict__ A,
     const int rest = pix / qw;
     const int qy = rest % qh;
     const int n = rest / qh;
-    const bool whole = c0 + VEC <= p.C && p.C % VEC == 0;
-    typedef unsigned int __attribute__((ext_vector_type(VEC * sizeof(T) / 4))) Raw;
-    // The dy window, fp32.
-    float win[MY][MX][VEC];
+    // Two forms: every channel of the vector real (the rule: whole-vector loads and stores), or
+    // the channel tail (element-wise). One branch per thread, none per load.
+    auto run = [&](auto wholeFlag) {
+        constexpr bool whole = decltype(wholeFlag)::value;
+        typedef unsigned int __attribute__((ext_vector_type(VEC * sizeof(T) / 4))) Raw;
+        // The dy window, fp32.
+        float win[MY][MX][VEC];
 #pragma unroll
-    for(int m = 0; m < MY; ++m)
+        for(int m = 0; m < MY; ++m)
 #pragma unroll
-        for(int mm = 0; mm < MX; ++mm)
-        {
-            const int oy = qy - m, ox = qx - mm;
-            T v[VEC];
-            if(oy >= 0 && oy < p.Hi && ox >= 0 && ox < p.Wi)
+            for(int mm = 0; mm < MX; ++mm)
             {
-                const T* a = A + ((long)(n * p.Hi + oy) * p.Wi + ox) * p.C + c0;
-                if(whole)
+                // Every load is issued (a position outside dy reads the image's first one) and its
+                // value masked, so the window's loads stay in flight together: a branch per load would
+                // wait for each one alone.
+                const int oy = qy - m, ox = qx - mm;
+                const bool in = oy >= 0 && oy < p.Hi && ox >= 0 && ox < p.Wi;
+                const T* a
+                    = A + ((long)(n * p.Hi + (in ? oy : 0)) * p.Wi + (in ? ox : 0)) * p.C + c0;
+                T v[VEC];
+                if constexpr(whole)
                     *reinterpret_cast<Raw*>(v) = *reinterpret_cast<const Raw*>(a);
                 else
 #pragma unroll
                     for(int e = 0; e < VEC; ++e)
-                        v[e] = c0 + e < p.C ? a[e] : T(0);
-            }
-            else
-            {
+                        v[e] = a[c0 + e < p.C ? e : 0];
 #pragma unroll
                 for(int e = 0; e < VEC; ++e)
-                    v[e] = T(0);
+                    win[m][mm][e] = in && c0 + e < p.C ? valu_to_f32(v[e]) : 0.0f;
             }
 #pragma unroll
-            for(int e = 0; e < VEC; ++e)
-                win[m][mm][e] = valu_to_f32(v[e]);
-        }
-#pragma unroll
-    for(int ry = 0; ry < S; ++ry)
-    {
-        const int y = S * qy + ry - p.ph;
-        if(y < 0 || y >= p.Ho)
-            continue;
-#pragma unroll
-        for(int rx = 0; rx < S; ++rx)
+        for(int ry = 0; ry < S; ++ry)
         {
-            const int x = S * qx + rx - p.pw;
-            if(x < 0 || x >= p.Wo)
+            const int y = S * qy + ry - p.ph;
+            if(y < 0 || y >= p.Ho)
                 continue;
-            float acc[VEC];
 #pragma unroll
-            for(int e = 0; e < VEC; ++e)
-                acc[e] = 0.0f;
-#pragma unroll
-            for(int m = 0; m < MY; ++m)
+            for(int rx = 0; rx < S; ++rx)
             {
-                if(ry + S * m >= KH)
+                const int x = S * qx + rx - p.pw;
+                if(x < 0 || x >= p.Wo)
                     continue;
+                float acc[VEC];
 #pragma unroll
-                for(int mm = 0; mm < MX; ++mm)
+                for(int e = 0; e < VEC; ++e)
+                    acc[e] = 0.0f;
+#pragma unroll
+                for(int m = 0; m < MY; ++m)
                 {
-                    if(rx + S * mm >= KW)
+                    if(ry + S * m >= KH)
                         continue;
-                    const float* w = &sW[(ry + S * m) * KW + rx + S * mm][cv * VEC];
+#pragma unroll
+                    for(int mm = 0; mm < MX; ++mm)
+                    {
+                        if(rx + S * mm >= KW)
+                            continue;
+                        const float* w = &sW[(ry + S * m) * KW + rx + S * mm][cv * VEC];
+#pragma unroll
+                        for(int e = 0; e < VEC; ++e)
+                            acc[e] += w[e] * win[m][mm][e];
+                    }
+                }
+                T* d = D + ((long)(n * p.Ho + y) * p.Wo + x) * p.C + c0;
+                T o[VEC];
+#pragma unroll
+                for(int e = 0; e < VEC; ++e)
+                    valu_from_f32(acc[e], o[e]);
+                if constexpr(whole)
+                    *reinterpret_cast<Raw*>(d) = *reinterpret_cast<const Raw*>(o);
+                else
 #pragma unroll
                     for(int e = 0; e < VEC; ++e)
-                        acc[e] += w[e] * win[m][mm][e];
-                }
+                        if(c0 + e < p.C)
+                            d[e] = o[e];
             }
-            T* d = D + ((long)(n * p.Ho + y) * p.Wo + x) * p.C + c0;
-            T o[VEC];
-#pragma unroll
-            for(int e = 0; e < VEC; ++e)
-                valu_from_f32(acc[e], o[e]);
-            if(whole)
-                *reinterpret_cast<Raw*>(d) = *reinterpret_cast<const Raw*>(o);
-            else
-#pragma unroll
-                for(int e = 0; e < VEC; ++e)
-                    if(c0 + e < p.C)
-                        d[e] = o[e];
         }
-    }
+    };
+    if(c0 + VEC <= p.C && p.C % VEC == 0)
+        run(DwFlag<true>{});
+    else
+        run(DwFlag<false>{});
 }
 
 // Channels-first phase blocks: lanes along qx of one dx row band; a thread computes S rows x S
@@ -1130,10 +1141,12 @@ __device__ inline void v6_phase_block_nchw(const T* __restrict__ A,
 #pragma unroll
         for(int mm = 0; mm < MX; ++mm)
         {
+            // Every load issued (outside dy: the plane's first element), its value masked: the
+            // window's loads stay in flight together.
             const int oy = qy - m, ox = qx - mm;
-            win[m][mm] = oy >= 0 && oy < p.Hi && ox >= 0 && ox < p.Wi
-                             ? valu_to_f32(a0[(long)oy * p.Wi + ox])
-                             : 0.0f;
+            const bool in = oy >= 0 && oy < p.Hi && ox >= 0 && ox < p.Wi;
+            const float v = valu_to_f32(a0[in ? (long)oy * p.Wi + ox : 0]);
+            win[m][mm] = in ? v : 0.0f;
         }
     T* d0 = D + (long)(n * p.C + c) * p.Ho * p.Wo;
 #pragma unroll
