@@ -9,7 +9,8 @@
  * An scf.for's carried-value counts agree, its iter_args metadata names each
  * carried value and its type (which the loop's result shares), and its body
  * yields only at its end, one value per carried value, of its type, ending in
- * that yield whenever the loop carries any.
+ * that yield whenever the loop carries any; a carried value or result with no
+ * type is refused rather than read.
  *
  * Only the scf.yield that ends a branch of an if/else with results has its
  * values taken: a branch of an if/else without results holds no scf.yield, and
@@ -261,6 +262,24 @@ void check_rule(const rocke_op_t* op,
     check(err == message, what + ": rule text '" + err + "'");
 }
 
+/* The verifier reports `verifier_report` (one line per diagnostic), and both
+ * lowerings refuse the kernel with `status` and `message`. */
+void check_refused_reporting(Kernel& k,
+                             rocke_status_t status,
+                             const std::string& message,
+                             const std::string& verifier_report,
+                             const std::string& what)
+{
+    const std::string diags = k.diagnostics();
+    check(diags == verifier_report, what + ", verifier: " + diags);
+    const refusal llvm = k.lower_llvm();
+    check(llvm.status == status && llvm.message == message,
+          what + ", LLVM lowering: " + std::to_string(llvm.status) + " " + llvm.message);
+    const refusal hip = k.lower_hip();
+    check(hip.status == status && hip.message == message,
+          what + ", HIP lowering: " + std::to_string(hip.status) + " " + hip.message);
+}
+
 /* The verifier reports `message` alone, and both lowerings refuse the kernel
  * with `status` and `message`. */
 void check_refused(Kernel& k,
@@ -268,14 +287,7 @@ void check_refused(Kernel& k,
                    const std::string& message,
                    const std::string& what)
 {
-    const std::string diags = k.diagnostics();
-    check(diags == message + "\n", what + ", verifier: " + diags);
-    const refusal llvm = k.lower_llvm();
-    check(llvm.status == status && llvm.message == message,
-          what + ", LLVM lowering: " + std::to_string(llvm.status) + " " + llvm.message);
-    const refusal hip = k.lower_hip();
-    check(hip.status == status && hip.message == message,
-          what + ", HIP lowering: " + std::to_string(hip.status) + " " + hip.message);
+    check_refused_reporting(k, status, message, message + "\n", what);
 }
 
 /* The verifier reports nothing, and both lowerings accept the kernel. */
@@ -648,6 +660,67 @@ void a_loop_whose_iter_args_metadata_is_malformed_is_refused()
     }
 }
 
+/* A raw value (rocke_i_value_named given no type) has no type, and a raw op
+ * given no result types leaves its results so. A loop whose init operand,
+ * result or closing yield has no type is refused by the verifier and both
+ * lowerings instead of read: an init operand as having no init type, a result
+ * or yielded value with its missing type named "(null)". A raw value has no
+ * defining op either, so the verifier also reports it out of scope; the
+ * lowerings meet the loop rule first. */
+void a_loop_value_with_no_type_is_refused()
+{
+    const std::string out_of_scope = "operand '%untyped' used before definition / out of scope\n";
+    {
+        Kernel k("loop_untyped_init");
+        rocke_op_t* loop_op = nullptr;
+        k.build_carrying_loop(
+            4,
+            false,
+            [&k, &loop_op](const rocke_for_t& loop) {
+                loop_op = loop.op;
+                rocke_b_scf_yield(&k.b, &k.lane, 1);
+            },
+            false);
+        rocke_b_ret(&k.b);
+        loop_op->operands[3] = rocke_i_value_named(&k.b, "%untyped", nullptr);
+        const std::string message = "scf.for iter_arg %acc has no init type";
+        check_refused_reporting(k,
+                                ROCKE_ERR_VALUE,
+                                message,
+                                out_of_scope + message + "\n",
+                                "loop with an init operand with no type");
+    }
+    {
+        Kernel k("loop_untyped_result");
+        rocke_op_t* loop_op = nullptr;
+        k.build_carrying_loop(4, false, [&loop_op](const rocke_for_t& loop) { loop_op = loop.op; });
+        rocke_b_ret(&k.b);
+        loop_op->results[0]->type = nullptr;
+        check_refused(k,
+                      ROCKE_ERR_VALUE,
+                      "scf.for result type '(null)' does not match iter_arg %acc type 'i32'",
+                      "loop with a result with no type");
+    }
+    {
+        Kernel k("loop_untyped_yield");
+        k.build_carrying_loop(
+            4,
+            false,
+            [&k](const rocke_for_t&) {
+                rocke_value_t* untyped = rocke_i_value_named(&k.b, "%untyped", nullptr);
+                rocke_b_scf_yield(&k.b, &untyped, 1);
+            },
+            false);
+        rocke_b_ret(&k.b);
+        const std::string message = "scf.for iter_arg 0 is i32, but its body yields (null)";
+        check_refused_reporting(k,
+                                ROCKE_ERR_VALUE,
+                                message,
+                                message + "\n" + out_of_scope,
+                                "loop yield of a value with no type");
+    }
+}
+
 /* Serialized IR can give a loop iter_args metadata that is a bare map rather
  * than a list of maps; the parser reads it (rocke_i_attr_is_bare_map), and the
  * verifier and both lowerings refuse the parsed loop as Python refuses a dict.
@@ -908,6 +981,7 @@ int main()
     each_loop_is_held_to_its_own_carried_values();
     a_loop_whose_carried_counts_disagree_is_refused();
     a_loop_whose_iter_args_metadata_is_malformed_is_refused();
+    a_loop_value_with_no_type_is_refused();
     a_loop_whose_iter_args_metadata_is_a_bare_map_is_refused();
     a_loop_without_exactly_one_body_region_is_refused();
     an_unrolled_loop_refuses_its_body_before_its_carried_types();

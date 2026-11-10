@@ -2993,13 +2993,27 @@ static const char* scf_for_carried_count_error(const rocke_op_t* op, char* buf, 
     return NULL;
 }
 
+/* The name of `type`, or "(null)" when there is none, for a loop rule's
+ * refusal of a result or yielded value with no type. A raw value
+ * (rocke_i_value_named given no type) or the result of a raw op (rocke_i_op
+ * given no result types) has none, and the rule refuses its loop rather than
+ * read the missing name. */
+static const char* type_name_or_null(const rocke_type_t* type)
+{
+    return (type && type->name) ? type->name : "(null)";
+}
+
 /* Python core/ir.py::_scf_for_metadata_entry_error: the refusal for the scf.for
  * `op`, whose carried-value counts agree (scf_for_carried_count_error), when an
  * iter_args metadata entry does not describe its carried value, written into
  * `buf`, or NULL when every entry does. Entry i is a map whose "name" is a
  * non-empty string and whose "type" names the type of init operand i (operand
- * 3 + i); result i has that type too. Every value, built or parsed, has a
- * named type, as scf_for_yield_error also relies on. */
+ * 3 + i), which has a named type; result i has that type too. The builders
+ * and parsers of both engines type every value, but a raw value
+ * (rocke_i_value_named given no type) or the result of a raw op (rocke_i_op
+ * given no result types) has none, so this engine also refuses an init operand
+ * with no type; scf_for_yield_error relies on every init type being named once
+ * this passes. */
 static const char* scf_for_metadata_entry_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     const rocke_attr_value_t* metadata = rocke_attr_get(&op->attrs, "iter_args");
@@ -3024,6 +3038,11 @@ static const char* scf_for_metadata_entry_error(const rocke_op_t* op, char* buf,
             return rocke_i_untyped_loop_value_message(name, buf, cap);
         }
         const rocke_type_t* init_type = op->operands[3 + i]->type;
+        if(!init_type || !init_type->name)
+        {
+            snprintf(buf, cap, "scf.for iter_arg %s has no init type", name);
+            return buf;
+        }
         if(strcmp(type_name, init_type->name) != 0)
         {
             snprintf(buf,
@@ -3040,7 +3059,7 @@ static const char* scf_for_metadata_entry_error(const rocke_op_t* op, char* buf,
             snprintf(buf,
                      cap,
                      "scf.for result type '%s' does not match iter_arg %s type '%s'",
-                     result_type->name,
+                     type_name_or_null(result_type),
                      name,
                      init_type->name);
             return buf;
@@ -3102,7 +3121,7 @@ static const char* scf_for_yield_error(const rocke_op_t* op, char* buf, size_t c
                      "scf.for iter_arg %d is %s, but its body yields %s",
                      i,
                      init_type->name,
-                     value_type->name);
+                     type_name_or_null(value_type));
             return buf;
         }
     }
