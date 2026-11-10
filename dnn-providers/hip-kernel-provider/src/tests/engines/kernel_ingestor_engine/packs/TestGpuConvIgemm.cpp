@@ -1050,7 +1050,8 @@ TEST(TestConvIgemmCatalog, ChannelsFirstOutputConfigsServeOnlyChannelsFirstOutpu
                 if(kernel.getStringMetadata("dtype") != "HALF"
                    || kernel.getStringMetadata("atom") != "mfma32_f16"
                    || kernel.getIntMetadata("xcd") != 0 || kernel.getIntMetadata("halo") != 0
-                   || kernel.getIntMetadata("wdirect") != 0 || kernel.getIntMetadata("pack") != 0)
+                   || kernel.getIntMetadata("wdirect") != 0 || kernel.getIntMetadata("pack") != 0
+                   || kernel.getIntMetadata("fuse") != 0)
                 {
                     continue;
                 }
