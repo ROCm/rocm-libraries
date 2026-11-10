@@ -1304,7 +1304,15 @@ namespace rocalution
     void HIPAcceleratorMatrixBCSR<ValueType>::LAnalyse(bool diag_unit)
     {
 #ifdef ROCALUTION_PTRTYPE_64
-        // rocsparse_bsrsv only supports 32-bit row offsets
+        // rocsparse_bsrsv only supports 32-bit row offsets. LSolve falls back to a host
+        // CSR copy, which cannot know about a unit diagonal.
+        if(diag_unit == true)
+        {
+            LOG_INFO("HIPAcceleratorMatrixBCSR::LAnalyse() does not support diag_unit with "
+                     "64-bit row offsets");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+
         return;
 #else
         rocsparse_status status;
@@ -1386,7 +1394,15 @@ namespace rocalution
     void HIPAcceleratorMatrixBCSR<ValueType>::UAnalyse(bool diag_unit)
     {
 #ifdef ROCALUTION_PTRTYPE_64
-        // rocsparse_bsrsv only supports 32-bit row offsets
+        // rocsparse_bsrsv only supports 32-bit row offsets. USolve falls back to a host
+        // CSR copy, which cannot know about a unit diagonal.
+        if(diag_unit == true)
+        {
+            LOG_INFO("HIPAcceleratorMatrixBCSR::UAnalyse() does not support diag_unit with "
+                     "64-bit row offsets");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+
         return;
 #else
         rocsparse_status status;

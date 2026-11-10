@@ -1616,6 +1616,18 @@ TEST_P(local_matrix_formats, triangular_solves_use_the_triangular_parts)
     });
 }
 
+// A 64-bit build solves BCSR on the host, where the unit diagonal would be lost
+TEST_P(local_matrix_formats, unit_diagonal_ends_the_program_for_64_bit_bcsr)
+{
+    if(backend() != Backend::Accelerator || !is(BCSR) || sizeof(PtrType) == sizeof(int))
+    {
+        GTEST_SKIP() << "only a 64-bit build keeps no BCSR analysis on the accelerator";
+    }
+    auto A = make(banded<double>());
+    EXPECT_FATAL_ERROR(A->LAnalyse(true), "hip_matrix_bcsr\\.cpp");
+    EXPECT_FATAL_ERROR(A->UAnalyse(true), "hip_matrix_bcsr\\.cpp");
+}
+
 TYPED_TEST(local_matrix, iterative_triangular_solves_converge)
 {
     using T = typename TypeParam::value_type;
