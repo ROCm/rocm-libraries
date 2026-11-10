@@ -218,10 +218,12 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                           kLdsBytesPerWgp,
                   "the launch contract must exclude a third resident workgroup");
 
-    // Host-side launch contract: the dynamic LDS request above and the runtime arguments
-    // the kernel specialises on but does not re-check on the device (page size, head
-    // dimensions, mask direction, page/token strides, table pointers). Call before every
-    // launch; throws std::invalid_argument and launches nothing on a violation.
+    // Host-side launch contract: the dynamic LDS request above, the runtime arguments the kernel
+    // specialises on (page size, head dimensions, mask direction) and the page geometry and tables
+    // it relies on. The device keeps its own traps on the strides, the page count and the table
+    // pointers for a launch that bypasses this check. Call before every launch; throws
+    // std::invalid_argument and launches nothing on a violation (the generated launchers report it
+    // and return -1).
     CK_TILE_HOST static void CheckLaunch(const Kargs& kargs, index_t dynamic_smem_bytes)
     {
         auto require = [](bool ok, const char* what) {
@@ -236,6 +238,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         require(kargs.hdim_q == FmhaPipeline::kQKHeaddim, "hdim_q differs from the compiled D");
         require(kargs.hdim_v == FmhaPipeline::kN1, "hdim_v differs from the compiled V width");
         require(kargs.nhead_ratio_qk > 0, "nhead_ratio_qk must be positive");
+        require(kargs.num_total_pages > 0, "num_total_pages must be positive");
         if constexpr(!kVectorizedKV)
             require(kargs.stride_k >= kargs.hdim_q && kargs.stride_v >= kargs.hdim_v,
                     "K/V token stride smaller than the head dimension");
@@ -249,14 +252,16 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         {
             require(kargs.page_table.seqlen_k_ptr != nullptr, "seqlen_k_ptr is null");
             require(kargs.page_table.block_table_ptr != nullptr, "block_table_ptr is null");
+            require(kargs.page_table.batch_stride_block_table > 0,
+                    "batch_stride_block_table must be positive");
         }
         require(kargs.seqstart_q_ptr != nullptr, "seqstart_q_ptr is null");
         if constexpr(kStoreLSE)
             require(kargs.lse_ptr != nullptr, "lse_ptr is null");
         if constexpr(kVectorizedKV)
         {
-            // The token stride is implied by the layout (stride_k/stride_v are not read, but
-            // must stay positive); a page-head holds P x D elements.
+            // The token stride is implied by the layout: stride_k/stride_v are not read, but the
+            // device traps on non-positive strides. A page-head holds P x D elements.
             require(kargs.stride_k > 0 && kargs.stride_v > 0, "K/V token stride not positive");
             require(static_cast<long_index_t>(kargs.batch_stride_k) >=
                             static_cast<long_index_t>(FmhaPipeline::kPageBlockSize) *
@@ -290,8 +295,11 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                 require(kargs.sink_size >= 0, "sink_size must not be negative");
             else
                 require(kargs.sink_size == 0, "sink tokens need a sink instance");
-            // Each KV split shifts a bottom-right window to its key range; a top-left corner or
-            // a left bound cannot follow (the device traps on both).
+            // The KV split takes no mask or a bottom-right mask without a left window: the
+            // dispatch routes only those to it, and this check refuses the rest. The device shifts
+            // each sequence's window to its split's key range, a shift that depends on that
+            // sequence's KV length and so cannot be checked here; it keeps the general shift, with
+            // its traps on a top-left corner and on a left window the shift cannot keep.
             if constexpr(KvSplits_ == 2)
                 require(kargs.mask_type != GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT &&
                             kargs.window_size_left < 0,
@@ -302,8 +310,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         if constexpr(kHasLogitsSoftCap)
             require(kargs.logits_soft_cap > 0.f, "a soft-cap instance needs logits_soft_cap > 0");
         if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
-            require(kargs.bias_ptr != nullptr && kargs.stride_bias >= kargs.seqlen_k,
-                    "an elementwise-bias instance needs bias_ptr and stride_bias >= seqlen_k");
+            require(kargs.bias_ptr != nullptr, "an elementwise-bias instance needs bias_ptr");
         if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
             require(kargs.alibi_slope_ptr != nullptr, "an ALiBi instance needs the slopes");
         if constexpr(KvSplits_ == 2)
