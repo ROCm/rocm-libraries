@@ -209,6 +209,14 @@ class SumUnrollMfma(SumUnroll):
         ldsVgpr = writer.vgprPool.checkOut(1,"ldsVgpr")
         ldsVgpr1 = writer.vgprPool.checkOut(1,"ldsVgpr1")
         dummy   = writer.vgprPool.checkOut(1,"dummy")
+        # With LocalSplitU, each group of NumThreads / LocalSplitU threads summed
+        # its own part of K. A group's partial sums take the K slots after the
+        # previous group's, so the layout is computed from the thread's serial
+        # within its group.
+        lsu = kernel["LocalSplitU"]
+        groupSerial = ldsVgpr  # otherwise unused
+        lsuReg = ldsVgpr1  # otherwise unused
+        serial = groupSerial if lsu > 1 else "Serial"
 
         # parameter for get each type index
         tile10           = 1 - tile01
@@ -225,13 +233,19 @@ class SumUnrollMfma(SumUnroll):
         vectorWidth      = writer.states.lraTileProperties[tile01].vectorWidth
         maxKId           = writer.states.lraTileProperties[tile01].maxKId
 
-        strideTile       = maxKId
+        strideTile       = maxKId * lsu
         strideBlock      = kernel["MatrixInstM"] * strideTile
         strideWave       = kernel["MatrixInstM"] * num1DBlocks * strideTile * vectorWidth
 
         with writer.allocTmpSgpr(1, tag="StoreSumLDS_tmpSgprInfo") as tmpSgprInfo:
+            if lsu > 1:
+                groupThreads = kernel["NumThreads"] // lsu
+                imod.add(vectorStaticRemainder(dummy, groupSerial, "Serial", groupThreads, tmpVgprRes, tmpSgprInfo, \
+                    "LocalSplitU: serial in group = tid %% group threads(%u)" % groupThreads))
+                imod.add(vectorStaticDivide(lsuReg, "Serial", groupThreads, tmpVgprRes, \
+                    "LocalSplitU: group = tid / group threads(%u)" % groupThreads))
             # tile offset
-            imod.add(vectorStaticRemainder(dummy, kReg, "Serial", waveWidth, tmpVgprRes, tmpSgprInfo, \
+            imod.add(vectorStaticRemainder(dummy, kReg, serial, waveWidth, tmpVgprRes, tmpSgprInfo, \
                 "0. thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
             imod.add(vectorStaticRemainder(dummy, tReg, kReg, kernel["MatrixInstN"], tmpVgprRes, tmpSgprInfo, \
                 "1. N offset: nIdx = wtid %% MI_N(%u)" % kernel["MatrixInstN"]))
@@ -263,20 +277,25 @@ class SumUnrollMfma(SumUnroll):
                 "4. K offset: kIdx = wtid / (MIN(%u) * MIBB(%u))" % (kernel["MatrixInstN"], kernel["MatrixInstB"])))
             imod.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), 1, tmpSgprInfo, \
                 "4. K offset: lrKOffset = kIdx * mStride(1)"))
+            if lsu > 1:
+                imod.add(vectorStaticMultiply(vgpr(lsuReg), vgpr(lsuReg), maxKId, tmpSgprInfo, \
+                    "4. LocalSplitU K offset: group * maxKId(%u)" % maxKId))
+                imod.add(VAddU32(dst=vgpr(kReg), src0=vgpr(lsuReg), src1=vgpr(kReg), \
+                    comment="4. K offset += LocalSplitU K offset"))
 
             imod.add(VAddU32(dst=vgpr(tReg), src0=vgpr(kReg), src1=vgpr(tReg), \
                 comment="5. offset in wave: lrOffset = bnOffset + lrKOffset"))
             # wave offset
             if num1DWaves > 1:
             # FIXME: Should be two cases tile01 == 0 and tile01 == 1
-                imod.add(vectorStaticDivide(wReg, "Serial", dividedForWaveId, tmpVgprRes, \
+                imod.add(vectorStaticDivide(wReg, serial, dividedForWaveId, tmpVgprRes, \
                     "6. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
                 # Here we calculate the coordinate of the block offset, and remove the duplicated wave.
                 if tile01 == 0:
                     imod.add(vectorStaticDivide(dummy, wReg, num1DWaves, tmpVgprRes, \
                     "6-1.mask duplicated: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
                 else:
-                    imod.add(vectorStaticDivide(dummy, "Serial", waveWidth, tmpVgprRes, \
+                    imod.add(vectorStaticDivide(dummy, serial, waveWidth, tmpVgprRes, \
                         "6-1. wave offset in N dimen (waveWidth): wtid_1 = tid / waveWidth(%u)" % waveWidth))
                     imod.add(vectorStaticRemainder(dummy, dummy, dummy, kernel["MIWaveGroup"][0], tmpVgprRes, tmpSgprInfo, \
                         "6-1. wave offset in M dimen (MIWaveGroup0): wtid0 = wtid_1 %% MIWaveGroup0(%u)" % kernel["MIWaveGroup"][0]))
@@ -298,7 +317,9 @@ class SumUnrollMfma(SumUnroll):
         writer.vgprPool.checkIn(dummy)
 
         # Add barrier here to avoid race condition if lds offset starts from 0
-        if kernel["LdsOffsetBias"] == 0:  # Compatible for both GSU1 and GSUM
+        # With LocalSplitU, other waves may still be reading the A/B tiles or
+        # the reduction's data from LDS.
+        if kernel["LdsOffsetBias"] == 0 or lsu > 1:  # Compatible for both GSU1 and GSUM
           imod.add(SBarrier(comment="Wait for all wavefronts"))
 
         MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
@@ -309,7 +330,8 @@ class SumUnrollMfma(SumUnroll):
         for vIdx in range(0, numVectorsPerTile):
             for eIdx in range(0, numReadPerTileVector):
                 # normal case
-                offset_val = int((eIdx + vIdx * MIWaveGroupShape[tile01]) * maxKId * kernel["ProblemType"]["ComputeDataType"].numBytes())
+                # writeBiasToGlobal reads these from LdsOffsetBias on.
+                offset_val = int((eIdx + vIdx * MIWaveGroupShape[tile01]) * strideTile * kernel["ProblemType"]["ComputeDataType"].numBytes()) + kernel["LdsOffsetBias"]
                 bps = int(kernel["ProblemType"]["ComputeDataType"].numBytes())
                 ds  = DSModifiers(offset=offset_val)
                 dst = vgpr(tReg)
