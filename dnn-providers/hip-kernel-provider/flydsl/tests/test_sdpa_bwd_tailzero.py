@@ -333,10 +333,11 @@ def _helper_uses(path: Path) -> set[str]:
 
 
 def _helper_calls(path: Path) -> dict[str, collections.Counter]:
-    """Per module builder (`build_*_module_primary`), the helper calls (`addr.<name>(...)`) that run when the
-    kernel is built, traced or launched: `(role, name)` with role `build` (the builder's own body), `kernel`
-    (its `@flyc.kernel` function) or `jit` (its `@flyc.jit` launch). A call inside any other nested function
-    is not counted: nothing runs it."""
+    """Per module builder (`build_*_module_primary`), the helper calls (`addr.<name>(...)`) made by the code that
+    defines the kernel: `(role, name)` with role `build` (the builder's own body), `kernel` (its `@flyc.kernel`
+    function) or `jit` (its `@flyc.jit` launch). A call inside any other nested function (a local helper or the
+    returned wrapper) is not counted, because such a function may never be called; so a helper call moved
+    there stops counting as the kernel's use of the helper."""
 
     def role(node: ast.FunctionDef) -> str | None:
         decorators = " ".join(ast.unparse(d) for d in node.decorator_list)
