@@ -286,9 +286,37 @@ void setRopeInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
     recipes.setDefault(a->freqs_tensor_uid(), FillRecipe::free(0.0f, 4096.0f));
 }
 
+// ── Gather ───────────────────────────────────────────────────────────────────
+
+void setGatherInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+                           const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                           InputFillRecipes& recipes)
+{
+    const auto* a = node.attributes_as_GatherAttributes();
+    if(a == nullptr || graph.tensors() == nullptr || a->axis() < 0)
+    {
+        return;
+    }
+    const auto axis = static_cast<flatbuffers::uoffset_t>(a->axis());
+
+    // Every index must lie in [0, x.dims[axis]); the reference throws on any other. An
+    // integer tensor casts both bounds to its type before the uniform draw over [lo, hi) and
+    // truncates each draw, so FREE[0, extent] reaches every row and never extent itself.
+    for(const auto* x : *graph.tensors())
+    {
+        if(x->uid() == a->x_tensor_uid() && x->dims() != nullptr && axis < x->dims()->size())
+        {
+            const auto extent = static_cast<float>(x->dims()->Get(axis));
+            recipes.setDefault(a->indices_tensor_uid(), FillRecipe::free(0.0f, extent));
+            return;
+        }
+    }
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
-bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+                       const hipdnn_flatbuffers_sdk::data_objects::Node& node,
                        InputFillRecipes& recipes)
 {
     using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
@@ -333,6 +361,9 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
         return true;
     case NA::RopeAttributes:
         setRopeInitDefaults(node, recipes);
+        return true;
+    case NA::GatherAttributes:
+        setGatherInitDefaults(graph, node, recipes);
         return true;
     // x takes the [-1, 1] default. Ties (frequent in bf16 / f16 rows of thousands) need no
     // avoiding: the FlyDSL kernel and the CPU reference both rank equal values by position.
@@ -592,7 +623,7 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
     {
         const auto& node = *graph.nodes()->Get(i);
-        if(!applyDefaultFills(node, recipes))
+        if(!applyDefaultFills(graph, node, recipes))
         {
             const auto* name = node.name();
             return FillResult::unsupported(

@@ -1337,6 +1337,47 @@ TEST(TestFillInputs, BlockScaleDequantizeRangesRecordedInMetadata)
     EXPECT_FLOAT_EQ(inputs.at("2").at("hi").get<float>(), 0.5f);
 }
 
+// Gather indices are drawn from [0, x.dims[axis]), the range the reference accepts, and every
+// row of that axis is reachable.
+TEST(TestFillInputs, GatherIndicesStayInsideTheGatheredAxis)
+{
+    GraphResult gr;
+    auto& b = gr.builder;
+    const std::vector<int64_t> xDims = {2, 7, 3};
+    const std::vector<int64_t> xStrides = {21, 3, 1};
+    const std::vector<int64_t> indexDims = {256};
+    const std::vector<int64_t> indexStrides = {1};
+    const std::vector<int64_t> yDims = {2, 256, 3};
+    const std::vector<int64_t> yStrides = {768, 3, 1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &xStrides, &xDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 2, "indices", DataType::INT64, &indexStrides, &indexDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 3, "y", DataType::FLOAT, &yStrides, &yDims));
+
+    auto gather = CreateGatherAttributes(b, 1, 2, 3, /*axis=*/1);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(
+        b, "gather", DataType::FLOAT, NodeAttributes::GatherAttributes, gather.Union()));
+    b.Finish(CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes));
+
+    gr.graph = GetGraph(b.GetBufferPointer());
+    const auto leafUids = gr.leafInputUids({3});
+    auto inputs = makeTensorsFromGraph(gr, leafUids);
+    InputFillRecipes recipes;
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(recipes.fill(2), FillRecipe::free(0.0f, 7.0f));
+
+    auto& indices = *inputs.at(2);
+    const auto* values = static_cast<const int64_t*>(indices.rawHostData());
+    const std::set<int64_t> seen(values, values + indices.elementCount());
+    EXPECT_EQ(seen, (std::set<int64_t>{0, 1, 2, 3, 4, 5, 6}));
+}
+
 // RoPE freqs are raw angles, position * inv_freq, drawn over thousands of radians rather than
 // the [-1, 1] float default, so sin/cos range reduction is exercised.
 TEST(TestFillInputs, RopeFreqsSpanThousandsOfRadians)

@@ -1,0 +1,29 @@
+{
+  "claims": {
+    "hipkernel:flydsl_gather": [
+      {
+        "cases": [
+          "v1000_h5120_ids16_i64_bf16",
+          "v1000_h5120_ids16_i64_fp32",
+          "v1000_h5120_ids1x7_i32_bf16",
+          "v1000_h5120_ids1x7_i32_fp32",
+          "v1000_h5120_ids8_i32_fp16",
+          "v100_h33_ids9_i64_fp32",
+          "v100_h36_ids1x5_i32_bf16"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

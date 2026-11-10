@@ -7,10 +7,10 @@ Gather (index_select / take) along one axis: with ``indices`` of rank m,
 ``y.dims = x.dims[:axis] ++ indices.dims ++ x.dims[axis + 1:]``. The features
 come from ``gather_attributes.fbs``. The serializer
 (``utilities/json/GatherAttributes.hpp``) writes the ports under ``inputs``
-and ``outputs`` and ``axis`` at the top level. No provider implements the op,
-so the dtypes are those the CPU reference executor registers
-(``GatherSignatureKey``): ``x`` and ``y`` of one float dtype, ``indices``
-int32 or int64. By group:
+and ``outputs`` and ``axis`` at the top level. The dtypes are those the CPU
+reference executor registers (``GatherSignatureKey``), which
+``hipkernel:flydsl_gather`` also builds: ``x`` and ``y`` of one float dtype,
+``indices`` int32 or int64. By group:
 
 - ``dtype`` (exclusive): the dtype of ``x``, which ``y`` shares.
 - ``index_dtype`` (exclusive): ``int32`` or ``int64``.

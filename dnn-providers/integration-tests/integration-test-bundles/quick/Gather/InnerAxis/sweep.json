@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "x2x50x24_axis1_ids3_i64_fp16",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              24
+            ],
+            "strides": [
+              72,
+              24,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "int64"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              50,
+              24
+            ],
+            "strides": [
+              1200,
+              24,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "operation": "Qwen3.8 FlyDSL gather",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceGather); gather along a non-leading axis, which hipkernel:flydsl_gather serves as [outer, axis_extent, inner]",
+        "seed": 1,
+        "notes": "Gather along axis 1 of [2, 50, 24] f16 with [3] int64 ids: outer 2, row of 48 bytes; 16-byte vector object"
+      }
+    },
+    {
+      "id": "x3x20x5_axis1_ids2x4_i32_fp32",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              2,
+              4,
+              5
+            ],
+            "strides": [
+              40,
+              20,
+              5,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              20,
+              5
+            ],
+            "strides": [
+              100,
+              5,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "operation": "Qwen3.8 FlyDSL gather",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceGather); gather along a non-leading axis, which hipkernel:flydsl_gather serves as [outer, axis_extent, inner]",
+        "seed": 1,
+        "notes": "Gather along axis 1 of [3, 20, 5] f32 with [2, 4] int32 ids: outer 3, row of 20 bytes; per-element object"
+      }
+    }
+  ]
+}

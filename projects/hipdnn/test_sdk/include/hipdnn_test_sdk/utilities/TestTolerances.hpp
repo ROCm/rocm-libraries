@@ -549,4 +549,26 @@ constexpr float getTolerance()
 
 } // namespace topk
 
+namespace gather
+{
+
+// Gather copies x's elements into y without arithmetic or conversion (x and y share one
+// dtype), so engine and reference must agree bit for bit: any nonzero difference is a wrong
+// row, a wrong column or a corrupted value, never rounding.
+template <typename T>
+constexpr float getTolerance()
+{
+    if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float> || std::is_same_v<T, half>
+                 || std::is_same_v<T, bfloat16>)
+    {
+        return 0.0f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace gather
+
 } // namespace hipdnn_test_sdk::utilities

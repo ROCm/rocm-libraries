@@ -83,6 +83,8 @@ inline float toleranceForNodeAttributes(data::NodeAttributes attrType)
         return tol::softmax::getTolerance<T>();
     case NA::TopkAttributes:
         return tol::topk::getTolerance<T>();
+    case NA::GatherAttributes:
+        return tol::gather::getTolerance<T>();
     default:
         return 1e-3f;
     }

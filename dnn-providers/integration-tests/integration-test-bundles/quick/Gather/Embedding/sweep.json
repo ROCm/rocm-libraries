@@ -1,0 +1,381 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "v1000_h5120_ids1x7_i32_bf16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              7,
+              5120
+            ],
+            "strides": [
+              35840,
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1000,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "operation": "Qwen3.8 FlyDSL gather",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceGather); embedding table width H=5120 from the Qwen3.8 layer graph, V kept small for the CPU oracle",
+        "seed": 1,
+        "notes": "Qwen3.8 embedding lookup: [V=1000, H=5120] bf16 table, [1, T=7] int32 token ids; 16-byte vector object"
+      }
+    },
+    {
+      "id": "v1000_h5120_ids1x7_i32_fp32",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              7,
+              5120
+            ],
+            "strides": [
+              35840,
+              5120,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1000,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "operation": "Qwen3.8 FlyDSL gather",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceGather); embedding table width H=5120 from the Qwen3.8 layer graph, V kept small for the CPU oracle",
+        "seed": 1,
+        "notes": "Qwen3.8 embedding lookup: [V=1000, H=5120] f32 table, [1, T=7] int32 token ids; 16-byte vector object"
+      }
+    },
+    {
+      "id": "v1000_h5120_ids16_i64_bf16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "int64"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1000,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "operation": "Qwen3.8 FlyDSL gather",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceGather); embedding table width H=5120 from the Qwen3.8 layer graph, V kept small for the CPU oracle",
+        "seed": 1,
+        "notes": "Qwen3.8 embedding lookup: [V=1000, H=5120] bf16 table, [T=16] int64 token ids; 16-byte vector object"
+      }
+    },
+    {
+      "id": "v1000_h5120_ids16_i64_fp32",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "int64"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1000,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "operation": "Qwen3.8 FlyDSL gather",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceGather); embedding table width H=5120 from the Qwen3.8 layer graph, V kept small for the CPU oracle",
+        "seed": 1,
+        "notes": "Qwen3.8 embedding lookup: [V=1000, H=5120] f32 table, [T=16] int64 token ids; 16-byte vector object"
+      }
+    },
+    {
+      "id": "v100_h36_ids1x5_i32_bf16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              5,
+              36
+            ],
+            "strides": [
+              180,
+              36,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              5
+            ],
+            "strides": [
+              5,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              100,
+              36
+            ],
+            "strides": [
+              36,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "operation": "Qwen3.8 FlyDSL gather",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceGather); embedding table width H=5120 from the Qwen3.8 layer graph, V kept small for the CPU oracle",
+        "seed": 1,
+        "notes": "Row of 72 bytes, not a multiple of 16: served by the per-element bf16 object"
+      }
+    },
+    {
+      "id": "v100_h33_ids9_i64_fp32",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              9,
+              33
+            ],
+            "strides": [
+              33,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              9
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "int64"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              100,
+              33
+            ],
+            "strides": [
+              33,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "operation": "Qwen3.8 FlyDSL gather",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceGather); embedding table width H=5120 from the Qwen3.8 layer graph, V kept small for the CPU oracle",
+        "seed": 1,
+        "notes": "Row of 132 bytes, not a multiple of 16: served by the per-element f32 object"
+      }
+    },
+    {
+      "id": "v1000_h5120_ids8_i32_fp16",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              8
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1000,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "operation": "Qwen3.8 FlyDSL gather",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceGather); embedding table width H=5120 from the Qwen3.8 layer graph, V kept small for the CPU oracle",
+        "notes": "Qwen3.8 embedding lookup: [V=1000, H=5120] f16 table, [T=8] int32 token ids; 16-byte vector object",
+        "seed": 1
+      }
+    }
+  ]
+}
