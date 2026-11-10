@@ -364,9 +364,9 @@ def knob_fields(op: str, fields: Any) -> list[str]:
     ]
 
 
-# Every engine that has a UED of its own carries an engine estimate (RFC 0019 §3.1
-# `predict_engine`, L1); the slotted split engine (`sdpa_bwd_split`) does not, and no slot is
-# planned for it. The estimate is the expected tflops of the engine's own pick, which engine
+# Every op that owns its engine carries an engine estimate (RFC 0019 §3.1 `predict_engine`,
+# L1); the slotted split engine (`sdpa_bwd_split`) writes a UED of its own but has none, and no
+# slot is planned for it. The estimate is the expected tflops of the engine's own pick, which engine
 # selection reads before any catalog is enumerated. An engine without one is ordered by
 # static rules whatever the graph, and FlyDSL's engines compete for graphs: on gfx1201
 # sdpa_rdna, sdpa_rdna_decode and sdpa_aiw each match nearly every graph of the others'
