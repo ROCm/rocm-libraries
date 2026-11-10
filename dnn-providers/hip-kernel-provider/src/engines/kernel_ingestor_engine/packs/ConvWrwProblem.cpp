@@ -225,7 +225,8 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes)
                                config.tc,
                                config.vec,
                                config.align,
-                               config.ns})
+                               config.ns,
+                               config.wq})
     {
         if(value < 0 || value > INT_LIMIT)
         {
@@ -249,12 +250,28 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes)
                       i(config.tc),
                       i(config.vec),
                       i(config.align),
-                      i(config.ns));
+                      i(config.ns),
+                      i(config.wq));
 }
 
 int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
 {
     const int64_t vec = config.vec;
+    if(config.loop == LOOP_DIRECT)
+    {
+        // The x and dy rounds of a row over an item's 8 / wq waves (k3dLoads).
+        if((config.wq != 1 && config.wq != 2 && config.wq != 4) || config.bc < 1 || config.bc > 512
+           || config.bk < 1 || config.bk > 512 || config.s < 1 || config.s > 64 || config.dw < 1
+           || config.dw > 64)
+        {
+            return std::numeric_limits<int64_t>::max();
+        }
+        return k3dLoads(static_cast<int>(config.bc),
+                        static_cast<int>(config.bk),
+                        static_cast<int>(config.wq),
+                        static_cast<int>(config.s),
+                        static_cast<int>(config.dw));
+    }
     if(config.loop == LOOP_ROWS_FMA)
     {
         // K3FmaRowTiles: as the FMA ring's, over fr windows of the strided window rows.
@@ -338,6 +355,70 @@ int64_t splitsWanted(int64_t blocksXY,
     return std::max<int64_t>(wanted, 1);
 }
 
+DirectPlan directPlanFor(int64_t tiles,
+                         int64_t planes,
+                         int64_t rows,
+                         int64_t colBlocks,
+                         int64_t filterRows,
+                         int64_t partialBytes,
+                         int64_t units,
+                         int64_t tileMacs)
+{
+    tiles = std::max<int64_t>(tiles, 1);
+    units = std::max<int64_t>(units, 1);
+    // A block row at ~6.25 TFLOP/s per unit (gfx950), partials at ~4 TB/s written and read.
+    const double rowUs = 2.0 * static_cast<double>(tileMacs) / 6.25e6;
+    const double splitUs = 2.0 * static_cast<double>(partialBytes) / 4e6;
+    const int64_t walk = tiles * 2 <= units ? 0 : 1;
+    DirectPlan best;
+    double bestCost = 0;
+    for(int64_t segs = 1; segs <= 64; ++segs)
+    {
+        if(segs > 1 && divUp(rows, segs) < 4)
+        {
+            break;
+        }
+        DirectPlan p;
+        p.segs = segs;
+        p.segRows = divUp(rows, segs);
+        p.walk = walk;
+        p.items = planes * segs * colBlocks;
+        int64_t busiest = 0;
+        if(walk == 0)
+        {
+            const int64_t wanted = std::min(std::max<int64_t>(1, units / tiles), p.items);
+            p.per = divUp(p.items, wanted);
+            p.splits = divUp(p.items, p.per);
+            p.grid = std::min(units, tiles * p.splits);
+            busiest = divUp(tiles * p.splits, units) * p.per;
+        }
+        else
+        {
+            p.per = divUp(tiles * p.items, units);
+            p.splits = 1;
+            // A tile's pieces depend on where its first unit falls in a run, which repeats
+            // with period per.
+            for(int64_t t = 0; t < std::min(tiles, p.per); ++t)
+            {
+                const int64_t first = t * p.items / p.per;
+                const int64_t last = (t * p.items + p.items - 1) / p.per;
+                p.splits = std::max(p.splits, last - first + 1);
+            }
+            p.grid = divUp(tiles * p.items, p.per);
+            busiest = p.per;
+        }
+        const double cost
+            = static_cast<double>(busiest) * static_cast<double>(p.segRows + filterRows + 1) * rowUs
+              + static_cast<double>(p.splits) * splitUs;
+        if(segs == 1 || cost < bestCost)
+        {
+            best = p;
+            bestCost = cost;
+        }
+    }
+    return best;
+}
+
 std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,
                                       const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
@@ -351,6 +432,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         return std::nullopt;
     }
     const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA;
+    const bool direct = config.loop == LOOP_DIRECT;
     const bool rows = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA;
     if(fma != (info->wave == 0))
     {
@@ -371,7 +453,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx950";
 
     // Loop and layout.
-    if(config.loop < LOOP_ROWS || config.loop > LOOP_ROWS_FMA)
+    if(config.loop < LOOP_ROWS || config.loop > LOOP_DIRECT)
     {
         return std::nullopt;
     }
@@ -417,6 +499,17 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         }
         threads = config.wk * config.wc * info->wave;
     }
+    // waves_q: loop 5's items side by side, the 8 waves split wk x wc x wq; 0 elsewhere.
+    if(direct ? ((config.wq != 1 && config.wq != 2 && config.wq != 4)
+                 || config.wk * config.wc * config.wq != 8)
+              : config.wq != 0)
+    {
+        return std::nullopt;
+    }
+    if(direct)
+    {
+        threads = 8 * info->wave;
+    }
     // The filter width, its stride and dilation are compile-time.
     if(config.s != a.filter[2] || config.sw != a.stride[2] || config.dw != a.dilation[2]
        || config.fr < 1)
@@ -430,7 +523,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
             return std::nullopt;
         }
     }
-    else if(kg % config.vec != 0 || cg % config.vec != 0)
+    else if((kg % config.vec != 0 && config.align != 2) || cg % config.vec != 0)
     {
         return std::nullopt;
     }
@@ -443,6 +536,24 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         if(!gfx950 || config.layout == LAYOUT_CHANNELS_LAST || config.sw != 1 || config.ns < 2
            || config.ns > 4)
+        {
+            return std::nullopt;
+        }
+    }
+    else if(direct)
+    {
+        // Rows kept channels-last (so gfx950 and an atom of 8 positions per lane), the 16 x 16 x
+        // 32 atom (the other such atom steps 16 positions), 32 output columns per item, unit
+        // width stride and height dilation (a one-row filter has none), ns ring slots whose
+        // loads in flight fit vmcnt, rows of a conflict-free rotation.
+        const int64_t loads = loadPassesOf(config, eb, info->wave);
+        if(!tr || shape.ka != 32 || config.bq != 32 || config.sw != 1
+           || (a.dilation[1] != 1 && a.filter[1] != 1) || config.ns < 2 || config.ns > 5
+           || loads > 63 || (config.ns - 2) * loads > 63 || config.bpu != 1
+           || k3dRotation(static_cast<int>(config.bc),
+                          static_cast<int>((config.s - 1) * config.dw + 1))
+                  < 0
+           || k3dRotation(static_cast<int>(config.bk), 1) < 0)
         {
             return std::nullopt;
         }
@@ -465,7 +576,17 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    if(config.align != 0)
+    // Align 2: the ring's channels-last dy units at any element, for output channel counts that
+    // are not whole vectors (only there: whole vectors take the aligned configs).
+    if(config.align == 2)
+    {
+        if(config.loop != LOOP_RING || config.layout != LAYOUT_CHANNELS_LAST
+           || kg % config.vec == 0)
+        {
+            return std::nullopt;
+        }
+    }
+    else if(config.align != 0)
     {
         if(config.align != 1 || config.loop != LOOP_RING || !cf || config.sw != 1
            || a.inSpatial[2] % config.vec != 0 || a.outSpatial[2] % config.vec != 0)
@@ -501,30 +622,77 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     }
 
     // Grid and reduction steps.
-    const int64_t gridX = divUp(kg, config.bk) * divUp(cg, config.bc);
-    const int64_t frows = a.filter[0] * a.filter[1];
-    const int64_t gridY = a.groups * (rows ? divUp(frows, config.fr) : a.filter[0]);
-    const int64_t chunks = divUp(a.outSpatial[2], config.bq);
-    const int64_t trackLen = divUp(a.outSpatial[1], a.dilation[1]) + a.filter[1] - 1;
-    const auto steps
-        = rows ? pack_features::checkedProduct({a.n, a.outSpatial[0], a.outSpatial[1], chunks})
-               : pack_features::checkedProduct(
-                     {a.n, a.outSpatial[0], a.dilation[1], chunks, trackLen});
     const auto partialElems = pack_features::checkedProduct({a.groups, problem.taps, kg, cg});
+    int64_t gridX = 0;
+    int64_t gridY = 1;
+    int64_t gridZ = 1;
+    int64_t chunks = 0;
+    int64_t trackLen = 0;
+    int64_t splits = 0;
+    int64_t stepsPerSplit = 0;
+    std::optional<int64_t> steps;
+    DirectPlan plan;
+    if(direct)
+    {
+        // Loop 5: a persistent grid over (tile, item) units; steps are a tile's items and
+        // stepsPerSplit the items (walk 0) or units (walk 1) of a piece.
+        chunks = divUp(a.outSpatial[2], 32);
+        const auto tiles = pack_features::checkedProduct(
+            {a.groups, a.filter[0], divUp(cg, config.bc), divUp(kg, config.bk)});
+        if(!tiles.has_value() || !partialElems.has_value())
+        {
+            return std::nullopt;
+        }
+        plan = directPlanFor(*tiles,
+                             a.n * a.outSpatial[0],
+                             a.inSpatial[1],
+                             chunks,
+                             a.filter[1],
+                             *partialElems * int64_t{sizeof(float)},
+                             units,
+                             config.bc * config.bk * config.s * config.fr * 32);
+        const auto unitsOfWork = pack_features::checkedProduct({*tiles, plan.items});
+        if(!unitsOfWork.has_value() || plan.items > INT_LIMIT)
+        {
+            return std::nullopt;
+        }
+        gridX = plan.grid;
+        splits = plan.splits;
+        steps = plan.items;
+        stepsPerSplit = plan.per;
+    }
+    else
+    {
+        gridX = divUp(kg, config.bk) * divUp(cg, config.bc);
+        const int64_t frows = a.filter[0] * a.filter[1];
+        gridY = a.groups * (rows ? divUp(frows, config.fr) : a.filter[0]);
+        chunks = divUp(a.outSpatial[2], config.bq);
+        trackLen = divUp(a.outSpatial[1], a.dilation[1]) + a.filter[1] - 1;
+        steps = rows
+                    ? pack_features::checkedProduct({a.n, a.outSpatial[0], a.outSpatial[1], chunks})
+                    : pack_features::checkedProduct(
+                          {a.n, a.outSpatial[0], a.dilation[1], chunks, trackLen});
+    }
     if(gridX < 1 || gridX > INT_LIMIT || gridY < 1 || gridY > MAX_GRID_YZ || !steps.has_value()
        || *steps < 1 || !partialElems.has_value() || trackLen > INT_LIMIT || chunks > INT_LIMIT)
     {
         return std::nullopt;
     }
-    const int64_t wanted = splitsWanted(gridX * gridY, config.bpu, *steps, *partialElems, units);
-    const int64_t stepsPerSplit = divUp(*steps, wanted);
-    const int64_t splits = divUp(*steps, stepsPerSplit);
+    if(!direct)
+    {
+        const int64_t wanted
+            = splitsWanted(gridX * gridY, config.bpu, *steps, *partialElems, units);
+        stepsPerSplit = divUp(*steps, wanted);
+        splits = divUp(*steps, stepsPerSplit);
+        gridZ = splits;
+    }
     const auto workspace
         = pack_features::checkedProduct({splits, *partialElems, int64_t{sizeof(float)}});
     const int64_t quads = a.groups * problem.taps * kg * divUp(cg, 4);
     const int64_t reduceGrid = divUp(quads, REDUCE_QUADS_PER_BLOCK);
-    if(splits > MAX_GRID_YZ || !workspace.has_value() || reduceGrid > INT_LIMIT
-       || (config.xcd != 0 && gridX * gridY * splits > UINT_LIMIT))
+    if(splits > MAX_GRID_YZ || !workspace.has_value()
+       || (direct && *workspace > MAX_WORKSPACE_BYTES) || reduceGrid > INT_LIMIT
+       || (config.xcd != 0 && gridX * gridY * gridZ > UINT_LIMIT))
     {
         return std::nullopt;
     }
@@ -532,7 +700,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     WrwLaunch launch;
     launch.gridX = static_cast<unsigned int>(gridX);
     launch.gridY = static_cast<unsigned int>(gridY);
-    launch.gridZ = static_cast<unsigned int>(splits);
+    launch.gridZ = static_cast<unsigned int>(gridZ);
     launch.block = static_cast<unsigned int>(threads);
     launch.reduceGrid = static_cast<unsigned int>(reduceGrid);
     launch.kernelType = info->kernelType;
@@ -564,7 +732,10 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     k3.splits = static_cast<int>(splits);
     k3.steps = *steps;
     k3.stepsPerSplit = stepsPerSplit;
-    k3.trackLen = rows ? 0 : static_cast<int>(trackLen);
+    k3.trackLen = rows || direct ? 0 : static_cast<int>(trackLen);
+    k3.segs = direct ? static_cast<int>(plan.segs) : 0;
+    k3.segRows = direct ? static_cast<int>(plan.segRows) : 0;
+    k3.walk = direct ? static_cast<int>(plan.walk) : 0;
     const bool channelsLast = !cf;
     packedStrides({a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]}, channelsLast, k3.xs);
     packedStrides(
@@ -613,7 +784,7 @@ std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects:
     {
         defines.emplace_back("CONV_K3_ATOM", std::string(kernelType));
     }
-    const std::array<std::pair<const char*, int64_t>, 17> fields{{{"LOOP", config.loop},
+    const std::array<std::pair<const char*, int64_t>, 18> fields{{{"LOOP", config.loop},
                                                                   {"LAYOUT", config.layout},
                                                                   {"BK", config.bk},
                                                                   {"BC", config.bc},
@@ -629,7 +800,8 @@ std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects:
                                                                   {"VEC", config.vec},
                                                                   {"XCD", config.xcd},
                                                                   {"ALIGN", config.align},
-                                                                  {"NS", config.ns}}};
+                                                                  {"NS", config.ns},
+                                                                  {"WQ", config.wq}}};
     for(const auto& [name, value] : fields)
     {
         defines.emplace_back(std::string("CONV_K3_") + name, std::to_string(value));

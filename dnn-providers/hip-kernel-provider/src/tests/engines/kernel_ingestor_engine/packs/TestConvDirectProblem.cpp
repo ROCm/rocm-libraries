@@ -3,6 +3,7 @@
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_CONV)
 
+#include <array>
 #include <functional>
 #include <string>
 #include <vector>
@@ -362,7 +363,29 @@ struct ConfigFields
     int64_t bm = 128, bn = 64, bc = 32, wm = 2, wn = 2, vec = 8;
     int64_t ring = 1, bl = 0, split = 0;
     int64_t tm = 0, tn = 0, nt = 0, threads = 0, pipe = 0;
+    int64_t rows = 0, pw = 0, fn = 0, wp = 0, wq = 0, wk = 0, pp = 0, epi = 0;
 };
+
+/// A gfx950 rows config: 2 x 2 x 2 waves of 8 rows x 16 columns x 64 channels, 64-channel chunks.
+ConfigFields rowsFields()
+{
+    ConfigFields f;
+    f.kind = "rows";
+    f.atom = "mfma16x32_f16";
+    f.archs = "gfx950";
+    f.bm = 16;
+    f.bn = 128;
+    f.bc = 64;
+    f.wm = f.wn = 0;
+    f.vec = 8;
+    f.ring = 0;
+    f.rows = 1;
+    f.pw = 8;
+    f.fn = 4;
+    f.wp = f.wq = f.wk = 2;
+    f.epi = 1;
+    return f;
+}
 
 ConfigFields fmaFields(int64_t vec)
 {
@@ -410,7 +433,15 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"tn", f.tn},
                        {"nt", f.nt},
                        {"threads", f.threads},
-                       {"pipe", f.pipe}};
+                       {"pipe", f.pipe},
+                       {"rows", f.rows},
+                       {"pw", f.pw},
+                       {"fn", f.fn},
+                       {"wp", f.wp},
+                       {"wq", f.wq},
+                       {"wk", f.wk},
+                       {"pp", f.pp},
+                       {"epi", f.epi}};
     return kernel;
 }
 
@@ -544,6 +575,82 @@ TEST(TestConvDirectKernelMatch, RefusesUnknownMetadata)
     EXPECT_FALSE(admits(noArchs, "gfx942"));
 }
 
+TEST(TestConvDirectKernelMatch, RowsConfigsRunOnGfx950WithWholeGranules)
+{
+    const auto f = rowsFields();
+    EXPECT_TRUE(admits(f, "gfx950:sramecc+:xnack-"));
+    EXPECT_FALSE(admits(f, "gfx942"));
+    EXPECT_FALSE(admits(f, "gfx950", baseShape(), "BFLOAT16"));
+    auto bf = f;
+    bf.atom = "mfma16x32_bf16";
+    EXPECT_TRUE(admits(bf, "gfx950", baseShape(), "BFLOAT16"));
+    auto exact = f;
+    exact.atom = "mfma16_f32";
+    exact.bc = 32;
+    exact.vec = 4;
+    exact.epi = 0;
+    EXPECT_TRUE(admits(exact, "gfx950", baseShape(), "FLOAT"));
+    // The halo moves in 16-byte granules: vec must be 16 bytes of the operand.
+    auto narrow = f;
+    narrow.vec = 4;
+    EXPECT_FALSE(admits(narrow, "gfx950"));
+    auto odd = baseShape();
+    odd.c = 12;
+    EXPECT_FALSE(admits(f, "gfx950", odd));
+    // 2-D only.
+    EXPECT_FALSE(admits(f, "gfx950", filterShape({3, 3, 3}, {1, 1, 1})));
+}
+
+TEST(TestConvDirectKernelMatch, RowsConfigsDeclineEachMalformedField)
+{
+    ASSERT_TRUE(admits(rowsFields(), "gfx950"));
+    const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
+        {"rows knob off", [](ConfigFields& f) { f.rows = 0; }},
+        {"pw", [](ConfigFields& f) { f.pw = 0; }},
+        {"fn", [](ConfigFields& f) { f.fn = 0; }},
+        {"wp", [](ConfigFields& f) { f.wp = 0; }},
+        {"wq", [](ConfigFields& f) { f.wq = 0; }},
+        {"wk", [](ConfigFields& f) { f.wk = 0; }},
+        {"pp", [](ConfigFields& f) { f.pp = 2; }},
+        {"pp without two halves",
+         [](ConfigFields& f) {
+             f.pp = 1;
+             f.wk = 1;
+             f.bn = 64;
+         }},
+        {"epi", [](ConfigFields& f) { f.epi = 2; }},
+        {"kd", [](ConfigFields& f) { f.kd = 3; }},
+        {"ring", [](ConfigFields& f) { f.ring = 1; }},
+        {"bl", [](ConfigFields& f) { f.bl = 1; }},
+        {"split", [](ConfigFields& f) { f.split = 1; }},
+        {"wm", [](ConfigFields& f) { f.wm = 2; }},
+        {"wn", [](ConfigFields& f) { f.wn = 2; }},
+        {"bm", [](ConfigFields& f) { f.bm = 128; }},
+        {"bn", [](ConfigFields& f) { f.bn = 64; }},
+    };
+    for(const auto& [name, mutate] : mutations)
+    {
+        auto f = rowsFields();
+        mutate(f);
+        EXPECT_FALSE(admits(f, "gfx950")) << name;
+    }
+    // The rows knobs belong to rows configs only.
+    for(int field = 0; field < 7; ++field)
+    {
+        ConfigFields mma;
+        mma.atom = "mfma16x32_f16";
+        mma.archs = "gfx950";
+        ASSERT_TRUE(admits(mma, "gfx950"));
+        std::array<int64_t*, 7> knobs{
+            &mma.pw, &mma.fn, &mma.wp, &mma.wq, &mma.wk, &mma.pp, &mma.epi};
+        *knobs[static_cast<size_t>(field)] = 1;
+        EXPECT_FALSE(admits(mma, "gfx950")) << "rows knob " << field << " on an mma config";
+    }
+    ConfigFields rowsKnobOnMma;
+    rowsKnobOnMma.rows = 1;
+    EXPECT_FALSE(admits(rowsKnobOnMma, "gfx942"));
+}
+
 TEST(TestConvDirectShips, GroupsNameArchitecturesAndFamilies)
 {
     EXPECT_TRUE(conv_direct::shipsTo("any", "gfx906"));
@@ -660,6 +767,39 @@ TEST(TestConvDirectPlan, RingConfigsSplitDepthNoFinerThanTheFilter)
     const auto planNr = planOf(shape, stream, "HALF", 304);
     ASSERT_TRUE(planNr.has_value());
     EXPECT_EQ(planNr->args.ds, 1);
+}
+
+TEST(TestConvDirectPlan, RowsTilesAreFixedAndTheGridIsOneBlockPerUnitAtMost)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.c = 72;
+    shape.k = 136;
+    shape.input = {40, 70};
+    const auto plan = planOf(shape, rowsFields(), "HALF", 256);
+    ASSERT_TRUE(plan.has_value());
+    const auto& a = plan->args;
+    EXPECT_EQ(a.th, 16);
+    EXPECT_EQ(a.tw, 32);
+    EXPECT_EQ(a.tilesH, 3);
+    EXPECT_EQ(a.tilesW, 3);
+    // K 136 -> two 128-column blocks; C 72 -> two 64-channel chunks of 32-wide slices.
+    EXPECT_EQ(a.kpad, 256);
+    EXPECT_EQ(plan->cpad, 128);
+    EXPECT_EQ(a.ca, 128 / 32);
+    const unsigned tiles = 3 * 3 * static_cast<unsigned>(shape.n) * 2;
+    EXPECT_EQ(plan->grid[0], tiles);
+    EXPECT_EQ(plan->grid[1], 1u);
+    EXPECT_EQ(plan->grid[2], 1u);
+    const auto few = planOf(shape, rowsFields(), "HALF", 8);
+    ASSERT_TRUE(few.has_value());
+    EXPECT_EQ(few->grid[0], 8u);
+    // One input image past the 32-bit buffer offsets.
+    auto huge = shape;
+    huge.input = {4096, 4096};
+    huge.c = 128;
+    EXPECT_FALSE(planOf(huge, rowsFields(), "HALF", 256).has_value());
 }
 
 TEST(TestConvDirectPlan, ADeviceWithoutUnitsIsDeclined)

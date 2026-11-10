@@ -45,7 +45,8 @@
  * Every config of the installed catalog that the kernel match admits on this device runs on
  * every case, in fp32, fp16 and bf16 (matrix-core loops, gfx950's DMA ring and transpose reads,
  * the fp32 FMA ring wherever widths are whole vectors, and the fp32 FMA output rows for any
- * stride and any width): channels-first and channels-last, 1-D, 2-D and 3-D,
+ * stride and any width, and gfx950's direct loop on 16-bit channels-last unit-stride cases):
+ * channels-first and channels-last, 1-D, 2-D and 3-D,
  * groups, stride 2, dilation (2, 3 along the width, 12 for the deeplab rows), padding below, at
  * and past the filter, odd channel counts and partial tiles, both dw layouts under either
  * activation layout, and true convolution. Each compiled config's static LDS is checked against
@@ -97,9 +98,14 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
             roots.push_back(dir / "lib" / "hipdnn_plugins" / "engines"
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
-        // One pack per dtype, all in the first root that has any.
-        const std::array<std::string, 3> files{
-            "conv_wrw_f32.kdp.json", "conv_wrw_f16.kdp.json", "conv_wrw_bf16.kdp.json"};
+        // Packs per dtype and kernel family (conv_wrw_<dtype>_<family>.kdp.json), all in the
+        // first root that has any.
+        const auto isPack = [](const std::string& name) {
+            const std::string prefix = "conv_wrw_", suffix = ".kdp.json";
+            return name.size() > prefix.size() + suffix.size()
+                   && name.compare(0, prefix.size(), prefix) == 0
+                   && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+        };
         std::vector<std::filesystem::path> found;
         for(const auto& root : roots)
         {
@@ -108,8 +114,7 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
                 !error && it != std::filesystem::recursive_directory_iterator();
                 it.increment(error))
             {
-                if(std::find(files.begin(), files.end(), it->path().filename().string())
-                   != files.end())
+                if(isPack(it->path().filename().string()))
                 {
                     found.push_back(it->path());
                 }
@@ -119,10 +124,17 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
                 break;
             }
         }
-        if(found.size() != files.size())
+        std::sort(found.begin(), found.end());
+        // Every dtype ships packs; each dtype's prefix must be present.
+        for(const char* dtype : {"conv_wrw_f32_", "conv_wrw_f16_", "conv_wrw_bf16_"})
         {
-            throw std::runtime_error("not every conv_wrw_*.kdp.json beside the provider or this "
-                                     "test binary");
+            if(std::none_of(found.begin(), found.end(), [&](const std::filesystem::path& path) {
+                   return path.filename().string().rfind(dtype, 0) == 0;
+               }))
+            {
+                throw std::runtime_error(std::string("no ") + dtype
+                                         + "*.kdp.json beside the provider or this test binary");
+            }
         }
         std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
         for(const auto& path : found)
@@ -181,6 +193,7 @@ conv_wrw::WrwConfig configOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition
     c.xcd = kernel.getIntMetadata("xcd");
     c.align = kernel.getIntMetadata("align");
     c.ns = kernel.getIntMetadata("ns");
+    c.wq = kernel.getIntMetadata("wq");
     return c;
 }
 
@@ -312,12 +325,27 @@ std::vector<DeviceCase> deviceCases()
         {"Nchw3x3", conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})},
         {"Nchw3x3Aligned", conv(16, 32, {9, 16}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})},
         {"Nhwc3x3", conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)},
+        {"Nhwc3x3Wide", conv(64, 96, {21, 70}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)},
+        // Output channels that are not whole vectors (dy units at any element), images whose
+        // last dy element ends mid-dword.
+        {"Nhwc3x3ThreeOutputChannels",
+         conv(32, 3, {21, 45}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)},
+        {"Nhwc1x1FiveOutputChannels",
+         conv(16, 5, {13, 37}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, true, 1, 3)},
+        {"ThreeDNhwc3x3x3",
+         conv(16, 32, {4, 6, 40}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true)},
         {"GroupedNchw3x3", conv(48, 32, {7, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 2)},
         {"GroupedNhwc3x3", conv(24, 48, {7, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true, 3)},
         {"ThreeD3x3x3",
          conv(8, 16, {4, 6, 7}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1})},
         {"OneD1x7", conv(16, 24, {50}, {7}, {3}, {3}, {1}, {1})},
         {"OneD1x7Nhwc", conv(16, 24, {50}, {7}, {3}, {3}, {1}, {1}, true)},
+        {"OneD1x3Dilation5", conv(32, 64, {150}, {3}, {5}, {5}, {1}, {5})},
+        {"OneD1x4", conv(32, 48, {90}, {4}, {0}, {0}, {1}, {1})},
+        {"ThreeD2x2x2Stride2",
+         conv(8, 16, {6, 8, 10}, {2, 2, 2}, {0, 0, 0}, {0, 0, 0}, {2, 2, 2}, {1, 1, 1})},
+        {"Deeplab3x3Dilation36",
+         conv(16, 16, {76, 76}, {3, 3}, {36, 36}, {36, 36}, {1, 1}, {36, 36}, false, 1, 1)},
         {"Wide1x11Dilation3", conv(16, 16, {3, 40}, {1, 11}, {0, 15}, {0, 15}, {1, 1}, {1, 3})},
         {"Dilation2", conv(16, 24, {11, 13}, {3, 3}, {2, 2}, {2, 2}, {1, 1}, {2, 2})},
         {"Deeplab3x3Dilation12",
@@ -466,9 +494,10 @@ void runCase(const DeviceCase& deviceCase)
             // The declared LDS is the host's; the kernel never takes more than the device has.
             EXPECT_GE(compiled, host);
             EXPECT_LE(compiled, conv_wrw::ldsLimitOf(device.gcnArchName));
-            if(config.loop == conv_wrw::LOOP_RING_DMA)
+            if(config.loop == conv_wrw::LOOP_RING_DMA || config.loop == conv_wrw::LOOP_DIRECT)
             {
-                // The unused stages are one-element arrays, which may or may not be allocated.
+                // The unused stages / ring slots are one-element arrays, which may or may not be
+                // allocated.
                 EXPECT_LE(compiled, host + 32);
             }
             else
@@ -557,25 +586,9 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 19> KNOBS{"atom_id",
-                                                       "loop",
-                                                       "layout",
-                                                       "bk",
-                                                       "bc",
-                                                       "bq",
-                                                       "fr",
-                                                       "s",
-                                                       "sw",
-                                                       "dw",
-                                                       "wk",
-                                                       "wc",
-                                                       "tk",
-                                                       "tc",
-                                                       "vec",
-                                                       "xcd",
-                                                       "align",
-                                                       "ns",
-                                                       "bpu"};
+    static constexpr std::array<const char*, 20> KNOBS{
+        "atom_id", "loop", "layout", "bk", "bc",  "bq",  "fr",    "s",  "sw",  "dw",
+        "wk",      "wc",   "tk",     "tc", "vec", "xcd", "align", "ns", "bpu", "wq"};
     std::set<std::vector<int64_t>> seen[3];
     for(const auto& kernel : catalog())
     {
@@ -614,6 +627,7 @@ TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures
         for(const char* arch : ARCHS)
         {
             const bool gfx950Only = config.loop == conv_wrw::LOOP_RING_DMA
+                                    || config.loop == conv_wrw::LOOP_DIRECT
                                     || config.layout == conv_wrw::LAYOUT_CHANNELS_LAST_TR;
             if(!conv_igemm::atomRunsOn(config.atom, arch)
                || (gfx950Only && std::string(arch) != "gfx950"))
@@ -627,7 +641,7 @@ TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures
         EXPECT_GT(archs, 0) << "a config no architecture runs";
         loops.insert(config.loop);
     }
-    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4}));
+    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4, 5}));
 }
 
 } // namespace

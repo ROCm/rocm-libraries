@@ -318,6 +318,12 @@ std::vector<DeviceCase> deviceCases()
     // over 3 rows (one output row) and the 3-D whole-filter window.
     cases.push_back({"Nhwc3x3OutputOneHigh", dense(24, 40, {3, 11}, {3, 3}, {0, 0}, true)});
     cases.push_back({"Ndhwc3x3x3OutputOne", dense(16, 24, {3, 3, 3}, {3, 3, 3}, {0, 0, 0}, true)});
+    // More tiles than a 256-CU device runs at once: the rows kernel's blocks walk several tiles,
+    // prefetching the next tile's first chunk; 136 channels make an odd chunk count (the walk
+    // alternates its starting stage) and 8 a single chunk.
+    auto manyTiles = dense(136, 8, {160, 160}, {3, 3}, {1, 1}, true);
+    manyTiles.n = 6;
+    cases.push_back({"Nhwc3x3ManyTiles", manyTiles});
     return cases;
 }
 

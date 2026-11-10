@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "718fc640-7df9-5cbb-ac76-844a537d9858",
+  "name": "kernel dtype, channel bound, filter, stride, dilation, atom (device, ship list) match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_smallc.kernel_match"
+}

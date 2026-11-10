@@ -90,6 +90,10 @@
     {
       "name": "bpu",
       "type": "int"
+    },
+    {
+      "name": "wq",
+      "type": "int"
     }
   ]
 }

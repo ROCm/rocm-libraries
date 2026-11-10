@@ -89,6 +89,50 @@ __device__ inline void k3Load(Raw& v, k3i4 rsrc, unsigned offset)
         K1_RSRC_FLAGS);
     v = k1BufferLoad<Raw>(r, offset);
 }
+/// Loads (per k3UaLoads) of one 16-byte unit at any element offset (align 2: channels-last
+/// units of channel counts that are not whole vectors): dwords one by one, so each is bounds
+/// checked alone (a unit reaching past the buffer keeps its in-range channels), 16-bit units at
+/// an odd element shifted into place. A dword is checked whole, so a buffer ending mid-dword
+/// (16-bit, an odd element count) would drop its last element: a 2-byte load fetches it.
+template <class T>
+constexpr int k3UaLoads()
+{
+    return sizeof(T) == 2 ? 6 : 4;
+}
+template <class T, class Raw>
+__device__ inline void k3LoadUa(Raw& v, k3i4 rsrc, unsigned offset)
+{
+    static_assert(sizeof(Raw) == 16, "K3 unaligned units are 16 bytes");
+    constexpr int N = sizeof(T) == 2 ? 5 : 4;
+    const bool out = offset == K1_OUT_OF_RANGE;
+    const unsigned base = offset & ~3u;
+    unsigned d[N];
+#pragma unroll
+    for(int i = 0; i < N; ++i)
+        k3Load(d[i], rsrc, out ? K1_OUT_OF_RANGE : base + 4u * i);
+    unsigned w[4];
+    if constexpr(N == 5)
+    {
+        const unsigned rec = static_cast<unsigned>(rsrc[2]);
+        const bool half = (rec & 2u) != 0;
+        unsigned short tail;
+        k3Load(tail, rsrc, out || !half ? K1_OUT_OF_RANGE : rec - 2u);
+#pragma unroll
+        for(int i = 0; i < N; ++i)
+            d[i] = half && base + 4u * i == (rec & ~3u) ? static_cast<unsigned>(tail) : d[i];
+        const unsigned shift = offset & 2u;
+#pragma unroll
+        for(int i = 0; i < 4; ++i)
+            w[i] = __builtin_amdgcn_alignbyte(d[i + 1], d[i], shift);
+    }
+    else
+    {
+#pragma unroll
+        for(int i = 0; i < 4; ++i)
+            w[i] = d[i];
+    }
+    v = __builtin_bit_cast(Raw, w);
+}
 /// Element e of a loaded run (by value: indexing registers through a pointer keeps them in
 /// memory).
 template <class T, int VEC, class Raw>
@@ -294,9 +338,14 @@ struct K3Tiles
     // ALIGN 1 (channels-first, width stride 1, rows a whole number of VEC): units start at
     // multiples of VEC within the row, so each is wholly in or out of it (out: read as
     // zeros), and the store shifts the window into place with an unaligned LDS write.
-    static_assert(ALIGN == 0 || (LAYOUT == K3_NCHW && SW == 1), "K3 aligned units");
+    // ALIGN 2 (channels-last, transposed into LDS): dy units start at any element, for output
+    // channel counts that are not whole vectors; the channels a unit reads past the group land
+    // in tile rows the partials drop.
+    static_assert(ALIGN == 0 || (ALIGN == 1 && LAYOUT == K3_NCHW && SW == 1)
+                      || (ALIGN == 2 && LAYOUT == K3_NHWC && VEC * sizeof(T) == 16),
+                  "K3 aligned units");
     // Channels-first: VEC-position units over the window; each phase gets VEC / SW of a unit.
-    static constexpr int NBV = (WIN + (ALIGN ? VEC - 1 : 0) + VEC - 1) / VEC;
+    static constexpr int NBV = (WIN + (ALIGN == 1 ? VEC - 1 : 0) + VEC - 1) / VEC;
     // Phase length: the window's positions in a phase, rounded so units and words fit, plus
     // two elements of slack for the funnel-shifted fragment reads.
     static constexpr int PH_RAW = LAYOUT == K3_NCHW ? NBV * VEC / SW : (WIN + SW - 1) / SW;
@@ -307,7 +356,7 @@ struct K3Tiles
     static constexpr int LDA = TR ? k3TrPitch(BK) : BQ + SKEW;
     static constexpr int LDB = TR ? k3TrPitch(BC) : (PH + 2 + SKEW - 1) / SKEW * SKEW + SKEW;
     // ALIGN: a guard of VEC elements ahead of the x tile takes the first row's shifted spill.
-    static constexpr int A_ELEMS = (TR ? BQ : BK) * LDA + (ALIGN ? VEC : 0);
+    static constexpr int A_ELEMS = (TR ? BQ : BK) * LDA + (ALIGN == 1 ? VEC : 0);
     static constexpr int B_ELEMS = FR * SW * (TR ? PH : BC) * LDB;
     static constexpr int NJ = PH / KV;
     // Window positions the loads cover (the interior test).
@@ -320,7 +369,7 @@ struct K3Tiles
     static constexpr int A_REGS = LAYOUT == K3_NCHW ? A_PASSES : A_PASSES * KV;
     static constexpr int B_REGS = LAYOUT == K3_NCHW ? B_PASSES : B_PASSES * KV;
     /// Loads one step issues.
-    static constexpr int LOADS = A_REGS + B_REGS;
+    static constexpr int LOADS = A_REGS * (ALIGN == 2 ? k3UaLoads<T>() : 1) + B_REGS;
     static_assert(LAYOUT == K3_NHWC || (BQ % VEC == 0 && VEC % SW == 0), "K3 channels-first units");
     static_assert(LAYOUT == K3_NCHW || (BK % VEC == 0 && BC % VEC == 0 && BQ % KV == 0),
                   "K3 channels-last units");
@@ -476,7 +525,8 @@ struct K3Tiles
             s.xRow[f] = xRow[f];
             s.xOk[f] = xOk[f];
         }
-        s.edge = LAYOUT == K3_NCHW && !ALIGN && (q0 + BQ > a.wo || iw0 < 0 || iw0 + SPAN > a.wi);
+        s.edge
+            = LAYOUT == K3_NCHW && ALIGN != 1 && (q0 + BQ > a.wo || iw0 < 0 || iw0 + SPAN > a.wi);
         // ALIGN: the units start at iwA, the multiple of VEC at or below iw0.
         const int iwA = iw0 >= 0 ? iw0 / VEC * VEC : -((-iw0 + VEC - 1) / VEC) * VEC;
         s.shiftX = iwA - iw0;
@@ -487,7 +537,7 @@ struct K3Tiles
             if(LAYOUT == K3_NCHW)
             {
                 const int off = aOff[p] + yRow + q0;
-                if constexpr(ALIGN)
+                if constexpr(ALIGN == 1)
                 {
                     const bool in = ok && q0 + aPos[p] < a.wo;
                     k3Load(
@@ -507,9 +557,12 @@ struct K3Tiles
                 {
                     const bool okq = ok && q0 + aPos[p] + j < a.wo;
                     const int off = aOff[p] + yRow + q0 * ys4 + j * ys4;
-                    k3Load(s.ra[p * KV + j],
-                           yr,
-                           okq ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
+                    const unsigned at
+                        = okq ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE;
+                    if constexpr(ALIGN == 2)
+                        k3LoadUa<T>(s.ra[p * KV + j], yr, at);
+                    else
+                        k3Load(s.ra[p * KV + j], yr, at);
                 }
             }
         }
@@ -521,7 +574,7 @@ struct K3Tiles
             rowOf(p, xOk, xRow, rowOk, row);
             if(LAYOUT == K3_NCHW)
             {
-                if constexpr(ALIGN)
+                if constexpr(ALIGN == 1)
                 {
                     const int iw = iwA + bPos[p];
                     const bool in = rowOk && iw >= 0 && iw < a.wi;

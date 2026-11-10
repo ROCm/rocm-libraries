@@ -33,7 +33,10 @@ struct K3Args
     long long stepsPerSplit;
     /// Row-ring kernel: steps per track (ceil(ho / dh) + fr - 1).
     int trackLen;
-    int padding0;
+    /// Direct loop: row segments per image and rows per segment.
+    int segs;
+    int segRows;
+    int walk; ///< 0 cells (tile fastest), 1 stream (tile-major runs)
     /// Element strides: x (n, c, d, h, w), dy (n, k, d, h, w).
     long long xs[5];
     long long ys[5];

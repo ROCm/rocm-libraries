@@ -7,7 +7,8 @@
 //   CONV_K3_LOOP     0 output rows (any stride); 1 row ring (height stride 1); 2 row ring with
 //                    LDS DMA (gfx950, width stride 1); 3 row ring on FMA (exact fp32 without
 //                    an fp32 matrix core: RDNA); 4 output rows on FMA (any stride, vec 1 for
-//                    rows that are not a whole number of vectors)
+//                    rows that are not a whole number of vectors); 5 direct (ConvWrwDirect.h:
+//                    gfx950, 16-bit, unit stride and height dilation, persistent grid)
 //   CONV_K3_ATOM     K1's matrix-core atom (ConvIgemmCore.h); loops 0 to 2
 //   CONV_K3_LAYOUT   0 channels-first (N C D H W); 1 channels-last (N D H W C) transposed into
 //                    LDS; 2 channels-last kept channels-last, LDS transpose reads (gfx950, 16-bit)
@@ -19,12 +20,25 @@
 //   CONV_K3_VEC      elements per 16-byte global load
 //   CONV_K3_XCD      1: XCD-contiguous block order (gfx942, gfx950)
 //   CONV_K3_ALIGN    1: row-aligned units, unaligned LDS store (loop 1, channels-first)
-//   CONV_K3_NS       LDS stages (loop 2)
+//   CONV_K3_NS       LDS stages (loop 2); ring slots (loop 5)
+//   CONV_K3_WQ       loop 5: items side by side (waves_q; wk x wc x wq = 8 waves)
+// Loop 5 (gfx950, 16-bit, channels-last kept, ConvWrwDirect.h) also takes CONV_K3_PP and
+// CONV_K3_SWZ (default 1: the ping-pong and the swizzled rows; 0 only for ablation).
 // ConvWrwReduce, the partials' fixed-order sum, shares the source.
 
 #include "ConvWrwCore.h"
+#include "ConvWrwDirect.h"
 
-#if CONV_K3_LOOP == 3 || CONV_K3_LOOP == 4
+#ifndef CONV_K3_PP
+#define CONV_K3_PP 1
+#endif
+#ifndef CONV_K3_SWZ
+#define CONV_K3_SWZ 1
+#endif
+
+#if CONV_K3_LOOP == 5
+#define CONV_K3_THREADS 512
+#elif CONV_K3_LOOP == 3 || CONV_K3_LOOP == 4
 #define CONV_K3_THREADS ((CONV_K3_BK / CONV_K3_TK) * (CONV_K3_BC / CONV_K3_TC))
 #else
 #define CONV_K3_THREADS (CONV_K3_WK * CONV_K3_WC * CONV_K3_ATOM::WAVE)
@@ -32,7 +46,22 @@
 
 extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
 {
-#if CONV_K3_LOOP == 4
+#if CONV_K3_LOOP == 5
+    k3WrwDirect<CONV_K3_T,
+                CONV_K3_ATOM,
+                CONV_K3_BC,
+                CONV_K3_BK,
+                CONV_K3_WQ,
+                CONV_K3_BC / (16 * CONV_K3_WC),
+                CONV_K3_BK / (16 * CONV_K3_WK),
+                CONV_K3_FR,
+                CONV_K3_S,
+                CONV_K3_DW,
+                CONV_K3_NS - 1,
+                CONV_K3_PP,
+                CONV_K3_SWZ,
+                CONV_K3_XCD>(a);
+#elif CONV_K3_LOOP == 4
     k3WrwRowsFma<CONV_K3_T,
                  CONV_K3_LAYOUT,
                  CONV_K3_BK,
