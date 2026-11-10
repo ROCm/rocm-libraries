@@ -2223,7 +2223,8 @@ namespace rocisa
         std::string toString() const override
         {
             std::string kStr = instStr + " " + getArgStr();
-            kStr += " th:TH_ATOMIC_RETURN";
+            // Returning atomic: the gfx12 temporal hint, or glc before it.
+            kStr += capOrDefault(getAsmCaps(), "HasTHModifier") ? " th:TH_ATOMIC_RETURN" : " glc";
             if(flat)
                 kStr += flat->toString();
             kStr = formatWithComment(kStr);
@@ -2337,12 +2338,13 @@ namespace rocisa
         std::string toString() const override
         {
             // SADDR returning atomic: "global_atomic_inc_u32 vdst, vaddr, vsrc, saddr".
-            // th:TH_ATOMIC_RETURN is emitted unconditionally; scope: (when the ISA caps
-            // allow) is rendered first to match StinkyTofu's canonical order.
+            // scope: (when the ISA caps allow) is rendered before the return hint to
+            // match StinkyTofu's canonical order.
             std::string kStr = instStr + " " + getArgStr();
             if(modifier)
                 kStr += modifier->toString();
-            kStr += " th:TH_ATOMIC_RETURN";
+            // Returning atomic: the gfx12 temporal hint, or glc before it.
+            kStr += capOrDefault(getAsmCaps(), "HasTHModifier") ? " th:TH_ATOMIC_RETURN" : " glc";
             kStr = formatWithComment(kStr);
             setMsb(kStr, {vaddr, srcData, saddr}, dst);
             return kStr;
