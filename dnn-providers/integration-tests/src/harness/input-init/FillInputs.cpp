@@ -418,8 +418,8 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
     recipes.setDefault(a->dropout_scale_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
     recipes.setDefault(a->dropout_scale_inv_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
 
-    // Overwritten by fillInputs() with the forward of Q, K and V. The fill stands only
-    // where the CPU forward rejects the shapes, and the backward reference fails those.
+    // Overwritten by fillInputs() with the forward of Q, K and V; a node whose forward
+    // cannot be derived is unsupported, so this fill is never verified against.
     recipes.setDefault(a->o_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
     recipes.setDefault(a->stats_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
 }

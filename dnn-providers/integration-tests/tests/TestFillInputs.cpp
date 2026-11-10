@@ -22,6 +22,7 @@
 
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
+#include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -31,9 +32,11 @@
 #include "SdpaFwdGraphTestUtils.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/input-init/FillInputs.hpp"
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -334,7 +337,8 @@ GraphResult buildSdpaFwdWithSeqLenQGraph()
 }
 
 // ── SDPA backward standalone ────────────────────────────────────────────────
-// O and stats are leaf inputs (not virtual) — filled as free(0, 1)
+// O and stats are leaf inputs (not virtual); every tensor has the generic test shape,
+// which no SDPA forward takes.
 
 GraphResult buildSdpaBwdStandaloneGraph()
 {
@@ -680,7 +684,8 @@ hipdnn_data_sdk::utilities::TensorBase<T>& typedTensor(InputTensorMap& inputs, i
 
 // ── SDPA backward at attention shapes ───────────────────────────────────────
 // Q, O, dO, dQ [1, 2, 4, 8]; K, V, dK, dV [1, 2, 6, 8]. uids: q=1, k=2, v=3, o=4,
-// do=5, stats=6, dq=7, dk=8, dv=9, runtime scale=10, additive mask=11.
+// do=5, stats=6, dq=7, dk=8, dv=9, runtime scale=10, additive mask=11, seq_len_q=12,
+// seq_len_kv=13, dropout mask=14, dropout scale=15.
 
 constexpr int64_t kSdpaHeads = 2;
 constexpr int64_t kSdpaSeqQ = 4;
@@ -696,6 +701,9 @@ struct SdpaBwdOptions
     bool causal = false;
     bool attnMask = false;
     std::optional<float> dropoutProbability;
+    bool alibi = false;
+    bool padding = false; // padding_mask with seq_len_q and seq_len_kv
+    bool dropoutMask = false; // explicit dropout mask and scale
 };
 
 GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
@@ -746,6 +754,23 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
         tensors.push_back(
             CreateTensorAttributesDirect(b, 11, "mask", DataType::FLOAT, &maskStrides, &maskDims));
     }
+    const std::vector<int64_t> lenDims = {1, 1, 1, 1};
+    if(opts.padding)
+    {
+        tensors.push_back(
+            CreateTensorAttributesDirect(b, 12, "seq_len_q", DataType::INT32, &lenDims, &lenDims));
+        tensors.push_back(
+            CreateTensorAttributesDirect(b, 13, "seq_len_kv", DataType::INT32, &lenDims, &lenDims));
+    }
+    const std::vector<int64_t> dropDims = {1, kSdpaHeads, kSdpaSeqQ, kSdpaSeqKv};
+    const auto dropStrides = generateStrides(dropDims);
+    if(opts.dropoutMask)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 14, "dropout_mask", DataType::FLOAT, &dropStrides, &dropDims));
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 15, "dropout_scale", DataType::FLOAT, &scalarDims, &scalarDims));
+    }
 
     SdpaBackwardAttributesBuilder attrs(b);
     attrs.add_q_tensor_uid(1);
@@ -776,6 +801,21 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
     if(opts.dropoutProbability.has_value())
     {
         attrs.add_dropout_probability(*opts.dropoutProbability);
+    }
+    if(opts.alibi)
+    {
+        attrs.add_alibi_mask(true);
+    }
+    if(opts.padding)
+    {
+        attrs.add_padding_mask(true);
+        attrs.add_seq_len_q_tensor_uid(12);
+        attrs.add_seq_len_kv_tensor_uid(13);
+    }
+    if(opts.dropoutMask)
+    {
+        attrs.add_dropout_mask_tensor_uid(14);
+        attrs.add_dropout_scale_tensor_uid(15);
     }
     auto bwd = attrs.Finish();
 
@@ -871,12 +911,68 @@ void expectOAndStatsAreForwardOfQkv(
     }
 }
 
-void expectAllEqual(hipdnn_data_sdk::utilities::ITensor& tensor, float value)
+// Runs the CPU forward reference directly on the filled float Q, K and V under the
+// node's attributes (scale, band, ALiBi, sequence lengths, explicit dropout) and
+// expects the derived O and stats to match it.
+void expectMatchesDirectForward(const GraphResult& gr, InputTensorMap& inputs, float tolerance)
 {
-    const auto* data = static_cast<const float*>(tensor.rawHostData());
-    for(size_t i = 0; i < tensor.elementCount(); ++i)
+    using hipdnn_data_sdk::utilities::generateStrides;
+    using hipdnn_data_sdk::utilities::ShallowTensor;
+    const auto& a = *gr.node(0).attributes_as_SdpaBackwardAttributes();
+    const auto view = [&inputs](int64_t uid) {
+        auto& t = *inputs.at(uid);
+        return ShallowTensor<float>(t.rawHostData(), t.dims(), t.strides());
+    };
+    const auto q = view(1);
+    const auto k = view(2);
+    const auto v = view(3);
+    const std::vector<int64_t> oDims = {1, kSdpaHeads, kSdpaSeqQ, kSdpaHeadDim};
+    const std::vector<int64_t> lseDims = {1, kSdpaHeads, kSdpaSeqQ, 1};
+    std::vector<float> oRef(static_cast<size_t>(kSdpaHeads * kSdpaSeqQ * kSdpaHeadDim));
+    std::vector<float> lseRef(static_cast<size_t>(kSdpaHeads * kSdpaSeqQ));
+    ShallowTensor<float> oView(oRef.data(), oDims, generateStrides(oDims));
+    ShallowTensor<float> lseView(lseRef.data(), lseDims, generateStrides(lseDims));
+
+    const auto band = extractDiagonalBandParams(a, "test");
+    hipdnn_test_sdk::utilities::SdpaFwdOptions<float> opts;
+    opts.setScale(a.attn_scale_value())
+        .setBand(band.leftBound, band.rightBound, band.topLeftAlignment)
+        .setAlibi(a.alibi_mask())
+        .setLse(&lseView);
+    std::optional<ShallowTensor<int32_t>> seqQ;
+    std::optional<ShallowTensor<int32_t>> seqKv;
+    if(a.seq_len_q_tensor_uid().has_value())
     {
-        ASSERT_EQ(data[i], value) << "element " << i;
+        auto& sq = *inputs.at(12);
+        auto& skv = *inputs.at(13);
+        seqQ.emplace(sq.rawHostData(), sq.dims(), sq.strides());
+        seqKv.emplace(skv.rawHostData(), skv.dims(), skv.strides());
+        opts.setSeqLens(&*seqQ, &*seqKv);
+    }
+    std::optional<ShallowTensor<float>> dropMask;
+    if(a.dropout_mask_tensor_uid().has_value())
+    {
+        dropMask.emplace(view(14));
+        opts.setDropout(&*dropMask, scalarValue(inputs, 15));
+    }
+    hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::forward<float, float, float, float>(
+        q, k, v, oView, opts);
+
+    const auto* o = static_cast<const float*>(inputs.at(4)->rawHostData());
+    const auto* lse = static_cast<const float*>(inputs.at(6)->rawHostData());
+    for(size_t i = 0; i < oRef.size(); ++i)
+    {
+        ASSERT_NEAR(o[i], oRef[i], tolerance) << "O element " << i;
+    }
+    for(size_t i = 0; i < lseRef.size(); ++i)
+    {
+        // A padded row's LSE is -inf in both.
+        if(std::isinf(lseRef[i]))
+        {
+            ASSERT_EQ(lse[i], lseRef[i]) << "stats element " << i;
+            continue;
+        }
+        ASSERT_NEAR(lse[i], lseRef[i], tolerance) << "stats element " << i;
     }
 }
 
@@ -965,12 +1061,15 @@ TEST(TestFillInputs, SdpaFwdWithSeqLenQFills)
     EXPECT_TRUE(result.filled) << result.reason;
 }
 
-TEST(TestFillInputs, SdpaBwdStandaloneFills)
+// O and stats whose forward the references reject are refused with the reason, not
+// left as filled: a fill no forward produced would make the backward meaningless.
+TEST(TestFillInputs, SdpaBwdWhoseForwardIsRejectedIsRefused)
 {
     const auto gr = buildSdpaBwdStandaloneGraph();
     const auto result = runFill(gr, {7, 8, 9});
 
-    EXPECT_TRUE(result.filled) << result.reason;
+    EXPECT_FALSE(result.filled);
+    EXPECT_NE(result.reason.find("cannot derive O and stats"), std::string::npos) << result.reason;
 }
 
 TEST(TestFillInputs, SdpaFwdBwdFusedSucceeds)
@@ -1062,18 +1161,60 @@ TEST(TestFillInputs, SdpaBwdWithComputedQIsRefused)
     EXPECT_NE(result.reason.find("Q is computed by the graph"), std::string::npos) << result.reason;
 }
 
-// The CPU reference takes the LSE only as [B, H, Sq, 1]. Rank-3 stats are left as
-// filled rather than refused: the backward reference rejects the graph with the
-// same check and fails it, which a skip at fill time would hide.
-TEST(TestFillInputs, SdpaBwdWithRank3StatsKeepsFilledOAndStats)
+// Rank-3 stats are derived through their [B, H, Sq, 1] view, the shape the forward
+// references write, over the same memory.
+TEST(TestFillInputs, SdpaBwdWithRank3StatsIsDerived)
 {
     SdpaBwdOptions opts;
     opts.rank3Stats = true;
     const auto gr = buildSdpaBwdGraph(opts);
     auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
 
-    expectAllEqual(*inputs.at(4), 0.5f);
-    expectAllEqual(*inputs.at(6), 0.5f);
+    expectOAndStatsAreForwardOfQkv<float>(inputs, 1.0f, /*causal=*/false, /*oTolerance=*/1e-5f);
+}
+
+// ALiBi (with top-left causal, the band the references take it with) enters the
+// forward graph and so the derived O and stats.
+TEST(TestFillInputs, SdpaBwdDerivationAddsAlibi)
+{
+    SdpaBwdOptions opts;
+    opts.alibi = true;
+    opts.causal = true;
+    opts.attnScale = 0.35f;
+    const auto gr = buildSdpaBwdGraph(opts);
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
+
+    expectMatchesDirectForward(gr, inputs, 1e-6f);
+}
+
+// Padding: the rows past seq_len_q and the keys past seq_len_kv leave the forward.
+TEST(TestFillInputs, SdpaBwdDerivationAppliesThePadding)
+{
+    SdpaBwdOptions opts;
+    opts.padding = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    InputFillRecipes recipes;
+    recipes.set(12, FillRecipe::values(std::vector<int64_t>{kSdpaSeqQ - 1}, /*repeat=*/false));
+    recipes.set(13, FillRecipe::values(std::vector<int64_t>{kSdpaSeqKv - 1}, /*repeat=*/false));
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, recipes);
+
+    expectMatchesDirectForward(gr, inputs, 1e-6f);
+}
+
+// An explicit dropout mask and scale enter the forward; a dropout probability next to
+// the mask is the mask's, not a Philox draw.
+TEST(TestFillInputs, SdpaBwdDerivationAppliesTheExplicitDropoutMask)
+{
+    SdpaBwdOptions opts;
+    opts.dropoutMask = true;
+    opts.dropoutProbability = 0.5f;
+    const auto gr = buildSdpaBwdGraph(opts);
+    InputFillRecipes recipes;
+    recipes.set(14, FillRecipe::values(std::vector<int64_t>{1, 0, 1, 1, 0}));
+    recipes.set(15, FillRecipe::fixed(2.0f));
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, recipes);
+
+    expectMatchesDirectForward(gr, inputs, 1e-6f);
 }
 
 // With a device filler the forward runs on the device: O and stats come back current
@@ -1118,9 +1259,7 @@ TEST(TestGpuFillInputs, SdpaBwdDerivationOnTheDeviceAddsTheAttnMaskAndRuntimeSca
                                           static_cast<const float*>(inputs.at(11)->rawHostData()));
 }
 
-// Stats the GPU forward does not write ([B, H, Sq] here) take the CPU forward, which
-// leaves them as filled, as without a device.
-TEST(TestGpuFillInputs, SdpaBwdWithRank3StatsKeepsFilledOAndStatsOnTheDevice)
+TEST(TestGpuFillInputs, SdpaBwdWithRank3StatsIsDerivedOnTheDevice)
 {
     SKIP_IF_NO_DEVICES();
     SdpaBwdOptions opts;
@@ -1129,8 +1268,25 @@ TEST(TestGpuFillInputs, SdpaBwdWithRank3StatsKeepsFilledOAndStatsOnTheDevice)
     DeviceInputFiller device;
     auto inputs = fillSdpaBwdWithFixedOAndStats(gr, {}, &device);
 
-    expectAllEqual(*inputs.at(4), 0.5f);
-    expectAllEqual(*inputs.at(6), 0.5f);
+    using hipdnn_data_sdk::utilities::MemoryLocation;
+    EXPECT_EQ(typedTensor<float>(inputs, 6).memory().location(), MemoryLocation::BOTH);
+    expectOAndStatsAreForwardOfQkv<float>(inputs, 1.0f, /*causal=*/false, /*oTolerance=*/1e-5f);
+}
+
+TEST(TestGpuFillInputs, SdpaBwdDerivationOnTheDeviceAddsAlibi)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaBwdOptions opts;
+    opts.alibi = true;
+    opts.causal = true;
+    opts.attnScale = 0.35f;
+    const auto gr = buildSdpaBwdGraph(opts);
+    DeviceInputFiller device;
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, {}, &device);
+
+    using hipdnn_data_sdk::utilities::MemoryLocation;
+    EXPECT_EQ(typedTensor<float>(inputs, 4).memory().location(), MemoryLocation::BOTH);
+    expectMatchesDirectForward(gr, inputs, 1e-5f);
 }
 
 // An op missing from applyDefaultFills() makes fillInputs() refuse the whole

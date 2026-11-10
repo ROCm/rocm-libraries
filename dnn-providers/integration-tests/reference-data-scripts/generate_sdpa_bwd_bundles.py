@@ -725,8 +725,8 @@ PLACE = {
                "H38 H39 H43 H44 H45 H46 H49 H58 H61 H66 H68 H69 H72 H73 H74 H75 H76 H83 H84 H86 H88 H89 H92",
     "nightly": "S05 S11 S14 S16 S17 S18 S19 S20 S22 S37 S38 S40 S41 S44 "
                "H05 H06 H23 H26 H29 H30 H32 H40 H41 H42 H47 H60 H67 H71 H77 H78 H85",
-    "full":    "S03 S24 H94 H95 X05 X06 X07 X08 X09 X11 X13",
-    "notrun":  "S46 S47 H62 H87 H91 H93 X01 X02 X03 X04 X10 X12 X14",
+    "full":    "S03 S24 H94 H95 X05 X06 X07 X08 X09 X10 X11 X13",
+    "notrun":  "S46 S47 H62 H87 H91 H93 X01 X02 X03 X04 X12 X14",
 }
 PLACE_DTYPES = {"S13": "fp16", "S25": "bf16", "S26": "fp16", "S27": "bf16", "S28": "fp16"}  # one dtype of two
 OUT_OF_LEVEL = "X01 X02 X03 X04 X12".split()  # a timing run with the GPU reference re-sizes them
@@ -773,7 +773,7 @@ M_EDIT = {
 # Not-run items: the level each enters when its gate opens (default: pr; M
 # and X: full)
 TARGET_LEVEL = {
-    "pr": "PRB-M04 PRB-P01 PRB-P02 PRB-P03 PRB-P04 PRB-R04 REG-08 REG-14 S46 S47 H93 H91 M40.pr",
+    "pr": "PRB-P01 PRB-P02 PRB-P03 PRB-P04 PRB-R04 REG-14 S46 S47 H93 H91 M40.pr",
     "nightly": "PRB-P06 M40.n",
     "none": "PRB-R03 H62 PRB-M02 PRB-M02f",
     "out-of-level": "X03",
@@ -825,7 +825,7 @@ def model_items():
                 "padding_mask": True,
             }
             it["topology"] = "Padding"
-            it["oracle"] = "14358+derivation+HG4"
+            it["oracle"] = "14358+HG4"
         if mid in P.M_CORPUS_ENCODED and it["align"] == "TL" and it["R"] == 0:
             it["attrs"] = dict(CAUSAL_FLAG)
             it["R"] = None
@@ -867,7 +867,6 @@ def hf_items():
                 it["topology"] = "AdditiveMaskDBias"
         if r.get("alibi"):
             it["attrs"] = {"alibi_mask": True}
-            it["oracle"] = "14358+derivation"
         it["items"] = derived_features(it) + ["HF"]
         it["hf"] = {
             "geo": r["geo"],
@@ -939,8 +938,7 @@ def regression_and_defect_items():
              expected="bias applied in its declared dtype", **bias),
         item("REG-07b", "quick", "regression", "DT4 AW13", (1, 2, 2, 2, 64, 96), bias=P.bias_spec("1h", "fp16"),
              expected="HALF bias read as HALF with BF16 IO", **bias),
-        item("REG-08", "notrun", "probe", "T6 S56", (1, 1, 1, 1, 128, 128), stats="rank3",
-             oracle="14358+derivation-rank3",
+        item("REG-08", "pr", "probe", "T6 S56", (1, 1, 1, 1, 128, 128), stats="rank3",
              regression_of="#12933", expected="plan decision (rank-3 Stats in or out of the well-formed set)"),
         item("REG-13a", "quick", "regression", "A4 H64", (1, 1, 1, 1, 64, 128), W=2, R=0, regression_of="SEM-001",
              expected="exactly 2 keys per row"),
@@ -996,7 +994,7 @@ def probe_items():
     (SD), hazard additions and the 32-head model layer."""
     rj = dict(rejection=True, expected=E_REJ)
     nb = (1, 1, 1, 1, 64, 96)  # the rejection probes' base
-    pad = dict(topology="Padding", oracle="14358+derivation+HG4")
+    pad = dict(topology="Padding", oracle="14358+HG4")
     bias = dict(topology="AdditiveMask", inputs=P.domain("bias_neg"))
     scale = dict(set="H", topology="ScaleTensor", expected="scale 0.5 applied")
     m41 = dict(set="M", layout="bshd", attrs=CAUSAL_FLAG, expected="correct accept")
@@ -1069,9 +1067,8 @@ def probe_items():
              verdict="FAIL (no oracle) on a wrong accept, if the harness fills FP8; otherwise SKIP", **rj),
         item("PRB-U13", "pr", "probe", "T7 IVP13", nb, tensor_layout={"dQ": "overlap_rows"},
              verdict=FOV + " (gfx942, 2026-10-28: ASM_SDPA_ENGINE accepts it and the aliased dQ fails the comparison)", **rj),
-        # oracle not ready on the baseline (declared, not written)
-        item("PRB-M04", "notrun", "probe", "A8 S51", (1, 4, 4, 4, 64, 64), R=0, attrs={"alibi_mask": True},
-             oracle="14358+derivation", expected=E_OR),
+        item("PRB-M04", "pr", "probe", "A8 S51", (1, 4, 4, 4, 64, 64), R=0, attrs={"alibi_mask": True},
+             expected=E_OR),
         *[item(f"PRB-{k}", "pr", "probe", "T11 G11 " + extra, (*bb, 64, 96), bias=P.bias_spec(dims), dbias=True,
                inputs=P.domain("bias_neg"), topology="AdditiveMaskDBias", expected="dBias correct, or typed rejection")
           for k, dims, bb, extra in (("B11", "11", (1, 2, 2, 2), "H80"), ("B12", "1h", (1, 2, 2, 2), "S50"),
@@ -1087,7 +1084,7 @@ def probe_items():
              expected="typed rejection; an accept is unverifiable"),
         item("PRB-R04", "notrun", "probe", "T15 T16 G12 S53 DT6", (1, 2, 2, 2, 64, 96),
              dropout={"p": 0.2, "scale": 1.25, "scale_inv": 0.8, "mask_dims": "1h"}, inputs=P.domain("u01"),
-             topology="DropoutMask", oracle="14358+derivation+HG4", expected=E_OR),
+             topology="DropoutMask", oracle="14358+HG4", expected=E_OR),
         item("PRB-P01", "notrun", "probe", "A9 T13 G13 DT6", (2, 2, 2, 2, 64, 96),
              padding={"seq_len_q": [64, 64], "seq_len_kv": [96, 40], "padding_mask": True}, expected=E_OR, **pad),
         item("PRB-P02", "notrun", "probe", "A9 T13 G13 S52", (3, 2, 2, 2, 64, 96),
@@ -1100,7 +1097,7 @@ def probe_items():
              padding={"seq_len_q": [64, 64], "seq_len_kv": [96, 40], "padding_mask": False},
              expected="padding semantics, or typed rejection", **pad),
         item("PRB-P06", "notrun", "probe", "T17 G14 S55", (2, 2, 2, 2, 64, 96), ragged={"q": [64, 40], "kv": [96, 50]},
-             topology="Ragged", oracle="14358+derivation+HG20", expected=E_OR),
+             topology="Ragged", oracle="14358+HG20", expected=E_OR),
         # graph options and layouts
         item("PRB-X01", "nightly", "probe", "GO2", (1, 2, 2, 2, 256, 256), topology="FwdBwdChained", oracle="ready [I]",
              expected=E_OR),

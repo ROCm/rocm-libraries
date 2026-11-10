@@ -902,15 +902,14 @@ UNASSIGNED_GATE = "no non-vacuous class (needs the per-tensor validator HG6)"
 # reference budget.
 # fmt: off
 GATES = {
-    "14358+derivation": ("the #14312 derivation extension (ALiBi)", "to file"),
-    "14358+derivation+HG4": ("the #14312 derivation extension and HG4 (per-batch lists, Bernoulli masks)",
-                             "ALMIOPEN-2861, ALMIOPEN-2862 (partial); derivation: to file"),
-    "14358+derivation+HG20": ("the derivation extension and HG20 (ragged fill)", "to file"),
+    # The derivation runs the forward graph through the reference executors (ALMIOPEN-3157):
+    # ALiBi and rank-3 Stats are derived; padding, explicit dropout and ragged cases wait
+    # only for their fills.
+    "14358+HG4": ("HG4 (per-batch length lists, Bernoulli dropout masks)", "ALMIOPEN-2861, ALMIOPEN-2862"),
+    "14358+HG20": ("HG20 (ragged offset fill)", "ALMIOPEN-2125"),
     "14358+I4": ("I4 (structured -inf injection)", "ALMIOPEN-2948 (design only); to file"),
     "14358+gpufwd": ("a GPU forward derivation (X-size shapes)", "ALMIOPEN-2855 (partial)"),
     "14358+timing": ("a timing run that re-sizes the shape", "to file"),
-    "14358+derivation-rank3": ("the #14312 derivation extension for rank-3 Stats (the CPU forward that derives "
-                               "O and Stats needs [B, Hq, Sq, 1])", "to file"),
     "I3": ("I3: base pointers placed at exactly the declared alignment", "ALMIOPEN-2948 (design only); to file"),
     "I4": ("I4: structured value injection", "ALMIOPEN-2948 (design only); to file"),
     "HG9": ("HG9: exact-zero check", "to file"),
@@ -1877,7 +1876,7 @@ X_SHAPES = {
     "X07": dict(**_H1, Sq=65536, Skv=1, f=("V6", "AW9"), dt=("fp16", "bf16"), defect="DEF-03"),
     "X08": dict(B=65537, Hq=1, Hk=1, Hv=1, Sq=16, Skv=16, Dqk=64, Dv=64, f=("G1",)),
     "X09": dict(**_H2, Sq=16, Skv=65537, f=("G6",)),
-    "X10": dict(**_H2, Sq=16, Skv=65537, R=0, attrs={"alibi_mask": True}, f=("A8", "G6"), oracle="14358+derivation"),
+    "X10": dict(**_H2, Sq=16, Skv=65537, R=0, attrs={"alibi_mask": True}, f=("A8", "G6")),
     "X11": dict(**_H1, Sq=4096, Skv=4096, R=0, f=("V6",)),
     "X12": dict(**_H1, Sq=16384, Skv=16384, R=0, f=("V6",), oracle="14358+timing"),
     "X13": dict(B=78, Hq=16, Hk=16, Hv=16, Sq=64, Skv=64, Dqk=80, Dv=80, f=("G1",)),
@@ -2227,8 +2226,10 @@ _GL64 = dict(B=2, Hq=4, Hk=2, Hv=2, Sq=64, Skv=96, Dqk=64, Dv=64)
 _CM = {"causal_mask": True, "causal_mask_bottom_right": False}
 _DROP = {"p": 0.2, "scale": 1.25, "scale_inv": 0.8, "mask_dims": "full"}
 _PADKV = {"seq_len_q": [64, 64, 64], "seq_len_kv": [96, 71, 64], "padding_mask": False}
-_GT1_DROPOUT = "GT1, the #14312 derivation extension for dropout and HG4 (the live counterpart's gate)"
-_GT1_PADDING = "GT1, the #14312 derivation extension for padding and HG4 (the live counterpart's gate)"
+_GT1_DROPOUT = (
+    "GT1 and HG4, the Bernoulli dropout-mask fill (the live counterpart's gate)"
+)
+_GT1_PADDING = "GT1 and HG4, the per-batch length fill (the live counterpart's gate)"
 # fmt: off
 GOLDEN = OrderedDict([
     # id: (level, purpose, criteria, class, fields)
@@ -2250,10 +2251,10 @@ GOLDEN = OrderedDict([
                                               dbias=True,
                                               topology="AdditiveMaskDBias", gate="GT1"))),
     ("GL-15", ("pr", "probe", "G-B", "P", dict(_GL64, align="BR", R=0, inputs=DOMAIN["u01"], dropout=_DROP,
-                                              topology="DropoutMask", oracle="14358+derivation+HG4",
+                                              topology="DropoutMask", oracle="14358+HG4",
                                               gate=_GT1_DROPOUT))),
     ("GL-16a", ("pr", "probe", "G-B", "P", dict(_GL64, B=3, Hq=2, align="BR", R=0, padding=_PADKV,
-                                               topology="Padding", oracle="14358+derivation+HG4", gate=_GT1_PADDING))),
+                                               topology="Padding", oracle="14358+HG4", gate=_GT1_PADDING))),
     ("GL-17", ("pr", "claim", "G-D", "U", dict(_GL, inputs=DOMAIN["peaked"]))),
     ("GL-18", ("pr", "claim", "G-D G-A", "D", dict(_GL, dt="fp16", layout="bshd", inputs=DOMAIN["v01"]))),
     ("GL-19", ("nightly", "claim", "G-D", "P", dict(_H1, Sq=896, Skv=64, dt="fp16", set="H"))),
