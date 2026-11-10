@@ -452,8 +452,54 @@ class BuildJob:
     caps: dict
 
 
-def _dtype_triple(dtype: str) -> Tuple[str, str, str]:
-    return dtype, dtype, dtype
+# The benchmark/cache spelling of TF32: A and B are read as the logical
+# ``tf32`` carrier, D stays fp32. Only the identity layer (KernelIdentity,
+# labels, the early-stop key, the cache filter) uses it; a kernel spec gets
+# fp32 storage plus ``mma_dtype="tf32"`` from :func:`conv_data_spec`.
+TF32_TRIPLE: Tuple[str, str, str] = ("tf32", "tf32", "fp32")
+
+# Logical dtype -> the dtype its tensors are stored in. Byte, vector-width,
+# LDS and K-outer helpers must see this, never the logical ``"tf32"`` (which
+# they would size as a 2-byte type).
+_STORAGE_DTYPE = {"tf32": "fp32"}
+
+
+def dtype_triple(dtype: str) -> Tuple[str, str, str]:
+    """``(dtype_a, dtype_b, dtype_d)`` of a benchmark ``--dtype``."""
+    return TF32_TRIPLE if dtype == "tf32" else (dtype, dtype, dtype)
+
+
+def storage_dtype(dtype: str) -> str:
+    """The dtype a logical (identity-layer) dtype is stored in."""
+    return _STORAGE_DTYPE.get(dtype, dtype)
+
+
+def conv_data_spec(dtype_a: str, dtype_b: Optional[str] = None, dtype_d=None):
+    """The kernel ``ConvDataSpec`` for an identity-layer dtype (or triple).
+
+    The one translation between the two layers: ``"tf32"`` operands become
+    fp32 storage with ``mma_dtype="tf32"``; every other dtype passes through,
+    so the spec of an existing identity is exactly what it was. A TF32 triple
+    must be :data:`TF32_TRIPLE` exactly: TF32 is an operand mode, so the output
+    is spelled ``fp32`` and any other spelling is refused, not rewritten.
+    """
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    if dtype_b is None and dtype_d is None:
+        dtype_a, dtype_b, dtype_d = dtype_triple(dtype_a)
+    if "tf32" in (dtype_a, dtype_b, dtype_d):
+        if (dtype_a, dtype_b, dtype_d) != TF32_TRIPLE:
+            raise ValueError(
+                f"a tf32 identity is {'/'.join(TF32_TRIPLE)}, got "
+                f"{dtype_a}/{dtype_b}/{dtype_d}"
+            )
+        return ConvDataSpec(
+            dtype_a="fp32",
+            dtype_b="fp32",
+            dtype_d="fp32",
+            mma_dtype="tf32",
+        )
+    return ConvDataSpec(dtype_a=dtype_a, dtype_b=dtype_b, dtype_d=dtype_d)
 
 
 def _grid_axes(direction: Optional[str]) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
@@ -755,7 +801,7 @@ def _fwd_jobs(
     parallel enumeration hands each worker one); ``llvm_flavor`` pins the
     identity's flavor (see :func:`_job_flavor`).
     """
-    da, db, dd = _dtype_triple(dtype)
+    da, db, dd = dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
         tile_m,
@@ -1069,7 +1115,6 @@ def _async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> dict:
     """
     if not cfg.get("async_dma"):
         return {}
-    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
     from kernels.common.conv_implicit_gemm import (
         ImplicitGemmConvSpec,
         async_tile_loaders,
@@ -1079,7 +1124,7 @@ def _async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> dict:
     try:
         spec = ImplicitGemmConvSpec(
             problem=_probe_problem("fwd", caps),
-            data=ConvDataSpec(dtype_a=da, dtype_b=db, dtype_d=dd),
+            data=conv_data_spec(da, db, dd),
             **cfg,
         )
         a_loader, b_loader = async_tile_loaders(spec, arch)
@@ -1124,7 +1169,10 @@ def _wgrad_streamk_builds(
     falls to the split-K kernels.
     """
     variants = _wgrad_streamk_variants(epilogue, streamk_modes, streamk_reductions)
-    w = CACHE_WGRAD_STREAMK_LOAD_BYTES // {"fp16": 2, "bf16": 2, "fp32": 4}[dtype]
+    w = (
+        CACHE_WGRAD_STREAMK_LOAD_BYTES
+        // {"fp16": 2, "bf16": 2, "fp32": 4}[storage_dtype(dtype)]
+    )
     builds = [
         (mode, reduction, vec_a, vec_b)
         for mode, reduction in variants
@@ -1159,7 +1207,7 @@ def _wgrad_jobs(
         WgradConvSpec,
     )
 
-    da, db, dd = _dtype_triple(dtype)
+    da, db, dd = dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
         tile_m,
@@ -1189,8 +1237,8 @@ def _wgrad_jobs(
         # (M-outer) caches only the slower layout on gfx950.
         lds_k_outer = WgradConvSpec.default_lds_k_outer(
             arch=arch,
-            dtype_a=da,
-            dtype_b=db,
+            dtype_a=storage_dtype(da),
+            dtype_b=storage_dtype(db),
             warp_tile_m=wt,
             warp_tile_n=wt,
             wave_size=wave_size,
@@ -1206,8 +1254,8 @@ def _wgrad_jobs(
         _k_pad = WgradConvSpec.default_lds_k_pad(
             arch=arch,
             tile_k=tile_k,
-            dtype_a=da,
-            dtype_b=db,
+            dtype_a=storage_dtype(da),
+            dtype_b=storage_dtype(db),
             lds_k_outer=lds_k_outer,
             wave_size=wave_size,
         )
@@ -1416,7 +1464,7 @@ def _dgrad_jobs(
 ) -> Iterator[BuildJob]:
     from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
 
-    da, db, dd = _dtype_triple(dtype)
+    da, db, dd = dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
         tile_m,
@@ -1450,7 +1498,7 @@ def _dgrad_jobs(
             # K-outer has no scatter to remove.
             lds_k_outer = DgradConvSpec.default_lds_k_outer(
                 arch=arch,
-                dtype_b=db,
+                dtype_b=storage_dtype(db),
                 warp_tile_n=wt,
                 cpg=vec_bc,
                 wave_size=wave_size,
@@ -1657,8 +1705,12 @@ def job_for_identity(identity: KernelIdentity) -> BuildJob:
             f"not an implicit-GEMM conv identity: {identity.direction}/"
             f"{identity.algorithm}"
         )
-    if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
-        raise LookupError("the AOT grid builds A, B and D in one dtype")
+    if (identity.dtype_a, identity.dtype_b, identity.dtype_d) != dtype_triple(
+        identity.dtype_a
+    ):
+        raise LookupError(
+            "the AOT grid builds A, B and D in one dtype (tf32: tf32/tf32/fp32)"
+        )
     if identity.warp_tile_m != identity.warp_tile_n:
         raise LookupError("the AOT grid builds square warp tiles only")
     target = ArchTarget.from_gfx(identity.arch)
@@ -1767,9 +1819,7 @@ def _spec_is_valid(job: BuildJob, arch: str, dtype: str) -> bool:
     """
     if _aot_excluded(job, arch):
         return False
-    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
-
-    data = ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
+    data = conv_data_spec(dtype)
     problem = _probe_problem(job.direction, job.caps)
     try:
         if job.direction == "fwd":
@@ -1829,7 +1879,7 @@ def count_jobs(
     Counted per direction rather than once over a shared grid: wgrad walks a
     wider one (see :func:`_grid_axes`).
     """
-    da, db, _ = _dtype_triple(dtype)
+    da, db, _ = dtype_triple(dtype)
     mma_family = "wmma" if target.wave_size == 32 else "mma"
     vecs = len(_VECS) * len(_VECS)
     layouts = len(_layout_caps())
@@ -1922,7 +1972,7 @@ def _direction_jobs(
 
 def _geometry_list(target, dtype: str, direction: Optional[str] = None) -> List[tuple]:
     mma_family = "wmma" if target.wave_size == 32 else "mma"
-    da, db, _ = _dtype_triple(dtype)
+    da, db, _ = dtype_triple(dtype)
     return list(_geometries(target, mma_family, da, db, direction))
 
 
@@ -2005,9 +2055,7 @@ def kernel_for_job(job: BuildJob, arch: str, dtype: str):
     rather than failed -- the grid is deliberately over-generated and most
     rejections are ordinary spec-validity rules.
     """
-    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
-
-    data = ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
+    data = conv_data_spec(dtype)
     problem = _probe_problem(job.direction, job.caps)
 
     if job.direction == "fwd":

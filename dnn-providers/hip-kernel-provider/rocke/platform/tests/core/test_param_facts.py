@@ -551,7 +551,7 @@ def test_cpp_prints_verifies_and_canonicalizes_the_same():
 
     ``ROCKE_PARAM_FACTS_CLI`` names the built ``rocke_param_facts``:
     ``tests/run_all.py`` resolves it from a configured build and the installed
-    ``rocke_pytest`` ctest sets it. A value that names no file fails.
+    ``rocke_pytest_*`` ctest entries set it. A value that names no file fails.
     """
     path = built_program("ROCKE_PARAM_FACTS_CLI", "rocke_param_facts")
     for case in sorted(IR_CASES):

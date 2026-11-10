@@ -36,9 +36,9 @@
 #include "Debug.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
-#include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt_fused_a2a_peers.hpp"
 #include "candidate_preparation.hpp"
+#include "get_all_search_type_for_test.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
@@ -3357,43 +3357,18 @@ namespace
                 // path. Only use the subdir if a Tensile mapping file is actually present
                 // there; otherwise the directory may have been created by ExtOp/Transform
                 // installs without a corresponding Tensile library (multi-arch non-TheRock
-                // builds). The mapping filenames carry `processor`, the name the runtime
-                // reports for this device -- which is the compiler target the kernels in
-                // it were built for, including gfx1250-strict. The subdir is revisioned:
-                // an A0 part reporting gfx1250 loads library/gfx1250v0/, with no fallback.
+                // builds). Both the subdir and the mapping filenames carry `processor`,
+                // the name the runtime reports for this device -- which is the compiler
+                // target the kernels in it were built for, including a silicon-revision
+                // variant such as gfx1250-strict.
                 {
-                    int asicRevision = -1;
-                    if(processor == "gfx1250")
-                    {
-                        hipDeviceProp_t deviceProperties;
-                        HIP_CHECK_EXC(hipGetDeviceProperties(&deviceProperties, deviceId));
-                        asicRevision = deviceProperties.asicRevision;
-                    }
-                    const auto libArch      = rocblaslt_revisioned_arch_name(processor, asicRevision);
-                    auto processor_path     = path / libArch;
+                    auto processor_path     = path / processor;
                     auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
                     auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
                     auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
                     if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
                        || std::filesystem::exists(mapping_yaml))
                     {
-                        path = std::move(processor_path);
-                    }
-                    else if(libArch != processor)
-                    {
-                        auto master = processor_path / ("TensileLibrary_" + processor);
-                        if(!std::filesystem::exists(master.string() + ".dat")
-                           && !std::filesystem::exists(master.string() + ".dat.zlib")
-                           && !std::filesystem::exists(master.string() + ".yaml"))
-                            std::cerr << "\nrocblaslt error: " << processor
-                                      << " device with asicRevision 0 (A0) needs the " << libArch
-                                      << " GEMM library, but " << processor_path
-                                      << " holds no Tensile library. Build with the "
-                                      << libArch << " subtree (the default for -a " << processor
-                                      << "), or run with HSA_DISABLE_GFX12_STRICT=0 and a "
-                                      << processor << "-strict build. Not falling back to "
-                                      << (path / processor)
-                                      << ": its kernels give wrong results on A0." << std::endl;
                         path = std::move(processor_path);
                     }
                 }
@@ -7631,12 +7606,29 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     return rocblaslt_status_success;
 }
 
+namespace
+{
+    std::atomic<int> g_lastGetAllSearchType{-1};
+}
+
+extern "C" HIPBLASLT_EXPORT void rocblaslt_testing_reset_last_get_all_search_type_for_test()
+{
+    g_lastGetAllSearchType.store(-1, std::memory_order_relaxed);
+}
+
+extern "C" HIPBLASLT_EXPORT int rocblaslt_testing_last_get_all_search_type_for_test()
+{
+    return g_lastGetAllSearchType.load(std::memory_order_relaxed);
+}
+
 template <typename MyProblem>
 rocblaslt_status getAllSolutions(MyProblem&                                      prob,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes)
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType)
 {
+    g_lastGetAllSearchType.store(static_cast<int>(searchType), std::memory_order_relaxed);
     log_api(__func__, "Entering function");
 
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
@@ -7660,13 +7652,11 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 
     if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
     {
-        solutions = library->findAllSolutions(
-            prob, *hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
+        solutions = library->findAllSolutions(prob, *hardware, searchType);
     }
     else if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGroupedGemm>::value)
     {
-        solutions = library->findAllSolutionsGroupedGemm(
-            prob.gemms, *hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
+        solutions = library->findAllSolutionsGroupedGemm(prob.gemms, *hardware, searchType);
     }
     log_api(__func__, "Found hardware solutions: ", solutions.size());
 
@@ -7676,14 +7666,12 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
         prob.setF32XdlMathOp(rocisa::DataType::Float);
         if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
         {
-            solutions = library->findAllSolutions(
-                prob, *hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
+            solutions = library->findAllSolutions(prob, *hardware, searchType);
         }
         else if constexpr(std::is_same<MyProblem,
                                        TensileLite::ContractionProblemGroupedGemm>::value)
         {
-            solutions = library->findAllSolutionsGroupedGemm(
-                prob.gemms, *hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
+            solutions = library->findAllSolutionsGroupedGemm(prob.gemms, *hardware, searchType);
         }
     }
 
@@ -7759,7 +7747,8 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 rocblaslt_status getAllSolutions(RocblasltContractionProblem&                    prob,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes)
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType)
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
@@ -7779,13 +7768,14 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
     }
 #endif
     auto tensile_prob = ConstructTensileProblem(prob);
-    return getAllSolutions(tensile_prob, handle, heuristicResults, maxWorkSpaceBytes);
+    return getAllSolutions(tensile_prob, handle, heuristicResults, maxWorkSpaceBytes, searchType);
 }
 
 rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&       probs,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes)
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType)
 {
     TensileLite::ContractionProblemGroupedGemm tensile_probs;
     for(int i = 0; i < probs.size(); i++)
@@ -7793,26 +7783,29 @@ rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&      
         tensile_probs.gemms.push_back(ConstructTensileProblem(probs[i]));
         tensile_probs.gemms[i].setGroupedGemm(true);
     }
-    return getAllSolutions(tensile_probs, handle, heuristicResults, maxWorkSpaceBytes);
+    return getAllSolutions(tensile_probs, handle, heuristicResults, maxWorkSpaceBytes, searchType);
 }
 
 rocblaslt_status getAllSolutions(std::shared_ptr<void>                           gemmData,
                                  rocblaslt_handle                                handle,
                                  rocblaslt::RocGemmType                          gemmType,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes)
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType)
 {
     rocblaslt_status status = rocblaslt_status_success;
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        status = getAllSolutions(data->problem, handle, heuristicResults, maxWorkSpaceBytes);
+        status                                = getAllSolutions(
+            data->problem, handle, heuristicResults, maxWorkSpaceBytes, searchType);
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
         std::shared_ptr<TensileDataGroupedGemm> data
             = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
-        status = getAllSolutions(data->problem, handle, heuristicResults, maxWorkSpaceBytes);
+        status = getAllSolutions(
+            data->problem, handle, heuristicResults, maxWorkSpaceBytes, searchType);
     }
     else
     {

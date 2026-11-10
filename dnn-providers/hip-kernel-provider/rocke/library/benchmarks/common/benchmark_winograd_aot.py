@@ -46,6 +46,8 @@ from typing import Dict, List, Optional, Tuple
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 VECS = (8, 4, 2, 1)
+# The I/O dtypes: the ones --compile-all builds and the --dtype choices
+# (benchmark_conv_compare.py skips its Winograd leg for any other).
 IOS = ("fp16", "bf16")
 
 
@@ -852,7 +854,7 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--dtype",
         default=None,
-        choices=["fp16", "bf16"],
+        choices=list(IOS),
         help="I/O dtype (default: fp16, or each MIOpenDriver command's)",
     )
     ap.add_argument(

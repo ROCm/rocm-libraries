@@ -64,7 +64,9 @@ unified-attention 2D, kept for reference.
 
 > Every roll **gate** and survey carries a hard-coded family list pinned to
 > `ARCH = "gfx950"` and `kernels/gfx950`, because a gate has to defend a fixed
-> claim. They cannot be aimed at another arch without editing them. The
+> claim. They cannot be aimed at another arch without editing them. The one
+> exception is `roll_hsaco_parity`: it reads `ROCKE_ROLL_ARCH` (default
+> `gfx950`), and the roller tests set it to run the lane on gfx942 and gfx950. The
 > concrete-path drivers discover their kernels automatically instead of naming
 > them: `parity_matrix` and `hsaco_parity` take an arch (`--arches` / `--arch`),
 > while `record_coverage` probes each emitter's arch itself. For a kernel of

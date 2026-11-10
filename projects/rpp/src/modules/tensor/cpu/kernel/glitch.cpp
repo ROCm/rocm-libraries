@@ -83,7 +83,7 @@ RppStatus glitch_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u*
                         (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
-        Rpp32u vectorIncrement, alignedLength;
+        Rpp32s vectorIncrement, alignedLength;
 
         if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
             (dstDescPtr->layout == RpptLayout::NCHW)) {
@@ -199,7 +199,7 @@ RppStatus glitch_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u*
             dstPtrRow = dstPtrChannel;
             Rpp32s vectorIncrement = 10;
             Rpp32s vectorIncrementPkd = 30;
-            Rpp32u alignedLength = ((roi.xywhROI.roiWidth / vectorIncrement) - 1) * vectorIncrement;
+            Rpp32s alignedLength = ((roi.xywhROI.roiWidth / vectorIncrement) - 1) * vectorIncrement;
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8u* dstPtrTemp = dstPtrRow;
                 int vectorLoopCount = 0;
@@ -253,7 +253,7 @@ RppStatus glitch_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp
                         (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
-        Rpp32u vectorIncrement, alignedLength;
+        Rpp32s vectorIncrement, alignedLength;
 
         if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
             (dstDescPtr->layout == RpptLayout::NCHW)) {
@@ -332,7 +332,7 @@ RppStatus glitch_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp
                    (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp32f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
-            Rpp32u vectorIncrement = 8;
+            Rpp32s vectorIncrement = 8;
             alignedLength = (roi.xywhROI.roiWidth & ~(vectorIncrement - 1)) - vectorIncrement;
 
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
@@ -368,7 +368,7 @@ RppStatus glitch_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp
             Rpp32f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
             vectorIncrement = 2;  // 1 increment per channel (R, G, B) => 2 channels at a time
-            Rpp32u vectorIncrementPkd =
+            Rpp32s vectorIncrementPkd =
                 6;  // 3 channels per pixel (R, G, B) × 2 pixels at a time => 6
             alignedLength = (((roi.xywhROI.roiWidth) / vectorIncrementPkd) * vectorIncrementPkd) -
                             vectorIncrementPkd;
@@ -526,7 +526,7 @@ RppStatus glitch_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s*
                         (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
-        Rpp32u vectorIncrement, alignedLength;
+        Rpp32s vectorIncrement, alignedLength;
 
         if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
             (dstDescPtr->layout == RpptLayout::NCHW)) {

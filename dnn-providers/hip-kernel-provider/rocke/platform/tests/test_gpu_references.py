@@ -12,6 +12,7 @@ import subprocess
 import sys
 
 import pytest
+from rocke.tests.provider_categories import provider_category_labels
 
 _PLATFORM = Path(__file__).resolve().parents[1]
 _LIBRARY = _PLATFORM.parent / "library"
@@ -826,44 +827,18 @@ def test_reference_ctests_keep_the_shared_reference_labels(tmp_path):
     shared rocke_reference_common_pytest gets. A name that no longer matches
     the patterns keeps only the quick label baked into the installed tests.
     """
-    # The provider YAML sits beside rocke/ and the monorepo's shared parser
-    # applies it; a standalone rocKE tree has neither.
-    provider = _PLATFORM.parent.parent
-    categories = provider / "ROCKE_ENGINE_test_categories_external.yaml"
-    parser = provider.parent.parent / "shared/ctest/parse_ctest_categories.py"
-    for path in (categories, parser):
-        if not path.is_file():
-            pytest.skip(f"no provider CTest categories to check: {path} does not exist")
-    pytest.importorskip("yaml", reason="the shared category parser needs PyYAML")
     published = _published(tmp_path)
     names = _reference_ctests(published)
     # One host suite per operation and one GPU suite per published pair.
     assert len(names) == len(published) + sum(map(len, published.values())), names
     shared = "rocke_reference_common_pytest"
-    # Label an installed CTest file the way the provider build does.
-    ctests = tmp_path / "CTestTestfile.cmake"
-    ctests.write_text(
-        "".join(f"add_test({name} python)\n" for name in [shared, *names])
-    )
-    result = subprocess.run(
-        [sys.executable, str(parser), str(categories), str(ctests)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    labels = {
-        name: set(value.split(";"))
-        for name, value in re.findall(
-            r'set_tests_properties\("([^"]+)" PROPERTIES LABELS "([^"]*)"\)',
-            result.stdout,
-        )
-    }
-    assert labels.get(shared), f"{categories.name} no longer labels {shared}"
+    labels = provider_category_labels([shared, *names], tmp_path)
+    assert labels.get(shared), f"the provider categories no longer label {shared}"
     for name in names:
         missing = labels[shared] - labels.get(name, set())
         assert not missing, (
-            f"{name} lacks the {shared} labels {sorted(missing)}: the patterns in "
-            f"{categories.name} no longer match it"
+            f"{name} lacks the {shared} labels {sorted(missing)}: the provider "
+            "category patterns no longer match it"
         )
 
 

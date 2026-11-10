@@ -84,6 +84,7 @@ positive_patterns: &positive_patterns
   - "*/GPU_CandidateSelection_*"
   - "*/GPU_Find2Conv_*"
   - "*/GPU_FindDb_*"
+  - "*/GPU_FindDbWorkspace*"
   - "*/GPU_FindModeTrustVerify_*"
   # RNN family (replaces the *GRUExtra* / *lstm_extra* patterns, which matched nothing)
   - "*/GPU_GRU_*"
@@ -339,8 +340,6 @@ test_categories:
       - "Full/GPU_TensorTransform_I8*"
       - "Full/GPU_binaryTensorOps_cast_*_I8*"
       - "Full/GPU_binaryTensorOps_cast_*_I32*"
-      # Flaky on gfx942 (ALMIOPEN-1926); Jenkins filters the same index on gfx94X.
-      - "Full/GPU_LstmMSRnn_FP32.TestFloat/1095"
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
 
@@ -422,8 +421,6 @@ test_categories:
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
       - "Full/GPU_MIOpenDriverConv2dTransTest*"
       - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
-      # Flaky on gfx942 (ALMIOPEN-1926); Jenkins filters the same index on gfx94X.
-      - "Full/GPU_LstmMSRnn_FP32.TestFloat/1095"
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
 
@@ -652,10 +649,6 @@ exclude_gpu:
       - "*/GPU_MIOpenDriver*"
       - "Smoke/CPU_Handle_NONE*"
       - "Full/GPU_reduce_custom_fp32*"
-      # Flaky on Windows gfx110X (ALMIOPEN-1926): intermittent CPU/GPU mismatch at rnn_seq_api.hpp:272,
-      # bias-enabled cases only, a different index set on every attempt (88 of 4,316 executions failed in
-      # PR #13107 runs 38815363944 and 38983909810). FP16 and Linux gfx94X passed every execution.
-      - "Full/GPU_LstmMSRnn_FP32*"
       # Fails on every arch without bundled AI models (ALMIOPEN-2966): "no fdeep .tn.model files found" in the system db.
       # Models ship only for gfx908/gfx90a/gfx942/gfx950, and since #13680 Windows installs per-target db files like Linux
       # (PR #13107 run 40983714656, Windows gfx110X, 2 of 2 attempts). Remove when ALMIOPEN-2966 makes the test skip archs
@@ -673,9 +666,6 @@ exclude_gpu:
   #Add exclude_gpu_gfx1150/gfx1151 separately only if they have unique patterns.
     test_patterns:
       - *gfx11_common_patterns
-      # Flaky on Windows gfx1151 (ALMIOPEN-1926), same signature as gfx110X: intermittent CPU/GPU mismatch at
-      # rnn_seq_api.hpp:272, bias-enabled cases only (18 of 2,316 executions failed in PR #13107 run 39358709264).
-      - "Full/GPU_LstmMSRnn_FP32*"
       # Fails on every gfx1151 host whose CU count has no shipped system db (#13416): "Db file does not exist ...
       # gfx115128.HIP.fdb.txt" / "gfx115120.HIP.fdb.txt". Windows: 5 of 5 executions on 5 hosts (PR #13107 runs 39358709264,
       # 39480689944, develop nightly 38527180317). Linux: 12 of 12 on the 20-CU strixhalo hosts in run 39740910967 (passes on
@@ -727,20 +717,6 @@ exclude_gpu:
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx115X"
-
-  exclude_gpu_gfx94X:
-    test_patterns:
-      # Flaky on gfx942 (ALMIOPEN-1926): same bias-only CPU/GPU mismatch at rnn_seq_api.hpp:272 as gfx110X/gfx115X. Jenkins
-      # gfx942, 2026-08-24..10-23: 39 failures at 36 different indices in ~304k executions (1 in 5 builds with >= 1 failure),
-      # including 11 of 37 develop builds after the per-index filters /1026 and /1095 landed; gfx90a: 0 in ~284k.
-      # Mirrors the Jenkins family filter under MIOPEN_TEST_GFX94X.
-      - "Full/GPU_LstmMSRnn_FP32*"
-    labels:
-      - "quick"
-      - "standard"
-      - "comprehensive"
-      - "full"
-      - "ex_gpu_gfx94X"
 
   exclude_gpu_gfx950:
     test_patterns:

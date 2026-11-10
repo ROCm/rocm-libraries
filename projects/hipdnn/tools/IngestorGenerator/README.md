@@ -402,7 +402,13 @@ regeneration drops it (and the regeneration gate's byte compare fails):
 3. Regenerate. The UED comes out byte-identical to the promoted one; nothing else
    changes, and the reader still resolves the native UHD from `default` only, so the
    model UHD under `heuristics/` mints and reuses no id.
-4. `dvc add heuristics` in the bundle directory, and commit the `.dvc` pointer.
+4. Add the model's DVC pointer: in its leaf folder
+   (`heuristics/<ued-id>/<role>/<arch>/<metric>/`) run `dvc add model.bin`, append
+   `remote: ingestor` to the new `model.bin.dvc`, and commit the pointer and the `.gitignore`
+   `dvc add` writes beside it, with `heuristic.uhd.json`. One pointer per model, not one for
+   `heuristics/`; the provider's configure scan and `dvc pull -r ingestor` read it. A build
+   that did not pull the model ships without it and warns; one built with
+   `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` fails instead.
 
 Roles are the three promote accepts. Keys are one concrete arch (`gfx942`, not `gfx9` or
 `gfx950-dcgpu`); `default` is allowed except under `sort_kernel_catalog`, whose `default`
@@ -433,9 +439,10 @@ The folder is the `authored_subpath` and may differ from it:
     kernel_dtype_matches_graph.umd.json   # the one shared kernel-scoped matcher
     <slug>.kdp.json                 # single-pack engine: one KDP named after the slug
     <slug>_<pack>.kdp.json          # multi-pack engine: one KDP per pack
-    operation_is_<disc>.umd.json    # multi-pack engine ONLY -- one operation-scoped
-                                     # UMD per pack. A single-pack engine emits ZERO of
-                                     # these; see "UMD policy" below.
+    operation_is_<disc>.umd.json    # multi-pack engine with discriminators ONLY -- one
+                                     # operation-scoped UMD per pack. A single-pack or
+                                     # sharded engine emits ZERO of these; see "UMD
+                                     # policy" below.
   packs/<Name>Native.cpp            # native-symbol stub (graph_match/kernel_match/
                                     # score/dispatch bodies are all `// TODO`)
   tests/Test<Name>Packs.cpp         # COMPLETE pack-shape census -- not a stub
@@ -450,6 +457,12 @@ applicability belongs in the UED's `graph_match`. A **single-pack** engine gets 
 graph-scoped UMDs, its one pack's `matchers[]` naming only the shared kernel-scoped dtype
 matcher; a **multi-pack** engine gets **one** graph-scoped operation-matcher UMD per pack
 (each pack setting a unique `discriminator`), plus that same shared matcher.
+
+A multi-pack engine whose packs declare **no** `discriminator` is one catalog sharded
+across KDP files, for example one pack per dtype so that no file holds the whole catalog.
+It is treated like a single pack: zero graph-scoped UMDs, every shard naming only the
+shared kernel-scoped matcher, and the engine's `graph_match` admitting every shard. Either
+every pack of an engine declares a `discriminator` or none does.
 
 ### Native-symbol stub shape
 
@@ -474,7 +487,7 @@ counts, SDK version and runtime source kind come from the actual output, after
 normalization and deduplication. Packaged runtime source kind is KPACK, not the authored
 builder kind. The file is emitted in the form the provider's `.clang-format` (pre-commit
 pins clang-format 18.1.4) produces, so a copy is not reformatted later;
-`tests/test_packs_formatting.py` checks the shipped gfx950 config against the live file and,
+`tests/test_packs_formatting.py` checks each manifest-backed shipped config against its live file and,
 with `HIPDNN_CLANG_FORMAT` naming a binary, every shipped config against clang-format.
 
 **The census lives in its own binary.** `Test<Name>Packs.cpp` is spliced into
@@ -830,7 +843,6 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
 | `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
-| `configs/gfx950_attention_dense.profile.yaml` | Not a generator config: the gfx950 dense attention profile that the `tools/` scripts read through `--profile` |
 
 ## Generated variant sets: `variants`
 
@@ -917,6 +929,11 @@ engine:
                                   # Must be a single path stem (^[A-Za-z0-9_][A-Za-z0-9_-]*$).
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
   heuristic: native | none        # optional, default "native"; "none" omits the UHD
+  native_symbols_from: hipkernel:Other   # optional: the descriptors name that engine's
+                                  # registered native symbols instead of minting this
+                                  # engine's own (e.g. a test-only engine serving a
+                                  # subset of a shipped catalog). Ignore the emitted
+                                  # native stub then: nothing registers it.
   heuristics:                     # optional; per-arch model UHDs `uhd_gen promote` bound,
     sort_kernel_catalog:          # role -> arch -> [UHD id]. See "Shipping a trained
       gfx942: [<uhd-uuid>]        # model". Not allowed beside `slots`.
@@ -925,6 +942,12 @@ kmd_fields:                       # the KMD's fields[] -- one per axis this engi
   - name: block_size              # kernels vary along
     type: int                     # bool | int | float | string | int_list
     default_value: 64             # omit entirely for a MANDATORY field
+    builder_default: false        # optional, generator-only: true lets a kernel
+                                  # state this field in neither metadata nor
+                                  # kernel_source.spec because the builder's spec
+                                  # dataclass defaults it to default_value too
+                                  # (adding a field to a shipped engine without
+                                  # changing its descriptors). Needs default_value.
   - name: dtype
     type: string
 
@@ -947,7 +970,7 @@ workspace_policy: none | fixed | derived
 packs:
   - name: add
     arch: [gfx942]                # optional; empty means arch-independent
-    discriminator: add             # REQUIRED iff this engine has >1 pack; forbidden
+    discriminator: add             # on every pack or none of a >1-pack engine; forbidden
                                     # for a single-pack engine
     kernels:
       - name: my_engine.f32_block64
