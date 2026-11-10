@@ -555,6 +555,20 @@ IgemmProblem withoutFilterStaging(const IgemmProblem& problem)
     return direct;
 }
 
+bool outputChannelsFirst(const IgemmProblem& problem)
+{
+    const auto& output = problem.direction == ConvDirection::FORWARD ? problem.y : problem.x;
+    return output.needed && output.transpose;
+}
+
+IgemmProblem withoutOutputStaging(const IgemmProblem& problem)
+{
+    IgemmProblem direct = problem;
+    (problem.direction == ConvDirection::FORWARD ? direct.y : direct.x) = Staging{};
+    layOutWorkspace(direct);
+    return direct;
+}
+
 bool packFits(const IgemmProblem& problem, int64_t bk)
 {
     const auto& a = problem.args;
@@ -764,6 +778,7 @@ struct Tile
     int64_t halo = 0; ///< the halo A loop
     int64_t wdirect = 0; ///< backward data reads the K T R S C/g filter directly
     int64_t pack = 0; ///< k-steps of whole taps
+    int64_t cf = 0; ///< the output written packed channels-first from the epilogue
 
     int64_t blockThreads() const
     {
@@ -795,11 +810,13 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.halo = kernel.getIntMetadata("halo");
     tile.wdirect = kernel.getIntMetadata("wdirect");
     tile.pack = kernel.getIntMetadata("pack");
+    tile.cf = kernel.getIntMetadata("cf");
     if(tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1
        || (tile.xcd != 0 && tile.xcd != 1) || (tile.halo != 0 && tile.halo != 1)
        || (tile.halo != 0 && (tile.info.wave == 0 || tile.stages != 1))
        || (tile.wdirect != 0 && tile.wdirect != 1) || (tile.pack != 0 && tile.pack != 1)
-       || (tile.pack != 0 && (tile.halo != 0 || tile.wdirect != 0)))
+       || (tile.pack != 0 && (tile.halo != 0 || tile.wdirect != 0))
+       || (tile.cf != 0 && tile.cf != 1) || (tile.cf != 0 && tile.info.wave == 0))
     {
         return std::nullopt;
     }
@@ -813,7 +830,8 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
 /// several XCDs (elsewhere it is its plain twin), a halo config only where the problem fits
 /// the halo loop. A direct-filter config serves backward data whose filter is packed K T R S C/g
 /// with its input channels a multiple of the vector (16-bit: output channels even); a tap-packing
-/// config only reductions shorter than its k-step that divide it.
+/// config only reductions shorter than its k-step that divide it. A channels-first-output config
+/// serves outputs (forward y, backward data dx) that are packed channels-first.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -873,11 +891,15 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
+    if(tile->cf != 0 && !conv_igemm::outputChannelsFirst(*problem))
+    {
+        return false;
+    }
     return conv_igemm::gridFor(*problem, tile->bm, tile->bn).has_value();
 }
 
-/// The problem a config runs: a direct-filter config reads the graph's filter, so nothing stages
-/// it.
+/// The problem a config runs: a direct-filter config reads the graph's filter, and a
+/// channels-first-output config writes the graph's output, so nothing stages them.
 std::optional<IgemmProblem>
     problemFor(const MatchContext& context, ConvDirection direction, const Tile& tile)
 {
@@ -885,6 +907,10 @@ std::optional<IgemmProblem>
     if(problem.has_value() && tile.wdirect != 0)
     {
         problem = conv_igemm::withoutFilterStaging(*problem);
+    }
+    if(problem.has_value() && tile.cf != 0)
+    {
+        problem = conv_igemm::withoutOutputStaging(*problem);
     }
     return problem;
 }
@@ -1082,6 +1108,7 @@ public:
         options.add("CONV_IGEMM_HALO", std::to_string(tile->halo));
         options.add("CONV_IGEMM_WD", std::to_string(tile->wdirect));
         options.add("CONV_IGEMM_PACK", std::to_string(tile->pack));
+        options.add("CONV_IGEMM_CF", std::to_string(tile->cf));
         options.add("CONV_IGEMM_DIR",
                     std::string(*direction == ConvDirection::FORWARD ? "0" : "1"));
         // 32-bit buffer loads while a block's rows and the filter stay under 2^31 bytes.

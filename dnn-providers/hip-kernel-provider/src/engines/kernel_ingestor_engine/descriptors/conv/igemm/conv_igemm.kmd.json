@@ -66,6 +66,10 @@
     {
       "name": "pack",
       "type": "int"
+    },
+    {
+      "name": "cf",
+      "type": "int"
     }
   ]
 }

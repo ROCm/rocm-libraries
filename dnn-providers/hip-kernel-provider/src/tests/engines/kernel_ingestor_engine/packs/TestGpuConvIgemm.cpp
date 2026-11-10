@@ -272,6 +272,12 @@ std::vector<DeviceCase> deviceCases()
     std::vector<DeviceCase> cases;
     cases.push_back({"Nhwc3x3", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, true)});
     cases.push_back({"Nchw3x3", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, false)});
+    // Channels-first images of whole vectors: the channels-first-output configs' vector stores.
+    cases.push_back({"Nchw3x3WholeVectors", dense(24, 40, {8, 12}, {3, 3}, {1, 1}, false)});
+    auto groupedFirst = dense(32, 48, {12, 13}, {3, 3}, {1, 1}, false);
+    groupedFirst.groups = 4;
+    groupedFirst.stride = {2, 2};
+    cases.push_back({"NchwGroupedStride2", groupedFirst});
     cases.push_back({"Nhwc1x1", dense(64, 32, {7, 9}, {1, 1}, {0, 0}, true)});
     cases.push_back({"NhwcSmallChannels", dense(3, 16, {17, 15}, {3, 3}, {1, 1}, true)});
 
@@ -521,7 +527,7 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its knob tuple: within one direction and
     // dtype (what one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 14> KNOBS{"atom",
+    static constexpr std::array<const char*, 15> KNOBS{"atom",
                                                        "math",
                                                        "bm",
                                                        "bn",
@@ -534,7 +540,8 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
                                                        "xcd",
                                                        "halo",
                                                        "wdirect",
-                                                       "pack"};
+                                                       "pack",
+                                                       "cf"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -602,6 +609,147 @@ TEST(TestConvIgemmCatalog, DirectFilterConfigsAreBackwardDataOnlyAndPackingIsNot
     }
     EXPECT_GT(direct, 0);
     EXPECT_GT(packed, 0);
+}
+
+TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOutputTwin)
+{
+    static constexpr std::array<const char*, 14> SHAPE{"atom",
+                                                       "math",
+                                                       "bm",
+                                                       "bn",
+                                                       "bk",
+                                                       "wm",
+                                                       "wn",
+                                                       "threads",
+                                                       "vec",
+                                                       "stages",
+                                                       "xcd",
+                                                       "halo",
+                                                       "wdirect",
+                                                       "pack"};
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const auto& kernels = catalog(direction);
+        const auto tupleOf = [](const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel) {
+            std::string tuple = kernel.getStringMetadata("dtype");
+            for(const char* knob : SHAPE)
+            {
+                const std::string name(knob);
+                tuple += "|"
+                         + (name == "atom" || name == "math"
+                                ? kernel.getStringMetadata(name)
+                                : std::to_string(kernel.getIntMetadata(name)));
+            }
+            return tuple;
+        };
+        int twins = 0;
+        for(const auto& kernel : kernels)
+        {
+            SCOPED_TRACE(kernel.name);
+            const bool cf = kernel.getIntMetadata("cf") != 0;
+            const bool eligible
+                = kernel.getStringMetadata("atom") != "fma" && kernel.getIntMetadata("pack") == 0;
+            if(cf)
+            {
+                EXPECT_TRUE(eligible);
+                continue;
+            }
+            const auto tuple = tupleOf(kernel);
+            const auto twin = std::count_if(kernels.begin(), kernels.end(), [&](const auto& other) {
+                return other.getIntMetadata("cf") != 0 && tupleOf(other) == tuple;
+            });
+            EXPECT_EQ(twin, eligible ? 1 : 0);
+            twins += static_cast<int>(twin);
+        }
+        EXPECT_GT(twins, 0);
+    }
+}
+
+TEST(TestConvIgemmCatalog, ChannelsFirstOutputIsTheTransposedOutputOfTheDirection)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const bool forward = direction == ConvDirection::FORWARD;
+        conv_igemm::IgemmProblem problem;
+        problem.direction = direction;
+        // Only the input channels-first: not the output.
+        auto& input = forward ? problem.x : problem.y;
+        auto& output = forward ? problem.y : problem.x;
+        input.needed = input.transpose = true;
+        EXPECT_FALSE(conv_igemm::outputChannelsFirst(problem));
+        // The output staged by the strided copy (not packed channels-first).
+        output.needed = true;
+        EXPECT_FALSE(conv_igemm::outputChannelsFirst(problem));
+        output.transpose = true;
+        EXPECT_TRUE(conv_igemm::outputChannelsFirst(problem));
+    }
+}
+
+TEST(TestConvIgemmCatalog, ChannelsFirstOutputProblemsStageNoOutput)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        conv_igemm::IgemmProblem problem;
+        problem.direction = direction;
+        problem.x.needed = problem.x.transpose = true;
+        problem.x.bytes = 1000;
+        problem.w.needed = true;
+        problem.w.bytes = 5000;
+        problem.y.needed = problem.y.transpose = true;
+        problem.y.bytes = 300;
+        const auto direct = conv_igemm::withoutOutputStaging(problem);
+        if(direction == ConvDirection::FORWARD)
+        {
+            EXPECT_TRUE(direct.x.needed);
+            EXPECT_FALSE(direct.y.needed);
+            EXPECT_EQ(direct.w.workspaceOffset, 1024u); // after x, 256-byte aligned
+            EXPECT_EQ(direct.workspaceBytes, 6144u);
+        }
+        else
+        {
+            EXPECT_FALSE(direct.x.needed);
+            EXPECT_TRUE(direct.y.needed);
+            EXPECT_EQ(direct.w.workspaceOffset, 0u);
+            EXPECT_EQ(direct.y.workspaceOffset, 5120u);
+            EXPECT_EQ(direct.workspaceBytes, 5632u);
+        }
+    }
+}
+
+hipdnn_plugin_sdk::ingestor::DeviceProperties deviceOf(const std::string& arch, int units);
+
+TEST(TestConvIgemmCatalog, ChannelsFirstOutputConfigsServeOnlyChannelsFirstOutputs)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(const bool channelsLast : {true, false})
+        {
+            auto shape = dense(32, 48, {12, 13}, {3, 3}, {1, 1}, channelsLast);
+            shape.dataType = DataType::HALF;
+            const GraphFixture fixture(buildGraph(specFor(shape, direction)),
+                                       deviceOf("gfx942:sramecc+:xnack-", 304));
+            const auto pack = packFor(direction);
+            const auto bound = matchesGraph(pack, fixture.context());
+            ASSERT_TRUE(bound.has_value());
+            int checked = 0;
+            for(const auto& kernel : catalog(direction))
+            {
+                if(kernel.getStringMetadata("dtype") != "HALF"
+                   || kernel.getStringMetadata("atom") != "mfma32_f16"
+                   || kernel.getIntMetadata("xcd") != 0 || kernel.getIntMetadata("halo") != 0
+                   || kernel.getIntMetadata("wdirect") != 0)
+                {
+                    continue;
+                }
+                SCOPED_TRACE(kernel.name + (channelsLast ? " channels-last" : " channels-first"));
+                const bool cf = kernel.getIntMetadata("cf") != 0;
+                EXPECT_EQ(matchesKernel(pack, fixture.context(), kernel, *bound),
+                          !cf || !channelsLast);
+                ++checked;
+            }
+            EXPECT_GT(checked, 1);
+        }
+    }
 }
 
 TEST(TestConvIgemmCatalog, PackingFitsOnlyReductionsShorterThanAndDividingTheKStep)

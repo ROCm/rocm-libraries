@@ -20,7 +20,8 @@
     "xcd",
     "halo",
     "wdirect",
-    "pack"
+    "pack",
+    "cf"
   ],
   "behavior_notes": [
     "runtime_compilation"

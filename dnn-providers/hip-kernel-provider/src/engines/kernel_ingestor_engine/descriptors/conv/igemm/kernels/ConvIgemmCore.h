@@ -741,6 +741,104 @@ __device__ inline long long
     }
 }
 
+// Walks the channels-first output positions of consecutive GEMM rows (one column): the row's
+// position along each axis (count[] per image), the output step per row along it, and the
+// channel planes between images. Starts by division once, then steps by additions.
+struct K1CfWalk
+{
+    int count[3]; // positions per image along d, h, w
+    long long step[3]; // output elements per position along d, h, w
+    long long image; // output elements from a position to the same one in the next image
+    int j[3];
+    long long o;
+
+    template <int DIR>
+    __device__ void init(const K1Args& a, const K1Gather& gather)
+    {
+        for(int i = 0; i < 3; ++i)
+            count[i] = gather.out[i];
+        if constexpr(DIR == K1_FORWARD)
+        {
+            step[2] = 1;
+            step[1] = a.wo;
+            step[0] = static_cast<long long>(a.ho) * a.wo;
+            image = static_cast<long long>(a.k) * a.dout * step[0];
+        }
+        else
+        {
+            step[2] = a.sw;
+            step[1] = static_cast<long long>(a.sh) * a.wi;
+            step[0] = static_cast<long long>(a.sd) * a.hi * a.wi;
+            image = static_cast<long long>(a.c) * a.di * a.hi * a.wi;
+        }
+    }
+
+    // Row m's element (column index @p o0 from k1OutIndexCf) and its axis positions.
+    __device__ void start(long long m, long long o0)
+    {
+        const int spatial = count[0] * count[1] * count[2];
+        int rest = static_cast<int>(m % spatial);
+        j[2] = rest % count[2];
+        rest /= count[2];
+        j[1] = rest % count[1];
+        j[0] = rest / count[1];
+        o = o0;
+    }
+
+    // The next row's element.
+    __device__ void next()
+    {
+        o += step[2];
+        if(++j[2] < count[2])
+            return;
+        j[2] = 0;
+        o += step[1] - count[2] * step[2];
+        if(++j[1] < count[1])
+            return;
+        j[1] = 0;
+        o += step[0] - count[1] * step[1];
+        if(++j[0] < count[0])
+            return;
+        j[0] = 0;
+        // Back to the image's first position, then on to the next image's plane.
+        o += image - count[0] * step[0];
+    }
+};
+
+// The same element in a packed channels-first output (CF 1): forward y[img][g kg + n][pos],
+// backward data dx[img][g cg + n][the phase's input position].
+template <int DIR>
+__device__ inline long long
+    k1OutIndexCf(const K1Args& a, const K1Gather& gather, int g, int phase, long long m, int n)
+{
+    if constexpr(DIR == K1_FORWARD)
+    {
+        const long long spatial = static_cast<long long>(a.dout) * a.ho * a.wo;
+        const long long img = m / spatial;
+        return (img * a.k + static_cast<long long>(g) * (a.k / a.groups) + n) * spatial
+               + (m - img * spatial);
+    }
+    else
+    {
+        const int pw = phase % a.sw;
+        const int ph = (phase / a.sw) % a.sh;
+        const int pd = phase / (a.sw * a.sh);
+        const int spatial = gather.out[0] * gather.out[1] * gather.out[2];
+        const long long img = m / spatial;
+        int rest = static_cast<int>(m - img * spatial);
+        const int jw = rest % gather.out[2];
+        rest /= gather.out[2];
+        const int jh = rest % gather.out[1];
+        const int jd = rest / gather.out[1];
+        const int iw = ((pw - a.pw) % a.sw + a.sw) % a.sw + jw * a.sw;
+        const int ih = ((ph - a.ph) % a.sh + a.sh) % a.sh + jh * a.sh;
+        const int id = ((pd - a.pd) % a.sd + a.sd) % a.sd + jd * a.sd;
+        return ((img * a.c + static_cast<long long>(g) * (a.c / a.groups) + n) * a.di + id) * a.hi
+                   * a.wi
+               + static_cast<long long>(ih) * a.wi + iw;
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Global tile loads. A: VEC reduction channels of PASSES gathered rows, each row's origin decoded
 // once. B: VEC reduction channels of PASSES filter rows, contiguous along the reduction:
@@ -1387,6 +1485,8 @@ __device__ inline void k1XcdOrder(unsigned& bx, unsigned& by, unsigned& bz)
 // order. HALO 1: the halo A loop (the launcher checks k1HaloFits with K1_HALO_CAP rows; STAGES 1).
 // WD 1: backward data reads the graph's K T R S C/g filter directly (K1Tiles). PACK 1: k-steps of
 // whole taps when the reduction channels per tap divide BK (K1Tiles; not with the halo loop).
+// CF 1: the output (forward y, backward data dx) is written packed channels-first straight from
+// the epilogue (and the split-K partials indexed alike), so it needs no staging transpose.
 
 template <class T,
           class Atom,
@@ -1402,7 +1502,8 @@ template <class T,
           int XCD = 0,
           int HALO = 0,
           int WD = 0,
-          int PACK = 0>
+          int PACK = 0,
+          int CF = 0>
 __device__ void k1ConvMma(const K1Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -1420,7 +1521,10 @@ __device__ void k1ConvMma(const K1Args& a)
                           / static_cast<int>(sizeof(T)); // in T
     // Epilogue: each wave stages 16 rows of its tile at a time.
     constexpr int OLD = WTN + 16 / static_cast<int>(sizeof(T));
-    constexpr int OUT = WM * WN * DIM * OLD;
+    // Channels-first epilogue (CF 1): each wave stages DIM columns x CFR rows, column-major.
+    constexpr int CFR = WTM < 64 ? WTM : 64;
+    constexpr int OLDC = CFR + 16 / static_cast<int>(sizeof(T));
+    constexpr int OUT = CF ? WM * WN * DIM * OLDC : WM * WN * DIM * OLD;
     // Halo: A is [PLANES][AROWS][LD], the staged rows and one zero row, then one B tile.
     constexpr int HRPP = THREADS / (BK / VEC);
     constexpr int HROWS = (BM + K1_HALO_CAP + HRPP - 1) / HRPP * HRPP;
@@ -1711,9 +1815,78 @@ __device__ void k1ConvMma(const K1Args& a)
                     const long long m = m0 + wm * WTM + i * DIM + Atom::dRow(lane, e);
                     if(m < gather.rows && nn < ncols)
                     {
-                        partial[k1OutIndex<DIR>(a, gather, g, phase, m, nn)] = acc[i][j][e];
+                        partial[CF ? k1OutIndexCf<DIR>(a, gather, g, phase, m, nn)
+                                   : k1OutIndex<DIR>(a, gather, g, phase, m, nn)]
+                            = acc[i][j][e];
                     }
                 }
+            }
+        return;
+    }
+
+    T* out = static_cast<T*>(DIR == K1_FORWARD ? a.y : a.x);
+    typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
+    if constexpr(CF != 0)
+    {
+        // Channels-first epilogue: per DIM-column slab and CFR-row chunk, accumulators to the
+        // wave's column-major LDS strip, then runs of VEC rows (consecutive positions of one
+        // channel) to global; single elements where a run is not contiguous in the output (an
+        // image boundary, a stride phase) or past the last row.
+        __syncthreads();
+        T* strip = lds + wave * DIM * OLDC;
+        constexpr int RUNS = CFR / VEC;
+        K1CfWalk walk;
+        walk.template init<DIR>(a, gather);
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+#pragma unroll
+            for(int rc = 0; rc < WTM / CFR; ++rc)
+            {
+#pragma unroll
+                for(int i = 0; i < CFR / DIM; ++i)
+#pragma unroll
+                    for(int e = 0; e < Atom::ACC; ++e)
+                        strip[(lane % DIM) * OLDC + i * DIM + Atom::dRow(lane, e)]
+                            = K1Elem<T>::store(acc[rc * (CFR / DIM) + i][j][e]);
+                __builtin_amdgcn_wave_barrier();
+                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
+                __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
+                for(int v = lane; v < DIM * RUNS; v += WAVE)
+                {
+                    const int col = v / RUNS;
+                    const int run = v - col * RUNS;
+                    const long long m = m0 + wm * WTM + rc * CFR + run * VEC;
+                    const int nn = n0 + wn * WTN + j * DIM + col;
+                    if(m >= gather.rows || nn >= ncols)
+                    {
+                        continue;
+                    }
+                    const T* src = strip + col * OLDC + run * VEC;
+                    const long long o = k1OutIndexCf<DIR>(a, gather, g, phase, m, nn);
+                    walk.start(m, o);
+                    long long at[VEC];
+#pragma unroll
+                    for(int e = 0; e < VEC; ++e)
+                    {
+                        at[e] = walk.o;
+                        walk.next();
+                    }
+                    // Positions only increase with m, so a span of VEC - 1 means contiguous.
+                    if(m + VEC <= gather.rows && o % VEC == 0 && at[VEC - 1] == o + VEC - 1)
+                    {
+                        *reinterpret_cast<Raw*>(out + o) = *reinterpret_cast<const Raw*>(src);
+                    }
+                    else
+                    {
+#pragma unroll
+                        for(int e = 0; e < VEC; ++e)
+                            if(m + e < gather.rows)
+                                out[at[e]] = src[e];
+                    }
+                }
+                __builtin_amdgcn_wave_barrier();
+                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
+                __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
             }
         return;
     }
@@ -1722,8 +1895,6 @@ __device__ void k1ConvMma(const K1Args& a)
     // to global (single columns past the last full vector).
     __syncthreads();
     T* strip = lds + wave * DIM * OLD;
-    T* out = static_cast<T*>(DIR == K1_FORWARD ? a.y : a.x);
-    typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
     constexpr int ROW_VECS = WTN / VEC;
 #pragma unroll
     for(int i = 0; i < FM; ++i)

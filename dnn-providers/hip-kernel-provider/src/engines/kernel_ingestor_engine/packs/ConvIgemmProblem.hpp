@@ -64,6 +64,14 @@ struct IgemmProblem
 /// operands keep their order in the workspace.
 IgemmProblem withoutFilterStaging(const IgemmProblem& problem);
 
+/// Whether @p problem's output (forward y, backward data dx) is packed channels-first, so a
+/// channels-first-output config writes it in place of the staging transpose.
+bool outputChannelsFirst(const IgemmProblem& problem);
+
+/// @p problem without the output staging, for a channels-first-output config: the remaining
+/// staged operands keep their order in the workspace.
+IgemmProblem withoutOutputStaging(const IgemmProblem& problem);
+
 /**
  * @brief The convolution @p context's graph describes in @p direction, or nullopt when the
  *        implicit-GEMM kernels do not serve it.
