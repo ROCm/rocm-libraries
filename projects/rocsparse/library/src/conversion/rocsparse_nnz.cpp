@@ -183,6 +183,8 @@ namespace rocsparse
                 {
                     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                         nnz_per_row_columns, 0, sizeof(I) * m, handle->stream));
+                    // Do not fall through: the column case memsets n entries.
+                    break;
                 }
                 case rocsparse_direction_column:
                 {

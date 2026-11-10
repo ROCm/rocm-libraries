@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -81,6 +81,15 @@ void testing_nnz(const Arguments& arg)
     //
     rocsparse_int MN = (dirA == rocsparse_direction_row) ? M : N;
 
+    //
+    // With row direction and m == 0 the array has no valid entries. Keep n
+    // sentinel values past that prefix so a fall-through into the column
+    // memset fails this test.
+    //
+    const rocsparse_int nnz_guard    = (dirA == rocsparse_direction_row && M == 0 && N > 0) ? N : 0;
+    const rocsparse_int nnz_alloc    = MN + nnz_guard;
+    const rocsparse_int nnz_sentinel = static_cast<rocsparse_int>(0x7eadbeef);
+
     host_vector<T>             h_A(LD * N);
     host_vector<rocsparse_int> h_nnzPerRowColumn(MN);
     host_vector<rocsparse_int> hd_nnzPerRowColumn(MN);
@@ -89,7 +98,7 @@ void testing_nnz(const Arguments& arg)
 
     // Allocate device memory
     device_vector<T>             d_A(LD * N);
-    device_vector<rocsparse_int> d_nnzPerRowColumn(MN);
+    device_vector<rocsparse_int> d_nnzPerRowColumn(nnz_alloc);
     device_vector<rocsparse_int> d_nnzTotalDevHostPtr(1);
 
     //
@@ -124,11 +133,35 @@ void testing_nnz(const Arguments& arg)
     //
     CHECK_HIP_ERROR(hipMemcpy(d_A, h_A, sizeof(T) * LD * N, hipMemcpyHostToDevice));
 
+    if(nnz_guard > 0)
+    {
+        host_vector<rocsparse_int> h_nnz_fill(nnz_alloc, nnz_sentinel);
+        CHECK_HIP_ERROR(hipMemcpy(d_nnzPerRowColumn,
+                                  h_nnz_fill,
+                                  sizeof(rocsparse_int) * nnz_alloc,
+                                  hipMemcpyHostToDevice));
+    }
+
     //
     // Unit check.
     //
     if(arg.unit_check)
     {
+        auto check_empty_row_guard = [&]() {
+            if(nnz_guard == 0)
+            {
+                return;
+            }
+
+            host_vector<rocsparse_int> h_guard(nnz_guard);
+            host_vector<rocsparse_int> h_expected(nnz_guard, nnz_sentinel);
+            CHECK_HIP_ERROR(hipMemcpy(h_guard,
+                                      d_nnzPerRowColumn.data() + MN,
+                                      sizeof(rocsparse_int) * nnz_guard,
+                                      hipMemcpyDeviceToHost));
+            h_guard.unit_check(h_expected);
+        };
+
         //
         // Compute the reference host first.
         //
@@ -158,6 +191,7 @@ void testing_nnz(const Arguments& arg)
         //
         hd_nnzPerRowColumn.unit_check(h_nnzPerRowColumn);
         hd_nnzTotalDevHostPtr.unit_check(h_nnzTotalDevHostPtr);
+        check_empty_row_guard();
 
         //
         // Pointer mode host for nnz and call.
@@ -180,6 +214,7 @@ void testing_nnz(const Arguments& arg)
         //
         hd_nnzPerRowColumn.unit_check(h_nnzPerRowColumn);
         unit_check_scalar(dh_nnz, h_nnzTotalDevHostPtr[0]);
+        check_empty_row_guard();
     }
 
     if(arg.timing)

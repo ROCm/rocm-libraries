@@ -31,6 +31,24 @@ Tests:
   function: nnz_bad_arg
   precision: *single_double_precisions_complex_real
 
+- name: nnz_empty_row
+  category: quick
+  function: nnz
+  precision: *single_double_precisions_complex_real
+  M: [0]
+  N: [64]
+  denseld: [1]
+  direction: [rocsparse_direction_row]
+
+- name: nnz_empty_row
+  category: pre_checkin
+  function: nnz
+  precision: *single_double_precisions_complex_real
+  M: [0]
+  N: [64]
+  denseld: [1]
+  direction: [rocsparse_direction_row]
+
 - name: nnz
   category: quick
   function: nnz
