@@ -54,10 +54,15 @@
   CDNA 5 it ranks above `direct` for grouped 1×1 fprop and dgrad.
 * `direct` (CDNA 5) runs 1×3, 3×1, 1×5, 5×1 and 7×1 filters, and `direct_wgrad` (CDNA 5) runs
   1×5 and 5×1.
+* The CMake option `HIPCONV_DISABLE_ASAN` (default `OFF`) compiles hipconv without ASAN
+  instrumentation, for a consumer built with `-fsanitize=address` whose link otherwise fails with
+  an out-of-range relocation.
 * `describe_kernel(kernel)` returns `family[full description]`, or the bare family when the full
   description is empty, and `find_kernel(arch, description)` returns the kernel it names.
 * `is_deterministic(kernel, device, par)` reports whether two launches on the same inputs write
   bitwise-identical outputs; it is false for a kernel that adds into dW atomically.
+* `has_device_code(hip_device)` reports whether the loaded binary holds hipconv's device code for
+  a HIP device.
 
 ### Changed
 
@@ -70,7 +75,8 @@
   `ArchHandle` in `get_valid_configs` and `find_config`, and after the kernel handle elsewhere.
   Selection makes no HIP calls, and a null `arch` or a `cu_count` below 1 is rejected.
 * `resolve_arch` no longer checks the current device for device code; it is the same registry
-  lookup as `find_arch`. Without device code for the GPU, `launch()` fails.
+  lookup as `find_arch`. Without device code for the GPU, `launch()` fails; `has_device_code`
+  reports beforehand whether a HIP device has it.
 * `launch()` requires the stream's device to be current, as hipBLASLt does.
 * `ConvLaunch::make` no longer asks hipBLASLt for an algorithm. If hipBLASLt has none for the
   layer, the first `launch()` returns `hipErrorNotSupported`.
