@@ -1,0 +1,257 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --DsRefillSinkPass --InsertWaitAluPass=enableESM2TrackValuVsrc,sharedOrderCountFollowers,xdlCountFromNextWmma --enable-esm2-track-valu-vsrc --print-output
+#
+# Sink mode, checked through the waits InsertWaitAluPass then emits. Each refill overwrites
+# v[200:203], which WMMA 0 (v[0:7]) read. The v_wmma_f32_16x16x32_bf16 form needs 12 WMMAs after
+# that read to hide the wait, and a refill's data is due 3 WMMAs before the WMMA that reads it
+# again. The other WMMAs read v[224:239] and keep their order.
+
+#===----------------------------------------------------------------------===#
+# 4 WMMAs after the read: the refill moves 8 WMMAs later, after the 12th, and needs no wait.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @sink_hides_the_wait
+# CHECK: v[32:39] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NEXT: v[40:47] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK: v[96:103] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NEXT: v[200:203] = "st.ds_load_b128"
+# CHECK-NEXT: v[104:111] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NOT: s_wait_alu
+# CHECK: "st.s_endpgm"
+
+st.func @sink_hides_the_wait() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[200:203] = "st.ds_load_b128"(v300, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[96:103]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[104:111] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[104:111]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[112:119] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[112:119]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[120:127] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[120:127]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[128:135] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[128:135]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[140:147] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[140:147]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# The second load waited only because the first did. Both move, in order.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @sink_moves_the_whole_unit
+# CHECK: v[96:103] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NEXT: v[200:203] = "st.ds_load_b128"
+# CHECK-NEXT: v[204:207] = "st.ds_load_b128"
+# CHECK-NOT: s_wait_alu
+# CHECK: "st.s_endpgm"
+
+st.func @sink_moves_the_whole_unit() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[200:203] = "st.ds_load_b128"(v300, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[204:207] = "st.ds_load_b128"(v300, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[96:103]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[104:111] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[104:111]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[112:119] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[112:119]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[120:127] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[120:127]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[128:135] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[128:135]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[140:147] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[140:147]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# A ds_load with the same banks sits one gap past where the wait is hidden: the refill joins it
+# there rather than opening a gap of its own.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @sink_joins_a_ds_run
+# CHECK: v[96:103] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NEXT: v[104:111] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NEXT: v[200:203] = "st.ds_load_b128"
+# CHECK-NEXT: v[244:247] = "st.ds_load_b128"
+# CHECK-NOT: s_wait_alu
+# CHECK: "st.s_endpgm"
+
+st.func @sink_joins_a_ds_run() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[200:203] = "st.ds_load_b128"(v300, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[240:243] = "st.ds_load_b128"(v301, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[96:103]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[104:111] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[104:111]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[244:247] = "st.ds_load_b128"(v302, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[112:119] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[112:119]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[120:127] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[120:127]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[128:135] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[128:135]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[140:147] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[140:147]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# A barrier ends the stage at slot 10, and its threshold counts from the last ds_load before
+# it. The refill goes no further than that load, so its wait gets weaker: 7 WMMAs, not 4. The
+# load beside it lets a gap hold two loads.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @sink_stops_at_the_last_load_before_a_barrier
+# CHECK: v[56:63] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NEXT: s_wait_alu
+# CHECK-SAME: va_vdst = 7
+# CHECK-NEXT: v[200:203] = "st.ds_load_b128"
+# CHECK-NEXT: v[244:247] = "st.ds_load_b128"
+# CHECK: "st.s_barrier_signal"
+
+st.func @sink_stops_at_the_last_load_before_a_barrier() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[200:203] = "st.ds_load_b128"(v300, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[240:243] = "st.ds_load_b128"(v301, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[244:247] = "st.ds_load_b128"(v302, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1 }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[96:103]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[104:111] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[104:111]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[112:119] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[112:119]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[120:127] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[120:127]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[128:135] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[128:135]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[136:143] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[136:143]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# The refill is itself the last ds_load before a barrier, so it stays and keeps its wait.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @sink_keeps_the_last_load_before_a_barrier
+# CHECK: v[32:39] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NEXT: s_wait_alu
+# CHECK-SAME: va_vdst = 4
+# CHECK-NEXT: v[200:203] = "st.ds_load_b128"
+# CHECK-NEXT: "st.s_barrier_signal"
+
+st.func @sink_keeps_the_last_load_before_a_barrier() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[200:203] = "st.ds_load_b128"(v300, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1 }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[96:103]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[104:111] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[104:111]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[112:119] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[112:119]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[120:127] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[120:127]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[128:135] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[128:135]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# WMMA 12 reads the refilled data, so it is due at slot 9, before the wait is hidden. The refill
+# goes to slot 9 and its wait gets weaker: 8 WMMAs, not 4.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @sink_takes_a_weaker_wait_when_the_data_is_due
+# CHECK: v[64:71] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NEXT: s_wait_alu
+# CHECK-SAME: va_vdst = 8
+# CHECK-NEXT: v[200:203] = "st.ds_load_b128"
+# CHECK-NEXT: v[72:79] = "st.v_wmma_f32_16x16x32_bf16"
+
+st.func @sink_takes_a_weaker_wait_when_the_data_is_due() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[200:203] = "st.ds_load_b128"(v300, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[140:147] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[140:147]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# The read is in the block before the branch. The scoreboard is seeded from that block, so the
+# refill at the top of the next block moves after its 9th WMMA and needs no wait.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @sink_sees_a_read_in_the_previous_block
+# CHECK: ^next:
+# CHECK-NEXT: v[40:47] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK: v[104:111] = "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NEXT: v[200:203] = "st.ds_load_b128"
+# CHECK-NEXT: v[112:119] = "st.v_wmma_f32_16x16x32_bf16"
+
+st.func @sink_sees_a_read_in_the_previous_block() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_cbranch_scc1"("exit", SCC0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^next, ^exit
+^next:
+  v[200:203] = "st.ds_load_b128"(v300, LDS0) { issueCycles = 1, latencyCycles = 16, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[96:103]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[104:111] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[104:111]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[112:119] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[112:119]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[120:127] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[120:127]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[128:135] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[232:239], v[128:135]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+^exit:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

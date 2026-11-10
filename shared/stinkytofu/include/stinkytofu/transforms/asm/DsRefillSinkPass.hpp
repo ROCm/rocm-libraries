@@ -10,11 +10,18 @@
 namespace stinkytofu {
 class Pass;
 
-/// Reports, for every ds_load InsertWaitAluPass would give a va_vdst wait, the refill window it
-/// has: from the WMMA count that hides the wait to the WMMA that reads its data, within its
-/// stage. The report goes to the "DsRefillSinkPass" debug stream; the IR is not changed. Runs
-/// after the DAG scheduler, under expert scheduling mode 2. The policy is in
-/// docs/developer/ds-refill-placement.md.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createDsRefillSinkPass();
+/// Sinks a ds_load that overwrites registers a recent WMMA read until InsertWaitAluPass needs no
+/// va_vdst wait for it, without moving any WMMA. A refill moves only later, inside its window:
+/// after the WMMA count that hides the wait, before the WMMA that reads its data needs it, and
+/// within its stage. A move is kept only when the block owes fewer WMMAs and no vm_vsrc wait
+/// gets stricter. Runs after the DAG scheduler and before wait-count insertion, under expert
+/// scheduling mode 2. The policy is in docs/developer/ds-refill-placement.md.
+struct DsRefillSinkOptions {
+    /// Report every waiting ds_load, its window and the slot the policy picks, to the
+    /// "DsRefillSinkPass" debug stream, and change nothing.
+    bool reportOnly = false;
+};
+
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createDsRefillSinkPass(DsRefillSinkOptions options = {});
 
 }  // namespace stinkytofu

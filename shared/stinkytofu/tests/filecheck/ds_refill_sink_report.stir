@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --DsRefillSinkPass --enable-esm2-track-valu-vsrc --debug-pass DsRefillSinkPass 2>&1
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --DsRefillSinkPass=report --enable-esm2-track-valu-vsrc --debug-pass DsRefillSinkPass 2>&1
 #
 # Report mode: for each ds_load InsertWaitAlu would give a va_vdst wait, its refill window and the
 # slot the policy picks. A slot counts the block's WMMAs before a node. The refill overwrites

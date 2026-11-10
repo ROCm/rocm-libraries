@@ -275,7 +275,11 @@ const std::vector<PassInfo> availablePasses = {
          if (hasPassArg(args, "noGuard")) options.avoidMsbXcntDrain = false;
          return createEpilogueStoreSinkPass(options);
      }},
-    {"DsRefillSinkPass", [](const auto&) { return createDsRefillSinkPass(); }},
+    // DsRefillSinkPass accepts: report (plan and report, move nothing)
+    {"DsRefillSinkPass",
+     [](const std::vector<std::string>& args) {
+         return createDsRefillSinkPass({.reportOnly = hasPassArg(args, "report")});
+     }},
     {"PeepholeOptimizationPass", [](const auto&) { return createPeepholeOptimizationPass(); }},
     {"DeadCodeEliminationPass", [](const auto&) { return createDeadCodeEliminationPass(); }},
     {"RedundantMovEliminationPass",

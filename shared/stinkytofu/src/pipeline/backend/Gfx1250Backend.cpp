@@ -114,7 +114,8 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
         pm.addPass(createStinkyMergeBarrierPass());
         // Only expert scheduling mode 2 has the va_vdst waits this pass works on.
         const auto& options = module.getModuleOptions();
-        if (options.EnableESM2 && options.DsRefillSink > 0) pm.addPass(createDsRefillSinkPass());
+        if (options.EnableESM2 && options.DsRefillSink > 0)
+            pm.addPass(createDsRefillSinkPass({.reportOnly = options.DsRefillSink == 1}));
     }
 }
 
