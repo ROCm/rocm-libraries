@@ -74,8 +74,8 @@ namespace
     {
         H obj = nullptr;
 
-        guard()                        = default;
-        guard(const guard&)            = delete;
+        guard()             = default;
+        guard(const guard&) = delete;
         guard& operator=(const guard&) = delete;
         ~guard()
         {
