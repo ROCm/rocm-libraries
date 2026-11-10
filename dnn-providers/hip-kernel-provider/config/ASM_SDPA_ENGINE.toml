@@ -928,7 +928,6 @@ reason = "ALMIOPEN-3043: a negative or zero attention scale gives NaN in O"
 # SdpaFwdPlan cases with a block mask or a caller dropout mask: whole folders, matched by pattern.
 [[test_skips]]
 filters = [
-    "full_SdpaFwdPlan_Bm_Bias_ScBv.*",
     "*_SdpaFwdPlan_ScBv_DMask_DScBv.*",
     "*_SdpaFwdPlan_Sink_DMask_DScBv_Stats.*",
 ]
@@ -1030,6 +1029,10 @@ filters = [
     "full_SdpaFwdPlan_Bm_Bias_DMask_DScBv.bf16_9325129309e7a7e7",
     "full_SdpaFwdPlan_Bm_Bias_Max_SumExp.bf16_1a17dc99cdfc021e",
     "full_SdpaFwdPlan_Bm_Bias_Max_SumExp.bf16_50b9759d212cb7f0",
+    "full_SdpaFwdPlan_Bm_Bias_ScBv.bf16_2e775a55dc04d2c6",
+    "full_SdpaFwdPlan_Bm_Bias_ScBv.bf16_54c98c4a24f80281",
+    "full_SdpaFwdPlan_Bm_Bias_ScBv.bf16_987efc062d05a8eb",
+    "full_SdpaFwdPlan_Bm_Bias_ScBv.bf16_a444e1cae30c2e5d",
     "full_SdpaFwdPlan_Bm_Bias_Stats.bf16_0003722af4427c01",
     "full_SdpaFwdPlan_Bm_Bias_Stats.bf16_0a7c0728ba9b353d",
     "full_SdpaFwdPlan_Bm_Bias_Stats.bf16_0ae35e5aaa4d8127",
@@ -1938,8 +1941,6 @@ filters = [
     "*_SdpaFwdPlan_ScRt_Max.*",
     "*_SdpaFwdPlan_ScRt_Max_SumExp.*",
     "*_SdpaFwdPlan_ScRt_SumExp.*",
-    "*_SdpaFwdPlan_SlQ_SlKv_Bias_Max.*",
-    "*_SdpaFwdPlan_SlQ_SlKv_Bm_Max.*",
     "*_SdpaFwdPlan_SlQ_SlKv_Max_SumExp_PtK.*",
     "*_SdpaFwdPlan_SlQ_SlKv_Max_SumExp_PtK_PtV.*",
     "*_SdpaFwdPlan_SlQ_SlKv_Max_SumExp_PtKv.*",
@@ -1969,6 +1970,9 @@ filters = [
     "comprehensive_SdpaFwdPlan_DMask_DScBv_Stats_Max_SumExp.bf16_a40f18509c14302d",
     "comprehensive_SdpaFwdPlan_DMask_DScBv_Stats_Max_SumExp.bf16_f3cb0a93ba407bfc",
     "comprehensive_SdpaFwdPlan_DMask_DScBv_Stats_Max_SumExp.bf16_f9e3ba55959d4b2d",
+    "comprehensive_SdpaFwdPlan_SlQ_SlKv_Bias_Max.bf16_4ce5a3c24489d3f8",
+    "comprehensive_SdpaFwdPlan_SlQ_SlKv_Bias_Max.bf16_7cbfde48f51ddf0c",
+    "comprehensive_SdpaFwdPlan_SlQ_SlKv_Bm_Max.bf16_4cbed46bdca6e356",
     "full_SdpaFwdPlan_Bm_Bias_Max_SumExp.bf16_05f3976a9d94a407",
     "full_SdpaFwdPlan_Bm_Bias_Max_SumExp.bf16_072d34045e7b7c1f",
     "full_SdpaFwdPlan_Bm_Bias_Max_SumExp.bf16_07d43b14df688f09",
@@ -2023,6 +2027,9 @@ filters = [
     "full_SdpaFwdPlan_DMask_DScBv_Stats_Max_SumExp.bf16_cfb0264ce447e6d3",
     "full_SdpaFwdPlan_DMask_DScBv_Stats_Max_SumExp.bf16_d86f6ba09d6d4b85",
     "full_SdpaFwdPlan_DMask_DScBv_Stats_Max_SumExp.bf16_ff9f97f476fc92b2",
+    "full_SdpaFwdPlan_SlQ_SlKv_Bias_Max.bf16_1ced43c86f95d014",
+    "full_SdpaFwdPlan_SlQ_SlKv_Bias_Max.bf16_209ae98ad96bdb3b",
+    "full_SdpaFwdPlan_SlQ_SlKv_Bm_Max.bf16_e5a6483be3cd6ffd",
     "standard_SdpaFwdPlan_Bm_Bias_Max_SumExp.bf16_0023208126f9db13",
     "standard_SdpaFwdPlan_Bm_Bias_Max_SumExp.bf16_06be7046cb35c267",
     "standard_SdpaFwdPlan_Bm_Bias_Max_SumExp.bf16_0ea71719c832f52e",
@@ -2089,6 +2096,12 @@ filters = [
     "standard_SdpaFwdPlan_DMask_DScBv_Stats_Max_SumExp.bf16_a1f7b952e932e40e",
     "standard_SdpaFwdPlan_DMask_DScBv_Stats_Max_SumExp.bf16_cf1aa73a57f8dd99",
     "standard_SdpaFwdPlan_DMask_DScBv_Stats_Max_SumExp.bf16_fda7f496b6b97456",
+    "standard_SdpaFwdPlan_SlQ_SlKv_Bias_Max.bf16_356d9e2efe10b0f5",
+    "standard_SdpaFwdPlan_SlQ_SlKv_Bias_Max.bf16_844307b0118b8666",
+    "standard_SdpaFwdPlan_SlQ_SlKv_Bias_Max.bf16_9d5eb96b73d35ab0",
+    "standard_SdpaFwdPlan_SlQ_SlKv_Bias_Max.bf16_a6c37222f99064a6",
+    "standard_SdpaFwdPlan_SlQ_SlKv_Bm_Max.bf16_3715a6b4991d36a3",
+    "standard_SdpaFwdPlan_SlQ_SlKv_Bm_Max.bf16_b87346801ae16e1e",
 ]
 reason = "ALMIOPEN-3124: the Max and Sum-exp outputs are accepted but never written"
 
