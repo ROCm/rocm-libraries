@@ -113,6 +113,7 @@ positive_patterns: &positive_patterns
   - "GPU_Conv3DKernelTuningAI_FP32*"
   - "GPU_Conv3DKernelTuningSolver_FP32*"
   - "GPU_ConvAIModelLoad_FP32*"
+  - "GPU_ConvHipConv*"
   - "GPU_ConvNDKernelTuningUtils_FP32*"
   - "GPU_ConvStridedTensors_FP32*"
   - "GPU_HipBLASLtGEMMTest_FP32*"
