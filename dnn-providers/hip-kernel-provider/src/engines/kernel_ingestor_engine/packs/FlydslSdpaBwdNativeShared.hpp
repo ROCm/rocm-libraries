@@ -1005,8 +1005,8 @@ struct BwdPlanCommon
     TailzeroGrid tailzeroGrid;
 };
 
-/// The matched problem of @p context under @p options. A graph that declined at graph_match
-/// no longer matching is a bug, not a graph: BAD_PARAM scoped by @p scope.
+/// The matched problem of @p context under @p options. A graph that graph_match accepted and
+/// that no longer matches is a bug, not a graph: BAD_PARAM scoped by @p scope.
 inline bwd::SdpaBwdProblem
     matchedProblemOf(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                      const bwd::MatchOptions& options,
