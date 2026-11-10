@@ -29,10 +29,13 @@ of the image count; a run that starts inside a unit first replays ``KH - 1``
 steps with its X rows masked, refilling the ring without counting any (row,
 tap) pair twice. The copies never drain between units.
 
-Copies are per-lane ``global_load_async_to_lds`` into a ring of ``stages``
-row buffers. Every lane issues every copy (a padding lane copies element 0
-into a dummy slot past the buffer and zero-fills its own slot with an LDS
-store), so each wave counts the same copies per step and
+Rows move into a ring of ``stages`` buffers of ``rows`` rows each. With
+``tdm`` (what the AOT grid builds) each row of X and dY is one TDM transfer,
+issued by waves ``0 .. 2 * rows - 1``; the hardware zero-fills what lies past
+the clipped extents. Otherwise the copies are per-lane
+``global_load_async_to_lds``: every lane issues every copy (a padding lane
+copies element 0 into a dummy slot past the buffer and zero-fills its own
+slot with an LDS store), so each wave counts the same copies per step and
 ``s_wait_asynccnt`` can leave the younger steps in flight.
 
 The block adds its tile into the zeroed fp32 dW with cascade atomics.
