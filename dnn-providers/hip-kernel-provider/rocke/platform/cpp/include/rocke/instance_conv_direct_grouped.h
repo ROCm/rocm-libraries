@@ -21,6 +21,7 @@
  *   ------------------------------------   -------------------------------------
  *   @dataclass(frozen) DirectConvProblem    rocke_direct_conv_problem_t
  *     .total_c/.total_k/.flops (@property)   rocke_direct_conv_problem_total_c/...
+ *     .Ho/.Wo (@property)                    rocke_direct_conv_problem_Ho / _Wo
  *     .short()                               rocke_direct_conv_problem_short
  *   @dataclass(frozen) DirectConv16cSpec     rocke_direct_conv_16c_spec_t
  *     .threads_per_block / .n_acc_slots      rocke_direct_conv_16c_*
@@ -109,13 +110,14 @@ typedef struct rocke_direct_conv_problem
                         * to "fp16".  Zero-initialising the struct leaves dtype
                         * NULL, which silently selects fp16 and will silently
                         * drop a bf16 request. */
-    int dil_h; /* default 1; filter dilation, honoured by the non-grouped */
-    int dil_w; /* forward kernel only (every other variant rejects it)   */
+    int dil_h; /* default 1; filter dilation: direct_nongrouped, the WMMA */
+    int dil_w; /* forward / tap-outer / dgrad take it, the rest refuse it */
     int pad_w; /* default -1 (= PAD); column padding where it differs from
-                * PAD. Only the rotated-filter depthwise dgrad
-                * (rocke_direct_depthwise_tiled_spec_t.dgrad) takes such a
-                * problem; the forward tiled spec rejects one. Values below
-                * -1 are no padding: the depthwise dgrad specs reject them. */
+                * PAD. Only the variants of Python's PER_AXIS_PAD_VARIANTS
+                * (library/kernels/conv/direct_variants.py) take such a
+                * problem (direct_spec_for_problem refuses it for every other
+                * variant). Values below -1 are no padding
+                * (rocke_direct_conv_pad_w_reason). */
 } rocke_direct_conv_problem_t;
 
 /* DirectConvProblem with dataclass defaults (KH=KW=3, PAD=1, stride=1) and the
@@ -126,6 +128,14 @@ rocke_direct_conv_problem_t rocke_direct_conv_problem_default(void);
 /* @property PAD_W -> PAD if pad_w < 0 else pad_w. Every Wo below uses it. */
 int rocke_direct_conv_problem_pad_w(const rocke_direct_conv_problem_t* p);
 
+/* pad_w_reason(p): only -1 (PAD) or a value of at least 0 is a column
+ * padding. Returns true (and writes `prefix` + the reason) when pad_w is
+ * neither. */
+bool rocke_direct_conv_pad_w_reason(const rocke_direct_conv_problem_t* p,
+                                    const char* prefix,
+                                    char* reason,
+                                    size_t reason_cap);
+
 /* one_padding_reason(p): the kernels that offset columns by PAD compute no
  * per-axis padding. Returns true (and writes `prefix` + the reason) when
  * pad_w is no column padding or PAD_W != PAD. */
@@ -134,10 +144,46 @@ bool rocke_direct_conv_one_padding_reason(const rocke_direct_conv_problem_t* p,
                                           char* reason,
                                           size_t reason_cap);
 
-/* @property total_c -> groups * cpg. */
-int rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p);
-/* @property total_k -> groups * kpg. */
-int rocke_direct_conv_problem_total_k(const rocke_direct_conv_problem_t* p);
+/* dilation_reason(p): why a direct-conv kernel without dilation support
+ * cannot compute p. Returns true (and writes the reason) when p is dilated --
+ * any dilation other than 1, zero and negatives included, as in Python's
+ * is_dilated. */
+bool rocke_direct_dilation_reason(const rocke_direct_conv_problem_t* p, char* why, size_t why_cap);
+/* channel_totals_reason(p): why p's channel totals (groups * cpg, groups *
+ * kpg) do not fit the i32 the direct-conv builders keep them in. Returns true
+ * (and writes the reason) when either exceeds INT32_MAX. */
+bool rocke_direct_channel_totals_reason(const rocke_direct_conv_problem_t* p,
+                                        char* why,
+                                        size_t why_cap);
+/* problem_dims_reason(p): why p is not a convolution the forward WMMA kernels
+ * can launch. Returns true (and writes "<name> must be >= 1 (got <v>)" for the
+ * first of N, H, W, groups, cpg, kpg, KH, KW below 1) when an extent is zero
+ * or negative; the dw fwd validator and rocke_wmma_fwd_gate check it before
+ * any divisibility, size or grid rule. */
+bool rocke_direct_problem_dims_reason(const rocke_direct_conv_problem_t* p,
+                                      char* why,
+                                      size_t why_cap);
+
+/* The problem's dtype, NULL read as "fp16" (see the dtype field). */
+const char* rocke_direct_conv_problem_dtype(const rocke_direct_conv_problem_t* p);
+/* p.dtype == "bf16". */
+bool rocke_direct_conv_problem_is_bf16(const rocke_direct_conv_problem_t* p);
+
+/* @property total_c -> groups * cpg and @property total_k -> groups * kpg,
+ * in 64 bits like Python's ints: the validators compare tensor sizes built
+ * from them against the i32 limits, so the product must not wrap. The
+ * validators of every builder that keeps a total in an int (the grouped
+ * direct-conv families and the grouped wgrad MFMA) refuse totals past
+ * INT32_MAX first (rocke_direct_channel_totals_reason), so those builders'
+ * (int) casts are exact. */
+long long rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p);
+long long rocke_direct_conv_problem_total_k(const rocke_direct_conv_problem_t* p);
+/* @property Ho -> (H + 2*PAD - (KH-1)*dil_h - 1) // stride + 1 and
+ * @property Wo -> (W + 2*PAD_W - (KW-1)*dil_w - 1) // stride + 1: the output
+ * extents of a strided, dilated convolution, with Python's floor division
+ * (rocke_floor_div), so a too-small input gives the same value as Python. */
+long long rocke_direct_conv_problem_Ho(const rocke_direct_conv_problem_t* p);
+long long rocke_direct_conv_problem_Wo(const rocke_direct_conv_problem_t* p);
 /* @property flops -> 2*N*H*W*groups*kpg*KH*KW*cpg (returned as int64). */
 long long rocke_direct_conv_problem_flops(const rocke_direct_conv_problem_t* p);
 
@@ -650,7 +696,8 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
  *      ch_per_lane: int = 1
  *      block_h: int = 8          # dX rows per block (a tile; must be > 0)
  *      dot2: bool = False        # fdot2 tap pairs (gfx950)
- *      mfma: bool = False        # Toeplitz MFMA form (gfx950)
+ *      mfma: bool = False        # Toeplitz form: MFMA at wave64 (gfx950),
+ *                                # WMMA 16x16x32 at wave_size 32 (gfx1250)
  *      w_fold: int = 1           # images per MFMA tile (mfma only)
  *      prefetch_rows: int = 1    # dY rows in flight (mfma only)
  *      wave_size: int = 64
@@ -921,7 +968,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_new(
 
 /* build_direct_depthwise_dgrad_windowed(spec, arch). Windowed depthwise dgrad
  * (stride 1, cpg=kpg=1): a block streams the dY rows of a tile of block_h dX
- * rows once each; VALU, fdot2 or Toeplitz MFMA form. _new validates the spec
+ * rows once each; VALU, fdot2 or Toeplitz form (MFMA at wave64, wave32 WMMA
+ * at wave_size 32). _new validates the spec
  * (as the Python builder does) and names the kernel. */
 rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_win(
     rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_win_spec_t* spec, const char* arch);

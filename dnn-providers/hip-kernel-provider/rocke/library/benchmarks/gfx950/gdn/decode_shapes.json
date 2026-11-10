@@ -1,0 +1,10 @@
+[
+  {"gate_kind": "gdn", "mode": "plain", "state_dtype": "bf16", "heads": ["16/32", "4/8", "32/32"], "head_dim": 128, "batches": [1, 8, 16, 32, 64, 128, 256]},
+  {"gate_kind": "gdn", "mode": "plain", "state_dtype": "f32", "heads": ["16/32", "4/8", "32/32"], "head_dim": 128, "batches": [1, 8, 16, 32, 64, 128, 256]},
+  {"gate_kind": "gdn", "mode": "fused", "state_dtype": "bf16", "heads": ["8/8", "16/16", "32/32"], "head_dim": 128, "batches": [1, 8, 16, 32, 64, 128, 256]},
+  {"gate_kind": "gdn", "mode": "fused", "state_dtype": "f32", "heads": ["8/8", "16/16", "32/32"], "head_dim": 128, "batches": [1, 8, 16, 32, 64, 128, 256]},
+  {"gate_kind": "kda", "mode": "plain", "state_dtype": "bf16", "heads": ["8/8", "32/32", "96/96"], "head_dim": 128, "batches": [1, 8, 16, 32, 64, 128, 256]},
+  {"gate_kind": "kda", "mode": "plain", "state_dtype": "f32", "heads": ["8/8", "32/32", "96/96"], "head_dim": 128, "batches": [1, 8, 16, 32, 64, 128, 256]},
+  {"gate_kind": "kda", "mode": "fused", "state_dtype": "bf16", "heads": ["8/8", "32/32", "96/96"], "head_dim": 128, "batches": [1, 8, 16, 32, 64, 128, 256]},
+  {"gate_kind": "kda", "mode": "fused", "state_dtype": "f32", "heads": ["8/8", "32/32", "96/96"], "head_dim": 128, "batches": [1, 8, 16, 32, 64, 128, 256]}
+]

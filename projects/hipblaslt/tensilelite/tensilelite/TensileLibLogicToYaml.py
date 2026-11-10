@@ -27,10 +27,10 @@ from . import LibraryIO
 from .Common.GlobalParameters import defaultInternalSupportParams, defaultSolution
 from .Common.Constants import HR
 from .CustomKernels import isCustomKernelConfig
-from .SolutionStructs.Problem import ProblemType
+from .SolutionStructs.Problem import ProblemSizesMock, ProblemType
 from .SolutionStructs.Problem import _defaultProblemType as defaultProblemType
 from .Common.GlobalParameters import globalParameters
-from .Common.Architectures import gfxToIsa, isaToGfx, steppingArchOf, tuningArchOf
+from .Common.Architectures import gfxToIsa, isaToGfx, steppingArchOf
 from .Common import IsaVersion
 from .Common.ValidParameters import (
     checkParametersAreValid,
@@ -641,7 +641,12 @@ def formProblemSize(
     # verbatim instead of recovering a single size from the exact logic.
     if problemSizes is not None:
         temp["ProblemSizes"] = [
-            {key: FlowList(value) for key, value in entry.items()}
+            {
+                key: {k: makeFlow(v) for k, v in value.items()}
+                if isinstance(value, dict)
+                else FlowList(value)
+                for key, value in entry.items()
+            }
             for entry in problemSizes
         ]
     # for origami exactLogic is not present so we need to create it
@@ -651,9 +656,24 @@ def formProblemSize(
         )
         temp["ProblemSizes"] = [{"Exact": FlowList([1, 1, 1, 1])}]
     else:
-        for size, mapping in exactLogic:
-            if mapping[0] == solutionIndex:
-                temp["ProblemSizes"] = [{"Exact": FlowList(size)}]
+        problems = ProblemSizesMock(
+            exactLogic, problemTypeStat
+        ).problems
+        for problem, (_, mapping) in zip(problems, exactLogic):
+            if mapping[0] != solutionIndex:
+                continue
+            if problem.world is None:
+                temp["ProblemSizes"] = [{"Exact": FlowList(problem.sizes)}]
+            else:
+                temp["ProblemSizes"] = [
+                    {
+                        "Exact": {
+                            "sizes": FlowList(problem.sizes),
+                            "world": problem.world,
+                            "a2aExtent": problem.a2aExtent,
+                        }
+                    }
+                ]
         if "ProblemSizes" not in temp:
             tPrint(
                 1,
@@ -1420,11 +1440,9 @@ def formLibraryLogic(
 def buildTarget(libraryLogic: dict) -> str:
     """The architecture the solution was generated for: its logic's ArchitectureName.
 
-    That is the name TensileCreateLibrary matches logic files by. A build alias
-    names another architecture's logic built for an existing target, and a config
-    can name only real targets, so an alias stands for the logic it builds.
+    That is the name TensileCreateLibrary matches logic files by.
     """
-    return tuningArchOf(str(libraryLogic["ArchitectureName"]))
+    return str(libraryLogic["ArchitectureName"])
 
 
 def addBuildTarget(globalParams: dict, target: str) -> None:

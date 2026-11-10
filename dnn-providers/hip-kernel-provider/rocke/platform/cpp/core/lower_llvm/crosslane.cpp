@@ -1050,7 +1050,12 @@ static void _op_tile_inline_asm(rocke_lower_t* L, const rocke_op_t* op)
     }
     template_esc = rocke_ll_escape_asm_string(L, raw_template);
 
-    sideeffect = rocke_attr_get_bool(&op->attrs, "sideeffect", true);
+    const auto* side_attr = rocke_attr_get(&op->attrs, "sideeffect");
+    if(side_attr && side_attr->kind != ROCKE_ATTR_BOOL)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "LLVM inline asm sideeffect must be a boolean");
+    }
+    sideeffect = side_attr ? side_attr->u.b : true;
     flag_str = sideeffect ? " sideeffect" : "";
 
     /* Build the typed operand list. The strbufs are RAII-guarded so a throw

@@ -1,0 +1,12 @@
+{
+  "_comment": ["Square 4096x4096x8192. Everything not here comes from _base.json."],
+  "extends": "_base.json",
+  "problem": { "m": 4096, "n": 4096, "k": 8192 },
+  "tile_config": {
+    "tile_m": [64, 128, 256],
+    "tile_n": [64, 128, 256],
+    "tile_k": [64, 128, 256],
+    "warp_m": [2, 4, 8],
+    "warp_n": [2, 4, 8]
+  }
+}
