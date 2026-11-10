@@ -1862,14 +1862,13 @@ class InstalledGeneratorTest(unittest.TestCase):
                         with self.subTest(tool=name, helper=helper):
                             self.assertIn(helper, staged)
 
-    def test_support_policy_tests_are_installed_and_collected(self):
+    def test_support_policy_tests_and_generator_are_staged(self):
         cmake = (_ROCKE / "CMakeLists.txt").read_text()
         self.assertTrue((_HERE / "test_arch_domain_support.py").is_file())
         self.assertNotRegex(
             cmake, r'PATTERN\s+"test_arch_domain_support\.py"\s+EXCLUDE'
         )
         self.assertIn('install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"', cmake)
-        self.assertIn("add_test(rocke_pytest python -m pytest", cmake)
         self.assertIn("gen_arch_domain.py", _staged_generator_tools(cmake))
 
     def test_staged_tool_inventory_accepts_cmake_formatting(self):

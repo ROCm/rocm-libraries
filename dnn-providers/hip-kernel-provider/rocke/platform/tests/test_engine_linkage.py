@@ -337,8 +337,10 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     named part runs whole top-level directories of tests/ that exist, no
     directory runs in two parts, and rocke_pytest_other runs tests/ with the
     library tests and every named part's directories ignored. A file a part
-    must not collect is ignored by the part that would collect it. Every part
-    keeps the suite's options, labels and time limit."""
+    must not collect is ignored by the part that would collect it. The host-only
+    arch-domain support controls must remain selected by exactly one part, even
+    when directories are regrouped. Every part keeps the suite's options, labels
+    and time limit."""
     _, ctest_dir = configure_installed_ctest(
         tmp_path,
         f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
@@ -390,6 +392,25 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     assert other_ignored[: len(expected_directory_ignores)] == (
         expected_directory_ignores
     )
+
+    policy_test = f"{tests_root}/tools/test_arch_domain_support.py"
+    policy_owners = [
+        part
+        for part, paths in {"other": other_paths, **directories_by_part}.items()
+        if any(
+            policy_test == path or policy_test.startswith(f"{path.rstrip('/')}/")
+            for path in paths
+        )
+        and not any(
+            policy_test == path or policy_test.startswith(f"{path.rstrip('/')}/")
+            for path in ignored_by_part[part]
+        )
+    ]
+    assert len(policy_owners) == 1, (
+        f"{policy_test} must be collected by exactly one platform pytest part; "
+        f"selected by {policy_owners!r}"
+    )
+
     ignored_by_part["other"] = other_ignored[len(expected_directory_ignores) :]
 
     # A file is ignored by the part that would collect it: a named part, for a

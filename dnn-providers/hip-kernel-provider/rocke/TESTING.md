@@ -488,7 +488,7 @@ receive a contention-free retry.
 Structure and compiler-probe units remain source-only in
 `platform/tests/tools/test_arch_domain_artifact.py`. Host-only support-policy
 controls in `platform/tests/tools/test_arch_domain_support.py` run in both source
-pytest and the installed `rocke_pytest` CI entry, using the staged generator in
+pytest and the installed `rocke_pytest_*` CI parts, using the staged generator in
 installed artifacts. They check loss-fail, gain-pass, invalid records, and method/
 metadata guards for both gfx942 and gfx950 without a real compiler. Normal pytest
 and the `ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated

@@ -169,8 +169,8 @@ Four distinct things run here; don't conflate them:
 pytest: the sweep starts external compiler/linker processes, has its own timeout
 and resource contract, and is independent of `ROCKE_BACKEND`. The separate
 `tools/test_arch_domain_support.py` units exercise the comparison policy without
-real compiler processes. They run in source pytest and installed `rocke_pytest`,
-using the source or staged generator respectively.
+real compiler processes. They run in source pytest and installed `rocke_pytest_*`
+parts, using the source or staged generator respectively.
 
 The same logical gate has two registrations: the build-tree entry invokes the
 source tool and committed source column, while the installed entry invokes a
