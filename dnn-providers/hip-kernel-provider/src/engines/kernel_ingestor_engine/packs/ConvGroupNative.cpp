@@ -44,8 +44,8 @@
  * (descriptors/conv/group/kernels) run each 16-channel block on a 16x16 matrix-core atom with
  * the block-diagonal expansion of its groups' filters, from an input halo staged in LDS: 16 /
  * C/g groups per multiply, every input read once a workgroup. Forward gathers x into y; backward
- * data (unit stride) gathers dy into dx with the filter reflected and its channel roles swapped,
- * which the expansion does. The activations are staged channels-last by the implicit-GEMM
+ * data gathers dy into dx with the filter reflected and its channel roles swapped, which the
+ * expansion does, by stride phases when strided. 3-D convolutions loop the depth taps over planes. The activations are staged channels-last by the implicit-GEMM
  * engine's own parse and staging kernels when the graph's are not. Every config is admitted on
  * correctness alone; autotune ranks them.
  */
@@ -91,14 +91,41 @@ std::optional<unsigned int> phaseBlocks(const K4Args& a, int th, int wp, int cb)
     {
         return std::nullopt;
     }
-    const long long blocks = static_cast<long long>(a.n) * divUp(a.ho, th) * divUp(a.wo, 16LL * wp)
-                             * (a.c / (16 * cb));
+    const long long blocks = static_cast<long long>(a.n) * a.dout * divUp(a.ho, th)
+                             * divUp(a.wo, 16LL * wp) * (a.c / (16 * cb));
     if(blocks < 1 || blocks > MAX_GRID)
     {
         return std::nullopt;
     }
     return static_cast<unsigned int>(blocks);
 }
+
+namespace
+{
+
+/// One axis of a backward-data stride phase: dx[st j + p] = sum over q < ceil(F / st) of
+/// dy[j + dmin + q] w[p + pad - st (dmin + q)], dmin = ceil((p + pad - F + 1) / st), taps past
+/// the filter zero.
+struct PhaseAxis
+{
+    int out = 0; ///< dx positions the phase writes
+    int pad = 0; ///< the gather's leading padding (-dmin)
+    int tapBase = 0; ///< filter tap of compact tap 0
+};
+
+PhaseAxis phaseAxis(long long in, long long pad, long long filter, int st, int p)
+{
+    const auto ceilDiv
+        = [](long long a, long long b) { return a >= 0 ? (a + b - 1) / b : -((-a) / b); };
+    const long long dmin = ceilDiv(p + pad - filter + 1, st);
+    PhaseAxis axis;
+    axis.out = static_cast<int>(divUp(in - p, st));
+    axis.pad = static_cast<int>(-dmin);
+    axis.tapBase = static_cast<int>(p + pad - st * dmin);
+    return axis;
+}
+
+} // namespace
 
 std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvDirection direction)
 {
@@ -120,14 +147,14 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
     {
         return std::nullopt;
     }
-    // 2-D (a unit depth, its filter one tap deep), unit dilation, one stride both ways
-    // (backward data: 1 or 2).
-    if(k.di != 1 || k.dout != 1 || k.ft != 1 || k.pd != 0 || k.sd != 1 || k.dd != 1 || k.dh != 1
-       || k.dw != 1 || k.sh != k.sw || (!forward && k.sh > 2))
+    // 2-D or 3-D, unit dilation, one stride across rows and columns (the depth stride its own);
+    // backward data: strides 1 or 2.
+    if(k.dd != 1 || k.dh != 1 || k.dw != 1 || k.sh != k.sw || (!forward && (k.sh > 2 || k.sd > 2)))
     {
         return std::nullopt;
     }
     GroupProblem problem;
+    problem.filterT = k.ft;
     problem.filterR = k.fr;
     problem.filterS = k.fs;
     problem.stride = k.sh;
@@ -136,10 +163,12 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
     K4ExpandArgs expand{};
     expand.sK = base.wStrides[0];
     expand.sC = base.wStrides[1];
+    expand.sT = base.wStrides[2];
     expand.sR = base.wStrides[3];
     expand.sS = base.wStrides[4];
     expand.c = k.c;
     expand.cg = cg;
+    expand.t = k.ft;
     expand.r = k.fr;
     expand.s = k.fs;
     expand.reflect = base.flipFilter != 0 ? 1 : 0;
@@ -150,70 +179,89 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
     args.cg = cg;
     if(forward)
     {
+        problem.kernelT = k.ft;
         problem.kernelR = k.fr;
         problem.kernelS = k.fs;
         problem.kernelStride = st;
         GroupPhase phase;
+        args.di = k.di;
         args.hi = k.hi;
         args.wi = k.wi;
+        args.dout = k.dout;
         args.ho = k.ho;
         args.wo = k.wo;
+        args.sd = k.sd;
+        args.pd = k.pd;
         args.ph = k.ph;
         args.pw = k.pw;
+        args.outD = k.dout;
         args.outH = k.ho;
         args.outW = k.wo;
-        args.osh = args.osw = 1;
+        args.osd = args.osh = args.osw = 1;
         phase.args = args;
+        expand.tc = k.ft;
         expand.rc = k.fr;
         expand.sc = k.fs;
-        expand.rStep = expand.sStep = 1;
+        expand.tStep = expand.rStep = expand.sStep = 1;
         phase.expand = expand;
         problem.phases.push_back(phase);
     }
     else
     {
-        // dx[i] gathers dy[(i + pad - r) / st] over the taps r that divide: by phases p = i mod
-        // st, dx[st j + p] = sum over q < ceil(R / st) of dy[j + dmin + q] w[p + pad - st (dmin
-        // + q)], dmin = ceil((p + pad - R + 1) / st), taps past the filter zero.
+        // Phases over depth, rows and columns, each a unit-stride gather of the compact taps.
+        const int sd = k.sd;
+        problem.kernelT = static_cast<int>(divUp(k.ft, sd));
         problem.kernelR = static_cast<int>(divUp(k.fr, st));
         problem.kernelS = static_cast<int>(divUp(k.fs, st));
         problem.kernelStride = 1;
-        const auto ceilDiv
-            = [](long long a, long long b) { return a >= 0 ? (a + b - 1) / b : -((-a) / b); };
-        for(int pr = 0; pr < st; ++pr)
+        for(int pt = 0; pt < sd; ++pt)
         {
-            for(int pc = 0; pc < st; ++pc)
+            for(int pr = 0; pr < st; ++pr)
             {
-                GroupPhase phase;
-                phase.args = args;
-                auto& p = phase.args;
-                p.hi = k.ho;
-                p.wi = k.wo;
-                p.ho = static_cast<int>(divUp(k.hi - pr, st));
-                p.wo = static_cast<int>(divUp(k.wi - pc, st));
-                if(p.ho < 1 || p.wo < 1)
+                for(int pc = 0; pc < st; ++pc)
                 {
-                    continue;
+                    const auto d = phaseAxis(k.di, k.pd, k.ft, sd, pt);
+                    const auto h = phaseAxis(k.hi, k.ph, k.fr, st, pr);
+                    const auto w = phaseAxis(k.wi, k.pw, k.fs, st, pc);
+                    if(d.out < 1 || h.out < 1 || w.out < 1)
+                    {
+                        continue;
+                    }
+                    GroupPhase phase;
+                    phase.args = args;
+                    auto& p = phase.args;
+                    p.di = k.dout;
+                    p.hi = k.ho;
+                    p.wi = k.wo;
+                    p.dout = d.out;
+                    p.ho = h.out;
+                    p.wo = w.out;
+                    p.sd = 1;
+                    p.pd = d.pad;
+                    p.ph = h.pad;
+                    p.pw = w.pad;
+                    p.outD = k.di;
+                    p.outH = k.hi;
+                    p.outW = k.wi;
+                    p.osd = sd;
+                    p.osh = p.osw = st;
+                    p.ood = pt;
+                    p.ooh = pr;
+                    p.oow = pc;
+                    phase.expand = expand;
+                    auto& e = phase.expand;
+                    e.tc = problem.kernelT;
+                    e.rc = problem.kernelR;
+                    e.sc = problem.kernelS;
+                    e.tBase = d.tapBase;
+                    e.tStep = -sd;
+                    e.rBase = h.tapBase;
+                    e.rStep = -st;
+                    e.sBase = w.tapBase;
+                    e.sStep = -st;
+                    e.swap = 1;
+                    problem.phases.push_back(phase);
                 }
-                const long long dminH = ceilDiv(pr + k.ph - k.fr + 1, st);
-                const long long dminW = ceilDiv(pc + k.pw - k.fs + 1, st);
-                p.ph = static_cast<int>(-dminH);
-                p.pw = static_cast<int>(-dminW);
-                p.outH = k.hi;
-                p.outW = k.wi;
-                p.osh = p.osw = st;
-                p.ooh = pr;
-                p.oow = pc;
-                phase.expand = expand;
-                auto& e = phase.expand;
-                e.rc = problem.kernelR;
-                e.sc = problem.kernelS;
-                e.rBase = static_cast<int>(pr + k.ph - st * dminH);
-                e.rStep = -st;
-                e.sBase = static_cast<int>(pc + k.pw - st * dminW);
-                e.sStep = -st;
-                e.swap = 1;
-                problem.phases.push_back(phase);
             }
         }
     }
@@ -233,9 +281,10 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
             offset = alignUp(offset + staging->bytes);
         }
     }
-    const size_t expandBytes = static_cast<size_t>(k.c / 16)
-                               * static_cast<size_t>(problem.kernelR * problem.kernelS) * 256
-                               * static_cast<size_t>(igemm->elementBytes);
+    const size_t expandBytes
+        = static_cast<size_t>(k.c / 16)
+          * static_cast<size_t>(problem.kernelT * problem.kernelR * problem.kernelS) * 256
+          * static_cast<size_t>(igemm->elementBytes);
     for(auto& phase : problem.phases)
     {
         phase.expandOffset = offset;
@@ -331,7 +380,7 @@ struct Tile
 {
     std::string atom;
     conv_igemm::AtomInfo info;
-    int64_t r = 0, s = 0, stride = 0, th = 0, wp = 0, cb = 0;
+    int64_t t = 0, r = 0, s = 0, stride = 0, th = 0, wp = 0, cb = 0;
 };
 
 std::optional<Tile> tileOf(const KernelDefinition& kernel)
@@ -344,13 +393,15 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
         return std::nullopt;
     }
     tile.info = *info;
+    tile.t = kernel.getIntMetadata("t");
     tile.r = kernel.getIntMetadata("r");
     tile.s = kernel.getIntMetadata("s");
     tile.stride = kernel.getIntMetadata("stride");
     tile.th = kernel.getIntMetadata("th");
     tile.wp = kernel.getIntMetadata("wp");
     tile.cb = kernel.getIntMetadata("cb");
-    if(tile.r < 1 || tile.s < 1 || tile.stride < 1 || tile.th < 1 || tile.wp < 1 || tile.cb < 1)
+    if(tile.t < 1 || tile.r < 1 || tile.s < 1 || tile.stride < 1 || tile.th < 1 || tile.wp < 1
+       || tile.cb < 1)
     {
         return std::nullopt;
     }
@@ -358,7 +409,8 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
 }
 
 /// Kernel-scoped applicability: the config's atom runs on this device and multiplies the graph's
-/// element type (the 16x16 atoms whose k-step divides 16), its compile-time filter and stride
+/// element type (the 16x16 atoms whose k-step divides 16), its compile-time filter (depth, rows,
+/// columns) and stride
 /// are the graph's, its channel tile divides the channels, and its halo fits the LDS.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
@@ -381,7 +433,7 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    if(tile->r != problem->filterR || tile->s != problem->filterS
+    if(tile->t != problem->filterT || tile->r != problem->filterR || tile->s != problem->filterS
        || tile->stride != problem->stride)
     {
         return false;
@@ -553,6 +605,7 @@ public:
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         options.add("CONV_GROUP_T", elementTypeFor(problem->igemm.base.dataType));
         options.add("CONV_GROUP_ATOM", std::string(tile->info.kernelType));
+        options.add("CONV_GROUP_FT", std::to_string(problem->kernelT));
         options.add("CONV_GROUP_R", std::to_string(problem->kernelR));
         options.add("CONV_GROUP_S", std::to_string(problem->kernelS));
         options.add("CONV_GROUP_ST", std::to_string(problem->kernelStride));
@@ -574,7 +627,8 @@ public:
                                               options,
                                               signatureOf<K4ExpandArgs>());
         const long long expandElems = static_cast<long long>(problem->igemm.args.c / 16)
-                                      * problem->kernelR * problem->kernelS * 256;
+                                      * problem->kernelT * problem->kernelR * problem->kernelS
+                                      * 256;
         expand.setBlockSize(COPY_BLOCK, 1, 1);
         expand.setGridSize(static_cast<unsigned int>(std::clamp<long long>(
                                (expandElems + COPY_BLOCK - 1) / COPY_BLOCK, 1, COPY_MAX_BLOCKS)),

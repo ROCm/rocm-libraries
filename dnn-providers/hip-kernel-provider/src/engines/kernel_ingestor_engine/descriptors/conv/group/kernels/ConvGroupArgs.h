@@ -7,45 +7,48 @@
 #pragma once
 
 /// One small-group convolution as a gather over channels-last activations:
-///   out[n][oh osh + ooh][ow osw + oow][g cg + o]
-///     = sum over taps (r, s) < (R, S) and the group's cg channels i of
-///       in[n][oh ST - ph + r][ow ST - pw + s][g cg + i] w16[block][r S + s][o][i].
-/// Forward gathers x into y (osh = osw = 1, no offsets). Backward data gathers dy into dx at unit
-/// stride, by stride phases otherwise: phase (ooh, oow) writes dx rows ooh, ooh + osh, ... from
-/// the taps that reach them, each its own expanded filter (ConvGroupExpand). The filter is
-/// pre-expanded per 16-channel block: w16[block][tap][n 16][k 16], zero where n and k sit in
-/// different groups.
+///   out[n][od osd + ood][oh osh + ooh][ow osw + oow][g cg + o]
+///     = sum over taps (t, r, s) < (T, R, S) and the group's cg channels i of
+///       in[n][od sd - pd + t][oh ST - ph + r][ow ST - pw + s][g cg + i]
+///       w16[block][(t R + r) S + s][o][i].
+/// Forward gathers x into y (unit output steps, no offsets). Backward data gathers dy into dx at
+/// unit stride, by stride phases otherwise: phase (ood, ooh, oow) writes every osd-th dx plane,
+/// osh-th row and osw-th column from its offset, from the taps that reach them, each phase its
+/// own expanded filter (ConvGroupExpand). The filter is pre-expanded per 16-channel block:
+/// w16[block][tap][n 16][k 16], zero where n and k sit in different groups. 2-D convolutions are
+/// the depth-1 case (one plane, one depth tap).
 struct K4Args
 {
     const void* in;
     const void* w;
     void* out;
     int n, c; // images, channels of in and out (all groups)
-    int hi, wi; // in extents
-    int ho, wo; // the gather's output extents (this phase's)
-    int ph, pw; // the gather's leading padding
-    int outH, outW; // out extents
-    int osh, osw; // out row and column step
-    int ooh, oow; // out row and column offset
+    int di, hi, wi; // in extents
+    int dout, ho, wo; // the gather's output extents (this phase's)
+    int sd; // the gather's depth stride (rows and columns: the compile-time ST)
+    int pd, ph, pw; // the gather's leading padding
+    int outD, outH, outW; // out extents
+    int osd, osh, osw; // out plane, row and column step
+    int ood, ooh, oow; // out plane, row and column offset
     int cg; // channels a group
-    int padding0;
 };
 
-/// The filter expansion: w16[block][tap][n][k] for taps (q, u) < (rc, sc) from the graph's filter
-/// w[k][c][r][s] (any strides: element (k, c, r, s) at k sK + c sC + r sR + s sS), cg channels a
-/// group each way. Tap (q, u) reads filter tap (rBase + rStep q, sBase + sStep u), zero outside
-/// the filter; reflect (true convolution) reflects that again. swap: n is the input channel and k
-/// the output channel (backward data), else the other way round.
+/// The filter expansion: w16[block][tap][n][k] for taps (v, q, u) < (tc, rc, sc) from the
+/// graph's filter w[k][c][t][r][s] (any strides: element (k, c, t, r, s) at k sK + c sC + t sT +
+/// r sR + s sS), cg channels a group each way. Tap (v, q, u) reads filter tap (tBase + tStep v,
+/// rBase + rStep q, sBase + sStep u), zero outside the filter; reflect (true convolution)
+/// reflects that again. swap: n is the input channel and k the output channel (backward data),
+/// else the other way round.
 struct K4ExpandArgs
 {
     const void* src;
     void* dst;
-    long long sK, sC, sR, sS;
+    long long sK, sC, sT, sR, sS;
     int c; // channels (all groups)
     int cg;
-    int r, s; // filter extent
-    int rc, sc; // expanded taps
-    int rBase, rStep, sBase, sStep;
+    int t, r, s; // filter extent
+    int tc, rc, sc; // expanded taps
+    int tBase, tStep, rBase, rStep, sBase, sStep;
     int swap;
     int reflect;
     int elementBytes;
