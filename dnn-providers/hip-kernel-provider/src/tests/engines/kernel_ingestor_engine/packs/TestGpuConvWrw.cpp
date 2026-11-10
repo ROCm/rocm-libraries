@@ -367,6 +367,11 @@ std::vector<DeviceCase> deviceCases()
         {"Pointwise1x1Nhwc", conv(64, 136, {6, 9}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, true)},
         {"Pointwise1x1OddChannels", conv(70, 33, {6, 7}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1})},
         {"Pad0OddChannels", conv(5, 7, {7, 9}, {3, 3}, {0, 0}, {0, 0}, {1, 1}, {1, 1})},
+        // The row reduce: channel runs of 64, 64 and 8 (K C R S).
+        {"Nchw3x3ThreeChannelRuns", conv(136, 24, {6, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})},
+        // A filter as wide as its map (FCN's point_output, as 1-D): one output position per
+        // image.
+        {"PointOutput1x7", conv(24, 40, {7}, {7}, {0}, {0}, {1}, {1}, false, 1, 8)},
         {"PaddingPastTheFilter", conv(8, 16, {6, 9}, {3, 3}, {3, 4}, {3, 4}, {1, 1}, {1, 1})},
         {"ManySteps", conv(64, 96, {20, 70}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 1, 4)},
     };
@@ -418,11 +423,13 @@ int ldsOfCompiled(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
 }
 
 /// Whether this device is expected to serve every case in @p dataType: the MFMA families from
-/// gfx90a (gfx908's bf16 atom ships for the common filters only), RDNA in 16-bit only.
+/// gfx90a (gfx908's bf16 atom ships for the common filters only), gfx906 on the FMA loops (every
+/// element type), RDNA in 16-bit only.
 bool expectServed(const std::string& arch, DataType dataType)
 {
     const auto base = std::string(hipdnn_plugin_sdk::stripArchFeatures(arch));
-    if(base == "gfx90a" || base == "gfx942" || base == "gfx950")
+    // gfx906: the FMA loops, every element type.
+    if(base == "gfx90a" || base == "gfx942" || base == "gfx950" || base == "gfx906")
     {
         return true;
     }

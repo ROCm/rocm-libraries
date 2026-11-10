@@ -293,7 +293,10 @@ def lds_limit(c):
     return 160 * 1024 if archs_of(c) == ["gfx950"] else 64 * 1024
 
 
-def valid(c, dtype):
+def valid(c, dtype, fma16=False):
+    """Whether the pack admits config c for dtype on some architecture. fma16: the FMA loops on
+    16-bit graphs, which only devices without a matrix core for the type take (gfx906).
+    """
     e = eb(dtype)
     fma = c["loop"] in (3, 4)
     ok = (c["vec"] * e == 16 or (c["loop"] == 4 and c["vec"] == 1)) and (
@@ -303,7 +306,7 @@ def valid(c, dtype):
         threads = (c["bk"] // c["tk"]) * (c["bc"] // c["tc"])
         ok = (
             ok
-            and dtype == "FLOAT"
+            and (dtype == "FLOAT" or fma16)
             and c["wk"] == c["wc"] == 0
             and c["tk"] % 4 == 0
             and c["tc"] % 4 == 0
@@ -313,6 +316,8 @@ def valid(c, dtype):
             and c["bk"] % c["tk"] == 0
             and c["bc"] % c["tc"] == 0
             and c["bq"] % c["vec"] == 0
+            and c["bk"] % c["vec"] == 0
+            and c["bc"] % c["vec"] == 0
         )
         ok = (
             ok
@@ -751,6 +756,82 @@ def build_smallc():
     return dropped
 
 
+def fma_cands(tiles, layouts, lays, s, sw, dw, fr, loop, vec):
+    """The FMA configs of a filter row. Unit height stride: the FMA ring (aligned rows) and the
+    FMA output rows with scalar units (any row); stride 2: the FMA output rows, vectors and
+    scalars."""
+    cands = []
+    for t in tiles:
+        for lay in layouts if lays is None else [x for x in layouts if x in lays]:
+            if loop == 1:
+                cands.append(C("fma", 3, lay, t, s, sw, dw, fr, vec, 0, 0, 0))
+                cands.append(C("fma", 4, lay, t, s, sw, dw, fr, 1, 0, 0, 0))
+            else:
+                cands.append(C("fma", 4, lay, t, s, sw, dw, fr, vec, 0, 0, 0))
+                cands.append(C("fma", 4, lay, t, s, sw, dw, fr, 1, 0, 0, 0))
+    return cands
+
+
+# gfx906 (no matrix core): the FMA loops for every element type, 16-bit accumulating in fp32, on
+# FMA32's tiles plus 16-input-channel tiles (small-C layers: SqueezeNet's c16, stems), and on the
+# output rows 4-position steps for maps of a few output positions (FCN's 7x7 point_output on a
+# 7x7 map: one output per image). Shipped in conv_wrw_<dtype>_fma906 packs that list gfx906
+# only, so none of it is a candidate where matrix cores run.
+FMA906_SMALLC = [(64, 16, 4, 4, 32), (32, 16, 4, 4, 32)]
+FMA906_ROWS = [(64, 64, 4, 4, 4), (64, 128, 4, 4, 4)]
+# The filter rows that take the small-C tiles (stems, SqueezeNet-like 3x3 and 1x1, the 1-D
+# rows) and the short-step output rows (1 x S rows serve any filter height on the output rows).
+SMALLC906 = {
+    "3x3",
+    "1x1",
+    "1x3",
+    "1x7",
+    "3x3r1",
+    "3x3s2",
+    "3x3s2r1",
+    "7x7s2r1",
+    "2x2s2",
+}
+ROWS906 = {"1x1", "1x3", "1x7", "1x11"}
+FMA906_ARCHS = ["gfx906"]
+CATALOG906 = {"FLOAT": [], "HALF": [], "BFLOAT16": []}
+
+
+def build_fma906():
+    dropped = 0
+    for dtype in CATALOG906:
+        vec = 16 // eb(dtype)
+        for tag, s, sw, dw, fr, loop, idx, aligns, lays in FILTERS:
+            # fp32 already has FMA32's tiles (and FMA_TILES) in the shared FMA pack.
+            tiles = [] if dtype == "FLOAT" else FMA_TILES.get(tag, FMA32)
+            tiles = tiles + (FMA906_SMALLC if tag in SMALLC906 else [])
+            cands = fma_cands(tiles, [CF, CL], lays, s, sw, dw, fr, loop, vec)
+            if tag in ROWS906:
+                cands += fma_cands(FMA906_ROWS, [CF, CL], lays, s, sw, dw, fr, 0, vec)
+            # Dilated filters: one filter row per block on the output rows, whose dilated
+            # window of three rows overflows 64 KiB in fp32 (deeplab d2 to d36).
+            if dw > 1:
+                cands += fma_cands(
+                    FMA32 + FMA906_SMALLC, [CF, CL], lays, s, sw, dw, 1, 0, vec
+                )
+            for c in cands:
+                if valid(c, dtype, fma16=True):
+                    CATALOG906[dtype].extend(with_bpu(c))
+                else:
+                    dropped += 1
+    # Drop what the shared FMA pack already holds (fp32) and repeats (as build()).
+    for dtype, cfgs in CATALOG906.items():
+        seen = {tuple(c[f] for f in INTS) for c in CATALOG[dtype]}
+        kept = []
+        for c in cfgs:
+            key = tuple(c[f] for f in INTS)
+            if key not in seen:
+                seen.add(key)
+                kept.append(c)
+        CATALOG906[dtype] = kept
+    return dropped
+
+
 def build():
     dropped = build_direct() + build_unaligned_k() + build_smallc()
     for atoms, tiles, xcd, layouts, loop2, only in FAMILIES:
@@ -772,29 +853,7 @@ def build():
                         picked = picked + [t for t in extra if t not in picked]
                 if atom == "fma":
                     picked = FMA_TILES.get(tag, picked)
-                    # Unit height stride: the FMA ring (aligned rows) and the FMA output rows with
-                    # scalar units (any row); stride 2: the FMA output rows, vectors and scalars.
-                    cands = []
-                    for t in picked:
-                        for lay in (
-                            layouts
-                            if lays is None
-                            else [x for x in layouts if x in lays]
-                        ):
-                            if loop == 1:
-                                cands.append(
-                                    C(atom, 3, lay, t, s, sw, dw, fr, vec, 0, 0, 0)
-                                )
-                                cands.append(
-                                    C(atom, 4, lay, t, s, sw, dw, fr, 1, 0, 0, 0)
-                                )
-                            else:
-                                cands.append(
-                                    C(atom, 4, lay, t, s, sw, dw, fr, vec, 0, 0, 0)
-                                )
-                                cands.append(
-                                    C(atom, 4, lay, t, s, sw, dw, fr, 1, 0, 0, 0)
-                                )
+                    cands = fma_cands(picked, layouts, lays, s, sw, dw, fr, loop, vec)
                     for c in cands:
                         if valid(c, dtype):
                             CATALOG[dtype].extend(with_bpu(c))
@@ -907,8 +966,12 @@ def emit():
     for dtype, cfgs in CATALOG.items():
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
         packs = {}
-        for i, c in enumerate(cfgs):
-            pack = packs.setdefault(family_of(c), [])
+        # The gfx906 FMA configs follow the dtype's list, in their own gfx906-only pack.
+        tagged = [(c, family_of(c)) for c in cfgs] + [
+            (c, "fma906") for c in CATALOG906[dtype]
+        ]
+        for i, (c, fam) in enumerate(tagged):
+            pack = packs.setdefault(fam, [])
             lay = ["nchw", "nhwc", "nhwctr"][c["layout"]]
             thr = (
                 f"t{c['tk']}x{c['tc']}"
@@ -943,7 +1006,7 @@ def emit():
                     "version": "1.0",
                     "id": U(f"kdp.{dt}.{fam}"),
                     "name": f"hipkernel:conv_wrw_{dt}_{fam}",
-                    "arch": [],
+                    "arch": FMA906_ARCHS if fam == "fma906" else [],
                     "matchers": [umd],
                     "engine": ued,
                     "dispatch": udd,
@@ -966,7 +1029,8 @@ def emit():
 
 if __name__ == "__main__":
     dropped = build()
+    dropped += build_fma906()
     n = emit()
     print(n, "kernel configs;", dropped, "candidates dropped (LDS, passes or tile)")
     for dtype, cfgs in CATALOG.items():
-        print(" ", dtype, len(cfgs))
+        print(" ", dtype, len(cfgs), "+", len(CATALOG906[dtype]), "gfx906 FMA")

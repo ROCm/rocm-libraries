@@ -61,6 +61,10 @@ inline constexpr std::array<std::string_view, 17> ATOMS{"mfma16_f16",
 /// The atom_id of @p atom, or -1 for an unknown one.
 int64_t atomIdOf(std::string_view atom);
 
+/// Whether a matrix-core atom of ATOMS multiplies @p element ("f32", "f16", "bf16") on
+/// @p gcnArchName (suffix intact). Where none does (gfx906, gfx900), "fma" takes that type too.
+bool runsMatrixAtomFor(std::string_view element, std::string_view gcnArchName);
+
 /// An atom's fragment edge (DIM: the super-columns of a fragment and the GEMM columns of one)
 /// and the output channels one step reduces (KA). The FMA loop's: 16 and 4.
 struct AtomShape
@@ -183,7 +187,8 @@ inline constexpr int64_t MAX_TRANSFORM_BLOCKS = 1024;
  *        not compute it correctly or cannot launch it there.
  *
  * Reads and gates every field of @p config: the atom (known, its atom_id, running on the
- * device, taking the graph's element type; "fma" on fp32 graphs only); the layout, one dy is
+ * device, taking the graph's element type; "fma" on fp32 graphs, or 16-bit ones where
+ * runsMatrixAtomFor finds no atom for the type); the layout, one dy is
  * packed in; vec (channels-last: 16 bytes, the output channels whole vectors; channels-first:
  * 1, or 16 bytes when dy rows are whole vectors); u and v the problem's window extents; sh and
  * sw the problem's strides; nb at least the input channels times the phases, at most

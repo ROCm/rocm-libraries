@@ -48,9 +48,34 @@ __device__ void sbTransform(const ConvStemBwdTransformArgs& a)
     }
 }
 
-/// The FMA "atom" (exact fp32 without an fp32 matrix core): 16 threads per super-row, each FM
-/// super-columns 16 apart and all NB columns of D.
+/// The FMA "atom" (exact fp32 without an fp32 matrix core; 16-bit, accumulating in fp32, where
+/// no matrix core takes it): 16 threads per super-row, each FM super-columns 16 apart and all NB
+/// columns of D.
 typedef float SbF4 __attribute__((ext_vector_type(4)));
+
+/// Four consecutive elements of an LDS run (16-byte aligned for fp32, 8-byte for 16-bit) as
+/// fp32.
+template <class T>
+__device__ inline SbF4 sbLoad4(const T* p)
+{
+    if constexpr(sizeof(T) == 4)
+    {
+        return *reinterpret_cast<const SbF4*>(p);
+    }
+    else
+    {
+        typedef typename K1Raw<8>::type R8;
+        const R8 r = *reinterpret_cast<const R8*>(p);
+        const unsigned w[2] = {r[0], r[1]};
+        SbF4 v;
+#pragma unroll
+        for(int i = 0; i < 4; ++i)
+            v[i] = K1Elem<T>::load(
+                __builtin_bit_cast(T, static_cast<unsigned short>(w[i / 2] >> (16 * (i % 2)))));
+        return v;
+    }
+}
+
 struct SbFma
 {
     static constexpr int WAVE = 16; ///< threads per super-row
@@ -87,7 +112,7 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
     constexpr int B_ELEMS = NB * UV * KCP;
     constexpr int THREADS = TH * WAVE;
     constexpr int EV = 16 / static_cast<int>(sizeof(T)); // elements per 16-byte unit
-    static_assert(FMA ? (NB >= 1 && sizeof(T) == 4) : NB % DIM == 0, "stem bwd columns");
+    static_assert(FMA ? NB >= 1 : NB % DIM == 0, "stem bwd columns");
     static_assert(KC % KA == 0 && KC % EV == 0, "stem bwd chunk");
     static_assert(CL || CFV == 1 || CFV == EV, "stem bwd channels-first vector");
     static_assert(sbLdsBytes(static_cast<int>(sizeof(T)), U, V, NB, KC, TH, TW)
@@ -240,7 +265,7 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
 #pragma unroll
                         for(int kk = 0; kk < KC; kk += 4)
                         {
-                            const SbF4 t = *reinterpret_cast<const SbF4*>(
+                            const SbF4 t = sbLoad4(
                                 As + ((wave + U - 1 - u) * WC + m * DIM + lane + V - 1 - v) * KCP
                                 + kk);
                             av[m][kk] = t[0];
@@ -253,8 +278,7 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
 #pragma unroll
                         for(int kk = 0; kk < KC; kk += 4)
                         {
-                            const SbF4 bv = *reinterpret_cast<const SbF4*>(
-                                Bs + (c * UV + u * V + v) * KCP + kk);
+                            const SbF4 bv = sbLoad4(Bs + (c * UV + u * V + v) * KCP + kk);
 #pragma unroll
                             for(int m = 0; m < FM; ++m)
                             {

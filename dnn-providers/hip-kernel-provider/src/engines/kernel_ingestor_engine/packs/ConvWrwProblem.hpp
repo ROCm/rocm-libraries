@@ -59,6 +59,11 @@ inline constexpr std::array<std::string_view, 17> ATOMS{"mfma16_f16",
 /// The atom_id of @p atom, or -1 for an unknown one.
 int64_t atomIdOf(std::string_view atom);
 
+/// Whether a matrix-core atom of ATOMS multiplies @p element ("f32", "f16", "bf16") on
+/// @p gcnArchName (suffix intact). Where none does (gfx906, gfx900), the FMA loops serve that
+/// element type too.
+bool runsMatrixAtomFor(std::string_view element, std::string_view gcnArchName);
+
 /// A matrix-core atom's shape: the fragment's edge (DIM), the positions one step reduces (KA)
 /// and the positions a lane holds (KPL).
 struct AtomShape
@@ -241,7 +246,8 @@ DirectPlan directPlanFor(int64_t tiles,
  *        not compute it correctly or cannot launch it there.
  *
  * Reads and gates every field of @p config: the atom (known, its atom_id, running on the
- * device, taking the graph's element type; "fma" exactly for loop 3, on fp32 graphs); the loop
+ * device, taking the graph's element type; "fma" exactly for loops 3 and 4, on fp32 graphs, or on
+ * 16-bit graphs where runsMatrixAtomFor finds no atom for the type); the loop
  * (0 any stride; 1 to 3 height stride 1 with fr the filter height, or 1 at height stride sh > 1
  * and unit height dilation with fr = ceil(filter height / sh), one grid row per height phase;
  * 2 gfx950 and width stride 1;

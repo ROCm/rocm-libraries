@@ -96,6 +96,14 @@ int64_t atomIdOf(std::string_view atom)
     return it == ATOMS.end() ? -1 : static_cast<int64_t>(it - ATOMS.begin());
 }
 
+bool runsMatrixAtomFor(std::string_view element, std::string_view gcnArchName)
+{
+    return std::any_of(ATOMS.begin(), ATOMS.end(), [&](std::string_view atom) {
+        return atom != "fma" && conv_igemm::atomElement(atom) == element
+               && conv_igemm::atomRunsOn(atom, gcnArchName);
+    });
+}
+
 AtomShape atomShapeOf(std::string_view atom)
 {
     const auto id = atomIdOf(atom);
@@ -257,8 +265,10 @@ std::optional<StemBwdLaunch>
     const bool fma = info->wave == 0;
     const std::string_view arch = device.gcnArchName;
     const auto element = conv_igemm::dataElement(problem.base.dataType);
+    // FMA: fp32 everywhere, 16-bit only where no matrix atom takes the type (gfx906).
     if(!conv_igemm::atomRunsOn(config.atom, arch)
-       || (fma ? element != "f32" : conv_igemm::atomElement(config.atom) != element))
+       || (fma ? element != "f32" && runsMatrixAtomFor(element, arch)
+               : conv_igemm::atomElement(config.atom) != element))
     {
         return std::nullopt;
     }

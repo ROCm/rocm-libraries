@@ -57,16 +57,20 @@ SHAPE = {
 # Per dtype, the atoms the catalog carries (gfx950 runs mfma16_* too; its 16 x 32 atoms halve
 # the steps).
 FAMILIES = {
-    "HALF": ["mfma16_f16", "mfma16x32_f16", "wmma11_f16", "wmma12_f16"],
+    "HALF": ["mfma16_f16", "mfma16x32_f16", "wmma11_f16", "wmma12_f16", "fma"],
     "BFLOAT16": [
         "mfma16_bf16",
         "mfma16_bf16_908",
         "mfma16x32_bf16",
         "wmma11_bf16",
         "wmma12_bf16",
+        "fma",
     ],
     "FLOAT": ["mfma16_f32", "fma"],
 }
+# 16-bit FMA configs serve only devices without a matrix core for the type: they ship in
+# conv_stem_bwd_<dtype>_fma906 packs that list these architectures.
+FMA16_ARCHS = ["gfx906"]
 GEOMETRIES = [
     (2, 4),
     (2, 2),
@@ -143,8 +147,11 @@ def build():
                     else ([16, 32, 64] if w * w <= 4 else [16, 32])
                 )
                 tiles = (
+                    # 16 threads a row; 8 x 1 for the wide windows' 48 / 64 columns (11x11 s4),
+                    # whose B chunk leaves the larger tiles no room in 64 KiB or registers.
                     [(8, 4), (16, 2), (16, 4), (32, 2)]
-                    if atom == "fma"  # 16 threads a row
+                    + ([(8, 1)] if w * w > 4 and s > 2 else [])
+                    if atom == "fma"
                     else [(2, 4), (4, 2), (4, 4), (8, 2)]
                 )
                 for nb in nbs(atom, s):
@@ -239,7 +246,9 @@ def emit(catalog):
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
         packs = {}
         for i, c in enumerate(cfgs):
-            pack = packs.setdefault(family_of(c["atom"]), [])
+            fam = family_of(c["atom"])
+            fam = "fma906" if fam == "fma" and dtype != "FLOAT" else fam
+            pack = packs.setdefault(fam, [])
             lay = ["nchw", "nhwc"][c["layout"]]
             name = (
                 f"conv_stem_bwd.{dt}.{c['atom']}.{lay}.v{c['vec']}.s{c['sh']}x{c['sw']}"
@@ -271,7 +280,7 @@ def emit(catalog):
                     "version": "1.0",
                     "id": U(f"kdp.{dt}.{fam}"),
                     "name": f"hipkernel:conv_stem_bwd_{dt}_{fam}",
-                    "arch": [],
+                    "arch": FMA16_ARCHS if fam == "fma906" else [],
                     "matchers": [umd],
                     "engine": ued,
                     "dispatch": udd,

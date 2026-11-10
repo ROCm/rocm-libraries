@@ -196,6 +196,14 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
     return problem;
 }
 
+bool runsMatrixAtomFor(std::string_view element, std::string_view gcnArchName)
+{
+    return std::any_of(ATOMS.begin(), ATOMS.end(), [&](std::string_view atom) {
+        return atom != "fma" && conv_igemm::atomElement(atom) == element
+               && conv_igemm::atomRunsOn(atom, gcnArchName);
+    });
+}
+
 int64_t atomIdOf(std::string_view atom)
 {
     const auto it = std::find(ATOMS.begin(), ATOMS.end(), atom);
@@ -461,8 +469,11 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     }
     const std::string_view arch = device.gcnArchName;
     const auto element = conv_igemm::dataElement(problem.base.dataType);
+    // The FMA loops take fp32 everywhere, and 16-bit (accumulating in fp32) only where no
+    // matrix atom takes it (gfx906, gfx900): elsewhere they would only add slow candidates.
     if(!conv_igemm::atomRunsOn(config.atom, arch)
-       || (fma ? element != "f32" : conv_igemm::atomElement(config.atom) != element))
+       || (fma ? element != "f32" && runsMatrixAtomFor(element, arch)
+               : conv_igemm::atomElement(config.atom) != element))
     {
         return std::nullopt;
     }
@@ -600,7 +611,11 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    if(fma && config.bq % config.vec != 0)
+    // Both FMA loops' tiles are whole vectors of positions and (channels-last units; the
+    // kernels assert it for either layout) of channels: 16-bit vectors of 8 take tiles of 8.
+    if(fma
+       && (config.bq % config.vec != 0 || config.bk % config.vec != 0
+           || config.bc % config.vec != 0))
     {
         return std::nullopt;
     }
@@ -724,7 +739,13 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const auto workspace
         = pack_features::checkedProduct({splits, *partialElems, int64_t{sizeof(float)}});
     const int64_t quads = a.groups * problem.taps * kg * divUp(cg, 4);
-    const int64_t reduceGrid = divUp(quads, REDUCE_QUADS_PER_BLOCK);
+    // K C T R S filters of several taps (up to the row reduce's LDS): row blocks, one output
+    // channel's run of channels by every tap each, written contiguously.
+    const bool reduceRows
+        = !problem.filterChannelsLast && problem.taps > 1 && problem.taps <= K3_REDUCE_ROW_MAX_TAPS;
+    const int64_t reduceGrid = reduceRows
+                                   ? a.groups * kg * divUp(cg, int64_t{K3_REDUCE_ROW_CHANNELS})
+                                   : divUp(quads, REDUCE_QUADS_PER_BLOCK);
     if(splits > MAX_GRID_YZ || !workspace.has_value()
        || (direct && *workspace > MAX_WORKSPACE_BYTES) || reduceGrid > INT_LIMIT
        || (config.xcd != 0 && gridX * gridY * gridZ > UINT_LIMIT))
@@ -792,6 +813,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     r.wk = cg * problem.taps;
     r.wc = problem.filterChannelsLast ? 1 : problem.taps;
     r.wtap = problem.filterChannelsLast ? cg : 1;
+    r.rows = reduceRows ? 1 : 0;
     return launch;
 }
 
