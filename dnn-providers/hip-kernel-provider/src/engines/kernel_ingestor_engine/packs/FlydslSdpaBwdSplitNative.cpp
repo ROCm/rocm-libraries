@@ -125,7 +125,6 @@ using native::reducePlanes;
 using native::STORE_DB_FIELD;
 using native::TAILZERO_LAUNCH;
 using native::toInt32;
-using native::Uids;
 using Slot = FlydslSdpaBwdSplitSlot;
 
 // The contract with the installed descriptor files, which restate these same strings.
@@ -1028,12 +1027,9 @@ bool flydslSdpaBwdSplitKernelMatches(const MatchContext& /*context*/,
 
 /// Everything graph- and kernel-derived, resolved once at prepare(). Holds no reference to
 /// the match context.
-struct SplitPlan
+struct SplitPlan : native::BwdPlanCommon
 {
     Slot slot = Slot::PREP;
-    bwd::SdpaBwdProblem problem;
-    Uids uids;
-    unsigned int blockThreads = 0;
     Grid grid;
     /// The row serves a graph whose V heads differ from K's (`u2_role` not `none`): the
     /// kernel takes `num_head_v`, and the dq slot's tail-zero launch is the V-head object.
@@ -1041,32 +1037,11 @@ struct SplitPlan
     /// A `dkdv` row with `u2`: the dV-only launch's grid, over the V heads. The launch has the
     /// dK-only launch's block and arguments.
     Grid dvonlyGrid;
-    native::Window window;
-    int32_t dropoutThreshold = 0;
-    float dropoutScale = 1.0F;
-    int32_t runtimeFlags = 0;
-    int32_t varlenBits = 0;
-    native::WorkspaceLayout workspace;
-    native::ScalarOperands scalars;
-    /// The reduce kernel's symbol and launch, when the dq slot's graph has a broadcast dBias.
-    std::string reduceSymbol;
-    native::ReduceGrid reduceGrid;
-    /// The tail-zero launch of the dq slot: the outputs it zeroes (`mask`, 0 for no launch)
-    /// and its grid.
-    int32_t tailzeroMask = 0;
-    native::TailzeroGrid tailzeroGrid;
 };
 
 bwd::SdpaBwdProblem problemOf(const MatchContext& context)
 {
-    auto matched = bwd::matchSdpaBackward(context, bwd::SPLIT_MATCH_OPTIONS);
-    if(auto* problem = std::get_if<bwd::SdpaBwdProblem>(&matched))
-    {
-        return *problem;
-    }
-    const auto& decline = std::get<bwd::Decline>(matched);
-    native::failBadParam(ERROR_SCOPE,
-                         "the graph no longer matches [" + decline.cause + "]: " + decline.detail);
+    return native::matchedProblemOf(context, bwd::SPLIT_MATCH_OPTIONS, ERROR_SCOPE);
 }
 
 /// Checks the tokens graph_match bound against the layout recomputed from the graph: a

@@ -112,7 +112,6 @@ using native::reducePlanes;
 using native::STORE_DB_FIELD;
 using native::TAILZERO_LAUNCH;
 using native::toInt32;
-using native::Uids;
 
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view ENGINE_NAME = "hipkernel:flydsl_sdpa_bwd_merged";
@@ -505,37 +504,14 @@ double flydslSdpaBwdMergedScore(const MatchContext& /*context*/,
 
 /// Everything graph- and kernel-derived, resolved once at prepare(). Holds no reference to
 /// the match context.
-struct MergedPlan
+struct MergedPlan : native::BwdPlanCommon
 {
-    bwd::SdpaBwdProblem problem;
-    Uids uids;
-    unsigned int blockThreads = 0;
     unsigned int gridBlocks = 0;
-    native::Window window;
-    int32_t dropoutThreshold = 0;
-    float dropoutScale = 1.0F;
-    int32_t runtimeFlags = 0;
-    int32_t varlenBits = 0;
-    native::WorkspaceLayout workspace;
-    native::ScalarOperands scalars;
-    /// The reduce kernel's symbol and launch, when the graph's dBias is broadcast.
-    std::string reduceSymbol;
-    native::ReduceGrid reduceGrid;
-    /// The tail-zero launch: the outputs it zeroes (`mask`, 0 for no launch) and its grid.
-    int32_t tailzeroMask = 0;
-    native::TailzeroGrid tailzeroGrid;
 };
 
 bwd::SdpaBwdProblem problemOf(const MatchContext& context)
 {
-    auto matched = bwd::matchSdpaBackward(context);
-    if(auto* problem = std::get_if<bwd::SdpaBwdProblem>(&matched))
-    {
-        return *problem;
-    }
-    const auto& decline = std::get<bwd::Decline>(matched);
-    native::failBadParam(ERROR_SCOPE,
-                         "the graph no longer matches [" + decline.cause + "]: " + decline.detail);
+    return native::matchedProblemOf(context, bwd::MatchOptions{}, ERROR_SCOPE);
 }
 
 MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)

@@ -153,7 +153,8 @@ struct Uids
 /// declined graph to its caller only as "No engine configurations available".
 inline void logDecline(std::string_view engine, std::string_view cause, const std::string& detail)
 {
-    HIPDNN_PLUGIN_LOG_INFO(engine << " declined the graph [" << cause << "]: " << detail);
+    const sdpa_graph::DeclinedBy declined{engine, cause};
+    HIPDNN_PLUGIN_LOG_INFO(declined << detail);
 }
 
 inline void requireHip(hipError_t status, const char* what)
@@ -483,47 +484,6 @@ ScalarOperands scalarOperandsOf(const TensorMap& tensors, const bwd::SdpaBwdProb
             = hipdnn_plugin_sdk::makeScalarOperand(tensors, problem.offsetUid, "offset");
     }
     return operands;
-}
-
-/**
- * @brief Fills what every engine's plan takes from the graph the same way: the tensor uids, the
- *        window, the dropout threshold and scale, the runtime flags, the varlen bits and the
- *        scalar operands.
- *
- * @p Plan carries the fields of those names and its matched `problem`, which is set before the
- * call. @p tile is the kernel's head-dim tile: a head dim below it sets RT_FLAG_PADDED.
- */
-template <typename Plan>
-void bindGraphOperands(Plan& plan,
-                       const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                       int64_t tile)
-{
-    const auto& problem = plan.problem;
-    const auto& attributes
-        = context.graph.getNodeWrapper(0)
-              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
-    plan.uids = Uids{attributes.q_tensor_uid(),
-                     attributes.k_tensor_uid(),
-                     attributes.v_tensor_uid(),
-                     attributes.o_tensor_uid(),
-                     attributes.do_tensor_uid(),
-                     attributes.dq_tensor_uid(),
-                     attributes.dk_tensor_uid(),
-                     attributes.dv_tensor_uid(),
-                     attributes.stats_tensor_uid()};
-
-    plan.window = windowFor(problem);
-    if(problem.dropoutP > 0.0F)
-    {
-        plan.dropoutThreshold = flydsl_sdpa::dropoutThreshold(problem.dropoutP);
-        plan.dropoutScale = flydsl_sdpa::dropoutScale(problem.dropoutP);
-    }
-    const bool paddedHead = problem.headDimQk != tile || problem.headDimV != tile;
-    plan.runtimeFlags
-        = (paddedHead ? RT_FLAG_PADDED : 0) | (problem.dropoutP > 0.0F ? RT_FLAG_DROPOUT : 0);
-    plan.varlenBits = varlenBitsOf(problem);
-
-    plan.scalars = scalarOperandsOf(context.graph.getTensorMap(), problem);
 }
 
 inline float resolveScale(const bwd::SdpaBwdProblem& problem,
@@ -1020,6 +980,85 @@ inline std::optional<TailzeroGrid> tailzeroGridOf(const bwd::SdpaBwdProblem& pro
         return std::nullopt;
     }
     return TailzeroGrid{static_cast<unsigned int>(gridX), static_cast<unsigned int>(*planes)};
+}
+
+/// What every engine's plan holds the same way: the matched problem, the launch values the
+/// graph decides, and the reduce and tail-zero launches. An engine's plan derives from it and
+/// adds its own grid and slot.
+struct BwdPlanCommon
+{
+    bwd::SdpaBwdProblem problem;
+    Uids uids;
+    unsigned int blockThreads = 0;
+    Window window;
+    int32_t dropoutThreshold = 0;
+    float dropoutScale = 1.0F;
+    int32_t runtimeFlags = 0;
+    int32_t varlenBits = 0;
+    WorkspaceLayout workspace;
+    ScalarOperands scalars;
+    /// The reduce kernel's symbol and launch, when the graph's dBias is broadcast.
+    std::string reduceSymbol;
+    ReduceGrid reduceGrid;
+    /// The tail-zero launch: the outputs it zeroes (`mask`, 0 for no launch) and its grid.
+    int32_t tailzeroMask = 0;
+    TailzeroGrid tailzeroGrid;
+};
+
+/// The matched problem of @p context under @p options. A graph that declined at graph_match
+/// no longer matching is a bug, not a graph: BAD_PARAM scoped by @p scope.
+inline bwd::SdpaBwdProblem
+    matchedProblemOf(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                     const bwd::MatchOptions& options,
+                     std::string_view scope)
+{
+    auto matched = bwd::matchSdpaBackward(context, options);
+    if(auto* problem = std::get_if<bwd::SdpaBwdProblem>(&matched))
+    {
+        return *problem;
+    }
+    const auto& decline = std::get<bwd::Decline>(matched);
+    failBadParam(scope, "the graph no longer matches [" + decline.cause + "]: " + decline.detail);
+}
+
+/**
+ * @brief Fills what every engine's plan takes from the graph the same way: the tensor uids, the
+ *        window, the dropout threshold and scale, the runtime flags, the varlen bits and the
+ *        scalar operands.
+ *
+ * `plan.problem` is set before the call. @p tile is the kernel's head-dim tile: a head dim
+ * below it sets RT_FLAG_PADDED.
+ */
+inline void bindGraphOperands(BwdPlanCommon& plan,
+                              const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                              int64_t tile)
+{
+    const auto& problem = plan.problem;
+    const auto& attributes
+        = context.graph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
+    plan.uids = Uids{attributes.q_tensor_uid(),
+                     attributes.k_tensor_uid(),
+                     attributes.v_tensor_uid(),
+                     attributes.o_tensor_uid(),
+                     attributes.do_tensor_uid(),
+                     attributes.dq_tensor_uid(),
+                     attributes.dk_tensor_uid(),
+                     attributes.dv_tensor_uid(),
+                     attributes.stats_tensor_uid()};
+
+    plan.window = windowFor(problem);
+    if(problem.dropoutP > 0.0F)
+    {
+        plan.dropoutThreshold = flydsl_sdpa::dropoutThreshold(problem.dropoutP);
+        plan.dropoutScale = flydsl_sdpa::dropoutScale(problem.dropoutP);
+    }
+    const bool paddedHead = problem.headDimQk != tile || problem.headDimV != tile;
+    plan.runtimeFlags
+        = (paddedHead ? RT_FLAG_PADDED : 0) | (problem.dropoutP > 0.0F ? RT_FLAG_DROPOUT : 0);
+    plan.varlenBits = varlenBitsOf(problem);
+
+    plan.scalars = scalarOperandsOf(context.graph.getTensorMap(), problem);
 }
 
 /// The tail-zero arguments over the outputs at @p dQ, @p dK and @p dV and the lengths at
