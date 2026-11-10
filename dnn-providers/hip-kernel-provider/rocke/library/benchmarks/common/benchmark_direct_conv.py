@@ -325,9 +325,10 @@ def parse_miopen_cmd_direct(cmd: str):
     # dilated or not (direct_fwd_wmma), are the problems a direct kernel
     # computes with per-axis padding: the shapes of PER_AXIS_PAD_VARIANTS
     # (kernels.conv.direct_variants), which the cache selection checks per
-    # variant. Every other problem keeps one padding for both axes.
+    # variant. A stride-1 depthwise wgrad (the Toeplitz WMMA kernel) is one
+    # too. Every other problem keeps one padding for both axes.
     pad_w_ok = (
-        (miopen_args.forw == 2 and cpg == 1 and kpg == 1 and sH == 1)
+        (miopen_args.forw in (2, 4) and cpg == 1 and kpg == 1 and sH == 1)
         or (
             miopen_args.forw == 1 and groups == 1 and (sH == 1 or one_d) and not dilated
         )

@@ -2111,6 +2111,7 @@ _W32_WGRAD = (
     "direct_wgrad",
     "direct_wgrad_small_c",
     "direct_depthwise_wgrad",
+    "direct_depthwise_wgrad_wmma",
 )
 
 
