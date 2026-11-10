@@ -5,7 +5,7 @@
 
 Checks the predicates that keep a custom kernel on 128x4-shuffled scales away from
 every problem it cannot run: the scale format, alpha == 1, the fixed size and
-strides, and the swizzled operands.
+strides, and the swizzled operands. The last test parses the rocKE MX FP6 logic files.
 """
 
 import copy
@@ -20,12 +20,31 @@ from tensilelite.SolutionStructs.Validators.MXScaleFormat import validateHostPre
 
 pytestmark = pytest.mark.unit
 
+_LOGIC_FILES = [
+    (
+        f"gfx950/gfx950_id75a3/Equality/gfx950_Cijk_Alik_Bljk_{types}_MXAE8B32_MXBE8B32_STA_STB_H"
+        "_UserArgs.yaml",
+        fmt,
+    )
+    for types, fmt in (("F6BS", "e2m3"), ("B6BS", "e3m2"))
+]
+# Each kernel runs 12 * L + 8 K tiles of 128: L iterations of a 12-tile main loop and a
+# fixed 8-tile tail. Only these K have a kernel (L = 42 and L = 85).
+_KS = (65536, 131584)
 # A generated MX GEMM and a non-MX GEMM from the shipped corpus.
 _GENERATED_MX_LOGIC = (
     "gfx950/gfx950/GridBased/gfx950_Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_GG_HAS_SAB_SAV"
     "_UserArgs.yaml"
 )
 _NON_MX_LOGIC = "gfx950/gfx950_id75a3/Equality/gfx950_Cijk_Alik_Bljk_F8F8S_BH_BiasS_HAS_SAV_UserArgs.yaml"
+
+
+def _kernel_name(fmt, k):
+    name = (
+        f"rocke_gemm_mx_{fmt}_{fmt}_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3"
+        f"_4096x4096x{k}_c0c1"
+    )
+    return name + "_k4b371438f4" if k == 65536 else name
 
 
 def _flatten(predicate):
@@ -124,3 +143,36 @@ def test_host_pre_swizzle_128x4_is_handwritten_gfx950_only(fmt, handwritten, isa
     state = {"MXScaleFormat": fmt, "ISA": isa, "Valid": True}
     assert validateHostPreSwizzle128x4(state, handwritten, False) is valid
     assert state["Valid"] is valid
+
+
+@needs_logic_corpus
+@pytest.mark.parametrize("rel, fmt", _LOGIC_FILES, ids=("e2m3", "e3m2"))
+def test_logic_file_predicates(rel, fmt, assembler, gfx950_iim):
+    logic = require_logic_file(rel)
+    library = L.parseLibraryLogicFile(str(logic), assembler, False, False, False, gfx950_iim, False)
+    assert len(library.solutions) == len(_KS)
+    rows = {tuple(key): index for key, (index, _) in library.exactLogic}
+    assert set(rows) == {(4096, 4096, 1, k) for k in _KS}
+    for k in _KS:
+        struct = library.solutions[rows[(4096, 4096, 1, k)]]
+        assert struct["CustomKernelName"] == _kernel_name(fmt, k)
+        solution = C.Solution.FromSolutionStruct(
+            struct, False, False, False, assembler, gfx950_iim
+        )
+        preds = {}
+        for p in _flatten(solution.problemPredicate):
+            preds.setdefault(p.tag, []).append((p.index, p.value))
+
+        def values(tag):
+            return set(preds[tag])
+
+        assert values("MXScaleFormat") == {(None, 3)}
+        assert values("AlphaValue") == {(None, "1")}
+        assert values("SwizzleTensorA") == {(None, True)}
+        assert values("SwizzleTensorB") == {(None, True)}
+        assert values("SizeEqual") == {(0, 4096), (1, 4096), (2, 1), (3, k)}
+        assert values("StrideAEqual") == {(1, k)}
+        assert values("StrideBEqual") == {(1, k)}
+        assert values("StrideDEqual") == {(1, 4096)}
+        assert solution.problemType.mxScaleFormat == 3
+        assert not solution.problemType.useBeta

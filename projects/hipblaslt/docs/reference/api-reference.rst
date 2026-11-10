@@ -204,6 +204,21 @@ to ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``, the following restri
    both enum values in ``hipblaslt.h`` give the byte offset of every element and scale.
 *  ``opA`` must be equal to ``T``, and ``opB`` must be equal to ``N``.
 
+The solutions for this scale mode are rocKE GEMM kernels, which add these restrictions:
+
+*  Atype and Btype must be the same type.
+*  Ctype and Dtype must be ``HIP_R_16BF``, and the compute type must be ``HIPBLAS_COMPUTE_32F``.
+*  ``lda`` and ``ldb`` must be equal to ``K``, and ``ldd`` must be equal to ``m``.
+*  ``B`` must be equal to ``1``.
+*  Epilogues are not supported.
+*  ``alpha`` must be equal to ``1``, and ``beta`` must be equal to ``0``.
+*  Solutions exist only for gfx950 devices with PCI chip ID ``0x75a3``, at ``m = n = 4096`` with
+   ``K = 65536`` or ``K = 131584``.
+*  ``hipblasLtMatmulAlgoGetHeuristic`` does not return these solutions, because it does not assume
+   ``beta = 0``. Query them through the extension API (``hipblaslt_ext::Gemm::setProblem`` with ``beta = 0``,
+   then ``algoGetHeuristic``), and run the returned algorithm with ``hipblaslt_ext::Gemm::run`` or
+   ``hipblasLtMatmul``.
+
 hipblasLtMatrixTransformDescCreate()
 ------------------------------------------
 .. doxygenfunction:: hipblasLtMatrixTransformDescCreate
