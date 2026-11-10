@@ -146,8 +146,7 @@ jobs:
           echo "Initializing ROCm SDK"
           "$VENV_PATH/Scripts/rocm-sdk.exe" init
 
-          ROCM_SDK_PATH="$VENV_PATH/Lib/site-packages/_rocm_sdk_devel"
-          ROCM_SDK_PATH="${ROCM_SDK_PATH//\\//}"
+          ROCM_SDK_PATH="$(cygpath -m "$VENV_PATH/Lib/site-packages/_rocm_sdk_devel")"
           echo "ROCM_SDK_PATH=$ROCM_SDK_PATH"
           echo "ROCM_SDK_PATH=$ROCM_SDK_PATH" >> "$GITHUB_ENV"
 
@@ -177,7 +176,7 @@ jobs:
           git -C "$KPACK_SRC" fetch --depth 1 --filter=blob:none origin "${{ steps.ci-env.outputs.kpack-ref }}"
           git -C "$KPACK_SRC" checkout -q FETCH_HEAD
           # Confirms the fetch landed on the pinned commit.
-          fetched=$(git -C "$KPACK_SRC" rev-parse HEAD | tr -d '\r')
+          fetched=$(git -C "$KPACK_SRC" rev-parse HEAD)
           test "$fetched" = "${{ steps.ci-env.outputs.kpack-ref }}" || { echo "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" >&2; exit 1; }
           # Installing the directory rebuilds and reinstalls every time, so a
           # warm venv cannot keep an older build of this same 0.1.0 version.
@@ -335,11 +334,14 @@ jobs:
       - name: Install frontend wheel
         run: |
           set -euo pipefail
-          wheel=$(ls build/wheel_package/hipdnn_frontend-*.whl | head -n1)
+          wheel=$(ls build/wheel_package/hipdnn_frontend-*.whl)
           "$VENV_PYTHON" -m pip install --force-reinstall "$wheel"
 
       - name: Run frontend wheel tests
         run: |
+          # ROCM_PATH is what conftest.py resolves test_good_plugin from, and
+          # HIP_PATH is its Windows HIP SDK counterpart; PATH is how Windows
+          # finds the SDK DLLs, hipdnn_backend.dll among them.
           ROCM_PATH="$ROCM_SDK_PATH" \
             HIP_PATH="$ROCM_SDK_PATH" \
             PATH="$(cygpath -u "$ROCM_SDK_PATH/bin"):$(cygpath -u "$ROCM_SDK_PATH/lib"):$PATH" \
