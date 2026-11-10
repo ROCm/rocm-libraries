@@ -7,17 +7,21 @@ the kernels it generates. Each carries a YAML block inside its
 ``.amdgpu_metadata`` section: ``custom.config`` is the registration record that
 drives kernel launch, and ``amdhsa.kernels`` is what the GPU runtime reads.
 Kernels captured from rocRoller also arrive with rocRoller's internal view of
-the kernel, in two forms that nothing reads: a graph dump under the
-``.kernel_graph``, ``.kernel_graph_dot`` and ``.command`` keys, and whole-line
-``//`` comments narrating codegen.
+the kernel, in three forms that nothing reads: a graph dump under the
+``.kernel_graph``, ``.kernel_graph_dot`` and ``.command`` keys, rocRoller's
+launch metadata (``.workitem_count``, ``.dynamic_sharedmemory_bytes``,
+``.kernel_dimensions``, ``.workgroup_size``, and ``.expression`` /
+``.variableType`` on each argument), and whole-line ``//`` comments narrating
+codegen.
 
-``StripKernelGraphs`` deletes both. These tests pin the properties that make
-the deletion safe to apply to a kernel that ships: it must leave instructions,
-their trailing comments, ``.amdgcn_target``, ``custom.config`` and
-``amdhsa.kernels`` untouched; it must act on the graph keys only inside the
-metadata section and on comments only outside it; it must keep licence and
-annotation comments; and it must leave a kernel that did not come from
-rocRoller entirely alone.
+``StripKernelGraphs`` deletes all three. These tests pin the properties that
+make the deletion safe to apply to a kernel that ships: it must leave
+instructions, their trailing comments, ``.amdgcn_target``, ``custom.config``
+and the rest of ``amdhsa.kernels`` untouched; it must act on metadata keys only
+inside the metadata section, at their own column, and on comments only outside
+it; it must keep licence and annotation comments; and it must leave the
+comments and launch metadata of a kernel that did not come from rocRoller
+alone.
 """
 
 import os
@@ -26,7 +30,9 @@ import pytest
 import yaml
 
 import tensilelite
-from tensilelite.StripKernelGraphs import (COMMENT_LABEL, main, processFile,
+from tensilelite.StripKernelGraphs import (COMMENT_LABEL, ROCROLLER_ARG_KEYS,
+                                           ROCROLLER_KERNEL_KEYS, StripError, main,
+                                           processFile, stripLaunchMetadata,
                                            stripLines, stripTraceComments)
 
 pytestmark = pytest.mark.unit
@@ -151,12 +157,76 @@ ANNOTATION_COMMENTS = [
 ]
 
 
+# A kernel entry carrying rocRoller's launch metadata, in the shapes rocRoller
+# writes: flow-style one-liners for most keys, a block-style expression for the
+# second argument. .reqd_workgroup_size is a standard key that shares a suffix
+# with rocRoller's .workgroup_size and must survive.
+LAUNCH_KERNEL_HEAD = """\
+amdhsa.version: [1, 2]
+amdhsa.kernels:
+  - .name: k
+    .symbol: k.kd
+    .kernarg_segment_size: 16
+    .max_flat_workgroup_size: 256
+    .reqd_workgroup_size: [256, 1, 1]
+    .workgroup_size: [256, 1, 1]
+    .kernel_dimensions: 2
+    .wavefront_size: 64
+    .workitem_count: [{type: Multiply, lhs: {type: CommandArgument, name: M}, rhs: 4}, 1, 1]
+    .dynamic_sharedmemory_bytes: {type: LiteralValue.UInt32, dataType: UInt32, value: 0}
+    .args:
+      - .name: Tensor_0_stride_0_0
+        .size: 8
+        .offset: 0
+        .expression: {type: CommandArgument, size: 8, offset: 192, name: Tensor_0_stride_0}
+        .variableType: {dataType: Int64, pointerType: Value}
+        .value_kind: by_value
+      - .name: WGM
+        .size: 4
+        .offset: 8
+        .expression:
+          type: CommandArgument
+          name: WGM
+        .variableType: {dataType: Int32, pointerType: Value}
+        .value_kind: by_value
+"""
+
+LAUNCH_KERNEL_HEAD_STRIPPED = """\
+amdhsa.version: [1, 2]
+amdhsa.kernels:
+  - .name: k
+    .symbol: k.kd
+    .kernarg_segment_size: 16
+    .max_flat_workgroup_size: 256
+    .reqd_workgroup_size: [256, 1, 1]
+    .wavefront_size: 64
+    .args:
+      - .name: Tensor_0_stride_0_0
+        .size: 8
+        .offset: 0
+        .value_kind: by_value
+      - .name: WGM
+        .size: 4
+        .offset: 8
+        .value_kind: by_value
+"""
+
+LAUNCH_REMOVED = {
+    "workgroup_size": 1,
+    "kernel_dimensions": 1,
+    "workitem_count": 1,
+    "dynamic_sharedmemory_bytes": 1,
+    "args[].expression": 4,
+    "args[].variableType": 2,
+}
+
+
 def buildSource(dump="", trailing="", preamble=None, configFirst=True,
-                comments="", origin="rocroller"):
+                comments="", origin="rocroller", kernelHead=KERNEL_HEAD):
     """Assemble a synthetic custom kernel around an optional dump."""
     head = TARGET_LINE + INSTRUCTIONS if preamble is None else preamble
     config = CUSTOM_CONFIG.replace("Origin: rocroller", f"Origin: {origin}")
-    body = config + KERNEL_HEAD if configFirst else KERNEL_HEAD + config
+    body = config + kernelHead if configFirst else kernelHead + config
     return (
         comments
         + head
@@ -625,6 +695,147 @@ def test_a_graph_dump_is_still_removed_from_a_non_rocroller_kernel(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# rocRoller's launch metadata goes from rocRoller's kernels only
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("configFirst", [True, False], ids=["config-before", "config-after"])
+def test_launch_metadata_is_removed_from_a_rocroller_kernel(tmp_path, configFirst):
+    source = buildSource(kernelHead=LAUNCH_KERNEL_HEAD, configFirst=configFirst)
+    path = writeKernel(tmp_path, source)
+    removed, bytesRemoved = processFile(str(path))
+    assert removed == LAUNCH_REMOVED
+    expected = buildSource(kernelHead=LAUNCH_KERNEL_HEAD_STRIPPED, configFirst=configFirst)
+    assert path.read_text(encoding="utf-8") == expected
+    assert bytesRemoved == len(source.encode("utf-8")) - len(expected.encode("utf-8"))
+
+
+@pytest.mark.parametrize("origin", ["tensile", "ck", "triton", "wave"])
+def test_launch_metadata_of_another_source_is_kept(tmp_path, origin):
+    source = buildSource(kernelHead=LAUNCH_KERNEL_HEAD, origin=origin)
+    path = writeKernel(tmp_path, source)
+    assert processFile(str(path)) == ({}, 0)
+    assert path.read_text(encoding="utf-8") == source
+
+
+def test_launch_metadata_and_graph_dump_go_together(tmp_path):
+    source = buildSource(kernelHead=LAUNCH_KERNEL_HEAD, dump=KERNEL_GRAPH + COMMAND,
+                         comments="".join(TRACE_COMMENTS))
+    path = writeKernel(tmp_path, source)
+    removed, _ = processFile(str(path))
+    assert removed == dict(LAUNCH_REMOVED, kernel_graph=9, command=5,
+                           **{COMMENT_LABEL: len(TRACE_COMMENTS)})
+    assert path.read_text(encoding="utf-8") == buildSource(
+        kernelHead=LAUNCH_KERNEL_HEAD_STRIPPED)
+
+
+def test_stripped_launch_metadata_still_parses_with_the_runtime_keys(tmp_path):
+    path = writeKernel(tmp_path, buildSource(kernelHead=LAUNCH_KERNEL_HEAD))
+    before = metadataYaml(path.read_text(encoding="utf-8"))["amdhsa.kernels"][0]
+    processFile(str(path))
+    after = metadataYaml(path.read_text(encoding="utf-8"))["amdhsa.kernels"][0]
+
+    kernelKeys = {"." + k for k in ROCROLLER_KERNEL_KEYS}
+    argKeys = {"." + k for k in ROCROLLER_ARG_KEYS}
+    assert kernelKeys <= set(before)
+    assert {k: v for k, v in after.items() if k != ".args"} == {
+        k: v for k, v in before.items() if k not in kernelKeys and k != ".args"}
+    assert after[".args"] == [{k: v for k, v in arg.items() if k not in argKeys}
+                              for arg in before[".args"]]
+
+
+def test_an_arg_key_outside_the_args_list_is_kept(tmp_path):
+    """.expression at the kernel-key column is not an argument's expression."""
+    head = KERNEL_HEAD.replace("    .args:\n", "    .expression: kept\n    .args:\n")
+    path = writeKernel(tmp_path, buildSource(kernelHead=head))
+    assert processFile(str(path)) == ({}, 0)
+
+
+def test_a_kernel_key_inside_an_argument_is_kept(tmp_path):
+    """.workgroup_size at the argument-key column belongs to the argument."""
+    head = KERNEL_HEAD + "        .workgroup_size: kept\n"
+    path = writeKernel(tmp_path, buildSource(kernelHead=head))
+    assert processFile(str(path)) == ({}, 0)
+
+
+def test_launch_metadata_strip_is_idempotent(tmp_path):
+    source = buildSource(kernelHead=LAUNCH_KERNEL_HEAD)
+    once, removed = stripLines(source.splitlines(keepends=True))
+    assert removed == LAUNCH_REMOVED
+    twice, removedAgain = stripLines(list(once))
+    assert twice == once
+    assert removedAgain == {}
+
+
+def test_launch_metadata_strip_preserves_line_endings():
+    source = buildSource(kernelHead=LAUNCH_KERNEL_HEAD).replace("\n", "\r\n")
+    newLines, removed = stripLaunchMetadata(source.splitlines(keepends=True))
+    assert removed == LAUNCH_REMOVED
+    assert "".join(newLines) == buildSource(
+        kernelHead=LAUNCH_KERNEL_HEAD_STRIPPED).replace("\n", "\r\n")
+
+
+def _withoutCustomKernel(source):
+    """The same kernel with its custom.config CustomKernel block removed."""
+    block = ("  CustomKernel:\n"
+             "    args: [ { type: int64, semantic: StrideA0 } ]\n"
+             "    macrotile: [32, 32, 64]\n"
+             "    threads: [64, 1, 1]\n"
+             "    grid: [TilesX, TilesY, Batch]\n")
+    assert source.count(block) == 1
+    return source.replace(block, "")
+
+
+@pytest.mark.parametrize("configFirst", [True, False], ids=["config-before", "config-after"])
+def test_launch_metadata_of_a_kernel_without_custom_kernel_is_refused(tmp_path, capsys,
+                                                                     configFirst):
+    """Such a kernel's arguments are rebuilt from .expression and .variableType."""
+    source = _withoutCustomKernel(
+        buildSource(kernelHead=LAUNCH_KERNEL_HEAD, configFirst=configFirst))
+    path = writeKernel(tmp_path, source)
+    with pytest.raises(StripError, match="CustomKernel"):
+        processFile(str(path))
+    assert main(["--check", str(tmp_path)]) == 2
+    assert main([str(tmp_path)]) == 2
+    assert path.read_text(encoding="utf-8") == source
+    assert "CustomKernel" in capsys.readouterr().err
+
+
+def test_a_kernel_without_custom_kernel_and_no_launch_metadata_is_not_refused(tmp_path):
+    source = _withoutCustomKernel(buildSource(dump=KERNEL_GRAPH))
+    path = writeKernel(tmp_path, source)
+    removed, _ = processFile(str(path))
+    assert removed == {"kernel_graph": 9}
+
+
+def test_a_nested_custom_kernel_key_does_not_count(tmp_path):
+    source = _withoutCustomKernel(buildSource(kernelHead=LAUNCH_KERNEL_HEAD)).replace(
+        "  Source:\n", "  Source:\n    CustomKernel: not-the-block\n")
+    path = writeKernel(tmp_path, source)
+    with pytest.raises(StripError, match="CustomKernel"):
+        processFile(str(path))
+
+
+def test_a_key_that_opens_its_entry_is_refused(tmp_path, capsys):
+    head = KERNEL_HEAD.replace("      - .name: Tensor_0_stride_0_0\n",
+                               "      - .expression: {type: CommandArgument}\n"
+                               "        .name: Tensor_0_stride_0_0\n")
+    source = buildSource(kernelHead=head)
+    path = writeKernel(tmp_path, source)
+    with pytest.raises(StripError):
+        processFile(str(path))
+    assert main([str(tmp_path)]) == 2
+    assert path.read_text(encoding="utf-8") == source
+    assert "opens its entry" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("label", sorted(LAUNCH_REMOVED))
+def test_check_mode_reports_each_launch_key_by_name(tmp_path, capsys, label):
+    writeKernel(tmp_path, buildSource(kernelHead=LAUNCH_KERNEL_HEAD))
+    assert main(["--check", str(tmp_path)]) == 1
+    assert f"  .{label}: {LAUNCH_REMOVED[label]} lines" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
 # stripTraceComments works on lines alone
 # --------------------------------------------------------------------------
 
@@ -707,9 +918,18 @@ def customKernelRoot():
 
 
 def test_no_shipped_custom_kernel_carries_provenance(capsys):
-    """Regression gate: a kernel added later must not bring provenance back."""
+    """Regression gate: a kernel added later must not bring provenance back.
+
+    That covers the graph dump, the launch metadata and the trace comments;
+    the next test pins the launch keys so the gate cannot quietly lose one.
+    """
     assert main(["--check", customKernelRoot()]) == 0
     assert "0 of" in capsys.readouterr().out
+
+
+def test_the_gate_covers_every_launch_metadata_key():
+    assert set(ROCROLLER_KERNEL_KEYS) | {"args[]." + k for k in ROCROLLER_ARG_KEYS} == set(
+        LAUNCH_REMOVED)
 
 
 def test_shipped_rocroller_kernels_keep_only_their_licence_header():
