@@ -75,7 +75,7 @@ gives the reason.
 | §4, §15 (I1): a generator writes the bundles from the declarations | `model.yaml` and `rules.yaml` are in the repository. The case generator, the graph exporter, the row selection and the case list are not (section 1). | The bundles cannot be made again from the repository. Why: the programs are a PoC still being developed. |
 | §4, §9: each case has a `purpose` and maps to a plan item | Case metadata has no `purpose` and no `plan_items`. Each case links to its case-list row by `case_key` (section 9.4). | No purpose tag, and the trace runs through a file that is not in the repository. Why: not recorded. |
 | §8.3, §13.1 step 10: claims are harvested | Every `support.json` is empty (section 11). | No claims. Why: they come in a later change, tracked in ALMIOPEN-3225. |
-| §8.4, P2: the plan never names an engine, and the same bundles run on every lane | The base case is one that `ASM_SDPA_ENGINE` accepts (section 4). Every SDPA engine lane runs the cases (section 9.5), and each engine's TOML file holds the skips for its defects (section 10). | The HIP_MLOPS, MIOPEN and hipBLASLt lanes exclude the cases because they have no SDPA support. Why the base case is engine-specific: not recorded. |
+| §8.4, P2: the plan never names an engine, and the same bundles run on every lane | The base case is one that `ASM_SDPA_ENGINE` accepts (section 4). Every SDPA engine lane runs the cases (section 9.5), and each engine's TOML file holds the skips for its defects (section 10). | The HIP_MLOPS, MIOPEN and hipBLASLt lanes exclude the cases because they have no SDPA support. The FlyDSL SDPA lanes exclude the 8 run-time zero and negative scale cases, which they refuse at run time (section 9.5, ALMIOPEN-3247). Why the base case is engine-specific: not recorded. |
 | §6, §8.1: each level holds `expected_rejection` bundles | No rejection cases. Requests that hipDNN must refuse belong to a separate rejection suite (sections 3 and 11). | Why: not recorded. |
 | §12: golden cases, at least the G-A anchors | No golden data. Each output is checked against the GPU and CPU SDPA references (section 9.4). | Why: not recorded. |
 | §13.2 template: pass criteria, trade-off register, exhaustive mode | No such sections. `choice` rules in `rules.yaml` record each judgement call with its reason (section 5). Fuzzer hints mark the value axes that only a fuzzer uses (section 3). | Why: not recorded. |
@@ -798,6 +798,16 @@ does not accept is declined, and the suite skips it. The HIP_MLOPS, MIOPEN and
 hipBLASLt lanes have no SDPA support. Their tier YAML files exclude
 `*_SdpaFwdPlan_*`, so they do not load these cases only to decline them.
 
+One exception: the FlyDSL SDPA lanes do not run the 8 cases whose attention
+scale is a run-time tensor holding zero or a negative value (4 standard,
+1 comprehensive, 3 full). The FlyDSL engines accept the graph and then refuse
+these cases when they run (`BAD_PARAM`: the run-time scale must be positive).
+That refusal is correct, but the suite cannot yet accept a refusal as the
+expected outcome, so it would count each case as a failure. The lanes' tier
+YAML file excludes the cases by exact name, each tier listing its own and the
+lower tiers' cases, until the suite can accept an expected refusal
+(ALMIOPEN-3247).
+
 ## 10. Known engine defects and their skips
 
 An engine can accept a case and then give a wrong output. The test of that
@@ -811,6 +821,10 @@ passes as `--test-config`). Only
 [`ASM_SDPA_ENGINE.toml`](../../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml)
 holds any, after the comment line `-- SdpaFwdPlan known engine defects --`.
 Read the TOML files for the current list. This document does not copy it.
+
+A refusal at run time is not a defect and gets no skip. The FlyDSL SDPA lanes
+exclude the run-time zero and negative scale cases in their tier YAML file
+instead (section 9.5, ALMIOPEN-3247).
 
 ### 10.1 Running the cases
 

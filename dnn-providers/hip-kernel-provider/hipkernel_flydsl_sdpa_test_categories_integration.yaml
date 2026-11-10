@@ -13,9 +13,6 @@
 # Tiers cascade: standard runs quick + standard, comprehensive runs quick + standard +
 # comprehensive; only "full" runs the full-tier bundles.
 
-_common_excludes: &common_excludes
-  - "*DISABLED*"
-
 # The two 4096-token fp16 causal bhsd cases cost about two minutes each in the GPU
 # reference on an RDNA iGPU (the engine itself takes milliseconds). They run from the
 # comprehensive tier up; quick and standard keep every other SdpaFwd case.
@@ -43,7 +40,18 @@ test_categories:
       - "standard_SdpaFwd_*.*"
       - "quick_SdpaFwdPlan_*.*"
       - "standard_SdpaFwdPlan_*.*"
-    exclude: *fast_excludes
+    # SdpaFwdPlan cases whose attention scale is a run-time tensor holding zero or a
+    # negative value: the FlyDSL SDPA engines refuse them at execute (BAD_PARAM, the
+    # run-time scale must be positive), and the harness cannot yet accept an expected
+    # refusal (ALMIOPEN-3247). Each tier lists its own and lower tiers' cases.
+    exclude:
+      - "*DISABLED*"
+      - "*_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small.*"
+      - "*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*"
+      - "standard_SdpaFwdPlan_Bias_ScRt_Stats.bf16_195fa1067d4d3335"
+      - "standard_SdpaFwdPlan_Bias_ScRt_Stats.bf16_e255b647ffccf099"
+      - "standard_SdpaFwdPlan_Bm_ScRt.bf16_83e906024b68c435"
+      - "standard_SdpaFwdPlan_Bm_ScRt.bf16_d78679e2a34d1c47"
     labels:
       - "standard"
       - "pr"
@@ -58,7 +66,14 @@ test_categories:
       - "quick_SdpaFwdPlan_*.*"
       - "standard_SdpaFwdPlan_*.*"
       - "comprehensive_SdpaFwdPlan_*.*"
-    exclude: *common_excludes
+    # Run-time zero or negative scale cases (ALMIOPEN-3247); see the standard category.
+    exclude:
+      - "*DISABLED*"
+      - "standard_SdpaFwdPlan_Bias_ScRt_Stats.bf16_195fa1067d4d3335"
+      - "standard_SdpaFwdPlan_Bias_ScRt_Stats.bf16_e255b647ffccf099"
+      - "standard_SdpaFwdPlan_Bm_ScRt.bf16_83e906024b68c435"
+      - "standard_SdpaFwdPlan_Bm_ScRt.bf16_d78679e2a34d1c47"
+      - "comprehensive_SdpaFwdPlan_Bias_ScRt_Stats.bf16_00e130a802bf3019"
     labels:
       - "comprehensive"
       - "nightly"
@@ -69,7 +84,17 @@ test_categories:
     test_patterns:
       - "*_SdpaFwd_*.*"
       - "*_SdpaFwdPlan_*.*"
-    exclude: *common_excludes
+    # Run-time zero or negative scale cases (ALMIOPEN-3247); see the standard category.
+    exclude:
+      - "*DISABLED*"
+      - "standard_SdpaFwdPlan_Bias_ScRt_Stats.bf16_195fa1067d4d3335"
+      - "standard_SdpaFwdPlan_Bias_ScRt_Stats.bf16_e255b647ffccf099"
+      - "standard_SdpaFwdPlan_Bm_ScRt.bf16_83e906024b68c435"
+      - "standard_SdpaFwdPlan_Bm_ScRt.bf16_d78679e2a34d1c47"
+      - "comprehensive_SdpaFwdPlan_Bias_ScRt_Stats.bf16_00e130a802bf3019"
+      - "full_SdpaFwdPlan_Bias_ScRt_Stats.bf16_12bf5c234e92fd7a"
+      - "full_SdpaFwdPlan_Bm_ScRt.bf16_7ce8c20b0aa9dab3"
+      - "full_SdpaFwdPlan_Bm_ScRt.bf16_eb6d98791c63695b"
     labels:
       - "full"
       - "all"
