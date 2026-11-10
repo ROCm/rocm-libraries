@@ -40,7 +40,7 @@
 
 #include <cstdint>
 #include <half/half.hpp>
-using half         = half_float::half;
+using half = half_float::half;
 #include <hip_float8.hpp>
 
 using float16      = half_float::half;
