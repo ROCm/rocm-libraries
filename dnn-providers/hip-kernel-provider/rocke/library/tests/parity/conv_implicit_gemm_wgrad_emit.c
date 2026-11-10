@@ -65,6 +65,8 @@
  *  63-66  two-stage (f32 workspace) split-K on WMMA: fp16/bf16 out variants,
  *         and gfx1151 rejected (no validated float global atomics). Must
  *         match the Python emitter's 63-66.
+ *  73-88  TF32 compute (mma_dtype "tf32"), fp32 storage, on both TF32 atoms
+ *         of gfx950 and gfx942. Must match the Python emitter's _tf32_spec.
  *  71-72  prefetch_addr + compv3 + register_prefetch=true: split-K packed
  *         fp16 atomic on base 11, and two-stage on base 15. Config 43 above
  *         is compv3 + prefetch_addr with register_prefetch left at its
@@ -128,10 +130,98 @@ static int streamk_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, con
     return 0;
 }
 
+/* TF32 compute: fp32 dY / X / dW, each LDS fragment bitcast to vec<tf32xN>
+ * for the arch's TF32 atom -- BF16x3 emulation on gfx950 (32x32x16,
+ * 16x16x32), native XF32 on gfx942 (32x32x4, 16x16x8). 64x64x32 tile, 2x2
+ * warps. Keep in lockstep with _tf32_spec() in conv_implicit_gemm_wgrad_emit.py
+ * (which lists what each index covers). */
+static int make_cfg_tf32(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    /* problem: 2 = 2-D, 3 = 3-D, 1 = grouped (groups=3) */
+    static const struct
+    {
+        const char* arch;
+        int edge;
+        int k;
+        int problem;
+        const char* pipeline;
+        const char* epilogue;
+        int split_k;
+    } cfgs[] = {
+        {"gfx950", 32, 16, 2, "mem", "default", 1}, /* 73 */
+        {"gfx950", 16, 32, 2, "compv4", "cshuffle", 1}, /* 74 */
+        {"gfx942", 32, 4, 2, "compv4", "default", 1}, /* 75 */
+        {"gfx942", 16, 8, 2, "mem", "cshuffle", 1}, /* 76 */
+        {"gfx950", 32, 16, 3, "mem", "default", 1}, /* 77 */
+        {"gfx942", 16, 8, 3, "compv4", "default", 1}, /* 78 */
+        {"gfx950", 16, 32, 2, "mem", "default", 4}, /* 79 */
+        {"gfx942", 32, 4, 2, "mem", "cshuffle", 4}, /* 80 */
+        {"gfx950", 32, 16, 2, "mem", "default", 4}, /* 81: two_stage */
+        {"gfx942", 16, 8, 2, "mem", "default", 4}, /* 82: two_stage */
+        {"gfx950", 16, 32, 1, "mem", "default", 1}, /* 83: stream-K dp_sk */
+        {"gfx942", 32, 4, 2, "mem", "default", 1}, /* 84: stream-K persistent atomic */
+        {"gfx950", 32, 16, 2, "basic", "default", 1}, /* 85: lds_k_pad=4 */
+        {"gfx942", 16, 8, 2, "compv4", "default", 1}, /* 86: unroll_k */
+        {"gfx950", 32, 16, 2, "mem", "default", 1}, /* 87: lds_k_outer, rejected */
+        {"gfx950", 32, 16, 2, "mem", "default", 1}, /* 88: async_dma, rejected */
+    };
+    const int i = idx - 73;
+    *spec = rocke_implicit_gemm_conv_wgrad_spec_default();
+    if(cfgs[i].problem == 3)
+        spec->problem
+            = rocke_conv_problem_make_3d(1, 5, 6, 6, 16, 32, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+    else if(cfgs[i].problem == 1)
+    {
+        spec->problem = rocke_conv_problem_make(2, 10, 10, 48, 120, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 3;
+    }
+    else
+        spec->problem = rocke_conv_problem_make(2, 12, 12, 32, 96, 3, 3, 1, 1, 1, 1, 1, 1);
+    spec->dtype_a = "fp32";
+    spec->dtype_b = "fp32";
+    spec->dtype_d = "fp32";
+    spec->mma_dtype = "tf32";
+    spec->tile_m = 64;
+    spec->tile_n = 64;
+    spec->tile_k = 32;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = cfgs[i].edge;
+    spec->warp_tile_n = cfgs[i].edge;
+    spec->warp_tile_k = cfgs[i].k;
+    spec->pipeline = cfgs[i].pipeline;
+    spec->epilogue = cfgs[i].epilogue;
+    spec->split_k = cfgs[i].split_k;
+    spec->two_stage = (idx == 81 || idx == 82);
+    if(idx == 83)
+    {
+        spec->streamk = "dp_sk";
+        spec->streamk_ctas = 6;
+    }
+    if(idx == 84)
+    {
+        spec->streamk = "persistent";
+        spec->streamk_ctas = 6;
+        spec->streamk_reduction = "atomic";
+    }
+    if(idx == 85)
+    {
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 4;
+    }
+    spec->unroll_k = (idx == 86);
+    spec->lds_k_outer = (idx == 87);
+    spec->async_dma = (idx == 88);
+    *arch = cfgs[i].arch;
+    return 0;
+}
+
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
+    if(idx >= 73 && idx <= 88)
+        return make_cfg_tf32(idx, spec, arch);
     int base = pfa_base(idx);
     if(idx == 71 || idx == 72)
         base = idx == 71 ? 11 : 15;

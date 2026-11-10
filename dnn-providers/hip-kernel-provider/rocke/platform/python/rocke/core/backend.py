@@ -946,14 +946,19 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         # split-K admission); dropped, the engine would build the identity.
         acc_epilogue=_conv_acc_epilogue_to_dict(spec.acc_epilogue),
     )
-    # dtype_* and the vector-size/optional knobs are merge-target additions
-    # (#8624); forward them only when this branch's spec exposes them so the
-    # binding falls back to the engine default otherwise.
+    # The ConvDataSpec: the storage dtypes and the MMA input type (mma_dtype,
+    # None unless TF32 compute, which the binding leaves at the engine's None).
+    # They live on ``spec.data``, not the spec; dropped, the engine would build
+    # its fp16 default under the spec's name.
+    data = getattr(spec, "data", None)
+    for f in ("dtype_a", "dtype_b", "dtype_d", "dtype_acc", "mma_dtype"):
+        v = getattr(data, f, None)
+        if v is not None:
+            d[f] = v
+    # The vector-size/optional knobs are merge-target additions (#8624);
+    # forward them only when set so the binding falls back to the engine
+    # default otherwise.
     for f in (
-        "dtype_a",
-        "dtype_b",
-        "dtype_d",
-        "dtype_acc",
         "lds_k_pad",
         "waves_per_eu",
         "vector_size_a",
@@ -1312,7 +1317,10 @@ def conv_direct_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
 
 def conv_direct_nongrouped_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`DirectNongroupedConvSpec` -> flat dict (problem nested, dtype included).
-    ``iglp`` / ``waves_per_eu`` are forwarded as-is; ``None`` means "knob off"."""
+    ``iglp`` / ``waves_per_eu`` are forwarded as-is; ``None`` means "knob off".
+    ``dtype`` is the problem's own name ("fp16", "bf16", "fp32" or "tf32"): the C
+    builder derives the storage type and the MMA atoms from it, as Python does,
+    so ``lds_pad`` (in elements) is forwarded as the spec holds it."""
     p = spec.problem
     return dict(
         problem=dict(
