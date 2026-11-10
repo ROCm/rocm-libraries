@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "2_2_6_64_bf16_bshd_nb8_bs4",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              6,
+              64
+            ],
+            "strides": [
+              768,
+              64,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              6
+            ],
+            "strides": [
+              6,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              8,
+              2,
+              4,
+              64
+            ],
+            "strides": [
+              512,
+              256,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL paged_cache_store",
+        "seed": 4,
+        "notes": "SDPA-native x [B, H, S, D] viewed over BSHD memory, slots [B, S]",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePagedCacheStore); Qwen3.8-shaped cases use the full-attention KV write: 2 KV heads, head_dim 256, block_size 16"
+      }
+    },
+    {
+      "id": "2_2_16_256_bf16_bshd_nb4_bs16_qwen38",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              16,
+              256
+            ],
+            "strides": [
+              8192,
+              256,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16
+            ],
+            "strides": [
+              16,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              2,
+              16,
+              256
+            ],
+            "strides": [
+              8192,
+              4096,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL paged_cache_store",
+        "seed": 5,
+        "notes": "Qwen3.8 KV write from the SDPA-native BSHD K/V view: 2 KV heads, head_dim 256, block_size 16",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePagedCacheStore); Qwen3.8-shaped cases use the full-attention KV write: 2 KV heads, head_dim 256, block_size 16"
+      }
+    }
+  ]
+}

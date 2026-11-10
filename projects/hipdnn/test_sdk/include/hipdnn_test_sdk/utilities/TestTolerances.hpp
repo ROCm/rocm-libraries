@@ -571,4 +571,19 @@ constexpr float getTolerance()
 
 } // namespace gather
 
+namespace paged_cache_store
+{
+
+// Exact for every container dtype, FP8 included. A stored element is cast(x * scale): one
+// f32 product, correctly rounded on both sides, then one round-to-nearest-even cast to the
+// container type (none when it is x's own), so engine and reference produce the same bits.
+// Every element no slot names keeps its starting contents on both sides. Any difference is
+// a wrong slot, a missed or extra write, or a corrupted value, never rounding.
+constexpr float getTolerance()
+{
+    return 0.0f;
+}
+
+} // namespace paged_cache_store
+
 } // namespace hipdnn_test_sdk::utilities

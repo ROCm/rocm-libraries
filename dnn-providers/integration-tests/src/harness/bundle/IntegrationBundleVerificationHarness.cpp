@@ -881,13 +881,17 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
 
     const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
                                        _bundle->outputTensorUids.end());
+    // An output the op updates in place is filled like an input too; both output buffers
+    // start from that fill (detail::allocateSentinelOutputs()).
+    const auto inPlaceUids = hipdnn_integration_tests::inPlaceOutputUids(wrapper.getGraph());
+    const std::set<int64_t> inPlaceOutputs(inPlaceUids.begin(), inPlaceUids.end());
 
     InputTensorMap inputs;
     std::vector<int64_t> leafInputUids;
     bool anySubByte = false;
     for(const auto& [uid, attrs] : tensorAttrMap)
     {
-        if(attrs->virtual_() || outputUids.count(uid) != 0)
+        if(attrs->virtual_() || (outputUids.count(uid) != 0 && inPlaceOutputs.count(uid) == 0))
         {
             continue;
         }
@@ -946,6 +950,14 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     }
 
     _inputs = std::move(inputs);
+    _inPlaceOutputs.clear();
+    for(const int64_t uid : _bundle->outputTensorUids)
+    {
+        if(inPlaceOutputs.count(uid) != 0 && _inputs.count(uid) != 0)
+        {
+            _inPlaceOutputs.push_back(uid);
+        }
+    }
     return std::nullopt;
 }
 
@@ -954,8 +966,17 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
 OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool onDevice) const
 {
     const auto wrapper = _bundle->graphWrapper();
-    return detail::allocateSentinelOutputs(
+    auto outputs = detail::allocateSentinelOutputs(
         wrapper.getTensorMap(), _bundle->outputTensorUids, _inputs, onDevice);
+    // An in-place output starts from its filled contents instead of the sentinel, the
+    // same for the engine and every reference, so what the op leaves alone compares.
+    for(const int64_t uid : _inPlaceOutputs)
+    {
+        auto& start = *_inputs.at(uid);
+        outputs.at(uid)->fillWithData(start.rawHostData(),
+                                      start.elementSpace() * start.elementSize());
+    }
+    return outputs;
 }
 
 std::unordered_map<int64_t, void*>

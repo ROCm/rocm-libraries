@@ -97,6 +97,13 @@ inline float toleranceForNode(data::NodeAttributes attrType, data::DataType data
     using hipdnn_data_sdk::types::bfloat16;
     using hipdnn_data_sdk::types::half;
 
+    // Exact for every container dtype; ahead of the switch because an FP8 container has
+    // no element type below.
+    if(attrType == data::NodeAttributes::PagedCacheStoreAttributes)
+    {
+        return hipdnn_test_sdk::utilities::paged_cache_store::getTolerance();
+    }
+
     switch(dataType)
     {
     case DT::FLOAT:

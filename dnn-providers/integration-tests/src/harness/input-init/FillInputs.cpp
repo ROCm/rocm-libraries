@@ -7,11 +7,15 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <numeric>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/types.hpp>
@@ -313,6 +317,119 @@ void setGatherInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Graph& gr
     }
 }
 
+// ── Paged cache store ────────────────────────────────────────────────────────
+
+void setPagedCacheStoreInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                    InputFillRecipes& recipes)
+{
+    const auto* a = node.attributes_as_PagedCacheStoreAttributes();
+    if(a == nullptr)
+    {
+        return;
+    }
+
+    // A scale away from 1, so a kernel that drops it diverges visibly. slot_mapping is
+    // overwritten by assignPagedCacheStoreSlots() after the fill.
+    recipes.setDefault(a->scale_tensor_uid(), FillRecipe::free(0.5f, 2.0f));
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    findTensorAttributes(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph, int64_t uid)
+{
+    if(graph.tensors() == nullptr)
+    {
+        return nullptr;
+    }
+    for(const auto* tensor : *graph.tensors())
+    {
+        if(tensor->uid() == uid)
+        {
+            return tensor;
+        }
+    }
+    return nullptr;
+}
+
+// Writes `slots` into a T tensor in row-major index order; false when it is not one.
+template <class T>
+bool writeSlots(hipdnn_data_sdk::utilities::ITensor& tensor, const std::vector<int64_t>& slots)
+{
+    auto* typed = dynamic_cast<hipdnn_data_sdk::utilities::TensorBase<T>*>(&tensor);
+    if(typed == nullptr)
+    {
+        return false;
+    }
+    const auto& dims = typed->dims();
+    std::vector<int64_t> index(dims.size(), 0);
+    for(const auto slot : slots)
+    {
+        typed->setHostValue(static_cast<T>(slot), index);
+        for(auto axis = dims.size(); axis-- > 0;)
+        {
+            if(++index[axis] < dims[axis])
+            {
+                break;
+            }
+            index[axis] = 0;
+        }
+    }
+    typed->memory().markHostModified();
+    return true;
+}
+
+// A uniform draw cannot make a valid slot_mapping: the reference rejects two tokens on
+// one slot, and a slot at or past num_blocks * block_size. So the slots are distinct
+// draws from [0, num_blocks * block_size) in shuffled order, scattering the tokens over
+// blocks and in-block offsets, and about a quarter of the tokens get a distinct negative
+// slot, which every implementation skips. Seeded from the uid's seed, or else from the
+// global seed and the uid, so a bundle's slots are reproducible.
+std::optional<std::string> assignPagedCacheStoreSlots(
+    const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+    const hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAttributes& op,
+    InputTensorMap& inputs,
+    const std::vector<int64_t>& ownedUids,
+    const InputFillRecipes& recipes)
+{
+    const auto slotUid = op.slot_mapping_tensor_uid();
+    if(std::find(ownedUids.begin(), ownedUids.end(), slotUid) == ownedUids.end())
+    {
+        return std::nullopt;
+    }
+    const auto* container = findTensorAttributes(graph, op.container_tensor_uid());
+    if(container == nullptr || container->dims() == nullptr || container->dims()->size() != 4)
+    {
+        return std::string("container must be [num_blocks, H, block_size, D]");
+    }
+    const int64_t slotCount = container->dims()->Get(0) * container->dims()->Get(2);
+    auto& slotTensor = *inputs.at(slotUid);
+    const auto tokens = static_cast<int64_t>(slotTensor.elementCount());
+    if(tokens > slotCount)
+    {
+        return std::to_string(tokens) + " tokens cannot take distinct slots among "
+               + std::to_string(slotCount);
+    }
+
+    std::mt19937 rng(recipes.resolveSeed(slotUid).value_or(recipes.globalSeed()
+                                                           ^ static_cast<unsigned int>(slotUid)));
+    std::vector<int64_t> slots(static_cast<size_t>(slotCount));
+    std::iota(slots.begin(), slots.end(), int64_t{0});
+    std::shuffle(slots.begin(), slots.end(), rng);
+    slots.resize(static_cast<size_t>(tokens));
+    for(auto& slot : slots)
+    {
+        if(rng() % 4 == 0)
+        {
+            slot = -1 - slot;
+        }
+    }
+
+    if(!writeSlots<int32_t>(slotTensor, slots) && !writeSlots<int64_t>(slotTensor, slots))
+    {
+        return std::string("slot_mapping must be INT32 or INT64");
+    }
+    return std::nullopt;
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
@@ -364,6 +481,9 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
         return true;
     case NA::GatherAttributes:
         setGatherInitDefaults(graph, node, recipes);
+        return true;
+    case NA::PagedCacheStoreAttributes:
+        setPagedCacheStoreInitDefaults(node, recipes);
         return true;
     // x takes the [-1, 1] default. Ties (frequent in bf16 / f16 rows of thousands) need no
     // avoiding: the FlyDSL kernel and the CPU reference both rank equal values by position.
@@ -679,7 +799,49 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                 + " from its Q, K and V: " + *why);
         }
     }
+
+    // A paged cache store's slot_mapping is a set of distinct slots, not a free draw.
+    for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
+    {
+        const auto& node = *graph.nodes()->Get(i);
+        const auto* pagedCacheStore = node.attributes_as_PagedCacheStoreAttributes();
+        if(pagedCacheStore == nullptr)
+        {
+            continue;
+        }
+        if(auto why
+           = assignPagedCacheStoreSlots(graph, *pagedCacheStore, inputs, ownedUids, recipes))
+        {
+            const auto* name = node.name();
+            return FillResult::unsupported(
+                "cannot assign slots of paged cache store node "
+                + std::string(name != nullptr ? name->c_str() : "(unnamed)") + ": " + *why);
+        }
+    }
     return FillResult::ok(deviceFilled);
+}
+
+std::vector<int64_t> inPlaceOutputUids(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph)
+{
+    using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+
+    std::vector<int64_t> uids;
+    if(graph.nodes() == nullptr)
+    {
+        return uids;
+    }
+    for(const auto* node : *graph.nodes())
+    {
+        switch(node->attributes_type())
+        {
+        case NA::PagedCacheStoreAttributes:
+            uids.push_back(node->attributes_as_PagedCacheStoreAttributes()->container_tensor_uid());
+            break;
+        default:
+            break;
+        }
+    }
+    return uids;
 }
 
 } // namespace hipdnn_integration_tests

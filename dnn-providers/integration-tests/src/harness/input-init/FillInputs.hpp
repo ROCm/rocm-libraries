@@ -115,10 +115,20 @@ private:
 /// the forward of its Q, K and V (see deriveSdpaBackwardForwardOutputs()), whatever
 /// recipe they were filled with. A node whose forward cannot be derived makes the
 /// result unsupported, with the reason.
+///
+/// The slot_mapping of each paged cache store node is likewise replaced by distinct
+/// in-range slots, about a quarter of them negative (skipped), whatever its recipe.
 FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
                       InputFillRecipes& recipes,
                       DeviceInputFiller* device);
+
+/// Outputs that an op updates in place, reading their prior contents: a paged cache
+/// store writes only the container rows its slots name and leaves the rest as they
+/// were. The harness fills these like inputs and starts the engine's and the
+/// reference's output buffers from the same contents, so the elements the op leaves
+/// alone compare exactly instead of as an unwritten sentinel.
+std::vector<int64_t> inPlaceOutputUids(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph);
 
 } // namespace hipdnn_integration_tests

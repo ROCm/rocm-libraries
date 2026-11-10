@@ -37,6 +37,7 @@ const std::set<NodeAttributes>& cpuSupportedOps()
         NodeAttributes::RopeAttributes,
         NodeAttributes::TopkAttributes,
         NodeAttributes::GatherAttributes,
+        NodeAttributes::PagedCacheStoreAttributes,
     };
     return s_ops;
 }

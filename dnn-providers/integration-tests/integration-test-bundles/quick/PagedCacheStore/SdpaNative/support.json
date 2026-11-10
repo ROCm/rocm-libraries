@@ -1,0 +1,24 @@
+{
+  "claims": {
+    "hipkernel:flydsl_paged_cache_store": [
+      {
+        "cases": [
+          "2_2_16_256_bf16_bshd_nb4_bs16_qwen38",
+          "2_2_6_64_bf16_bshd_nb8_bs4"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

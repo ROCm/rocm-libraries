@@ -1,0 +1,273 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "13_2_64_bf16_scaled_nb8_bs4",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              13,
+              2,
+              64
+            ],
+            "strides": [
+              128,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              13
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              8,
+              2,
+              4,
+              64
+            ],
+            "strides": [
+              512,
+              256,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL paged_cache_store",
+        "seed": 6,
+        "notes": "bf16 container with a device FLOAT scale",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePagedCacheStore); Qwen3.8-shaped cases use the full-attention KV write: 2 KV heads, head_dim 256, block_size 16"
+      }
+    },
+    {
+      "id": "13_2_64_bf16_fp8e4m3_scaled_nb8_bs4",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              13,
+              2,
+              64
+            ],
+            "strides": [
+              128,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              13
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              8,
+              2,
+              4,
+              64
+            ],
+            "strides": [
+              512,
+              256,
+              64,
+              1
+            ],
+            "data_type": "fp8_e4m3"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL paged_cache_store",
+        "seed": 7,
+        "notes": "OCP FP8 E4M3 container with a device FLOAT scale",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePagedCacheStore); Qwen3.8-shaped cases use the full-attention KV write: 2 KV heads, head_dim 256, block_size 16"
+      }
+    },
+    {
+      "id": "13_2_64_bf16_fp8e5m2_scaled_nb8_bs4",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              13,
+              2,
+              64
+            ],
+            "strides": [
+              128,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              13
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              8,
+              2,
+              4,
+              64
+            ],
+            "strides": [
+              512,
+              256,
+              64,
+              1
+            ],
+            "data_type": "fp8_e5m2"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL paged_cache_store",
+        "seed": 8,
+        "notes": "OCP FP8 E5M2 container with a device FLOAT scale",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePagedCacheStore); Qwen3.8-shaped cases use the full-attention KV write: 2 KV heads, head_dim 256, block_size 16"
+      }
+    },
+    {
+      "id": "40_2_256_bf16_fp8e4m3_scaled_nb8_bs16_qwen38",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              40,
+              2,
+              256
+            ],
+            "strides": [
+              512,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              40
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              8,
+              2,
+              16,
+              256
+            ],
+            "strides": [
+              8192,
+              4096,
+              256,
+              1
+            ],
+            "data_type": "fp8_e4m3"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL paged_cache_store",
+        "seed": 9,
+        "notes": "Qwen3.8 KV write into an OCP FP8 E4M3 cache",
+        "reference_source": "hipDNN CPU reference (CpuFpReferencePagedCacheStore); Qwen3.8-shaped cases use the full-attention KV write: 2 KV heads, head_dim 256, block_size 16"
+      }
+    }
+  ]
+}

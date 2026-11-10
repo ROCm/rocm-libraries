@@ -8,10 +8,11 @@ block_size, D]``: each token with ``slot = slot_mapping[token] >= 0`` writes
 * scale)``; other container elements keep their contents. The features come
 from ``paged_cache_store_attributes.fbs``. The serializer
 (``utilities/json/PagedCacheStoreAttributes.hpp``) writes the ports under
-``inputs`` and ``outputs``. No provider implements the op, so the dtypes are
-those the CPU reference executor registers (``PagedCacheStoreSignatureKey``):
-``x`` of one float dtype, the container of that dtype or an OCP fp8 dtype,
-``slot_mapping`` int32 or int64, ``scale`` fp32. By group:
+``inputs`` and ``outputs``. The dtypes are those the CPU reference executor
+registers (``PagedCacheStoreSignatureKey``), which
+``hipkernel:flydsl_paged_cache_store`` also builds where the target converts to
+the fp8 format: ``x`` of one float dtype, the container of that dtype or an OCP
+fp8 dtype, ``slot_mapping`` int32 or int64, ``scale`` fp32. By group:
 
 - ``dtype`` (exclusive): the dtype of ``x``.
 - ``container`` (exclusive): ``same`` (the dtype of ``x``), ``fp8e4m3`` or

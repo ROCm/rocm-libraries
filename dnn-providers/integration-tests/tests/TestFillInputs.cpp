@@ -1461,4 +1461,170 @@ TEST(TestFillInputs, SoftmaxLogitsSpanSeveralDecadesOfProbability)
     EXPECT_GT(*hi, 4.0f);
 }
 
+namespace
+{
+
+template <class T>
+std::vector<int64_t> indexValues(const InputTensorMap& inputs, int64_t uid)
+{
+    auto& tensor = *inputs.at(uid);
+    const auto* values = static_cast<const T*>(tensor.rawHostData());
+    return {values, values + tensor.elementCount()};
+}
+
+} // namespace
+
+namespace
+{
+
+// ── Paged cache store ───────────────────────────────────────────────────────
+// x [T, H, D] with slots [T], or x [B, H, S, D] with slots [B, S]; container
+// [num_blocks, H, block_size, D]. uids: x=1, slot_mapping=2, container=3.
+struct PagedCacheStoreGraph
+{
+    GraphResult graph;
+    std::vector<int64_t> leafUids;
+    InputTensorMap inputs;
+};
+
+std::unique_ptr<PagedCacheStoreGraph>
+    buildPagedCacheStoreGraph(const std::vector<int64_t>& xDims,
+                              const std::vector<int64_t>& slotDims,
+                              DataType slotDataType,
+                              int64_t numBlocks,
+                              int64_t blockSize)
+{
+    auto result = std::make_unique<PagedCacheStoreGraph>();
+    auto& b = result->graph.builder;
+    const auto packed = [](const std::vector<int64_t>& dims) {
+        std::vector<int64_t> strides(dims.size(), 1);
+        for(auto axis = dims.size() - 1; axis-- > 0;)
+        {
+            strides[axis] = strides[axis + 1] * dims[axis + 1];
+        }
+        return strides;
+    };
+    const std::vector<int64_t> cDims = {numBlocks, xDims[1], blockSize, xDims.back()};
+    const auto xStrides = packed(xDims);
+    const auto slotStrides = packed(slotDims);
+    const auto cStrides = packed(cDims);
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &xStrides, &xDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 2, "slot_mapping", slotDataType, &slotStrides, &slotDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 3, "container", DataType::FLOAT, &cStrides, &cDims));
+
+    auto store = CreatePagedCacheStoreAttributes(b, 1, 2, 3, flatbuffers::nullopt);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(b,
+                                     "paged_cache_store",
+                                     DataType::FLOAT,
+                                     NodeAttributes::PagedCacheStoreAttributes,
+                                     store.Union()));
+    b.Finish(CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes));
+
+    result->graph.graph = GetGraph(b.GetBufferPointer());
+    result->leafUids = result->graph.leafInputUids({3});
+    result->inputs = makeTensorsFromGraph(result->graph, result->leafUids);
+    return result;
+}
+
+template <class T>
+std::vector<int64_t> fillPagedCacheStoreSlots(PagedCacheStoreGraph& g, unsigned int seed)
+{
+    InputFillRecipes recipes;
+    recipes.setGlobalSeed(seed);
+    const auto result = fillInputs(*g.graph.graph, g.inputs, g.leafUids, recipes, nullptr);
+    EXPECT_TRUE(result.filled) << result.reason;
+    return indexValues<T>(g.inputs, 2);
+}
+
+// Every token's slot is distinct and below num_blocks * block_size, a negative one included
+// (slot -1 - s stands for the skipped s); over the seeds both kinds occur.
+void expectDistinctSlotsWithSomeSkipped(const std::vector<std::vector<int64_t>>& draws,
+                                        int64_t slotCount)
+{
+    int64_t skipped = 0;
+    int64_t stored = 0;
+    for(const auto& slots : draws)
+    {
+        std::set<int64_t> targets;
+        for(const auto slot : slots)
+        {
+            EXPECT_GE(slot, -slotCount);
+            EXPECT_LT(slot, slotCount);
+            targets.insert(slot < 0 ? -1 - slot : slot);
+            (slot < 0 ? skipped : stored) += 1;
+        }
+        EXPECT_EQ(targets.size(), slots.size());
+    }
+    EXPECT_GT(skipped, 0);
+    EXPECT_GT(stored, skipped);
+}
+
+} // namespace
+
+TEST(TestFillInputs, PagedCacheStoreTokenPackedSlotsAreDistinctWithSomeSkipped)
+{
+    std::vector<std::vector<int64_t>> draws;
+    for(unsigned int seed = 1; seed <= 16; ++seed)
+    {
+        auto g = buildPagedCacheStoreGraph({24, 2, 16}, {24}, DataType::INT32, 8, 4);
+        draws.push_back(fillPagedCacheStoreSlots<int32_t>(*g, seed));
+        ASSERT_EQ(draws.back().size(), 24u);
+    }
+    expectDistinctSlotsWithSomeSkipped(draws, 32);
+}
+
+TEST(TestFillInputs, PagedCacheStoreSdpaNativeSlotsAreDistinctWithSomeSkipped)
+{
+    std::vector<std::vector<int64_t>> draws;
+    for(unsigned int seed = 1; seed <= 16; ++seed)
+    {
+        auto g = buildPagedCacheStoreGraph({2, 2, 5, 16}, {2, 5}, DataType::INT64, 4, 4);
+        draws.push_back(fillPagedCacheStoreSlots<int64_t>(*g, seed));
+        ASSERT_EQ(draws.back().size(), 10u);
+    }
+    expectDistinctSlotsWithSomeSkipped(draws, 16);
+}
+
+// As many tokens as slots: each slot is some token's target, stored or skipped.
+TEST(TestFillInputs, PagedCacheStoreSlotsCanFillTheContainer)
+{
+    auto g = buildPagedCacheStoreGraph({8, 1, 4}, {8}, DataType::INT32, 2, 4);
+    std::set<int64_t> targets;
+    for(const auto slot : fillPagedCacheStoreSlots<int32_t>(*g, 3))
+    {
+        targets.insert(slot < 0 ? -1 - slot : slot);
+    }
+    EXPECT_EQ(targets, (std::set<int64_t>{0, 1, 2, 3, 4, 5, 6, 7}));
+}
+
+TEST(TestFillInputs, PagedCacheStoreSlotsAreReproducible)
+{
+    auto first = buildPagedCacheStoreGraph({24, 2, 16}, {24}, DataType::INT32, 8, 4);
+    auto second = buildPagedCacheStoreGraph({24, 2, 16}, {24}, DataType::INT32, 8, 4);
+    EXPECT_EQ(fillPagedCacheStoreSlots<int32_t>(*first, 7),
+              fillPagedCacheStoreSlots<int32_t>(*second, 7));
+}
+
+TEST(TestFillInputs, PagedCacheStoreWithMoreTokensThanSlotsIsRefused)
+{
+    auto g = buildPagedCacheStoreGraph({9, 1, 4}, {9}, DataType::INT32, 2, 4);
+    InputFillRecipes recipes;
+    const auto result = fillInputs(*g->graph.graph, g->inputs, g->leafUids, recipes, nullptr);
+    EXPECT_FALSE(result.filled);
+    EXPECT_NE(result.reason.find("9 tokens cannot take distinct slots among 8"), std::string::npos)
+        << result.reason;
+}
+
+TEST(TestFillInputs, PagedCacheStoreContainerIsUpdatedInPlace)
+{
+    auto g = buildPagedCacheStoreGraph({4, 1, 4}, {4}, DataType::INT32, 2, 4);
+    EXPECT_EQ(inPlaceOutputUids(*g->graph.graph), (std::vector<int64_t>{3}));
+}
+
 // NOLINTEND(readability-identifier-naming)
