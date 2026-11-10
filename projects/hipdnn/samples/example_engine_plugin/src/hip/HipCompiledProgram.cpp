@@ -93,7 +93,7 @@ HipCompiledProgram::~HipCompiledProgram() noexcept
     {
         if(_module != nullptr)
         {
-            auto result = hipModuleUnload(_module);
+            const auto result = hipModuleUnload(_module);
             if(result != hipSuccess)
             {
                 HIPDNN_PLUGIN_LOG_WARN("hipModuleUnload failed: " << hipGetErrorString(result));
