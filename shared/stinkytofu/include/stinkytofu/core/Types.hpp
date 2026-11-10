@@ -103,9 +103,9 @@ struct PassFeatureConfig {
         /// filler, tensor_load) may issue; below it, and with room in the queue, the next
         /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
         /// to make (a promoted barrier) are not held. < 0 = automatic: one WMMA short of a full
-        /// queue, (queue depth - 1) x the next WMMA's latency. The queue depth is
-        /// HWModel::Matrix's. 0 = the queue model is off (the single-window model: a WMMA
-        /// waits for the previous one to finish).
+        /// queue, (queue depth - 1) x the next WMMA's latency. The queue depth comes from
+        /// each matrix opcode's hardware descriptor. 0 = the queue model is off (the
+        /// single-window model: a WMMA waits for the previous one to finish).
         int wmmaQueueCoverCycles = 0;
         /// How many WMMAs one refill issues once the queue drops below the refill line
         /// (wmmaQueueCoverCycles). Fixed: wmmaBatchSize of them. Dynamic: as many as it takes

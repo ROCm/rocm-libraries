@@ -2599,23 +2599,27 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_LongRunKeepsEveryInstruction) {
 
 // An automatic refill line (cover < 0) is one WMMA short of a full queue: the same schedule as
 // asking for (depth - 1) x the next WMMA's latency by hand. The WMMAs are not scale pairs, so
-// the depth is HWModel::Matrix::wmmaQueueDepth.
+// their instruction metadata supplies the regular queue depth.
 TEST_F(DAGSchedulerPassTest, WmmaQueue_AutomaticCoverIsOneWmmaShortOfFull) {
-    const int kDepth = hwModelForArch({12, 5, 0}).matrix.wmmaQueueDepth;
     std::string shapes[2];
     for (int v = 0; v < 2; ++v) {
         SetUp();
         for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
         int latency = 0;
-        for (int i = 0; i < 8; i++)
-            latency = createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i)->latencyCycles;
+        int depth = 0;
+        for (int i = 0; i < 8; i++) {
+            StinkyInstruction* wmma = createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+            latency = wmma->latencyCycles;
+            depth = wmma->getHwInstDesc()->matrixQueueDepth;
+        }
+        ASSERT_GT(depth, 0);
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.dsSpread = false;
         pfc.dagFeatures.dsReadQueueDepth = 2;
-        pfc.dagFeatures.wmmaQueueCoverCycles = v == 0 ? -1 : (kDepth - 1) * latency;
+        pfc.dagFeatures.wmmaQueueCoverCycles = v == 0 ? -1 : (depth - 1) * latency;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
         shapes[v] = wdShape(mnemonicSequence(*bb));
