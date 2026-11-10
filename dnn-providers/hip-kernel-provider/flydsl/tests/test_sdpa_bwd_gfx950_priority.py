@@ -26,9 +26,19 @@ ABI = FLYDSL / "kernels_src" / "kernels" / "attention_bwd_cdna" / "fmha_abi_gfx1
 HELPERS = ("_f32", "dropout_threshold", "dropout_scale")
 
 
+def _flydsl_installed() -> bool:
+    """Whether the real FlyDSL package is importable. The provider's own `flydsl/` source directory is a namespace package
+    on `sys.path` when pytest runs from the provider root, so the package's presence is not enough: the installed package
+    has `flydsl.compiler`, the source directory does not."""
+    try:
+        return importlib.util.find_spec("flydsl.compiler") is not None
+    except ModuleNotFoundError:
+        return False
+
+
 def _host_helpers() -> dict:
     """The module's own helpers: imported where flydsl is installed, else their definitions executed from the file."""
-    if importlib.util.find_spec("flydsl") is not None:
+    if _flydsl_installed():
         # flydsl is installed, so a failing import here is a broken sibling module, not a missing dependency.
         from kernels.attention_bwd_cdna import fmha_abi_gfx1201 as abi  # noqa: PLC0415
 
