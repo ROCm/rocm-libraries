@@ -22,8 +22,13 @@ from rocke.helpers.split_k_planner import (
     select_split_k_plan,
     split_k_cost_model,
 )
+from rocke.tests.arch_marks import arch_specific
 
 GFX950 = split_k_cost_model("gfx950")
+# The cost model is fitted on gfx950 only; split_k_cost_model("gfx942") is None.
+_GFX950_MODEL = arch_specific(
+    ("gfx950",), reason="the split-K cost model is fitted for gfx950 only"
+)
 ATOMIC16 = SplitKReduction("atomic", "bf16", max_split_k=128)
 WORKSPACE = SplitKReduction("workspace", "fp32", workspace=True)
 
@@ -58,6 +63,7 @@ def test_cost_model_lookup():
         (SplitKProblem(m=1280, n=17280, k=12800), BIG_TILE),
     ],
 )
+@_GFX950_MODEL
 def test_off_ladder_degree_must_beat_the_ladder_by_the_margin(problem, kernel):
     exact = dataclasses.replace(GFX950, ladder_margin=0.0)
     best = select_split_k_plan(problem, kernel, (WORKSPACE,), exact)
@@ -71,6 +77,7 @@ def test_off_ladder_degree_must_beat_the_ladder_by_the_margin(problem, kernel):
         assert plan.predicted_cost <= best.predicted_cost * (1 + GFX950.ladder_margin)
 
 
+@_GFX950_MODEL
 def test_grouped_launch_keeps_the_group_stride_xcd_aligned():
     # Depthwise-like: one tile per group, groups sharing gridDim.z. Off the
     # power-of-two ladder, every degree keeps tiles_per_group * split_k a
@@ -93,6 +100,7 @@ def test_grouped_launch_keeps_the_group_stride_xcd_aligned():
     assert 7 in _degrees(_plan(TINY_OUT_LONG_K, SMALL_TILE))
 
 
+@_GFX950_MODEL
 def test_grouped_pool_contains_the_whole_ladder_under_a_tight_cap():
     # Only 5 K iterations: no multiple of 8 fits; the ladder still does.
     grouped = SplitKProblem(m=16, n=144, k=16 * 5, batch=12)
@@ -100,6 +108,7 @@ def test_grouped_pool_contains_the_whole_ladder_under_a_tight_cap():
     assert _degrees(plan) == {2, 4}
 
 
+@_GFX950_MODEL
 def test_device_geometry_override():
     assert (GFX950.num_cus, GFX950.num_xcds) == (256, 8)
     other = split_k_cost_model("gfx950:sramecc+:xnack-", num_cus=228, num_xcds=6)
@@ -125,6 +134,7 @@ def test_kernel_rejects_non_positive_geometry():
         SplitKKernel(64, 64, 64, waves_per_block=0)
 
 
+@_GFX950_MODEL
 def test_predict_rejects_bad_degree_and_missing_reduction():
     with pytest.raises(ValueError, match="split_k must be >= 1"):
         predict_split_k_cost(TINY_OUT_LONG_K, SMALL_TILE, 0, None, GFX950)
@@ -132,6 +142,7 @@ def test_predict_rejects_bad_degree_and_missing_reduction():
         predict_split_k_cost(TINY_OUT_LONG_K, SMALL_TILE, 4, None, GFX950)
 
 
+@_GFX950_MODEL
 def test_latency_bound_problem_splits_deep():
     # One or two output tiles cannot occupy 256 CUs; the long reduction is
     # what there is to parallelise, so the planner splits it far past the
@@ -141,6 +152,7 @@ def test_latency_bound_problem_splits_deep():
     assert plan.reduction is WORKSPACE
 
 
+@_GFX950_MODEL
 def test_compute_bound_problem_barely_splits():
     # Hundreds of big tiles already saturate the MFMA pipes; splitting only
     # adds rounds and reduction traffic.
@@ -148,6 +160,7 @@ def test_compute_bound_problem_barely_splits():
     assert plan.split_k <= 4
 
 
+@_GFX950_MODEL
 def test_more_output_tiles_never_raise_the_degree():
     degrees = [
         _plan(SplitKProblem(m=128, n=n, k=1 << 20), SplitKKernel(64, 64, 64, 4)).split_k
@@ -156,6 +169,7 @@ def test_more_output_tiles_never_raise_the_degree():
     assert degrees == sorted(degrees, reverse=True)
 
 
+@_GFX950_MODEL
 def test_longer_reduction_never_lowers_the_degree():
     degrees = [
         _plan(SplitKProblem(m=128, n=128, k=k), SplitKKernel(64, 64, 64, 4)).split_k
@@ -164,6 +178,7 @@ def test_longer_reduction_never_lowers_the_degree():
     assert degrees == sorted(degrees)
 
 
+@_GFX950_MODEL
 def test_reduction_cap_is_respected():
     plan = _plan(TINY_OUT_LONG_K, SMALL_TILE, reductions=(ATOMIC16,))
     assert plan.split_k <= ATOMIC16.max_split_k
@@ -171,6 +186,7 @@ def test_reduction_cap_is_respected():
         assert name == "none" or degree <= ATOMIC16.max_split_k
 
 
+@_GFX950_MODEL
 def test_uncapped_reduction_wins_past_the_cap():
     # With both on offer, a problem that wants more than the 16-bit cap gets
     # it through the reduction that has no cap.
@@ -179,6 +195,7 @@ def test_uncapped_reduction_wins_past_the_cap():
     assert plan.reduction is WORKSPACE
 
 
+@_GFX950_MODEL
 def test_degree_never_exceeds_k_iterations():
     problem = SplitKProblem(m=16, n=16, k=40 * 64)  # 40 K iterations at tile_k 64
     plan = _plan(problem, SplitKKernel(16, 16, 64, 1))
@@ -186,6 +203,7 @@ def test_degree_never_exceeds_k_iterations():
     assert all(d <= 40 for d, _, _ in plan.candidates)
 
 
+@_GFX950_MODEL
 def test_grid_z_budget_is_shared_with_the_batch():
     problem = SplitKProblem(m=1, n=9, k=1 << 24, batch=1024)
     plan = _plan(problem, SplitKKernel(16, 16, 32, 1))
@@ -193,6 +211,7 @@ def test_grid_z_budget_is_shared_with_the_batch():
     assert all(d * problem.batch <= MAX_GRID_DIM_Z for d, _, _ in plan.candidates)
 
 
+@_GFX950_MODEL
 def test_max_split_k_argument_caps_every_reduction():
     plan = _plan(TINY_OUT_LONG_K, SMALL_TILE, max_split_k=16)
     assert plan.split_k <= 16
@@ -202,6 +221,7 @@ def _degrees(plan):
     return {d for d, _, _ in plan.candidates}
 
 
+@_GFX950_MODEL
 def test_candidates_include_unsplit_and_every_power_of_two():
     plan = _plan(TINY_OUT_LONG_K, SMALL_TILE)
     degrees = _degrees(plan)
@@ -209,12 +229,14 @@ def test_candidates_include_unsplit_and_every_power_of_two():
     assert {1 << i for i in range(1, 11)} <= degrees
 
 
+@_GFX950_MODEL
 def test_candidates_include_the_cu_count_divisors_and_multiples():
     cu304 = split_k_cost_model("gfx950", num_cus=304)
     plan = select_split_k_plan(TINY_OUT_LONG_K, SMALL_TILE, (WORKSPACE,), cu304)
     assert {19, 38, 76, 152, 304, 608, 912} <= _degrees(plan)
 
 
+@_GFX950_MODEL
 def test_candidates_are_not_every_degree():
     # A short reduction: past sqrt(k_iters) most degrees repeat an iteration
     # count, and those (when they also fill no round) are left out.
@@ -239,6 +261,7 @@ def test_candidates_are_not_every_degree():
 @pytest.mark.parametrize(
     "geometry", [{}, {"num_cus": 304}, {"num_cus": 228, "num_xcds": 6}]
 )
+@_GFX950_MODEL
 def test_candidates_lose_nothing_against_every_degree(problem, kernel, geometry):
     # The pool only drops degrees the model can never prefer, so planning over
     # it matches planning over every integer up to the cap -- on a grouped
@@ -264,17 +287,20 @@ def test_candidates_lose_nothing_against_every_degree(problem, kernel, geometry)
     assert plan.predicted_cost <= min(best[0], unsplit) * (1 + 1e-12)
 
 
+@_GFX950_MODEL
 def test_unsplit_can_be_excluded():
     plan = _plan(DENSE_SHORT_K, BIG_TILE, allow_unsplit=False)
     assert plan.split_k >= 2
     assert all(d >= 2 for d, _, _ in plan.candidates)
 
 
+@_GFX950_MODEL
 def test_no_admissible_candidate_raises():
     with pytest.raises(ValueError, match="no admissible split-K candidate"):
         _plan(DENSE_SHORT_K, BIG_TILE, reductions=(), allow_unsplit=False)
 
 
+@_GFX950_MODEL
 def test_time_unit_is_one_k_step_latency():
     # One CTA alone on the device, with throughput far above its demand, pays
     # exactly one latency unit per K iteration: the unit the constants use.
@@ -289,6 +315,7 @@ def test_time_unit_is_one_k_step_latency():
     assert math.isclose(t, 37.0, rel_tol=1e-9)
 
 
+@_GFX950_MODEL
 def test_z_batch_sets_the_grid_z_budget_independently_of_the_batch():
     # A kernel that puts the batch on another grid axis does not divide the
     # gridDim.z budget by it.
@@ -302,6 +329,7 @@ def test_z_batch_sets_the_grid_z_budget_independently_of_the_batch():
         SplitKProblem(m=1, n=1, k=1, z_batch=0)
 
 
+@_GFX950_MODEL
 def test_never_beyond_the_validated_range():
     plan = _plan(TINY_OUT_LONG_K, SMALL_TILE)
     assert plan.split_k <= GFX950.max_split_k

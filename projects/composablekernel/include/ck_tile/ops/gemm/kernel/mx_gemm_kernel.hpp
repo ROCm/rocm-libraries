@@ -61,19 +61,27 @@ struct MxGemmKernelArgs : public UniversalGemmKernelArgs<NumATensor, NumBTensor,
 };
 
 namespace detail {
-// The operand types MxGemmKernel takes K tails for on the TDM pipelines.
+// The operand types MxGemmKernel takes K tails for on the TDM pipelines in any pair.
 template <typename T>
 inline constexpr bool is_mx_tdm_k_tail_operand_v =
     std::is_same_v<T, fp8_t> || std::is_same_v<T, pk_fp4_t>;
+
+// MxGemmKernel on the TDM pipelines takes K tails for the following operands: A, B are either fp8_t
+// or pk_fp4_t or A = B = pk_fp6x16_t.
+template <typename A, typename B>
+inline constexpr bool is_mx_tdm_k_tail_pair_v =
+    (is_mx_tdm_k_tail_operand_v<A> && is_mx_tdm_k_tail_operand_v<B>) ||
+    (std::is_same_v<A, pk_fp6x16_t> && std::is_same_v<B, pk_fp6x16_t>);
 } // namespace detail
 
 /**
  * @brief Whether these operands, layouts and scales are K-tail configurations, for which
  *        MxGemmKernel takes K tails on the gfx125 TDM pipelines (see IsMxTdmShapeSupported).
- * @details The K-tail configurations: fp8_t or pk_fp4_t on each side (any pair), 32-element
- *          scales packed four to an int32, a row-major A and a column-major B, so that K is the
- *          contiguous dimension of both. IsMxTdmShapeSupported also requires a KPerBlock that is
- *          a multiple of ScaleBlockSize * KXdlPack; MxGroupedGemmKernel takes no K tails.
+ * @details The K-tail configurations: fp8_t or pk_fp4_t on each side (any pair), or pk_fp6x16_t
+ *          on both sides; 32-element scales packed four to an int32; a row-major A and a
+ *          column-major B, so that K is the contiguous dimension of both. IsMxTdmShapeSupported
+ *          also requires a KPerBlock that is a multiple of ScaleBlockSize * KXdlPack;
+ *          MxGroupedGemmKernel takes no K tails.
  * @tparam ADataType      Element type of A (cv and reference qualifiers are ignored).
  * @tparam BDataType      Element type of B (cv and reference qualifiers are ignored).
  * @tparam ALayout        Layout of A.
@@ -88,9 +96,9 @@ template <typename ADataType,
           index_t ScaleBlockSize,
           index_t KXdlPack>
 inline constexpr bool is_mx_tdm_k_tail_config_v =
-    detail::is_mx_tdm_k_tail_operand_v<remove_cvref_t<ADataType>> &&
-    detail::is_mx_tdm_k_tail_operand_v<remove_cvref_t<BDataType>> && ScaleBlockSize == 32 &&
-    KXdlPack == 4 && std::is_same_v<ALayout, tensor_layout::gemm::RowMajor> &&
+    detail::is_mx_tdm_k_tail_pair_v<remove_cvref_t<ADataType>, remove_cvref_t<BDataType>> &&
+    ScaleBlockSize == 32 && KXdlPack == 4 &&
+    std::is_same_v<ALayout, tensor_layout::gemm::RowMajor> &&
     std::is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>;
 
 /**
@@ -113,7 +121,8 @@ inline constexpr bool is_mx_tdm_k_tail_config_v =
  *          partial. With AllowKTail and a KPerBlock that is a multiple of
  *          ScaleBlockSize * KXdlPack, the K-tail configurations (is_mx_tdm_k_tail_config_v)
  *          accept a K that is a multiple of the PackedSize of A and of B (any K for fp8_t, an even
- *          K for pk_fp4_t); it need not be a multiple of ScaleBlockSize, of
+ *          K for pk_fp4_t, a multiple of 16 for pk_fp6x16_t); it need not be a multiple of
+ *          ScaleBlockSize, of
  *          ScaleBlockSize * KXdlPack or of KPerBlock. The TDM writes zeros to LDS for the A and B
  *          elements past K, so a partial last K tile needs no masking. When K is not a multiple of
  *          ScaleBlockSize, the last scale block covers only the remaining K % ScaleBlockSize
@@ -276,6 +285,11 @@ struct MxGemmKernel
     using MxGemmPipeline   = remove_cvref_t<GemmPipeline_>;
     using EpiloguePipeline = remove_cvref_t<EpiloguePipeline_>;
 
+    /// Whether this TDM pipeline runs MX split-K correctly with a split-K-capable epilogue: only
+    /// a pipeline that declares kSupportsTdmSplitK (comp_tdm_v3). The others keep the TDM
+    /// split-K rejection whatever the epilogue.
+    using BaseKernel::kPipelineSupportsTdmSplitK;
+
     using BaseKernel::PersistentKernel;
     using typename BaseKernel::AsLayout;
     using typename BaseKernel::BsLayout;
@@ -345,16 +359,19 @@ struct MxGemmKernel
     // accumulates each k_id's partial C tile with atomic_add; the CShuffle epilogue can only
     // emit atomic_add for fp16/bf16 outputs when the C vector size is even. For an odd vector
     // size that combination is not instantiated, so such a config cannot run split-K.
-    // Epilogues must declare atomic support; TDM stores cannot reduce split-K outputs.
+    // Epilogues must opt in by declaring kAtomicAddRequiresEvenVectorSize, and one whose store
+    // always overwrites (SupportsSplitK == false, e.g. TdmEpilogue) cannot reduce split-K outputs
+    // even if it declares that marker.
     template <typename T>
     using AtomicAddRequiresEvenVectorSize = decltype(T::kAtomicAddRequiresEvenVectorSize);
 
     static constexpr bool kSplitKAtomicAddSupported = [] {
-        if constexpr(is_detected<AtomicAddRequiresEvenVectorSize, EpiloguePipeline>::value)
+        if constexpr(epilogue_can_accumulate_v<EpiloguePipeline> &&
+                     is_detected<AtomicAddRequiresEvenVectorSize, EpiloguePipeline>::value)
             return !EpiloguePipeline::kAtomicAddRequiresEvenVectorSize ||
                    EpiloguePipeline::GetVectorSizeC() % 2 == 0;
         else
-            return false; // Unmarked epilogues (including TDM) cannot reduce split-K outputs.
+            return false; // Unmarked or overwriting epilogues cannot reduce split-K outputs.
     }();
 
     static constexpr index_t MXdlPackEff = MxGemmPipeline::MXdlPackEff;
@@ -501,8 +518,16 @@ struct MxGemmKernel
             // UniversalGemmKernel::IsSupportedArgument skips its shape checks for TDM pipelines.
             // The device check comes last so that the argument checks also run on a host without
             // a gfx125 device.
+            // The TDM split-K rejection guards the TDM epilogue, which overwrites C, and the TDM
+            // pipelines whose loads are not clipped to a split's K range. A pipeline that
+            // declares kSupportsTdmSplitK (comp_tdm_v3) with a split-K-capable epilogue
+            // (CShuffle, checked above as kSplitKAtomicAddSupported) adds each split into C
+            // atomically, so k_batch > 1 is not rejected here for it.
+            const index_t tdm_k_batch =
+                (is_tdm_epilogue_v<EpiloguePipeline> || !kPipelineSupportsTdmSplitK) ? kargs.k_batch
+                                                                                     : 1;
             if(!BaseKernel::IsTdmArgumentSupported("MX GEMM",
-                                                   kargs.k_batch,
+                                                   tdm_k_batch,
                                                    kargs.K,
                                                    kargs.as_ptr[0],
                                                    kargs.bs_ptr[0],

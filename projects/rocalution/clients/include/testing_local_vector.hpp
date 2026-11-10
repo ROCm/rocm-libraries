@@ -591,20 +591,20 @@ void testing_copy_from_data(const Arguments& argus)
     // Create a LocalVector and allocate some size
     LocalVector<T> vec = getTestVector<T>(argus.size);
 
-    // Pointer to data
-    T data_ptr[5] = {0, 2, 4, 8, 16};
+    // CopyFromData reads GetSize() elements
+    std::vector<T> data(argus.size);
+    for(int i = 0; i < argus.size; ++i)
+    {
+        data[i] = static_cast<T>(2 * i);
+    }
 
     // Attempt to copy from the data pointer
-    EXPECT_NO_THROW(vec.CopyFromData(data_ptr));
+    EXPECT_NO_THROW(vec.CopyFromData(data.data()));
 
     EXPECT_EQ(vec.GetSize(), argus.size);
-    if(argus.size >= 5)
+    for(int i = 0; i < argus.size; ++i)
     {
-        EXPECT_EQ(vec[0], static_cast<T>(0.0));
-        EXPECT_EQ(vec[1], static_cast<T>(2.0));
-        EXPECT_EQ(vec[2], static_cast<T>(4.0));
-        EXPECT_EQ(vec[3], static_cast<T>(8.0));
-        EXPECT_EQ(vec[4], static_cast<T>(16.0));
+        EXPECT_EQ(vec[i], data[i]);
     }
 }
 
