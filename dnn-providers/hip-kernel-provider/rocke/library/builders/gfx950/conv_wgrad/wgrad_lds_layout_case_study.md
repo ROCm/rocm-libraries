@@ -5,7 +5,7 @@ SPDX-License-Identifier: MIT
 
 # wgrad LDS layout and occupancy — gfx950 case study
 
-Per [`platform/AGENTS.md`](../../../../../AGENTS.md) §Compliance this document
+Per [`platform/AGENTS.md`](../../../../platform/AGENTS.md) §Compliance this document
 records **methodology and levers only**. No measured throughput, latency, or
 achieved-FLOP figure appears here or in any commit message; those live on the
 protected AMD Confluence page. Ratios quoted below are described qualitatively.
@@ -36,9 +36,9 @@ somewhere. Where that transpose is placed is the whole subject of this study.
 
 ## The instrument
 
-[WaveScope](../../../../../dsl_docs/architecture/wavescope_integration.md) ATT
+[WaveScope](../../../../platform/dsl_docs/architecture/wavescope_integration.md) ATT
 traces with source correlation, captured with
-[`capture_wavescope_trace.py`](../../../../../dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_trace.py).
+[`capture_wavescope_trace.py`](../../../../platform/dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_trace.py).
 The per-instruction stall totals joined to the Python authoring stack via
 `inline_frames.json` are what made each finding falsifiable — every claim below
 is anchored to a line the sidecar attributed, not to a reading of the source.
@@ -58,7 +58,7 @@ Two notes for anyone replaying this:
 ## Finding 1: transpose-on-store serialises the global loads
 
 The default (M-outer) LDS tile transposes **on store**, in
-[`helpers/loads.py`](../../../../helpers/loads.py) `_store_tile`, the
+[`helpers/loads.py`](../../../../platform/python/rocke/helpers/loads.py) `_store_tile`, the
 `vector_axis == "row"` branch: one 1-element `smem_store_vN` per free-axis
 element. With `load_vec = 8` each 16-byte global load becomes eight 2-byte LDS
 writes plus their address arithmetic.
@@ -127,7 +127,7 @@ The productive lever was **waves per workgroup**, not prefetch depth. Sweeping
 Pipeline choice at the optimum is within measurement noise across all five,
 which confirms the limit is occupancy rather than software pipelining. Note
 that only `compv4`, `async_dma` and `unroll_k` double-buffer at all
-([`conv_implicit_gemm_wgrad.py`](../../../instances/common/conv_implicit_gemm_wgrad.py)),
+([`conv_implicit_gemm_wgrad.py`](../../../kernels/common/conv_implicit_gemm_wgrad.py)),
 and double buffering did not separate from the rest here.
 
 The prior tuning data was collected on the M-outer path and does not transfer:
@@ -170,7 +170,7 @@ both available on gfx9\* and gfx95\*) before a single wide LDS write.
 
 This was **not** evaluated, for two reasons. First, its target hardware was not
 present — this box exposes gfx950 only, and per
-[`platform/AGENTS.md`](../../../../../AGENTS.md) a lane must not be faked.
+[`platform/AGENTS.md`](../../../../platform/AGENTS.md) a lane must not be faked.
 Second, a first-principles count is discouraging: an 8-way transpose of 2-byte
 elements needs on the order of 8 shuffles, against the 8 narrow stores it would
 replace. Packing pairs into dwords and transposing 4x4 improves that but not
@@ -179,13 +179,13 @@ queued task.
 
 ## Replay
 
-From `platform/`, with `PYTHONPATH=$(pwd)/python`.
+From `platform/`, with `PYTHONPATH=$(pwd)/python:$(pwd)/../library`.
 
 Correctness — the regression test for Finding 2, and the full suite:
 
 ```bash
-python3 -m pytest tests/instances/test_conv_wgrad_correctness.py -q
-python3 -m pytest tests/instances/test_conv_wgrad_correctness.py -q \
+python3 -m pytest ../library/tests/test_conv_wgrad_correctness.py -q
+python3 -m pytest ../library/tests/test_conv_wgrad_correctness.py -q \
     -k "atom_16x16x16 or LdsKOuter"
 ```
 
@@ -201,7 +201,7 @@ Step 0 lever sweep. Shapes come from `--miopen-cmd` (or `--miopen-file` for a
 batch); there are no per-dimension flags:
 
 ```bash
-python3 python/rocke/benchmark/benchmark_implicit_gemm_conv.py \
+python3 ../library/benchmarks/common/benchmark_implicit_gemm_conv.py \
     --direction wgrad --arch gfx950 --dtype bf16 \
     --miopen-cmd "./MIOpenDriver convbfp16 -n 8 -c 128 -H 32 -W 32 -k 128 \
         -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -g 1 -F 4 -in_layout=NHWC" \
@@ -220,7 +220,7 @@ what the numeric tests do — they assert the two are bitwise identical, so this
 doubles as the correctness gate:
 
 ```bash
-python3 -m pytest tests/instances/test_conv_wgrad_correctness.py -q -rs -k k_outer
+python3 -m pytest ../library/tests/test_conv_wgrad_correctness.py -q -rs -k k_outer
 ```
 
 Read the `-rs` skip list. A sweep whose subTests all skip still reports

@@ -11,7 +11,7 @@ for adding merged-group support to the forward implicit-GEMM convolution path on
 configurations in **NHWC**, at bf16 and fp16, swept over the kernel's own config
 space; the comparison arms are rocke's own unmerged and merged forward
 implicit-GEMM kernels, with MIOpen 3.5.1 (ROCm 7.2.0) as the external reference
-point. Per [`platform/AGENTS.md`](../../../../../AGENTS.md) §Compliance, only
+point. Per [`platform/AGENTS.md`](../../../../platform/AGENTS.md) §Compliance, only
 ratios appear here — no latency, throughput, achieved-FLOP or bandwidth figure
 is recorded in this file or in any commit message. Absolute values live in the
 approved access-controlled record.
@@ -44,7 +44,7 @@ convolution groups into one GEMM tile so the group index becomes the
 fastest-varying factor of a GEMM dimension, restoring `Gm`-wide vector access at
 the cost of `Gm`x redundant multiply-accumulates that land in otherwise idle
 MFMA lanes. rocke already had this for backward-weight
-([`conv_implicit_gemm_wgrad.py`](../../../../../../library/kernels/common/conv_implicit_gemm_wgrad.py));
+([`conv_implicit_gemm_wgrad.py`](../../../kernels/common/conv_implicit_gemm_wgrad.py));
 the question was what the right arrangement is for forward, and whether the
 redundant work is genuinely free.
 
@@ -179,13 +179,13 @@ parallelism. Past the point where the part runs out of blocks, the `grid.z`
 shrink stops buying re-read savings and starts starving the machine.
 
 The degree model, `_fwd_merge_pick` in
-[`benchmark_implicit_gemm_conv.py`](../../../../../../library/benchmarks/common/benchmark_implicit_gemm_conv.py),
+[`benchmark_implicit_gemm_conv.py`](../../../benchmarks/common/benchmark_implicit_gemm_conv.py),
 therefore evaluates a **closed-form cost for every admissible degree and takes
 the argmin**. It does not decide what ships. Its one job in this change is to
 centre the sweep's per-tile degree window (Finding 4). The AOT kernel cache
 builds every admissible degree (`CACHE_FWD_GROUP_MERGES`, 2..64, cshuffle,
 plain and `unroll_k`), `_group_merge_fits` in
-[`kernel_cache.py`](../../../../../../library/benchmarks/common/kernel_cache.py)
+[`kernel_cache.py`](../../../benchmarks/common/kernel_cache.py)
 decides which cached binaries can serve a problem, and the run-from-cache path
 times those candidates and keeps the fastest. The shipped degree is chosen by
 measurement, not by this model. Dispatcher integration (an analytic pick in
@@ -427,7 +427,7 @@ measured rows rather than from two runs.
 There is one copy of the model, in the sweep driver, and nothing in the library
 reads it; there is no dispatcher copy for it to drift from. What has to stay
 true across a refit is pinned by
-[`library/tests/test_fwd_merge_window.py`](../../../../../../library/tests/test_fwd_merge_window.py)
+[`library/tests/test_fwd_merge_window.py`](../../../tests/test_fwd_merge_window.py)
 over a `(groups, M, Y, X, stride)` grid that includes the awkward group counts
 (primes, 2-adic-poor values such as 72, and 1/3 with no admissible degree):
 
@@ -449,7 +449,7 @@ tile, `64x64x64 / w2x2 / a32x32x16` — the tile the gfx950 forward dispatch
 candidate pinned, because the corpus was built when the model was meant to
 drive a merged dispatch candidate. That is not a depthwise decision: the block
 in
-[`library/dispatch/grouped_convolution.py`](../../../../../../library/dispatch/grouped_convolution.py)
+[`library/dispatch/grouped_convolution.py`](../../../dispatch/grouped_convolution.py)
 that defines it is labelled *"Hard-coded tile parameters (to be replaced by
 sweep-derived tuning tables)"* and is shared by **every** implicit-GEMM
 convolution candidate on gfx950; the merged dispatch candidate the corpus was

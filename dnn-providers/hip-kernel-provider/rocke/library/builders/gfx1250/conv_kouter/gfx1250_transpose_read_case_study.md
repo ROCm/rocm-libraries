@@ -81,7 +81,7 @@ formula and the gate stayed GREEN throughout.
 What settled it was a **per-lane hardware probe**: fill LDS with an encoded
 `(k, col)` value, issue the transpose read, and decode what each lane actually
 received. One run answers the question that no amount of source reading did.
-`examples/gfx1250/wmma_probe.py` is the existing precedent for this technique —
+`platform/python/rocke/examples/gfx1250/wmma_probe.py` is the existing precedent for this technique —
 note its own docstring calls the gfx1250 lane maps a "hypothesis verified
 empirically", so the layout this builds on carries the same caveat.
 
@@ -116,22 +116,22 @@ nothing*, which is why the K-outer sweeps now carry an `_assert_ran()` backstop.
 
 ## Replay
 
-From `platform/`, with `PYTHONPATH=$(pwd)/python`. Items marked **[gfx1250]**
+From `platform/`, with `PYTHONPATH=$(pwd)/python:$(pwd)/../library`. Items marked **[gfx1250]**
 need the hardware; the rest are CPU-only and run anywhere.
 
 Correctness **[gfx1250]** — arch-aware, so on a wave32 box these select the
 `16x16x32` atom and the `default` epilogue automatically:
 
 ```bash
-python3 -m pytest tests/instances/test_conv_wgrad_correctness.py -q -rs -k k_outer
-python3 -m pytest tests/instances/test_conv_dgrad_correctness.py -q -rs -k KOuter
+python3 -m pytest ../library/tests/test_conv_wgrad_correctness.py -q -rs -k k_outer
+python3 -m pytest ../library/tests/test_conv_dgrad_correctness.py -q -rs -k KOuter
 ```
 
 The newly-reachable 16-bit-dW path from Finding 3.2 — read the `-rs` skip list
 and confirm `epilogue=default` subTests **run** rather than skip:
 
 ```bash
-python3 -m pytest tests/instances/test_conv_wgrad_correctness.py -q -rs \
+python3 -m pytest ../library/tests/test_conv_wgrad_correctness.py -q -rs \
     -k "pipeline_mem or pipeline_compv3 or pipeline_compv4 or pipeline_basic"
 ```
 
@@ -140,7 +140,7 @@ emits `ds_load_tr16_b128` with the right operand shapes, and that the wavelet
 combination is rejected:
 
 ```bash
-python3 -m pytest tests/instances/test_conv_dgrad_correctness.py -q \
+python3 -m pytest ../library/tests/test_conv_dgrad_correctness.py -q \
     -k Gfx1250Emit
 ```
 
@@ -155,7 +155,7 @@ ROCKE_LLVM_FLAVOR=llvm22 python3 tools/check_byte_identity.py --only conv
 Step 0 lever sweep **[gfx1250]**:
 
 ```bash
-python3 python/rocke/benchmark/benchmark_implicit_gemm_conv.py \
+python3 ../library/benchmarks/common/benchmark_implicit_gemm_conv.py \
     --direction wgrad --arch gfx1250 --dtype bf16 \
     --miopen-cmd "./MIOpenDriver convbfp16 -n 8 -c 128 -H 32 -W 32 -k 128 \
         -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -g 1 -F 4 -in_layout=NHWC" \

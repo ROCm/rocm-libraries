@@ -14,12 +14,12 @@ import math
 import struct
 import unittest
 
-from rocke.helpers.split_k import (
-    MAX_GRID_DIM_Z,
+from kernels.common.conv_split_k import (
     WGRAD_ASSUMED_WAVES_PER_CU,
     WGRAD_TARGET_WAVES_PER_CU,
     select_split_k_wgrad,
 )
+from kernels.conv.split_k_planner import MAX_GRID_DIM_Z
 from rocke.tests.arch_marks import COVERED_ARCHES
 
 # Per-group wgrad GEMM dims for the grouped conv shapes the library benchmarks

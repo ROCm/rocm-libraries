@@ -33,10 +33,10 @@
 
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_op_for_shape */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
-#include "rocke/helper_rocke.helpers.layouts.h" /* rocke_conv_tr_lane_offsets32 */
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
+#include "rocke/instance_conv_layouts.h" /* rocke_conv_tr_lane_offsets32 */
 #include "rocke/ir.h"
 
 /* Fixed-capacity scratch. The image-reason VGPR budget (224) bounds

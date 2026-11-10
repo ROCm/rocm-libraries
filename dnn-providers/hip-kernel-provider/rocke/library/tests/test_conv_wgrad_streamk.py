@@ -470,7 +470,7 @@ class TestStreamKHostPlan(unittest.TestCase):
 
     def test_cpp_default_pool_agrees(self):
         from kernels.common.conv_implicit_gemm_wgrad import wgrad_streamk_default_pool
-        from rocke.helpers.split_k import _ARCH_NUM_CUS
+        from rocke.helpers.split_k import ARCH_NUM_CUS
 
         from rocke.core.arch.target import known_arches
 
@@ -478,7 +478,7 @@ class TestStreamKHostPlan(unittest.TestCase):
         # Both directions: every arch of the Python CU table, and every arch
         # rocke knows of plus a few it does not -- a key only the C table has
         # would make the C pool differ from Python's 256-CU fallback there.
-        arches = {*_ARCH_NUM_CUS, *known_arches(), "gfx90a", "gfx908", "gfx1100"}
+        arches = {*ARCH_NUM_CUS, *known_arches(), "gfx90a", "gfx908", "gfx1100"}
         arches |= {"gfx1200", "gfx9999"}
         for arch in sorted(arches):
             for reduction in ("linear", "tree", "atomic", "workspace"):

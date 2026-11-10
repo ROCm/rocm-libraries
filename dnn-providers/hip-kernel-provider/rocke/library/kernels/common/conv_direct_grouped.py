@@ -87,12 +87,12 @@ from rocke.core.ir import (
     Value,
     VectorType,
 )
+from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common.conv_abi import conv_direct_arg_names
 from rocke.helpers.fuse import dtype_to_ir
 from rocke.helpers.spec import ceil_div
 from rocke.helpers.grid import chiplet_transform_chunked_runtime
 from rocke.helpers.io import concat_tree, smem_load_fragment
-from rocke.helpers.layouts import ConvKOuterFragmentReader
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,

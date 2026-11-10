@@ -10,7 +10,7 @@ Why fp16 backward-weight convolution timed from the AOT cache
 `benchmark_implicit_gemm_conv.py --run-from-cache`) lagged bf16 on the same
 shapes, and the four changes that closed most of that gap.
 
-Per [`platform/AGENTS.md`](../../../../../AGENTS.md) §Compliance this document
+Per [`platform/AGENTS.md`](../../../../platform/AGENTS.md) §Compliance this document
 records **methodology and levers only**. No measured throughput, latency or
 ratio appears here or in any commit message. Measured scope: gfx950, fp16,
 `--direction wgrad`, the cached AOT implicit-GEMM wgrad kernels.
@@ -59,14 +59,14 @@ difference had to be in the kernels. Their ISA differed: every
 agent-scope `seq_cst` `atomicrmw`. Its bf16 sibling already lowered to a
 `monotonic` `atomicrmw fadd <2 x bfloat>` with the AMDGPU memory-model
 metadata. Both engines now lower fp16 the same way
-([`lower_llvm.py`](../../../core/lower_llvm.py),
-[`mem.cpp`](../../../../../cpp/core/lower_llvm/mem.cpp)); the op's existing
+([`lower_llvm.py`](../../../../platform/python/rocke/core/lower_llvm.py),
+[`mem.cpp`](../../../../platform/cpp/core/lower_llvm/mem.cpp)); the op's existing
 `ordering` attribute (default `monotonic`) is honoured. The dgrad split-K
 epilogue uses the same op and gets the same fix.
 
 ## Finding 2: the split-K cost model had learned the fences
 
-[`split_k_planner`](../../../helpers/split_k_planner.py)'s gfx950
+[`split_k_planner`](../../../kernels/conv/split_k_planner.py)'s gfx950
 `atomic_bytes_per_latency` had been fitted while the fences were in place, so
 its fp16 entry was a small fraction of the bf16 one and the planner capped fp16
 atomic splits at shallow degrees. With the fix, that constant made deeper
@@ -103,9 +103,9 @@ now does what CK's compv3 does with one LDS buffer: a prologue stages tile
 `k_lo`; each iteration issues tile `k+1`'s loads into registers, runs tile
 `k`'s MFMAs out of LDS while they are in flight, then barriers and overwrites
 LDS
-([`conv_implicit_gemm_wgrad.py`](../../../../../../library/kernels/common/conv_implicit_gemm_wgrad.py),
+([`conv_implicit_gemm_wgrad.py`](../../../kernels/common/conv_implicit_gemm_wgrad.py),
 C++ twin `wgrad_emit_kloop_prefetch_addr` in
-[`conv_implicit_gemm_wgrad.cpp`](../../../../../cpp/instances/common/conv_implicit_gemm_wgrad.cpp)).
+[`conv_implicit_gemm_wgrad.cpp`](../../../cpp/instances/common/conv_implicit_gemm_wgrad.cpp)).
 The last iteration loads one tile past the slice into LDS that no MFMA reads;
 the reduction-axis predicate sends it to the zero-fill sentinel past the
 tensor. Unlike plain `prefetch_addr` (address math only, data dependency
@@ -118,7 +118,7 @@ its existing kernel name and cached binaries. `mem` and `compv4` ignore
 
 `register_prefetch` is opt-in and not yet wired into anything that ships: the
 AOT generator (`_wgrad_prefetch_addr` in
-[`aot_jobs.py`](../../../../../../library/kernels/conv/aot_jobs.py)) and the
+[`aot_jobs.py`](../../../kernels/conv/aot_jobs.py)) and the
 JIT sweep (`benchmark_implicit_gemm_conv.py`) still set only `prefetch_addr`,
 so the production grid and cache hold only the plain loop; the C++ default is
 `false` too. The only callers today are parity configs 55-56 and the

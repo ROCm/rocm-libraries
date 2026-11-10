@@ -415,7 +415,7 @@ kernel for an A/B comparison; the AOT grid does not sweep it.
 | `../../tests/parity/conv_implicit_gemm_dgrad_emit.{c,py}` | C-vs-Python parity emitters |
 | `../conv/aot_jobs.py` | AOT grid: tilde and stride-1 (tap-outer) binaries, the `CACHE_DGRAD_HALO_*` sub-grid |
 | `../conv/kernel_identity.py` | `KernelIdentity` and `identity_supports_problem`: which problems a cached binary serves (`tap_outer_k` needs `kpg % tile_k == 0`; a halo binary needs `Ho == Hi`, `Wo == Wi`, `Wo <= halo_max_wo`) |
-| `../../../platform/python/rocke/examples/gfx950/conv_dgrad/` | `run_one_dgrad.py` (one config, for traces) and the dgrad case studies |
+| `../../builders/gfx950/conv_dgrad/` | the dgrad case studies (`run_one_dgrad.py`, one config for traces, is in `../../benchmarks/gfx950/conv_dgrad/`) |
 | `../../tests/test_conv_dgrad_tf32.py` | TF32 host-side gate (validation, IR, ISA) |
 
 The stride-1, tap-outer and dY halo binaries are reached through the AOT
@@ -423,7 +423,7 @@ cache (`benchmark_implicit_gemm_conv --compile-all` / `--run-from-cache`);
 they are not dispatched yet (the grouped-convolution dispatcher is being
 reworked separately). The tile and halo findings that bear on choosing among
 them are in the case study:
-`../../../platform/python/rocke/examples/gfx950/conv_dgrad/stride1_igemm_dgrad_case_study.md`.
+`../../builders/gfx950/conv_dgrad/stride1_igemm_dgrad_case_study.md`.
 
 ## Differences from Wgrad
 
