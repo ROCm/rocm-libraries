@@ -549,15 +549,11 @@ directory coverage alone does not establish GPU correctness.
 
 **Embedded host-test assets.** The rocKE umbrella CMake project, not the
 standalone `platform/` project, stages external assets used by installed library
-tests. The hipDNN SDPA template and eligible graphs form one optional set; the
-provider geometry headers form another and are staged independently. Missing
-content preserves the existing skip behavior, while a staged SDPA set makes the
-installed test require it. The umbrella uses `ROCM_LIBRARIES_ROOT` when supplied
-and otherwise preserves the established source-relative embedding. Alternate
-embeddings may set `ROCKE_HIPDNN_SDPA_TEMPLATE`,
-`ROCKE_HIPDNN_SDPA_BUNDLES`, and `ROCKE_PROVIDER_PACK_HEADERS`; paths may be
-native Windows or POSIX paths. Standalone platform builds have no external-asset
-dependency.
+tests. The hipDNN SDPA assets and provider geometry headers are optional and
+independent. Missing content preserves the tests' skip behavior; staged SDPA
+assets make the installed test require them. The umbrella resolves the asset
+repository from `ROCM_LIBRARIES_ROOT`, with a source-relative fallback for an
+in-repository build. Standalone platform builds have no external-asset dependency.
 
 **Harness lane bridge.** The differential harness numbers its lanes `L1…L6` (L1
 `verify`, L3 `ll` = the byte-identity gate, L5 the golden anchor, L6 numeric). Read
