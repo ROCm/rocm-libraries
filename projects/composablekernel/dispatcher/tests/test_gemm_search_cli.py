@@ -497,93 +497,186 @@ def test_search_without_a_winner_exits_1(monkeypatch, capsys, tmp_path):
 
 GFX1250 = {"arch": "gfx1250"}
 TDM = ("comp_async", "comp_tdm", "comp_tdm_v2", "comp_tdm_pc")  # bridged TDM/async
-TDM_CONFIGS = {"search_config_gfx1250_tdm.json": TDM,
-               "search_config_gfx1250_tdm_no_pc.json": TDM[:-1]}
+GFX1250_CONFIG = str(
+    GEMM_TE_DIR / "gemm_universal" / "configs" / "default_config_gfx1250.json"
+)
 EXAMPLE_SETTINGS = GEMM_TE_DIR / "configs" / "search_settings_gfx1250_tdm.json"
 
 
-def _te_config(name):
-    return str(GEMM_TE_DIR / "configs" / name)
-
-
-def _kernels(monkeypatch, capsys, tmp_path, config, fixed):
-    """--list-pairs of ``config``: ({kernel: pipeline}, {problem: [kernels]})."""
-    path = tmp_path / f"list-{Path(config).stem}.json"
-    rc, _, built, _ = _main(monkeypatch, capsys, tmp_path, config, "--list-pairs",
-                            str(path), fixed=fixed)
+def _kernels(monkeypatch, capsys, tmp_path, *argv, fixed=None):
+    """--list-pairs: ({kernel: pipeline}, {problem: [kernels]})."""
+    path = tmp_path / "kernels.json"
+    rc, _, built, _ = _main(
+        monkeypatch, capsys, tmp_path, *argv, "--list-pairs", str(path), fixed=fixed
+    )
     assert rc == 0 and not built
     data = json.loads(path.read_text())
     return {k: v["pipeline"] for k, v in data["kernels"].items()}, data["pairs"]
 
 
-TDM_SYNC = (
-    "the gfx1250 TDM search configs in tile_engine/ops/gemm/configs/ "
-    "(search_config_gfx1250_tdm*.json) are gemm_universal/configs/"
-    "default_config_gfx1250.json with trait_config.pipeline cut to TDM above "
-    "(no_pc: without comp_tdm_pc): after editing the default config, copy it "
-    "to both files and restore their pipeline lists; after adding a bridged "
-    "TDM pipeline to the default, add it to TDM here and to both files")
+@pytest.mark.parametrize(
+    "value, message",
+    [
+        ("", "non-empty"),
+        (",compv4", "non-empty"),
+        ("compv4,", "non-empty"),
+        ("compv4,,mem", "non-empty"),
+        ("compv4,compv4", "duplicate"),
+        ("compv4,typo", "unknown pipeline"),
+    ],
+)
+def test_pipeline_filter_rejects_bad_values(
+    monkeypatch, capsys, tmp_path, value, message
+):
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, capsys, tmp_path, "--pipelines", value)
+    assert exc.value.code == 2
+    assert message in capsys.readouterr().err
+    assert not any((tmp_path / "libs").iterdir())
+    assert not (tmp_path / "out.csv").exists()
 
 
-def test_gfx1250_tdm_search_configs_are_the_default_configs_tdm_part(monkeypatch):
-    # gemm_universal's gfx1250 default config with the pipeline list cut to
-    # its TDM/async pipelines (no_pc: without comp_tdm_pc): tile_k up to 256,
-    # persistent, pads, epilogues and warp tiles stay the default's. Every
-    # listed pipeline has a bridge (comp_tdm_v3 has none yet).
-    monkeypatch.syspath_prepend(str(DISPATCHER_DIR / "codegen"))
-    import adaptive_search as AS
-    import codegen_common
+@pytest.mark.parametrize("config_count", [0, 1, 2])
+def test_pipeline_filter_is_shared_before_limits_and_pairs(
+    monkeypatch, capsys, tmp_path, config_count
+):
+    # Implicit CI selection and explicit (including multiple) configs use
+    # the same filter before --max-kernels and --pairs in every run mode.
+    configs = [str(GEMM_TE_DIR / "configs" / "default_ci_config.json")] * config_count
+    pipe, full = _kernels(monkeypatch, capsys, tmp_path, *configs)
+    expected = next(n for n in full[KEYS[0]] if pipe[n] == "compv4")
+    argv = [*configs, "--pipelines", " compv4 ", "--max-kernels", "1"]
+    selected, listed = _kernels(monkeypatch, capsys, tmp_path, *argv)
+    assert selected == {expected: "compv4"}
+    assert listed == {k: [expected] for k in KEYS}
+    pairs = tmp_path / "selected.json"
+    for wanted in ([expected], "*"):
+        pairs.write_text(json.dumps({KEYS[0]: wanted}))
+        rc, cap, built, calls = _main(
+            monkeypatch, capsys, tmp_path, *argv, "--pairs", str(pairs)
+        )
+        assert rc == 0, cap.out
+        assert set(built) == {expected}
+        assert calls and all(
+            c["prob"] == PROBLEMS[0] and c["names"] == [expected] for c in calls
+        )
+    rc, cap, built, calls, out = _search(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        *argv,
+        "--pairs",
+        str(pairs),
+        host_cache={"max_total_gib": 0},
+    )
+    assert rc == 0, cap.out
+    assert set(built) == {expected}
+    assert calls and all(
+        c["prob"] == PROBLEMS[0] and c["names"] == [expected] for c in calls
+    )
+    assert _read(out, "winners.json") == {KEYS[0]: [expected]}
+    assert _read(out, "run.json")["context"]["pipelines"] == ["compv4"]
 
-    default = json.loads((GEMM_TE_DIR / "gemm_universal" / "configs" /
-                          "default_config_gfx1250.json").read_text())
-    pipes = default["trait_config"].pop("pipeline")["values"]
-    assert [p for p in pipes if p not in ("compv3", "compv4", "mem")] == list(TDM), \
-        TDM_SYNC
-    for name, want in TDM_CONFIGS.items():
-        cfg = json.loads(Path(_te_config(name)).read_text())
-        assert cfg["trait_config"].pop("pipeline") == {"values": list(want)}, TDM_SYNC
-        assert cfg == default, f"{name}: {TDM_SYNC}"
-        assert set(want) <= set(codegen_common.CommonTypeMappings.PIPELINE_TO_CK)
-    example = AS.SearchSettings.from_json(EXAMPLE_SETTINGS)
-    assert example.build_timeout_s and example.warm_start.cover == "pipeline"
-    assert example.warm_start.pairs_file is None
+
+@pytest.mark.parametrize("search", [False, True])
+def test_pipeline_filter_rejects_excluded_explicit_pairs(
+    monkeypatch, capsys, tmp_path, search
+):
+    pipe, full = _kernels(monkeypatch, capsys, tmp_path)
+    excluded = next(n for n in full[KEYS[0]] if pipe[n] != "compv4")
+    pairs = tmp_path / "excluded.json"
+    pairs.write_text(json.dumps({KEYS[0]: [excluded]}))
+    runner = _search if search else _main
+    rc, cap, built, calls, *_ = runner(
+        monkeypatch, capsys, tmp_path, "--pipelines", "compv4", "--pairs", str(pairs)
+    )
+    assert rc == 1 and not built and not calls
+    assert "this run does not have" in cap.out and "--pipelines" in cap.out
 
 
-@pytest.mark.parametrize("dtype, layout", [("fp16", "rcr"), ("bf16", "rcr"),
-                                           ("fp8", "rcr"), ("bf16", "ccr"),
-                                           ("fp8", "crr")])
-def test_gfx1250_tdm_configs_list_every_bridged_tdm_pipeline(monkeypatch, capsys,
-                                                             tmp_path, dtype, layout):
+def test_pipeline_filter_no_matching_config_is_an_error(monkeypatch, capsys, tmp_path):
+    # The ordinary CI config does not contain TDM; the filter must not silently
+    # switch to a full config or succeed with an empty list.
+    path = tmp_path / "empty.json"
+    rc, cap, built, calls = _main(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        "--pipelines",
+        "comp_tdm",
+        "--list-pairs",
+        str(path),
+        fixed=GFX1250,
+    )
+    assert rc == 1 and not built and not calls and not path.exists()
+    assert "--pipelines" in cap.out and "0 configs" in cap.out
+
+
+@pytest.mark.parametrize(
+    "dtype, layout",
+    [("fp16", "rcr"), ("bf16", "rcr"), ("fp8", "rcr"), ("bf16", "ccr"), ("fp8", "crr")],
+)
+def test_gfx1250_pipeline_filter_preserves_the_default_space(
+    monkeypatch, capsys, tmp_path, dtype, layout
+):
     # With --arch gfx1250 every problem gets every bridged TDM/async pipeline
     # (comp_async in rcr only); the no_pc variant drops comp_tdm_pc only.
     fixed = {**GFX1250, "dtype": dtype, "layout": layout}
-    for name, want in TDM_CONFIGS.items():
-        pipe, pairs = _kernels(monkeypatch, capsys, tmp_path, _te_config(name), fixed)
+    reference = json.loads(Path(GFX1250_CONFIG).read_text())
+    path = tmp_path / "tdm-reference.json"
+    for want in (TDM, TDM[:-1]):
+        # Compare actual filtering with expanding the same default config
+        # directly restricted to these pipelines, without persisted copies.
+        reference["trait_config"]["pipeline"]["values"] = list(want)
+        path.write_text(json.dumps(reference))
+        expected_pipe, expected_pairs = _kernels(
+            monkeypatch, capsys, tmp_path, str(path), fixed=fixed
+        )
+        pipe, pairs = _kernels(
+            monkeypatch,
+            capsys,
+            tmp_path,
+            GFX1250_CONFIG,
+            "--pipelines",
+            ",".join(want),
+            fixed=fixed,
+        )
+        assert pairs == expected_pairs
+        assert pipe == expected_pipe
         want = set(want) - (set() if layout == "rcr" else {"comp_async"})
         assert set(pairs) == set(KEYS)
         assert all({pipe[n] for n in names} == want for names in pairs.values())
 
 
 @pytest.mark.parametrize("dtype, layout", [("fp8", "rcr"), ("bf16", "ccr")])
-def test_gfx1250_tdm_search_tries_every_pipeline(monkeypatch, capsys, tmp_path,
-                                                 dtype, layout):
+def test_gfx1250_tdm_search_tries_every_pipeline(
+    monkeypatch, capsys, tmp_path, dtype, layout
+):
     # The example settings (fewer trials) on the TDM config, end to end with
     # the build and the GPU stubbed: warm_start.cover tries each pipeline on
     # each problem first, build_timeout_s bounds every build, and the workers
     # get the run's arch for the fp8 format.
     fixed = {**GFX1250, "dtype": dtype, "layout": layout}
-    config = _te_config("search_config_gfx1250_tdm.json")
-    pipe, pairs = _kernels(monkeypatch, capsys, tmp_path, config, fixed)
+    argv = [GFX1250_CONFIG, "--pipelines", ",".join(TDM)]
+    pipe, pairs = _kernels(monkeypatch, capsys, tmp_path, *argv, fixed=fixed)
     want = set(TDM) - (set() if layout == "rcr" else {"comp_async"})
     settings = json.loads(EXAMPLE_SETTINGS.read_text())
-    settings.update(trials_per_problem=6, new_builds_per_run=40, batch_per_problem=2,
-                    confirm={"finalists": 2, "fresh_calls": 1})
+    settings.update(
+        trials_per_problem=6,
+        new_builds_per_run=40,
+        batch_per_problem=2,
+        confirm={"finalists": 2, "fresh_calls": 1},
+    )
     kws = []
-    rc, cap, built, calls, out = _search(monkeypatch, capsys, tmp_path, config,
-                                         build_kw=kws, fixed=fixed, **settings)
+    rc, cap, built, calls, out = _search(
+        monkeypatch, capsys, tmp_path, *argv, build_kw=kws, fixed=fixed, **settings
+    )
     assert rc == 0, cap.out
     run = _read(out, "run.json")
-    assert run["context"]["arch"] == "gfx1250" and run["settings"]["build_timeout_s"] == 300
+    assert (
+        run["context"]["arch"] == "gfx1250"
+        and run["settings"]["build_timeout_s"] == 300
+    )
     assert kws and all(k["build_timeout"] == 300 for k in kws)
     assert calls and all(c["extra"]["arch"] == "gfx1250" for c in calls)
     for key, prob in zip(KEYS, PROBLEMS):
@@ -591,8 +684,7 @@ def test_gfx1250_tdm_search_tries_every_pipeline(monkeypatch, capsys, tmp_path,
         tried = {pipe[c["names"][0]] for c in calls if c["prob"] == prob}
         assert tried == want  # every candidate is one of them
     winners = drv.load_pair_list(out / "winners.json")
-    assert set(winners) == set(KEYS) and all(
-        winners[k][0] in pairs[k] for k in KEYS)
+    assert set(winners) == set(KEYS) and all(winners[k][0] in pairs[k] for k in KEYS)
 
 
 def test_get_arch_filter_data_does_not_grow_sys_path(monkeypatch):

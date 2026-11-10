@@ -64,9 +64,9 @@ gemm/
 - `user_provided_config.json` — scratch space for custom sweeps.
 - `example_problems.json` — example M/N/K problem set (used when `--problems`
   is omitted).
-- `search_config_gfx1250_tdm.json`, `search_config_gfx1250_tdm_no_pc.json`,
-  `search_settings_gfx1250_tdm.json` - the gfx1250 TDM search space and example
-  search settings, see [gfx1250 / MI450](#gfx1250--mi450-tdm-pipelines).
+- `search_settings_gfx1250_tdm.json` - example search settings for the gfx1250
+  full default config with `--pipelines`, see
+  [gfx1250 / MI450](#gfx1250--mi450-tdm-pipelines).
 
 > The JSON used by **nightly** tests is intended to drop into the same
 > `configs/` directory and be selected with a positional config — no driver
@@ -139,6 +139,17 @@ measures and reports exactly as described above.
   many single timings is biased towards a lucky timing; selecting and reporting
   on the median of the repeats removes that bias. Kernels that failed `--verify`
   or wrote no non-zero output are not re-timed.
+- `--pipelines NAME[,NAME...]` - restrict the selected configs to these bridged
+  pipelines, before `--max-kernels` and `--pairs`, in plain runs, `--list-pairs`
+  and search. Config selection is unchanged: omitted positional configs still
+  use the variant's usual default (typically the small CI config). Pass a full
+  config explicitly when the CI config lacks the pipelines you need. Names
+  are case-sensitive; surrounding whitespace is ignored. Empty, duplicate or
+  unknown names are errors. Known pipelines can be absent for a particular
+  arch, dtype, layout or problem; no surviving configs is an error. Explicit
+  `--pairs` names outside the filtered space are rejected, while `"*"` means
+  all eligible kernels within that space. Omitting the flag keeps every
+  pipeline from the selected configs.
 - `--list-pairs PATH` — dry run: expand and pair as a real run would, write every
   `(problem, kernel)` pair it would measure together with each kernel's
   configuration, and exit without building. Use it to see the size of a sweep
@@ -339,9 +350,9 @@ Option rules:
   confirmation calls run on one device (problem `i` on device `i mod n`), so
   its finalists are compared on the same GPU.
 - The candidates of a problem are exactly the kernels a full run measures with
-  it when every kernel builds (its `--list-pairs` pairs). `--pairs` and
-  `--max-kernels` narrow them (recorded in `run.json`); `--pairs` also limits
-  the search to the problems it lists, and is not a warm start. A listed
+  it when every kernel builds (its `--list-pairs` pairs). `--pipelines`,
+  `--pairs` and `--max-kernels` narrow them (recorded in `run.json`); `--pairs`
+  also limits the search to the problems it lists, and is not a warm start. A listed
   problem none of whose listed kernels pair with it stays unresolved. A
   problem with fewer candidates than `trials_per_problem` is measured
   exhaustively. Fixed-vector-width kernels are candidates where a full run
@@ -627,20 +638,20 @@ or keep the default `shared` seed policy.
 
 #### gfx1250 / MI450: TDM pipelines
 
-`configs/search_config_gfx1250_tdm.json` is gemm_universal's gfx1250 default
-config (`gemm_universal/configs/default_config_gfx1250.json`) with its pipeline
-list cut to the bridged TDM/async pipelines: `comp_async` (`rcr` only, fully
+Use gemm_universal's gfx1250 default config
+(`gemm_universal/configs/default_config_gfx1250.json`) with `--pipelines`
+restricting it to the bridged TDM/async pipelines: `comp_async` (`rcr` only, fully
 padded, persistent or not), `comp_tdm`, `comp_tdm_v2` and `comp_tdm_pc` (`tdm`
 epilogue, unpadded), tile_k 64 to 256, warp tile 16x16; the bridge drops what
 it does not support. In the default config these pipelines are 2.7-3.2% of the
 `rcr` space, so a search there rarely tries them. Kernels per layout, each
 paired with every problem of `example_problems.json` (5 aligned problems):
 
-| Config | dtype | `rcr` | `rrr` | `crr` | `ccr` |
+| Pipeline selection | dtype | `rcr` | `rrr` | `crr` | `ccr` |
 |---|---|---|---|---|---|
-| `search_config_gfx1250_tdm.json` | fp16, bf16 | 1207 | 595 | 583 | 595 |
+| TDM/async (all four above) | fp16, bf16 | 1207 | 595 | 583 | 595 |
 | | fp8, bf8 | 1618 | 1234 | 1234 | 1234 |
-| `search_config_gfx1250_tdm_no_pc.json` | fp16, bf16 | 1071 | 459 | 459 | 459 |
+| TDM/async without `comp_tdm_pc` | fp16, bf16 | 1071 | 459 | 459 | 459 |
 | | fp8, bf8 | 1248 | 864 | 864 | 864 |
 
 By pipeline, fp16 `rcr`: `comp_async` 612, `comp_tdm` 306, `comp_tdm_v2` 153,
@@ -652,7 +663,8 @@ any one problem (fp16 `rcr` over 4 mixed problems: 1819 against 1207 per
 problem). Check your problems with `--list-pairs`.
 
 ```bash
-RUN="configs/search_config_gfx1250_tdm.json --variant gemm_universal \
+RUN="gemm_universal/configs/default_config_gfx1250.json \
+    --pipelines comp_async,comp_tdm,comp_tdm_v2,comp_tdm_pc --variant gemm_universal \
     --arch gfx1250 --dtype bf16 --layout rcr --problems problems.json"
 python gemm_full_benchmark.py $RUN --devices 0, --workers 16 \
     --search-config configs/search_settings_gfx1250_tdm.json \
@@ -704,9 +716,9 @@ python gemm_full_benchmark.py $RUN --pairs calibration-pairs.json \
     --devices 0, --workers 16 --verify --build-timeout 1200
 ```
 
-`trials_per_problem` 100 is not exhaustive (the TDM config has 459 to 1618
+`trials_per_problem` 100 is not exhaustive (the TDM selections have 459 to 1618
 candidates per problem). The exhaustive reference for a search is a plain run
-of the same config and problems with `--verify`, or `--pairs` with a
+of the same config, `--pipelines` and problems with `--verify`, or `--pairs` with a
 `--list-pairs` file to split it into one problem per run; it builds and
 measures every pair.
 
@@ -722,16 +734,15 @@ Node caveats:
   from.
 - With the ROCm 10.2 compiler, `comp_tdm_pc` kernels can hang in their named
   barriers, and each such trial costs a full `--kernel-timeout`. On that
-  toolchain use `configs/search_config_gfx1250_tdm_no_pc.json` for the search
-  and for the reference run; other toolchains keep the full config.
+  toolchain use `--pipelines comp_async,comp_tdm,comp_tdm_v2` for the search
+  and for the reference run; other toolchains can include `comp_tdm_pc`.
 - A run cannot be resumed: an interrupted run confirms nothing. On a host that
   may hang or reboot, run one problem per run (its own problems file and
   `--search-output-dir`) and copy each output directory off the node when it
   ends.
-- Not covered: `comp_tdm_v3` (no dispatcher bridge yet; once it has one, add
-  it to the pipeline list of both `search_config_gfx1250_tdm*.json` files and
-  to `TDM` in `dispatcher/tests/test_gemm_search_cli.py`, whose test keeps
-  both files equal to the default config except for that list),
+- Not covered: `comp_tdm_v3` (no dispatcher bridge yet; once it has one and
+  the default config lists it, include it in `--pipelines` and the TDM
+  coverage tests),
   `preshuffle_tdm` (the
   `gemm_preshuffle` variant; a search takes `gemm_universal` only), and the MX,
   Stream-K, batched, grouped and quant TDM kernels.
