@@ -35,7 +35,9 @@
 //
 // Each row is reduced by one wavefront in a fixed order whatever the grid, so
 // the clamped runs must match the full-grid run bit for bit. They are also
-// checked against a host triangular solve.
+// checked against a host triangular solve. The solution is the same for any
+// valid row order, so max_nnz, diag_ind and the row map from the analysis are
+// compared with the full-grid run as well.
 //
 // The large case has 100,003 rows, coupled to the row before, so the dependency
 // chain is serial and crosses every chunk boundary. It has 3126 row blocks on
@@ -53,6 +55,8 @@
 #include "unit_test_utils.hpp"
 
 #include "rocsparse_handle.hpp"
+#include "rocsparse_mat_info.hpp"
+#include "rocsparse_trm_info.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -225,6 +229,30 @@ namespace
         return x;
     }
 
+    // What the analysis leaves for the solve and for csrilu0 and csric0. The
+    // solve reads only the row map, csrilu0 and csric0 read diag_ind, and
+    // max_nnz selects their kernel.
+    struct analysis_data
+    {
+        int64_t                    max_nnz = -1;
+        std::vector<rocsparse_int> diag_ind;
+        std::vector<rocsparse_int> row_map;
+    };
+
+    // Index of the first entry where a and b differ, or -1.
+    int64_t first_difference(const std::vector<rocsparse_int>& a,
+                             const std::vector<rocsparse_int>& b)
+    {
+        for(size_t i = 0; i < a.size() || i < b.size(); ++i)
+        {
+            if(i >= a.size() || i >= b.size() || a[i] != b[i])
+            {
+                return static_cast<int64_t>(i);
+            }
+        }
+        return -1;
+    }
+
     // Run analysis and solve through the public API. max_grid_x > 0 replaces
     // handle->properties.maxGridSize[0] for both; 0 leaves the device limit.
     void csrsv(const csr_matrix&          A,
@@ -234,7 +262,8 @@ namespace
                const std::vector<double>& x,
                int                        max_grid_x,
                std::vector<double>&       y,
-               rocsparse_int&             pivot)
+               rocsparse_int&             pivot,
+               analysis_data&             analysis)
     {
         const rocsparse_int nnz = static_cast<rocsparse_int>(A.col_ind.size());
 
@@ -287,6 +316,14 @@ namespace
                                             d_buffer.ptr),
                   rocsparse_status_success);
 
+        const rocsparse::trm_info_t* trm = info->get_csrsv_info(trans, fill);
+        ASSERT_NE(trm, nullptr);
+        analysis.max_nnz  = trm->get_max_nnz();
+        analysis.diag_ind = rocsparse_ut::to_host(
+            static_cast<const rocsparse_int*>(trm->get_diag_ind()), static_cast<size_t>(A.m));
+        analysis.row_map = rocsparse_ut::to_host(
+            static_cast<const rocsparse_int*>(trm->get_row_map()), static_cast<size_t>(A.m));
+
         ASSERT_EQ(rocsparse_dcsrsv_solve(handle,
                                          trans,
                                          A.m,
@@ -330,7 +367,9 @@ namespace
 
         std::vector<double> full;
         rocsparse_int       full_pivot = 0;
-        ASSERT_NO_FATAL_FAILURE(csrsv(A, fill, trans, alpha, x, 0, full, full_pivot));
+        analysis_data       full_analysis;
+        ASSERT_NO_FATAL_FAILURE(
+            csrsv(A, fill, trans, alpha, x, 0, full, full_pivot, full_analysis));
         ASSERT_EQ(full_pivot, -1) << label(fill, trans) << " full grid";
         ASSERT_EQ(full.size(), ref.size());
 
@@ -344,8 +383,17 @@ namespace
         {
             std::vector<double> got;
             rocsparse_int       pivot = 0;
-            ASSERT_NO_FATAL_FAILURE(csrsv(A, fill, trans, alpha, x, grid, got, pivot));
+            analysis_data       analysis;
+            ASSERT_NO_FATAL_FAILURE(csrsv(A, fill, trans, alpha, x, grid, got, pivot, analysis));
             EXPECT_EQ(pivot, -1) << label(fill, trans) << " grid.x " << grid;
+            EXPECT_EQ(analysis.max_nnz, full_analysis.max_nnz)
+                << label(fill, trans) << ": max_nnz with grid.x clamped to " << grid;
+            EXPECT_EQ(first_difference(analysis.diag_ind, full_analysis.diag_ind), -1)
+                << label(fill, trans) << ": first differing diag_ind entry with grid.x clamped to "
+                << grid;
+            EXPECT_EQ(first_difference(analysis.row_map, full_analysis.row_map), -1)
+                << label(fill, trans) << ": first differing row map entry with grid.x clamped to "
+                << grid;
             ASSERT_EQ(got.size(), full.size());
 
             // Report the first differing row rather than every entry, so a
@@ -436,7 +484,8 @@ TEST(internal_level2_csrsv_grid_x_chunk, zero_pivot_on_small_grid)
             {
                 std::vector<double> y;
                 rocsparse_int       pivot = -1;
-                ASSERT_NO_FATAL_FAILURE(csrsv(A, fill, trans, 1.0, x, grid, y, pivot));
+                analysis_data       analysis;
+                ASSERT_NO_FATAL_FAILURE(csrsv(A, fill, trans, 1.0, x, grid, y, pivot, analysis));
                 EXPECT_EQ(pivot, missing) << label(fill, trans) << " grid.x " << grid;
             }
         }
