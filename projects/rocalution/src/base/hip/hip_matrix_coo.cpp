@@ -235,7 +235,7 @@ namespace rocalution
             copy_h2d(this->nnz_, cast_mat->mat_.col, this->mat_.col);
             copy_h2d(this->nnz_, cast_mat->mat_.val, this->mat_.val);
 
-            this->ApplyAnalyseClear_();
+            this->CreateSpMatDescr_();
         }
         else
         {
@@ -306,7 +306,7 @@ namespace rocalution
             copy_d2d(this->nnz_, hip_cast_mat->mat_.col, this->mat_.col);
             copy_d2d(this->nnz_, hip_cast_mat->mat_.val, this->mat_.val);
 
-            this->ApplyAnalyseClear_();
+            this->CreateSpMatDescr_();
         }
         else
         {
@@ -352,7 +352,7 @@ namespace rocalution
             copy_d2d(this->nnz_, this->mat_.col, hip_cast_mat->mat_.col);
             copy_d2d(this->nnz_, this->mat_.val, hip_cast_mat->mat_.val);
 
-            hip_cast_mat->ApplyAnalyseClear_();
+            hip_cast_mat->CreateSpMatDescr_();
         }
         else
         {
@@ -407,7 +407,7 @@ namespace rocalution
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
 
-            this->ApplyAnalyseClear_();
+            this->CreateSpMatDescr_();
         }
         else
         {
@@ -502,7 +502,7 @@ namespace rocalution
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
 
-            this->ApplyAnalyseClear_();
+            this->CreateSpMatDescr_();
         }
         else
         {
@@ -560,7 +560,7 @@ namespace rocalution
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
 
-            hip_cast_mat->ApplyAnalyseClear_();
+            hip_cast_mat->CreateSpMatDescr_();
         }
         else
         {
@@ -588,7 +588,7 @@ namespace rocalution
         copy_d2d(this->nnz_, col, this->mat_.col);
         copy_d2d(this->nnz_, val, this->mat_.val);
 
-        this->ApplyAnalyseClear_();
+        this->CreateSpMatDescr_();
     }
 
     template <typename ValueType>
@@ -796,7 +796,7 @@ namespace rocalution
                                                                                this->mat_.col);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-            this->ApplyAnalyseClear_();
+            this->CreateSpMatDescr_();
         }
 
         return true;
@@ -857,7 +857,7 @@ namespace rocalution
 
             free_hip(&pb);
 
-            this->ApplyAnalyseClear_();
+            this->CreateSpMatDescr_();
         }
 
         return true;
@@ -870,7 +870,7 @@ namespace rocalution
         {
             HIPSpSort(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle), this->spmat_descr_);
 
-            this->ApplyAnalyseClear_();
+            this->CreateSpMatDescr_();
         }
 
         return true;

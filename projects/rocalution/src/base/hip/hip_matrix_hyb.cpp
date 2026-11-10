@@ -254,7 +254,7 @@ namespace rocalution
             copy_h2d(this->coo_nnz_, cast_mat->mat_.COO.col, this->mat_.COO.col);
             copy_h2d(this->coo_nnz_, cast_mat->mat_.COO.val, this->mat_.COO.val);
 
-            this->ApplyAnalyseClear_();
+            this->CreateSpMatDescr_();
         }
         else
         {
@@ -341,7 +341,7 @@ namespace rocalution
             copy_d2d(this->coo_nnz_, hip_cast_mat->mat_.COO.col, this->mat_.COO.col);
             copy_d2d(this->coo_nnz_, hip_cast_mat->mat_.COO.val, this->mat_.COO.val);
 
-            this->ApplyAnalyseClear_();
+            this->CreateSpMatDescr_();
         }
         else
         {
@@ -395,7 +395,7 @@ namespace rocalution
             copy_d2d(this->coo_nnz_, this->mat_.COO.col, hip_cast_mat->mat_.COO.col);
             copy_d2d(this->coo_nnz_, this->mat_.COO.val, hip_cast_mat->mat_.COO.val);
 
-            hip_cast_mat->ApplyAnalyseClear_();
+            hip_cast_mat->CreateSpMatDescr_();
         }
         else
         {
@@ -466,7 +466,7 @@ namespace rocalution
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
 
-            this->ApplyAnalyseClear_();
+            this->CreateSpMatDescr_();
         }
         else
         {
@@ -593,7 +593,7 @@ namespace rocalution
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
 
-            this->ApplyAnalyseClear_();
+            this->CreateSpMatDescr_();
         }
         else
         {
@@ -667,7 +667,7 @@ namespace rocalution
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
 
-            hip_cast_mat->ApplyAnalyseClear_();
+            hip_cast_mat->CreateSpMatDescr_();
         }
         else
         {

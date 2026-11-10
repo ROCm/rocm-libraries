@@ -81,6 +81,8 @@ namespace rocalution
         virtual bool Sort(void);
 
     private:
+        // rocSPARSE keeps the COO SpMV analysis in the sparse matrix descriptor, so every
+        // write to the arrays needs a new descriptor
         void CreateSpMatDescr_(void);
         void DestroySpMatDescr_(void);
         void ApplyAnalyse_(ValueType                   alpha,
