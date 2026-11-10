@@ -44,6 +44,17 @@ one to `IMPORTANT` or above, also run step 3.
      in **Proof** that no mutant ran.
 4. Set the verdict and the tier you can defend; `PARTIAL` states the narrower claim.
 
+## Threads
+
+A finding linked to a PR thread (`LEDGER.md` *Threads*, the `Thread URL` rows of the finding;
+the thread's comments are in `pr/threads.json`) joins your batch when its thread has a new reply
+(`reply-affected.txt`). Read the reply: it can show a guard, test or document you missed, and then step 2 applies. The
+verdict follows the proof, never the reply or the thread's resolved state. When the proof
+holds and the reply argues intent (the behavior is deliberate, accepted or out of scope), keep
+the verdict and add a `Needs human decision:` line to the verify file: the question, the
+options and your recommendation. The orchestrator moves it to Open questions. Cite the thread
+URL; never quote the reply or name its author.
+
 ## Handoffs
 
 A finding that duplicates or overlaps another is not a finding of yours. Write `ORCH: cluster <ID> with <ID>` under **Handoffs**

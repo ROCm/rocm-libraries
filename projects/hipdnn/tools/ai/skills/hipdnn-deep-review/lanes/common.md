@@ -14,8 +14,8 @@ and inputs. Scouts and `SYNTH` read this file and [orient.md](orient.md) only.
 | `$REPO`, `$REPO_BASE` | Sparse worktrees of `$CLONE` at `$HEAD` and `$BASE` |
 ```markdown
 $EVIDENCE/LEDGER.md   $EVIDENCE/r<N>/: PIN.md env.sh CONTEXT.md ID-MAP.md REPORT.md COMMENTS.md
-  dispatch-context.md files.txt numstat.txt commits.txt sparse.txt drift.txt areas.tsv owners.tsv   (round > 1: range-diff.txt affected.txt)
-  pr/ (pr.json body.md inline.json files.json checks.tsv branch.txt pr-text.txt pr-comment.txt pr-inline.txt) | intent.md   orient/<slug>.md
+  dispatch-context.md files.txt numstat.txt commits.txt sparse.txt drift.txt areas.tsv owners.tsv   (round > 1: range-diff.txt affected.txt reply-affected.txt)
+  pr/ (pr.json body.md inline.json files.json checks.tsv branch.txt pr-text.txt pr-comment.txt pr-inline.txt threads.json) | intent.md   threads.md   orient/<slug>.md
   packets/<LANE>.md  lanes/<LANE>.md  verify/<ID>.md
   evidence subdirectories: verify/<ID>-evidence/  lanes/*-evidence/  lanes/<ID>/
 ```
@@ -56,7 +56,13 @@ Orient file paths; find callers, contracts and reaching tests yourself and list 
 **Coverage**. A packet marked `Sampled: <generator>; sample <files>` replaces "every changed
 line" with the generator plus that sample; record the rest as `sampled`. Concern lane: the
 changed files in scope with `numstat` rows, the areas' Orient file paths and the stack
-parent. From round 2: the range-diff path, `affected.txt` and your ledger rows.
+parent. From round 2: the range-diff path, `affected.txt` and your ledger rows. With a PR, an
+**Open review threads** list: each unresolved thread the reviewer did not open, as `path:line`,
+thread URL and the first line of its first comment.
+
+An open thread is a point someone else raised. Do not file it again as your own finding: when
+a finding of yours covers the same point, cite the thread URL. Never quote a comment body or
+name its author in a report, finding or handoff.
 
 A merged agent writes one report named after its first lane; findings keep their lane's
 prefix. A split lane is `<LANE><k>`.

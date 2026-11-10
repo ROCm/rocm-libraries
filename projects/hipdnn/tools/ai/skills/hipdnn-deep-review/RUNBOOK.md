@@ -19,9 +19,17 @@ results; `init` derives it itself). `$TARGET` is the PR's base branch (a stacked
 `develop`), `develop` for `branch:<name>` unless told otherwise (`--target`), or the left side
 of a range.
 
+Before `init` of a PR review, link the comments already posted to their findings, once per
+`posted.tsv` found: the `posted:<file>` input, else every `$EVIDENCE/r*/comments/*/posted.tsv`
+([report.md](report.md) *posted.tsv*). Linking is idempotent and needs no thread data:
+
+```bash
+ledger.py link "$EVIDENCE" <N> --from <posted.tsv>   # or: ledger.py link "$EVIDENCE" <N> <comment URL> <ID>
+```
+
 ```bash
 python3 <skill dir>/scripts/pin.py init --evidence <evidence dir> --scratch <scratch dir> \
-  --round <N> --owner-repo <owner>/<repo> [--clone <dir>] \
+  --round <N> --owner-repo <owner>/<repo> [--clone <dir>] [--reviewer <gh login>] [--since <time>] \
   --pr <pr>   # or: --branch <name> [--target <base>]   or: --range <base>..<head>
 ```
 
@@ -45,7 +53,17 @@ python3 <skill dir>/scripts/pin.py init --evidence <evidence dir> --scratch <scr
 - adds the sparse worktrees `$REPO` (at `$HEAD`) and `$REPO_BASE` (at `$BASE`) and checks
   both are at their SHAs;
 - for a PR saves `pr/pr.json` (with GitHub's `mergeStateStatus` and `mergeable`; nothing gates on them), `body.md`, `inline.json`, `files.json`, `checks.tsv` and the plain-text `branch.txt`, `pr-text.txt`, `pr-comment.txt` and `pr-inline.txt`, and
-  checks `$HEAD` against `headRefOid` and the file counts (below).
+  checks `$HEAD` against `headRefOid` and the file counts (below);
+- writes `Pinned:` (UTC) and, for a PR, `Reviewer:` (`--reviewer`, else `gh api user`) to `PIN.md`;
+- for a PR, thread intake: saves every review thread (GraphQL `reviewThreads`; a failed read
+  fails `init`, with no REST fallback) as `pr/threads.json`, fills `State`, `Last reply` and
+  `Round seen` of the ledger's Threads rows, writes `threads.md` (all threads, with logins) and
+  `reply-affected.txt` (the findings whose linked thread has a reply by someone other than the
+  reviewer since the previous round's `Pinned:`, else `--since`; `--since` is required when that
+  round has no `Pinned:`), and prints `unlinked: <URL>` for each thread no row links and
+  `mismatch:` for a resolved thread whose finding is `OPEN` or `UNVERIFIED` and an unresolved
+  thread whose finding is closed. Nothing is linked by inference: link an `unlinked:` thread by
+  hand with `ledger.py link`. Thread state never changes a finding.
 
 `. <evidence dir>/r<N>/env.sh` exports every `PIN.md` variable among `SKILL EVIDENCE SCRATCH
 CLONE KEY TARGET TARGET_TIP HEAD HEAD_SHORT BASE REPO REPO_BASE KNOWLEDGE`, fails when `EVIDENCE`,
@@ -295,6 +313,8 @@ or a grouped row) and why. Re-dispatch a non-conforming report once, naming the 
    and its published copy; for more, re-dispatch that scout, then `SYNTH`.
 4. Send conflicting findings and each lane's own **Needs human decision** entries to the
    ledger's Open questions table (edit it by hand), citing [policy.md](policy.md) *Precedence*.
+   A verifier's `Needs human decision:` line (`ledger.py verdicts` prints it as
+   `needs-decision: <ID>: ...`) goes there too.
 
 Verify every candidate with an agent that did not report it ([lanes/verify.md](lanes/verify.md)):
 `BLOCKING` and `IMPORTANT` in batches of at most 10 per verifier, grouped by lane;
@@ -338,6 +358,18 @@ its output sweep ([lanes/leaks.md](lanes/leaks.md); output `$EVIDENCE/r<N>/lanes
 
 ## Iterate
 
+Run `pin.py freshness --evidence "$EVIDENCE" --owner-repo <owner>/<repo> [--pr <pr>] [--reviewer <login>]`
+to choose where to start. It prints one verdict: `stale: base branch changed` (the PR was
+retargeted), `stale: head moved`, `new thread activity` (a comment by someone other than the
+reviewer after the newest round's `Pinned:`) or `fresh`, in that priority, then `next: start
+r<N+1>` or `next: reopen r<N>`; `N/A` when the review has no PR. For a round without `Pinned:`
+(every round before this field, and a published-only round) pass `--prev-head <sha>`,
+`--prev-pinned <time>` (a date alone is 00:00 UTC) and `--prev-target <branch>`; without a
+target it skips the base check and says so. With no `PIN.md` the PR is unknown, so also pass
+`--pr <pr>`, and `--reviewer <login>` when the newest round's `PIN.md` has no `Reviewer:`. Freshness
+ignores movement of the target's tip; re-running `DRIFT` and `IMPACT` follows their own rules
+below.
+
 On a new head, start round N+1 at *Pin and intake*. In *Orient*, copy the previous round's
 `orient/` and `CONTEXT.md`; scout an area the change adds and every area whose file's
 `Describes` sha is not the new `$BASE` (the copied file is its prior file), then `SYNTH` again.
@@ -358,7 +390,8 @@ Re-run `DRIFT` whenever the round's `drift.txt` says `Trigger: yes`: the target 
 Re-run `IMPACT` whenever the round's pinned `TARGET_TIP` differs from the tip of its last run: its
 merged view is computed against that tip and goes stale with it. Only *Pin and intake* records a
 tip: a round reopened on the same head keeps its pinned tip, so its `IMPACT` re-run does too.
-Re-verify every affected `OPEN` or `UNVERIFIED` finding. A lane not re-run carries forward
+Re-verify every affected `OPEN` or `UNVERIFIED` finding, and every finding in `reply-affected.txt`
+(a reply by someone other than the reviewer on its linked thread), whatever its status. A lane not re-run carries forward
 (Coverage and Lanes rows copied, marked `carried from r<M>`).
 
 **Continuing a published review.** Earlier rounds may exist only as a published record that
@@ -366,13 +399,19 @@ someone else ran (`prior:<dir>`): a review folder holding `LEDGER.md` and `r<k>/
 without `PIN.md` or `files.txt`. Before *Pin and intake*, copy its `LEDGER*.md` and every
 `r<k>/` into an empty `$EVIDENCE`, and leave the copies unchanged. `round:` then defaults to
 the next round. Take the previous head and base from the record's round table or the newest
-`REPORT.md` header. Run `ledger.py counts "$EVIDENCE" <k>` on the newest round. For each
+`REPORT.md` header; the record has no `Pinned:`, so pass its date to `pin.py freshness` (*Iterate*) and
+to `pin.py init` as `--since`. Run `ledger.py counts "$EVIDENCE" <k>` on the newest round. For each
 Open questions row the PR has since answered, ask the user and move the answer into Decisions,
 or the new round cannot reach `Closure: CLOSED`. `(not published)` cells in the copies are
 redactions; the scripts accept them.
 
-On the same head, after a decision, approval, new evidence or to re-run a `FAILED` lane, reopen the round at *Merge and
-verify*: record the decision, run the follow-ups, re-verify what it affects and repeat
+On the same head, after a decision, approval, new evidence, new thread activity or to re-run a `FAILED` lane, reopen the round at *Merge and
+verify*. Link any new `posted.tsv` first (*Pin and intake*), then
+`pin.py threads --evidence "$EVIDENCE" --round <N> --owner-repo <owner>/<repo> --pr <pr> [--reviewer <login>] [--since <time>]`
+re-fetches the threads and refreshes `threads.md` and `reply-affected.txt`. A reply is new when it
+came after `--since`, else after round `<N>`'s own `Pinned:`, so the reopened round's list holds the
+replies since it was pinned; `--since` is required when round `<N>` has no `Pinned:`, and `--reviewer`
+when its `PIN.md` has no `Reviewer:`, as in a published-only round. Then: record the decision, run the follow-ups, re-verify what it affects and repeat
 *Synthesize*, updating the round's files in place.
 
 Close a finding only when its proof ([findings.md](findings.md) *Proof per kind*) no longer
