@@ -28,6 +28,7 @@
 
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx */
 #include "rocke/helper_rocke.helpers.fuse.h" /* rocke_fuse_dtype_to_ir_str */
+#include "rocke/helper_rocke.helpers.io.h" /* rocke_b_concat_tree, rocke_b_smem_load_fragment */
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_abi.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
@@ -315,19 +316,6 @@ bool rocke_dconv_f32_mma_plan(
     return false;
 }
 
-/* Pairwise concatenation, as Python's `while len(parts) > 1` loop. */
-static rocke_value_t* dconv_concat_tree(rocke_ir_builder_t* b, std::vector<rocke_value_t*> parts)
-{
-    while(parts.size() > 1)
-    {
-        std::vector<rocke_value_t*> next;
-        for(size_t i = 0; i < parts.size(); i += 2)
-            next.push_back(rocke_b_vec_concat(b, parts[i], parts[i + 1]));
-        parts.swap(next);
-    }
-    return parts.empty() ? NULL : parts[0];
-}
-
 rocke_value_t* rocke_dconv_load_elems(rocke_ir_builder_t* b,
                                       const char* dtype,
                                       rocke_value_t* rsrc,
@@ -361,7 +349,7 @@ rocke_value_t* rocke_dconv_load_elems(rocke_ir_builder_t* b,
         parts.push_back(
             rocke_b_buffer_load_vN(b, rsrc, v, soff, rocke_f32(), ROCKE_DCONV_F32_IO_MAX));
     }
-    return dconv_concat_tree(b, parts);
+    return rocke_b_concat_tree(b, parts.data(), (int)parts.size());
 }
 
 void rocke_dconv_store_from_f32(rocke_ir_builder_t* b,
@@ -541,7 +529,8 @@ void rocke_dconv_mfma_dtype_flags(const char* dtype, int* f32, int* tf32)
     *tf32 = (dtype != NULL && strcmp(dtype, "tf32") == 0) ? 1 : 0;
 }
 
-/* Pairwise vec_concat until one value remains (Python's `while len(parts) > 1`). */
+/* `b.vec_pack([b.vec_extract(val, i + j) for j in range(4)], F32)`: the
+ * 4-element fp32 chunk at element i of `val`. */
 static rocke_value_t* dconv_f32_chunk(rocke_ir_builder_t* b, rocke_value_t* val, int i)
 {
     rocke_value_t* elems[ROCKE_DCONV_F32_IO_MAX];
@@ -609,21 +598,9 @@ rocke_value_t* rocke_dconv_smem_load_elems(rocke_ir_builder_t* b,
     const rocke_type_t* io_type = rocke_dconv_io_type(b, dtype);
     if(io_type == NULL)
         return NULL;
-    if(!rocke_dconv_is_f32_storage(dtype) || n <= ROCKE_DCONV_F32_IO_MAX)
-    {
-        rocke_value_t* ind[2] = {row, idx};
-        return rocke_b_smem_load_vN(b, lds, ind, 2, io_type, n);
-    }
-    if(n % ROCKE_DCONV_F32_IO_MAX)
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "fp32 direct-conv LDS read of %d elements: not a multiple of 4", n);
-    std::vector<rocke_value_t*> parts;
-    for(int i = 0; i < n; i += ROCKE_DCONV_F32_IO_MAX)
-    {
-        rocke_value_t* ind[2] = {row, dconv_chunk_off(b, idx, i, 1)};
-        parts.push_back(rocke_b_smem_load_vN(b, lds, ind, 2, rocke_f32(), ROCKE_DCONV_F32_IO_MAX));
-    }
-    return dconv_concat_tree(b, parts);
+    /* 16-bit storage: one load of n; fp32 storage: <= 4-element pieces. */
+    const int max_elems = rocke_dconv_is_f32_storage(dtype) ? ROCKE_DCONV_F32_IO_MAX : n;
+    return rocke_b_smem_load_fragment(b, lds, row, idx, io_type, n, max_elems, 0);
 }
 
 void rocke_dconv_smem_store_elems(rocke_ir_builder_t* b,

@@ -36,7 +36,7 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, has_shape */
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
-#include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
+#include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type, rocke_b_smem_load_fragment */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/lower_llvm.h"
@@ -1507,31 +1507,7 @@ rocke_value_t* nongrouped_lds_frag(nongrouped_ctx& c,
                                    int plane_stride)
 {
     const int n = c.FRAG < c.XV ? c.FRAG : c.XV;
-    std::vector<rocke_value_t*> parts;
-    int h;
-    for(h = 0; h < c.FRAG / n; ++h)
-    {
-        rocke_value_t* ind[2];
-        ind[0] = c.c0;
-        ind[1] = idx;
-        if(h != 0)
-        {
-            rocke_value_t* k = nongrouped_c(c, (int64_t)h * plane_stride);
-            ind[1] = rocke_b_add(c.b, idx, k);
-        }
-        parts.push_back(rocke_b_smem_load_vN(c.b, smem, ind, 2, c.io_type, n));
-    }
-    while(parts.size() > 1)
-    {
-        std::vector<rocke_value_t*> next;
-        size_t i;
-        for(i = 0; i < parts.size(); i += 2)
-        {
-            next.push_back(rocke_b_vec_concat(c.b, parts[i], parts[i + 1]));
-        }
-        parts.swap(next);
-    }
-    return parts[0];
+    return rocke_b_smem_load_fragment(c.b, smem, c.c0, idx, c.io_type, c.FRAG, n, plane_stride);
 }
 
 rocke_value_t*

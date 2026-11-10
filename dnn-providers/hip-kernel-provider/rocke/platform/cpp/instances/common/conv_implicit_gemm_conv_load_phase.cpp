@@ -34,6 +34,7 @@
 #include <stddef.h>
 #include <string.h> /* strcmp */
 
+#include "rocke/helper_rocke.helpers.io.h" /* rocke_b_smem_load_fragment */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_choose_load_vec */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
@@ -210,17 +211,8 @@ rocke_value_t* rocke_conv_emit_smem_load(rocke_ir_builder_t* b,
  *      def _load_mma_operand(b, smem, row, col, n, *, smem_dtype, data):
  *          if not data.is_tf32:
  *              return _emit_smem_load(b, smem, row, col, n, smem_dtype=smem_dtype)
- *          if n <= _TF32_LDS_LOAD_MAX:
- *              frag = b.smem_load_vN(smem, row, col, dtype=F32, n=n)
- *          else:
- *              parts = [b.smem_load_vN(smem, row,
- *                                      col if i == 0 else b.add(col, b.const_i32(i)),
- *                                      dtype=F32, n=_TF32_LDS_LOAD_MAX)
- *                       for i in range(0, n, _TF32_LDS_LOAD_MAX)]
- *              while len(parts) > 1:
- *                  parts = [b.vec_concat(parts[i], parts[i + 1])
- *                           for i in range(0, len(parts), 2)]
- *              frag = parts[0]
+ *          frag = smem_load_fragment(b, smem, row, col, dtype=F32, n=n,
+ *                                    max_elems=_TF32_LDS_LOAD_MAX)
  *          return _to_mma_operand(b, frag, data)
  * ===================================================================== */
 rocke_value_t* rocke_conv_to_mma_operand(rocke_ir_builder_t* b, rocke_value_t* frag, bool is_tf32)
@@ -240,41 +232,8 @@ rocke_value_t* rocke_conv_load_mma_operand(rocke_ir_builder_t* b,
 {
     if(!is_tf32)
         return rocke_conv_emit_smem_load(b, smem, row, col, n, smem_dtype);
-    rocke_value_t* frag;
-    if(n <= ROCKE_CONV_TF32_LDS_LOAD_MAX)
-    {
-        rocke_value_t* idx[2] = {row, col};
-        frag = rocke_b_smem_load_vN(b, smem, idx, 2, rocke_f32(), n);
-    }
-    else
-    {
-        if(n % ROCKE_CONV_TF32_LDS_LOAD_MAX != 0)
-            return (rocke_value_t*)rocke_i_set_err(
-                b, ROCKE_ERR_VALUE, "TF32 fragment length %d is not a multiple of 4", n);
-        rocke_value_t* parts[ROCKE_CONV_MAX_ACCS];
-        int num_parts = 0;
-        for(int i = 0; i < n && num_parts < ROCKE_CONV_MAX_ACCS; i += ROCKE_CONV_TF32_LDS_LOAD_MAX)
-        {
-            /* Sequenced: Python evaluates const_i32 before add before the load. */
-            rocke_value_t* c = col;
-            if(i != 0)
-            {
-                rocke_value_t* off = rocke_b_const_i32(b, i);
-                c = rocke_b_add(b, col, off);
-            }
-            rocke_value_t* idx[2] = {row, c};
-            parts[num_parts++]
-                = rocke_b_smem_load_vN(b, smem, idx, 2, rocke_f32(), ROCKE_CONV_TF32_LDS_LOAD_MAX);
-        }
-        while(num_parts > 1)
-        {
-            int next = 0;
-            for(int i = 0; i < num_parts; i += 2)
-                parts[next++] = rocke_b_vec_concat(b, parts[i], parts[i + 1]);
-            num_parts = next;
-        }
-        frag = parts[0];
-    }
+    rocke_value_t* frag = rocke_b_smem_load_fragment(
+        b, smem, row, col, rocke_f32(), n, ROCKE_CONV_TF32_LDS_LOAD_MAX, 0);
     return rocke_conv_to_mma_operand(b, frag, true);
 }
 

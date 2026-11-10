@@ -90,6 +90,7 @@ from kernels.common.conv_abi import conv_direct_arg_names
 from rocke.helpers.fuse import dtype_to_ir
 from rocke.helpers.spec import ceil_div
 from rocke.helpers.grid import chiplet_transform_chunked_runtime
+from rocke.helpers.io import concat_tree, smem_load_fragment
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
@@ -377,9 +378,7 @@ def _load_elems(
         )
         for i in range(0, n, _F32_IO_MAX)
     ]
-    while len(parts) > 1:
-        parts = [b.vec_concat(parts[i], parts[i + 1]) for i in range(0, len(parts), 2)]
-    return parts[0]
+    return concat_tree(b, parts)
 
 
 def _store_from_f32(
@@ -476,30 +475,19 @@ def _smem_load_elems(
     """LDS read of ``n`` contiguous elements of ``dtype`` at ``[row, idx]``.
 
     16-bit dtypes issue the one ``smem_load_vN`` the f16 path always did. fp32
-    storage is read in ``<= 4``-element (16-byte, ds_read_b128) pieces at
-    consecutive element offsets and concatenated, so no LDS access asks for
+    storage is read by :func:`~rocke.helpers.io.smem_load_fragment` in
+    ``<= 4``-element (16-byte, ds_read_b128) pieces, so no LDS access asks for
     more than 16-byte alignment.
     """
-    io_type = _io_type(dtype)
-    if not _is_f32_storage(dtype) or n <= _F32_IO_MAX:
-        return b.smem_load_vN(lds, row, idx, dtype=io_type, n=n)
-    if n % _F32_IO_MAX:
-        raise ValueError(
-            f"fp32 direct-conv LDS read of {n} elements: not a multiple of 4"
-        )
-    parts = [
-        b.smem_load_vN(
-            lds,
-            row,
-            idx if i == 0 else b.add(idx, b.const_i32(i)),
-            dtype=F32,
-            n=_F32_IO_MAX,
-        )
-        for i in range(0, n, _F32_IO_MAX)
-    ]
-    while len(parts) > 1:
-        parts = [b.vec_concat(parts[i], parts[i + 1]) for i in range(0, len(parts), 2)]
-    return parts[0]
+    return smem_load_fragment(
+        b,
+        lds,
+        row,
+        idx,
+        dtype=_io_type(dtype),
+        n=n,
+        max_elems=_F32_IO_MAX if _is_f32_storage(dtype) else n,
+    )
 
 
 def _smem_store_elems(

@@ -42,6 +42,7 @@ from rocke.core.ir import (
     Value,
     VectorType,
 )
+from rocke.helpers.io import smem_load_fragment
 from rocke.helpers.magic_division import do_magic_division_dynamic
 from rocke.helpers.spec import choose_load_vec
 from rocke.helpers.transforms import (
@@ -619,33 +620,17 @@ def _load_mma_operand(
     """Read one MFMA operand fragment from LDS, in the type the MMA consumes.
 
     Non-TF32 specs take exactly the :func:`_emit_smem_load` path they always
-    did. Under TF32 the fragment is fp32 in LDS; it is read in loads of at most
-    four elements -- each claims only the 16-byte alignment a ``ds_read_b128``
+    did. Under TF32 the fragment is fp32 in LDS; it is read by
+    :func:`~rocke.helpers.io.smem_load_fragment` in loads of at most four
+    elements -- each claims only the 16-byte alignment a ``ds_read_b128``
     needs, which the validated row stride guarantees -- and then reinterpreted
     once as ``vec<tf32xN>`` (:func:`_to_mma_operand`, a free bitcast).
     """
     if not data.is_tf32:
         return _emit_smem_load(b, smem, row, col, n, smem_dtype=smem_dtype)
-    if n <= _TF32_LDS_LOAD_MAX:
-        frag = b.smem_load_vN(smem, row, col, dtype=F32, n=n)
-    else:
-        if n % _TF32_LDS_LOAD_MAX:
-            raise ValueError(f"TF32 fragment length {n} is not a multiple of 4")
-        parts = [
-            b.smem_load_vN(
-                smem,
-                row,
-                col if i == 0 else b.add(col, b.const_i32(i)),
-                dtype=F32,
-                n=_TF32_LDS_LOAD_MAX,
-            )
-            for i in range(0, n, _TF32_LDS_LOAD_MAX)
-        ]
-        while len(parts) > 1:
-            parts = [
-                b.vec_concat(parts[i], parts[i + 1]) for i in range(0, len(parts), 2)
-            ]
-        frag = parts[0]
+    frag = smem_load_fragment(
+        b, smem, row, col, dtype=F32, n=n, max_elems=_TF32_LDS_LOAD_MAX
+    )
     return _to_mma_operand(b, frag, data)
 
 

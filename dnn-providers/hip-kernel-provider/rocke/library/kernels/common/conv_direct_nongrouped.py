@@ -128,6 +128,7 @@ from rocke.core.ir import (
     KernelDef,
     Value,
 )
+from rocke.helpers.io import smem_load_fragment
 
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
@@ -1451,22 +1452,16 @@ def build_direct_conv_nongrouped(
         Each piece is one ``ds_read_b128`` (align 16, which is all the pixel
         stride guarantees); the pieces are concatenated in K order.
         """
-        n = min(FRAG, XV)
-        parts = [
-            b.smem_load_vN(
-                smem,
-                c0,
-                idx if h == 0 else b.add(idx, b.const_i32(h * plane_stride)),
-                dtype=io_type,
-                n=n,
-            )
-            for h in range(FRAG // n)
-        ]
-        while len(parts) > 1:
-            parts = [
-                b.vec_concat(parts[i], parts[i + 1]) for i in range(0, len(parts), 2)
-            ]
-        return parts[0]
+        return smem_load_fragment(
+            b,
+            smem,
+            c0,
+            idx,
+            dtype=io_type,
+            n=FRAG,
+            max_elems=min(FRAG, XV),
+            stride=plane_stride,
+        )
 
     def read_a_frag(base: Value, tap: int, mt: int, katom: int) -> Value:
         off = ((tap * M_TILES + mt) * KATOMS + katom) * WAVE * WV
