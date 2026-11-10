@@ -994,7 +994,7 @@ def validate_instance(spec: MxTdmV4Spec, tuning: Optional[Dict]) -> str:
 
 
 def instance_unsupported_reason(spec: MxTdmV4Spec, tuning: Optional[Dict]) -> str:
-    """MxGemmTdmV4Kernel::GetUnsupportedReason of the instance on spec's M, N and K: "" if it
+    """MxGemmKernel::GetUnsupportedReason of the v4 instance on spec's M, N and K: "" if it
     runs them, else the rocKE reason code or the shape trait it lacks."""
     reason = spec.validate()
     if reason != "ok":

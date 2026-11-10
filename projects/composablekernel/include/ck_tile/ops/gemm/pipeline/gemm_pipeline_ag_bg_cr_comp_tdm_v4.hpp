@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <string>
 #include <type_traits>
 
 #include "ck_tile/core.hpp"
@@ -91,6 +92,31 @@ CK_TILE_DEVICE TDM_GROUP1 tdm_group1(uint32_t workgroup_mask,
     g1.tensorDim1Stride(1);
     return g1;
 }
+
+/// The MxTdmV4GemmTraits values rocKE derives from `spec`'s shape, as host values.
+struct ShapeTraits
+{
+    bool edge_m;
+    bool edge_n;
+    bool wide_a;
+    bool wide_b;
+    bool wide_d;
+    index_t odd_tiles;
+    index_t tail_steps;
+    index_t store_width;
+};
+
+CK_TILE_HOST_DEVICE constexpr ShapeTraits shape_traits(const MxTdmV4Spec& s)
+{
+    return {s.edge_m(),
+            s.edge_n(),
+            s.wide_a(),
+            s.wide_b(),
+            s.wide_d(),
+            static_cast<index_t>(s.K / s.tile_k % 2),
+            s.tail_steps(),
+            s.store_width()};
+}
 } // namespace mx_tdm_v4
 
 /**
@@ -167,6 +193,11 @@ struct GemmPipelineAgBgCrCompTDMV4
         return 1;
     }
     static constexpr bool skipCheckValidLaunchParams = true;
+    /// MxGemmKernel runs this pipeline on its operand pointers and M, N, K (Operands) and the
+    /// tile origin (MakeCoords), not on tile windows, at k_batch == 1 on packed operands.
+    static constexpr bool kRawOperands = true;
+    using Operands                     = mx_tdm_v4::Operands;
+    using Coords                       = mx_tdm_v4::Coords;
 
     /// The workgroup's threads: kBlockSize of the device pass (4 waves of 32).
     static constexpr index_t kThreads     = kSpec.block_size();
@@ -194,6 +225,7 @@ struct GemmPipelineAgBgCrCompTDMV4
     static constexpr bool kHasCluster     = kSpec.has_cluster();
     static constexpr index_t kClusterX    = kSpec.cluster_x;
     static constexpr index_t kClusterY    = kSpec.cluster_y;
+    static constexpr index_t kClusterZ    = kSpec.cluster_z;
     static constexpr index_t kSignalWmmas = kSpec.signal_wmmas();
     static constexpr index_t kGl2Distance = kSpec.gl2_distance;
     static constexpr index_t kReadsPerStep =
@@ -213,8 +245,56 @@ struct GemmPipelineAgBgCrCompTDMV4
         return std::string("pipeline_AgBgCrCompTDMV4") + MxTdmV4TuningName<Tuning>();
     }
 
-    /// This thread's coordinates; the cluster ids are 0 without a cluster.
-    CK_TILE_DEVICE static mx_tdm_v4::Coords MakeCoords()
+    /// The name of an MxGemmKernel of this pipeline: data types, tile, tuning and traits.
+    [[nodiscard]] CK_TILE_HOST static std::string GetKernelName()
+    {
+        std::string name = std::string("mx_gemm_tdm_v4_mx") + mx_tdm_v4_dtype_name(kSpec.a_dtype);
+        if(kSpec.b_dtype != kSpec.a_dtype)
+            name += mx_tdm_v4_dtype_name(kSpec.b_dtype);
+        name += "_t" + std::to_string(kSpec.tile_m) + "x" + std::to_string(kSpec.tile_n) + "x" +
+                std::to_string(kSpec.tile_k) + mx_tdm_v4_tuning_name(kSpec);
+        if(Traits::kEdgeM || Traits::kEdgeN)
+            name += "_edge";
+        if(Traits::kWideA || Traits::kWideB || Traits::kWideD)
+            name += "_wide";
+        if(Traits::kOddTiles >= 0)
+            name += Traits::kOddTiles ? "_odd" : "_even";
+        if(Traits::kHasTail)
+            name += "_tail" + std::to_string(Traits::kTailSteps);
+        return name + "_w" + std::to_string(Traits::kStoreWidth);
+    }
+
+    /// nullptr if this instance runs an M x N x K problem, else why not: rocKE's validate() of the
+    /// full spec, or a shape path the traits lack.
+    CK_TILE_HOST static const char* GetUnsupportedReason(index_t M, index_t N, index_t K)
+    {
+        const MxTdmV4Spec spec     = Policy::template GetSpec<Problem>(M, N, K);
+        const MxTdmV4Reason reason = mx_tdm_v4_validate(spec);
+        if(reason != MxTdmV4Reason::Ok)
+            return mx_tdm_v4_reason_message(reason);
+        const mx_tdm_v4::ShapeTraits need = mx_tdm_v4::shape_traits(spec);
+        if(need.edge_m && !Traits::kEdgeM)
+            return "M is not a multiple of tile_m: needs an EdgeM instance";
+        if(need.edge_n && !Traits::kEdgeN)
+            return "N is not a multiple of tile_n: needs an EdgeN instance";
+        if(need.wide_a && !Traits::kWideA)
+            return "A's offsets pass 2^31: needs a WideA instance";
+        if(need.wide_b && !Traits::kWideB)
+            return "B's offsets pass 2^31: needs a WideB instance";
+        if(need.wide_d && !Traits::kWideD)
+            return "D's offsets pass 2^31: needs a WideD instance";
+        if(Traits::kOddTiles >= 0 && need.odd_tiles != Traits::kOddTiles)
+            return "the tile count K / tile_k does not have the instance's OddTiles parity";
+        if(need.tail_steps != Traits::kTailSteps)
+            return "the K tail (K mod tile_k, in 128-wide K steps) is not the instance's TailSteps";
+        if(N % Traits::kStoreWidth != 0)
+            return "the store width does not divide N";
+        return nullptr;
+    }
+
+    /// This thread's coordinates in the tile at (block_m, block_n); the cluster ids are 0 without
+    /// a cluster.
+    CK_TILE_DEVICE static mx_tdm_v4::Coords MakeCoords(index_t block_m, index_t block_n)
     {
         mx_tdm_v4::Coords c{};
         c.tid       = static_cast<index_t>(threadIdx.x);
@@ -225,8 +305,8 @@ struct GemmPipelineAgBgCrCompTDMV4
         c.wave    = amd_wave_read_first_lane(integer_divide_nonnegative<mx_tdm_v4::kWave>(c.tid));
         c.wave_n  = integer_modulo_nonnegative<kWarpN>(c.wave);
         c.wave_m  = integer_divide_nonnegative<kWarpN>(c.wave);
-        c.block_m = static_cast<index_t>(blockIdx.y) * kTileM;
-        c.block_n = static_cast<index_t>(blockIdx.x) * kTileN;
+        c.block_m = block_m;
+        c.block_n = block_n;
         if constexpr(kHasCluster)
         {
             c.cluster_wx = static_cast<index_t>(get_cluster_workgroup_id_x());

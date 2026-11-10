@@ -30,6 +30,7 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/host/arg_parser.hpp"
 #include "ck_tile/host/mx_scale_kmajor.hpp"
+#include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
 namespace {
@@ -64,10 +65,10 @@ using Pipeline = ck_tile::GemmPipelineAgBgCrCompTDMV4<
     ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>;
 
 template <typename P>
-using KernelOf = ck_tile::MxGemmTdmV4Kernel<
-    ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
-    P,
-    ck_tile::MxAlphaBetaEpilogue<ck_tile::MxAlphaBetaEpilogueProblem<P>>>;
+using KernelOf =
+    ck_tile::MxGemmKernel<ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
+                          P,
+                          ck_tile::MxAlphaBetaEpilogue<ck_tile::MxAlphaBetaEpilogueProblem<P>>>;
 
 template <typename A,
           typename B,
@@ -89,7 +90,7 @@ float launch(const ck_tile::stream_config& s, const typename K::KernelArgs& karg
 {
     if(!K::IsSupportedArgument(kargs))
         throw std::runtime_error(K::GetName() + ": " + K::GetUnsupportedReason(kargs));
-    const dim3 grids  = K::GridSize(kargs.M, kargs.N);
+    const dim3 grids  = K::GridSize(kargs.M, kargs.N, kargs.k_batch);
     const dim3 blocks = K::BlockSize();
     if constexpr(K::ClusterLaunch)
     {
@@ -254,23 +255,24 @@ Host make_inputs(const ck_tile::MxTdmV4Spec& s, bool sparse, bool trig, uint32_t
 template <typename K>
 int run(const Options& o)
 {
-    const auto s      = K::Policy::template GetSpec<typename K::Problem>(o.M, o.N, o.K);
+    using P           = typename K::GemmPipeline;
+    const auto s      = P::Policy::template GetSpec<typename P::Problem>(o.M, o.N, o.K);
     const float alpha = o.mode == "verify" ? 1.0f / 64 : o.alpha;
     {
         uint8_t dummy = 0;
-        const typename K::HostArgs probe{&dummy,
-                                         &dummy,
-                                         &dummy,
-                                         &dummy,
-                                         &dummy,
+        const typename K::HostArgs probe{{&dummy},
+                                         {&dummy},
+                                         {&dummy},
+                                         {&dummy},
+                                         {&dummy},
                                          &dummy,
                                          1,
                                          o.M,
                                          o.N,
                                          o.K,
-                                         o.K,
-                                         o.K,
-                                         o.N,
+                                         {o.K},
+                                         {o.K},
+                                         {o.N},
                                          o.N,
                                          alpha,
                                          o.beta};
@@ -282,7 +284,7 @@ int run(const Options& o)
         }
     }
     std::cout << K::GetName() << " M " << o.M << " N " << o.N << " K " << o.K << " grid "
-              << K::GridSize(o.M, o.N).x << "x" << K::GridSize(o.M, o.N).y << " lds "
+              << K::GridSize(o.M, o.N, 1).x << "x" << K::GridSize(o.M, o.N, 1).y << " lds "
               << K::GetSmemSize() << "\n";
     if(o.mode == "check")
         return 0;
@@ -307,19 +309,19 @@ int run(const Options& o)
     bs.ToDevice(h.bs.data());
     c.ToDevice(h.c.data());
     d.SetZero();
-    const typename K::HostArgs host_args{a.GetDeviceBuffer(),
-                                         as.GetDeviceBuffer(),
-                                         b.GetDeviceBuffer(),
-                                         bs.GetDeviceBuffer(),
-                                         c.GetDeviceBuffer(),
+    const typename K::HostArgs host_args{{a.GetDeviceBuffer()},
+                                         {as.GetDeviceBuffer()},
+                                         {b.GetDeviceBuffer()},
+                                         {bs.GetDeviceBuffer()},
+                                         {c.GetDeviceBuffer()},
                                          d.GetDeviceBuffer(),
                                          1,
                                          o.M,
                                          o.N,
                                          o.K,
-                                         o.K,
-                                         o.K,
-                                         o.N,
+                                         {o.K},
+                                         {o.K},
+                                         {o.N},
                                          o.N,
                                          alpha,
                                          o.beta};

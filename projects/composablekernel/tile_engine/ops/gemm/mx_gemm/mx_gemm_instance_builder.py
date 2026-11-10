@@ -268,7 +268,7 @@ struct SelectedKernel {{
                                    ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>,
             Traits>,
         ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>;
-    using Kernel = ck_tile::MxGemmTdmV4Kernel<
+    using Kernel = ck_tile::MxGemmKernel<
         ck_tile::GemmTile2DNMajorPartitioner<typename Pipeline::BlockGemmShape>,
         Pipeline,
         ck_tile::MxAlphaBetaEpilogue<ck_tile::MxAlphaBetaEpilogueProblem<Pipeline>>>;
@@ -276,19 +276,19 @@ struct SelectedKernel {{
     static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream)
     {{
         // D = A @ B^T: alpha 1, beta 0, so no C.
-        const typename Kernel::HostArgs host_args{{args.as_ptr[0],
-                                                  args.as_scale_ptr[0],
-                                                  args.bs_ptr[0],
-                                                  args.bs_scale_ptr[0],
-                                                  nullptr,
+        const typename Kernel::HostArgs host_args{{args.as_ptr,
+                                                  args.as_scale_ptr,
+                                                  args.bs_ptr,
+                                                  args.bs_scale_ptr,
+                                                  {{nullptr}},
                                                   args.e_ptr,
                                                   args.k_batch,
                                                   args.M,
                                                   args.N,
                                                   args.K,
-                                                  args.stride_As[0],
-                                                  args.stride_Bs[0],
-                                                  args.stride_E,
+                                                  args.stride_As,
+                                                  args.stride_Bs,
+                                                  {{args.stride_E}},
                                                   args.stride_E,
                                                   1.0f,
                                                   0.0f}};
@@ -296,7 +296,7 @@ struct SelectedKernel {{
             throw std::runtime_error(std::string("Arguments not supported: ") +
                                      Kernel::GetUnsupportedReason(host_args));
         const auto kargs  = Kernel::MakeKernelArgs(host_args);
-        const dim3 grids  = Kernel::GridSize(args.M, args.N);
+        const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
         const dim3 blocks = Kernel::BlockSize();
         if constexpr(Kernel::ClusterLaunch)
         {{

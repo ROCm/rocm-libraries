@@ -94,10 +94,14 @@ struct GemmTile2DNMajorPartitioner
     static constexpr index_t MPerBlock = BlockGemmShape::kM;
     static constexpr index_t NPerBlock = BlockGemmShape::kN;
     static constexpr index_t KPerBlock = BlockGemmShape::kK;
+    /// GridSize is 2D: UniversalGemmKernel reads the tile from blockIdx.x and blockIdx.y.
+    static constexpr bool kGrid2D = true;
 
     CK_TILE_HOST_DEVICE GemmTile2DNMajorPartitioner() noexcept = delete;
     CK_TILE_HOST_DEVICE GemmTile2DNMajorPartitioner([[maybe_unused]] index_t M,
-                                                    [[maybe_unused]] index_t N) noexcept;
+                                                    [[maybe_unused]] index_t N) noexcept
+    {
+    }
 
     /**
      * @brief Calculates GEMM kernel grid size.
@@ -130,13 +134,13 @@ struct GemmTile2DNMajorPartitioner
      * @param blockIdx      WGP's X index (the N tile).
      * @param blockIdy      WGP's Y index (the M tile).
      * @return const tuple<index_t, index_t>    Tuple containing 2D output C-tile index (M, N).
+     * @note The workgroup ids are wave-uniform already; no amd_wave_read_first_lane, which would
+     *       hide from LLVM that the tile origin is a multiple of the tile.
      */
     CK_TILE_DEVICE static auto
     GetOutputTileIndex(index_t blockIdx, index_t blockIdy) noexcept -> const tuple<index_t, index_t>
     {
-        const index_t iM = amd_wave_read_first_lane(blockIdy);
-        const index_t iN = amd_wave_read_first_lane(blockIdx);
-        return make_tuple(iM, iN);
+        return make_tuple(blockIdy, blockIdx);
     }
 };
 

@@ -87,7 +87,8 @@ struct MxAlphaBetaEpilogue
 
     static_assert(kStoreWidth >= 1 && kStoreWidth <= kSpec.max_store_width() &&
                       kRn % kStoreWidth == 0 && (kStoreWidth & (kStoreWidth - 1)) == 0,
-                  "comp_tdm_v4: StoreWidth must be a power of 2 dividing the N repeat, <= 16 B");
+                  "comp_tdm_v4: the D store width must be a power of 2 dividing the N repeat, "
+                  "<= 16 B");
 
     using Storage = std::conditional_t<kOutBytes == 1, uint8_t, uint16_t>;
     using SVec = std::conditional_t<kStoreWidth == 1, Storage, ext_vector_t<Storage, kStoreWidth>>;

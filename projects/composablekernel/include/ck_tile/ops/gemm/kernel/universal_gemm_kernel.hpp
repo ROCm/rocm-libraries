@@ -282,6 +282,17 @@ struct UniversalGemmKernel
              TilePartitioner::BlockGemmShape::kclusterK >
          1);
 
+    template <typename T>
+    using has_grid_2d = decltype(T::kGrid2D);
+    /// The workgroup's tile comes from blockIdx.x and blockIdx.y: with a cluster, or with a
+    /// partitioner whose GridSize is 2D without one (kGrid2D, GemmTile2DNMajorPartitioner).
+    static constexpr bool kTileIndex2D = ClusterLaunch || []() {
+        if constexpr(is_detected<has_grid_2d, TilePartitioner>{})
+            return TilePartitioner::kGrid2D;
+        else
+            return false;
+    }();
+
     static constexpr auto I0 = number<0>();
     static constexpr auto I1 = number<1>();
     static constexpr auto I2 = number<2>();
@@ -418,7 +429,10 @@ struct UniversalGemmKernel
     {
         // Balances K-dimension work across batches to maximize parallelism while minimizing
         // load imbalance. Uses ceil division to distribute remainder work evenly.
-        __device__ SplitKBatchOffset(const KernelArgs& kargs, const index_t k_id = blockIdx.z)
+        /// KArgs: KernelArgs, or a derived kernel's arguments with the same K, k_batch and stride
+        /// members.
+        template <typename KArgs>
+        __device__ SplitKBatchOffset(const KArgs& kargs, const index_t k_id = blockIdx.z)
         {
             constexpr auto K1     = TilePartitioner::BlockGemmShape::WarpTile::at(number<2>{});
             const index_t num_all = amd_wave_read_first_lane(
@@ -1620,14 +1634,14 @@ struct UniversalGemmKernel
         }
     }
 
-    CK_TILE_DEVICE static auto
-    GetTileCoordinates(const KernelArgs& kargs) -> tuple<index_t, index_t>
+    template <typename KArgs>
+    CK_TILE_DEVICE static auto GetTileCoordinates(const KArgs& kargs) -> tuple<index_t, index_t>
     {
         index_t iM, iN;
 
-        if constexpr(ClusterLaunch)
+        if constexpr(kTileIndex2D)
         {
-            // Cluster launch: use 2D block indexing
+            // Cluster launch or a 2D partitioner: use 2D block indexing
             const auto blockIdX = amd_wave_read_first_lane(blockIdx.x);
             const auto blockIdY = amd_wave_read_first_lane(blockIdx.y);
             const auto [tile_m, tile_n] =

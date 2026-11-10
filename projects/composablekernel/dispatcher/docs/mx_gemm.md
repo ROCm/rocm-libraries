@@ -20,7 +20,7 @@ on gfx1250 also `comp_tdm_v4`, the CK backport of rocKE's `mx_gemm` (see
 | gfx1250 | `comp_async` | `GemmPipelineAgBgCrCompAsync` | CShuffle |
 | gfx1250 | `comp_async_eight_waves` | `GemmPipelineAgBgCrCompAsyncEightWaves` | CShuffle |
 | gfx1250 | `weight_preshuffle` | `MXGemmPreshufflePipelineAGmemBGmemCRegV1` | CShuffle |
-| gfx1250 | `comp_tdm_v4` | `GemmPipelineAgBgCrCompTDMV4` (`MxGemmTdmV4Kernel`) | `alphabeta` (`MxAlphaBetaEpilogue`) |
+| gfx1250 | `comp_tdm_v4` | `GemmPipelineAgBgCrCompTDMV4` (`MxGemmKernel`) | `alphabeta` (`MxAlphaBetaEpilogue`) |
 
 The first five are the choices in the native `MxGemmPipelineType` selector.
 CK-Tile also has a separate `MXFlatmmKernel` family, including
@@ -92,7 +92,7 @@ scales of one tile with a single TDM box. Callers pass the natural `[MN][K / 32]
 scales as for the other pipelines; the bridge and the Tile Engine profiler
 convert them with `ck_tile::mx_scale_to_kmajor` when the generated
 `SelectedKernel` declares `KMajorScales`. The kernel checks the problem itself
-(`IsSupportedArgument` on its `MxGemmTdmV4HostArgs`; `GetUnsupportedReason`
+(`IsSupportedArgument` on its `MxGemmAlphaBetaHostArgs`; `GetUnsupportedReason`
 says why): `k_batch` must be 1 and the strides packed, K must be a multiple of
 32, and the K tail, the tile parity and partial M and N tiles must match the
 instance's shape traits.

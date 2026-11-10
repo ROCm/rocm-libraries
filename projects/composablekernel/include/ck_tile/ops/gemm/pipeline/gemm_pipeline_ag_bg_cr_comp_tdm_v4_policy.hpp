@@ -245,7 +245,7 @@ struct GemmPipelineAgBgCrCompTDMV4Policy
 };
 
 /// rocKE's validate() at compile time: nullptr if Problem and Tuning build, else the reason code
-/// (see mx_tdm_v4_reason_code). The shape rules are MxGemmTdmV4Kernel::IsSupportedArgument's.
+/// (see mx_tdm_v4_reason_code). The shape rules are the pipeline's GetUnsupportedReason.
 template <typename Problem, typename Tuning = MxTdmV4DefaultTuning>
 CK_TILE_HOST_DEVICE constexpr const char* MxTdmV4Validate()
 {

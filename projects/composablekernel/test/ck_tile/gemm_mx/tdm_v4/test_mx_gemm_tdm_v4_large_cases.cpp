@@ -32,7 +32,7 @@ std::vector<index_t> sample_rows(index_t M, index_t tile_m)
 template <typename Kernel>
 void check_sampled(index_t M, index_t N, index_t K, float beta)
 {
-    constexpr auto s = Kernel::kSpec;
+    constexpr auto s = Kernel::GemmPipeline::kSpec;
     SCOPED_TRACE(Kernel::GetName() + " M" + std::to_string(M) + " N" + std::to_string(N) + " K" +
                  std::to_string(K));
     const Inputs in = make_inputs(s.a_dtype, s.b_dtype, s.out, M, N, K, s.tile_k);

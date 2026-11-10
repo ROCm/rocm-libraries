@@ -22,6 +22,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
 #include "ck_tile/host/mx_scale_kmajor.hpp"
+#include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
 namespace mx_tdm_v4_test {
@@ -57,10 +58,10 @@ using Pipeline = ck_tile::GemmPipelineAgBgCrCompTDMV4<
 
 /// The kernel of a v4 pipeline: its N-major partitioner and its alpha / beta epilogue.
 template <typename P>
-using KernelOf = ck_tile::MxGemmTdmV4Kernel<
-    ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
-    P,
-    ck_tile::MxAlphaBetaEpilogue<ck_tile::MxAlphaBetaEpilogueProblem<P>>>;
+using KernelOf =
+    ck_tile::MxGemmKernel<ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
+                          P,
+                          ck_tile::MxAlphaBetaEpilogue<ck_tile::MxAlphaBetaEpilogueProblem<P>>>;
 
 template <typename A,
           typename B,
@@ -202,7 +203,7 @@ typename Kernel::HostArgs host_args(const void* a,
                                     float beta)
 {
     return typename Kernel::HostArgs{
-        a, a_scale, b, b_scale, c, d, 1, M, N, K, K, K, N, N, alpha, beta};
+        {a}, {a_scale}, {b}, {b_scale}, {c}, d, 1, M, N, K, {K}, {K}, {N}, N, alpha, beta};
 }
 
 /// Launches Kernel: the grid of GridSize, and with a cluster tuning the cluster of ClusterSize.
@@ -211,7 +212,7 @@ float launch(const ck_tile::stream_config& s, const typename Kernel::KernelArgs&
 {
     if(!Kernel::IsSupportedArgument(kargs))
         throw std::runtime_error(Kernel::GetName() + ": " + Kernel::GetUnsupportedReason(kargs));
-    const dim3 grids  = Kernel::GridSize(kargs.M, kargs.N);
+    const dim3 grids  = Kernel::GridSize(kargs.M, kargs.N, kargs.k_batch);
     const dim3 blocks = Kernel::BlockSize();
     if constexpr(Kernel::ClusterLaunch)
     {
@@ -346,7 +347,7 @@ inline std::string first_mismatch(const std::vector<uint8_t>& got,
 template <typename Kernel>
 constexpr MxTdmV4OutDtype out_of()
 {
-    return Kernel::kSpec.out;
+    return Kernel::GemmPipeline::kSpec.out;
 }
 
 /// Runs `Kernel` on rocKE's sparse inputs at each beta and requires bitwise equality with the
@@ -354,7 +355,7 @@ constexpr MxTdmV4OutDtype out_of()
 template <typename Kernel>
 void check(index_t M, index_t N, index_t K, std::initializer_list<float> betas = {0.0f, 0.5f})
 {
-    constexpr auto s = Kernel::kSpec;
+    constexpr auto s = Kernel::GemmPipeline::kSpec;
     SCOPED_TRACE(Kernel::GetName() + " M" + std::to_string(M) + " N" + std::to_string(N) + " K" +
                  std::to_string(K));
     Inputs in        = make_inputs(s.a_dtype, s.b_dtype, s.out, M, N, K, s.tile_k);
