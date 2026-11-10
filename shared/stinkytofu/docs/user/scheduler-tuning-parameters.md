@@ -44,10 +44,11 @@ Each parameter resolves independently, first match wins:
   nothing may issue in a scale WMMA's blocked (LD_SCALE) slot.
 - **WMMA queue**: the matrix pipe buffers 8 WMMAs, or 5 `v_wmma_scale*` pairs (measured on
   gfx1250 with `DISABLE_XDL_ARB_STALL` set), so a WMMA can issue while earlier ones are still
-  outstanding. The depth is a hardware fact (`HWModel::Matrix`), not an option: a region that
-  holds a `v_wmma_scale*` pair uses 5, any other 8. Queued WMMAs run one after another in the pipe, each taking its full
-  `L`, and the pipe window is their segments end to end. With depth 1 a WMMA waits for
-  the previous one to finish: the single-window model.
+  outstanding. The depth is per-opcode hardware metadata generated from the architecture
+  `.def`, not an option: `v_wmma_scale*` uses 5, other matrix opcodes use 8. Queued WMMAs run
+  one after another in the pipe, each taking its full `L`, and the pipe window is their
+  segments end to end. With depth 1 a WMMA waits for the previous one to finish: the
+  single-window model.
 - **WMMA clock**: knobs measured "in WMMAs" count issued WMMAs, so they do not
   change meaning with the queue.
 

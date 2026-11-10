@@ -157,6 +157,10 @@ struct CDNA5ReadyQueueTestPeer {
     static bool overlaps(CDNA5ReadyQueue& q, DAGNode* n) {
         return q.destOverlapsActiveWmmaSrc(n);
     }
+    static void setQueueDepth(CDNA5ReadyQueue& q, const HwInstDesc& desc) {
+        q.regionWmmaQueueDepth_ = std::max(1, static_cast<int>(desc.matrixQueueDepth));
+        q.regionQueueFillDepth_ = q.regionWmmaQueueDepth_;
+    }
     static constexpr uint8_t kBlocked = CDNA5ReadyQueue::kBlockedSlot;
 };
 
@@ -357,6 +361,8 @@ TEST_F(CDNA5ReadyQueueTest, MixedDrainCapUsesMaxDrainInBurst) {
 //  - Elapsed: already wall time, so the blocked cycle is not charged a second time.
 TEST_F(CDNA5ReadyQueueTest, AdvanceTimeReadsItsArgumentByKind) {
     using Peer = CDNA5ReadyQueueTestPeer;
+    const HwInstDesc* wmma = getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, GfxArchID::Gfx1250);
+    ASSERT_NE(wmma, nullptr);
     for (int on = 0; on < 2; ++on) {
         PassContext ctx = on ? makeQueueCtx(16) : makeQueueCtx(0);
         struct Case {
@@ -372,6 +378,7 @@ TEST_F(CDNA5ReadyQueueTest, AdvanceTimeReadsItsArgumentByKind) {
         };
         for (const Case& c : cases) {
             CDNA5ReadyQueue queue(ctx);
+            Peer::setQueueDepth(queue, *wmma);
             Peer::slots(queue).assign(20, 1);
             Peer::slots(queue)[15] = Peer::kBlocked;
             Peer::latency(queue) = 20;
@@ -390,24 +397,32 @@ TEST_F(CDNA5ReadyQueueTest, AdvanceTimeReadsItsArgumentByKind) {
 // for an 8-cycle one. An explicit cover is the same for both and 0 turns the queue model off.
 TEST_F(CDNA5ReadyQueueTest, AutomaticRefillLineFollowsTheNextWmmaLatency) {
     using Peer = CDNA5ReadyQueueTestPeer;
+    const HwInstDesc* wmma = getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, GfxArchID::Gfx1250);
+    ASSERT_NE(wmma, nullptr);
     PassContext autoCtx = makeQueueCtx(-1);
     CDNA5ReadyQueue autoQueue(autoCtx);
+    Peer::setQueueDepth(autoQueue, *wmma);
     EXPECT_EQ(Peer::cover(autoQueue, 4), 28);
     EXPECT_EQ(Peer::cover(autoQueue, 8), 56);
 
     PassContext explicitCtx = makeQueueCtx(40);
     CDNA5ReadyQueue explicitQueue(explicitCtx);
+    Peer::setQueueDepth(explicitQueue, *wmma);
     EXPECT_EQ(Peer::cover(explicitQueue, 4), 40);
     EXPECT_EQ(Peer::cover(explicitQueue, 8), 40);
 
     PassContext offCtx = makeQueueCtx(0);
     CDNA5ReadyQueue offQueue(offCtx);
+    Peer::setQueueDepth(offQueue, *wmma);
     EXPECT_EQ(Peer::cover(offQueue, 8), 0);
 }
 
 TEST_F(CDNA5ReadyQueueTest, QueuedWmmaWarStateSurvivesARegionCut) {
     PassContext ctx = makeQueueCtx(16);
     CDNA5ReadyQueue queue(ctx);
+    const HwInstDesc* wmma = getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, GfxArchID::Gfx1250);
+    ASSERT_NE(wmma, nullptr);
+    CDNA5ReadyQueueTestPeer::setQueueDepth(queue, *wmma);
     // A WMMA reading v[0:7] ends 40 cycles into the window; the region ends at position 10.
     CDNA5ReadyQueueTestPeer::srcs(queue).push_back({StinkyRegister("v", 0, 8)});
     CDNA5ReadyQueueTestPeer::ends(queue).push_back(40);
@@ -454,6 +469,7 @@ TEST_F(CDNA5ReadyQueueTest, ForcedWmmaChargesItsSourceStallWhenTheQueueModelIsOn
         AsmIRBuilder builder(*b, GfxArchID::Gfx1250);
         StinkyInstruction* wmma =
             builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, GfxArchID::Gfx1250));
+        CDNA5ReadyQueueTestPeer::setQueueDepth(queue, *wmma->getHwInstDesc());
         wmma->addDestReg(StinkyRegister("v", 200, 8));
         wmma->addSrcReg(StinkyRegister("v", 100, 8));  // reads the ds_load's v[100:103]
         wmma->addSrcReg(StinkyRegister("v", 100, 8));
