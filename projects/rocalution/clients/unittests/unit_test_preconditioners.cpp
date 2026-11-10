@@ -1944,6 +1944,14 @@ TYPED_TEST(preconditioners, approximate_inverses_move_to_the_other_backend)
         {"explicit TNS", &explicit_p, truncated_neumann(ref, r)},
     };
 
+    // The matrices that the preconditioners apply are analysed on the accelerator
+    auto applied = [&](Solver<T>& p, Matrix<T>& A) {
+        std::vector<T>    z;
+        const std::string log = logged([&] { z = apply(p, A, r); });
+        EXPECT_EQ(log.find("the SpMV analysis is performed lazily"), std::string::npos);
+        return z;
+    };
+
     std::vector<std::unique_ptr<Matrix<T>>> matrices;
     for(const auto& [name, p, reference] : cases)
     {
@@ -1954,12 +1962,12 @@ TYPED_TEST(preconditioners, approximate_inverses_move_to_the_other_backend)
         p->Build();
 
         move(other(this->backend()), *p, A);
-        expect_near(apply(*p, A, r), reference, scaled_tol<T>(1e-13));
+        expect_near(applied(*p, A), reference, scaled_tol<T>(1e-13));
 
         // A second Build clears the first one
         move(this->backend(), *p, A);
         p->Build();
-        expect_near(apply(*p, A, r), reference, scaled_tol<T>(1e-13));
+        expect_near(applied(*p, A), reference, scaled_tol<T>(1e-13));
     }
 }
 

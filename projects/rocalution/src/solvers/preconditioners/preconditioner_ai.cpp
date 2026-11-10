@@ -689,6 +689,7 @@ namespace rocalution
         this->L_.MoveToAccelerator();
         this->LT_.MoveToAccelerator();
 
+        this->TNS_.ApplyAnalyse();
         this->L_.ApplyAnalyse();
         this->LT_.ApplyAnalyse();
 
