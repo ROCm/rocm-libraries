@@ -54,6 +54,8 @@ class _SlotPlacer:
         self._adjusters = adjusters or []
         self._onPlace = onPlace
         self.denseToFit = False
+        # (first, last) slot every search and forced placement stays within.
+        self.window: Optional[Tuple[int, int]] = None
 
         self._placed: List[List[Tuple[int, object]]] = [[] for _ in range(self.totalSlots)]
         self._firstPos: List[Optional[int]] = [None] * numModules
@@ -101,6 +103,9 @@ class _SlotPlacer:
         succ = self._nextInPath[mid]
         if 0 <= succ < self._n and self._firstPos[succ] is not None:
             hi = self._firstPos[succ] - 1
+        if self.window is not None:
+            lo = max(lo, self.window[0])
+            hi = min(hi, self.window[1])
         return lo, hi
 
     def findSlot(self, mid: int, inst, limit: int, reverse: bool = False) -> Optional[int]:
@@ -3627,6 +3632,535 @@ def _scheduleHalfDisjointCell(
     return scheduled
 
 
+# Measured on gfx950 (sol 101 ATT, 32-cycle MFMA cadence): cycles of
+# non-MFMA issue one MFMA gap absorbs, and what each class costs there.
+_GAP_ISSUE_BUDGET = 28
+_BARRIER_CYCLES = 17
+_WAITING_DRAIN_CYCLES = 20
+_LOAD_CYCLES = 12
+_VALU_AFTER_MFMA_STALL = 8
+_ONE_ISSUE_CYCLES = 4
+_LOAD_BESIDE_FENCE_EXCESS = 20
+_LOAD_PAST_RUN_EXCESS = 23
+_SALU_BURST = 5
+_SALU_BURST_EXCESS = 6
+
+
+def _issueExcess(gaps):
+    """Estimated cycles a run of MFMA gaps adds over the MFMA cadence.
+
+    gaps holds each gap's instructions in issue order. A gap costs what it
+    issues beyond _GAP_ISSUE_BUDGET: a barrier 17 cycles, a local-read
+    drain 20 while a ds_read is fewer than _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT
+    MFMAs old (else 4), a load 12, a VALU 4 plus 8 when it opens the gap,
+    anything else 4. More than _SALU_BURST SALUs add 6, a load beside a
+    barrier or wait 20, every load
+    past _MXFP8_MAX_DTL_RUN in a row 23, and every ds_read past the first
+    beside a load 1.
+    """
+    total, run, lastRead = 0.0, 0, None
+    for index, gap in enumerate(gaps):
+        insts = [inst for inst in gap if not isinstance(inst, TextBlock)]
+        issue = 0.0
+        for position, inst in enumerate(insts):
+            if _isBarrier(inst):
+                issue += _BARRIER_CYCLES
+            elif _isFullLgkmDrain(inst) and lastRead is not None and (
+                    index - lastRead < _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT):
+                issue += _WAITING_DRAIN_CYCLES
+            elif _isBufferLoad(inst):
+                issue += _LOAD_CYCLES
+            elif _isVALU(inst):
+                issue += _ONE_ISSUE_CYCLES + (_VALU_AFTER_MFMA_STALL if position == 0 else 0)
+            else:
+                issue += _ONE_ISSUE_CYCLES
+        excess = max(0.0, issue - _GAP_ISSUE_BUDGET)
+        if sum(map(_isScalarAlu, insts)) > _SALU_BURST:
+            excess += _SALU_BURST_EXCESS
+        if any(_isBufferLoad(inst) for inst in insts):
+            run += 1
+            if any(_isBarrier(inst) or _isWaitCnt(inst) for inst in insts):
+                excess += _LOAD_BESIDE_FENCE_EXCESS
+            if run > _MXFP8_MAX_DTL_RUN:
+                excess += _LOAD_PAST_RUN_EXCESS
+            excess += max(0, sum(map(_isDsRead, insts)) - 1)
+        else:
+            run = 0
+        if any(_isDsRead(inst) for inst in insts):
+            lastRead = index
+        total += excess
+    return total
+
+
+def _moduleGaps(module):
+    """A scheduled module's MFMA gaps: the instructions after each MFMA."""
+    gaps = []
+    for inst in module.flatitems():
+        if isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
+            gaps.append([])
+        elif gaps:
+            gaps[-1].append(inst)
+    return gaps
+
+
+def _halfMemoryPlan(eligible, readGroups, loadCount):
+    """Joint ds_read and load gaps for one half, one memory op a gap
+    where the half has room.
+
+    eligible lists, in order, the MFMA gaps open to a ds_read or a load.
+    readGroups holds (allowed gaps, read count) per group of reads that
+    keep their order; a group's last allowed gap is its deadline. Loads
+    are paced evenly over the capacity the reads leave: a gap counts only
+    for the share of it no read group needs. Reads take the other gaps,
+    earliest deadline first and as early as allowed, two to a gap only
+    where one a gap would miss a deadline. A load never shares its gap.
+
+    Returns (gaps per read group, load gaps), or None when the reads
+    leave the loads no capacity or a group cannot meet its deadline.
+    """
+    n = len(eligible)
+    index = {gap: i for i, gap in enumerate(eligible)}
+    allowed = []
+    capacity = [1.0] * n
+    for gaps, count in readGroups:
+        positions = sorted(index[gap] for gap in set(gaps) if gap in index)
+        if count and not positions:
+            return None
+        allowed.append(positions)
+        for i in positions if count else ():
+            capacity[i] -= min(1.0, count / len(positions))
+    capacity = [max(0.0, c) for c in capacity]
+
+    loads = []
+    room = sum(capacity)
+    if loadCount:
+        if room <= 0:
+            return None
+        acc = 0.0
+        for i, c in enumerate(capacity):
+            acc += c
+            while (len(loads) < loadCount
+                   and acc + 1e-9 >= (len(loads) + 0.5) * room / loadCount):
+                loads.append(max(i, loads[-1] + 1) if loads else i)
+        if len(loads) < loadCount or loads[-1] >= n:
+            return None
+
+    loadSet = set(loads)
+    free = [i for i in range(n) if i not in loadSet]
+    remaining = [count for _, count in readGroups]
+    allowedSets = [set(positions) for positions in allowed]
+    deadline = [positions[-1] if positions else -1 for positions in allowed]
+    targets = [[] for _ in readGroups]
+    order = sorted(range(len(readGroups)), key=lambda g: (deadline[g], g))
+    for cursor, i in enumerate(free):
+        pending = [g for g in order if remaining[g]]
+        if not pending:
+            break
+        if any(deadline[g] < i for g in pending):
+            return None
+        doubled = False
+        for g in pending:
+            group = [k for k in pending if deadline[k] <= deadline[g]]
+            demand = sum(remaining[k] for k in group)
+            avail = sum(
+                1 for j in free[cursor:]
+                if j <= deadline[g] and any(j in allowedSets[k] for k in group))
+            if demand > 2 * avail:
+                return None
+            doubled = doubled or demand > avail
+        for _ in range(2 if doubled else 1):
+            ready = [g for g in order if remaining[g] and i in allowedSets[g]]
+            if not ready:
+                break
+            targets[ready[0]].append(eligible[i])
+            remaining[ready[0]] -= 1
+    if any(remaining):
+        return None
+    return targets, [eligible[i] for i in loads]
+
+
+def _halfCellOrderSafe(sequence, cellOf, pathOrders, modules):
+    """Whether a half's final order keeps every cross-cell dependency.
+
+    sequence is the half's (moduleId, instruction) in issue order, MFMAs
+    included. Per-cell scheduling issued every instruction of a cell after
+    those of earlier cells, so each pair the half cell inverted must be
+    free to reorder by register spans, nothing may cross a barrier or a
+    VMEM wait, and every SCC reader must still see the SCC writer ahead
+    of it in its own path. Local-read waits only gain coverage when a
+    read moves ahead of them, so reads may cross them.
+    """
+    producer = {}
+    for order in pathOrders:
+        last = None
+        for mid in order:
+            for inst in modules[mid].instructions:
+                if _readsScc(inst):
+                    producer[id(inst)] = last
+                if _writesScc(inst):
+                    last = id(inst)
+
+    def skipped(inst):
+        return isinstance(inst, TextBlock) or (
+            _isWaitCnt(inst) and getattr(inst, "vlcnt", -1) < 0)
+
+    def fence(inst):
+        return _isBarrier(inst) or (
+            _isWaitCnt(inst) and getattr(inst, "vlcnt", -1) >= 0)
+
+    lastWriter = None
+    early = {}
+    for mid, inst in sequence:
+        cell = cellOf[mid]
+        if _readsScc(inst) and producer.get(id(inst), lastWriter) != lastWriter:
+            return False
+        if _writesScc(inst):
+            lastWriter = id(inst)
+        if skipped(inst):
+            continue
+        for later, items in early.items():
+            if later <= cell:
+                continue
+            for other in items:
+                if fence(inst) or fence(other) or not _mayReorder(
+                        inst, other, scc=False):
+                    return False
+        early.setdefault(cell, []).append(inst)
+    return True
+
+
+def _scheduleHalfDisjointHalf(
+        cells, minGapDsReadToWait, earliestWriteShadow=None, mfmaBase=0,
+        tailScaleReads=0, cellComments=()):
+    """Schedule every partition cell of one half-disjoint half together.
+
+    cells holds (emittedModules, pathOrders, preMfmaOrders, mfmas) per cell
+    in issue order; only the first may open the half. The MFMAs are
+    concatenated and the cells share one placer. Each later cell's
+    local-read wait stays in the gap right before its first MFMA, alone,
+    so it fences the reads of the cells before it. Reads stay inside
+    their own cell and at least minGapDsReadToWait MFMAs ahead of the
+    next fence. Loads keep their half and their order, but no longer
+    their cell: when the half has a gap for every ds_read and load, the
+    two are interleaved so each gap holds at most one of them, loads
+    paced evenly over the gaps the reads leave (_halfMemoryPlan). A half
+    with more memory ops than gaps keeps each cell's reads where the
+    cell scheduler puts them, and places the loads over the whole half
+    by the cell scheduler's rules.
+
+    cellComments is the marker emitted ahead of each later cell's wait.
+    Returns None when the cells do not fit this scheme, or the result
+    would reorder a cross-cell dependency; the caller then schedules each
+    cell on its own.
+    """
+    spi = _MXFP8_FOLLOWER_SLOTS
+    modules, mfmas, starts, split, orders, cellOf = [], [], [], [], [], {}
+    for c, (emitted, pathOrders, preMfmaOrders, cellMfmas) in enumerate(cells):
+        if len(cellMfmas) < 2:
+            return None
+        base = len(modules)
+        modules.extend(emitted)
+        for mid in range(base, len(modules)):
+            cellOf[mid] = c
+        pre = [[base + mid for mid in order] for order in preMfmaOrders]
+        paths = [[base + mid for mid in order] for order in pathOrders]
+        orders += pre + paths
+        split.append(_splitHalfDisjointCell(modules, paths, pre, cellMfmas))
+        starts.append(len(mfmas))
+        mfmas.extend(cellMfmas)
+    ends = starts[1:] + [len(mfmas)]
+    for c in range(1, len(cells)):
+        if split[c][0] or any(
+                _isBarrier(inst) or (_isWaitCnt(inst) and inst.vlcnt >= 0)
+                for _, inst in split[c][1]):
+            return None
+
+    intervals = len(mfmas) - 1
+    seams = {starts[c] - 1: c for c in range(1, len(cells)) if split[c][1]}
+
+    rules = _SchedulingRules(
+        totalSlots=intervals * spi, minGapDsReadToWait=minGapDsReadToWait,
+        allowReadsAcrossWait=True)
+    rules.earliestWriteShadow = earliestWriteShadow or {}
+    rules.mfmaBase = mfmaBase
+    adjusters = [rules.deferLiveSourceWrite] if rules.earliestWriteShadow else []
+    dtlRun = rules.maxDtlRun(_MXFP8_MAX_DTL_RUN)
+
+    def outsideSeams(placer, pos, inst):
+        return pos // spi not in seams
+
+    placer = _SlotPlacer(
+        intervals, len(modules), orders,
+        validators=[
+            outsideSeams,
+            rules.oneDsReadPerInterval, rules.oneDtlLoadPerInterval,
+            rules.noDsReadOrValuInFirstSlot, rules.minGapDsReadBeforeWait,
+            rules.minGapDsReadToWait, rules.noM0WithBufferLoad,
+            rules.noValuWithDtl, dtlRun,
+        ],
+        preferences=[rules.valuNeedsLeader, rules.dtlAvoidsDsRead],
+        adjusters=adjusters,
+        onPlace=rules.trackPlacement,
+        slotsPerInterval=spi,
+        maxPerSlot=1,
+        dataDsReadCap=(_MXFP8_DATA_DS_READS, _MXFP8_DATA_DS_READ_OVERFLOW),
+        maxInstructionsPerInterval=spi)
+
+    syncItems = split[0][0]
+    if syncItems:
+        placer.placePath(syncItems, startLimit=0)
+    opened = _nextPlacementSlot(placer)
+    if any(_isBarrier(inst) for _, inst in syncItems) and opened % spi:
+        rounded = (opened // spi + 1) * spi
+        if rounded < ends[0] * spi - spi:
+            opened = rounded
+    for gap, c in seams.items():
+        for j, item in enumerate(split[c][1]):
+            placer.place(gap * spi + min(j, spi - 1), item)
+    cellOpen = [opened] + [starts[c] * spi for c in range(1, len(cells))]
+    firstInterval = opened // spi
+
+    def intervalInsts(interval):
+        return [item[1] for slot in placer._placed[interval * spi:(interval + 1) * spi]
+                for item in slot if not isinstance(item[1], TextBlock)]
+
+    def emptySlots(interval):
+        return spi - sum(map(len, placer._placed[interval * spi:(interval + 1) * spi]))
+
+    readPaths = [
+        _orderReadsAroundLiveSourceWrites(
+            split[c][2], rules.earliestWriteShadow, mfmaBase)
+        for c in range(len(cells))]
+    requests = [item for c in range(len(cells)) for item in split[c][3]]
+    bundles, pending = _requestBundles(requests)
+
+    def tailFrom(begin):
+        # The items after the last load need empty slots behind its m0 and
+        # load, ahead of the tail scale reads.
+        scaleTail = max(
+            begin, intervals - math.ceil(tailScaleReads / _MXFP8_DATA_DS_READS))
+        end = scaleTail
+        while end > begin and emptySlots(end - 1) - 2 + sum(
+                map(emptySlots, range(end, scaleTail))) < len(pending):
+            end -= 1
+        return end
+
+    eligible = [
+        interval for interval in range(firstInterval, tailFrom(firstInterval))
+        if interval not in seams and not any(
+            _isWaitCnt(x) or _isBarrier(x) or _isVALU(x)
+            for x in intervalInsts(interval))]
+    groups, groupCells = [], []
+    for c in range(len(cells)):
+        count = sum(_isDsRead(inst) for _, inst in readPaths[c])
+        if not count:
+            continue
+        low = -(-cellOpen[c] // spi)
+        high = ends[c] - 1 - minGapDsReadToWait
+        groups.append(([g for g in eligible if low <= g <= high], count))
+        groupCells.append(c)
+    plan = _halfMemoryPlan(eligible, groups, len(bundles))
+
+    def placeReads(c, targets):
+        """One cell's read path from its open slot, inside its own cell.
+
+        Without targets the reads pack as the cell scheduler packs them,
+        which keeps them minGapDsReadToWait MFMAs ahead of the cell's end.
+        """
+        placer.window = (cellOpen[c], (ends[c] - 1) * spi - 1)
+        savedWait = rules.earliestWaitCntPos
+        if c:
+            rules.earliestWaitCntPos = (ends[c] - 1) * spi
+        remaining = iter(targets or ())
+        limit = cellOpen[c]
+        for mid, inst in readPaths[c]:
+            if targets is not None and _isDsRead(inst):
+                target = next(remaining, None)
+                if target is not None:
+                    limit = max(limit, target * spi)
+            limit = placer.adjustLimit(limit, inst)
+            pos = placer.findSlot(mid, inst, limit)
+            if pos is None:
+                pos = placer._forceSlot(mid, limit, False)
+            placer.place(pos, (mid, inst))
+            limit = pos + 1
+        rules.earliestWaitCntPos = savedWait
+        placer.window = None
+
+    readTargets = {}
+    if plan is not None:
+        readTargets = dict(zip(groupCells, plan[0]))
+    for c in range(len(cells)):
+        if readPaths[c]:
+            placeReads(c, readTargets.get(c) if plan is not None else None)
+
+    tailEnd = tailFrom(firstInterval)
+
+    def loadGaps(reads):
+        """Gaps after the barrier with this many ds_reads and room for a request."""
+        return [
+            interval for interval in range(firstInterval, tailEnd)
+            if interval not in seams
+            and sum(map(_isDsRead, intervalInsts(interval))) == reads
+            and not any(_isWaitCnt(x) or _isBarrier(x) or _isVALU(x)
+                        for x in intervalInsts(interval))
+            and len(intervalInsts(interval)) <= spi - 2]
+
+    def evenly(gaps, count):
+        return [gaps[index * len(gaps) // count] for index in range(count)]
+
+    def placeRequestsAndOthers(targets):
+        limit = opened
+        for bundle, target in zip(bundles, targets):
+            start = max(limit, target * spi)
+            # Address updates ahead of a request issue after the previous
+            # load, so only m0 and its load wait for the target gap.
+            if (rules.dtlDsReadLimit is not None and len(bundle) > 2
+                    and _isM0Update(bundle[-2][1])):
+                lead, bundle = bundle[:-2], bundle[-2:]
+                placer.placePath(lead, startLimit=limit)
+                start = max(start, max(placer._lastPos[mid] for mid, _ in lead) + 1)
+            placer.placePath(bundle, startLimit=start, atomicDtl=True)
+            limit = max(placer._lastPos[mid] for mid, _ in bundle) + 1
+        if pending:
+            placer.placePath(pending, startLimit=limit)
+        for c in range(len(cells)):
+            if split[c][4]:
+                placer.placePath(split[c][4], startLimit=cellOpen[c])
+
+    def overfullIntervals():
+        count = 0
+        for begin in range(0, placer.totalSlots, spi):
+            insts = [item[1] for slot in placer._placed[begin:begin + spi]
+                     for item in slot if not isinstance(item[1], TextBlock)]
+            count += sum(_isDtlLoad(inst) for inst in insts) > 1
+            count += len(insts) > spi
+        return count
+
+    def longestDtlRun():
+        run = longest = 0
+        for begin in range(0, placer.totalSlots, spi):
+            run = run + 1 if placer._intervalHasDtlLoad(begin) else 0
+            longest = max(longest, run)
+        return longest
+
+    # The joint plan goes first. Otherwise, as in the cell scheduler,
+    # requests take the gaps the reads left free and only the ones left
+    # over take gaps with one read, then two, under the run cap; then
+    # requests are spaced over every gap, with the cap and then without.
+    def snapped(targets):
+        """Planned load gaps moved to the nearest gaps the reads left free.
+
+        A read path's pointer swaps can take a planned load gap. A load
+        takes a gap with one read only when too few free gaps are left.
+        Returns (gaps, most reads beside a load), or None."""
+        free = set(loadGaps(0))
+        pool = sorted(free | set(loadGaps(1)))
+        result = []
+        for i, target in enumerate(targets):
+            ahead = len(targets) - i - 1
+            options = [g for g in pool if not result or g > result[-1]]
+            options = options[:len(options) - ahead] if ahead else options
+            if not options:
+                return None
+            result.append(min(
+                options, key=lambda g: (g not in free, abs(g - target), g)))
+        return result, int(any(g not in free for g in result))
+
+    attempts, chosen = [], []
+    planned = snapped(plan[1]) if plan is not None and bundles else None
+    if planned is not None:
+        attempts.append((planned[0], planned[1], True))
+    for reads in range(_MXFP8_DATA_DS_READ_OVERFLOW + 1) if bundles else ():
+        gaps, need = loadGaps(reads), len(bundles) - len(chosen)
+        if len(gaps) >= need:
+            attempts.append((sorted(chosen + evenly(gaps, need)), reads, True))
+            break
+        chosen += gaps
+    open_ = [g for g in range(firstInterval, max(intervals, firstInterval + 1))
+             if g not in seams]
+    spaced = evenly(open_, len(bundles)) if bundles else []
+    attempts += [(spaced, None, True), (spaced, None, False)]
+    saved = ([list(slot) for slot in placer._placed], list(placer._firstPos),
+             list(placer._lastPos), dict(rules.__dict__))
+    before = overfullIntervals()
+
+    def attempt(targets, readLimit, capped):
+        placer._placed = [list(slot) for slot in saved[0]]
+        placer._firstPos, placer._lastPos = list(saved[1]), list(saved[2])
+        rules.__dict__.update(saved[3])
+        rules.dtlDsReadLimit = readLimit
+        if capped and dtlRun not in placer._validators:
+            placer._validators.append(dtlRun)
+        if not capped and dtlRun in placer._validators:
+            placer._validators.remove(dtlRun)
+        placeRequestsAndOthers(targets)
+
+    # The first attempt that keeps the rules wins. When none does, the
+    # half is too dense for them, and the attempt with the least estimated
+    # excess over the MFMA cadence wins (_issueExcess).
+    cheapest = None
+    for index, (targets, readLimit, capped) in enumerate(attempts):
+        attempt(targets, readLimit, capped)
+        if capped and overfullIntervals() <= before and (
+                readLimit is None or longestDtlRun() <= _MXFP8_MAX_DTL_RUN):
+            break
+        cost = _issueExcess(
+            [[item[1] for slot in placer._placed[i * spi:(i + 1) * spi] for item in slot]
+             for i in range(intervals)])
+        if cheapest is None or cost < cheapest[0]:
+            cheapest = (cost, index)
+    else:
+        if cheapest[1] != len(attempts) - 1:
+            attempt(*attempts[cheapest[1]])
+
+    sequence = [item for item in split[0][1]] + [(None, mfmas[0])]
+    scheduled = Module()
+    for _, inst in split[0][1]:
+        scheduled.add(inst)
+    scheduled.add(mfmas[0])
+    mfmaCell = [c for c in range(len(cells)) for _ in range(ends[c] - starts[c])]
+    for i in range(intervals):
+        placed = [item for slot in placer._placed[i * spi:(i + 1) * spi]
+                  for item in slot]
+        c = mfmaCell[i + 1]
+        if c != mfmaCell[i] and i not in seams:
+            for item in placed:
+                scheduled.add(item[1])
+            if c - 1 < len(cellComments):
+                scheduled.add(cellComments[c - 1])
+        else:
+            if c != mfmaCell[i] and c - 1 < len(cellComments):
+                scheduled.add(cellComments[c - 1])
+            for item in placed:
+                scheduled.add(item[1])
+        sequence += placed + [(None, mfmas[i + 1])]
+        scheduled.add(mfmas[i + 1])
+    for mid, inst in placer.leftovers:
+        scheduled.add(inst)
+        sequence.append((mid, inst))
+
+    mfmaOf = {id(m): c for c in range(len(cells)) for m in mfmas[starts[c]:ends[c]]}
+    cellOf = dict(cellOf)
+    keyed = []
+    for mid, inst in sequence:
+        if mid is None:
+            mid = ("mfma", id(inst))
+            cellOf[mid] = mfmaOf[id(inst)]
+        keyed.append((mid, inst))
+    if not _halfCellOrderSafe(keyed, cellOf, orders, modules):
+        return None
+
+    bufLoadCount = 0
+    for inst in scheduled.flatitems():
+        if _isBufferLoad(inst):
+            bufLoadCount += 1
+        elif _isWaitCnt(inst) and inst.vlcnt >= 0:
+            if getattr(inst, "adjustVmcnt", True):
+                inst.vlcnt += bufLoadCount
+    return scheduled
+
+
 def extractPathsFromBeforeDeps(emittedModules) -> Tuple[int, List[List[int]], List[List[int]]]:
     """Extract non-MFMA dependency paths using only EmittedModule.before links.
 
@@ -3744,6 +4278,60 @@ def extractPathsFromBeforeDeps(emittedModules) -> Tuple[int, List[List[int]], Li
             regularPaths.append(path)
 
     return mfmaIdx, regularPaths, preMfmaPaths
+
+
+def instructionScheduleHalf(
+        emittedLists, minGapDsReadToWait=_MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
+        earliestWriteShadow=None, mfmaBase: int = 0, tailScaleReads: int = 0,
+        cellComments=()):
+    """Schedule the partition cells of one half-disjoint MXFP8 half.
+
+    emittedLists holds each cell's emitted modules in issue order and
+    cellComments the marker ahead of every cell after the first. The half
+    is scheduled as one cell (_scheduleHalfDisjointHalf) unless that does
+    not fit, or scheduling each cell on its own, as instructionSchedule
+    would, is estimated to run closer to the MFMA cadence (_issueExcess).
+    tailScaleReads belongs to the last cell.
+    """
+    cells = []
+    for emitted in emittedLists:
+        mfmaIdx, pathOrders, preMfmaOrders = extractPathsFromBeforeDeps(emitted)
+        mfmas = [
+            inst for inst in emitted[mfmaIdx].instructions
+            if isinstance(inst, (MFMAInstruction, MXMFMAInstruction))]
+        cells.append((emitted, pathOrders, preMfmaOrders, mfmas))
+    # Both schedulers add the loads ahead of a VMEM wait to its count.
+    waits = [inst for emitted in emittedLists for em in emitted
+             for inst in em.instructions if _isWaitCnt(inst)]
+    counts = [inst.vlcnt for inst in waits]
+
+    def restoreCounts():
+        for inst, count in zip(waits, counts):
+            inst.vlcnt = count
+
+    def joint():
+        if not all(_isMx8Schedule(cell[3]) for cell in cells):
+            return None
+        return _scheduleHalfDisjointHalf(
+            cells, minGapDsReadToWait, earliestWriteShadow, mfmaBase,
+            tailScaleReads, cellComments)
+
+    scheduled = joint()
+    jointCost = None if scheduled is None else _issueExcess(_moduleGaps(scheduled))
+    restoreCounts()
+    result = Module()
+    base = mfmaBase
+    for c, cell in enumerate(cells):
+        if c:
+            result.add(cellComments[c - 1])
+        result.add(_scheduleHalfDisjointCell(
+            *cell, minGapDsReadToWait, earliestWriteShadow, base,
+            tailScaleReads if c == len(cells) - 1 else 0))
+        base += len(cell[3])
+    if jointCost is None or _issueExcess(_moduleGaps(result)) < jointCost:
+        return result
+    restoreCounts()
+    return joint()
 
 
 def instructionSchedule(emittedModules, multiDU: bool = False,

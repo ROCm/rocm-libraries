@@ -265,18 +265,46 @@ def _partition_cell_gaps(body):
     return [cell[:-1] for cell in cells if cell]
 
 
+def _half_gaps(body):
+    """Instructions per MFMA gap of each half, in body order.
+
+    Partition cells of one half are scheduled together, so a half's gaps
+    run across its partition markers; the gap after a cell's last MFMA
+    holds the next cell's fence. Each half opens with its barrier."""
+    halves = []
+    gaps = None
+    for ln in body:
+        code = ln.split("//")[0].strip()
+        if not code or code.startswith("/*") or code.endswith(":"):
+            continue
+        if code.startswith("v_mfma"):
+            gaps = []
+            if halves:
+                halves[-1].append(gaps)
+        elif (code.startswith("s_barrier") and gaps is not None
+              and all(prior.startswith("s_waitcnt") for prior in gaps)):
+            if halves and halves[-1][-1] is gaps:
+                halves[-1].pop()
+            halves.append([gaps])
+            gaps.append(code)
+        elif gaps is not None:
+            gaps.append(code)
+    return [half[:-1] for half in halves]
+
+
 def test_loads_share_a_gap_with_reads_only_when_no_free_gap_is_left(dual_src):
-    """A cell puts a load beside a ds_read only when no gap after its
-    barrier could take the load alone: one with no read, wait, barrier,
-    VALU or request, room for m0 and the load, and no run past five.
-    The SRD and LDS-base updates that close a cell's requests follow its
-    last load, so a gap after the cell's last SALU does not count."""
+    """A half puts a load beside a ds_read only when it has fewer gaps
+    after its barrier that could take a load alone than loads: gaps with
+    no read, wait, barrier, VALU or request, room for m0 and the load,
+    and no run past five. The SRD and LDS-base updates that close the
+    requests follow the last load, so a gap after the half's last SALU
+    does not count."""
     def has(gap, *prefixes):
         return any(code.startswith(prefixes) for code in gap)
 
-    cells = _partition_cell_gaps(_mainloop_lines(dual_src))
-    assert cells
-    for c, gaps in enumerate(cells):
+    halves = _half_gaps(_mainloop_lines(dual_src))
+    assert len(halves) == 4
+    for c, gaps in enumerate(halves):
         barrier = [i for i, gap in enumerate(gaps) if has(gap, "s_barrier")]
         opened = barrier[0] + 1 if barrier else 0
         loaded = [has(gap, "buffer_load") for gap in gaps]
@@ -299,7 +327,7 @@ def test_loads_share_a_gap_with_reads_only_when_no_free_gap_is_left(dual_src):
                 and not has(gaps[i], "ds_read", "s_waitcnt", "s_barrier")
                 and not any(_is_valu(code.split()[0]) for code in gaps[i])
                 and not any(code.split()[1:2] == ["m0,"] for code in gaps[i])]
-        assert not (shared and free), (c, shared, free, gaps)
+        assert not shared or len(free) < sum(loaded), (c, shared, free, gaps)
 
 
 def test_vgpr_within_two_wave_slot_budget(dual_src):

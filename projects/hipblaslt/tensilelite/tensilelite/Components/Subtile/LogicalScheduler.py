@@ -5335,6 +5335,7 @@ class LogicalScheduler:
             guardExitOverwriteReread,
             insertPrefetchedScaleCopies,
             instructionSchedule,
+            instructionScheduleHalf,
             issueSaluFirst,
             keepValuBehindLeader,
             lateScaleReadsPrecedeSecondHalf,
@@ -5407,6 +5408,21 @@ class LogicalScheduler:
                 for em_list in partition_emitted
                 for em in em_list
                 if em.opType == "mfma")
+        # A half-disjoint main loop schedules all cells of a half with more
+        # than one partition together, so its loads and reads share the
+        # half's MFMA gaps.
+        half_cells = {}
+        if (schedule and self.halfDisjoint and label.startswith("MAINLOOP")
+                and injectAfterPartition is None and injectBeforeSlot is None):
+            numP = len(emitted_3d)
+            for half in (range(numP // 2), range(numP // 2, numP)):
+                cells = [(pi, k) for pi in half
+                         for k in range(len(emitted_3d[pi]))]
+                if len(half) > 1 and all(
+                        any(em.opType == "mfma" for em in emitted_3d[pi][k])
+                        for pi, k in cells):
+                    for cell in cells:
+                        half_cells[cell] = cells
         for pi, partition_emitted in enumerate(emitted_3d):
             # Partition 0 has no inbound drain, so it used to write straight into
             # the loop module and could not be woven into. Its own stage is the one
@@ -5415,6 +5431,9 @@ class LogicalScheduler:
             _ownModule = pendingDrain is not None or injectAfterPartition is not None
             partModule = Module(f"{label}_part{pi}") if _ownModule else module
             for k, em_list in enumerate(partition_emitted):
+                half_group = half_cells.get((pi, k))
+                if half_group is not None and half_group[0] != (pi, k):
+                    continue
                 partModule.addComment0(f"partition={pi} subIterK={k}")
                 if injectBeforeSlot is not None:
                     _pre = injectBeforeSlot.get((pi, k))
@@ -5439,6 +5458,28 @@ class LogicalScheduler:
                         vmem_boundary = (
                             (pi + 1) * copy_mfmas // len(emitted_3d)
                             - body_mfma_base)
+                    if half_group is not None:
+                        last_pi, last_k = half_group[-1]
+                        if (self._scaleShadowPlan and label == "MAINLOOP_C1"
+                                and last_pi == len(emitted_3d) - 1
+                                and last_k == len(emitted_3d[last_pi]) - 1):
+                            tail_scale_reads = len(self._scaleShadowPlan["entry"])
+                        markers = Module()
+                        for gpi, gk in half_group[1:]:
+                            markers.addComment0(f"partition={gpi} subIterK={gk}")
+                        group_lists = [emitted_3d[gpi][gk] for gpi, gk in half_group]
+                        partModule.add(instructionScheduleHalf(
+                            group_lists,
+                            minGapDsReadToWait=minGapDsReadToWait,
+                            earliestWriteShadow=write_floor,
+                            mfmaBase=body_mfma_base,
+                            tailScaleReads=tail_scale_reads,
+                            cellComments=markers.items()))
+                        body_mfma_base += sum(
+                            len(em.instructions)
+                            for group_list in group_lists
+                            for em in group_list if em.opType == "mfma")
+                        continue
                     scheduled = instructionSchedule(
                         em_list,
                         multiDU=self._is_multi_du(),
