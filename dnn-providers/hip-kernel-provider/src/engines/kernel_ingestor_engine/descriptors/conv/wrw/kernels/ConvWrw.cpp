@@ -27,7 +27,8 @@
 //   CONV_K3_WQ       loop 5: items side by side (waves_q; wk x wc x wq = 8 waves)
 // Loop 5 (gfx950, 16-bit, channels-last kept, ConvWrwDirect.h) also takes CONV_K3_PP and
 // CONV_K3_SWZ (default 1: the ping-pong and the swizzled rows; 0 only for ablation).
-// ConvWrwReduce, the partials' fixed-order sum, shares the source.
+// ConvWrwReduce, the partials' fixed-order sum, shares the source, as does ConvWrwReduceRows, the
+// same sum by K C T R S rows (the host's choice for at most 2 splits).
 
 #include "ConvWrwCore.h"
 #include "ConvWrwDirect.h"
@@ -165,4 +166,9 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
 extern "C" __global__ void __launch_bounds__(256) ConvWrwReduce(K3ReduceArgs a)
 {
     k3Reduce<CONV_K3_T>(a);
+}
+
+extern "C" __global__ void __launch_bounds__(256) ConvWrwReduceRows(K3ReduceArgs a)
+{
+    k3ReduceRows<CONV_K3_T>(a);
 }
