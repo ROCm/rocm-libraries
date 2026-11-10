@@ -832,6 +832,50 @@ def build_fma906():
     return dropped
 
 
+# RDNA fp32 (no fp32 matrix core): FMA tiles sized for few channels, on few-channel layers on
+# large maps (issue #15446: IGM's 3x3 C = K = 24 on 1505 x 2255 single images). FMA32's 32 x 64
+# tiles fill 24 of 64 input and 24 of 32 output channels there. These tiles are 24 x 24 at 32
+# positions and 48 x 48 at 64, measured on gfx1100 (1.3-1.5x on C = 24). Their blocks are small
+# (36 threads), so the planner also targets 8 blocks per unit. The pack lists the RDNA archs, so
+# none of it becomes a candidate where an fp32 matrix core runs.
+FMARDNA_TILES = [(24, 24, 4, 4, 32), (48, 48, 4, 4, 64)]
+FMARDNA_TAGS = {"3x3", "3x3r1", "1x1", "1x3", "3x3s2", "3x3s2r1"}
+FMARDNA_ARCHS = [
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1200",
+    "gfx1201",
+]
+CATALOGRDNA = {"FLOAT": []}
+
+
+def build_fmardna():
+    dropped = 0
+    vec = 4
+    for tag, s, sw, dw, fr, loop, idx, aligns, lays in FILTERS:
+        if tag not in FMARDNA_TAGS:
+            continue
+        for c in fma_cands(FMARDNA_TILES, [CF, CL], lays, s, sw, dw, fr, loop, vec):
+            if valid(c, "FLOAT"):
+                CATALOGRDNA["FLOAT"].extend(dict(c, bpu=b) for b in (2, 4, 8))
+            else:
+                dropped += 1
+    seen = {tuple(c[f] for f in INTS) for c in CATALOG["FLOAT"] + CATALOG906["FLOAT"]}
+    kept = []
+    for c in CATALOGRDNA["FLOAT"]:
+        key = tuple(c[f] for f in INTS)
+        if key not in seen:
+            seen.add(key)
+            kept.append(c)
+    CATALOGRDNA["FLOAT"] = kept
+    return dropped
+
+
 def build():
     dropped = build_direct() + build_unaligned_k() + build_smallc()
     for atoms, tiles, xcd, layouts, loop2, only in FAMILIES:
@@ -966,10 +1010,13 @@ def emit():
     for dtype, cfgs in CATALOG.items():
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
         packs = {}
-        # The gfx906 FMA configs follow the dtype's list, in their own gfx906-only pack.
-        tagged = [(c, family_of(c)) for c in cfgs] + [
-            (c, "fma906") for c in CATALOG906[dtype]
-        ]
+        # The gfx906 and RDNA FMA configs follow the dtype's list, in their own packs that
+        # list only those archs.
+        tagged = (
+            [(c, family_of(c)) for c in cfgs]
+            + [(c, "fma906") for c in CATALOG906[dtype]]
+            + [(c, "fmardna") for c in CATALOGRDNA.get(dtype, [])]
+        )
         for i, (c, fam) in enumerate(tagged):
             pack = packs.setdefault(fam, [])
             lay = ["nchw", "nhwc", "nhwctr"][c["layout"]]
@@ -1006,7 +1053,9 @@ def emit():
                     "version": "1.0",
                     "id": U(f"kdp.{dt}.{fam}"),
                     "name": f"hipkernel:conv_wrw_{dt}_{fam}",
-                    "arch": FMA906_ARCHS if fam == "fma906" else [],
+                    "arch": {"fma906": FMA906_ARCHS, "fmardna": FMARDNA_ARCHS}.get(
+                        fam, []
+                    ),
                     "matchers": [umd],
                     "engine": ued,
                     "dispatch": udd,
@@ -1030,7 +1079,17 @@ def emit():
 if __name__ == "__main__":
     dropped = build()
     dropped += build_fma906()
+    dropped += build_fmardna()
     n = emit()
     print(n, "kernel configs;", dropped, "candidates dropped (LDS, passes or tile)")
     for dtype, cfgs in CATALOG.items():
-        print(" ", dtype, len(cfgs), "+", len(CATALOG906[dtype]), "gfx906 FMA")
+        print(
+            " ",
+            dtype,
+            len(cfgs),
+            "+",
+            len(CATALOG906[dtype]),
+            "gfx906 FMA +",
+            len(CATALOGRDNA.get(dtype, [])),
+            "RDNA FMA",
+        )

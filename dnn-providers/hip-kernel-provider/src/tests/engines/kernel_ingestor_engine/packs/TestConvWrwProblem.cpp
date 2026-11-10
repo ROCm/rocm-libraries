@@ -782,6 +782,13 @@ std::vector<ConfigRefusal> configRefusals()
         {"TcSetOnMatrixCores", [](ConfigFields& f) { f.tc = 4; }},
         {"BpuThree", [](ConfigFields& f) { f.bpu = 3; }},
         {"BpuZero", [](ConfigFields& f) { f.bpu = 0; }},
+        {"BpuSixteen",
+         [](ConfigFields& f) { f.bpu = 16; },
+         [] {
+             ConfigFields f;
+             f.bpu = 8;
+             return f;
+         }},
         {"BkNotWholeFragmentsPerWave", [](ConfigFields& f) { f.bk = 96; }},
         {"BcNotWholeFragmentsPerWave", [](ConfigFields& f) { f.bc = 96; }},
         {"BqNotAtomSteps",
