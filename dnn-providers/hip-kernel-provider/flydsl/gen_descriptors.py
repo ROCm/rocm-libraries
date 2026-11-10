@@ -158,6 +158,11 @@ GRAPH_DETERMINED_FIELDS = {
     "n_align",
     # Top-k: the largest k an object serves (1 for the k = 1 reduction body).
     "k_max",
+    # MoE routing: the largest num_experts an object serves, and the prefix and scatter
+    # kernels launched after the histogram one from the same object.
+    "e_max",
+    "prefix_symbol",
+    "scatter_symbol",
     # Causal conv1d: the kernel width and the activation, and the channels per thread,
     # which C must be a multiple of.
     "width",

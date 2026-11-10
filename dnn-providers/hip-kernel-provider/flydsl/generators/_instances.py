@@ -113,6 +113,9 @@ _ABBREV = {
     "store_rstd": "rstd",
     "n_max": "nmax",
     "reduce_symbol": "",
+    "e_max": "emax",
+    "prefix_symbol": "",
+    "scatter_symbol": "",
     "index_dtype": "idx",
     "vec_bytes": "vec",
     "cache_dtype": "cache",
@@ -161,6 +164,9 @@ _NAME_OMITTED_WHEN = {
     "prefer_max": lambda knobs: True,
     # A symbol, not a choice: the object's name already says it is a decode one.
     "merge_symbol": lambda knobs: True,
+    # MoE routing: symbols, not choices -- every object carries the same three kernels.
+    "prefix_symbol": lambda knobs: True,
+    "scatter_symbol": lambda knobs: True,
 }
 
 
@@ -1774,6 +1780,35 @@ def causal_conv1d_instances() -> list[Instance]:
     return instances
 
 
+# MoE routing (kernels_src/kernels/moe_routing/moe_routing_kernel.py): a three-kernel
+# counting sort -- histogram, prefix, scatter -- in one object, the second and third
+# named here and launched by the dispatch from the same archive entry. One object per
+# arch: every shape (S, top_k, E, the block split) is a kernel argument and the
+# first_token_offset width (int32 or int64) a runtime flag. `e_max` is the per-expert
+# LDS table's size, the largest num_experts the object serves.
+MOE_ROUTING_E_MAX = 8192
+MOE_ROUTING_PREFIX_SYMBOL = "moe_routing_prefix_kernel_1"
+MOE_ROUTING_SCATTER_SYMBOL = "moe_routing_scatter_kernel_2"
+
+
+def moe_routing_instances() -> list[Instance]:
+    """The MoE routing table: one object, int32 expert ids."""
+    instances = [
+        Instance(
+            op="moe_routing",
+            dtype="i32",
+            priority=PRIORITY_SPECIALIZED,
+            knobs={
+                "e_max": MOE_ROUTING_E_MAX,
+                "prefix_symbol": MOE_ROUTING_PREFIX_SYMBOL,
+                "scatter_symbol": MOE_ROUTING_SCATTER_SYMBOL,
+            },
+        )
+    ]
+    _assert_unique(instances)
+    return instances
+
+
 OPS = {
     "rmsnorm": rmsnorm_instances,
     "rmsnorm_bwd": rmsnorm_bwd_instances,
@@ -1789,6 +1824,7 @@ OPS = {
     "softmax": softmax_instances,
     "topk": topk_instances,
     "causal_conv1d": causal_conv1d_instances,
+    "moe_routing": moe_routing_instances,
 }
 # Ops whose table differs by target and so takes the arch.
 _PER_TARGET_OPS = {

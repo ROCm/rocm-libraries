@@ -1030,7 +1030,7 @@ Approved for this integration.
 
 | Deviation | What FlyDSL does instead | Status |
 |---|---|---|
-| **Two-launch objects name their second kernel in metadata, not in RFC 0017 §15.1 `sources`.** RMSNorm backward (partial, then reduce) and both split-KV decode engines (split, then merge) launch two kernels compiled into one `.hsaco`. | Each UKD's `kernel_source` names the first kernel; the KMD field `reduce_symbol` (§2a) or `merge_symbol` (§5, §7) names the second, in the same packed object. The native `prepare()` loads both and `launch()` runs them in order on the plan stream. The generators verify both symbols exist in the object, with their recorded argument layouts, before writing it; the packer and the state manager's launch-set check see only the first symbol. | This is the form RFC 0021 §3 (kernel slots, draft) names as an accepted alternative to `sources` for dependent kernels: one UKD whose code object holds them, launched by its native handler through symbol names its KMD records, with a split-KV kernel and its reduction as the example. Optional later move: `hsaco` entries in `sources`, once the packer accepts them (proposed in #14215), which would bring both kernels under the packer's and loader's launch-set checks. The objects would not change. |
+| **Two-launch objects name their second kernel in metadata, not in RFC 0017 §15.1 `sources`.** RMSNorm backward (partial, then reduce) and both split-KV decode engines (split, then merge) launch two kernels compiled into one `.hsaco`; MoE routing launches three (histogram, prefix, scatter). | Each UKD's `kernel_source` names the first kernel; the KMD field `reduce_symbol` (§2a) or `merge_symbol` (§5, §7) names the second -- for MoE routing `prefix_symbol` and `scatter_symbol` name the second and third ([MoE routing](#moe-routing--hipkernelflydsl_moe_routing)) -- in the same packed object. The native `prepare()` loads them all and `launch()` runs them in order on the plan stream. The generators verify every symbol exists in the object, with its recorded argument layout, before writing it; the packer and the state manager's launch-set check see only the first symbol. | This is the form RFC 0021 §3 (kernel slots, draft) names as an accepted alternative to `sources` for dependent kernels: one UKD whose code object holds them, launched by its native handler through symbol names its KMD records, with a split-KV kernel and its reduction as the example. Optional later move: `hsaco` entries in `sources`, once the packer accepts them (proposed in #14215), which would bring both kernels under the packer's and loader's launch-set checks. The objects would not change. |
 
 ---
 
@@ -1272,6 +1272,84 @@ values (nearly every selection breaks ties), and rows of NaNs of both signs, inf
 signed zeros and small integers; widths 1, 7, 512, 3001 and 5000 and the 248320-wide
 vocabulary; x at a 16-byte aligned base and one element past it), and the census
 `TestFlydslTopkPacks`.
+
+## MoE routing — `hipkernel:flydsl_moe_routing`
+
+1 object per arch, built for **gfx90a, gfx942 and gfx950**: the kernels use buffer loads and
+stores, LDS and wave64 ballots, nothing gfx94x-only. RDNA is not built (the kernel's lane
+matching is 64-bit ballots; the builder refuses wave32 targets). Kernel:
+[`kernels_src/kernels/moe_routing/moe_routing_kernel.py`](kernels_src/kernels/moe_routing/moe_routing_kernel.py),
+ported to flydsl 0.3.4 from FlyDSL v0.5.0 (`226cde8d`) `kernels/moe/moe_sorting_kernel.py`
+(its header lists the modifications); native half:
+[`FlydslMoeRoutingNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslMoeRoutingNative.cpp).
+Upstream emits CK's padded sorted ids (unit-size blocks, `(slot << 24) | token`, sorted
+weights and expert ids) and its expert mesh holds one slot per (expert, token), so it cannot
+route a token that picks one expert twice; the port keeps its counting sort and multiphase
+structure and writes hipDNN's format instead.
+
+It computes the schema's routing (`moe_routing_attributes.fbs`, `CpuFpReferenceMoeRouting`)
+exactly: each pair `(s, k)` of `topk_ids [S, top_k]` whose id `e` lies in `[0, E)` is one
+row; rows are ordered by expert, then `s`, then `k` (a stable counting sort over the
+row-major pairs); `token_index[r] = s`, `token_ks[r] = k`, and `first_token_offset[e]` is the
+number of rows with expert `< e`, for `e` in `[0, E]`. An id outside `[0, E)` is not routed
+(expert parallelism), and the rows past `first_token_offset[E]` are left untouched.
+
+**Three kernels, one object** (§8's multi-launch objects): the UKD names the histogram
+kernel; the KMD's `prefix_symbol` and `scatter_symbol` name the other two, which the
+dispatch loads from the same archive entry and launches after it on the plan's stream.
+
+1. *Histogram* -- `blocks` workgroups of 256 threads, each over a span of whole 256-pair
+   tiles: per tile, each wave groups its lanes by expert (one ballot per id bit, 13 for
+   8192 experts), and the waves take turns adding their groups to an LDS count per expert.
+   Each block writes its counts to the workspace, expert-major.
+2. *Prefix* -- one workgroup of 1024 threads scans the `E x blocks` workspace in place
+   (16-byte groups, `BlockScan` per 4096 entries), which makes every entry its block's first
+   row for its expert, and writes `first_token_offset` (int32, or int64 as a low word and a
+   zero high word, on a runtime flag).
+3. *Scatter* -- the histogram's grid again: each pair takes its expert's next row in lane
+   order, the waves of a block in turn, and writes `token_index` and `token_ks`.
+
+Rows are deterministic: no atomics, and the order within a tile, a block and the grid is
+fixed by lane, wave and block. The block split is chosen at prepare: at most one block per
+256 pairs, one per compute unit, and `65536 / E` (so the single-block prefix scans at most
+about 64K entries). The workspace is `E x blocks` int32 counts, padded to 16 bytes.
+
+**Baked:** `e_max` 8192 (the per-expert LDS table: 32 KiB). **Runtime:** S, top_k, E, the
+block count and span, and the offsets' width.
+
+| Graph-scoped (`flydslMoeRoutingGraphMatches`) | Accepted | Declined |
+|---|---|---|
+| Nodes | exactly one `MoeRoutingAttributes` node | anything else; override-shape graphs |
+| Operands | four distinct real device tensors | virtual, pass-by-value, ragged or aliased |
+| Dtypes | `topk_ids`, `token_index`, `token_ks` INT32; `first_token_offset` INT32 or INT64 | any other |
+| Shapes | `topk_ids [S, top_k]`, `first_token_offset [E + 1, 1, 1]`, rows `[1, S * top_k, 1]`; S, top_k, E >= 1 | any other; a zero or negative extent |
+| Layout | packed row-major (unit axes' strides free) | padded or permuted strides |
+| Alignment | 4 bytes (8 for INT64 offsets) | less |
+| Extents | `S * top_k <= 2^29 - 1` (32-bit byte offsets) | larger |
+
+| Kernel-scoped (`flydslMoeRoutingKernelMatches`) | |
+|---|---|
+| `dtype` | `i32` |
+| `e_max` | `E <= e_max` (8192) |
+
+**Declined, not served:** more than 8192 experts (no object; the LDS table bounds it), INT64
+ids, and non-packed operands.
+
+**Performance (gfx90a, MI210, the standalone objects under rocprofv3, E = 512, top-8, 25%
+ids out of range on the largest).** Kernel time summed over the three launches: 16 tokens
+(decode) about 14 us, launch-bound; 8192 tokens 38 us (86 blocks: histogram 7, prefix 21,
+scatter 10); 65536 tokens 83 us. The prefix kernel is one workgroup and dominates mid-size
+prefill; a multi-workgroup scan, or fusing it into the scatter with a decoupled look-back,
+is the follow-up.
+
+**Checked by:** `TestFlydslMoeRoutingEngine` (host-only: every accept and decline above, the
+kernel match, the score, the block split and the workspace size), `TestGpuFlydslMoeRoutingObjects`
+(every staged object against `CpuFpReferenceMoeRouting`, INT32 and INT64 offsets: decode and
+prefill shapes up to 32768 tokens (many blocks, ragged last tiles), 20% and 100% of ids out
+of range (negative, `E` and above), a token picking one expert several times, every pair on
+one expert, E = 1 and E = `e_max`; outputs pre-filled with a sentinel so a stray or missing
+row fails; each case launched three times from one plan with identical bytes), and the
+census `TestFlydslMoeRoutingPacks`.
 
 ---
 

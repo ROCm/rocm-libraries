@@ -31,4 +31,5 @@ OP_KERNEL_DIRS = {
     "softmax": ("softmax",),
     "causal_conv1d": ("causal_conv1d",),
     "topk": ("topk",),
+    "moe_routing": ("moe_routing",),
 }

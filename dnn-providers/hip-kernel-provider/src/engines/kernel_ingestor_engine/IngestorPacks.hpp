@@ -106,6 +106,10 @@ void resetFlydslSoftmaxModuleCache();
 void registerFlydslTopkSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslTopkModuleCache();
 
+/// @see packs/FlydslMoeRoutingNative.cpp
+void registerFlydslMoeRoutingSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslMoeRoutingModuleCache();
+
 /// @see packs/FlydslCausalConv1dNative.cpp
 void registerFlydslCausalConv1dSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslCausalConv1dModuleCache();

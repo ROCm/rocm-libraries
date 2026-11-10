@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "e5a443ad-612f-5460-8021-3bc4e74c70b6",
+  "name": "flydsl moe_routing engine estimate",
+  "provenance": "Default slot for the engine estimate: a trained model installed under heuristics/ for an arch takes precedence there. No scorer is registered under this symbol, so on any other arch the loader disables the estimate and keeps the engine.",
+  "adapter": "native",
+  "objective": "max",
+  "score": {
+    "metric": "tflops"
+  },
+  "native": {
+    "symbol": "hipkernel.flydsl_moe_routing.engine_estimate"
+  }
+}

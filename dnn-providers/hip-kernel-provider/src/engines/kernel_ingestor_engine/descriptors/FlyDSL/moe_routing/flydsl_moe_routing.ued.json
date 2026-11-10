@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "id": "324736a3-2d74-5151-af15-a665777f3ec7",
+  "name": "hipkernel:flydsl_moe_routing",
+  "graph_match": {
+    "native": "hipkernel.flydsl_moe_routing.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "09c7feb0-b45f-558b-a139-069d47152b55"
+  },
+  "predict_engine": {
+    "default": "e5a443ad-612f-5460-8021-3bc4e74c70b6"
+  },
+  "metadata": "de297c6f-7cba-5d3c-9d29-439b71c573c8",
+  "knobs": []
+}

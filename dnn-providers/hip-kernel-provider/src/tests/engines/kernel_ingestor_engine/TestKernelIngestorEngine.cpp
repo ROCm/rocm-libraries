@@ -670,6 +670,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_softmax.dispatch",
         "hipkernel.flydsl_topk.dispatch",
         "hipkernel.flydsl_causal_conv1d.dispatch",
+        "hipkernel.flydsl_moe_routing.dispatch",
 #endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())

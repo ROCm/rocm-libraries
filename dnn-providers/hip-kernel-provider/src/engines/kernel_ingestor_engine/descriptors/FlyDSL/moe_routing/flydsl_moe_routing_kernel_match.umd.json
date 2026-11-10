@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "85dd2e1b-4c0c-5273-b2e1-f76a69158d64",
+  "name": "flydsl moe_routing: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_moe_routing.kernel_match"
+}

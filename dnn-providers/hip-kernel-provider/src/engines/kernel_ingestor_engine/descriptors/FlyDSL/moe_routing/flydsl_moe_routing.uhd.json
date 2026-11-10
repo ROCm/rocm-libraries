@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "09c7feb0-b45f-558b-a139-069d47152b55",
+  "name": "flydsl moe_routing selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_moe_routing.score"
+  }
+}

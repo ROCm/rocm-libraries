@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "id": "de297c6f-7cba-5d3c-9d29-439b71c573c8",
+  "name": "flydsl moe_routing variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "e_max",
+      "type": "int"
+    },
+    {
+      "name": "prefix_symbol",
+      "type": "string"
+    },
+    {
+      "name": "scatter_symbol",
+      "type": "string"
+    }
+  ]
+}

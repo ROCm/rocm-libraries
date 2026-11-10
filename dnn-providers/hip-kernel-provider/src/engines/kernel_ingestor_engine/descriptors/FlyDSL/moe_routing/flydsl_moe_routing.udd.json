@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "27b43f37-3530-5414-8a88-11596269672b",
+  "name": "flydsl moe_routing dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_moe_routing.dispatch"
+}
