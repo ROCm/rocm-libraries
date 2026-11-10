@@ -929,8 +929,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
                     // std::cout << "WaitCntData is nullptr\n";
                     cycles += inst->issueCycles;
                 }
-            } else if (isTensorLoad(*inst)) {
-                // TODO: Estimate cycles for TensorLoad
+            } else if (isTensorOp(*inst)) {
+                // TODO: Estimate cycles for the tensor ops
                 cycles += inst->issueCycles;
             } else if (isDSWrite(*inst)) {
                 // get bpr of data size (ds_write_b128 = 16 bytes); dest may be address or data

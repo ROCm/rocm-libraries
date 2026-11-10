@@ -348,7 +348,7 @@ Removing a wait is **legal** only when some pass regenerates it; otherwise the h
 | `HazardPass` | `s_wait_xcnt` | `Gfx1250XnackHazardPass`, from its own XNACK replay-group rules |
 | `None` | `s_wait_storecnt`, `s_wait_storecnt_dscnt`, legacy `s_waitcnt` | nothing — all three can name `STOREcnt` |
 
-`RemoveWaitCntOptions` then applies **policy** to what is legal: `s_wait_kmcnt` is kept because insertion is region-scoped, `s_wait_xcnt` because its regenerator places drains by different criteria, and `s_wait_tensorcnt` when the insertion pass should reuse the incoming ones. Blocks the strip pass skipped keep everything regardless.
+`RemoveWaitCntOptions` then applies **policy** to what is legal: `s_wait_kmcnt` is kept because insertion is region-scoped, `s_wait_xcnt` because its regenerator places drains by different criteria, and `s_wait_tensorcnt` when the insertion pass should reuse the incoming ones. Blocks the strip pass skipped keep everything regardless. A wait whose comment carries `stinky-keep` is kept before legality and policy are consulted: TensileLite tags the waits whose hazard the insertion pass does not re-derive, the `s_wait_dscnt` before a `tensor_store_from_lds` and the `s_wait_tensorcnt` after it and after the `tensor_load_to_lds` that loads C into the staged tile.
 
 ### Existing waits in the input
 

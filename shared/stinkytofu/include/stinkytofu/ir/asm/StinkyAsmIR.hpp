@@ -572,6 +572,16 @@ inline bool isTensorLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_TENSORLoadToLds);
 }
 
+// tensor_store_from_lds reads LDS and writes global memory: an LDS consumer.
+inline bool isTensorStore(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_TENSORStoreFromLds);
+}
+
+// tensor_load_to_lds or tensor_store_from_lds: a TDM op, counted by TENSORcnt.
+inline bool isTensorOp(const StinkyInstruction& inst) {
+    return isTensorLoad(inst) || isTensorStore(inst);
+}
+
 // Async memory ops tracked by ASYNCcnt (s_wait_asynccnt). Shared FIFO counter
 // across the whole async family; extend this predicate as async loads /
 // cluster-async / ds_atomic_async_barrier_arrive are added.
@@ -583,7 +593,7 @@ inline bool isAsyncMemOp(const StinkyInstruction& inst) {
 inline bool isVmemTex(const StinkyInstruction& inst) {
     return isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) ||
            isGLOBALOrAtomic(inst) || isAsyncMemOp(inst) || isGlobalPrefetch(inst) ||
-           isFLATPrefetch(inst) || isTensorLoad(inst);
+           isFLATPrefetch(inst) || isTensorOp(inst);
 }
 
 inline bool isDSRead(const StinkyInstruction& inst) {
@@ -811,7 +821,7 @@ inline bool mustPreserveInstruction(const StinkyInstruction& inst) {
 
     if (isGlobalMemAtomic(inst)) return true;
 
-    if (isTensorLoad(inst)) return true;
+    if (isTensorOp(inst)) return true;
 
     // Control flow
     if (isBranch(inst)) return true;
@@ -847,7 +857,7 @@ inline bool hasSideEffect(const StinkyInstruction& inst) {
     if ((isGlobalMemStore(inst) && !isGlobalStoreAsyncFromLds(inst)) || isBranch(inst) ||
         isCall(inst) || isWaitCnt(inst) || isHasSideEffect(inst))
         return true;
-    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst) ||
+    if ((isBarrier(inst) || isTensorOp(inst) || isDSRead(inst) || isDSWrite(inst) ||
          isGlobalStoreAsyncFromLds(inst)) &&
         !hasLdsPseudoRegs(inst))
         return true;
