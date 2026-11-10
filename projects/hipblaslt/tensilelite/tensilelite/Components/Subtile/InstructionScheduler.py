@@ -3940,7 +3940,7 @@ def _relaxCrossedFences(sequence, cellOf, fenceCell):
 
 def _scheduleHalfDisjointHalf(
         cells, minGapDsReadToWait, earliestWriteShadow=None, mfmaBase=0,
-        tailScaleReads=0, cellComments=(), crossCellReads=False):
+        scaleShadows=None, cellComments=(), crossCellReads=False):
     """Schedule every partition cell of one half-disjoint half together.
 
     cells holds (emittedModules, pathOrders, preMfmaOrders, mfmas) per cell
@@ -3962,6 +3962,12 @@ def _scheduleHalfDisjointHalf(
     on, and at least minGapDsReadToWait MFMAs ahead of every fence they
     cross. A half with a partial local-read wait keeps its reads in their
     cells, since a read moved ahead of it would change what it waits for.
+
+    appendC1ScaleShadowReads later adds the ``scaleShadows`` C0-entry
+    scale refreshes to the C1 tail. The gaps placeScaleShadowReads gives
+    them without sharing a load, from the half's barrier and fences, are
+    left out of the plan and take no load and no data read past the
+    two-read cap. The entries placed here are removed from the list.
 
     cellComments is the marker emitted ahead of each later cell's wait.
     Returns None when the cells do not fit this scheme, no load placement
@@ -4005,6 +4011,16 @@ def _scheduleHalfDisjointHalf(
     def outsideSeams(placer, pos, inst):
         return pos // spi not in seams
 
+    shadowReads = [0] * intervals
+
+    def besideScaleShadows(placer, pos, inst):
+        gap = pos // spi
+        if not shadowReads[gap] or not (
+                _isDsRead(inst) or _isDtlLoad(inst) or _isM0Update(inst)):
+            return True
+        return _isDsRead(inst) and sum(map(_isDsRead, intervalInsts(gap))) + (
+            shadowReads[gap]) < _MXFP8_DATA_DS_READS
+
     crossCellReads = crossCellReads and not any(
         isinstance(inst, SWaitCnt) and not _isFullLgkmDrain(inst)
         and (inst.dscnt > 0 or inst.kmcnt > 0)
@@ -4017,7 +4033,8 @@ def _scheduleHalfDisjointHalf(
 
     placer = _SlotPlacer(
         intervals, len(modules), orders,
-        validators=[outsideSeams] + ([clearOfLaterFences] if crossCellReads else []) + [
+        validators=[outsideSeams, besideScaleShadows] + (
+            [clearOfLaterFences] if crossCellReads else []) + [
             rules.oneDsReadPerInterval, rules.oneDtlLoadPerInterval,
             rules.noDsReadOrValuInFirstSlot, rules.minGapDsReadBeforeWait,
             rules.minGapDsReadToWait, rules.noM0WithBufferLoad,
@@ -4050,7 +4067,19 @@ def _scheduleHalfDisjointHalf(
                 for item in slot if not isinstance(item[1], TextBlock)]
 
     def emptySlots(interval):
-        return spi - sum(map(len, placer._placed[interval * spi:(interval + 1) * spi]))
+        return spi - shadowReads[interval] - sum(
+            map(len, placer._placed[interval * spi:(interval + 1) * spi]))
+
+    if scaleShadows:
+        reservedShadows, scaleShadows[:] = placeScaleShadowReads(
+            scaleShadows,
+            [[inst for _, inst in split[0][1]]] + [intervalInsts(i) for i in range(intervals)],
+            firstInterval + 1 if any(_isBarrier(inst) for _, inst in syncItems) else 0,
+            base=mfmaBase - 1,
+            tiers=[tier for tier in _SCALE_SHADOW_TIERS if not tier[0]])
+        for gap, _entry in reservedShadows:
+            if gap:
+                shadowReads[gap - 1] += 1
 
     readPaths = [
         _orderReadsAroundLiveSourceWrites(
@@ -4060,19 +4089,16 @@ def _scheduleHalfDisjointHalf(
     bundles, pending = _requestBundles(requests)
 
     def tailFrom(begin):
-        # The items after the last load need empty slots behind its m0 and
-        # load, ahead of the tail scale reads.
-        scaleTail = max(
-            begin, intervals - math.ceil(tailScaleReads / _MXFP8_DATA_DS_READS))
-        end = scaleTail
+        # The items after the last load need empty slots behind its m0 and load.
+        end = intervals
         while end > begin and emptySlots(end - 1) - 2 + sum(
-                map(emptySlots, range(end, scaleTail))) < len(pending):
+                map(emptySlots, range(end, intervals))) < len(pending):
             end -= 1
         return end
 
     eligible = [
         interval for interval in range(firstInterval, tailFrom(firstInterval))
-        if interval not in seams and not any(
+        if interval not in seams and not shadowReads[interval] and not any(
             _isWaitCnt(x) or _isBarrier(x) or _isVALU(x)
             for x in intervalInsts(interval))]
     # Each item's earliest gap; a cell's reads are planned in groups of
@@ -4145,7 +4171,7 @@ def _scheduleHalfDisjointHalf(
         """Gaps after the barrier with this many ds_reads and room for a request."""
         return [
             interval for interval in range(firstInterval, tailEnd)
-            if interval not in seams
+            if interval not in seams and not shadowReads[interval]
             and sum(map(_isDsRead, intervalInsts(interval))) == reads
             and not any(_isWaitCnt(x) or _isBarrier(x) or _isVALU(x)
                         for x in intervalInsts(interval))
@@ -4223,7 +4249,7 @@ def _scheduleHalfDisjointHalf(
             break
         chosen += gaps
     open_ = [g for g in range(firstInterval, max(intervals, firstInterval + 1))
-             if g not in seams]
+             if g not in seams and (g >= intervals or not shadowReads[g])] or [firstInterval]
     spaced = evenly(open_, len(bundles)) if bundles else []
     attempts += [(spaced, None, True), (spaced, None, False)]
     saved = ([list(slot) for slot in placer._placed], list(placer._firstPos),
@@ -4424,7 +4450,7 @@ def extractPathsFromBeforeDeps(emittedModules) -> Tuple[int, List[List[int]], Li
 
 def instructionScheduleHalf(
         emittedLists, minGapDsReadToWait=_MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
-        earliestWriteShadow=None, mfmaBase: int = 0, tailScaleReads: int = 0,
+        earliestWriteShadow=None, mfmaBase: int = 0, scaleShadows=None,
         cellComments=()):
     """Schedule the partition cells of one half-disjoint MXFP8 half.
 
@@ -4434,7 +4460,7 @@ def instructionScheduleHalf(
     to move into earlier cells and then without, or each cell on its own
     as instructionSchedule would; the schedule estimated to run closest
     to the MFMA cadence (_issueExcess) wins.
-    tailScaleReads belongs to the last cell.
+    The C0-entry scale refreshes the winner reserves leave ``scaleShadows``.
     """
     cells = []
     for emitted in emittedLists:
@@ -4453,39 +4479,46 @@ def instructionScheduleHalf(
         for inst, (vlcnt, dscnt) in zip(waits, counts):
             inst.vlcnt, inst.dscnt = vlcnt, dscnt
 
-    def joint(crossCellReads):
+    def joint(crossCellReads, shadows):
         if not all(_isMx8Schedule(cell[3]) for cell in cells):
             return None
         return _scheduleHalfDisjointHalf(
             cells, minGapDsReadToWait, earliestWriteShadow, mfmaBase,
-            tailScaleReads, cellComments, crossCellReads)
+            shadows, cellComments, crossCellReads)
 
-    def alone():
+    def alone(shadows):
         result = Module()
         base = mfmaBase
         for c, cell in enumerate(cells):
             if c:
                 result.add(cellComments[c - 1])
             result.add(_scheduleHalfDisjointCell(
-                *cell, minGapDsReadToWait, earliestWriteShadow, base))
+                *cell, minGapDsReadToWait, earliestWriteShadow, base, shadows))
             base += len(cell[3])
         return result
 
-    # In order of preference on equal cost.
-    builds = [lambda: joint(True), lambda: joint(False), alone]
+    # In order of preference on equal cost. Each build reserves from its
+    # own copy of the refreshes.
+    builds = [lambda shadows: joint(True, shadows),
+              lambda shadows: joint(False, shadows), alone]
     best = None
     for index, build in enumerate(builds):
         restoreCounts()
-        scheduled = build()
+        shadows = None if scaleShadows is None else list(scaleShadows)
+        scheduled = build(shadows)
         if scheduled is None:
             continue
         cost = _issueExcess(_moduleGaps(scheduled))
         if best is None or cost < best[0]:
-            best = (cost, index, scheduled)
-    if best[1] == len(builds) - 1:
-        return best[2]
-    restoreCounts()
-    return builds[best[1]]()
+            best = (cost, index, scheduled, shadows)
+    _cost, index, scheduled, shadows = best
+    if index != len(builds) - 1:
+        restoreCounts()
+        shadows = None if scaleShadows is None else list(scaleShadows)
+        scheduled = builds[index](shadows)
+    if scaleShadows is not None:
+        scaleShadows[:] = shadows
+    return scheduled
 
 
 def instructionSchedule(emittedModules, multiDU: bool = False,

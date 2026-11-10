@@ -6792,11 +6792,11 @@ class TestHalfDisjointHalf:
         marker.addComment0(text)
         return marker.items()[0]
 
-    def _half(self, cells, tailScaleReads=0, crossCellReads=False):
+    def _half(self, cells, scaleShadows=None, crossCellReads=False):
         from tensilelite.Components.Subtile.InstructionScheduler import (
             _scheduleHalfDisjointHalf)
         return _scheduleHalfDisjointHalf(
-            cells, 4, {}, 0, tailScaleReads,
+            cells, 4, {}, 0, scaleShadows,
             [self._marker(f"cell {c}") for c in range(1, len(cells))],
             crossCellReads)
 
@@ -6880,6 +6880,20 @@ class TestHalfDisjointHalf:
         assert all(b - a >= 2 for a, b in zip(loadGaps, loadGaps[1:]))
         assert any(g < 7 for g in loadGaps) and any(g > 7 for g in loadGaps)
 
+    def test_half_leaves_the_scale_refresh_gap_to_the_refresh(self):
+        # Without the refresh the cross-cell plan puts a load in gap 10,
+        # the WAR floor of a scale last read by MFMA 2.
+        for crossCellReads in (False, True):
+            shadows = [TestC1ScaleShadowReads._entry(17, "SA", 2, 0)]
+            scheduled = self._half(self._twoCells(reads=2, loads=2),
+                                   scaleShadows=shadows,
+                                   crossCellReads=crossCellReads)
+            assert scheduled is not None
+            _prefix, gaps = self._gaps(scheduled)
+            assert not any(c.startswith(("B MT=n tile", "A MT=n+2")) for c in gaps[10])
+            assert sum(c.startswith("A MT=n+2") for gap in gaps for c in gap) == 4
+            assert not shadows
+
     def test_later_cell_fence_stays_alone_before_its_first_mfma(self):
         scheduled = self._half(self._twoCells(reads=2, loads=2))
         _prefix, gaps = self._gaps(scheduled)
@@ -6899,7 +6913,7 @@ class TestHalfDisjointHalf:
         scheduled = self._half(cells)
         assert scheduled is not None
         _prefix, gaps = self._gaps(scheduled)
-        alone = _scheduleHalfDisjointCell(*self._twoCells(6, 2, 6)[0], 4, {}, 0, 0)
+        alone = _scheduleHalfDisjointCell(*self._twoCells(6, 2, 6)[0], 4, {}, 0)
         _p, aloneGaps = self._gaps(alone)
         reads = lambda gs: [[c for c in g if c.startswith("B MT=n tile")] for g in gs]
         assert reads(gaps)[:5] == reads(aloneGaps)[:5]
@@ -6937,8 +6951,8 @@ class TestHalfDisjointHalf:
         for c, cell in enumerate(self._twoCells(reads=6, loads=3, mfmas=6)):
             if c:
                 cellwise.add(self._marker("cell 1"))
-            cellwise.add(IS._scheduleHalfDisjointCell(*cell, 4, {}, 6 * c, 0))
-        chosen = IS.instructionScheduleHalf(emittedLists, 4, {}, 0, 0, markers)
+            cellwise.add(IS._scheduleHalfDisjointCell(*cell, 4, {}, 6 * c))
+        chosen = IS.instructionScheduleHalf(emittedLists, 4, {}, 0, None, markers)
         costs = [IS._issueExcess(IS._moduleGaps(m)) for m in (joint, cellwise, chosen)]
         assert costs[2] <= min(costs[:2]), costs
         assert str(chosen).count("A MT=n+2") == 6
@@ -6974,12 +6988,12 @@ class TestHalfDisjointHalf:
                 IS, "extractPathsFromBeforeDeps", lambda em: shapes[id(em)])
             markers = [self._marker("cell 1")]
             half = IS.instructionScheduleHalf(
-                [c[0] for c in cells], 4, {}, 0, 0, markers)
+                [c[0] for c in cells], 4, {}, 0, None, markers)
             alone = Module()
             for c, (modules, paths, preMfma) in enumerate(emittedLists()):
                 alone.add(IS._scheduleHalfDisjointCell(
                     modules[:-1], paths, preMfma, modules[-1].instructions,
-                    4, {}, c * mfmas, 0))
+                    4, {}, c * mfmas))
             cost = lambda m: IS._issueExcess(IS._moduleGaps(m))
             assert cost(half) <= cost(alone), (reads, loads, mfmas)
 

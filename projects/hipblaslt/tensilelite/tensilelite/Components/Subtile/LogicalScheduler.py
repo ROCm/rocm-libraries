@@ -5460,12 +5460,6 @@ class LogicalScheduler:
                             (pi + 1) * copy_mfmas // len(emitted_3d)
                             - body_mfma_base)
                     if half_group is not None:
-                        tail_scale_reads = 0
-                        last_pi, last_k = half_group[-1]
-                        if (self._scaleShadowPlan and label == "MAINLOOP_C1"
-                                and last_pi == len(emitted_3d) - 1
-                                and last_k == len(emitted_3d[last_pi]) - 1):
-                            tail_scale_reads = len(self._scaleShadowPlan["entry"])
                         markers = Module()
                         for gpi, gk in half_group[1:]:
                             markers.addComment0(f"partition={gpi} subIterK={gk}")
@@ -5475,7 +5469,8 @@ class LogicalScheduler:
                             minGapDsReadToWait=minGapDsReadToWait,
                             earliestWriteShadow=write_floor,
                             mfmaBase=body_mfma_base,
-                            tailScaleReads=tail_scale_reads,
+                            scaleShadows=(
+                                shadow_entries if pi in shadow_tail else None),
                             cellComments=markers.items()))
                         body_mfma_base += sum(
                             len(em.instructions)
