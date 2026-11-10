@@ -380,7 +380,7 @@ class CShuffleEpilogue:
     war_barriers: int = 1
     # MFMA path: set by from_grid(); drives lane_to_output in store().
     atom: Optional[MfmaAtom] = None
-    # WMMA path: set by from_grid_op(); uses c_frag_len / c_layout().coord() instead.
+    # WMMA path: set by from_grid_op(); uses dst.frag_len / dst_layout().coord().
     mma_op: Optional["MmaOp"] = None
 
     @property
@@ -414,9 +414,9 @@ class CShuffleEpilogue:
         out_dtype: str = "f16",
         no_alias: bool = False,
     ) -> "CShuffleEpilogue":
-        """Construct for a WMMA (``MmaOp``) accumulator layout.
+        """Construct for a WMMA (``MmaOp``) result layout.
 
-        Uses ``op.c_frag_len`` / ``op.c_layout()`` for the LDS scatter in
+        Uses ``op.dst.frag_len`` / ``op.dst_layout()`` for the LDS scatter in
         place of the MFMA-specific ``atom.lane_to_output``.
         """
         _fp32_out = out_dtype == "fp32"
@@ -490,10 +490,10 @@ class CShuffleEpilogue:
 
         # Resolve per-lane count and atom tile size from whichever ISA is active.
         if op is not None:
-            _c_per_lane = op.c_frag_len
+            _c_per_lane = op.dst.frag_len
             _atom_m = op.m
             _atom_n = op.n
-            _c_layout = op.c_layout()
+            _c_layout = op.dst_layout()
         else:
             _c_per_lane = atom.c_per_lane
             _atom_m = atom.m
@@ -523,7 +523,7 @@ class CShuffleEpilogue:
         # accumulator is carried in a :class:`StaticDistributedTensor`
         # and published through :func:`store_tile_cshuffle`.
         #
-        # The MMA output layout (``atom.lane_to_output`` / ``op.c_layout().coord()``)
+        # The MMA output layout (``atom.lane_to_output`` / ``op.dst_layout().coord()``)
         # is not a clean ``unmerge`` of the lane id, so the LDS coordinate is
         # supplied via an explicit ``coord_fn`` rather than ``calculate_x``.
         lds_layout = LdsLayout.cshuffle(tile_m=grid.tile_m, tile_n=grid.tile_n)
@@ -585,7 +585,7 @@ class CShuffleEpilogue:
                 tile_n_base = b.add(warp_n_off, b.const_i32(ni * _atom_n))
 
                 if _c_layout is not None:
-                    # WMMA path: use op.c_layout().coord() for the LDS scatter.
+                    # WMMA path: use op.dst_layout().coord() for the LDS scatter.
                     def coord_fn(
                         b_,
                         y_base,
@@ -738,10 +738,10 @@ class CShuffleEpilogue:
             )
 
         if op is not None:
-            _c_per_lane = op.c_frag_len
+            _c_per_lane = op.dst.frag_len
             _atom_m = op.m
             _atom_n = op.n
-            _c_layout = op.c_layout()
+            _c_layout = op.dst_layout()
         else:
             _c_per_lane = atom.c_per_lane
             _atom_m = atom.m

@@ -6,6 +6,8 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -122,8 +124,74 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     const MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, getTensorMap()).Times(::testing::AnyNumber());
     Handle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
+}
+
+TEST(TestHipMlopsEngine, RaggedTensorFlipsApplicableGraphToRejected)
+{
+    // Start from a graph an accepting plan builder would take, then add a ragged
+    // tensor: the flip to rejected must come from the engine's ragged guard, not the
+    // plan builder. The baseline proves the graph is otherwise accepted; the ragged
+    // case asserts the plan builder is never consulted (Times(0)).
+    auto baseBuilder = createValidMatmulGraph();
+    const GraphWrapper baseGraph(baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+            .WillRepeatedly(::testing::Return(true));
+
+        HipMlopsEngine engine(0);
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        Handle dummyHandle;
+        EXPECT_TRUE(engine.isApplicable(dummyHandle, baseGraph));
+    }
+
+    auto raggedBuilder = makeGraphWithRaggedTensor(createValidMatmulGraph());
+    const GraphWrapper raggedGraph(raggedBuilder.GetBufferPointer(), raggedBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
+
+        HipMlopsEngine engine(0);
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        Handle dummyHandle;
+        EXPECT_FALSE(engine.isApplicable(dummyHandle, raggedGraph));
+    }
+}
+
+TEST(TestHipMlopsEngine, Non16ByteAlignmentFlipsApplicableGraphToRejected)
+{
+    auto baseBuilder = createValidMatmulGraph();
+    const GraphWrapper baseGraph(baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+            .WillRepeatedly(::testing::Return(true));
+
+        HipMlopsEngine engine(0);
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        Handle dummyHandle;
+        EXPECT_TRUE(engine.isApplicable(dummyHandle, baseGraph));
+    }
+
+    auto misalignedBuilder = makeGraphWithTensorAlignment(createValidMatmulGraph(), 8);
+    const GraphWrapper misalignedGraph(misalignedBuilder.GetBufferPointer(),
+                                       misalignedBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
+
+        HipMlopsEngine engine(0);
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        Handle dummyHandle;
+        EXPECT_FALSE(engine.isApplicable(dummyHandle, misalignedGraph));
+    }
 }
 
 TEST(TestHipMlopsEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
@@ -140,6 +208,7 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     const MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, getTensorMap()).Times(::testing::AnyNumber());
     Handle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
@@ -149,6 +218,7 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
     const HipMlopsEngine engine(0);
 
     const MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, getTensorMap()).Times(::testing::AnyNumber());
     Handle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
@@ -163,6 +233,7 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     const MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, getTensorMap()).Times(::testing::AnyNumber());
     Handle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }

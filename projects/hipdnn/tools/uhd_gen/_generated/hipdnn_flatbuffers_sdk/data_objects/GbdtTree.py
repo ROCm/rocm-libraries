@@ -7,15 +7,20 @@ import flatbuffers
 from flatbuffers.compat import import_numpy
 np = import_numpy()
 
-# @brief A single decision tree in the GBDT ensemble.
+# @brief A single decision tree in the GBDT ensemble, in one of two encodings.
 #
-# Trees are stored in a flat array format for cache-friendly traversal.
+# Node arrays (the first seven fields): one entry per node, split or leaf.
 # Node i is internal if left_children[i] >= 0; leaf if left_children[i] == -1.
-#
 # Traversal: start at node 0, compare features[feature_indices[i]] against
 # thresholds[i], go left (left_children[i]) if less-or-equal (or less, if
 # decision_lte at i is false) or if missing and default_left,
 # else right (right_children[i]). At a leaf, return leaf_values[i].
+#
+# Split/leaf arrays (the `split_*` fields and `leaves`): splits and leaves are stored
+# apart, each array in the narrowest type it fits. A child >= 0 is a split index; a child
+# c < 0 is leaf ~c (-1 is leaf 0). Traversal starts at split 0, or at leaf 0 when the
+# tree has no splits. A split's threshold is GbdtModel.threshold_table[split_thresholds[i]].
+# A tree uses exactly one encoding; `leaves` present selects this one.
 class GbdtTree(object):
     __slots__ = ['_tab']
 
@@ -235,8 +240,164 @@ class GbdtTree(object):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(16))
         return o == 0
 
+    # GbdtTree
+    def SplitFeaturesType(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(18))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
+        return 0
+
+    # Split/leaf encoding: feature index per split.
+    # GbdtTree
+    def SplitFeatures(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(20))
+        if o != 0:
+            from flatbuffers.table import Table
+            obj = Table(bytearray(), 0)
+            self._tab.Union(obj, o)
+            return obj
+        return None
+
+    # GbdtTree
+    def SplitThresholdsType(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(22))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
+        return 0
+
+    # Split/leaf encoding: index into GbdtModel.threshold_table per split.
+    # GbdtTree
+    def SplitThresholds(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(24))
+        if o != 0:
+            from flatbuffers.table import Table
+            obj = Table(bytearray(), 0)
+            self._tab.Union(obj, o)
+            return obj
+        return None
+
+    # GbdtTree
+    def SplitLeftType(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(26))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
+        return 0
+
+    # Split/leaf encoding: left child per split (>= 0 split, < 0 leaf ~c).
+    # GbdtTree
+    def SplitLeft(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(28))
+        if o != 0:
+            from flatbuffers.table import Table
+            obj = Table(bytearray(), 0)
+            self._tab.Union(obj, o)
+            return obj
+        return None
+
+    # GbdtTree
+    def SplitRightType(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(30))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
+        return 0
+
+    # Split/leaf encoding: right child per split (>= 0 split, < 0 leaf ~c).
+    # GbdtTree
+    def SplitRight(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(32))
+        if o != 0:
+            from flatbuffers.table import Table
+            obj = Table(bytearray(), 0)
+            self._tab.Union(obj, o)
+            return obj
+        return None
+
+    # Split/leaf encoding: missing-value direction per split. Absent means every split
+    # goes `default_left_fill`.
+    # GbdtTree
+    def SplitDefaultLeft(self, j):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(34))
+        if o != 0:
+            a = self._tab.Vector(o)
+            return self._tab.Get(flatbuffers.number_types.BoolFlags, a + flatbuffers.number_types.UOffsetTFlags.py_type(j * 1))
+        return 0
+
+    # GbdtTree
+    def SplitDefaultLeftAsNumpy(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(34))
+        if o != 0:
+            return self._tab.GetVectorAsNumpy(flatbuffers.number_types.BoolFlags, o)
+        return 0
+
+    # GbdtTree
+    def SplitDefaultLeftLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(34))
+        if o != 0:
+            return self._tab.VectorLen(o)
+        return 0
+
+    # GbdtTree
+    def SplitDefaultLeftIsNone(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(34))
+        return o == 0
+
+    # Split/leaf encoding: comparison per split, as decision_lte. Absent means `<=`.
+    # GbdtTree
+    def SplitDecisionLte(self, j):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(36))
+        if o != 0:
+            a = self._tab.Vector(o)
+            return self._tab.Get(flatbuffers.number_types.BoolFlags, a + flatbuffers.number_types.UOffsetTFlags.py_type(j * 1))
+        return 0
+
+    # GbdtTree
+    def SplitDecisionLteAsNumpy(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(36))
+        if o != 0:
+            return self._tab.GetVectorAsNumpy(flatbuffers.number_types.BoolFlags, o)
+        return 0
+
+    # GbdtTree
+    def SplitDecisionLteLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(36))
+        if o != 0:
+            return self._tab.VectorLen(o)
+        return 0
+
+    # GbdtTree
+    def SplitDecisionLteIsNone(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(36))
+        return o == 0
+
+    # Split/leaf encoding: every split's missing-value direction when split_default_left
+    # is absent.
+    # GbdtTree
+    def DefaultLeftFill(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(38))
+        if o != 0:
+            return bool(self._tab.Get(flatbuffers.number_types.BoolFlags, o + self._tab.Pos))
+        return False
+
+    # GbdtTree
+    def LeavesType(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(40))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
+        return 0
+
+    # Split/leaf encoding: prediction per leaf.
+    # GbdtTree
+    def Leaves(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(42))
+        if o != 0:
+            from flatbuffers.table import Table
+            obj = Table(bytearray(), 0)
+            self._tab.Union(obj, o)
+            return obj
+        return None
+
 def GbdtTreeStart(builder):
-    builder.StartObject(7)
+    builder.StartObject(20)
 
 def Start(builder):
     GbdtTreeStart(builder)
@@ -325,14 +486,113 @@ def GbdtTreeStartDecisionLteVector(builder, numElems):
 def StartDecisionLteVector(builder, numElems):
     return GbdtTreeStartDecisionLteVector(builder, numElems)
 
+def GbdtTreeAddSplitFeaturesType(builder, splitFeaturesType):
+    builder.PrependUint8Slot(7, splitFeaturesType, 0)
+
+def AddSplitFeaturesType(builder, splitFeaturesType):
+    GbdtTreeAddSplitFeaturesType(builder, splitFeaturesType)
+
+def GbdtTreeAddSplitFeatures(builder, splitFeatures):
+    builder.PrependUOffsetTRelativeSlot(8, flatbuffers.number_types.UOffsetTFlags.py_type(splitFeatures), 0)
+
+def AddSplitFeatures(builder, splitFeatures):
+    GbdtTreeAddSplitFeatures(builder, splitFeatures)
+
+def GbdtTreeAddSplitThresholdsType(builder, splitThresholdsType):
+    builder.PrependUint8Slot(9, splitThresholdsType, 0)
+
+def AddSplitThresholdsType(builder, splitThresholdsType):
+    GbdtTreeAddSplitThresholdsType(builder, splitThresholdsType)
+
+def GbdtTreeAddSplitThresholds(builder, splitThresholds):
+    builder.PrependUOffsetTRelativeSlot(10, flatbuffers.number_types.UOffsetTFlags.py_type(splitThresholds), 0)
+
+def AddSplitThresholds(builder, splitThresholds):
+    GbdtTreeAddSplitThresholds(builder, splitThresholds)
+
+def GbdtTreeAddSplitLeftType(builder, splitLeftType):
+    builder.PrependUint8Slot(11, splitLeftType, 0)
+
+def AddSplitLeftType(builder, splitLeftType):
+    GbdtTreeAddSplitLeftType(builder, splitLeftType)
+
+def GbdtTreeAddSplitLeft(builder, splitLeft):
+    builder.PrependUOffsetTRelativeSlot(12, flatbuffers.number_types.UOffsetTFlags.py_type(splitLeft), 0)
+
+def AddSplitLeft(builder, splitLeft):
+    GbdtTreeAddSplitLeft(builder, splitLeft)
+
+def GbdtTreeAddSplitRightType(builder, splitRightType):
+    builder.PrependUint8Slot(13, splitRightType, 0)
+
+def AddSplitRightType(builder, splitRightType):
+    GbdtTreeAddSplitRightType(builder, splitRightType)
+
+def GbdtTreeAddSplitRight(builder, splitRight):
+    builder.PrependUOffsetTRelativeSlot(14, flatbuffers.number_types.UOffsetTFlags.py_type(splitRight), 0)
+
+def AddSplitRight(builder, splitRight):
+    GbdtTreeAddSplitRight(builder, splitRight)
+
+def GbdtTreeAddSplitDefaultLeft(builder, splitDefaultLeft):
+    builder.PrependUOffsetTRelativeSlot(15, flatbuffers.number_types.UOffsetTFlags.py_type(splitDefaultLeft), 0)
+
+def AddSplitDefaultLeft(builder, splitDefaultLeft):
+    GbdtTreeAddSplitDefaultLeft(builder, splitDefaultLeft)
+
+def GbdtTreeStartSplitDefaultLeftVector(builder, numElems):
+    return builder.StartVector(1, numElems, 1)
+
+def StartSplitDefaultLeftVector(builder, numElems):
+    return GbdtTreeStartSplitDefaultLeftVector(builder, numElems)
+
+def GbdtTreeAddSplitDecisionLte(builder, splitDecisionLte):
+    builder.PrependUOffsetTRelativeSlot(16, flatbuffers.number_types.UOffsetTFlags.py_type(splitDecisionLte), 0)
+
+def AddSplitDecisionLte(builder, splitDecisionLte):
+    GbdtTreeAddSplitDecisionLte(builder, splitDecisionLte)
+
+def GbdtTreeStartSplitDecisionLteVector(builder, numElems):
+    return builder.StartVector(1, numElems, 1)
+
+def StartSplitDecisionLteVector(builder, numElems):
+    return GbdtTreeStartSplitDecisionLteVector(builder, numElems)
+
+def GbdtTreeAddDefaultLeftFill(builder, defaultLeftFill):
+    builder.PrependBoolSlot(17, defaultLeftFill, 0)
+
+def AddDefaultLeftFill(builder, defaultLeftFill):
+    GbdtTreeAddDefaultLeftFill(builder, defaultLeftFill)
+
+def GbdtTreeAddLeavesType(builder, leavesType):
+    builder.PrependUint8Slot(18, leavesType, 0)
+
+def AddLeavesType(builder, leavesType):
+    GbdtTreeAddLeavesType(builder, leavesType)
+
+def GbdtTreeAddLeaves(builder, leaves):
+    builder.PrependUOffsetTRelativeSlot(19, flatbuffers.number_types.UOffsetTFlags.py_type(leaves), 0)
+
+def AddLeaves(builder, leaves):
+    GbdtTreeAddLeaves(builder, leaves)
+
 def GbdtTreeEnd(builder):
     return builder.EndObject()
 
 def End(builder):
     return GbdtTreeEnd(builder)
 
+import hipdnn_flatbuffers_sdk.data_objects.Float32Array
+import hipdnn_flatbuffers_sdk.data_objects.Float64Array
+import hipdnn_flatbuffers_sdk.data_objects.Int16Array
+import hipdnn_flatbuffers_sdk.data_objects.Int32Array
+import hipdnn_flatbuffers_sdk.data_objects.Int8Array
+import hipdnn_flatbuffers_sdk.data_objects.IntegerArray
+import hipdnn_flatbuffers_sdk.data_objects.RealArray
+import hipdnn_flatbuffers_sdk.data_objects.UInt16Array
+import hipdnn_flatbuffers_sdk.data_objects.UInt8Array
 try:
-    from typing import List
+    from typing import List, Union
 except:
     pass
 
@@ -348,6 +608,19 @@ class GbdtTreeT(object):
         leafValues = None,
         defaultLeft = None,
         decisionLte = None,
+        splitFeaturesType = 0,
+        splitFeatures = None,
+        splitThresholdsType = 0,
+        splitThresholds = None,
+        splitLeftType = 0,
+        splitLeft = None,
+        splitRightType = 0,
+        splitRight = None,
+        splitDefaultLeft = None,
+        splitDecisionLte = None,
+        defaultLeftFill = False,
+        leavesType = 0,
+        leaves = None,
     ):
         self.featureIndices = featureIndices  # type: Optional[List[int]]
         self.thresholds = thresholds  # type: Optional[List[float]]
@@ -356,6 +629,19 @@ class GbdtTreeT(object):
         self.leafValues = leafValues  # type: Optional[List[float]]
         self.defaultLeft = defaultLeft  # type: Optional[List[bool]]
         self.decisionLte = decisionLte  # type: Optional[List[bool]]
+        self.splitFeaturesType = splitFeaturesType  # type: int
+        self.splitFeatures = splitFeatures  # type: Union[None, 'hipdnn_flatbuffers_sdk.data_objects.Int8Array.Int8ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.UInt8Array.UInt8ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.Int16Array.Int16ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.UInt16Array.UInt16ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.Int32Array.Int32ArrayT']
+        self.splitThresholdsType = splitThresholdsType  # type: int
+        self.splitThresholds = splitThresholds  # type: Union[None, 'hipdnn_flatbuffers_sdk.data_objects.Int8Array.Int8ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.UInt8Array.UInt8ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.Int16Array.Int16ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.UInt16Array.UInt16ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.Int32Array.Int32ArrayT']
+        self.splitLeftType = splitLeftType  # type: int
+        self.splitLeft = splitLeft  # type: Union[None, 'hipdnn_flatbuffers_sdk.data_objects.Int8Array.Int8ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.UInt8Array.UInt8ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.Int16Array.Int16ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.UInt16Array.UInt16ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.Int32Array.Int32ArrayT']
+        self.splitRightType = splitRightType  # type: int
+        self.splitRight = splitRight  # type: Union[None, 'hipdnn_flatbuffers_sdk.data_objects.Int8Array.Int8ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.UInt8Array.UInt8ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.Int16Array.Int16ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.UInt16Array.UInt16ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.Int32Array.Int32ArrayT']
+        self.splitDefaultLeft = splitDefaultLeft  # type: Optional[List[bool]]
+        self.splitDecisionLte = splitDecisionLte  # type: Optional[List[bool]]
+        self.defaultLeftFill = defaultLeftFill  # type: bool
+        self.leavesType = leavesType  # type: int
+        self.leaves = leaves  # type: Union[None, 'hipdnn_flatbuffers_sdk.data_objects.Float32Array.Float32ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.Float64Array.Float64ArrayT']
 
     @classmethod
     def InitFromBuf(cls, buf, pos):
@@ -427,6 +713,31 @@ class GbdtTreeT(object):
                     self.decisionLte.append(gbdtTree.DecisionLte(i))
             else:
                 self.decisionLte = gbdtTree.DecisionLteAsNumpy()
+        self.splitFeaturesType = gbdtTree.SplitFeaturesType()
+        self.splitFeatures = hipdnn_flatbuffers_sdk.data_objects.IntegerArray.IntegerArrayCreator(self.splitFeaturesType, gbdtTree.SplitFeatures())
+        self.splitThresholdsType = gbdtTree.SplitThresholdsType()
+        self.splitThresholds = hipdnn_flatbuffers_sdk.data_objects.IntegerArray.IntegerArrayCreator(self.splitThresholdsType, gbdtTree.SplitThresholds())
+        self.splitLeftType = gbdtTree.SplitLeftType()
+        self.splitLeft = hipdnn_flatbuffers_sdk.data_objects.IntegerArray.IntegerArrayCreator(self.splitLeftType, gbdtTree.SplitLeft())
+        self.splitRightType = gbdtTree.SplitRightType()
+        self.splitRight = hipdnn_flatbuffers_sdk.data_objects.IntegerArray.IntegerArrayCreator(self.splitRightType, gbdtTree.SplitRight())
+        if not gbdtTree.SplitDefaultLeftIsNone():
+            if np is None:
+                self.splitDefaultLeft = []
+                for i in range(gbdtTree.SplitDefaultLeftLength()):
+                    self.splitDefaultLeft.append(gbdtTree.SplitDefaultLeft(i))
+            else:
+                self.splitDefaultLeft = gbdtTree.SplitDefaultLeftAsNumpy()
+        if not gbdtTree.SplitDecisionLteIsNone():
+            if np is None:
+                self.splitDecisionLte = []
+                for i in range(gbdtTree.SplitDecisionLteLength()):
+                    self.splitDecisionLte.append(gbdtTree.SplitDecisionLte(i))
+            else:
+                self.splitDecisionLte = gbdtTree.SplitDecisionLteAsNumpy()
+        self.defaultLeftFill = gbdtTree.DefaultLeftFill()
+        self.leavesType = gbdtTree.LeavesType()
+        self.leaves = hipdnn_flatbuffers_sdk.data_objects.RealArray.RealArrayCreator(self.leavesType, gbdtTree.Leaves())
 
     # GbdtTreeT
     def Pack(self, builder):
@@ -486,6 +797,32 @@ class GbdtTreeT(object):
                 for i in reversed(range(len(self.decisionLte))):
                     builder.PrependBool(self.decisionLte[i])
                 decisionLte = builder.EndVector()
+        if self.splitFeatures is not None:
+            splitFeatures = self.splitFeatures.Pack(builder)
+        if self.splitThresholds is not None:
+            splitThresholds = self.splitThresholds.Pack(builder)
+        if self.splitLeft is not None:
+            splitLeft = self.splitLeft.Pack(builder)
+        if self.splitRight is not None:
+            splitRight = self.splitRight.Pack(builder)
+        if self.splitDefaultLeft is not None:
+            if np is not None and type(self.splitDefaultLeft) is np.ndarray:
+                splitDefaultLeft = builder.CreateNumpyVector(self.splitDefaultLeft)
+            else:
+                GbdtTreeStartSplitDefaultLeftVector(builder, len(self.splitDefaultLeft))
+                for i in reversed(range(len(self.splitDefaultLeft))):
+                    builder.PrependBool(self.splitDefaultLeft[i])
+                splitDefaultLeft = builder.EndVector()
+        if self.splitDecisionLte is not None:
+            if np is not None and type(self.splitDecisionLte) is np.ndarray:
+                splitDecisionLte = builder.CreateNumpyVector(self.splitDecisionLte)
+            else:
+                GbdtTreeStartSplitDecisionLteVector(builder, len(self.splitDecisionLte))
+                for i in reversed(range(len(self.splitDecisionLte))):
+                    builder.PrependBool(self.splitDecisionLte[i])
+                splitDecisionLte = builder.EndVector()
+        if self.leaves is not None:
+            leaves = self.leaves.Pack(builder)
         GbdtTreeStart(builder)
         if self.featureIndices is not None:
             GbdtTreeAddFeatureIndices(builder, featureIndices)
@@ -501,5 +838,25 @@ class GbdtTreeT(object):
             GbdtTreeAddDefaultLeft(builder, defaultLeft)
         if self.decisionLte is not None:
             GbdtTreeAddDecisionLte(builder, decisionLte)
+        GbdtTreeAddSplitFeaturesType(builder, self.splitFeaturesType)
+        if self.splitFeatures is not None:
+            GbdtTreeAddSplitFeatures(builder, splitFeatures)
+        GbdtTreeAddSplitThresholdsType(builder, self.splitThresholdsType)
+        if self.splitThresholds is not None:
+            GbdtTreeAddSplitThresholds(builder, splitThresholds)
+        GbdtTreeAddSplitLeftType(builder, self.splitLeftType)
+        if self.splitLeft is not None:
+            GbdtTreeAddSplitLeft(builder, splitLeft)
+        GbdtTreeAddSplitRightType(builder, self.splitRightType)
+        if self.splitRight is not None:
+            GbdtTreeAddSplitRight(builder, splitRight)
+        if self.splitDefaultLeft is not None:
+            GbdtTreeAddSplitDefaultLeft(builder, splitDefaultLeft)
+        if self.splitDecisionLte is not None:
+            GbdtTreeAddSplitDecisionLte(builder, splitDecisionLte)
+        GbdtTreeAddDefaultLeftFill(builder, self.defaultLeftFill)
+        GbdtTreeAddLeavesType(builder, self.leavesType)
+        if self.leaves is not None:
+            GbdtTreeAddLeaves(builder, leaves)
         gbdtTree = GbdtTreeEnd(builder)
         return gbdtTree

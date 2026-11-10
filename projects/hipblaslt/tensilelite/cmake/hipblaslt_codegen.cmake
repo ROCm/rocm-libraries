@@ -130,10 +130,6 @@ function(hipblaslt_detect_sanitizer_runtime out_options out_lib_dirs)
     set(${out_lib_dirs} "${_lib_dirs}" PARENT_SCOPE)
 endfunction()
 
-# When ON, a build that requests gfx1250 also produces library/gfx1250v0/
-# (gfx1250-strict's kernels built for gfx1250). Never add gfx1250v0 to GPU_TARGETS.
-option(HIPBLASLT_BUILD_GFX1250V0 "Build library/gfx1250v0/ alongside gfx1250 for A0 parts reporting gfx1250." ON)
-
 function(create_device_library)
     set(_opts HOST_ASAN HOST_TSAN)
     set(_one
@@ -162,10 +158,10 @@ function(create_device_library)
             "create_device_library: CODEGEN_ROOT is required; pass the TensileLite source root "
             "or set HIPBLASLT_CODEGEN_ROOT.")
     endif()
-    set(_known_bugs_resource "${_codegen_dir}/tensilelite/TensileLogic/known_bugs.yaml")
+    set(_known_bugs_resource "${_codegen_dir}/tensilelite/logic/known_bugs.yaml")
     foreach(_required_path
             "${_codegen_dir}/tensilelite/bin/TensileLogic"
-            "${_codegen_dir}/tensilelite/TensileCreateLibrary/__main__.py"
+            "${_codegen_dir}/tensilelite/create_library/__main__.py"
             "${_known_bugs_resource}")
         if(NOT EXISTS "${_required_path}")
             message(FATAL_ERROR "create_device_library: required codegen resource not found: ${_required_path}")
@@ -178,11 +174,21 @@ function(create_device_library)
     if(NOT _cdl_TARGET)
         set(_cdl_TARGET "tensilelite-device-libraries")
     endif()
+    # TENSILELITE_GPU_TARGETS first, GPU_TARGETS after it. The two differ only by
+    # an xnack suffix that hip::device cannot take, and TensileLite wants the
+    # unstripped list -- but this module is installed for downstream projects,
+    # which set GPU_TARGETS and have never heard of the other name. Preferring the
+    # new variable without falling back would turn a call that worked into a
+    # configure error, for a variable the caller has no way to know about.
+    if(NOT _cdl_ARCHES)
+        set(_cdl_ARCHES ${TENSILELITE_GPU_TARGETS})
+    endif()
     if(NOT _cdl_ARCHES)
         set(_cdl_ARCHES ${GPU_TARGETS})
     endif()
     if(NOT _cdl_ARCHES)
-        message(FATAL_ERROR "create_device_library: no ARCHES given and GPU_TARGETS is empty")
+        message(FATAL_ERROR "create_device_library: no ARCHES given and neither "
+                            "TENSILELITE_GPU_TARGETS nor GPU_TARGETS is set")
     endif()
     if(NOT _cdl_CXX_COMPILER)
         set(_cdl_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
@@ -233,6 +239,11 @@ function(create_device_library)
         set(_installed_python_root "$<IF:$<PLATFORM_ID:Windows>,$<TARGET_FILE_DIR:roc::tensilelite-host>/../lib/hipblaslt,$<TARGET_FILE_DIR:roc::tensilelite-host>/hipblaslt>")
         list(APPEND _python_path_dirs "${_installed_python_root}")
         list(APPEND _runtime_lib_dirs "${_installed_python_root}/rocisa")
+        list(APPEND _runtime_lib_dirs "${_installed_python_root}/tensilelite")
+        list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:roc::tensilelite-host>")
+    endif()
+    if(TARGET tensilelite-host)
+        list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:tensilelite-host>")
     endif()
     if(TARGET roc::origami)
         list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:roc::origami>")
@@ -303,20 +314,11 @@ function(create_device_library)
     if(_cdl_EMIT_OCCUPANCY_PROBE)
         list(APPEND _opts_list "--emit-occupancy-probe")
     endif()
-    set(_logic_arches ${_cdl_ARCHES})
-    if(HIPBLASLT_BUILD_GFX1250V0)
-        list(APPEND _opts_list "--gfx1250v0")
-        # gfx1250v0 is built from gfx1250-strict's logic, so validate that too.
-        if("gfx1250" IN_LIST _cdl_ARCHES AND NOT "gfx1250-strict" IN_LIST _cdl_ARCHES)
-            list(APPEND _logic_arches "gfx1250-strict")
-        endif()
-    endif()
-    list(JOIN _logic_arches "$<SEMICOLON>" _logic_arches_semi)
 
     set(_tensile_logic_args
         "${_cdl_LOGIC_PATH}"
         --architecture
-        "${_logic_arches_semi}"
+        "${_arches_semi}"
         --use-bundled-known-bugs
         --check-all
     )
@@ -376,7 +378,7 @@ function(create_device_library)
     # Tensile is not yet importable.
     set(_output_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}.stamp")
     set(_tcl_command
-        ${_python_command} -m tensilelite.TensileCreateLibrary
+        ${_python_command} -m tensilelite.create_library
         ${_opts_list}
         "${_cdl_LOGIC_PATH}"
         "${_cdl_OUTPUT_DIR}"

@@ -15,7 +15,7 @@ whose Checked-no-finding states `Sweep: clean`, or whose Findings list each coun
 |---|---|
 | Every commit (message, author, committer, added lines); the final diff (added lines with line numbers at `$HEAD`, changed paths) | `history` and `git diff -U0`, below |
 | PR title, description, reviews, comments, inline threads | `pr/` in the round directory (PR targets only): `branch.txt`, `pr-text.txt`, `pr-comment.txt`, `pr-inline.txt`. No PR: the commit messages are the future description, and `intent.md` stands in for it |
-| Earlier heads | Round N > 1: `history "$BASE..<previous head>"` too, the head in the previous round's `PIN.md` |
+| Earlier heads | Round N > 1: `history "$BASE..<previous head>"` too, with the `Previous head` from this round's `PIN.md` |
 
 `history` covers every commit: a leak removed later is still published. `--diff-merges=remerge` (git 2.36+; older `--cc`) includes
 what merge commits introduce. `$L/pub.content` holds one published line per line; the parallel `$L/pub.anchor` holds
@@ -183,7 +183,7 @@ load_output() {
 load_output || { echo "STOP: sweep input missing, not clean" >&2; exit 1; }
 sed -i.bak 's#users/[A-Za-z0-9._-]*/#users/#g' "$L/pub.content" && rm "$L/pub.content.bak"   # the expected branch prefix
 cat > "$L/sweep-allow.txt" <<'EOF2'
-^(CORR|TESTQ|TESTB|AUTH|BUILD|DEPS|API|ROCK|LEAK|DUP|DOCS|RUN|DRIFT|ORCH|VER|SCOUT|SYNTH)[0-9]*-p?[0-9]+$
+^(CORR|TESTQ|TESTB|AUTH|BUILD|DEPS|API|ROCK|LEAK|DUP|DOCS|RUN|DRIFT|IMPACT|ORCH|VER|SCOUT|SYNTH)[0-9]*-p?[0-9]+$
 ^(handoffs?|worktrees?)$
 ^https?://(github\.com/ROCm/[A-Za-z0-9._-]+|raw\.githubusercontent\.com/ROCm/[A-Za-z0-9._-]+|rocm\.docs\.amd\.com|docs\.amd\.com|www\.amd\.com|example\.com)([/:?#].*)?$
 EOF2

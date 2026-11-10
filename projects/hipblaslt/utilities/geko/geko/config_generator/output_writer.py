@@ -33,7 +33,7 @@ logger = logging.getLogger("GEKO")
 # =====================================================================
 
 class TuningConfigWriter:
-    """Serialize a config dict (with :class:`ForkParameter` values) to Tensile YAML.
+    """Serialize a config dict (with :class:`ForkParameter` values) to TensileLite YAML.
 
     Emits GlobalParameters, BenchmarkProblems (including ForkParameters and Groups),
     LibraryLogic, optional ductile section, in one pass without post-processing.
@@ -293,7 +293,7 @@ def write_run_script(
     client_path: Optional[str | Path] = None,
     extra_env: Optional[Dict[str, str]] = None,
 ) -> None:
-    """Write an executable bash script that runs Tensile for one YAML.
+    """Write an executable bash script that runs TensileLite for one YAML.
     
     Args:
         filepath: Path for the ``.sh`` file (created with mode ``0o755``).
@@ -406,7 +406,7 @@ class EntityOutputWriter:
             output_dir: Directory for YAML and ``.sh`` files (and ``run_<gemm_type>_all.sh``).
             gemm_type: GEMM string used in run-all and config log basenames.
             hipblaslt_path: hipBLASLt root for per-entity run scripts.
-            client_path: Optional prebuilt Tensile client for run scripts.
+            client_path: Optional prebuilt TensileLite client for run scripts.
             write_shell_scripts: If false, skip ``.sh`` and ``run_*_all.sh`` (YAML and log only).
         """
         self._output_dir = Path(output_dir)

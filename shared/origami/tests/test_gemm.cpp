@@ -1928,6 +1928,19 @@ TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
       auto latency = origami::gemm::compute_parallel_reduction_latency(problem, hardware, config, ctx);
       REQUIRE(latency > 0.0);
     }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - tiny output still pays the second launch") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(32, 1, 2048);
+      auto config   = make_config(32, 32, 32, 16, 16, 16, false, 1);
+
+      origami::gemm::context_t ctx(problem, hardware, config);
+      ctx.splitting_factor    = 8;
+      ctx.reduction_strategy  = origami::reduction_t::parallel;
+
+      auto latency = origami::gemm::compute_parallel_reduction_latency(problem, hardware, config, ctx);
+      REQUIRE(latency >= origami::heuristic_defaults_t::POSTGSU_KERNEL_LAUNCH_OVERHEAD);
+    }
   }
 }
 

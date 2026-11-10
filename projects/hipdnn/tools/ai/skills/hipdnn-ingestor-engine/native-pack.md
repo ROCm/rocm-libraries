@@ -211,7 +211,7 @@ What the sketch relies on beyond the contract above and `LaunchKernelDefinition.
 - The hipDNN workspace is not zeroed. A launch that accumulates into the slice must
   initialise it, or an earlier launch must write all of it.
 - `launchNames()` is provisional until the `launches[]` dispatch program exists
-  ([RFC 0017 §15.1](../../../../docs/rfcs/0017_UniversalKernelDescriptor.md)).
+  (RFC 0017 §15.1 in `projects/hipdnn/docs/rfcs/0017_UniversalKernelDescriptor.md`).
 
 ## Registration and inventory proof
 

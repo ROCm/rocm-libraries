@@ -168,9 +168,147 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(1024u, 128u, 32, true,  true),  // transposed A
         std::make_tuple(1024u, 128u, 32, false, false), // non-transposed B
         std::make_tuple(1024u, 204u, 32, true,  true),  // M=204, non-32-aligned (was failing)
-        std::make_tuple(1024u, 213u, 32, true,  true)   // M=213, non-32-aligned (was failing)
+        std::make_tuple(1024u, 213u, 32, true,  true),  // M=213, non-32-aligned (was failing)
+        // 1x128 block scaling (MXBlockA/MXBlockB = 128).
+        std::make_tuple(1024u, 128u, 128, true,  true),  // transposed A
+        std::make_tuple(1024u, 128u, 128, false, false), // non-transposed B
+        std::make_tuple(1024u, 204u, 128, true,  true)   // free dim not block-aligned
     )
 );
+
+// ============================================================================
+// 1x128 block scaling
+//
+// Every other case in this file pins mxBlock to 32. These tests pin the
+// generator's block granularity itself: with MXBlockA/MXBlockB = 128 one scale
+// must cover 128 contiguous K elements, so the generator must emit K/128 scales
+// per free-dim column -- not K/32. A generator that silently ignored mxBlock and
+// kept 32-element blocks would still produce plausible-looking data, so the
+// checks below are on the *granularity*, not just on the values being finite.
+//
+// Layout for these calls (isTranspose=true, isMatrixA=true): rows=K, cols=M,
+// column-major with stride=rows, so element (k, m) lives at data index
+// m*rows + k and its scale at scale index m*(rows/mxBlock) + k/mxBlock.
+// ============================================================================
+
+/** @brief UE8M0 exponent byte -> float scale (bias 127). */
+static float decodeUE8M0(uint8_t byte)
+{
+    return std::ldexp(1.0f, static_cast<int>(byte) - 127);
+}
+
+/**
+ * @brief The generator must write exactly (rows/mxBlock)*cols scale bytes.
+ *
+ * The buffer is sized for the 32-block case (4x too large for mxBlock=128) and
+ * pre-filled with a sentinel that bounded [-1,1] input can never produce: 0xAB
+ * decodes to 2^44, and scales for data bounded to [-1,1] have exponent <= 127.
+ * If the generator ignored mxBlock and kept writing at 32 granularity, the tail
+ * would be overwritten and the sentinel check would fail.
+ */
+TEST(MXDataGenBlock128, ScaleGranularityIsBlock128)
+{
+    constexpr uint64_t rows    = 1024; // K
+    constexpr uint64_t cols    = 128; // M
+    constexpr int      mxBlock = 128;
+
+    const size_t numPacked     = (rows * cols + 1) / 2;
+    const size_t expectedScales = (rows / mxBlock) * cols;
+    const size_t oversized      = (rows / 32) * cols; // what a 32-block generator would write
+
+    ASSERT_EQ(oversized, expectedScales * 4u);
+
+    constexpr uint8_t kSentinel = 0xAB;
+    std::vector<uint8_t> data(numPacked, 0);
+    std::vector<uint8_t> scale(oversized, kSentinel);
+
+    generateMXInput((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_UE8M0,
+                    data.data(), scale.data(),
+                    rows, cols, rows, /*isTranspose=*/true,
+                    mxBlock, 1, /*isMatrixA=*/true,
+                    MXScaleLayout::None, "Bounded", -1.f, 1.f);
+
+    size_t written = 0;
+    for(size_t i = 0; i < expectedScales; ++i)
+        if(scale[i] != kSentinel)
+            ++written;
+    EXPECT_GT(written, 0u) << "generator wrote no scales at mxBlock=128";
+
+    for(size_t i = expectedScales; i < oversized; ++i)
+        ASSERT_EQ(scale[i], kSentinel)
+            << "scale byte " << i << " past the K/128 region was overwritten; the generator "
+            << "is emitting scales at a finer granularity than mxBlock=128";
+}
+
+/**
+ * @brief All 128 elements of an MX block must share one scale.
+ *
+ * Dequantized reference = fp4_value * blockScale, and FP4 E2M1 has only eight
+ * magnitudes. So dividing each reference value by the scale read at 128
+ * granularity must land back on that set. If the generator actually applied a
+ * distinct scale per 32 elements, three quarters of the elements in each block
+ * would be divided by the wrong power of two and fall off the FP4 grid.
+ *
+ * Parameterized over 32 as well so a mistake in the index mapping above fails
+ * the known-good control case too, rather than silently passing at 128.
+ */
+class MXBlockScaleGranularityTest : public ::testing::TestWithParam<int>
+{
+};
+
+TEST_P(MXBlockScaleGranularityTest, DequantizedValuesLieOnTheFP4Grid)
+{
+    const int mxBlock = GetParam();
+
+    constexpr uint64_t rows = 512; // K
+    constexpr uint64_t cols = 64; // M
+
+    const size_t numPacked  = (rows * cols + 1) / 2;
+    const size_t kBlocks    = rows / mxBlock;
+    const size_t numScales  = kBlocks * cols;
+
+    std::vector<uint8_t> data(numPacked, 0);
+    std::vector<uint8_t> scale(numScales, 0);
+
+    auto ref = generateMXInput((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_UE8M0,
+                               data.data(), scale.data(),
+                               rows, cols, rows, /*isTranspose=*/true,
+                               mxBlock, 1, /*isMatrixA=*/true,
+                               MXScaleLayout::None, "Bounded", -1.f, 1.f);
+
+    ASSERT_EQ(ref.size(), rows * cols);
+
+    // FP4 E2M1 magnitudes.
+    const std::vector<float> grid = {0.f, 0.5f, 1.f, 1.5f, 2.f, 3.f, 4.f, 6.f};
+
+    size_t checked = 0, nonZero = 0;
+    for(uint64_t m = 0; m < cols; ++m)
+    {
+        for(uint64_t k = 0; k < rows; ++k)
+        {
+            const float s = decodeUE8M0(scale[m * kBlocks + k / mxBlock]);
+            ASSERT_GT(s, 0.f) << "zero/denormal scale at m=" << m << " kblock=" << k / mxBlock;
+
+            const float q = std::abs(ref[m * rows + k]) / s;
+            const bool  onGrid
+                = std::any_of(grid.begin(), grid.end(),
+                              [&](float g) { return std::abs(q - g) <= 1e-3f * std::max(1.f, g); });
+            ASSERT_TRUE(onGrid)
+                << "dequantized value " << ref[m * rows + k] << " / scale " << s << " = " << q
+                << " is not an FP4 E2M1 magnitude (m=" << m << ", k=" << k
+                << ", mxBlock=" << mxBlock << "); the scale is not shared across the whole block";
+            ++checked;
+            if(q != 0.f)
+                ++nonZero;
+        }
+    }
+    EXPECT_EQ(checked, rows * cols);
+    EXPECT_GT(nonZero, 0u) << "all-zero data proves nothing about scale granularity";
+}
+
+INSTANTIATE_TEST_SUITE_P(BlockSizes,
+                         MXBlockScaleGranularityTest,
+                         ::testing::Values(32, 128));
 
 // ============================================================================
 // PreSwizzle scale tests

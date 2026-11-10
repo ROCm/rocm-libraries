@@ -25,8 +25,11 @@ findandcheckllvmsymbolizer()
 
 # YAML-driven CTest categorisation. Build-tree tests get labels as they are
 # registered; install_hipdnn_ctest_files() bakes the same labels into the
-# installed CTestTestfile.cmake.
+# installed CTestTestfile.cmake. test_categories.yaml labels whole CTest entries by
+# name. A target that must run a gtest-filtered subset (add_hipdnn_test(...
+# GTEST_CATEGORIES)) also gets suites generated from test_categories_gtest.yaml.
 set(_HIPDNN_TEST_CATEGORIES_YAML "${PROJECT_SOURCE_DIR}/test_categories.yaml")
+set(_HIPDNN_GTEST_CATEGORIES_YAML "${PROJECT_SOURCE_DIR}/test_categories_gtest.yaml")
 set(_HIPDNN_SHARED_CTEST "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
 if(EXISTS "${_HIPDNN_SHARED_CTEST}" AND EXISTS "${_HIPDNN_TEST_CATEGORIES_YAML}")
     include("${_HIPDNN_SHARED_CTEST}")
@@ -176,9 +179,10 @@ function(_add_check_target_internal PREFIX_NAME TARGET_NAME LABEL VERBOSE COMMEN
     # Build the ctest command
     set(CTEST_CMD ${CMAKE_COMMAND} -E env ${CTEST_ENV} ${CMAKE_CTEST_COMMAND})
 
-    # Add label filter if specified
+    # Add label filter if specified. Anchored: -L is a regex search, so a bare `quick` would
+    # also select every test labelled `ffm-quick`.
     if(NOT "${LABEL}" STREQUAL "")
-        list(APPEND CTEST_CMD -L "${LABEL}")
+        list(APPEND CTEST_CMD -L "^${LABEL}$")
     endif()
 
     # Always add --output-on-failure
@@ -194,7 +198,10 @@ function(_add_check_target_internal PREFIX_NAME TARGET_NAME LABEL VERBOSE COMMEN
 
     # Create the target with prefix
     set(FULL_TARGET_NAME "${PREFIX_NAME}-${TARGET_NAME}")
-    add_custom_target(${FULL_TARGET_NAME} COMMAND ${CTEST_CMD} COMMENT "${COMMENT}" USES_TERMINAL)
+    # VERBATIM: the anchors in -L "^label$" are shell-special (cmd.exe treats ^ as its escape
+    # character), so the arguments must be quoted for the host shell.
+    add_custom_target(${FULL_TARGET_NAME} COMMAND ${CTEST_CMD} COMMENT "${COMMENT}" USES_TERMINAL
+                      VERBATIM)
     add_dependencies(${FULL_TARGET_NAME} ${PREFIX_NAME}-validate_test_names)
     message(VERBOSE "Created ${FULL_TARGET_NAME} target")
 endfunction() # _add_check_target_internal
@@ -292,6 +299,53 @@ function(finalize_test_targets prefix_name)
     # cmake-format: on
 endfunction() # finalize_test_targets
 
+# Generates the <TARGET>_<category>_suite entries of a GTEST_CATEGORIES target from
+# test_categories_gtest.yaml (see add_hipdnn_test).
+#
+# Without shared/ctest (a sparse or standalone checkout of projects/hipdnn) no test gets category
+# labels at all, so there is nothing to pair these suites with: skip them, as the label pass above
+# skips. A missing yaml next to a present shared/ctest would instead drop the target out of every
+# category the yaml defines, so that case is a warning.
+function(_hipdnn_add_gtest_category_suites TARGET WORKING_DIR)
+    if(NOT COMMAND apply_test_category_labels)
+        message(STATUS "hipDNN: shared/ctest not available; skipping the gtest-filter suites of ${TARGET}")
+        return()
+    endif()
+    if(NOT EXISTS "${_HIPDNN_GTEST_CATEGORIES_YAML}")
+        message(WARNING
+            "hipDNN: ${_HIPDNN_GTEST_CATEGORIES_YAML} not found; ${TARGET} gets no gtest-filter "
+            "suites and is not selected by the categories that file defines"
+        )
+        return()
+    endif()
+
+    # Same environment and fixtures as the plain entry. The installed-tree lines that the parser
+    # writes into the fragment carry the same ENVIRONMENT, which only differs from the plain
+    # installed entry in sanitizer builds.
+    set(_category_args "")
+    if(DEFINED TEST_ENVIRONMENT)
+        list(APPEND _category_args ENVIRONMENT ${TEST_ENVIRONMENT})
+    endif()
+    if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+        list(APPEND _category_args ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION})
+    endif()
+    if(DEFINED HIPDNN_TEST_MIOPEN_CACHE_DIR)
+        list(APPEND _category_args FIXTURES_REQUIRED hipdnn_clear_miopen_test_cache)
+    endif()
+
+    # The parser appends the installed-tree add_test() lines to this fragment;
+    # install_hipdnn_ctest_files() copies it into the installed CTestTestfile.cmake.
+    set(_fragment "${CMAKE_CURRENT_BINARY_DIR}/${TARGET}_gtest_categories.ctest")
+    file(WRITE "${_fragment}" "")
+    set_property(GLOBAL APPEND PROPERTY HIPDNN_GTEST_CATEGORY_FRAGMENTS "${_fragment}")
+
+    apply_test_category_labels(
+        ${TARGET} "${_HIPDNN_GTEST_CATEGORIES_YAML}" "${WORKING_DIR}"
+        INSTALL_TEST_FILE "${_fragment}"
+        ${_category_args}
+    )
+endfunction() # _hipdnn_add_gtest_category_suites
+
 # ~~~
 # Records, configures, and registers a hipDNN gtest-based CTest test target. Assumes that the
 # test target is a gtest executable, setting up:
@@ -304,8 +358,14 @@ endfunction() # finalize_test_targets
 # Parameters:
 #   TARGET - Name of the test executable target (must already exist)
 #   WORKING_DIR - Working directory for test execution
+#   GTEST_CATEGORIES - Optional flag. Also generate <TARGET>_<category>_suite entries, each running
+#       the binary with the --gtest_filter that test_categories_gtest.yaml defines for that
+#       category, labelled as that file says. The target must then be listed under
+#       `exclude_tests` for the same categories in test_categories.yaml, or its plain entry would
+#       carry those labels too and run the tests the filter excludes.
 # ~~~
 function(add_hipdnn_test TARGET WORKING_DIR)
+    cmake_parse_arguments(ARG "GTEST_CATEGORIES" "" "" ${ARGN})
     # ROCm ships its own googletest, which hip::host puts on the include path. Ahead of the
     # fetched googletest it compiles against ROCm's headers but links the fetched archive.
     # Pinned per target, for both gtest and gmock, so library sources never see googletest.
@@ -381,6 +441,10 @@ function(add_hipdnn_test TARGET WORKING_DIR)
     if(DEFINED HIPDNN_TEST_MIOPEN_CACHE_DIR)
         set_tests_properties(${TARGET} PROPERTIES FIXTURES_REQUIRED hipdnn_clear_miopen_test_cache)
     endif()
+
+    if(ARG_GTEST_CATEGORIES)
+        _hipdnn_add_gtest_category_suites(${TARGET} "${WORKING_DIR}")
+    endif()
 endfunction() # add_hipdnn_test
 
 # Install CTest configuration files for direct test execution This should be called once at the end
@@ -430,6 +494,15 @@ function(install_hipdnn_ctest_files)
             "${INSTALLED_CTEST_FILE}"
         )
     endif()
+
+    # Suites generated from test_categories_gtest.yaml. Appended after the label pass on
+    # purpose: that pass would label them through test_categories.yaml's `.*` patterns
+    # (quick, standard, ...), and their only labels are the ones the gtest yaml gives them.
+    get_property(gtest_category_fragments GLOBAL PROPERTY HIPDNN_GTEST_CATEGORY_FRAGMENTS)
+    foreach(_fragment IN LISTS gtest_category_fragments)
+        file(READ "${_fragment}" _fragment_contents)
+        file(APPEND "${INSTALLED_CTEST_FILE}" "\n${_fragment_contents}")
+    endforeach()
 
     # Install the generated CTestTestfile.cmake to HIPDNN_CTEST_FILE_INSTALL_PATH
     install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_CTEST_FILE_INSTALL_PATH}

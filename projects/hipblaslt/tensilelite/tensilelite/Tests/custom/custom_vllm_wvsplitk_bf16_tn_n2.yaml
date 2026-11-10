@@ -58,6 +58,7 @@ BenchmarkProblems:
             macrotile: [64, 16, 8]
             threads: [64, 16, 1]
             grid: [ComputeUnits, One, One]
+            uniformSummationOrder: true
           - name: "wvSplitK_vllm_bf16_tn_n2_y1u2"
             args: [ { type: int32, semantic: SizeSum },
                     { type: int32, semantic: SizeFree0 },
@@ -76,6 +77,7 @@ BenchmarkProblems:
             macrotile: [64, 16, 8]
             threads: [64, 16, 1]
             grid: [ComputeUnits, One, One]
+            uniformSummationOrder: true
         - MatrixInstruction:
           # 9-tuple so fork conversion sets EnableMatrixInstruction and
           # WorkGroup [64, 16, 1] from waves=mi[7]*mi[8]=16 (matches threads).

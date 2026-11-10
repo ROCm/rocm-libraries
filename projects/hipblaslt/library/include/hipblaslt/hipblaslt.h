@@ -252,6 +252,14 @@ typedef enum {
 
   /** Memory order of the data. See ``hipblasLtOrder_t``.
    *
+   * ``hipblasLtMatmul``, ``hipblasLtMatmulAlgoGetHeuristic``, and the ``hipblaslt_ext`` ``Gemm`` and
+   * ``GroupedGemm`` APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED`` when any of A, B, C, or D uses
+   * ``HIPBLASLT_ORDER_ROW``. Only ``hipblasLtMatrixTransform`` accepts ``HIPBLASLT_ORDER_ROW``.
+   * Swizzled orders apply to A and B only: the same APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED``
+   * when C or D uses any order other than ``HIPBLASLT_ORDER_COL``.
+   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only ``HIPBLASLT_ORDER_COL`` and return
+   * ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
+   *
    * ``int32_t``, default: ``HIPBLASLT_ORDER_COL``.
    */
   HIPBLASLT_MATRIX_LAYOUT_ORDER = 3,
@@ -353,6 +361,7 @@ typedef enum {
     HIPBLASLT_POINTER_MODE_HOST = 0,                          /**<Targets host memory. */
     HIPBLASLT_POINTER_MODE_DEVICE = 1,                        /**<Targets device memory. */
     HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST = 4, /**<Alpha pointer targets a device memory vector of length equal to the number of rows of matrix D. Beta is a single value in host memory. */
+    HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT = 1000, /**<Alpha pointer targets a single FP32 value in device memory. Requires scaleType HIP_R_32F. Beta is a single value in host memory. */
 } hipblasLtPointerMode_t;
 
 /*! \ingroup types_module
@@ -421,8 +430,8 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_EPILOGUE = 2,                   /**<Epilogue function. See ``hipblasLtEpilogue_t``. Default value is ``HIPBLASLT_EPILOGUE_DEFAULT``. Data type: ``uint32_t``. */
   HIPBLASLT_MATMUL_DESC_BIAS_POINTER = 3,               /**<Bias or bias gradient vector pointer in the device memory. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE = 4,             /**<Type of the bias vector in the device memory. Can be set the same as the D matrix type or Scale type. Bias case: see ``HIPBLASLT_EPILOGUE_BIAS``. Data type: ``int32_t`` based on ``hipDataType``. */
-  HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER = 5,            /**<Device pointer to the scale factor value that converts data in matrix A to the compute data type range. The scaling factor must have the same type as the compute type. If not specified, or set to NULL, the scaling factor is assumed to be ``1``. If set for an unsupported matrix data, scale, and compute type combination, calling hipblasLtMatmul() will return ``HIPBLAS_INVALID_VALUE``. Default value: NULL. Data type: ``void*`` ``/const void*``. */
-  HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER = 6,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix B. Default value: NULL. Data type: ``void*`` / ``const void*``. */
+  HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER = 5,            /**<Device pointer to the scale factor value that converts data in matrix A to the compute data type range. The scaling factor must have the same type as the compute type. If not specified, or set to NULL, the scaling factor is assumed to be ``1``. If set for an unsupported matrix data, scale, and compute type combination, calling hipblasLtMatmul() will return ``HIPBLAS_INVALID_VALUE``. In grouped GEMM, scaling is supported only with the same MX block scale mode on both A and B (``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0``, ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT``, ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3``, ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT``, ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT``, ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT``, or ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT``), and this is a device array of ``groupCount`` pointers to each group's scale tensor. Each group's K must then be a multiple of the mode's block size, 16 or 32. Default value: NULL. Data type: ``void*`` ``/const void*``. */
+  HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER = 6,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix B, including the per-group pointer array in grouped GEMM. Default value: NULL. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_C_SCALE_POINTER = 7,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix C. Default value: NULL. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER = 8,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix D. Default value: NULL. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER = 9, /**<Not supported: no kernel applies a scale to the AUX output. Setting a non-NULL pointer returns ``HIPBLAS_STATUS_NOT_SUPPORTED``; setting NULL succeeds. Default value: NULL. Data type: ``void*`` / ``const void*``. */
@@ -480,6 +489,14 @@ typedef enum {
   /** Row-major.
    *
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
+   *
+   * Supported by ``hipblasLtMatrixTransform`` only. Matmul does not support this order and returns
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED``. To multiply row-major data, keep ``HIPBLASLT_ORDER_COL`` and
+   * use the identity ``(A * B)^T = B^T * A^T``: swap A and B, swap ``m`` and ``n``, and describe each
+   * matrix as its column-major transpose. The column-major result is ``(A * B)^T``, which is
+   * ``A * B`` in row-major order, so the output needs no transpose. Anything applied per row of D,
+   * such as a bias or an alpha vector, then applies per column of ``A * B``, and the scale for A
+   * becomes the scale for the second operand.
    */
   HIPBLASLT_ORDER_ROW = 1,
   
@@ -578,6 +595,7 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *
  *  A hipBLASLt handle is not safe for concurrent use across multiple HIP streams. Applications must ensure any previously submitted work associated with a handle has completed
  *  before reusing that handle on a different stream. For multi-stream execution, create one handle per stream.  
+ *
  *  Use the following functions to manipulate this library context:  
  *
  *  \ref hipblasLtCreate():
@@ -585,6 +603,9 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *  
  *  \ref hipblasLtDestroy():
  *  To destroy a previously created hipBLASLt library context descriptor and release the resources.
+ *
+ *  Distinct handles may be used at the same time from different threads, for example one handle per stream.
+ *  Handles in one process share the loaded solution libraries, code-object adapters, and heuristic caches.
  */
 typedef void* hipblasLtHandle_t;
 /*! \ingroup types_module

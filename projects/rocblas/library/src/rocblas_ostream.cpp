@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -290,6 +290,9 @@ void rocblas_internal_ostream::worker::thread_function()
     // Clear any errors in the FILE
     clearerr(m_file);
 
+    // Whether the previous write failed, to report only the first of consecutive failures
+    bool write_failed = false;
+
     // Lock the mutex in preparation for cond.wait
     std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -319,14 +322,23 @@ void rocblas_internal_ostream::worker::thread_function()
         // Detect any error and flush the C FILE stream
         if(ferror(m_file) || fflush(m_file))
         {
-            perror("Error writing log file");
+            // Report only the first of consecutive failures (e.g. a full disk), so a
+            // persistently failing file does not print an error for every message
+            if(!write_failed)
+                perror("Error writing log file");
+            write_failed = true;
 
-            // Tell future to wake up
-            task.set_value();
-            break;
+            // Keep servicing the queue: senders wait until their task completes, so
+            // exiting here would hang every later message sent to this worker. Clear
+            // the error so later writes are retried if the failure was transient.
+            clearerr(m_file);
+        }
+        else
+        {
+            write_failed = false;
         }
 
-        // Promise that the data has been written
+        // Promise that the data has been handled
         task.set_value();
 
         // Re-lock the mutex in preparation for cond.wait

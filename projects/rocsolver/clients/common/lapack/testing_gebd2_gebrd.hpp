@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -346,7 +346,7 @@ void gebd2_gebrd_getError(const rocblas_handle handle,
     for(rocblas_int b = 0; b < bc; ++b)
     {
         err = norm_error('F', m, n, lda, hA[b], hARes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
     }
 }
 

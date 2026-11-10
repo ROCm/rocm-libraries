@@ -11,6 +11,7 @@ developer who must run the suite, read its output, or add to it.
 | [Running the Tests](running-tests.md) | Run the suite (CTest, check targets, the binary directly), time the engine with `--benchmark`, learn what the tiers and filters select, and read the output: coverage summary, support-claim summary, hard stops, and runs that look green but are not. |
 | [Adding Tests and Updating Claims](adding-tests.md) | Add a bundle (end to end, including a new op), add golden data, update support claims when a run reports `unclaimed_support`, record an engine limitation, add an engine lane, or add a C++ test when a bundle cannot express it. |
 | [Support Claim Enforcement](support-claim-enforcement.md) | For harness maintainers: the claim verdict model, the lifecycle inside `TestBody()`, the coverage ladder, and who owns what in the harness. |
+| [GPU Reference Test Coverage Rules](gpu-ref-test-coverage.md) | Decide whether a new `hipdnn_gpu_ref_tests` case adds coverage: the cost of a case (HipRTC compiles), the datatype, layout and padding-mode rules that keep the matrix small, and the measured effect of the cut. |
 | [Support Matrix and Feature Coverage](support-matrix.md) | Render the human-readable matrix of which engine supports which graph on which GPU and OS, validate the sidecars it is built from, see the pre-commit and CI checks around it, and measure per-op feature coverage. |
 
 Tool references are next to the tools:
@@ -53,6 +54,7 @@ other rows do not, so they are easy to miss.
 | `FATAL: --enforce-support-claims is active and …` | **yes** | Enforcement verified nothing. | [Hard stops](running-tests.md#hard-stops) |
 | `benchmark failed: …` | **yes** (that test failed) | Under `--benchmark`, the verified graph failed when it ran again, or the timer returned too few measurements. | [Time the engine](running-tests.md#4-time-the-engine---benchmark) |
 | `unclaimed_support` in the `SUPPORT CLAIM SUMMARY` | no | The engine accepts graphs that no sidecar claims. Record them. | [Updating support claims](adding-tests.md#updating-support-claims) |
+| `[ VERIFIER ] rejected(<stage>): <bundle>` / `Verified by: … rejected R` | no | An expected-rejection bundle passed: the engine rejected a graph that is invalid on purpose. This is the intended pass, not a skip. | [Expected-rejection bundles](running-tests.md#expected-rejection-bundles) |
 | `Skipped:` equal to (or close to) the total | no | Green, but little or nothing was tested. Read the skip reasons. | [Test coverage summary](running-tests.md#test-coverage-summary) |
 | `WARNING: Bundle tests are enabled but …` / `WARNING: No bundles could be loaded from …` | no | No bundles registered. Only compiled-in C++ tests ran. | [Troubleshooting](running-tests.md#troubleshooting) |
 | `No tests were found!!!` from CTest | no (exit 0) | Wrong directory, wrong label, or only disabled suites. | [Runs that look green but are not](running-tests.md#runs-that-look-green-but-are-not) |

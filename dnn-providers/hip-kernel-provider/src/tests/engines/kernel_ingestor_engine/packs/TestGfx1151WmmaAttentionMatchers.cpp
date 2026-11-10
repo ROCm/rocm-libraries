@@ -605,10 +605,10 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOverrideShapeGraphs)
 
 // The graph's left_bound follows cuDNN (L keys ending at the diagonal, diagonal
 // included); the kernel's window_left follows FlashAttention (keys before the
-// diagonal), so the same window binds as L - 1. left_bound = 0 is declined.
+// diagonal), so the same window binds as L - 1. left_bound = 0 is outside hipDNN's
+// band domain (positive or -1, SEM-005), so it is declined.
 TEST(TestGfx1151WmmaAttentionMatchers, BindsCudnnLeftBoundAsFlashAttentionWindowLeft)
 {
-    using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
     GraphSpec spec;
     spec.leftBound = 7;
     spec.rightBound = 3;
@@ -629,15 +629,31 @@ TEST(TestGfx1151WmmaAttentionMatchers, BindsCudnnLeftBoundAsFlashAttentionWindow
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-// The deprecated causal flags override the bounds and alignment, as in the
-// hipDNN reference; otherwise a left bound would drop the causal limit.
-TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsOverrideBounds)
+// The deprecated causal flags compose with the bounds the way cuDNN's setters do
+// (resolveDiagonalBand, the hipDNN references): right bound 0 unless one is set,
+// bottom-right for causal_mask_bottom_right. window_left is the kernel's count of
+// keys left of the diagonal, so cuDNN's left_bound = 7 becomes 6 (SEM-001).
+TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsComposeWithBounds)
 {
     for(const bool bottomRight : {false, true})
     {
+        GraphSpec windowed;
+        windowed.causalMask = !bottomRight;
+        windowed.causalMaskBottomRight = bottomRight;
+        windowed.rightBound = -1;
+        const auto window = matchGraph(windowed);
+        ASSERT_TRUE(window.has_value());
+        EXPECT_EQ(tryGetBoundInt(*window, "gfx1151_wmma_attention.mask"), 2); // window
+        EXPECT_EQ(tryGetBoundInt(*window, "gfx1151_wmma_attention.window_left"), 6);
+        EXPECT_EQ(tryGetBoundInt(*window, "gfx1151_wmma_attention.window_right"), 0);
+        EXPECT_EQ(tryGetBoundInt(*window, "gfx1151_wmma_attention.bottom_right"),
+                  bottomRight ? 1 : 0);
+
         GraphSpec spec;
         spec.causalMask = !bottomRight;
         spec.causalMaskBottomRight = bottomRight;
+        spec.leftBound = -1;
+        spec.rightBound = -1;
         const auto bound = matchGraph(spec);
         ASSERT_TRUE(bound.has_value());
         EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.mask"), 1); // causal
@@ -650,6 +666,32 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsOverrideBounds)
         EXPECT_TRUE(matchesKernel(spec, prefillKernel(96, 96)));
         EXPECT_FALSE(matchesKernel(spec, prefillKernel(96, 96, "none", "none")));
     }
+
+    // An explicit right bound overrides the deprecated flag's right bound 0, so the
+    // band is a window with window_right 3, not a causal mask.
+    GraphSpec explicitRight;
+    explicitRight.causalMaskBottomRight = true;
+    explicitRight.leftBound = -1;
+    explicitRight.rightBound = 3;
+    const auto widened = matchGraph(explicitRight);
+    ASSERT_TRUE(widened.has_value());
+    EXPECT_EQ(tryGetBoundInt(*widened, "gfx1151_wmma_attention.mask"), 2); // window
+    EXPECT_EQ(tryGetBoundInt(*widened, "gfx1151_wmma_attention.window_left"), -1);
+    EXPECT_EQ(tryGetBoundInt(*widened, "gfx1151_wmma_attention.window_right"), 3);
+    EXPECT_EQ(tryGetBoundInt(*widened, "gfx1151_wmma_attention.bottom_right"), 1);
+
+    // causal_mask sets no alignment of its own, so a stored BOTTOM_RIGHT alignment
+    // stays bottom-right.
+    GraphSpec aligned;
+    aligned.causalMask = true;
+    aligned.bottomRight = true;
+    aligned.leftBound = -1;
+    aligned.rightBound = -1;
+    const auto causal = matchGraph(aligned);
+    ASSERT_TRUE(causal.has_value());
+    EXPECT_EQ(tryGetBoundInt(*causal, "gfx1151_wmma_attention.mask"), 1); // causal
+    EXPECT_EQ(tryGetBoundInt(*causal, "gfx1151_wmma_attention.window_right"), 0);
+    EXPECT_EQ(tryGetBoundInt(*causal, "gfx1151_wmma_attention.bottom_right"), 1);
 }
 
 // hipDNN scale semantics: a value, a pass-by-value tensor (constant or read at

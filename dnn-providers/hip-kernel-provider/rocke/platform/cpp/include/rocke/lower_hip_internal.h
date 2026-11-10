@@ -55,6 +55,9 @@ typedef struct rocke_h_lowerer
     ROCKE_VEC(char*) smem_decls; /* hoisted __shared__ decls            */
     int indent; /* current indent depth (starts at 1)  */
     int smem_counter; /* mirrors Python self._smem_counter   */
+    /* The GPU-check word's symbol once a tile.gpu_check_failed stores to it
+     * (Python self.gpu_check_word); NULL until then. */
+    const char* gpu_check_word;
 
     rocke_status_t status; /* ROCKE_OK; failures unwind via exceptions */
     char err[ROCKE_ERR_MSG_CAP];

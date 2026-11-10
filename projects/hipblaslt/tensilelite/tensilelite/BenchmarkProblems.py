@@ -55,14 +55,15 @@ from .backends.config import parse_backend_config
 from .Contractions import ProblemType as ContractionsProblemType
 from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni, getClientExecutablePath
 from .KernelWriterAssembly import KernelWriterAssembly
-from .TensileCreateLibrary import copyStaticFiles, libraryDir, tensileLibraryFile, writeSolutionsAndKernels
+from .create_library import copyStaticFiles, libraryDir, tensileLibraryFile, writeSolutionsAndKernels
 from .CustomKernels import getCustomKernelConfig
 from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
 from .Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
         BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
-from .Common.Architectures import archNamesByIsa, isaToGfx, gfxToVariants
+from .Common.Architectures import (ARCH_CAP_OVERRIDES, archNamesByIsa, capOverrideKeyOf,
+                                   isaToGfx, gfxToVariants, xnackQualifierOf)
 from .Common.GlobalParameters import globalParameters, startTime
 from .Common.TimingInstrumentation import timing_context
 
@@ -104,12 +105,17 @@ def _writeSyntheticResultsCSV(resultsFileName, problemSizes, gfxName, numSolutio
 
     header = ["GFlops"]
     header += ["Size%d" % i for i in range(numIndices)]
+    hasWorld = bool(problems) and problems[0].world is not None
+    if hasWorld:
+        header += ["World", "A2AExtent"]
     header += ["Solution_%d" % i for i in range(numSolutions)]
 
     lines = [",".join(header)]
     for problem in problems:
         row = [gfxName]
         row += [str(int(s)) for s in problem.sizes]
+        if hasWorld:
+            row += [str(problem.world), str(problem.a2aExtent)]
         row += [repr(_CPU_ONLY_SYNTHETIC_GFLOPS)] * numSolutions
         lines.append(",".join(row))
 
@@ -146,7 +152,7 @@ def cmdLineArchsFor(archNames, isaInfoMap) -> List[str]:
     ]
 
 
-def _computeCacheKey(benchmarkStep, cmdLineArchs):
+def _computeCacheKey(benchmarkStep, cmdLineArchs, archNames=None):
     """Compute a deterministic hash from the cache-relevant parameter fields.
 
     The compiler targets belong in the key because they decide what the cached
@@ -154,10 +160,38 @@ def _computeCacheKey(benchmarkStep, cmdLineArchs):
     architectures sharing an ISA are tuned by two runs that agree on every field
     here, and without the targets the second would load the first's objects and
     hand the wrong machine code to silicon that cannot run it.
+
+    A qualified request is in the key for the same reason one step further on.
+    ``cmdLineArchs`` has been through ``archNamesByIsa``, which drops the xnack
+    qualifier, so gfx1250 and gfx1250:xnack- arrive here spelled alike -- yet
+    their objects differ, because the qualifier selects ARCH_CAP_OVERRIDES and
+    an xnack- build omits the replay drains. Without this the two runs share one
+    entry, and whichever ran first decides what the other executes: an
+    unqualified run reusing an xnack- run's objects gets kernels missing drains
+    it needs.
+
+    The field holds only what selects an override, and is left out entirely when
+    nothing does. Both halves of that are about not splitting entries that
+    should be shared: a build whose qualifier the table does not speak to --
+    gfx942:xnack+ has no entry -- produces the same objects either way, so
+    keying on it would retire that configuration's caches for nothing, and a
+    build that never mentions xnack hashes exactly as it did before this field
+    existed. Predicates go for the same reason, as does the order two qualifiers
+    were written in, since ``capOverrideKeyOf`` reduces all of those to the one
+    thing that does change the objects.
     """
     cacheFields = {f: getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
     cacheFields["KernelNamingVersion"] = _KERNEL_NAMING_VERSION
     cacheFields["_Architectures"] = ",".join(sorted(cmdLineArchs))
+    # An xnack qualifier specifically: a bare stepping name is in the table too
+    # (gfx1250-strict carries deltas of its own), but it is an architecture, and
+    # _Architectures already tells those apart. Only the qualifier is invisible
+    # there, so only the qualifier belongs here.
+    overriding = sorted({k for a in (archNames or [])
+                         if xnackQualifierOf(a)
+                         and (k := capOverrideKeyOf(a)) in ARCH_CAP_OVERRIDES})
+    if overriding:
+        cacheFields["_RequestedArchitectures"] = ",".join(overriding)
     canonical = json.dumps(cacheFields, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
 
@@ -707,7 +741,9 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
         backend_name = str(backendConfig.get("Name", "tensile")).lower()
 
         # check if a solution cache exists and if it matches our solution parameters
-        cacheKey = _computeCacheKey(benchmarkStep, cmdLineArchsFor(archNames, isaInfoMap))
+        cacheKey = _computeCacheKey(
+            benchmarkStep, cmdLineArchsFor(archNames, isaInfoMap), archNames
+        )
         cacheDir = os.path.join(stepBaseDir, "caches", cacheKey)
         sourcePath = Path(cacheDir) / "source"
         
@@ -844,7 +880,8 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
 
                 if enableTileSelection:
                     configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
-                returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
+                returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths,
+                                       deviceScalarAlphaModes=benchmarkStep.deviceScalarAlphaModes)
 
                 # --cpu-only plumbing: runClient covered the config/run-script writing then
                 # stubbed the device launch (returncode 0). The device never produced a perf

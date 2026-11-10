@@ -231,6 +231,8 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->sliding_window = 0;
         s->has_softcap = false;
         break;
+    /* 32/5 does not divide: both engines refuse it (check_head_counts), so it
+     * is a both-reject parity case rather than an emitted kernel. */
     case 21:
         s->head_size = 64;
         s->block_size = 32;

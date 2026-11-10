@@ -90,12 +90,16 @@ INCLUDE = ROCKE / "cpp" / "include"
 TMP = Path(tempfile.gettempdir()) / "rocke_diff"
 TMP.mkdir(parents=True, exist_ok=True)
 TOOLS = ROCKE / "tools"  # absent in an installed tree, which ships _hostcaps.py here
-if TOOLS.is_dir() and str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
+# A script launch gets HERE from Python automatically; import-by-path does not.
+# Bootstrap both homes explicitly so this module has the same imports in focused
+# pytest and in isolated xdist workers as it does at its command-line entry point.
+for module_root in (HERE, TOOLS):
+    if module_root.is_dir() and str(module_root) not in sys.path:
+        sys.path.insert(0, str(module_root))
 
 from _hostcaps import available_cpus  # noqa: E402 -- tools path bootstrap above
-from python_batch_worker import canonical_digest  # noqa: E402 -- same directory
-from golden_store import (  # noqa: E402 -- this directory is on sys.path as the script's
+from python_batch_worker import canonical_digest  # noqa: E402 -- HERE bootstrap above
+from golden_store import (  # noqa: E402 -- HERE bootstrap above
     IR_CANONICAL,
     LL,
     GoldenStore,
@@ -165,7 +169,8 @@ def collect_ref_shas(results):
 
 
 MAX_CFG = 256  # default cap on config enumeration per family
-FAMILY_MAX_CFG = {"gfx1250_lowering": 512}
+# conv_direct_grouped's fp32 / tf32 configs start at index 201 and run past 256.
+FAMILY_MAX_CFG = {"gfx1250_lowering": 512, "conv_direct_grouped": 512}
 TIMEOUT = 120  # seconds per emitter invocation
 
 

@@ -46,7 +46,7 @@ except (ModuleNotFoundError, AttributeError):
 
 
 def is_built_custom_library(custom_lib_dir: str | Path) -> bool:
-    """Return True when custom_lib_dir contains compiled Tensile library artifacts."""
+    """Return True when custom_lib_dir contains compiled TensileLite library artifacts."""
     custom_lib_dir = Path(custom_lib_dir)
     patterns = (
         "library/**/TensileLibrary_lazy_gfx*.dat",

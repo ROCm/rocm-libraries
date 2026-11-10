@@ -49,6 +49,10 @@ public:
                               ErrorCode::INVALID_VALUE,
                               attributes.getUnsupportedReason());
 
+        // Band domain (SdpaSemanticsRegister SEM-005): left_bound -1 or >= 1, right_bound >= -1.
+        HIPDNN_CHECK_ERROR(detail::validateSdpaDiagonalBand(
+            attributes.left_bound, attributes.right_bound, "SdpaBwdNode"));
+
         const auto q = attributes.get_q();
         const auto k = attributes.get_k();
         const auto v = attributes.get_v();
@@ -356,9 +360,6 @@ public:
         {
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
         }
-
-        // Rule 11: left_bound follows cuDNN and must be -1 or >= 1
-        HIPDNN_CHECK_ERROR(detail::validateSdpaLeftBound(attributes.left_bound, "SdpaBwdNode"));
 
         return {};
     }

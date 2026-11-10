@@ -9,9 +9,10 @@ Three consumers share the math here (``natural_lse_from_log2_stats``):
   LSE store, ``dense_row_has_key`` / ``zero_keyless_row`` the empty-row output
   masking, and ``validate_dense_lse`` is the host-side contract for the
   caller-owned LSE buffer;
-* the unified split-KV reduce: the same IR helpers emit its LSE store, and
-  ``validate_unified_lse`` is its host-side buffer contract.  Both validators
-  sit on the common ``_check_lse_buffer``;
+* the unified split-KV reduce and the unified tiled 2D epilogues (gfx942 /
+  gfx950): the same IR helpers emit their LSE store, ``lse_row_has_mass`` the
+  ``!(l == 0)`` row test, and ``validate_unified_lse`` is their host-side buffer
+  contract.  Both validators sit on the common ``_check_lse_buffer``;
 * the MFMA / WMMA attention forward inner bodies: ``make_*_lse_epilogue``
   produce *epilogue callables* for
   :class:`rocke.helpers.attention_fwd_ext.AttnFwdExt.epilogue_hook`.
@@ -61,6 +62,7 @@ __all__ = [
     "LSE_ROWS_PER_LANE",
     "dense_row_has_key",
     "lse_row_value",
+    "lse_row_has_mass",
     "lse_store",
     "make_lse_epilogue",
     "make_mfma_lse_epilogue",
@@ -88,6 +90,17 @@ def lse_store(
     value = natural_lse_from_log2_stats(b, safe_m, safe_l)
     value = b.select(row_has_mass, value, b.const_f32(float("-inf")))
     b.global_store(dst, element_offset, value, align=4)
+
+
+def lse_row_has_mass(b: IRBuilder, l: Value) -> Value:
+    """``!(l == 0)``, NaN included: the exact inverse of the tiled 2D O guard
+    ``fcmp("oeq", l, 0)``. A keyless row (l == 0) gets -inf; a NaN row keeps NaN.
+
+    Built as ``one OR uno`` instead of ``lnot(oeq)``: the HIP lowerer maps i1 to
+    ``bool`` and lowers ``arith.not`` to ``~x``, which is true for both inputs.
+    """
+    zero = b.const_f32(0.0)
+    return b.lor(b.fcmp("one", l, zero), b.fcmp("uno", l, zero))
 
 
 def dense_row_has_key(

@@ -224,7 +224,10 @@ field. What a family needs beyond its axes is a `KnobSpace` hook:
 - `outer_knob` with `outer_values(base, level)` and `outer_default(base)`
   names one field that is cheap to sweep on top of every knob set: the walk
   checks a knob set once and only rebuilds it per outer value, so the drop
-  rules must not read it. A space whose outer knob is `waves_per_eu`
+  rules must not read it, except for the knobs a space names in
+  `outer_dependent_knobs` (GDN decode's `row_loads` restates auto's order at
+  some `waves_per_eu` values only): a knob set holding one is canonicalized
+  again at every outer value. A space whose outer knob is `waves_per_eu`
   (attention, GDN decode) subclasses `WavesPerEuSpace` (`waves.py`); a space
   without one sweeps nothing extra.
 - `stem(kernel)` / `stem_prefix()` give the display part of the id
@@ -258,7 +261,7 @@ cd dnn-providers/hip-kernel-provider/rocke/platform
 PYTHONPATH=python python tests/test_rocke.py
 PYTHONPATH=python python -m pytest tests/instances/test_rocke_multiarch.py -k TestGfx950ByteIdentical
 PYTHONPATH=python:tests/instances python -m rocke_ir_parity_harness \
-  --compare tests/golden/rocke_representative_ir_sha256.json
+  --check tests/golden/rocke_representative_ir_sha256/
 ```
 
 ## Onboard A New Operator Family

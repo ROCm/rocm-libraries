@@ -101,15 +101,20 @@ static rocke_value_t* rocke__q_offset(rocke_attn_unified_build_ctx_t* ctx,
  *                         iv_name="kpos")
  *   with loop as (kpos, (m_val, l_val, acc_val)):
  *       score = _emit_qk_score(...)
- *       causal_ok = cmp_le(kpos, context_len + query_pos)
- *       score = select(causal_ok, score, neg_inf)
- *       new_m = fmax(m_val, score)
+ *       band_ok = _scalar_band_ok(b, p, context_len, query_pos, kpos):
+ *           ok = cmp_le(kpos, context_len + query_pos)
+ *           if sliding_window > 0:
+ *               dist = sub(add(context_len, query_pos), kpos)
+ *               ok = land(ok, cmp_lt(dist, const_i32(sliding_window)))
+ *       score = select(band_ok, score, neg_inf)
+ *       new_m_raw = fmax(m_val, score)
+ *       new_m = select(fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
  *       alpha = exp2(m_val - new_m)
  *       prob  = exp2(score - new_m)
  *       new_l = fadd(fmul(l_val, alpha), prob)
  *       vv    = _emit_v_load(...)
  *       new_acc = fadd(fmul(acc_val, alpha), fmul(prob, vv))
- *       scf_yield(new_m, new_l, new_acc)
+ *       scf_yield(new_m_raw, new_l, new_acc)
  *
  * Stashes loop.results[0..2] in ctx->loop_m / loop_l / loop_acc.
  * ============================================================ */
@@ -119,7 +124,7 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
     rocke_iter_arg_t iter_args[3];
     rocke_for_t loop;
     rocke_value_t *kpos, *m_val, *l_val, *acc_val;
-    rocke_value_t *score, *causal_ok, *new_m, *alpha, *prob, *new_l, *vv, *new_acc;
+    rocke_value_t *score, *band_ok, *new_m_raw, *new_m, *alpha, *prob, *new_l, *vv, *new_acc;
     rocke_value_t* yields[3];
 
     iter_args[0].name = "m";
@@ -161,11 +166,27 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
                                              ctx->abi_scale,
                                              ctx->rcp_ln2);
 
-    /* causal_ok = cmp_le(kpos, context_len + query_pos) */
-    causal_ok = rocke_b_cmp_le(b, kpos, rocke_b_add(b, ctx->context_len, ctx->query_pos));
-    score = rocke_b_select(b, causal_ok, score, ctx->neg_inf);
+    /* band_ok = _scalar_band_ok(...): the causal (right) bound, then the
+     * sliding-window (left) bound when sliding_window > 0. This builder supports
+     * only the default mask (bottom-right causal, right_bound 0). */
+    band_ok = rocke_b_cmp_le(b, kpos, rocke_b_add(b, ctx->context_len, ctx->query_pos));
+    if(ctx->p->sliding_window > 0)
+    {
+        rocke_value_t* dist
+            = rocke_b_sub(b, rocke_b_add(b, ctx->context_len, ctx->query_pos), kpos);
+        rocke_value_t* sw_ok
+            = rocke_b_cmp_lt(b, dist, rocke_b_const_i32(b, ctx->p->sliding_window));
+        band_ok = rocke_b_land(b, band_ok, sw_ok);
+    }
+    score = rocke_b_select(b, band_ok, score, ctx->neg_inf);
 
-    new_m = rocke_b_fmax(b, m_val, score);
+    /* A fully masked segment (or masked leading keys) keeps m at -inf: use 0 as
+     * the exponent reference so alpha/prob are 0, not exp2(-inf - -inf) = NaN,
+     * but yield the raw max so the reduce still sees an empty segment.
+     * Python evaluates select's operands left to right: fcmp first. */
+    new_m_raw = rocke_b_fmax(b, m_val, score);
+    new_m = rocke_b_select(
+        b, rocke_b_fcmp(b, "ogt", new_m_raw, ctx->neg_inf), new_m_raw, ctx->zero_f);
     alpha = rocke_b_exp2(b, rocke_b_fsub(b, m_val, new_m));
     prob = rocke_b_exp2(b, rocke_b_fsub(b, score, new_m));
     new_l = rocke_b_fadd(b, rocke_b_fmul(b, l_val, alpha), prob);
@@ -181,9 +202,15 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
                                         kpos,
                                         ctx->dim);
 
-    new_acc = rocke_b_fadd(b, rocke_b_fmul(b, acc_val, alpha), rocke_b_fmul(b, prob, vv));
+    /* C leaves argument evaluation order unspecified: emit acc*alpha before
+     * prob*vv, as Python does. */
+    {
+        rocke_value_t* acc_scaled = rocke_b_fmul(b, acc_val, alpha);
+        rocke_value_t* pv = rocke_b_fmul(b, prob, vv);
+        new_acc = rocke_b_fadd(b, acc_scaled, pv);
+    }
 
-    yields[0] = new_m;
+    yields[0] = new_m_raw;
     yields[1] = new_l;
     yields[2] = new_acc;
     rocke_b_scf_yield(b, yields, 3);
@@ -322,6 +349,9 @@ void rocke_attn_unified_declare_reduce_params(rocke_attn_unified_build_ctx_t* ct
  *       mv = global_load_f32(segm_max, idx)
  *       scf_yield(fmax(mx, mv))
  *   overall = max_loop.results[0]
+ *
+ * A segment that saw no key stores max = -inf with sum = 0 (the segment kernel
+ * carries the raw max), so this pass ignores it without reading the sum.
  * ============================================================ */
 void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx)
 {
@@ -366,26 +396,37 @@ void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx
 /* ============================================================ *
  * Reduce combine pass (Python lines 2981-3003).
  *
+ *   ref = select(fcmp("ogt", overall, neg_inf), overall, zero)
  *   red = scf_for_iter(0, num_segments, 1, [("den", zero), ("acc", zero)],
  *                      iv_name="seg2")
  *   with red as (seg, (den, acc)):
  *       idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
  *       mv = global_load_f32(segm_max, idx)
  *       lv = global_load_f32(segm_expsum, idx)
- *       factor = exp2(mv - overall)
+ *       factor = exp2(mv - ref)
  *       den2 = fadd(den, fmul(lv, factor))
  *       out_idx, _ = seg_out_desc.offset(b, token=q_tok, head=q_head, seg=seg, dim=dim)
  *       ov = global_load_f32(segm_output, out_idx)
  *       acc2 = fadd(acc, fmul(ov, factor))
  *       scf_yield(den2, acc2)
+ *
+ * An empty segment stores max = -inf, so its factor exp2(-inf - ref) is 0
+ * whenever ref is finite. ref is the overall max, or 0 when every segment is
+ * empty (overall = -inf): then every factor is 0, den = 0 and the epilogue
+ * stores O = 0 instead of the NaN of exp2(-inf - -inf).
  * ============================================================ */
 void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_iter_arg_t iter_args[2];
     rocke_for_t red;
-    rocke_value_t *seg, *den, *acc, *idx, *mv, *lv, *factor, *den2, *out_idx, *ov, *acc2;
+    rocke_value_t *ref, *seg, *den, *acc, *idx, *mv, *lv, *factor, *den2, *out_idx, *ov, *acc2;
     rocke_value_t* yields[2];
+
+    /* Once, before the loop. Python evaluates select's operands left to right:
+     * fcmp first. */
+    ref = rocke_b_select(
+        b, rocke_b_fcmp(b, "ogt", ctx->overall, ctx->neg_inf), ctx->overall, ctx->zero_f);
 
     iter_args[0].name = "den";
     iter_args[0].init = ctx->zero_f;
@@ -411,7 +452,7 @@ void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t*
     idx = rocke__ml_offset(ctx, ctx->q_tok, ctx->q_head, seg);
     mv = rocke_b_global_load_f32(b, ctx->segm_max, idx, 0);
     lv = rocke_b_global_load_f32(b, ctx->segm_expsum, idx, 0);
-    factor = rocke_b_exp2(b, rocke_b_fsub(b, mv, ctx->overall));
+    factor = rocke_b_exp2(b, rocke_b_fsub(b, mv, ref));
     den2 = rocke_b_fadd(b, den, rocke_b_fmul(b, lv, factor));
 
     out_idx = rocke__out_offset(ctx, ctx->q_tok, ctx->q_head, seg, ctx->dim);
@@ -435,6 +476,7 @@ void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t*
  * Reduce guarded epilogue (Python lines 3004-3008).
  *
  *   result = fmul(red.results[1], rcp(red.results[0]))
+ *   result = select(fcmp("oeq", red.results[0], zero), zero, result)
  *   cast = cast_f32_to(result, dtype)
  *   out_idx, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim)
  *   with b.scf_if(active):
@@ -447,6 +489,10 @@ void rocke_attn_unified_emit_reduce_epilogue(rocke_attn_unified_build_ctx_t* ctx
     rocke_if_t guard;
 
     result = rocke_b_fmul(b, ctx->red_acc, rocke_b_rcp(b, ctx->red_den));
+    /* A row with no key at all has den == 0: O = 0 instead of acc * rcp(0).
+     * Only an exact zero counts as empty, so a NaN den still yields NaN. */
+    result
+        = rocke_b_select(b, rocke_b_fcmp(b, "oeq", ctx->red_den, ctx->zero_f), ctx->zero_f, result);
     cast = rocke_b_cast_f32_to(b, result, ctx->dtype);
 
     out_idx = rocke__q_offset(ctx, ctx->q_tok, ctx->q_head, ctx->dim);

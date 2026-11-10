@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "5c419b88-8ce4-5bb5-89c0-c572c5849290",
+  "name": "flydsl sdpa_rdna_decode selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_sdpa_rdna_decode.score"
+  }
+}

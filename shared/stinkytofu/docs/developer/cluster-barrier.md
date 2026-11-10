@@ -397,7 +397,7 @@ exit has drain wait + skip path.
 
 ## Entry handoff regression tests
 
-`Tensile/Tests/unit/test_cluster_entry_handoff_codegen.py` loads the executable
+`tensilelite/Tests/unit/test_cluster_entry_handoff_codegen.py` loads the executable
 `common/gemm/gfx1250/cluster_entry_handoff.yaml` through the real Python and
 backend pipeline. It checks SIA0 barrier reuse and the required SIA4 entry pair
 for three layouts, with iteration cloning enabled and disabled, and assembles all

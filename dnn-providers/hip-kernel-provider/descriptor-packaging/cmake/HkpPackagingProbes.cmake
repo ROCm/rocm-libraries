@@ -412,7 +412,8 @@ endfunction()
 #   hkp_packaging_probes. Zero probes is valid: every explicit arch is a build target,
 #   so the production pack covers it, unless HIPKERNELPROVIDER_MIN_PACKAGING_PROBES asks
 #   for more. Configuration fails when the production root cannot be read, pytest is not
-#   importable by Python3_EXECUTABLE, or fewer probes are declared than that minimum.
+#   importable by Python3_EXECUTABLE, or fewer automatic probes are found than that
+#   minimum (the named probes in probes.cmake do not count).
 # ---------------------------------------------------------------------------
 function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
     set_property(GLOBAL PROPERTY HKP_PROBE_ROCM_KPACK_DIR "${rocm_kpack_dir}")
@@ -439,12 +440,13 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
 
     get_property(_names GLOBAL PROPERTY HKP_PROBE_NAMES)
 
-    # Broken discovery and a build with nothing to probe both declare zero probes; a lane that
-    # must always have one sets the minimum.
-    list(LENGTH _names _probe_count)
+    # Broken discovery and a build with nothing to probe both find no automatic probe; a lane
+    # that must always have one sets the minimum. The named probes in probes.cmake are not
+    # counted: they are declared whether or not discovery finds anything.
+    list(LENGTH _auto_arches _probe_count)
     if(_probe_count LESS HIPKERNELPROVIDER_MIN_PACKAGING_PROBES)
         message(FATAL_ERROR
-            "hkp: ${_probe_count} packaging probe(s) declared, but "
+            "hkp: ${_probe_count} automatic packaging probe(s) found, but "
             "HIPKERNELPROVIDER_MIN_PACKAGING_PROBES requires at least "
             "${HIPKERNELPROVIDER_MIN_PACKAGING_PROBES}. If this build now targets every "
             "architecture the descriptors name, lower the minimum; otherwise probe "

@@ -56,7 +56,9 @@ namespace
                 testing_logging<T>(arg);
             else if constexpr(std::is_same_v<T, float>)
             {
-                if(!strcmp(arg.function, "kernel_select_trsm"))
+                if(!strcmp(arg.function, "logging_write_error"))
+                    testing_logging_write_error(arg);
+                else if(!strcmp(arg.function, "kernel_select_trsm"))
                     testing_kernel_select_trsm(arg);
                 else if(!strcmp(arg.function, "kernel_select_layout"))
                     testing_kernel_select_layout(arg);
@@ -91,7 +93,7 @@ namespace
         // Filter for which functions apply to this suite
         static bool function_filter(const Arguments& arg)
         {
-            return !strcmp(arg.function, "logging")
+            return !strcmp(arg.function, "logging") || !strcmp(arg.function, "logging_write_error")
                    || !strncmp(
                        arg.function, c_kernel_select_prefix, sizeof(c_kernel_select_prefix) - 1);
         }
@@ -100,6 +102,12 @@ namespace
         static std::string name_suffix(const Arguments& arg)
         {
             RocBLAS_TestName<logging> name(arg.name);
+
+            if(!strcmp(arg.function, "logging_write_error"))
+            {
+                name << rocblas_datatype2string(arg.a_type);
+                return std::move(name);
+            }
 
             if(strcmp(arg.function, "logging"))
             {

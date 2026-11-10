@@ -42,6 +42,20 @@ EMIT = os.environ.get("ROCKE_PARITY_EMIT", "/tmp/rocke_parity/emit")
 sys.path.insert(0, BUILD)
 import rocke_engine  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import attention_tiled_parity_configs as atp  # noqa: E402
+
+# Families whose table must cover every emitter config: the emitter must report
+# "unknown config index N" for the first index N past the table.
+_COMPLETE_TABLES = frozenset(
+    {
+        "gfx942_attention_tiled_2d",
+        "gfx950_attention_tiled_2d",
+        "gfx942_attention_tiled_3d",
+        "gfx950_attention_tiled_3d",
+    }
+)
+
 
 def _assert_build_id_match():
     """Cross-check the loaded .so's build-id against the emit dir's BUILD_ID.
@@ -1408,188 +1422,11 @@ def cfgs_fused_moe_e2e():
 
 
 def cfgs_gfx942_attention_tiled_2d():
-    rows = [
-        (64, 32, 32, 32, "bf16", True, 2048, False),
-        (128, 32, 32, 32, "fp16", True, 0, True),
-        (64, 128, 16, 4, "bf16", False, 4096, False),
-        (128, 64, 32, 8, "fp16", True, 2048, True),
-        (256, 32, 32, 32, "bf16", False, 0, False),
-    ]
-    return [
-        dict(
-            head_size=h,
-            block_size=b,
-            num_query_heads=q,
-            num_kv_heads=k,
-            dtype=d,
-            use_sinks=s,
-            sliding_window=sw,
-            has_softcap=sc,
-        )
-        for (h, b, q, k, d, s, sw, sc) in rows
-    ]
+    return [dict(c) for c in atp.GFX942_ATTENTION_TILED_2D]
 
 
 def cfgs_gfx950_attention_tiled_2d():
-    """Full 38-config table mirroring gfx950_attention_tiled_2d_emit.c make_spec."""
-
-    def base(h, b, q, k, dt, sink, sw, sc, **extra):
-        d = dict(
-            head_size=h,
-            block_size=b,
-            num_query_heads=q,
-            num_kv_heads=k,
-            dtype=dt,
-            use_sinks=sink,
-            sliding_window=sw,
-            has_softcap=sc,
-        )
-        d.update(extra)
-        return d
-
-    return [
-        base(64, 16, 1, 1, "bf16", False, 0, False),  # 0
-        base(128, 16, 1, 1, "bf16", False, 0, False),  # 1
-        base(256, 16, 1, 1, "bf16", False, 0, False),  # 2
-        base(64, 16, 16, 1, "bf16", False, 0, False),  # 3
-        base(64, 16, 2, 1, "bf16", False, 0, False),  # 4
-        base(64, 32, 32, 32, "bf16", False, 0, False),  # 5
-        base(64, 32, 32, 32, "fp16", True, 2048, True),  # 6
-        base(64, 32, 32, 32, "bf16", True, 1, False),  # 7
-        base(128, 32, 32, 32, "fp16", True, 0, True),  # 8
-        base(256, 32, 32, 32, "bf16", False, 0, False),  # 9
-        base(64, 64, 32, 32, "bf16", False, 0, False),  # 10
-        base(64, 32, 7, 7, "bf16", False, 0, False),  # 11
-        base(64, 32, 64, 8, "bf16", False, 0, False),  # 12
-        base(64, 32, 40, 8, "bf16", False, 0, False),  # 13
-        base(64, 32, 128, 1, "bf16", False, 0, False),  # 14
-        base(64, 32, 32, 32, "bf16", False, 0, False, use_qq_bias=True),  # 15
-        base(64, 32, 32, 32, "bf16", False, 0, False, use_alibi=True),  # 16
-        base(
-            64, 32, 32, 32, "fp16", True, 512, True, use_alibi=True, use_qq_bias=True
-        ),  # 17
-        base(64, 64, 64, 8, "bf16", False, 0, False, num_warps=8),  # 18
-        base(64, 32, 32, 32, "bf16", False, 0, False, num_warps=2),  # 19
-        base(64, 32, 64, 8, "bf16", False, 0, False, num_warps=4),  # 20
-        base(64, 32, 32, 32, "bf16", False, 0, False, tile_size=64),  # 21
-        base(64, 32, 32, 32, "bf16", False, 0, False, tile_size=128),  # 22
-        base(
-            128, 32, 32, 32, "fp16", False, 0, False, num_warps=2, tile_size=128
-        ),  # 23
-        base(64, 32, 32, 32, "bf16", False, 0, False, waves_per_eu=2),  # 24
-        base(64, 32, 32, 32, "bf16", False, 0, False, num_seqs=1),  # 25
-        base(64, 32, 32, 32, "bf16", False, 0, False, num_seqs=257),  # 26
-        base(
-            64,
-            32,
-            32,
-            32,
-            "bf16",
-            False,
-            0,
-            False,
-            kv_storage_dtype="fp8e4m3",
-            use_fp8_mfma_pv=True,
-        ),  # 27
-        base(64, 32, 32, 32, "bf16", False, 0, False, use_i64_kv_addr=True),  # 28
-        base(64, 32, 32, 32, "bf16", False, 0, False, use_register_pv=True),  # 29
-        base(64, 32, 32, 32, "bf16", False, 0, False, kv_storage_dtype="fp8e4m3"),  # 30
-        base(
-            64,
-            32,
-            32,
-            32,
-            "bf16",
-            False,
-            0,
-            False,
-            kv_storage_dtype="fp8e4m3",
-            use_fp8_mfma_qk=True,
-        ),  # 31
-        base(
-            128,
-            32,
-            32,
-            32,
-            "fp16",
-            False,
-            0,
-            False,
-            use_mfma_32x32=True,
-            block_m_per_warp=32,
-            tile_size=64,
-        ),  # 32
-        base(
-            64,
-            32,
-            32,
-            32,
-            "bf16",
-            False,
-            0,
-            False,
-            use_mfma_32x32=True,
-            use_transposed_qk_32x32=True,
-            use_transposed_scalar_state=True,
-            use_transposed_invariant_hoist=True,
-            use_transposed_mask_once=True,
-            use_grouped_kv2_softmax=True,
-            block_m_per_warp=32,
-            tile_size=64,
-        ),  # 33
-        base(
-            128,
-            32,
-            32,
-            32,
-            "bf16",
-            False,
-            0,
-            False,
-            use_mfma_32x32=True,
-            use_transposed_qk_32x32=True,
-            use_transposed_scalar_state=True,
-            use_transposed_invariant_hoist=True,
-            use_transposed_mask_once=True,
-            use_grouped_kv2_softmax=True,
-            block_m_per_warp=32,
-            tile_size=64,
-        ),  # 34
-        base(
-            64,
-            32,
-            64,
-            8,
-            "bf16",
-            False,
-            0,
-            False,
-            use_mfma_32x32=True,
-            use_transposed_qk_32x32=True,
-            use_transposed_scalar_state=True,
-            use_transposed_invariant_hoist=True,
-            use_transposed_mask_once=True,
-            use_grouped_kv2_softmax=True,
-            num_warps=4,
-            block_m_per_warp=32,
-            tile_size=64,
-        ),  # 35
-        base(64, 32, 32, 32, "bf16", False, 0, False, use_early_v_schedule=True),  # 36
-        base(
-            64,
-            32,
-            64,
-            8,
-            "bf16",
-            False,
-            0,
-            False,
-            num_warps=4,
-            block_m_per_warp=16,
-            tile_size=64,
-            use_fast_paged_kv_desc=True,
-        ),  # 37
-    ]
+    return [dict(c) for c in atp.GFX950_ATTENTION_TILED_2D]
 
 
 def cfgs_gfx950_attention_tiled_2d_fastkv_regp():
@@ -1602,6 +1439,7 @@ def cfgs_gfx950_attention_tiled_2d_fastkv_regp():
         {"use_transposed_half_local_pv": True, "use_mfma32_skip_legacy_qreg": True},
         {"use_agpr_alloc_zero": True, "use_transposed_half_local_pv": True},
         {"use_grouped_kv2_softmax": True},
+        {"emit_lse": True},
     ]
     out = []
     for dl in deltas:
@@ -1705,11 +1543,19 @@ def problems_gfx950_attention_tiled_2d():
         # transposed-32x32 combo (_enable_single_batch_combo /
         # _select_2d_tile_size) was never compared against Python here).
         # Mirrors the exact production scenario (gfx950, Hq32/Hkv8, D128,
-        # block_size=16, sliding_window=4096) verified on-silicon.
-        p(8192, 1, 32, 8, 128, 16, 8192, 8192, sliding_window=4096),  # bf16: new cohort
+        # block_size=16, sliding_window=4096) verified on-silicon, widened to
+        # every block size (the combo admits D128 SW at block_size 16/32/64).
+        p(8192, 1, 32, 8, 128, 16, 8192, 8192, sliding_window=4096),  # bf16
+        p(8192, 1, 32, 8, 128, 32, 8192, 8192, sliding_window=4096),  # bf16
         p(
             8192, 1, 32, 8, 128, 16, 8192, 8192, sliding_window=4096, dtype="fp16"
-        ),  # fp16: same cohort, pre-existing combo (regression pin)
+        ),  # fp16
+        p(
+            8192, 1, 32, 8, 128, 32, 8192, 8192, sliding_window=4096, dtype="fp16"
+        ),  # fp16
+        p(
+            8192, 1, 32, 8, 128, 64, 8192, 8192, sliding_window=4096, dtype="fp16"
+        ),  # fp16
         # ---- transposed_qk_32x32 multi-batch path ----
         p(512, 4, 32, 32, 64, 32, 512, 4096),  # multi-batch d64 long
         p(512, 4, 32, 32, 128, 32, 512, 4096),  # multi-batch d128 long
@@ -1717,6 +1563,39 @@ def problems_gfx950_attention_tiled_2d():
         # ---- fp8 paths ----
         p(512, 2, 32, 32, 64, 32, 512, 4096, use_fp8=True),
         p(512, 2, 32, 32, 64, 32, 512, 4096, use_fp8=True, sliding_window=256),
+        # fp8 single-batch combo: d128/d64 long (early-V off), d64 short (V
+        # double-buffer off), and the sliding-window exclusion.
+        p(2048, 1, 64, 8, 128, 64, 2048, 2048, use_fp8=True),
+        p(2048, 1, 64, 8, 64, 64, 2048, 2048, use_fp8=True),
+        p(512, 1, 32, 32, 64, 32, 512, 4096, use_fp8=True),
+        p(512, 1, 32, 32, 128, 16, 512, 4096, use_fp8=True, sliding_window=256),
+        # head_size 192 single-batch combo (T=64, interleave) and short D192.
+        p(2048, 1, 96, 96, 192, 16, 2048, 2048),
+        p(512, 1, 96, 96, 192, 16, 512, 4096),
+        # d64/d128 single-batch combo with a sliding window and/or sinks (both
+        # dtypes, every block size), plus the d192 / fp8 exclusions.
+        p(
+            2048,
+            1,
+            128,
+            8,
+            128,
+            64,
+            2048,
+            2048,
+            dtype="fp16",
+            use_sinks=True,
+            sliding_window=128,
+        ),
+        p(8192, 1, 32, 8, 128, 64, 8192, 8192, sliding_window=4096),
+        p(2048, 1, 32, 8, 128, 32, 2048, 2048, sliding_window=4096),
+        p(2048, 1, 32, 8, 128, 16, 2048, 2048, sliding_window=4096),
+        p(512, 1, 128, 8, 128, 64, 512, 512, use_sinks=True),
+        p(2048, 1, 128, 8, 128, 64, 2048, 2048, dtype="fp16", use_sinks=True),
+        p(2048, 1, 64, 8, 64, 64, 2048, 2048, use_sinks=True, sliding_window=128),
+        p(512, 1, 64, 8, 64, 64, 512, 512, dtype="fp16", sliding_window=256),
+        p(2048, 1, 96, 96, 192, 16, 2048, 2048, use_sinks=True),
+        p(2048, 1, 64, 8, 128, 64, 2048, 2048, use_fp8=True, use_sinks=True),
         # ---- misc flag combinations ----
         p(64, 64, 32, 32, 64, 32, 1, 4096, use_sinks=True),
         p(512, 2, 64, 8, 64, 32, 512, 4096, use_sinks=True),  # combo + sinks
@@ -1915,36 +1794,11 @@ def run_selector_parity(arch, problems):
 
 
 def cfgs_gfx942_attention_tiled_3d():
-    rows = [
-        (64, 16, 8, 8, "fp16", 8, False, 0, False, None, False, False),
-        (128, 32, 16, 16, "bf16", 16, False, 0, False, None, False, False),
-        (256, 64, 32, 8, "fp16", 8, False, 4096, False, None, False, False),
-        (128, 32, 32, 8, "bf16", 16, True, 0, True, "fp8e4m3", False, False),
-        (64, 16, 16, 4, "fp16", 8, False, 2048, False, None, True, False),
-    ]
-    out = []
-    for h, b, q, k, dt, seg, sink, sw, sc, kv, alibi, qqb in rows:
-        d = dict(
-            head_size=h,
-            block_size=b,
-            num_query_heads=q,
-            num_kv_heads=k,
-            dtype=dt,
-            num_segments=seg,
-            use_sinks=sink,
-            sliding_window=sw,
-            has_softcap=sc,
-            use_alibi=alibi,
-            use_qq_bias=qqb,
-        )
-        if kv is not None:
-            d["kv_storage_dtype"] = kv
-        out.append(d)
-    return out
+    return [dict(c) for c in atp.GFX942_ATTENTION_TILED_3D]
 
 
 def cfgs_gfx950_attention_tiled_3d():
-    return cfgs_gfx942_attention_tiled_3d()
+    return [dict(c) for c in atp.GFX950_ATTENTION_TILED_3D]
 
 
 def cfgs_deep_fused_conv_pool():
@@ -2186,6 +2040,19 @@ def main():
                 details.append(
                     f"  cfg{idx}: DIFF cpp={sha(got)} std={sha(std)} "
                     f"(len {len(got)} vs {len(std)})"
+                )
+        if fam in _COMPLETE_TABLES:
+            # The first index past the table must be unknown to the emitter. A
+            # build (the table is short), a reject or an exec error all fail.
+            end = len(cfgs)
+            past, past_err = run_emitter(fam, end)
+            if past != "" or f"unknown config index {end}" not in (past_err or ""):
+                n_mismatch += 1
+                why = "builds it" if past else f"says {past_err!r}"
+                details.append(
+                    f"  cfg{end}: the emitter {why}, not 'unknown config index "
+                    f"{end}'; attention_tiled_parity_configs.py must cover every "
+                    "emitter config"
                 )
         total_match += n_match
         total_mismatch += n_mismatch

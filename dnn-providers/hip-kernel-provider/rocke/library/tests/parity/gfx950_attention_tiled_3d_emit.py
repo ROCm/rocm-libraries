@@ -17,6 +17,9 @@
 # Each kernel is lowered with _native_lower(kernel, arch="gfx950") and
 # the two .ll texts are concatenated (segment first, then reduce) to stdout so
 # they can be byte-compared with the C emitter gfx950_attention_tiled_3d_emit.c.
+# prove_parity_binding keeps a copy of _CONFIGS (with emit_lse set for the
+# _REDUCE_LSE configs) in platform/cpp/bindings/attention_tiled_parity_configs.py;
+# update it in step.
 import sys
 
 from kernels.gfx950.attention_tiled_3d import (
@@ -269,7 +272,64 @@ _CONFIGS = {
         use_kv_lds_swizzle=True,
         use_wave_page_id_load=True,
     ),
+    16: dict(
+        # num_queries_per_kv=5 does not divide BLOCK_M=16: padded q-block.
+        head_size=128,
+        block_size=16,
+        num_query_heads=40,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    # --- idx17: head_size=192 MHA decode selector spec
+    17: dict(
+        head_size=192,
+        block_size=16,
+        num_query_heads=96,
+        num_kv_heads=96,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_segments=16,
+        num_seqs=1,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+    ),
+    18: dict(
+        # Reduce with emit_lse (see _REDUCE_LSE): bf16 D128 GQA.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    19: dict(
+        # Reduce with emit_lse (see _REDUCE_LSE): fp16 D64.
+        head_size=64,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
 }
+
+# Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
+_REDUCE_LSE = frozenset({18, 19})
 
 
 def _emit(idx: int) -> str:
@@ -287,6 +347,8 @@ def _emit(idx: int) -> str:
         num_kv_heads=cfg["num_kv_heads"],
         dtype=cfg["dtype"],
         num_segments=cfg["num_segments"],
+        waves_per_eu=cfg.get("waves_per_eu"),
+        emit_lse=idx in _REDUCE_LSE,
     )
     red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")
     red_ll = _native_lower(red_kernel, arch="gfx950")
@@ -314,6 +376,7 @@ def main() -> int:
             num_kv_heads=cfg["num_kv_heads"],
             dtype=cfg["dtype"],
             num_segments=cfg["num_segments"],
+            emit_lse=idx in _REDUCE_LSE,
         )
         red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")
         sys.stdout.write(serialize(seg_kernel))
@@ -330,6 +393,7 @@ def main() -> int:
             num_kv_heads=cfg["num_kv_heads"],
             dtype=cfg["dtype"],
             num_segments=cfg["num_segments"],
+            emit_lse=idx in _REDUCE_LSE,
         )
         red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")
         sys.stdout.write("".join(str(d) + "\n" for d in verify(seg_kernel)))

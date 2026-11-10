@@ -57,21 +57,25 @@ MALFORMED_FIXTURES = [
     ("undeclared_knob", "tile_count"),
 ]
 
-# Each role fixture is valid/ with one role-bound UHD changed; the engine loads in every
-# case. Expected: exit status, then (role, success) for every model_checks entry in report
-# order. See the fixtures' README for the runtime admission each one mirrors.
+# Each role fixture is valid/ with one role-bound UHD, pack or
+# provenance record changed; the engine loads in every case. Expected: exit status, then
+# (role, success) for every model_checks entry in report order, then text some reported
+# diagnostic must contain (None: not pinned).
+# See the fixtures' README for the runtime admission each one mirrors.
 ROLE_FIXTURES = [
-    ("l2_static_order", 0, [("sort_kernel_catalog", True)]),
-    ("l2_dynamic_features", 0, [("sort_kernel_catalog", True)]),
+    ("l2_static_order", 0, [("sort_kernel_catalog", True)], None),
+    ("l2_dynamic_features", 0, [("sort_kernel_catalog", True)], None),
     (
         "l1_static_order",
         1,
         [("sort_kernel_catalog", True), ("predict_engine", False)],
+        None,
     ),
     (
         "l1_native",
         0,
         [("sort_kernel_catalog", True), ("predict_engine", True)],
+        None,
     ),
 ]
 
@@ -185,11 +189,13 @@ def test_malformed_fixture_is_rejected(validator, name, marker):
 
 
 @pytest.mark.parametrize(
-    "name,exit_code,expected_checks",
+    "name,exit_code,expected_checks,diagnostic",
     ROLE_FIXTURES,
-    ids=[name for name, _, _ in ROLE_FIXTURES],
+    ids=[fixture[0] for fixture in ROLE_FIXTURES],
 )
-def test_role_fixture_model_checks(validator, name, exit_code, expected_checks):
+def test_role_fixture_model_checks(
+    validator, name, exit_code, expected_checks, diagnostic
+):
     result, payload = _run_validator(validator, FIXTURE_ROOT / name)
 
     assert result.returncode == exit_code, result.stdout + result.stderr
@@ -198,6 +204,9 @@ def test_role_fixture_model_checks(validator, name, exit_code, expected_checks):
     assert [
         (check["role"], check["success"]) for check in payload["model_checks"]
     ] == expected_checks, payload["model_checks"]
+    if diagnostic is not None:
+        messages = " ".join(d["message"] for d in payload["diagnostics"])
+        assert diagnostic in messages, messages
 
 
 @pytest.mark.parametrize(
@@ -272,3 +281,35 @@ def test_binary_ops_round_trip_validates_clean(
     payload = json.loads(result.stdout)
     assert payload["success"] is True
     assert binary_ops_config.engine.name in payload["engines"]
+
+
+def test_a_slotted_bundle_with_a_non_default_sdk_version_and_notes_validates_clean(
+    validator, generator, tmp_path
+):
+    """The generated slotted bundle loads in the real validator, and the two engine
+    members the shipped fixture leaves at their defaults survive into the UED it loads.
+    """
+    from tests.test_slots import _load, non_default_engine
+
+    config = _load(tmp_path, non_default_engine)
+    generator.render(config, tmp_path)
+    descriptors = tmp_path / config.descriptor_dir
+
+    result = subprocess.run(
+        [
+            str(validator),
+            str(descriptors),
+            "--expect-engine",
+            config.engine.name,
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True
+    assert config.engine.name in payload["engines"]
+    ued = json.loads((descriptors / "split_bwd.ued.json").read_text("utf-8"))
+    assert ued["sdk_version"] == "2.0.0"
+    assert ued["behavior_notes"] == ["runtime_compilation"]

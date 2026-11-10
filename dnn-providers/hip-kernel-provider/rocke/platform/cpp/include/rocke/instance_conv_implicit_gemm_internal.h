@@ -325,7 +325,7 @@ typedef struct rocke_conv_build_ctx
     /* ---- per-lane MMA fragment widths (off op) ---- */
     int a_per_lane; /* op.a_frag_len */
     int b_per_lane; /* op.b_frag_len */
-    int c_per_lane; /* op.c_frag_len */
+    int c_per_lane; /* op.dst.frag_len (output partials and epilogues) */
 
     /* ---- block tile dims (aliases of spec geometry) ---- */
     int block_m; /* spec.tile_m */
@@ -359,6 +359,18 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* group_idx;
     rocke_value_t* k_out_group_base;
 
+    /* ---- forward split-K state (spec.split_k > 1; all NULL / false off it) ----
+     * The trailing ws_ptr / ws_bytes / ks / ks_count kernargs, the CTA's K
+     * slice (z = group * ks_count + slice), and the slab base the epilogue adds
+     * to every D offset. Mirrors the Python builder's `split` locals. */
+    bool fwd_split;
+    rocke_value_t* fwd_p_ws;
+    rocke_value_t* fwd_p_ws_bytes;
+    rocke_value_t* fwd_p_ks;
+    rocke_value_t* fwd_p_ks_count;
+    rocke_value_t* fwd_slice_id;
+    rocke_value_t* fwd_slab_base;
+
     /* ---- wgrad stream-K state (NULL off the stream-K path) ---- *
      * wgrad_c_kpg       = b.const_i32(kpg)  (grouped dY k_out fold, Python c_kpg)
      * wgrad_replica_sel = linear CTA index hashed into the workspace replica in
@@ -380,7 +392,7 @@ typedef struct rocke_conv_build_ctx
     int k_atoms; /* spec.k_atoms_per_tile_k */
 
     /* ---- accumulators ---- */
-    rocke_value_t* acc_init; /* zero_vec_f32(c_per_lane)    */
+    rocke_value_t* acc_init; /* zero_vec_f32(op->srcs[2].frag_len) */
     /* The `accs` list: one zero-acc iter-arg per (mi, ni) warp MFMA tile, named
      * "acc_m{mi}_n{ni}" + the shared acc_init. */
     const char* acc_names[ROCKE_CONV_MAX_ACCS];
@@ -454,6 +466,12 @@ typedef struct rocke_conv_build_ctx
      * pipeline="wavelet": a_wavelet_loader/b_wavelet_loader are
      *   CoalescedTileLoader sized to num_load_waves * wave_size threads. */
     bool async_dma; /* spec.async_dma (cached)         */
+    /* gfx1250 async K loop (wgrad only): the sync loaders' slot partition with
+     * each chunk moved by global_load_async_to_lds from a_ptr / b_ptr instead of
+     * a buffer load. Zeroed by the ctx memset, so fwd/dgrad are unaffected. */
+    bool async_global_lds;
+    rocke_value_t* a_ptr;
+    rocke_value_t* b_ptr;
     /* spec.lds_k_outer (wgrad only). Zeroed by the ctx memset, so the forward
      * and dgrad drivers keep their exact previous behaviour. */
     bool lds_k_outer;
@@ -498,6 +516,22 @@ typedef struct rocke_conv_build_ctx
      * wave64 ds_read_b64_tr_b16 is type-agnostic, which is why gfx950 parity
      * never caught it. */
     const rocke_type_t* tr_dtype;
+    /* _smem_dtype: the LDS element type of the operand tiles, keyed on the
+     * *storage* dtype (rocke_conv_smem_dtype_for); NULL selects the f16 path.
+     * Equal to the MMA operand type except under TF32 compute. */
+    const rocke_type_t* smem_dtype;
+    /* ir_dtype_a / ir_dtype_b: _ir_dtype(spec.data.dtype_a / dtype_b), the
+     * storage element types of the A/B tensors, LDS tiles and tile loaders. */
+    const rocke_type_t* ir_dtype_a;
+    const rocke_type_t* ir_dtype_b;
+    /* spec.data.is_tf32: each fp32 LDS fragment is reinterpreted as
+     * vec<tf32xN> (rocke_conv_load_mma_operand). */
+    bool is_tf32;
+    /* Instruction-stream shape of one logical MMA step, for the compv3/compv4
+     * scheduling hints: the ds_reads one fragment takes and the physical MFMAs
+     * one atom issues. 1/1 for every non-TF32 atom; each builder sets both. */
+    int ds_reads_per_frag;
+    int mfmas_per_mma;
     rocke_async_tile_loader_t a_loader; /* async A loader (valid iff async)*/
     rocke_async_tile_loader_t b_loader; /* async B loader                  */
     bool have_async_loaders; /* true => a_loader/b_loader valid */
@@ -615,9 +649,51 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
                                     rocke_value_t* bv,
                                     rocke_value_t* c);
 
-/* _emit_smem_load(b, smem, row, col, n): f16/n==4 fast path else vN. */
-rocke_value_t* rocke_conv_emit_smem_load(
-    rocke_ir_builder_t* b, rocke_value_t* smem, rocke_value_t* row, rocke_value_t* col, int n);
+/* _ir_dtype(dtype): "fp16" -> f16, "bf16" -> bf16, "fp32" -> f32. Any other
+ * spelling sets the builder's ValueError (a TF32 spelling with the "compute
+ * mode, not a storage dtype" text) and returns NULL. */
+const rocke_type_t* rocke_conv_ir_dtype(rocke_ir_builder_t* b, const char* dtype);
+
+/* The _DTYPE_TO_IR lookup alone (no builder): NULL for an unsupported dtype,
+ * where _ir_dtype would raise. NULL dtype is the "fp16" default. */
+const rocke_type_t* rocke_conv_ir_dtype_lookup(const char* dtype);
+
+/* _smem_dtype_for(dtype): the LDS element type for a *storage* dtype; NULL
+ * selects the f16 path. Keyed on storage, never on the MMA dtype: a TF32
+ * kernel keeps fp32 tiles in LDS and only reinterprets the fragment it reads. */
+const rocke_type_t* rocke_conv_smem_dtype_for(const char* dtype);
+
+/* _emit_smem_load(b, smem, row, col, n, smem_dtype=None): a non-f16
+ * smem_dtype reads smem_load_vN of that type (an fp32 n == 1 read is
+ * extracted to a scalar); NULL / f16 takes the f16 n == 4 fast path, else
+ * smem_load_vN_f16. */
+rocke_value_t* rocke_conv_emit_smem_load(rocke_ir_builder_t* b,
+                                         rocke_value_t* smem,
+                                         rocke_value_t* row,
+                                         rocke_value_t* col,
+                                         int n,
+                                         const rocke_type_t* smem_dtype);
+
+/* _to_mma_operand(b, frag, data): hand an fp32 LDS fragment to a TF32 MMA as
+ * vec<tf32xN> (a bitcast, no rounding). Every non-TF32 spec gets frag back. */
+rocke_value_t* rocke_conv_to_mma_operand(rocke_ir_builder_t* b, rocke_value_t* frag, bool is_tf32);
+
+/* _load_mma_operand(b, smem, row, col, n, smem_dtype=, data=): one MFMA
+ * operand fragment from LDS, in the type the MMA consumes. Non-TF32 specs take
+ * exactly rocke_conv_emit_smem_load; under TF32 the fp32 fragment is read in
+ * loads of at most ROCKE_CONV_TF32_LDS_LOAD_MAX elements, concatenated, then
+ * reinterpreted once as vec<tf32xN>. */
+rocke_value_t* rocke_conv_load_mma_operand(rocke_ir_builder_t* b,
+                                           rocke_value_t* smem,
+                                           rocke_value_t* row,
+                                           rocke_value_t* col,
+                                           int n,
+                                           const rocke_type_t* smem_dtype,
+                                           bool is_tf32);
+
+/* _mfma_issues_per_mma(op): the physical MFMAs one logical op issues (3 for
+ * the gfx950 BF16x3 TF32 emulation, 1 for every native atom). */
+int rocke_conv_mfma_issues_per_mma(const rocke_mmaop_t* op);
 
 /* _emit_frag_smem_load(b, src, mn_in_atom, k_in_atom, atom_mn_base, k_tile_base,
  * frag_len): one frag_len-wide operand fragment from a row-major LDS tile
@@ -648,7 +724,8 @@ rocke_value_t* rocke_conv_emit_frag_smem_load(rocke_ir_builder_t* b,
                                               rocke_value_t* k_in_atom,
                                               rocke_value_t* atom_mn_base,
                                               rocke_value_t* k_tile_base,
-                                              int frag_len);
+                                              int frag_len,
+                                              const rocke_type_t* smem_dtype);
 
 /* _apply_accumulator_epilogue(b, epilogue, accs[n], out_accs[n]): apply the
  * static fp32 ConvAccumulatorEpilogue per-lane then re-pack. Identity copies
@@ -746,6 +823,10 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
  * its run_ping_pong sequencing inline against ctx until that port lands.) */
 void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx);
 
+/* gfx1250 async branch (wgrad only, ctx->async_global_lds): one-barrier
+ * ping-pong over global_load_async_to_lds copies drained by s_wait_asynccnt. */
+void rocke_conv_emit_kloop_async_global_lds(rocke_conv_build_ctx_t* ctx);
+
 /* pipeline=="wavelet" branch (Python lines 1539-1797): dedicated load-wave /
  * math-wave split. Requires ctx->have_wavelet_loaders and the wavelet_* fields
  * to be populated by rocke_conv_build_ctx_init. Dispatches the WMMA
@@ -793,6 +874,7 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* ir_d_pitch_pw,
                                           const rocke_tensor_descriptor_t* D_desc,
                                           rocke_value_t* k_out_group_base,
+                                          rocke_value_t* slab_base,
                                           rocke_value_t* bound_m,
                                           rocke_value_t* bound_n);
 
@@ -809,6 +891,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_mmaop_t* op,
                                        const rocke_tensor_descriptor_t* D_desc,
                                        rocke_value_t* k_out_group_base,
+                                       rocke_value_t* slab_base,
+                                       const char* out_dtype,
                                        rocke_value_t* bound_m,
                                        rocke_value_t* bound_n);
 

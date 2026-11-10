@@ -430,7 +430,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
         self._assert_refused(tmp_path)
 
     def test_a_zero_left_bound_is_refused(self, tmp_path):
-        """left_bound follows cuDNN (L keys ending at the diagonal); 0 is refused."""
+        """left_bound follows cuDNN (L keys ending at the diagonal); hipDNN rejects 0."""
         self._graph(
             tmp_path / "graphs" / "g.json",
             {"causal_mask": False, "left_bound": 0, "right_bound": 0},

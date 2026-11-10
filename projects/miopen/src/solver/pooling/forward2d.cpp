@@ -138,7 +138,7 @@ bool PoolingForward2d::IsApplicable(const ExecutionContext& context,
                TargetProperties::GetMaxWaveScratchSize() / context.GetStream().GetWavefrontWidth();
 }
 
-ConvSolution PoolingForward2d::GetSolution(const ExecutionContext&,
+ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
                                            const miopen::pooling::ProblemDescription& problem,
                                            const PerformanceConfigPooling2dForward& config) const
 {
@@ -192,7 +192,8 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext&,
             };
         }
 
-        build_params << GetDataTypeKBP(problem.GetXDesc().GetType());
+        build_params << GetDataTypeKBP(problem.GetXDesc().GetType(),
+                                       context.GetStream().GetDeviceName());
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 

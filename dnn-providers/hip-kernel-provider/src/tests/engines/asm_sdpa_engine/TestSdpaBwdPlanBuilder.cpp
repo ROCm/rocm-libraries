@@ -6,6 +6,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "GraphTest.hpp"
@@ -27,6 +28,7 @@ namespace asm_sdpa_engine
 {
 namespace
 {
+namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
 
 class TestSdpaBwdPlanBuilder : public ::testing::Test
 {
@@ -80,6 +82,52 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGr
                                       false,
                                       false,
                                       /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForRaggedGraph)
+{
+    // The backward engine does not support group mode; any ragged tensor must be
+    // rejected.
+    auto builder = sdpa::withRaggedTensors(createSdpaBwdGraph(), {"q", "k", "v", "o"});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsTrueForMultipleOf16ByteAlignment)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder
+        = hipdnn_test_sdk::utilities::makeGraphWithTensorAlignment(createSdpaBwdGraph(), 32);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForNon16ByteAlignment)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Without a gfx942 device the device check declines first, masking the alignment check.
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder
+        = hipdnn_test_sdk::utilities::makeGraphWithTensorAlignment(createSdpaBwdGraph(), 8);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -1195,7 +1243,7 @@ TEST(TestSdpaBwdDeprecatedCausalMaskBand, CausalWithLeftBoundResolvesToCausalWin
               .front()
               ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
 
-    // left_bound = 64 keeps 64 keys (cuDNN), which is FlashAttention's window_size_left 63.
+    // left_bound = 64 (cuDNN: 64 keys including the diagonal) is 63 keys left of it for the kernel.
     const auto band = plan_utils::resolveDiagonalBand(attrs);
     EXPECT_EQ(band.leftBound, 63);
     EXPECT_EQ(band.rightBound, 0);

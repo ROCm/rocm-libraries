@@ -8,6 +8,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 using namespace miopen_plugin;
 using namespace miopen_utils;
@@ -642,13 +643,65 @@ TEST(TestMiopenUtils, MapPointwiseModeUnsupported)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+TEST(TestMiopenUtils, EnvFindEnforceIsSetOnlyForEnforcingValues)
+{
+    // MIOpen reads NONE and 1 as "nothing enforced" and throws on values it cannot parse, so
+    // none of them may disable the benchmarking tuning policy.
+    for(const char* value : {"", "NONE", "none", "1", "0", "6", "bogus"})
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce(
+            "MIOPEN_FIND_ENFORCE", value);
+        EXPECT_FALSE(miopen_utils::envFindEnforceIsSet()) << "MIOPEN_FIND_ENFORCE=" << value;
+    }
+    // Numbers are read as std::stoul reads them, as MIOpen does.
+    for(const char* value :
+        {"DB_UPDATE", "search", "SEARCH_DB_UPDATE", "db_clean", "2", "5", "04", " 3", "4x"})
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce(
+            "MIOPEN_FIND_ENFORCE", value);
+        EXPECT_TRUE(miopen_utils::envFindEnforceIsSet()) << "MIOPEN_FIND_ENFORCE=" << value;
+    }
+}
+
 // =============================================================================
 // GPU-required tests for ScopedTuningPolicy
 // =============================================================================
 
 class TestGpuScopedTuningPolicy : public test_common::MiopenHandleFixture
 {
+protected:
+    // Cleared so a runner's MIOPEN_FIND_ENFORCE cannot change what each case asserts.
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _clearFindEnforce{
+        "MIOPEN_FIND_ENFORCE"};
 };
+
+TEST_F(TestGpuScopedTuningPolicy, EnvFindEnforceTakesPrecedenceOverBenchmarking)
+{
+    // MIOpen applies MIOPEN_FIND_ENFORCE only while the handle policy is None, so the
+    // guard must not set Search when the user set the variable (PyTorch never does).
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce("MIOPEN_FIND_ENFORCE",
+                                                                              "DB_UPDATE");
+    ASSERT_EQ(miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyNone), miopenStatusSuccess);
+
+    const ScopedTuningPolicy guard(_miopenHandle, true);
+
+    miopenTuningPolicy_t currentPolicy;
+    ASSERT_EQ(miopenGetTuningPolicy(_miopenHandle, &currentPolicy), miopenStatusSuccess);
+    EXPECT_EQ(currentPolicy, miopenTuningPolicyNone);
+}
+
+TEST_F(TestGpuScopedTuningPolicy, NonEnforcingEnvKeepsSearchPolicy)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce("MIOPEN_FIND_ENFORCE",
+                                                                              "NONE");
+    ASSERT_EQ(miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyNone), miopenStatusSuccess);
+
+    const ScopedTuningPolicy guard(_miopenHandle, true);
+
+    miopenTuningPolicy_t currentPolicy;
+    ASSERT_EQ(miopenGetTuningPolicy(_miopenHandle, &currentPolicy), miopenStatusSuccess);
+    EXPECT_EQ(currentPolicy, miopenTuningPolicySearch);
+}
 
 TEST_F(TestGpuScopedTuningPolicy, SetsSearchPolicyWhenBenchmarkingEnabled)
 {

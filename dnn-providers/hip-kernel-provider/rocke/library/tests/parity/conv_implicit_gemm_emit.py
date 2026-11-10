@@ -9,6 +9,8 @@
 # lower_kernel_to_llvm(arch=<cfg arch>) to stdout so it can be byte-compared
 # with the C emitter conv_implicit_gemm_emit.c.
 from kernels.common.conv_implicit_gemm import (
+    ConvAccumulatorEpilogue,
+    ConvDataSpec,
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
@@ -598,7 +600,173 @@ def _spec_raw(idx: int):
             ),
             "gfx1250",
         )
+    if 40 <= idx <= 53:
+        return _split_k_spec(idx)
+    if 54 <= idx <= 65:
+        return _tf32_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
+
+
+# Split-K forward (split_k > 1) and its single-launch cluster form
+# (split_k_cluster) on gfx1250 WMMA, plus one MFMA rejection. Keep in lockstep
+# with make_cfg_split_k() in conv_implicit_gemm_emit.c.
+#   40: wavelet/cshuffle, 16x16x64 tile (small M, deep K)
+#   41: mem/cshuffle, 64x64 tile, 2x2 warps
+#   42: mem/default (vector_size_c=1), 32x32x32 tile
+#   43: grouped (groups=2) wavelet/cshuffle
+#   44: cluster S=4, mem/cshuffle, 16x16x64 tile
+#   45: cluster S=8, mem/cshuffle, 64x64 tile
+#   46: cluster S=15, mem/cshuffle, 16x16x64 tile
+#   47: cluster S=4, grouped (groups=2), 32x32 tile, 1x2 warps
+#   48: cluster S=12, mem/default, 32x32x32 tile
+#   49: split_k=2 on gfx950 (MFMA): rejected by both engines
+#   50: split_k=2 with a bias acc_epilogue: rejected by both engines
+#   51: split_k=0: rejected by both engines
+#   52: cluster S=4 with K=kpg=10 (not a multiple of 4): rejected by both
+#   53: cluster S=4 on gfx1201 (no cluster launch): rejected by both engines
+_SMALL_M = dict(N=1, Hi=7, Wi=7, C=256, K=64, fy=3, fx=3, pH=1, pW=1)
+_CSH_64 = dict(N=2, Hi=12, Wi=12, C=128, K=96, fy=3, fx=3, pH=1, pW=1)
+_DEFAULT = dict(N=1, Hi=9, Wi=9, C=64, K=40, fy=3, fx=3, pH=1, pW=1)
+_GROUPED = dict(N=1, Hi=10, Wi=10, C=128, K=64, fy=3, fx=3, pH=1, pW=1, groups=2)
+_ODD_K = dict(N=1, Hi=7, Wi=7, C=256, K=10, fy=3, fx=3, pH=1, pW=1)
+
+
+def _split_k_spec(idx: int):
+    base = dict(
+        tile_m=16,
+        tile_n=16,
+        tile_k=64,
+        warp_m=1,
+        warp_n=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        wave_size=32,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=8,
+        pipeline="wavelet",
+        epilogue="cshuffle",
+        num_load_waves=1,
+        split_k=2,
+    )
+    tile_64 = dict(tile_m=64, tile_n=64, warp_m=2, warp_n=2)
+    tile_def = dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=32,
+        warp_m=2,
+        warp_n=1,
+        epilogue="default",
+        vector_size_c=1,
+    )
+    prob, kw = {
+        40: (_SMALL_M, {}),
+        41: (_CSH_64, dict(tile_64, pipeline="mem")),
+        42: (_DEFAULT, dict(tile_def, pipeline="mem")),
+        43: (_GROUPED, {}),
+        44: (_SMALL_M, dict(pipeline="mem", split_k_cluster=4)),
+        45: (_CSH_64, dict(tile_64, pipeline="mem", split_k_cluster=8)),
+        46: (_SMALL_M, dict(pipeline="mem", split_k_cluster=15)),
+        47: (
+            _GROUPED,
+            dict(
+                tile_m=32,
+                tile_n=32,
+                warp_m=1,
+                warp_n=2,
+                pipeline="mem",
+                split_k_cluster=4,
+            ),
+        ),
+        48: (_DEFAULT, dict(tile_def, pipeline="mem", split_k_cluster=12)),
+        49: (
+            _CSH_64,
+            dict(
+                tile_m=64,
+                tile_n=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                wave_size=64,
+                pipeline="mem",
+            ),
+        ),
+        50: (
+            _SMALL_M,
+            dict(pipeline="mem", acc_epilogue=ConvAccumulatorEpilogue(bias=1.0)),
+        ),
+        51: (_SMALL_M, dict(split_k=0)),
+        52: (_ODD_K, dict(pipeline="mem", split_k_cluster=4, vector_size_c=2)),
+        53: (_SMALL_M, dict(pipeline="mem", split_k_cluster=4, warp_tile_k=16)),
+    }[idx]
+    cfg = dict(base, **kw)
+    return (
+        ImplicitGemmConvSpec(problem=_cp(**prob), **cfg),
+        {49: "gfx950", 53: "gfx1201"}.get(idx, "gfx1250"),
+    )
+
+
+# TF32 compute (ConvDataSpec(mma_dtype="tf32")): fp32 storage, each LDS
+# fragment bitcast to vec<tf32xN> for the arch's TF32 atom -- native XF32 on
+# gfx942 (16x16x8, 32x32x4), BF16x3 emulation on gfx950 (16x16x32, 32x32x16).
+# 64x64x32 tile, 2x2 warps. Keep in lockstep with make_cfg_tf32() in
+# conv_implicit_gemm_emit.c.
+#   54: gfx950 16x16x32, 2-D, mem/cshuffle
+#   55: gfx950 32x32x16, 2-D, compv4/default (the scheduling-hint counts)
+#   56: gfx942 16x16x8, 2-D, compv3/cshuffle
+#   57: gfx942 32x32x4, 2-D, compv4/default
+#   58: gfx950 16x16x32, 3-D, compv3/cshuffle
+#   59: gfx942 16x16x8, 3-D, mem/default
+#   60: gfx950 32x32x16, 2-D, async_dma mem/cshuffle
+#   61: gfx942 32x32x4, 2-D, unroll_k compv4/cshuffle
+#   62: gfx950 16x16x32, 2-D, basic/default
+#   63: gfx942 16x16x8, depthwise group_merge=4, mem/cshuffle
+#   64: gfx942 16x16x32 (gfx950's atom): rejected by both engines
+#   65: gfx950 16x16x32 with lds_k_pad=2 (misaligned row stride): rejected
+_TF32 = ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
+_TF32_2D = dict(N=2, Hi=14, Wi=14, C=32, K=64, fy=3, fx=3, pH=1, pW=1)
+_TF32_3D = dict(
+    N=1, Hi=6, Wi=6, C=32, K=32, fy=3, fx=3, pH=1, pW=1, Di=4, Z=3, sD=1, pD=1, dD=1
+)
+_TF32_DW = dict(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)
+
+
+def _tf32_spec(idx: int):
+    prob, arch, m, k, pipeline, epilogue, kw = {
+        54: (_TF32_2D, "gfx950", 16, 32, "mem", "cshuffle", {}),
+        55: (_TF32_2D, "gfx950", 32, 16, "compv4", "default", {}),
+        56: (_TF32_2D, "gfx942", 16, 8, "compv3", "cshuffle", {}),
+        57: (_TF32_2D, "gfx942", 32, 4, "compv4", "default", {}),
+        58: (_TF32_3D, "gfx950", 16, 32, "compv3", "cshuffle", {}),
+        59: (_TF32_3D, "gfx942", 16, 8, "mem", "default", {}),
+        60: (_TF32_2D, "gfx950", 32, 16, "mem", "cshuffle", dict(async_dma=True)),
+        61: (_TF32_2D, "gfx942", 32, 4, "compv4", "cshuffle", dict(unroll_k=True)),
+        62: (_TF32_2D, "gfx950", 16, 32, "basic", "default", {}),
+        63: (_TF32_DW, "gfx942", 16, 8, "mem", "cshuffle", dict(group_merge=4)),
+        64: (_TF32_2D, "gfx942", 16, 32, "mem", "cshuffle", {}),
+        65: (_TF32_2D, "gfx950", 16, 32, "mem", "cshuffle", dict(lds_k_pad=2)),
+    }[idx]
+    return (
+        ImplicitGemmConvSpec(
+            problem=_cp(**prob),
+            data=_TF32,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=m,
+            warp_tile_n=m,
+            warp_tile_k=k,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            **kw,
+        ),
+        arch,
+    )
 
 
 def main() -> int:

@@ -131,8 +131,8 @@ class InstructionEmitter:
             'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source),
             'wait_lr':      lambda em, ui: self.emit_wait_lr(),
             'sync':         lambda em, ui: self.emit_sync(),
-            'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source),
-            'gr_inc':       lambda em, ui: self.emit_gr_inc(em.source),
+            'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source, ui),
+            'gr_inc':       lambda em, ui: self.emit_gr_inc(em.source, ui),
             'skip':         lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
             'inline':       lambda em, ui: self.emit_inline(em.source),
@@ -148,6 +148,13 @@ class InstructionEmitter:
         """Emit MFMA instructions from MFMAPlacement."""
         module = Module()
         subIterK = placement.subIterK
+        # Dual-period MXFP8: the data body is unrolled scaleReuse times per
+        # 256-K scale epoch (unroll_iter in [0, scaleReuse)).  Scales live on
+        # the epoch, not on the data subIterK axis (numSubIterK == 1), so the
+        # K-phase that selects the scale byte within the shared 4B dword is the
+        # data-iteration parity, i.e. unroll_iter, NOT subIterK (always 0).
+        dualPeriodScale = self.hasScale and getattr(self.config, 'dualPeriodScale', False)
+        scalePhase = (unroll_iter % self.config.scaleReuse) if dualPeriodScale else subIterK
         tile_maps = {t: placement.vgpr_tile_maps[t][unroll_iter]
                      for t in placement.vgpr_tile_maps}
 
@@ -185,8 +192,8 @@ class InstructionEmitter:
                 mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
                 kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
                 kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
-                sAsel = (a % mShapeA) + mShapeA * (subIterK % kShapeA)
-                sBsel = (b % mShapeB) + mShapeB * (subIterK % kShapeB)
+                sAsel = (a % mShapeA) + mShapeA * (scalePhase % kShapeA)
+                sBsel = (b % mShapeB) + mShapeB * (scalePhase % kShapeB)
             else:
                 scaleAVgpr = scaleBVgpr = -1
                 sAsel = sBsel = 0
@@ -195,7 +202,7 @@ class InstructionEmitter:
                 self.writer, self.kernel, aTile, bTile, dTile, dTile,
                 scaleAVgpr=scaleAVgpr, scaleBVgpr=scaleBVgpr,
                 scaleAsel=sAsel, scaleBsel=sBsel,
-                comment=f"MFMA C[{a},{b}] += A[{a},K={subIterK}] * B[{b},K={subIterK}]"))
+                comment=f"MFMA C[{a},{b}] += A[{a},K={scalePhase}] * B[{b},K={scalePhase}]"))
         return list(module.flatitems())
 
     def emit_lr(self, placement, unroll_iter=0):
@@ -232,6 +239,14 @@ class InstructionEmitter:
                     module.add(emitSingleDsRead(
                         ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
         elif tensor in ('SA', 'SB'):
+            # Dual-period MXFP8: one scale dword covers both K phases of the
+            # epoch and lives in a globally-colored VGPR that survives across
+            # the scaleReuse-unrolled data iterations.  Read it once per epoch
+            # (unroll_iter 0); later data iterations reuse the resident dword
+            # (the MFMA selects the K-phase byte via op_sel_hi).  This keeps the
+            # steady-state epoch at exactly six scale ds_reads.
+            if getattr(self.config, 'dualPeriodScale', False) and unroll_iter > 0:
+                return []
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
@@ -276,6 +291,12 @@ class InstructionEmitter:
                     module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK,
                                                     writer=self.writer))
         elif tensor in ('SA', 'SB'):
+            # Dual-period MXFP8: one scale epoch (256 K) feeds scaleReuse data
+            # iterations.  Prefetch the next epoch's scales (SRD advance + DTL
+            # load) exactly once per epoch (unroll_iter 0); later data
+            # iterations must NOT re-advance the scale SRD or re-issue the load.
+            if getattr(self.config, 'dualPeriodScale', False) and unroll_iter > 0:
+                return []
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
         return list(module.flatitems())
@@ -366,21 +387,35 @@ class InstructionEmitter:
         mod = source.build(self)
         return list(mod.flatitems()) if mod is not None else []
 
-    def emit_lr_inc(self, source):
+    def emit_lr_inc(self, source, unroll_iter=0):
         """Emit localReadLDSBufferSwap for a single tensor."""
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
+        # Dual-period MXFP8: the scale LDS double-buffer is driven on the 256-K
+        # epoch cadence.  Toggle the scale LR read-half once per epoch
+        # (unroll_iter 0) so it tracks the GR write-half swap; toggling on every
+        # data iteration would net to zero over the epoch and leave the LR
+        # reading the stale half.
+        if tensor in ('SA', 'SB') and getattr(self.config, 'dualPeriodScale', False) \
+                and unroll_iter > 0:
+            return []
         module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
-    def emit_gr_inc(self, source):
+    def emit_gr_inc(self, source, unroll_iter=0):
         """Emit globalReadPtrUpdates + globalReadLDSBufferSwap for a single tensor."""
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         hold = getattr(source, 'holdOnLastIter', False)
         module = Module()
         if tensor in ('SA', 'SB'):
+            # Dual-period MXFP8: advance the scale SRD and swap the scale LDS
+            # double-buffer once per 256-K epoch (unroll_iter 0).  Advancing on
+            # every data iteration would over-stride the scale pointer by
+            # scaleReuse and desynchronize scales from data.
+            if getattr(self.config, 'dualPeriodScale', False) and unroll_iter > 0:
+                return []
             module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel, hold))
         else:
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel, hold))

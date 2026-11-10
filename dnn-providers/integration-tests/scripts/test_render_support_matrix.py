@@ -105,13 +105,17 @@ def _sweep_bundle(
     cases: list[dict],
     template: dict | None = None,
     claims: dict | None = None,
+    version: object = None,
 ) -> Path:
     directory = root / relative
     _write_json(
         directory / "graph.template.json",
         template if template is not None else _graph(),
     )
-    _write_json(directory / "sweep.json", {"cases": cases})
+    sweep: dict = {"cases": cases}
+    if version is not None:
+        sweep["version"] = version
+    _write_json(directory / "sweep.json", sweep)
     if claims is not None:
         _write_json(directory / "support.json", {"version": 1, "claims": claims})
     return directory
@@ -436,6 +440,113 @@ class TestCollection:
         units = collect_units(bundle_root)
         assert [u.case_id for u in units] == ["a", "b", "c"]
         assert all(u.claims == {} for u in units)
+
+    def test_probe_cases_are_not_units(self, bundle_root: Path) -> None:
+        """Support matrices exclude probes (RFC 0022 §9); claims and regressions stay."""
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            [
+                {"id": "a", "metadata": {"purpose": "claim"}},
+                {"id": "b", "metadata": {"purpose": "probe"}},
+                {"id": "c", "metadata": {"purpose": "regression"}},
+                {"id": "d"},
+            ],
+        )
+        units = collect_units(bundle_root)
+        assert [u.case_id for u in units] == ["a", "c", "d"]
+
+    def test_expected_rejection_bundle_is_no_unit(self, bundle_root: Path) -> None:
+        """An invalid graph the engine must reject is not a supported graph.
+
+        Even a hand-added claim on it (the verifier rejects one) must not make
+        it a unit, or the denominator would count a graph nobody can run.
+        """
+        claims = {"MIOPEN_ENGINE": {"gfx942": ["linux"]}}
+        _single_bundle(bundle_root, "quick/Conv/Default", "ConvFwd", claims=claims)
+        flagged = _single_bundle(
+            bundle_root, "quick/Conv/Rejected", "ConvBad", claims=claims
+        )
+        _write_json(flagged / "ConvBad.meta.json", {"expected_rejection": True})
+        errors: list[str] = []
+        (unit,) = collect_units(bundle_root, errors)
+        assert unit.bundle == "Conv/Default"
+        assert errors == []
+
+    @pytest.mark.parametrize("value", [False, "true", 1, None])
+    def test_only_a_boolean_true_drops_a_single_bundle(
+        self, bundle_root: Path, value: object
+    ) -> None:
+        directory = _single_bundle(bundle_root, "quick/Conv/Default", "ConvFwd")
+        _write_json(directory / "ConvFwd.meta.json", {"expected_rejection": value})
+        assert len(collect_units(bundle_root)) == 1
+
+    def test_expected_rejection_case_leaves_the_sweep_denominator(
+        self, bundle_root: Path
+    ) -> None:
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            [
+                {"id": "a"},
+                {"id": "bad", "metadata": {"expected_rejection": True}},
+                {"id": "c"},
+            ],
+            claims={
+                "MIOPEN_ENGINE": [
+                    {"cases": ["a", "bad"], "support": {"gfx942": ["linux"]}}
+                ]
+            },
+        )
+        errors: list[str] = []
+        units = collect_units(bundle_root, errors)
+        assert [u.case_id for u in units] == ["a", "c"]
+        assert units[0].claims == {"MIOPEN_ENGINE": {GFX942}}
+        assert errors == []
+
+    @pytest.mark.parametrize("value", [False, "true", 1, None])
+    def test_only_a_boolean_true_drops_a_sweep_case(
+        self, bundle_root: Path, value: object
+    ) -> None:
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            [{"id": "a", "metadata": {"expected_rejection": value}}],
+        )
+        assert [u.case_id for u in collect_units(bundle_root)] == ["a"]
+
+    def test_unknown_case_is_still_reported_beside_a_flagged_one(
+        self, bundle_root: Path
+    ) -> None:
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            [{"id": "bad", "metadata": {"expected_rejection": True}}],
+            claims={
+                "MIOPEN_ENGINE": [
+                    {"cases": ["bad", "ghost"], "support": {"gfx942": ["linux"]}}
+                ]
+            },
+        )
+        errors: list[str] = []
+        assert collect_units(bundle_root, errors) == []
+        assert len(errors) == 1
+        assert "ghost" in errors[0]
+
+    def test_expected_rejection_bundles_leave_the_rendered_document_unchanged(
+        self, bundle_root: Path
+    ) -> None:
+        claims = {"MIOPEN_ENGINE": {"gfx942": ["linux"]}}
+        _single_bundle(bundle_root, "quick/Conv/Default", "ConvFwd", claims=claims)
+        before = render_markdown(collect_units(bundle_root), 0)
+        flagged = _single_bundle(bundle_root, "quick/Conv/Rejected", "ConvBad")
+        _write_json(flagged / "ConvBad.meta.json", {"expected_rejection": True})
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            [{"id": "bad", "metadata": {"expected_rejection": True}}],
+        )
+        assert render_markdown(collect_units(bundle_root), 0) == before
 
     def test_wholly_unclaimed_family_still_gets_a_row(self, bundle_root: Path) -> None:
         """The regression that motivated the rule: silence has to be visible."""
@@ -862,6 +973,95 @@ class TestCollection:
         assert [u.case_id for u in units] == ["good"]
         assert len(errors) == 1
         assert f"case 'bad': {message}" in errors[0]
+
+    @staticmethod
+    def _superset_template() -> dict:
+        sink = {"uid": 2, "dims": "${case.dims}", "data_type": "float"}
+        return _graph(
+            tensors=[_tensor(1, [1, 32, 16, 16], [8192, 256, 16, 1]), sink],
+            nodes=[
+                {
+                    "type": "ConvAttributes",
+                    "inputs": {"x_tensor_uid": 1, "sink_tensor_uid": 2},
+                }
+            ],
+        )
+
+    def test_case_with_absent_tensors_expands_the_pruned_template(
+        self, bundle_root: Path
+    ) -> None:
+        """The absent tensor leaves the template before its placeholders expand."""
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[
+                {"id": "full", "values": {"tensors": [{"uid": 2, "dims": [1]}]}},
+                {
+                    "id": "no_sink",
+                    "absent_tensors": [2],
+                    "metadata": {"format_version": 2},
+                },
+            ],
+            template=self._superset_template(),
+            version=2,
+        )
+        errors: list[str] = []
+        full, no_sink = collect_units(bundle_root, errors)
+        assert errors == []
+        assert [t["uid"] for t in full.graph["tensors"]] == [1, 2]
+        assert full.graph["nodes"][0]["inputs"]["sink_tensor_uid"] == 2
+        assert [t["uid"] for t in no_sink.graph["tensors"]] == [1]
+        assert no_sink.graph["nodes"][0]["inputs"] == {
+            "x_tensor_uid": 1,
+            "sink_tensor_uid": None,
+        }
+
+    @pytest.mark.parametrize(
+        ("absent", "version", "message"),
+        [
+            ([2], 1, "absent_tensors needs sweep version 2, not 1"),
+            ([2], None, "absent_tensors needs sweep version 2, not 1"),
+            ([7], 2, "7 is not a tensor of the template"),
+        ],
+    )
+    def test_case_with_absent_tensors_the_loader_refuses_is_an_error(
+        self, bundle_root: Path, absent: list, version: object, message: str
+    ) -> None:
+        """A FailedLoad in the harness: the case is no unit."""
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[
+                {"id": "good", "values": {"tensors": [{"uid": 2, "dims": [1]}]}},
+                {
+                    "id": "bad",
+                    "absent_tensors": absent,
+                    "metadata": {"format_version": 2},
+                },
+            ],
+            template=self._superset_template(),
+            version=version,
+        )
+        errors: list[str] = []
+        units = collect_units(bundle_root, errors)
+        assert [u.case_id for u in units] == ["good"]
+        assert len(errors) == 1
+        assert f"case 'bad': {message}; the harness fails it at load" in errors[0]
+
+    @pytest.mark.parametrize("version", [3, 0, 2.0, "2", True])
+    def test_sweep_version_other_than_1_or_2_fails_every_case(
+        self, bundle_root: Path, version: object
+    ) -> None:
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[{"id": "a"}, {"id": "b"}],
+            version=version,
+        )
+        errors: list[str] = []
+        assert collect_units(bundle_root, errors) == []
+        assert len(errors) == 1
+        assert f"sweep version {json.dumps(version)} is not 1 or 2" in errors[0]
 
     @pytest.mark.parametrize("uid", [None, True, "1"])
     def test_template_tensor_without_an_integer_uid_fails_every_case(
@@ -1923,7 +2123,14 @@ def _recount_overview(root: Path) -> dict:
         cases = json.loads((sweep_dir / "sweep.json").read_text(encoding="utf-8")).get(
             "cases", []
         )
-        ids = {c["id"] for c in cases if isinstance(c, dict) and "id" in c}
+        ids = {
+            c["id"]
+            for c in cases
+            if isinstance(c, dict)
+            and "id" in c
+            and (c.get("metadata") or {}).get("expected_rejection") is not True
+            and (c.get("metadata") or {}).get("purpose") != "probe"
+        }
         for case_id in ids:
             ops[(where, case_id)] = where[0]
             claimed.setdefault((where, case_id), set())
@@ -1948,6 +2155,13 @@ def _recount_overview(root: Path) -> dict:
             continue
         if any(sweep == graph.parent or sweep in graph.parents for sweep in sweeps):
             continue  # Already counted case-by-case above.
+        meta = graph.with_name(f"{graph.stem}.meta.json")
+        if (
+            meta.is_file()
+            and json.loads(meta.read_text(encoding="utf-8")).get("expected_rejection")
+            is True
+        ):
+            continue  # Not a supported graph: the engine must reject it.
         identity = (_below_tier(graph.parent, root), graph.name)
         ops[identity] = identity[0][0]
         claimed.setdefault(identity, set())

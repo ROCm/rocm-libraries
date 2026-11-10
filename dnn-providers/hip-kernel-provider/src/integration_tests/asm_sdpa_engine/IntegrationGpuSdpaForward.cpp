@@ -12,6 +12,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "../IntegrationGraphVerificationHarness.hpp"
 #include "AsmSdpaConfigHelpers.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
@@ -106,11 +107,26 @@ protected:
         const auto& stats = built.stats;
 
         auto validationResult = graph->validate();
+
         ASSERT_TRUE(validationResult.is_good())
             << "Graph validation failed for config: " << testCase.name << " - "
             << validationResult.get_message();
 
+        {
+            auto supportStatus = graph->is_supported_ext(this->_handle);
+            ASSERT_EQ(supportStatus.code, ErrorCode::OK)
+                << "No engines applicable for config: " << testCase.name << " - "
+                << supportStatus.get_message();
+        }
+
+        if(testCase.config.mode == hip_kernel_provider_common::BatchMode::GROUP)
+        {
+            GTEST_SKIP() << "Group mode kernels not supported by CPU validation";
+        }
+
         GraphVerificationContext context(*graph);
+
+        // Register output tensor validator
         graph->visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
@@ -433,6 +449,23 @@ std::vector<GraphTestCase> getGraphTestCasesByPrecision(bool fp8)
     return cases;
 }
 
+// Stats (LSE) output is not supported for ragged tensors, nor with causal masks on the
+// current ASM kernels (SdpaFwdPlanBuilder::isApplicable declines both), so only
+// batch-mode NO_MASK kernels are paired with stats.
+std::vector<GraphTestCase> getBatchModeStatsTestCases()
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(config.mode == hip_kernel_provider_common::BatchMode::BATCH
+           && static_cast<plan_utils::MaskType>(config.mask) == plan_utils::MaskType::NO_MASK)
+        {
+            cases.push_back(configToTestCase(config, /*withStats=*/true));
+        }
+    }
+    return cases;
+}
+
 } // namespace
 
 TEST_P(IntegrationGpuSdpaFwdBf16, Correctness)
@@ -462,8 +495,7 @@ INSTANTIATE_TEST_SUITE_P(SmokeFp8,
 
 INSTANTIATE_TEST_SUITE_P(SmokeStats,
                          IntegrationGpuSdpaFwdBf16,
-                         testing::ValuesIn(getCompatibleGraphTestCases(cfg_fmha_fwd,
-                                                                       /*withStats=*/true)),
+                         testing::ValuesIn(getBatchModeStatsTestCases()),
                          GraphTestCase::getName);
 
 TEST_P(IntegrationGpuSdpaFwdShapeSweepBf16, Correctness)

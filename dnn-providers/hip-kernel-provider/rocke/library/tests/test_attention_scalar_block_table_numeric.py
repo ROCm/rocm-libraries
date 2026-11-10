@@ -17,7 +17,6 @@ with numpy from the logical K/V, after rounding inputs to fp16. Skips without a
 GPU, and on devices whose target id the attention builders do not know.
 """
 
-import ctypes
 import itertools
 import math
 
@@ -27,6 +26,8 @@ import pytest
 from kernels.common import attention_unified as au
 from rocke.core.arch.target import known_arches
 from rocke.runtime.hip_module import get_device_arch
+
+from ._attention_device_array import DeviceArray as _DeviceArray
 
 _HQ, _HKV, _D, _BS = 8, 2, 64, 16
 _ATOL = 1e-2
@@ -48,38 +49,6 @@ def rt():
     from rocke.runtime.hip_module import Runtime
 
     return Runtime()
-
-
-def _u8(array):
-    return (ctypes.c_uint8 * array.nbytes).from_buffer(array)
-
-
-class _DeviceArray:
-    """A device copy of a numpy array, exposing the tensor attributes
-    ``run_unified_attention_torch`` reads. ``shape`` may be narrower than the
-    host array along the last axis, which models a column view of it."""
-
-    device = None
-
-    def __init__(self, rt, host, *, shape=None):
-        from rocke.runtime.launcher import DeviceMem
-
-        self._rt = rt
-        self._host = np.ascontiguousarray(host)
-        self._mem = DeviceMem(self._host.nbytes)
-        rt.memcpy_h2d(self._mem.ptr(), _u8(self._host), self._host.nbytes)
-        self.shape = self._host.shape if shape is None else shape
-
-    def stride(self, dim):
-        return self._host.strides[dim] // self._host.itemsize
-
-    def data_ptr(self):
-        return self._mem.ptr()
-
-    def read(self):
-        out = np.empty_like(self._host)
-        self._rt.memcpy_d2h(_u8(out), self._mem.ptr(), out.nbytes)
-        return out
 
 
 def _case(q_lens, kv_lens, row_width, *, seed):

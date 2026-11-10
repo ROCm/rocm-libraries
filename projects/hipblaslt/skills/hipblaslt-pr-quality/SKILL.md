@@ -1,6 +1,6 @@
 ---
 name: hipblaslt-pr-quality
-description: "hipBLASLt supplements to the ROCm PR quality base skill. Use for hipBLASLt PR author, review, or pre-merge gating (target branch develop; product paths under projects/hipblaslt/**, including tensilelite/). Adds and tightens base rules; never relaxes a base MUST."
+description: "hipBLASLt supplements to the ROCm PR quality base skill. Use for hipBLASLt PR author, review, or pre-merge gating (target branch develop; product paths under projects/hipblaslt/**, including tensilelite/, and shared/stinkytofu/**, the instruction scheduler and hazard pass that hipBLASLt kernels go through). Adds and tightens base rules; never relaxes a base MUST."
 argument-hint: "[author | review | pre-merge] [PR URL | branch:<name> | local]"
 extends: rocm-pr-quality
 allowed-tools: Bash, Read, Grep, Glob, Task, WebFetch
@@ -22,7 +22,9 @@ On any conflict, the base MUST-rule wins.
 ## Scope
 
 - **Target branch:** `develop`.
-- **Product paths:** `projects/hipblaslt/**` (the hipBLASLt component root, including `tensilelite/`).
+- **Product paths:** `projects/hipblaslt/**` (the hipBLASLt component root, including `tensilelite/`)
+  and `shared/stinkytofu/**` (stinkytofu, the assembly-level instruction scheduler and hazard pass
+  that TensileLite runs on generated kernels).
 - Paths below are written relative to the repo root; in a standalone hipBLASLt checkout they are relative to `projects/hipblaslt/`.
 - Changes outside these (docs, repo tooling) follow the base bar only.
 
@@ -35,6 +37,7 @@ Bind the base change-classes and scope buckets to hipBLASLt paths:
 - Frontend / API: `projects/hipblaslt/library/include/hipblaslt/**` (public headers), `projects/hipblaslt/library/src/**`.
 - TensileLite / kernel generation: `projects/hipblaslt/tensilelite/**`, especially `KernelWriter*.py`.
 - Tests/clients: `projects/hipblaslt/clients/**`.
+- Kernel scheduling and hazard safety: `shared/stinkytofu/**` (see the `hazard-safety` class below).
 
 ### Tightens M1 (defect-fix regression test)
 The regression test for a defect fix must run in a **shared CI lane** (TheRock GitHub Actions or
@@ -98,6 +101,43 @@ config rather than hardcoding it.
 Kernel-generation and assembly changes must show coverage on the affected gfx arch(s) in CI, not
 just host-side tests. Treat a build-only-but-untested arch as uncovered.
 
+### Adds — `hazard-safety` change class (stinkytofu, waits, hazards, scheduling)
+Some GPU architectures leave certain register hazards to software. For example, in gfx1250's expert
+scheduling mode 2 the hardware does not stall an instruction that overwrites a register a matrix
+instruction is still reading; the compiler must insert an `s_wait_alu` instead. stinkytofu's wait
+passes are then the only guard, and a missed wait gives a silently wrong answer, not a crash.
+Text-matching tests (FileCheck) show what the pass emits; they cannot show that a hazard is covered.
+
+Tag a PR `hazard-safety` when it adds, removes, weakens or gates a wait or hazard rule, changes the
+instruction scheduler's dependency handling, or edits instruction or hardware tables. Paths include
+`shared/stinkytofu/**/InsertWaitAluPass*`, `RemoveWaitAlu*`, the waitcnt passes, `dag/CDNA5.hpp`,
+`HazardRules.hpp`, `HWModel*`, `HwReg*`, `hardware/**/*.def`, and rocisa's hazard tables. When unsure,
+tag it (stricter wins). A `hazard-safety` PR must have all of:
+- **A safety argument** in the description for each rule it adds, removes, weakens or gates: why the
+  hazard cannot occur, or why the remaining wait still covers it.
+- **Execution evidence on the target architecture.** Either differential execution (the same kernels
+  built with and without the change give bitwise-identical results on integer test data) or a small
+  per-rule test kernel run on hardware, with run counts. Host-only ctest and FileCheck results do not
+  satisfy this.
+- **A test that fails if the protection is removed or the gate is flipped,** not only one that matches
+  today's emitted text.
+- **The protection on by default** (see the M2 tightening below). A gate that weakens a protection
+  ships with the protection on until the evidence lands.
+
+Missing any of these is `BLOCKING`. This tightens the base device-coverage rule for this class: a
+build-only or emulator-only result does not count as coverage.
+
+### Tightens M2 — a safe default for a protection is "on"
+The base M2 accepts a "safe-default flag." For a new feature the safe default is usually off. For a
+hazard or correctness protection it is the reverse: the safe default keeps the protection **on**. A
+new gate whose default turns a protection off does not satisfy M2. A gate described as temporary or
+for debugging never merges enabled.
+
+### Adds — test-substance smell: assertions on source text
+Add to the base smell scan: a test that reads a source file and asserts it contains a string (for
+example, that `Solution.py` contains `state["ProblemType"]["Sparse"]`). It fails only if someone
+edits that string, so it says nothing about behavior. Treat a hit as `BLOCKING`, like the base smells.
+
 ### Tightens — stale-base on high-coupling files
 Make the base stale-base check concrete and stricter. High-coupling files:
 `KernelWriter*.py` (which already covers `KernelWriterAssembly.py`), register/SGPR-lifetime code, shared `Components/*`.
@@ -123,7 +163,8 @@ on the merge-target still accepts it.
 
 ### Tightens — approvals
 Changes to the high-coupling files above need **≥ 2 hipBLASLt code-owner approvals** after the
-local team review (stricter than a generic base approval count).
+local team review (stricter than a generic base approval count). A `hazard-safety` PR also needs at
+least one approval from a reviewer outside the author's immediate team.
 
 ### Adds — prose and style for written artifacts
 When writing the PR description, review comments, handoffs, or design notes, apply the style guide in
@@ -180,3 +221,13 @@ went green; once both were on `develop` the strict-corpus unit test
 (`test_input_yaml_corpus_is_strict_clean`) rejected the fixtures, and the break only surfaced
 downstream in the ROCm/TheRock rocm-libraries bump (TheRock #6133, tracked by #8810). That is the
 validator-vs-validated-data collision the no-file-overlap gate above is designed to catch.
+
+PR #10003 added a gate that turned off write-after-read hazard tracking in stinkytofu for every
+non-sparse gfx1250 kernel. Its rationale was one line ("Disable for non-sparse kernel"), its test
+evidence was "ctest" and "tox", its unit test asserted on `Solution.py`'s source text, and the
+existing hazard FileCheck test was edited to pass the new flag. About one launch in 2,000 then read a
+matrix operand after it had been overwritten, the root cause of four P1 silent-data-corruption defects
+on gfx1250 (ROCM-31905, ROCM-31901, ROCM-31918, ROCM-32099), fixed by #12170. The `hazard-safety` class,
+the M2 tightening and the source-text smell above each block it. For the opposite, PR #11153 is a
+model `hazard-safety` PR: a hardware reproducer (12 of 30 runs failing before the fix, 0 of 30 after),
+tests shown to fail with the fix reverted, and a stated risk level.

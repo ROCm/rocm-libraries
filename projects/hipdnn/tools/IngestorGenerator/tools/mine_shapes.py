@@ -175,7 +175,8 @@ def _mask_from_attributes(
             raise SystemExit(
                 f"FAIL: {path}: invalid {name} {value!r}; expected null or integer >= -1"
             )
-    # left_bound follows cuDNN (L keeps the L keys ending at the diagonal); 0 is refused.
+    # left_bound follows cuDNN (L keeps the L keys ending at the diagonal); hipDNN rejects 0
+    # (SdpaSemanticsRegister SEM-005).
     if left == 0:
         raise SystemExit(f"FAIL: {path}: invalid left_bound 0; expected -1 or >= 1")
     causal = attrs.get("causal_mask")

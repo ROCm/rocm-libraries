@@ -459,9 +459,9 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(asm_sdpa_engine::deprecatedCausalMaskCases()),
                          asm_sdpa_engine::deprecatedCausalMaskCaseName);
 
-// The mask graph is 256x256. left_bound follows cuDNN (L keeps the L keys ending at
-// the diagonal), so a top-left left bound of 256 covers the whole sequence and is
-// plain causal, while 255 is a genuine sliding window (the last query drops key 0).
+// The mask graph is 256x256. cuDNN's left_bound counts the diagonal key, so a
+// top-left left bound of 256 covers the whole sequence and is plain causal, while
+// 255 hides key 0 from the last query and is a genuine sliding window.
 bool extractCausalForTopLeftWindow(int64_t leftBound)
 {
     auto builder = asm_sdpa_engine::createSdpaFwdGraphWithMask(

@@ -3,7 +3,10 @@
 
 #include "Utils.hpp"
 
+#include <algorithm>
+
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider::core::utils
@@ -109,6 +112,24 @@ bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttri
         = hipdnn_data_sdk::utilities::extractStrideOrder(stridesVec);
 
     // Compare against known layouts
+    if(numDims == 3)
+    {
+        const auto layoutNcl = hipdnn_data_sdk::utilities::TensorLayout::NCL;
+        const auto layoutNlc = hipdnn_data_sdk::utilities::TensorLayout::NLC;
+
+        if(strideOrder == layoutNlc.strideOrder)
+        {
+            return true;
+        }
+        if(strideOrder == layoutNcl.strideOrder)
+        {
+            return false;
+        }
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported tensor layout for 3D tensor. Only NCL and NLC are supported.");
+    }
+
     if(numDims == 4)
     {
         const auto layoutNchw = hipdnn_data_sdk::utilities::TensorLayout::NCHW;
@@ -147,8 +168,22 @@ bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttri
 
     throw hipdnn_plugin_sdk::HipdnnPluginException(
         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-        "Tensor must be 4D or 5D for layout detection. Got " + std::to_string(numDims)
+        "Tensor must be 3D, 4D or 5D for layout detection. Got " + std::to_string(numDims)
             + "D tensor.");
+}
+
+bool hasOnly16ByteAlignedTensors(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    constexpr int64_t REQUIRED_ALIGNMENT = 16;
+    return std::all_of(tensorMap.begin(), tensorMap.end(), [](const auto& entry) {
+        const auto* tensor = entry.second;
+        return hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor)
+               || (tensor->alignment() >= REQUIRED_ALIGNMENT
+                   && tensor->alignment() % REQUIRED_ALIGNMENT == 0);
+    });
 }
 
 } // namespace hip_kernel_provider::core::utils

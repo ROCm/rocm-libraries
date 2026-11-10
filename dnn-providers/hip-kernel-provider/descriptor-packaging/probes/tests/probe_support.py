@@ -41,6 +41,7 @@ MULTI_LAUNCH_FIXTURES = (
     FIXTURES / "multi_launch_decode_merge",
     FIXTURES / "multi_launch_same_kernel_twice",
 )
+SLOTTED_MULTI_LAUNCH_FIXTURE = FIXTURES / "slotted_multi_launch"
 MAIN_FIXTURE = FIXTURES / "main"
 EMPTY_ARCH_FIXTURE = FIXTURES / "empty_arch"
 HSACO_FIXTURES = FIXTURES / "hsaco"

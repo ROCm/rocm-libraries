@@ -138,7 +138,10 @@ public:
     // Scalar attributes
     std::optional<float> dropout_probability;
     std::optional<float> attn_scale_value;
+    /// Left diagonal-band bound: each query row keeps this many keys, including the diagonal;
+    /// -1 is unbounded and 0 is rejected.
     std::optional<int64_t> left_bound;
+    /// Right diagonal-band bound: keys up to this many past the diagonal are kept; -1 is unbounded.
     std::optional<int64_t> right_bound;
     std::optional<int32_t> max_seq_len_kv;
 
@@ -680,8 +683,9 @@ public:
      * forward pass: a provider whose kernels take FlashAttention's window would pass L - 1,
      * turning 0 into -1, which those kernels read as unbounded.
      *
-     * @param value The left bound L.
-     * @return Reference to this for chaining.
+     * @param value The left bound L > 0, or -1 for unbounded. Graph validation rejects 0 and
+     *              values below -1.
+     * @return Reference to this object for method chaining.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_diagonal_band_left_bound(int64_t value)
@@ -689,6 +693,14 @@ public:
         left_bound = value;
         return *this;
     }
+    /**
+     * @brief Set the right diagonal-band bound (cuDNN semantics).
+     *
+     * right_bound = R keeps keys up to R past the diagonal; 0 is causal.
+     *
+     * @param value R >= 0, or -1 for unbounded. Graph validation rejects values below -1.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_diagonal_band_right_bound(int64_t value)
     {
@@ -767,8 +779,9 @@ public:
      *
      * A window length of n keeps the n keys ending at the diagonal, as in cuDNN.
      *
-     * @param value The window length n (>= 1).
-     * @return Reference to this for chaining.
+     * @param value Window length n: keys per query row, including the diagonal. n > 0, or -1
+     *              for unbounded; graph validation rejects 0 and values below -1.
+     * @return Reference to this object for method chaining.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_sliding_window_length(int value)

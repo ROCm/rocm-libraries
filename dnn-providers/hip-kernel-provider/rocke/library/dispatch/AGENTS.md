@@ -19,11 +19,11 @@ passed from Python, it does not recompute it.
 **Standalone candidates are a bounded exception.** A candidate that owns its own
 kernel module builds that kernel's own spec here, tuning included:
 `gfx950_dense.py::_base_spec` resolves the default tile plus the candidate's persist /
-wide-DMA, and `gfx942_dense.py::_base_spec` resolves those plus `waves_per_eu`. Those specs
-are consumed only by their own builder and never enter the C++ parity identity. One
-rule governs the exception: **any value the kernel bakes into its `kernel_name` must
-be resolved into the concrete spec before build**. The default must come from the
-kernel's policy function; a swept knob value may replace it only when the
+wide-DMA, and `gfx942_dense.py::tuned_base_spec` resolves those plus `waves_per_eu`.
+Those specs are consumed only by their own builder and never enter the C++ parity
+identity. One rule governs the exception: **any value the kernel bakes into its
+`kernel_name` must be resolved into the concrete spec before build**. The default must
+come from the kernel's policy function; a swept knob value may replace it only when the
 body, symbol, and cache all read that same spec field. `gfx942_dense.py` calls
 `kernels.gfx942.attention_dense._tuned_waves_per_eu` for the default, and the
 sweep's WPE loop varies it from there. The gfx942 symbol always carries WPE;
@@ -40,7 +40,12 @@ params). Correctness rests entirely on the key.
 | priority | candidate | declared arches | module | scope |
 |---|---|---|---|---|
 | 3 | `attention_gfx942_dense` | gfx942 | `gfx942_dense.py` | bf16/fp16 D64/D128 dense prefill; grid and persistence are knobs (`spec_id=gfx942_dense`, opt-in) |
+| 3 | `attention_gfx942_dense_qbminor` | gfx942 | `gfx942_dense.py` | same body on the hipDNN ingestor's grid: non-persistent, `qb_minor` order, one KV segment, all fixed (`spec_id=gfx942_dense_qbminor`, opt-in) |
+| 3 | `attention_gfx942_dense_persist_aot` | gfx942 | `gfx942_dense.py` | same body on the ingestor's D128 persistent grid: 304 CTAs, an explicit (never `auto`) `persist_decode`, one KV segment; the other knobs swept (`spec_id=gfx942_dense_persist_aot`, opt-in) |
+| 3 | `attention_gfx942_dense_btminor_aot` | gfx942 | `gfx942_dense.py` | same body on the ingestor's non-persistent `bt_hkv_minor` grid, one KV segment; default spec only (`spec_id=gfx942_dense_btminor_aot`, opt-in) |
+| 3 | `attention_gfx942_dense_hqswz_aot` | gfx942 | `gfx942_dense.py` | same body on the ingestor's non-persistent `hq_minor_swz` grid, one KV segment; default spec only (`spec_id=gfx942_dense_hqswz_aot`, opt-in) |
 | 3 | `attention_gfx950_dense_grid` | gfx950 | `gfx950_dense.py` | dense grid body (`algorithm=attention_dense_grid`, `spec_id=gfx950_dense_grid`, opt-in) |
+| 3 | `attention_gfx950_dense_qbminor` | gfx950 | `gfx950_dense.py` | dense grid body at the `qb_minor` order the hipDNN ingestor launches (`algorithm=attention_dense_grid`, `spec_id=gfx950_dense_qbminor`, opt-in) |
 | 3 | `attention_gfx950_dense_persist` | gfx950 | `gfx950_dense.py` | dense persistent body (`algorithm=attention_dense_persist`, opt-in) |
 | 3 | `attention_gfx950_dense_persist_widedma` | gfx950 | `gfx950_dense.py` | persistent body + wide DMA, D128 (`algorithm=attention_dense_persist`, opt-in) |
 | 4 | `attention_rdna_wmma_decode` | gfx11-generic, gfx1151, gfx12-generic, gfx1201 | `gfx1151.py` | FP16/BF16 split-KV GQA-packed decode (+ merge kernel); unpinned only when `rdna_attention_use_decode` picks it (`algorithm=wmma_fmha_decode`) |
@@ -92,7 +97,8 @@ an invalid point. This is deliberately separate from the heuristic production
 builders.
 
 Four candidate families are **opt-in only** and never win under `algorithm="auto"`:
-`attention_gfx942_dense`, the three `attention_gfx950_dense_*` candidates, and
+`attention_gfx942_dense`, `attention_gfx942_dense_qbminor` and the three
+`attention_gfx942_dense_*_aot` candidates, the four `attention_gfx950_dense_*` candidates, and
 `attention_gfx1250_wmma`, plus every priority-30 unified tuning candidate.
 Registering a kernel makes it reachable; making it an
 arch's default is a separate decision that wants benchmark evidence, so none
@@ -109,7 +115,9 @@ pins a spec on `AttentionRequest`:
 
 1. `algorithm` + `spec_id` name the candidate; an opt-in candidate admits a
    request only when **both** match. The algorithm values name the kernel
-   body: `attention_dense` for gfx942 dense (persistence is a knob there),
+   body: `attention_dense` for gfx942 dense (persistence is a knob of
+   `gfx942_dense`; `gfx942_dense_qbminor` and the `*_aot` candidates each fix
+   one hipDNN ingestor grid),
    `attention_dense_grid` and `attention_dense_persist` for the two gfx950
    dense bodies (wide DMA is a candidate of the persistent one),
    `unified_tuning` for every unified tuning geometry, `wmma_attention_fwd`
@@ -146,11 +154,12 @@ aliased Q). So one kernel has one id, and a knob pin cannot reach a
 configuration a sweep would not.
 
 gfx950 dense is two algorithms, one per kernel body: `attention_dense_grid`
-(`gfx950_dense_grid`) and `attention_dense_persist` (`gfx950_dense_persist`
-and `gfx950_dense_persist_widedma`). The grid and persistent bodies serve
-different requests (only the grid body runs a moving bottom-right diagonal),
-and wide DMA needs the persistent body, so those three are the only frozen
-choices. The tile is a knob. The gate is the kernel's own
+(`gfx950_dense_grid`, and `gfx950_dense_qbminor`, the grid body at the `qb_minor`
+block order the hipDNN kernel ingestor launches) and `attention_dense_persist`
+(`gfx950_dense_persist` and `gfx950_dense_persist_widedma`). The grid and
+persistent bodies serve different requests (only the grid body runs a moving
+bottom-right diagonal), wide DMA needs the persistent body, and the ingestor
+needs a fixed block order, so those four are the only frozen choices. The tile is a knob. The gate is the kernel's own
 `supports_attention_dense`: dispatch adds no eligibility rule of its own, so
 wide DMA is offered on every shape the kernel accepts, including non-causal,
 sinks and sliding-window masks; `TestWideDmaFeatures` in
@@ -182,16 +191,53 @@ field as problem, candidate (`persistent`, `wide_lds_dma`), WPE loop,
 untunable (`lds_num_buffers`), or swept.
 
 gfx942 dense uses the same walk over `_GFX942_DENSE_AXES`
-(`("gfx942", "dense")`). It registers one candidate, so `persistent` is a
-knob there alongside `block_m` and `block_n`, and the persistent-only knobs
-are pruned per spec. Its knobs are the K row and
-V row pads, the D64 K group pad, the conflict-free-V store and its swizzle,
-the persistent and non-persistent block orders, exp2, `iglp` / `iglp_mode`,
-the PV fence mask, `pv_priority`, `pv_loop_order`, the bf16 O store width,
-and `causal_diag_split`. The
-LDS-saving knobs lead as enablers so an over-budget tile can still reach the
-setting that fits. Untunable here: `lds_num_buffers` (only 1 is implemented)
-and `lazy_rescale` (the body never reads it).
+(`("gfx942", "dense")`). On its tuned candidate, `gfx942_dense`, `persistent`
+is a knob alongside `block_m` and `block_n`, and the persistent-only knobs
+are pruned per spec. `gfx942_dense_qbminor` scopes `persistent`,
+`nonpersist_decode` and `kv_segments` out, so every spec it offers keeps the
+grid kind the hipDNN kernel ingestor launches. The `*_aot` candidates do the same
+for the ingestor's other grids: `gfx942_dense_persist_aot` also scopes
+`num_persistent` out, and the two non-persistent ones offer only their default
+spec. The gfx942 dense knobs include the K and V row pads, the D64 K group
+pad, conflict-free V store (`use_cfvst`) and its swizzle, K LDS buffering
+(`lds_num_buffers`), V register prefetch (`v_reg_prefetch`), the persistent
+and non-persistent block orders, exp2, `iglp` / `iglp_mode`, the PV fence
+mask, `pv_priority`, `pv_loop_order`, the bf16 O store width, and
+`causal_diag_split`. LDS-saving and prerequisite axes lead as enablers so
+an otherwise invalid configuration can become valid before later knobs
+are considered. Only `lazy_rescale` is untunable on gfx942, because the
+kernel body does not read it.
+
+Two performance levers are **independent opt-ins** for supported BF16 D128
+causal attention (`sliding_window=0`, no sinks), with or without
+`causal_diag_split`: `lds_num_buffers=2` enables **K LDS double buffering
+only**, and `v_reg_prefetch=True` enables **V register prefetch only**. Both
+run on the CFVST body, which is already the D128 default
+(`use_cfvst=None` resolves on via `default_use_cfvst`; `use_cfvst=False` opts out
+on either grid). KDB and VPF also require `persistent=True` and
+`block_n=64`, as enforced by the kernel's validator; turning on either one
+does not implicitly enable the other.
+
+The production tuning space remains **one knob at a time** on the default
+CFVST body. It offers CFVST off, CFVST + KDB, and CFVST + VPF without
+requiring the triple combination. The triple
+CFVST + KDB + VPF combination remains reachable through an explicit knob
+pin or the full tuning space. The BF16 D128 default remains
+`use_cfvst=None` (policy resolves to on at D128), `lds_num_buffers=1`, and
+`v_reg_prefetch=False`; these tuning choices do not alter the shipped
+default or make the opt-in dense candidate an automatic dispatch winner.
+Bare `tuning_id` replay searches production points only; replay a
+full-space-only combination with its recorded knob dictionary.
+
+**Tuning-id migration for `gfx942_dense`.** Adding the defaulted
+`v_reg_prefetch` field changes the defaults fingerprint in `config_key`, so
+every `gfx942_dense` `tuning_id` recorded before it is rekeyed: replaying one
+raises `PinRefused` instead of rebuilding a different kernel. No such id is
+stored in this tree. A downstream tuning store must drop its old
+`gfx942_dense` ids and re-sweep. `TUNING_ID_VERSION` is not bumped: the
+defaults fingerprint already separates the old and new ids, and
+`lds_num_buffers` was untunable on gfx942 before, so no stored id names it.
+
 `registered_attention_combos(req)` is the multi-engine bench
 entry: it probes `ATTENTION_EXECUTION_REGISTRY` for `req.arch` and flattens each
 candidate's `sweep_space` (dense, WMMA, and unified tuning). Routing-only
@@ -201,7 +247,7 @@ unified path labels are omitted.
 tier, that opt-in check is the only thing keeping them off the default path — a
 tier-3 candidate whose `support()` forgets it would silently claim all traffic
 for its arch. `Capability` cannot express the check (it constrains the request's
-*selector*, not its shape), so it stays in the predicate and every tier-3
+**selector**, not its shape), so it stays in the predicate and every tier-3
 candidate has to carry it.
 
 ## Layout
@@ -235,10 +281,15 @@ spec, and a test that calls `assert_tuning_contract`. `common.py` holds what eve
 shares (request, spec, gates) and imports none of the arch modules, so assembly
 order does not matter. `generic.py` is for candidates declaring more than one arch --
 the two unified paths and `d256_decode` -- which is not the same as portable:
-each still lists its arches explicitly, because there is no family wildcard.
+`d256_decode` lists its arches explicitly, because there is no family wildcard.
+Naming a generic target (`gfx11-generic`) is not a wildcard: `listed_arch_for`
+admits only the processors whose rows point at it and so share its facts; a
+target with facts of its own is covered only when it is named.
 
-The two generic candidates declare every known arch on purpose: they select a
-*path*, and `attention_unified` picks the concrete backend downstream from the
+The two generic candidates cover every known arch on purpose. They declare every
+target with facts of its own (`arches_with_own_facts()`), and `listed_arch_for`
+admits each other processor through the generic target its row points at. They
+select a **path**, and `attention_unified` picks the concrete backend downstream from the
 running device (wave64 MFMA on gfx942/gfx950, wave32 WMMA on gfx1250, the
 arch-neutral scalar kernel elsewhere). They are an explicit, tested exception to
 the wave-size consistency invariant.
@@ -284,7 +335,7 @@ Follow the `_make_d256_decode_candidate()` pattern in `generic.py`:
    [Definition of Done](../../KERNEL_AUTHORING.md#a-new-kernel-family) item.
 
    Point `build` at the real builder if the candidate has one. The unified
-   paths do not: they return an `AttentionSpec` naming a *path*, and no builder
+   paths do not: they return an `AttentionSpec` naming a **path**, and no builder
    consumes that. A standalone kernel like `attention_gfx1250_wmma` returns its
    builder's own spec instead, which is why it can declare `build`, a real
    grid, and a real signature where the unified candidates declare none.
@@ -469,8 +520,15 @@ is a drop-in via the ranker seam once a scoring signal exists.
 
 ## How to tune `num_segments` for a new cohort
 
-See the worked example:
-`benchmarks/gfx942/attention/decode/TUNING_D256.md`
+For gfx942 and gfx950 decode, start from the split rule:
+[gfx950 §6.1](../builders/gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule)
+and [gfx942 §8.3](../builders/gfx942/attention/ALGORITHM.md#83-the-decode-split-rule)
+describe it, and the
+[3D decode case study](../builders/common/attention_3d_decode/CASE_STUDY.md) has the
+replay recipe. Tuning candidate `0` takes the count `_num_segments` picks (the rule's,
+where it applies; elsewhere the prefill-derived count, except for the two decode
+refinements the ALGORITHM sections list), at the request's `num_cus` or,
+without one, the architecture's full-part CU count.
 
 ## Attention backward: registry, routing and tuning
 

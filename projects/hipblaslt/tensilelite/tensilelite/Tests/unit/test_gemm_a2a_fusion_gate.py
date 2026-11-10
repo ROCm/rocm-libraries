@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tensilelite.TensileCreateLibrary.Run import _includeGemmA2AFusionProblemType
+from tensilelite.create_library.run import _includeGemmA2AFusionProblemType
 
 
 pytestmark = pytest.mark.unit
@@ -50,7 +50,7 @@ def test_disabled_build_drops_fused_logic_and_reports_it(
     still passed as a successful build.
     """
     import tensilelite.LibraryIO as LibraryIO
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.create_library.run as RunModule
 
     parsed = [
         LibraryIO.LibraryLogic(
@@ -82,3 +82,17 @@ def test_disabled_build_drops_fused_logic_and_reports_it(
 
     assert masterLibraries == {}
     assert any("filtered 1 logic files" in message for message in reported)
+
+
+@pytest.mark.parametrize("fused,expected", [(True, True), (False, False), (None, False)])
+def test_library_client_build_enables_fusion_for_fused_logic(tmp_path, fused, expected):
+    from tensilelite.ClientWriter import getBuildClientLibraryScript
+
+    logic = tmp_path / "logic"
+    logic.mkdir()
+    if fused is not None:
+        (logic / "gfx950_fused.yaml").write_text(
+            f"MinimumRequiredVersion: 5.0.0\nProblemType: {{FusedGemmA2A: {fused}}}\n"
+        )
+    script = getBuildClientLibraryScript(str(tmp_path / "build"), str(logic), "amdclang++", "gfx950")
+    assert ("--enable-gemm-a2a-fusion" in script) is expected
