@@ -294,6 +294,15 @@ std::vector<DeviceCase> deviceCases()
          strideRows(upsample(8, 16, {9, 10}, 18, 2, 2, 0, 0), {2, 2}, {2, 2}, {0, 0})},
         {"ThreeDDepthT2S3Padded",
          strideRows(upsample(20, 12, {5, 13}, 41, 1, 2, 1, 1), {2, 1}, {3, 2}, {1, 1})},
+        // Filters past the stride: several (dy row, filter row) pairs per dx row, fewer at the
+        // borders.
+        {"Rows3x3S2Padded", strideRows(upsample(24, 40, {13}, 29, 3, 2, 1, 1), {3}, {2}, {1})},
+        {"Rows5x4S2", strideRows(upsample(16, 24, {12}, 30, 4, 2, 1, 1), {5}, {2}, {2})},
+        {"Rows3S1K4S2", strideRows(upsample(16, 24, {7}, 26, 4, 2, 1, 1), {3}, {1}, {1})},
+        {"ThreeD3x3x3S2",
+         strideRows(upsample(16, 20, {7, 9}, 18, 3, 2, 1, 1), {3, 3}, {2, 2}, {1, 1})},
+        {"ThreeD3x3x3S2Unpadded",
+         strideRows(upsample(8, 12, {9, 8}, 21, 3, 2, 0, 0), {3, 3}, {2, 2}, {0, 0})},
     };
 }
 

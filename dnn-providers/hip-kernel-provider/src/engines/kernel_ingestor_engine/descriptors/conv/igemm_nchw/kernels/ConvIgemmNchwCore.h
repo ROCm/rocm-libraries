@@ -5,10 +5,10 @@
 // K C S filter and writing dx in place (no staging copies, no workspace).
 // HIPRTC-compatible: no standard headers.
 //
-// The convolution runs along the width. Along depth and height each filter extent is at most its
-// stride, so a dx row takes at most one dy row and one filter row (td, th), and a dx row with
-// none is zero (K7Args). With x + pad = stride * q + phase,
-//   dx[c][x] = sum over k, j of w[k][c][td][th][phase + stride * j] * dy[k][row'][q - j].
+// The convolution runs along the width. Along depth and height a dx row reduces over every
+// (dy row, filter row) pair that reaches it, one after another in the k loop, and a dx row with
+// none is zero (K7Args, K7Block). With x + pad = stride * q + phase,
+//   dx[c][x] = sum over pairs, k, j of w[k][c][td][th][phase + stride * j] * dy[k][row'][q - j].
 // MIOpen's GEMM path computes col[c][s][q] = sum_k w[k][c][s] dy[k][q] (one GEMM: rows (c, s),
 // contiguous in the K C S filter) and then scatters col into dx (col2im). Here a block owns BN
 // channels, BMQ consecutive q and all stride phases, so every product lands in its own
@@ -56,14 +56,39 @@ __device__ inline typename K1Raw<VEC * sizeof(T)>::type
 /// The block's coordinates: image and dx row (grid z), first channel c0, and its dx positions
 /// x0 .. x0 + BMQ * ST - 1 (x0 a multiple of the tile, so no tile is mostly empty). With
 /// pad = ST * pq + r, x0 + pad = ST * q0 + r: phases from r take q0 + i at tile index i, phases
-/// below r take q0 + 1 + i, and both land at x0 + i * ST + ((phase - r) mod ST). The dx row's dy
-/// row is rowY and its filter row starts at element toff of each (k, c) filter; a row with no dy
-/// row (live false) is zero.
+/// below r take q0 + 1 + i, and both land at x0 + i * ST + ((phase - r) mod ST).
+///
+/// Depth and height: with d + pd = sd qd0 + td0, the dx row takes dy row qd0 - jd through filter
+/// row td0 + sd jd for each jd in [jdLo, jdLo + nD) (filter row inside the filter, dy row inside
+/// dy), and likewise along the height: nD nH (dy row, filter row) pairs, each reduced over k in
+/// turn. Pair 0's dy row is rowY and its filter row starts at element toff of each (k, c) filter.
+/// A row with no pair (live false) is zero.
 struct K7Block
 {
     int img, row, c0, x0, q0, r, rowY, toff;
+    int qd0, td0, jdLo, nD, qh0, th0, jhLo, nH;
     bool live;
 };
+
+/// The jd range of one axis: filter rows t0 + s j < f, dy rows q0 - j in [0, extent).
+__device__ inline void k7AxisTaps(int q0, int t0, int s, int f, int extent, int& lo, int& count)
+{
+    const int hiFilter = t0 < f ? (f - t0 + s - 1) / s : 0; // j < hiFilter
+    const int hiDy = q0 + 1; // q0 - j >= 0
+    lo = q0 - extent + 1 > 0 ? q0 - extent + 1 : 0; // q0 - j < extent
+    const int hi = hiFilter < hiDy ? hiFilter : hiDy;
+    count = hi > lo ? hi - lo : 0;
+}
+
+/// Pair pi's dy row and filter-row offset (pi below nD nH).
+__device__ inline void k7PairOf(const K7Args& a, const K7Block& b, int pi, int& rowY, int& toff)
+{
+    const int i = pi / b.nH;
+    const int jd = b.jdLo + i;
+    const int jh = b.jhLo + pi - i * b.nH;
+    rowY = (b.qd0 - jd) * a.hy + b.qh0 - jh;
+    toff = ((b.td0 + a.sd * jd) * a.fh + b.th0 + a.sh * jh) * a.fs;
+}
 
 template <int ST>
 __device__ inline K7Block k7Block(const K7Args& a, int bmq, int bn)
@@ -75,15 +100,21 @@ __device__ inline K7Block k7Block(const K7Args& a, int bmq, int bn)
     b.x0 = static_cast<int>(blockIdx.x) * bmq * ST;
     b.q0 = static_cast<int>(blockIdx.x) * bmq + a.pad / ST;
     b.r = a.pad % ST;
-    // d + pd = sd qd + td, h + ph = sh qh + th.
+    // d + pd = sd qd0 + td0, h + ph = sh qh0 + th0.
     const int d = b.row / a.hx;
     const int h = b.row - d * a.hx;
     const int nd = d + a.pd, nh = h + a.ph;
-    const int qd = nd / a.sd, qh = nh / a.sh;
-    const int td = nd - qd * a.sd, th = nh - qh * a.sh;
-    b.live = td < a.fd && th < a.fh && qd < a.dyDepth && qh < a.hy;
-    b.rowY = qd * a.hy + qh;
-    b.toff = (td * a.fh + th) * a.fs;
+    b.qd0 = nd / a.sd;
+    b.qh0 = nh / a.sh;
+    b.td0 = nd - b.qd0 * a.sd;
+    b.th0 = nh - b.qh0 * a.sh;
+    k7AxisTaps(b.qd0, b.td0, a.sd, a.fd, a.dyDepth, b.jdLo, b.nD);
+    k7AxisTaps(b.qh0, b.th0, a.sh, a.fh, a.hy, b.jhLo, b.nH);
+    b.live = b.nD * b.nH > 0;
+    b.rowY = 0;
+    b.toff = 0;
+    if(b.live)
+        k7PairOf(a, b, 0, b.rowY, b.toff);
     return b;
 }
 
@@ -110,6 +141,8 @@ __device__ inline K7Block k7BlockFlat(const K7Args& a, int bmq, int bn)
     b.live = td < a.fd && th < a.fh;
     b.rowY = 0;
     b.toff = (td * a.fh + th) * a.fs;
+    b.nD = b.nH = 1; // one pair, fixed
+    b.qd0 = b.td0 = b.jdLo = b.qh0 = b.th0 = b.jhLo = 0;
     return b;
 }
 
@@ -260,6 +293,29 @@ struct K7Tiles
             bC[p] = bPos[p] / taps;
             bS[p] = bPos[p] - bC[p] * taps;
         }
+    }
+
+    /// The k loop over every (dy row, filter row) pair: iteration it loads pair it / kIters,
+    /// k rows from (it mod kIters) BK.
+    int kIters, kIt, pi;
+    __device__ int start(const K7Args& a)
+    {
+        kIters = (a.k + BK - 1) / BK;
+        kIt = 0;
+        pi = 0;
+        load(0);
+        return kIters;
+    }
+    /// Loads the iteration after the last loaded one.
+    __device__ void loadNext(const K7Args& a, const K7Block& b)
+    {
+        if(++kIt == kIters)
+        {
+            kIt = 0;
+            ++pi;
+            k7PairOf(a, b, pi, row, toff);
+        }
+        load(kIt * BK);
     }
 
     /// FLAT: dy read as P = rowsY Wy positions per k row and image, positions g over all
@@ -603,8 +659,7 @@ __device__ void k7DgradMma(const K7Args& a)
     const int aRow0 = wq * WTQ + fragRow + HALO;
     const T* bBase = Bs + (wn * WTN + fragRow) * LDK + kb;
 
-    const int iters = (a.k + BK - 1) / BK;
-    tiles.load(0);
+    const int iters = tiles.start(a) * b.nD * b.nH;
     for(int it = 0; it < iters; ++it)
     {
         __syncthreads();
@@ -612,7 +667,7 @@ __device__ void k7DgradMma(const K7Args& a)
         __syncthreads();
         if(it + 1 < iters)
         {
-            tiles.load((it + 1) * BK);
+            tiles.loadNext(a, b);
         }
         // Phase p at tile index i reads dy[q0 + i + below(p) - j] for its tap p + ST j: the A
         // fragments shifted by d = below(p) - j serve every (p, j) pair with that shift.
@@ -742,7 +797,7 @@ template <class T,
           class Tiles>
 // Inlined at all 2 ST call sites: out of line, acc (passed by reference) would live in scratch.
 __device__ __attribute__((always_inline)) inline void
-    k7FmaSteps(const K7Args& a, Tiles& tiles, T* lds, float (&acc)[TC][TQ][NP])
+    k7FmaSteps(const K7Args& a, const K7Block& b, Tiles& tiles, T* lds, float (&acc)[TC][TQ][NP])
 {
     constexpr int TX = BN / TC;
     constexpr int HALO = TAPS - 1;
@@ -796,8 +851,7 @@ __device__ __attribute__((always_inline)) inline void
         }
     };
 
-    const int iters = (a.k + BK - 1) / BK;
-    tiles.load(0);
+    const int iters = tiles.start(a) * b.nD * b.nH;
     if constexpr(STAGES == 2)
     {
         tiles.template storeColumns<LDA, LDB, CP>(lds, lds + BK * LDA);
@@ -806,7 +860,7 @@ __device__ __attribute__((always_inline)) inline void
         {
             if(it + 1 < iters)
             {
-                tiles.load((it + 1) * BK);
+                tiles.loadNext(a, b);
             }
             const T* cur = lds + (it & 1) * STAGE;
             multiply(cur, cur + BK * LDA);
@@ -828,7 +882,7 @@ __device__ __attribute__((always_inline)) inline void
             __syncthreads();
             if(it + 1 < iters)
             {
-                tiles.load((it + 1) * BK);
+                tiles.loadNext(a, b);
             }
             multiply(lds, lds + BK * LDA);
         }
@@ -900,10 +954,10 @@ __device__ void k7DgradFma(const K7Args& a)
         {                                                                                \
             if(full)                                                                     \
                 k7FmaSteps<T, BMQ, BN, BK, TQ, TC, VEC, ST, TAPS, STAGES, R, true, NP>(  \
-                    a, tiles, lds, acc);                                                 \
+                    a, b, tiles, lds, acc);                                              \
             else                                                                         \
                 k7FmaSteps<T, BMQ, BN, BK, TQ, TC, VEC, ST, TAPS, STAGES, R, false, NP>( \
-                    a, tiles, lds, acc);                                                 \
+                    a, b, tiles, lds, acc);                                              \
         }                                                                                \
         break;
         K7_FMA_R(0)

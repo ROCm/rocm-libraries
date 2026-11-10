@@ -148,6 +148,25 @@ std::vector<AcceptCase> acceptCases()
     heightPadOnly.prePadding = {1, 2};
     heightPadOnly.postPadding = {1, 2};
     cases.push_back({"PaddingOnHeight", heightPadOnly});
+    // Filters past the stride: each dx row reduces over several (dy row, filter row) pairs.
+    auto heightPast = baseShape();
+    heightPast.input = {9, 37};
+    heightPast.filter = {3, 8};
+    heightPast.prePadding = heightPast.postPadding = {1, 2};
+    heightPast.stride = {2, 4};
+    cases.push_back({"FilterHeightPastTheStride", heightPast});
+    auto stride1Height = baseShape();
+    stride1Height.input = {6, 37};
+    stride1Height.filter = {3, 8};
+    stride1Height.prePadding = stride1Height.postPadding = {1, 2};
+    cases.push_back({"Filter3Stride1OnHeight", stride1Height});
+    auto cube3 = baseShape();
+    cube3.input = {7, 8, 36};
+    cube3.filter = {3, 3, 3};
+    cube3.prePadding = cube3.postPadding = {1, 1, 1};
+    cube3.stride = {2, 2, 2};
+    cube3.dilation = {1, 1, 1};
+    cases.push_back({"ThreeD3x3x3Stride2", cube3});
     return cases;
 }
 
@@ -285,25 +304,7 @@ std::vector<RefusalCase> refusalCases()
              shape.mode = ConvMode::CONVOLUTION;
              reshape(s, shape);
          }},
-        // Depth and height: a filter no longer than the stride, unit dilation.
-        {"FilterHeightPastTheStride",
-         [](ConvGraphSpec& s) {
-             auto shape = baseShape();
-             shape.input = {9, 37};
-             shape.filter = {3, 8};
-             shape.stride = {2, 4};
-             reshape(s, shape);
-         }},
-        {"FilterDepthPastTheStride",
-         [](ConvGraphSpec& s) {
-             auto shape = baseShape();
-             shape.input = {6, 3, 37};
-             shape.filter = {2, 1, 8};
-             shape.prePadding = shape.postPadding = {0, 0, 2};
-             shape.stride = {1, 1, 4};
-             shape.dilation = {1, 1, 1};
-             reshape(s, shape);
-         }},
+        // Depth and height: unit dilation.
         {"DilationOnHeight",
          [](ConvGraphSpec& s) {
              auto shape = baseShape();

@@ -22,11 +22,11 @@
  *        every gate can be tested without a device.
  *
  * The kernel reads dy, the K C T R S filter and writes dx in place, so it serves backward data
- * whose operands are all packed channels-first and whose depth and height filter extents are at
- * most their strides: each dx row then takes at most one dy row and one filter row (or none, and
- * is zero), and the convolution runs along the width. That is the shape of ConvTranspose1d (as
- * 1-D, or 2-D with height 1), of per-row 1-D convolutions, and of strided 1x1, patchify (filter
- * equal to stride) and 2x2x2 stride-2 backward data.
+ * whose operands are all packed channels-first, with unit dilation along depth and height: each
+ * dx row reduces over every (dy row, filter row) pair that reaches it (none: the row is zero),
+ * and the convolution runs along the width. That is the shape of ConvTranspose1d (as 1-D, or 2-D
+ * with height 1), of per-row 1-D convolutions, and of strided NCHW/NCDHW backward data: strided
+ * 1x1, patchify (filter equal to stride), 2x2x2 and 3x3x3 stride 2.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_igemm_nchw
 {
@@ -87,8 +87,8 @@ struct NchwProblem
     int elementBytes = 0;
     /// The stride along the width.
     int64_t stride = 0;
-    /// The dy plane can be read flattened: no padding on any axis, dx exactly the strides times
-    /// dy on every axis, and one tap per width phase (S <= stride).
+    /// The dy plane can be read flattened: no padding on any axis, every filter extent at most its
+    /// stride, dx exactly the strides times dy on every axis.
     bool flat = false;
 };
 
@@ -109,7 +109,7 @@ struct NchwLaunch
  *
  * Everything parseConvNaiveProblem gates, plus: fp32, fp16 or bf16; one group;
  * cross-correlation; dy, dx and the filter packed channels-first (N C D H W, K C T R S); along
- * depth and height unit dilation, non-negative padding and a filter extent of at most the stride;
+ * depth and height unit dilation and non-negative padding;
  * unit dilation along the width; every extent, stride and padding within 32 bits, one image of
  * dy and the whole filter within 32-bit byte offsets, images times dx rows within the grid's
  * third axis.

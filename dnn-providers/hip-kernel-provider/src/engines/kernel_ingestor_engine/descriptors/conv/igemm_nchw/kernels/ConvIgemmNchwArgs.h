@@ -8,13 +8,13 @@
 
 /// Backward data of a convolution along the width, read and written in place: dy packed
 /// N K (rows) Wy, the filter packed K C T R S, dx packed N C (rows) Wx, where (rows) are the depth
-/// and height positions. Along depth and height each filter extent is at most its stride
-/// (T <= sd, R <= sh), so a dx row (d, h) takes at most one dy row and one filter row:
-/// d + pd = sd * qd + td and h + ph = sh * qh + th, live when td < T, th < R and (qd, qh) lies in
-/// dy; a dx row with none is zero. The identity (extent 1, stride 1, no padding) is the 1-D case.
+/// and height positions. A dx row (d, h) takes dy row (qd, qh) through filter row (td, th) for
+/// every d + pd = sd * qd + td and h + ph = sh * qh + th with the filter row inside the filter and
+/// the dy row inside dy; a dx row with none is zero. The identity (extent 1, stride 1, no padding)
+/// is the 1-D case.
 /// Shapes are runtime; only the tile, the stride and the taps per phase are compile-time.
 ///
-/// With x + pad = stride * q + phase, dx[c][x] = sum over k and j of
+/// With x + pad = stride * q + phase, dx[c][x] = sum over the row pairs, k and j of
 /// w[k][c][td][th][phase + stride * j] * dy[k][qd][qh][q - j]. Grid: (q tiles, channel tiles,
 /// images * dx rows).
 struct K7Args
