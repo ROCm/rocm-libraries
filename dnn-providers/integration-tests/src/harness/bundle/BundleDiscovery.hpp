@@ -103,6 +103,7 @@ inline bool isDescendantOf(const std::filesystem::path& path, const std::filesys
 inline std::filesystem::path canonicalDirectory(const std::filesystem::path& path)
 {
     std::error_code error;
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto canonical = std::filesystem::canonical(path, error);
     return error ? path.lexically_normal() : canonical;
 }
@@ -513,9 +514,11 @@ inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path
     const auto sweepDirs = findSweepDirectories(bundleDir);
     warnOnEmptyLeafFolders(bundleDir, sweepDirs);
 
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto registerBundle = [&](DiscoveredBundle bundle) {
         const auto fullName = bundle.fullName();
         const auto diagnosticPath = bundle.diagnosticPath();
+        // NOLINTNEXTLINE(misc-const-correctness)
         auto it = nameToPath.find(fullName);
         if(it != nameToPath.end())
         {

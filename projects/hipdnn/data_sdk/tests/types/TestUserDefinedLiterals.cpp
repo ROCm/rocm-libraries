@@ -526,15 +526,25 @@ TEST_F(TestUserDefinedLiterals, LiteralWithMin)
 
 TEST_F(TestUserDefinedLiterals, AutoTypeDeduction)
 {
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto bf = 1.0_bf;
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto h = 1.0_h;
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto e2m1 = 1.0_e2m1;
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto e2m3 = 1.0_e2m3;
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto e3m2 = 1.0_e3m2;
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto e4m3 = 1.0_e4m3;
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto e4m3Fnuz = 1.0_e4m3_fnuz;
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto e5m2 = 1.0_e5m2;
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto e5m2Fnuz = 1.0_e5m2_fnuz;
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto e8m0 = 1.0_e8m0;
 
     static_assert(std::is_same_v<decltype(bf), bfloat16>);

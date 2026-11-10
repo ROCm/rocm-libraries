@@ -109,10 +109,12 @@ public:
 
     FillRecipe fill(int64_t uid) const
     {
+        // NOLINTNEXTLINE(misc-const-correctness)
         if(auto it = _fills.find(uid); it != _fills.end())
         {
             return it->second;
         }
+        // NOLINTNEXTLINE(misc-const-correctness)
         auto it = _typeFills.find(uid);
         return it != _typeFills.end() ? it->second : FillRecipe{};
     }
@@ -138,6 +140,7 @@ public:
 
     std::optional<unsigned int> resolveSeed(int64_t uid) const
     {
+        // NOLINTNEXTLINE(misc-const-correctness)
         if(auto it = _seeds.find(uid); it != _seeds.end())
         {
             return it->second;
@@ -163,6 +166,7 @@ public:
             {
                 j["value"] = fill.value;
             }
+            // NOLINTNEXTLINE(misc-const-correctness)
             if(auto it = _seeds.find(uid); it != _seeds.end())
             {
                 j["seed"] = it->second;
@@ -171,6 +175,7 @@ public:
         }
         for(const auto& [uid, seedVal] : _seeds)
         {
+            // NOLINTNEXTLINE(misc-const-correctness)
             auto key = std::to_string(uid);
             if(!inputs.contains(key))
             {

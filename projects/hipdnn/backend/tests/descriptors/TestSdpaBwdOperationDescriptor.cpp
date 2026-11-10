@@ -1708,6 +1708,7 @@ TEST_F(TestSdpaBwdOperationFromNode, FromNodeRequiredOnly)
 
 TEST_F(TestSdpaBwdOperationFromNode, FromNodeAllFields)
 {
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto node = createAllNode();
     const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
@@ -1770,6 +1771,7 @@ TEST_F(TestSdpaBwdOperationFromNode, FromNodePreservesNameAndComputeType)
 TEST_F(TestSdpaBwdOperationFromNode, FromNodeFailsMissingRequiredTensor)
 {
     _tensorMap.erase(K_SDPA_BWD_TENSOR_Q_UID);
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto node = createRequiredOnlyNode();
 
     ASSERT_THROW_HIPDNN_STATUS(SdpaBwdOperationDescriptor::fromNode(node, _tensorMap),
@@ -1781,6 +1783,7 @@ TEST_F(TestSdpaBwdOperationFromNode, FromNodeOptionalTensorUidSetButMissingInMap
     // Set scale_tensor_uid in the node attributes, but remove it from tensor map
     _tensorMap.erase(K_SDPA_BWD_TENSOR_SCALE_UID);
 
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto allAttrs = createAllAttrs();
     NodeT node;
     node.compute_data_type = DataType::FLOAT;

@@ -358,6 +358,7 @@ inline bool buildGraphBuffer(const nlohmann::json& graphJson,
     flatbuffers::FlatBufferBuilder builder;
     try
     {
+        // NOLINTNEXTLINE(misc-const-correctness)
         auto offset = hipdnn_flatbuffers_sdk::json::to<hipdnn_flatbuffers_sdk::data_objects::Graph>(
             builder, graphJson);
         builder.Finish(offset);
@@ -538,6 +539,7 @@ inline const nlohmann::json&
 {
     if(currentTensorUid.has_value())
     {
+        // NOLINTNEXTLINE(misc-const-correctness)
         auto tensorIt = caseTensors.find(*currentTensorUid);
         if(tensorIt != caseTensors.end())
         {
@@ -834,11 +836,13 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     bundle.graphBuffer = std::move(graphBuffer);
 
     {
+        // NOLINTNEXTLINE(misc-const-correctness)
         auto allOutputUids = detail::extractOutputUidsFromJson(*graphJson);
         const auto wrapper = bundle.graphWrapper();
         const auto& tensorMap = wrapper.getTensorMap();
         for(const int64_t uid : allOutputUids)
         {
+            // NOLINTNEXTLINE(misc-const-correctness)
             auto it = tensorMap.find(uid);
             if(it == tensorMap.end() || !it->second->virtual_())
             {
@@ -936,11 +940,13 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     // ops (Reduction/ResampleFwd/ResampleBwd/CustomOp) that getOutputTensorUidsFromGraph
     // throws on.
     {
+        // NOLINTNEXTLINE(misc-const-correctness)
         auto allOutputUids = detail::extractOutputUidsFromJson(expandedGraph);
         const auto wrapper = bundle.graphWrapper();
         const auto& tensorMap = wrapper.getTensorMap();
         for(const int64_t uid : allOutputUids)
         {
+            // NOLINTNEXTLINE(misc-const-correctness)
             auto it = tensorMap.find(uid);
             if(it == tensorMap.end() || !it->second->virtual_())
             {

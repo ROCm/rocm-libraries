@@ -334,6 +334,7 @@ TEST_F(TestSdpaBwdOperationFromNode, RequiredOnlyHasNullOptionalTensors)
 
 TEST_F(TestSdpaBwdOperationFromNode, AllFieldsScalarsAndBoolsPreserved)
 {
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto node = createAllNode();
     const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
@@ -393,6 +394,7 @@ TEST_F(TestSdpaBwdOperationFromNode, OptionalTensorUidSetButMissingInMap)
     // Set scale_tensor_uid in attrs but erase it from the map
     _tensorMap.erase(K_SDPA_BWD_TENSOR_SCALE_UID);
 
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto allAttrs = createAllAttrs();
     NodeT node;
     node.compute_data_type = DataType::FLOAT;

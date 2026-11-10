@@ -547,6 +547,7 @@ private:
         std::vector<Knob> knobVector;
         HIPDNN_CHECK_ERROR(detail::unpackKnobsFromDescriptors(engineDesc, knobVector));
 
+        // NOLINTNEXTLINE(misc-const-correctness)
         for(auto& knob : knobVector)
         {
             knobs.try_emplace(knob.knobId(), std::move(knob));

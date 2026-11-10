@@ -1389,6 +1389,7 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnAliasingLayouts)
         EXPECT_THROW(
             {
                 LayoutBuffer q(aliasing, ROLE_Q, true);
+                // NOLINTNEXTLINE(misc-const-correctness)
                 auto qt = q.tensor();
             },
             std::invalid_argument)

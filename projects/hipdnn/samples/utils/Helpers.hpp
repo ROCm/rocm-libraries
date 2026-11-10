@@ -270,6 +270,7 @@ inline void printConfig(const Config& config)
         std::cout << "  --layout: " << config.layout << '\n';
     }
 
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto printList = [](const char* name, const std::vector<int64_t>& values) {
         if(values.empty())
         {
@@ -598,6 +599,7 @@ inline int64_t
     getTensorElementCount(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensor)
 {
     int64_t count = 1;
+    // NOLINTNEXTLINE(misc-const-correctness)
     for(auto dim : tensor->get_dim())
     {
         count *= dim;

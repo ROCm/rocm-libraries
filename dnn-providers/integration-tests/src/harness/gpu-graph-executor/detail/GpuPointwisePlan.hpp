@@ -196,6 +196,7 @@ public:
             return false;
         }
 
+        // NOLINTNEXTLINE(misc-const-correctness)
         auto op = nodeAttributes->operation();
         switch(op)
         {
@@ -274,6 +275,7 @@ public:
             return false;
         }
 
+        // NOLINTNEXTLINE(misc-const-correctness)
         auto op = nodeAttributes->operation();
 
         switch(op)
