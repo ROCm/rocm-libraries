@@ -121,6 +121,10 @@ _ABBREV = {
     "threads_per_row": "tpr",
     "unroll": "u",
     "k_max": "kmax",
+    "width": "w",
+    "activation": "",
+    "lanes": "l",
+    "tile_tokens": "tt",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -1723,6 +1727,53 @@ def topk_instances() -> list[Instance]:
     return instances
 
 
+# --- Causal conv1d ----------------------------------------------------------------
+
+# kernels_src/kernels/causal_conv1d/causal_conv1d_kernel.py: one launch per graph, its
+# grid N sequence blocks plus ceil(T / tile_tokens) token tiles by the channel blocks.
+# T, N, C, the pool size, every stride, the cu_seqlens and state_indices widths and
+# which of bias / initial state / final state / state_indices are bound are runtime
+# arguments, so an object serves every shape and every combination of the optional
+# operands. Baked: the dtype, the kernel width, the activation, and the schedule.
+# `lanes` contiguous channels per thread: 4 serves C % 4 == 0 (every model's
+# channel count) and is ranked first; 1 serves every other C. The schedules were
+# picked on gfx90a over decode (N = 1..256) and prefill (T = 8192, 32768) at
+# C = 2048..10240: lanes 4 at 64 threads and 16-token tiles was best or within 3%
+# on every shape; lanes 1 is fastest at 256 threads.
+CAUSAL_CONV1D_DTYPES = ("bf16", "f16", "f32")
+CAUSAL_CONV1D_WIDTHS = (2, 3, 4)
+CAUSAL_CONV1D_ACTIVATIONS = ("identity", "silu")
+CAUSAL_CONV1D_SCHEDULES = (
+    # (lanes, block_threads, tile_tokens, priority)
+    (4, 64, 16, PRIORITY_SPECIALIZED),
+    (1, 256, 16, PRIORITY_GENERIC),
+)
+
+
+def causal_conv1d_instances() -> list[Instance]:
+    """The causal-conv1d table: dtype x width x activation x schedule."""
+    instances = [
+        Instance(
+            op="causal_conv1d",
+            dtype=dtype,
+            priority=priority,
+            knobs={
+                "width": width,
+                "activation": activation,
+                "lanes": lanes,
+                "block_threads": block_threads,
+                "tile_tokens": tile_tokens,
+            },
+        )
+        for dtype in CAUSAL_CONV1D_DTYPES
+        for width in CAUSAL_CONV1D_WIDTHS
+        for activation in CAUSAL_CONV1D_ACTIVATIONS
+        for lanes, block_threads, tile_tokens, priority in CAUSAL_CONV1D_SCHEDULES
+    ]
+    _assert_unique(instances)
+    return instances
+
+
 OPS = {
     "rmsnorm": rmsnorm_instances,
     "rmsnorm_bwd": rmsnorm_bwd_instances,
@@ -1737,6 +1788,7 @@ OPS = {
     "paged_cache_store": paged_cache_store_instances,
     "softmax": softmax_instances,
     "topk": topk_instances,
+    "causal_conv1d": causal_conv1d_instances,
 }
 # Ops whose table differs by target and so takes the arch.
 _PER_TARGET_OPS = {

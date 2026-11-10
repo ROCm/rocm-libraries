@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "588aef5c-a242-51f4-95d6-63121e5ba2be",
+  "name": "flydsl causal_conv1d selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_causal_conv1d.score"
+  }
+}

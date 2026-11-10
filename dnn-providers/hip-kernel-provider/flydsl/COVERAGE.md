@@ -1365,3 +1365,76 @@ serves -- one vector or element, odd and mid widths, its `n_max`, the router's 5
 that leaves the last multi-row block part-empty, stats off, natural and log2, padded and
 differing row pitches, and in place; plus a 2.2 GB f32 graph run as two launches, and the
 overlap refusal), and the census `TestFlydslSoftmaxPacks`.
+
+## Causal conv1d — `hipkernel:flydsl_causal_conv1d`
+
+36 objects per arch, built for **gfx90a, gfx942 and gfx950**: the kernel is global loads and
+stores, scalar (SMEM) buffer loads of the offsets and indices, f32 arithmetic and OCML `exp`,
+with no wave-size assumption and nothing gfx94x-only. RDNA is not built (no object has been
+validated there). Kernel:
+[`kernels_src/kernels/causal_conv1d/causal_conv1d_kernel.py`](kernels_src/kernels/causal_conv1d/causal_conv1d_kernel.py),
+vendored from AITER @ a9918248 (`aiter/ops/flydsl/kernels/causal_conv1d_prefill.py`, its
+per-sequence path after `causal_conv1d_update.py`) and restructured -- the modifications are
+listed in its docstring. Native half:
+[`FlydslCausalConv1dNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslCausalConv1dNative.cpp),
+problem resolution in
+[`FlydslCausalConv1dCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslCausalConv1dCommon.hpp).
+
+It computes the schema's convolution (`causal_conv1d_attributes.fbs`,
+`CpuFpReferenceCausalConv1d`): for sequence n (tokens `cu[n] .. cu[n+1]` of x `[T, C]`) and
+channel c, with xs the W - 1 state columns (oldest first; zeros without an initial state)
+then the tokens, `y[t, c] = act(bias[c] + sum_j w[c, j] xs[t + j, c])` accumulated in f32 in
+the reference's order, and `final[row(n), c, :]` the last W - 1 entries of xs (a sequence
+shorter than W - 1 shifts the old state, an empty one copies it). `row(n)` is
+`state_indices[n]` with a pool, else n. Grid x is N sequence blocks then `ceil(T / 16)` token
+tiles, grid y the channel blocks: a sequence block computes the first `min(len, W - 1)`
+outputs of its sequence and its final state, reading the whole initial row before writing
+the final one, and no other block touches that row -- so **final_state may be bound to
+initial_state's buffer** (the in-place update), and a decode step is one sequence block per
+sequence. Token tiles convolve every other packed token from x alone, finding the sequence
+starts in their window by binary search over `cu_seqlens`; the grid needs no host-side
+maximum length, and any mix of lengths, empty sequences included, is balanced.
+
+**Baked:** the dtype (x, weight, bias, both states and y share it), the kernel width W, the
+activation, and the schedule: 4 contiguous channels per thread at 64 threads, or 1 at 256.
+**Runtime:** T, N, C, the pool size P, the element strides of every operand (64-bit
+offsets; packed weight and states take one vector load per thread, any other layout
+per-element loads), the offsets' and indices' widths, and which of bias / initial state /
+final state / state_indices are bound.
+
+| Graph-scoped (`flydslCausalConv1dGraphMatches`) | Accepted | Declined |
+|---|---|---|
+| Nodes | exactly one `CausalConv1dAttributes` node; IDENTITY or SILU | anything else; override-shape graphs |
+| Operands | every bound operand a real device tensor; bias, initial state, final state, state_indices each optional (state_indices only with an initial state) | virtual, pass-by-value or ragged |
+| Dtypes | x bf16 / f16 / f32; weight, y, bias and both states in x's dtype; cu_seqlens and state_indices INT32 or INT64; compute type unset, FLOAT, HALF or BFLOAT16 | anything else, mixed float dtypes |
+| Shapes | x and y `[T, C]` (T, C >= 1), weight `[C, W]` (W >= 2), cu_seqlens `[N + 1]` (N >= 1), bias `[C]`, state_indices `[N]`, states `[N, C, W - 1]`, or `[P, C, W - 1]` with one P for both under a pool | anything else |
+| Strides | x and y with a unit channel stride and any token stride; weight, bias and both states any non-negative strides; cu_seqlens and state_indices contiguous; y and final_state non-overlapping; a unit axis's stride is ignored | a negative stride; a strided channel axis on x or y; overlapping outputs |
+| Alignment | cu_seqlens and state_indices on 4 bytes | less |
+| Extents | T <= 2^31 - 65, C and P <= 2^31 - 1, N <= 2^28 - 2 | larger |
+
+| Kernel-scoped (`flydslCausalConv1dKernelMatches`) | |
+|---|---|
+| `dtype`, `width`, `activation` | equal the graph's (W of 2, 3 or 4 ships) |
+| `lanes` | divides C |
+| grid | x `N + ceil(T / tile_tokens)` <= 2^31 - 1, y `ceil(C / (block_threads * lanes))` <= 65535 |
+
+**At launch** (`launch`, `INVALID_VALUE`): y sharing bytes with x; final_state sharing bytes
+with x, y, or with initial_state other than as the same buffer in the same layout; a
+cu_seqlens or state_indices address off 4 bytes.
+
+**Caller's contract** (as in the CPU reference, which throws; the kernel cannot report it):
+`cu_seqlens` starts at 0, ends at T and does not decrease; with a final state, the rows
+`state_indices` names are distinct. A row outside `[0, P)` is neither read nor written.
+
+**Not served:** widths 5 and up (one `_instances.py` row each; the kernel takes W up to 6),
+RDNA, and fusion with the surrounding ops. The integration bundles have no CausalConv1d graph
+yet, so no integration lane is registered.
+
+**Checked by:** `TestFlydslCausalConv1dEngine` (every accept and decline row, the resolved
+problem, the grid, kernel match, binding; host-only), `TestGpuFlydslCausalConv1dObjects`
+(every staged object through graph_match, kernel_match, prepare and launch against
+`CpuFpReferenceCausalConv1d`: a decode step, a decode step on a pool updated in place with a
+bias, a 300-token prefill from zeros, a varlen batch with empty and short sequences on an
+int64 pool in place with int64 offsets, a stateless multi-sequence prefill, channels-innermost
+weight and states, and C = 37, which the 4-lane objects must decline; final states compared
+exactly, untouched pool rows included), and the census `TestFlydslCausalConv1dPacks`.

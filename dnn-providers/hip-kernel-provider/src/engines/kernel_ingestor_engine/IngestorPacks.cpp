@@ -47,6 +47,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:flydsl_rope", &registerFlydslRopeSymbols, &resetFlydslRopeModuleCache},
         {"hipkernel:flydsl_softmax", &registerFlydslSoftmaxSymbols, &resetFlydslSoftmaxModuleCache},
         {"hipkernel:flydsl_topk", &registerFlydslTopkSymbols, &resetFlydslTopkModuleCache},
+        {"hipkernel:flydsl_causal_conv1d",
+         &registerFlydslCausalConv1dSymbols,
+         &resetFlydslCausalConv1dModuleCache},
 #endif
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx950AttentionDenseSymbols,

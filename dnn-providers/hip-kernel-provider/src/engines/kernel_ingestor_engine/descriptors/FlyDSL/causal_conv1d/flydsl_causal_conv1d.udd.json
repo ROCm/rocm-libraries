@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "301c6ad5-5f2f-5122-be95-d36763c4cef9",
+  "name": "flydsl causal_conv1d dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_causal_conv1d.dispatch"
+}

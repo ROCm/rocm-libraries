@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "id": "9e425087-6cf5-579c-84f8-0333e3d68c98",
+  "name": "flydsl causal_conv1d variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "width",
+      "type": "int"
+    },
+    {
+      "name": "activation",
+      "type": "string"
+    },
+    {
+      "name": "lanes",
+      "type": "int"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "tile_tokens",
+      "type": "int"
+    }
+  ]
+}

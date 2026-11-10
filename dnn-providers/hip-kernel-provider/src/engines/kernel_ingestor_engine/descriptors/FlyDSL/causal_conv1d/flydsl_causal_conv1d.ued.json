@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "id": "e9835405-776a-5d68-ba0c-76c316b1023c",
+  "name": "hipkernel:flydsl_causal_conv1d",
+  "graph_match": {
+    "native": "hipkernel.flydsl_causal_conv1d.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "588aef5c-a242-51f4-95d6-63121e5ba2be"
+  },
+  "predict_engine": {
+    "default": "98b2e5bf-0fc9-5d48-86bb-f1dccf34074d"
+  },
+  "metadata": "9e425087-6cf5-579c-84f8-0333e3d68c98",
+  "knobs": [
+    "block_threads",
+    "tile_tokens"
+  ]
+}

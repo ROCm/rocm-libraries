@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "d6002ac6-33da-5a24-ad1b-3a4bfe94cf24",
+  "name": "flydsl causal_conv1d: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_causal_conv1d.kernel_match"
+}

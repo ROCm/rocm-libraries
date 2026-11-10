@@ -135,6 +135,8 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslTopkObjects.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSoftmaxEngine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSoftmaxObjects.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslCausalConv1dEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslCausalConv1dObjects.cpp
     )
     # The architectures each op has objects for, so a device case that finds none
     # staged on one of them fails instead of skipping (FlydslNormDeviceTestSupport.hpp).
@@ -143,7 +145,7 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     # every other, so the test asks at run time whether the device's shard is staged.
     foreach(_flydsl_op rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode
                        sdpa_rdna sdpa_rdna_decode sdpa_aiw rope gather
-                       paged_cache_store topk softmax)
+                       paged_cache_store topk softmax causal_conv1d)
         string(REPLACE ";" "," _flydsl_archs
                        "${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_flydsl_op}}")
         string(TOUPPER "${_flydsl_op}" _flydsl_op_upper)
@@ -162,5 +164,6 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslPagedCacheStorePacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslTopkPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSoftmaxPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslCausalConv1dPacks.cpp
     )
 endif()

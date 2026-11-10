@@ -669,6 +669,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_paged_cache_store.dispatch",
         "hipkernel.flydsl_softmax.dispatch",
         "hipkernel.flydsl_topk.dispatch",
+        "hipkernel.flydsl_causal_conv1d.dispatch",
 #endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())

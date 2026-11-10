@@ -158,6 +158,11 @@ GRAPH_DETERMINED_FIELDS = {
     "n_align",
     # Top-k: the largest k an object serves (1 for the k = 1 reduction body).
     "k_max",
+    # Causal conv1d: the kernel width and the activation, and the channels per thread,
+    # which C must be a multiple of.
+    "width",
+    "activation",
+    "lanes",
 }
 
 # Fields that say when an object is preferred rather than how it was built: the
@@ -185,6 +190,8 @@ TUNING_FIELDS = {
     # Softmax: the threads that serve one row, and loads per thread per iteration.
     "threads_per_row",
     "unroll",
+    # Causal conv1d: packed tokens per token-tile block.
+    "tile_tokens",
 }
 
 # Every engine carries an engine estimate (RFC 0019 §3.1 `predict_engine`, L1): the

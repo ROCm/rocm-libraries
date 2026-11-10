@@ -29,5 +29,6 @@ OP_KERNEL_DIRS = {
     "rope": ("rope",),
     "paged_cache_store": ("paged_cache",),
     "softmax": ("softmax",),
+    "causal_conv1d": ("causal_conv1d",),
     "topk": ("topk",),
 }

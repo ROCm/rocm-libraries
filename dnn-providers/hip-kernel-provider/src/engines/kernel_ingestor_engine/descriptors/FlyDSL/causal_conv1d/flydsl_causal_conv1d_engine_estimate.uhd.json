@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "98b2e5bf-0fc9-5d48-86bb-f1dccf34074d",
+  "name": "flydsl causal_conv1d engine estimate",
+  "provenance": "Default slot for the engine estimate: a trained model installed under heuristics/ for an arch takes precedence there. No scorer is registered under this symbol, so on any other arch the loader disables the estimate and keeps the engine.",
+  "adapter": "native",
+  "objective": "max",
+  "score": {
+    "metric": "tflops"
+  },
+  "native": {
+    "symbol": "hipkernel.flydsl_causal_conv1d.engine_estimate"
+  }
+}
