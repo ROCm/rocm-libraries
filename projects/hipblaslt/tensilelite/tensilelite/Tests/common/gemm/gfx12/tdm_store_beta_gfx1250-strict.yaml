@@ -261,3 +261,58 @@ BenchmarkProblems:
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: relu]
+  ########################################
+  # DataParallel persistent kernels (StreamK 3 with StreamKForceDPOnly): MT64x64 gives
+  # 17 x 16 x 2 = 544 tiles for the 256 workgroups, so each workgroup stores several tiles through
+  # the TDM block, with NonEdge, M-edge, N-edge and corner tiles and a leading dimension larger than M.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - WorkGroupMapping: [8]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1025, 1023, 2, 128, 1040, 1040, 128, 128]
+  ########################################
+  # Non-atomic StreamK 4 and 5 (dynamic work queue and hybrid) with the sizes of the StreamK 3
+  # group: K=256 gives whole tiles, and with K=1600 tiles are completed by the fixup.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - WorkGroupMapping: [8]
+        - StreamK: [4, 5]
+        - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [505, 509, 2, 256, 520, 520, 256, 256]
+          - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
