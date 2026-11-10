@@ -621,8 +621,8 @@ void check_vector_cap_validator()
 }
 
 /* Every conditional name tag at once: async, kouter, pad, spk, twostage, wsr,
- * unroll, pfa, rpf, pgr, sk, skpers and skr -- thirteen flags. The name is
- * built before validation, so this invalid spec must still be named without
+ * unroll, pfa, rpf, pgr, sk, skpers, skr and tf32 -- fourteen flags. The name
+ * is built before validation, so this invalid spec must still be named without
  * overrunning the flag arrays (run under ROCKE_SANITIZE to see an overrun).
  * Expected name from Python WgradConvSpec.kernel_name() for the same spec. */
 void check_kernel_name_all_flags()
@@ -641,10 +641,12 @@ void check_kernel_name_all_flags()
     s.prefetch_addr = true;
     s.register_prefetch = true;
     s.prefetch_global_regs = true;
+    s.mma_dtype = "tf32";
     char name[512] = {0};
     CHECK(rocke_wgrad_conv_spec_kernel_name(&s, name, sizeof(name)) == ROCKE_OK);
-    const char* want = "conv_igemm_wgrad_N2H12W12C32_K96Y3X3_t64x64x32_w2x2_a32x32x16_mem_default"
-                       "_async_kouter_pad4_spk_twostage_wsr8_unroll_pfa_rpf_pgr_sk_skpers_skrtree";
+    const char* want
+        = "conv_igemm_wgrad_N2H12W12C32_K96Y3X3_t64x64x32_w2x2_a32x32x16_mem_default"
+          "_async_kouter_pad4_spk_twostage_wsr8_unroll_pfa_rpf_pgr_sk_skpers_skrtree_tf32";
     if(strcmp(name, want) != 0)
         fprintf(stderr, "  want: %s\n  got:  %s\n", want, name);
     CHECK(strcmp(name, want) == 0);
