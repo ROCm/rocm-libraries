@@ -621,8 +621,9 @@ if(BUILD_CODE_COVERAGE)
   foreach(_cov_tgt rocsparse-unit-test rocsparse-unit-test-device)
     if(TARGET ${_cov_tgt})
       # Host-only instrumentation, as for the library target. -Xarch_host keeps
-      # it off the device image (AISPARSE-778). ccache 4.9 drops -Xarch_*, so
-      # the launcher is cleared on these targets.
+      # it off the device image (AISPARSE-778). ccache < 4.12.1 drops -Xarch_*
+      # arguments (ccache/ccache#1632), so the launcher is cleared on these
+      # targets.
       target_compile_options(${_cov_tgt} PRIVATE
         "SHELL:-Xarch_host -fprofile-instr-generate"
         "SHELL:-Xarch_host -fcoverage-mapping")
