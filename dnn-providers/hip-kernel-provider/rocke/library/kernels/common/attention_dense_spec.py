@@ -33,11 +33,6 @@ from kernels.common.attention_dense_decode import (
 
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
 
-# KV-cache storage formats a dense body can dequantize on load. ``None`` keeps the
-# KV at the compute ``dtype`` (2 bytes); ``"fp8e4m3"`` stores K/V as 1-byte
-# float8_e4m3fn in HBM and dequants to bf16/fp16 in the loader.
-_KV_STORAGE_DTYPES = frozenset({"fp8e4m3"})
-
 # Shared query/KV geometry only. LDS layout choices are architecture-specific.
 DENSE_TILE_GEOMETRIES = MappingProxyType(
     {
@@ -147,9 +142,6 @@ class AttentionDenseSpec:
     # XCDs the hardware round-robins workgroups over. A wrong value keeps results
     # correct and only weakens the L2 locality of the XCD-aware block orders.
     chiplet_num_xcds: int = field(default=8, kw_only=True)
-    # KV-cache storage format. None keeps KV at the compute dtype; "fp8e4m3"
-    # reads 1-byte fp8 KV and dequants to dtype in the loader (Q stays dtype).
-    kv_storage_dtype: str | None = field(default=None, kw_only=True)
 
     @classmethod
     def supported_persist_decodes(cls) -> frozenset[str]:
@@ -182,14 +174,6 @@ class AttentionDenseSpec:
         if self.dtype not in _DTYPE_IR:
             raise ValueError(
                 f"dtype must be one of {sorted(_DTYPE_IR)}, got {self.dtype}"
-            )
-        if (
-            self.kv_storage_dtype is not None
-            and self.kv_storage_dtype not in _KV_STORAGE_DTYPES
-        ):
-            raise ValueError(
-                f"kv_storage_dtype must be None or one of "
-                f"{sorted(_KV_STORAGE_DTYPES)}, got {self.kv_storage_dtype}"
             )
         if self.block_m <= 0:
             raise ValueError(f"block_m must be positive, got {self.block_m}")
@@ -365,8 +349,22 @@ class AttentionDenseSpec:
 
     @property
     def kv_elem_bytes(self) -> int:
-        """Bytes per stored K/V element: 1 for fp8 KV, 2 for the compute dtype."""
-        return 1 if self.kv_storage_dtype == "fp8e4m3" else 2
+        """Bytes per stored K/V element.
+
+        2 on the shared spec: KV is stored at the compute dtype. A narrower KV
+        format is an arch-specific knob, so the arch whose loader implements one
+        overrides this (gfx950 fp8).
+
+        This is the one arch override the SHARED checks read, via the KV extent
+        in :func:`check_dense_spec_preflight`. The C++ mirror of this spec has
+        no narrow-KV field, so it always computes that extent at 2 B, and a
+        narrow-KV spec would be sized as its wide twin there. Nothing hands the
+        mirror such a spec today: the field lives on the arch subclass, which
+        the mirror does not carry, exactly like ``kv_segments``, ``emit_lse``
+        and ``wide_lds_dma``. Giving the mirror a narrow KV format means giving
+        it the field and the width, not only this property.
+        """
+        return 2
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -524,6 +522,15 @@ class AttentionDenseSpec:
     def _algorithm_name_parts(self) -> tuple[str, ...]:
         return ("lazyrs",) if self.lazy_rescale else ()
 
+    def _kv_storage_name_parts(self) -> tuple[str, ...]:
+        """Name tokens for a narrow KV storage format, empty on the shared spec.
+
+        KV at the compute dtype needs no token. The arch whose loader decodes a
+        narrower format overrides this, so the shared spec never reads a field
+        it does not declare and its C++ mirror stays in step with it.
+        """
+        return ()
+
     def _persist_decode_name_part(self) -> str:
         return PERSIST_DECODES[self.resolved_persist_decode].tag
 
@@ -535,8 +542,9 @@ class AttentionDenseSpec:
             f"bn{self.block_n}",
             self.dtype,
         ]
-        if self.kv_storage_dtype:
-            parts.append(f"kv{self.kv_storage_dtype}")
+        # Kept in the shared name, at this position, so an fp8 kernel can never
+        # share a symbol with its bf16 twin. The arch spec supplies the token.
+        parts.extend(self._kv_storage_name_parts())
         if self.block_m != DEFAULT_DENSE_TILE_GEOMETRY["block_m"]:
             parts.append(f"bm{self.block_m}")
         if 128 // self.head_size > 1:
@@ -598,6 +606,23 @@ def require_ocp_fp8_kv(named_tensors) -> None:
                 f"{dtype!r}; a bf16 or FNUZ tensor is read as OCP fp8 and "
                 "silently produces wrong output"
             )
+
+
+def require_fp8_kv_scale(name: str, value, label: str) -> float:
+    """Return one per-tensor fp8 dequant scale as a float, or raise.
+
+    The companion of :func:`require_ocp_fp8_kv`, and the single home of the
+    missing-scale rule. Both the dispatch binding and the runner enforce it, so
+    it lives here for the same reason the dtype rule does: ``kernels`` may not
+    import ``dispatch``. Defaulting a missing scale to 1.0 would silently
+    dequantize at unit scale and produce wrong output, so it is refused.
+    """
+    if value is None:
+        raise ValueError(
+            f"{label} requires {name!r} (per-tensor dequant scale); pass "
+            f"{name}=1.0 explicitly for unit-scale KV"
+        )
+    return float(value)
 
 
 def attention_dense_cache_key(spec: AttentionDenseSpec, *, arch: str) -> tuple:

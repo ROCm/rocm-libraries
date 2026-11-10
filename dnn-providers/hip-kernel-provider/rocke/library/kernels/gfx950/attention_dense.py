@@ -100,6 +100,7 @@ from kernels.common.attention_dense_spec import (
     attention_dense_cache_key,
     check_dense_scale,
     check_dense_spec_preflight,
+    require_fp8_kv_scale,
     require_ocp_fp8_kv,
 )
 from kernels.common.attention_dense_decode import (
@@ -148,6 +149,11 @@ _DEFAULT_GFX950_LAYOUT = GFX950_DENSE_LAYOUTS["default"]
 #     from the inherited D<128 lds_k_group_pad so neither re-sweep moves the other.
 _DEFAULT_LDS_NUM_BUFFERS = 2
 _DEFAULT_LDS_K_ROW_PAD = 8
+
+# KV-cache storage formats this body can dequantize on load. ``None`` keeps the
+# KV at the compute ``dtype`` (2 bytes); ``"fp8e4m3"`` stores K/V as 1-byte
+# float8_e4m3fn in HBM and dequants to bf16/fp16 in the loader.
+_KV_STORAGE_DTYPES = frozenset({"fp8e4m3"})
 # lds_v_row_pad: bf16 elements of V-row padding for the transposed PV read
 #   (ds_read_b64_tr_b16). The transpose read has a stricter bank pattern than
 #   K's ds_read_b128, so it needs a LARGER pad than the K pad (8): a measured
@@ -213,6 +219,16 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     # into this many contiguous chunks, one CTA each, merged by a combine kernel
     # (see kernels.common.attention_dense_kv_split). 1 (default) emits nothing new.
     kv_segments: int = field(default=1, kw_only=True)
+    # KV-cache storage format. None keeps KV at the compute dtype; "fp8e4m3"
+    # reads 1-byte fp8 KV and dequants to dtype in the loader (Q stays dtype).
+    # Lives here, not on the shared spec: only this arch's loader decodes fp8,
+    # and the shared spec is the one the C++ engine mirrors.
+    kv_storage_dtype: str | None = field(default=None, kw_only=True)
+
+    @property
+    def kv_elem_bytes(self) -> int:
+        """1 byte per stored K/V element under fp8 KV, else the shared 2."""
+        return 1 if self.kv_storage_dtype == "fp8e4m3" else 2
 
     def _supports_noncausal_window(self) -> bool:
         return True
@@ -314,6 +330,14 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if (
+            self.kv_storage_dtype is not None
+            and self.kv_storage_dtype not in _KV_STORAGE_DTYPES
+        ):
+            raise ValueError(
+                f"kv_storage_dtype must be None or one of "
+                f"{sorted(_KV_STORAGE_DTYPES)}, got {self.kv_storage_dtype}"
+            )
         if type(self.emit_lse) is not bool:
             raise ValueError(
                 f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
@@ -529,6 +553,9 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         # One runtime-shape binary serves every head count, so the symbol must not
         # claim an hq/kv -- mirrors _shape_name_parts dropping sq/sk.
         return () if self.runtime_shape else super()._head_name_parts()
+
+    def _kv_storage_name_parts(self) -> tuple[str, ...]:
+        return (f"kv{self.kv_storage_dtype}",) if self.kv_storage_dtype else ()
 
     def _algorithm_name_parts(self) -> tuple[str, ...]:
         parts = list(super()._algorithm_name_parts())
@@ -1340,8 +1367,13 @@ def build_attention_dense(
             # its bounds-checked buffer resource.
             kv_row = b.add(tile_key0, key)
             kv_row = b.select(b.cmp_lt(kv_row, seqlen_kv_p), kv_row, b.const_i32(0))
+            # _stride_k(), not the baked constant: on the runtime-shape path the
+            # head counts are kernargs, so two specs differing only in heads share
+            # a cache key and a symbol. Baking Hkv*D here made them lower to
+            # different IR under that one key, and the launcher cache then served
+            # whichever fp8 binary compiled first to both.
             addr = b.add(
-                b.add(k_base, b.mul(kv_row, b.const_i32(stride_k_tok))),
+                b.add(k_base, b.mul(kv_row, _stride_k())),
                 d0,
             )
             deq = dequant_fp8x8_to_dtype(
@@ -3326,15 +3358,10 @@ def run_attention_dense_torch(
         # this runner bypass that guard. Both call the same checker, so the two
         # entry points cannot drift apart.
         require_ocp_fp8_kv((("k", k), ("v", v)))
-        # Require the per-tensor dequant scales for fp8 rather than defaulting to
-        # 1.0: a direct caller that forgets them would silently dequantize at unit
-        # scale and get wrong output. Pass k_scale=v_scale=1.0 for unit-scale KV.
+        # Same checker the dispatch binding uses, so a direct caller of this
+        # runner gets the identical refusal rather than a second wording.
         for name, s in (("k_scale", k_scale), ("v_scale", v_scale)):
-            if s is None:
-                raise ValueError(
-                    f"fp8 dense requires {name} (per-tensor dequant scale); pass "
-                    f"{name}=1.0 explicitly for unit-scale KV"
-                )
+            require_fp8_kv_scale(name, s, "fp8 dense")
     if spec.varlen and (cu_seqlens_q is None or cu_seqlens_kv is None):
         raise ValueError(
             "varlen=True requires cu_seqlens_q and cu_seqlens_kv (int32 [batch+1]); "
