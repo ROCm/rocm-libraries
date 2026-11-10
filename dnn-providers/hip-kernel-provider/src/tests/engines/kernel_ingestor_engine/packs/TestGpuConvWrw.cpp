@@ -470,10 +470,10 @@ void runCase(const DeviceCase& deviceCase)
                 // The unused stages are one-element arrays, which may or may not be allocated.
                 EXPECT_LE(compiled, host + 32);
             }
-            else if(config.layout != conv_wrw::LAYOUT_CHANNELS_LAST || sizeof(T) == 4)
+            else
             {
-                // 16-bit channels-last tiles transposed into LDS: the compiler also promotes
-                // private arrays into the LDS left over (measured 8-24 KiB on gfx942 / gfx950).
+                // Nothing else takes LDS (a private array indexed through a pointer would be
+                // promoted into the LDS left over).
                 EXPECT_EQ(compiled, host);
             }
         }

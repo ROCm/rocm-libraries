@@ -666,24 +666,25 @@ struct K3Tiles
 
     /// Channels-last transpose: KV loaded vectors (one per position) of VEC channels become VEC
     /// words of KV positions, one per channel row of pitch LD.
+    /// The words are built from the loaded vectors' dwords by value: indexing the registers
+    /// through a pointer made the compiler keep them in memory (LDS) instead.
     __device__ static void storeWords(T* dst, int ld, const Raw* src)
     {
-        const T* e = reinterpret_cast<const T*>(src);
+        static_assert(sizeof(Raw) == 16, "K3 channels-last units are 16 bytes");
 #pragma unroll
         for(int i = 0; i < VEC; ++i)
         {
             if constexpr(KV == 1)
             {
-                dst[i * ld] = e[i];
+                const unsigned d = src[0][i];
+                *reinterpret_cast<unsigned*>(dst + i * ld) = d;
             }
             else
             {
-                typedef typename K1Raw<KV * sizeof(T)>::type Word;
-                T w[KV];
-#pragma unroll
-                for(int j = 0; j < KV; ++j)
-                    w[j] = e[j * VEC + i];
-                *reinterpret_cast<Word*>(dst + i * ld) = __builtin_bit_cast(Word, w);
+                const int sh = 16 * (i % 2);
+                const unsigned lo = (src[0][i / 2] >> sh) & 0xffffu;
+                const unsigned hi = (src[1][i / 2] >> sh) & 0xffffu;
+                *reinterpret_cast<unsigned*>(dst + i * ld) = lo | (hi << 16);
             }
         }
     }

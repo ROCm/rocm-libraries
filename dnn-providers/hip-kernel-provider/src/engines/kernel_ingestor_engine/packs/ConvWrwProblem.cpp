@@ -5,12 +5,8 @@
 
 #include "engines/kernel_ingestor_engine/packs/ConvWrwProblem.hpp"
 
-// The kernels' LDS arithmetic, shared verbatim with them; some of its parameters serve only
-// some loops.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
+// The kernels' LDS arithmetic, shared verbatim with them.
 #include "engines/kernel_ingestor_engine/descriptors/conv/wrw/kernels/ConvWrwGeom.h"
-#pragma GCC diagnostic pop
 
 #include <algorithm>
 #include <limits>
