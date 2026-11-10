@@ -276,20 +276,19 @@ union TDM_GROUP2_MODE0
             uint32_t global_addr_increment_lo;
         };
 
+        // Each 16-bit pair is one struct: a bitfield alone in a union takes the whole uint32_t,
+        // which would move the upper field out of sgpr3.
         union
         {
             struct
             {
-                union
-                {
-                    uint32_t tensor_dim2_stride_hi : 16;
-                    uint32_t global_addr_increment_hi : 16;
-                };
-                union
-                {
-                    uint32_t tile_dim3 : 16;
-                    uint32_t iterate_count : 16;
-                };
+                uint32_t tensor_dim2_stride_hi : 16;
+                uint32_t tile_dim3 : 16;
+            };
+            struct
+            {
+                uint32_t global_addr_increment_hi : 16;
+                uint32_t iterate_count : 16;
             };
             uint32_t sgpr3;
         };
@@ -346,6 +345,9 @@ union TDM_GROUP2
     };
     int32x4_t bitfield;
 };
+
+static_assert(sizeof(TDM_GROUP2_MODE0) == 16, "group 2 fields must fit its four SGPRs");
+static_assert(sizeof(TDM_GROUP2) == 16, "group 2 fields must fit its four SGPRs");
 
 union TDM_GROUP3_MODE0
 {
