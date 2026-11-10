@@ -346,6 +346,36 @@ static bool wouldFwdByteStridesFitUint32(
     return ok;
 }
 
+bool fwdKvRowExtentsFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                           int64_t inputBytes)
+{
+    constexpr auto K_U32_MAX_AS_I64 = static_cast<int64_t>(UINT32_MAX);
+    const int64_t seqLenKv = k.dims()->Get(SDPA_SEQ_AXIS);
+
+    auto extentFits
+        = [&](const char* name, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t) {
+              const int64_t seqStride = t.strides()->Get(SDPA_SEQ_AXIS);
+              // seqLenKv * seqStride * inputBytes <= UINT32_MAX, evaluated by division so
+              // no product is formed.
+              const bool fits = seqLenKv >= 0 && seqStride >= 0 && inputBytes > 0
+                                && (seqLenKv == 0 || seqStride == 0
+                                    || seqStride <= K_U32_MAX_AS_I64 / inputBytes / seqLenKv);
+              if(!fits)
+              {
+                  HIPDNN_PLUGIN_LOG_INFO("SDPA: per-head row byte extent reaches 2^32 (tensor="
+                                         << name << ", seqlen_kv=" << seqLenKv << ", seq_stride="
+                                         << seqStride << ", elementBytes=" << inputBytes << ")");
+              }
+              return fits;
+          };
+
+    bool ok = true;
+    ok &= extentFits("k", k);
+    ok &= extentFits("v", v);
+    return ok;
+}
+
 static std::string getKernelTocKey(std::string coName, const std::string& archId, bool isMi308)
 {
     if(archId == "gfx942")
@@ -567,7 +597,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
     // the gfx942 fp8 forward kernels consume, so it is declined here with a specific
     // message rather than the generic "unsupported datatype" one below. Inputs are
     // proven same-type above, so checking q is sufficient. Remove once gfx950 OCP
-    // fp8 forward kernels are wired in.
+    // fp8 forward kernels are wired in, and port with them AITER's power-of-two GQA
+    // ratio requirement for fp8 (can_impl_fmha_v3_fwd in aiter/ops/mha.py), which the
+    // gfx942 fp8 objects do not need because they divide by the ratio in full.
     HIP_KERNEL_RETURN_FALSE_IF(
         qTensor->data_type() == DataType::FP8_E4M3,
         "gfx942 fp8 SDPA requires FP8_E4M3_FNUZ inputs; OCP FP8_E4M3 (gfx950/MI350) is a "
@@ -700,6 +732,15 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                        qTensor->strides()->Get(2),
                                        inputBytes * cfg_fmha_fwd.at(key).ts_qo),
         "Forward Ts product overflows the uint32_t s_Ts kernarg field");
+
+    // The hd192x128 kernels on both architectures address each K and V head
+    // through a 32-bit buffer offset, so a head whose rows span 2^32 bytes or
+    // more is out of their reach even when every per-field stride fits. Ports
+    // AITER's can_impl_fmha_v3_fwd rule (aiter/ops/mha.py, batch and varlen).
+    const bool isHd192x128 = qTensor->dims()->Get(3) == 192 && vTensor->dims()->Get(3) == 128;
+    HIP_KERNEL_RETURN_FALSE_IF(isHd192x128
+                                   && !fwdKvRowExtentsFitU32(*kTensor, *vTensor, inputBytes),
+                               "hd192x128 K or V per-head row extent reaches 2^32 bytes");
 
     return true;
 }

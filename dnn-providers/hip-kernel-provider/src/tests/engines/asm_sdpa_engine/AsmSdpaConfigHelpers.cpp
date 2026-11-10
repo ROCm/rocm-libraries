@@ -102,12 +102,14 @@ std::string SdpaFwdTestCase::getName(const testing::TestParamInfo<SdpaFwdTestCas
 GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats)
 {
     auto tc = GraphTestCase{config, getConfigDescription(config), config.arch};
-    // Group mode gives K/V the same token capacity as Q, so the per-batch lengths a
-    // test writes into the offset tables can exceed one Q-tile while keeping every
-    // K/V length at least its Q length.
+    // Group mode gives Q and K/V a token capacity of 512, twice the largest ts_qo of any
+    // group row, so the per-batch lengths a test writes into the offset tables can span
+    // two Q-tiles of every row while keeping every K/V length at least its Q length.
     if(config.mode == BatchMode::GROUP)
     {
-        tc.seqKv = tc.seqQ;
+        constexpr int64_t K_GROUP_SEQ_CAPACITY = 512;
+        tc.seqQ = K_GROUP_SEQ_CAPACITY;
+        tc.seqKv = K_GROUP_SEQ_CAPACITY;
     }
     if(withStats)
     {

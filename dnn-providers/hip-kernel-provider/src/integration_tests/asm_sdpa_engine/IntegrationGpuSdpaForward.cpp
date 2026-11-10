@@ -47,11 +47,13 @@ constexpr float K_DESCALE_K_FILL = 0.5f;
 constexpr float K_DESCALE_V_FILL = 0.75f;
 
 // Per-batch token counts written into the group-mode offset tables (configToTestCase
-// gives group cases batch 2 and S_q = S_kv = 256). The lengths differ between batches,
-// are not multiples of any ts_qo or ts_kv, and span more than one 128-row Q-tile. Every
-// K/V length is at least its Q length, so bottom-right causal masks no row out fully.
-constexpr std::array<int32_t, 2> K_GROUP_SEQ_LENS_Q = {201, 130};
-constexpr std::array<int32_t, 2> K_GROUP_SEQ_LENS_KV = {243, 149};
+// gives group cases batch 2 and S_q = S_kv = 512). The lengths differ between batches,
+// are not multiples of any ts_qo or ts_kv, and both exceed the largest group ts_qo (256),
+// so every batch spans at least two Q-tiles of every group row and the causal tile
+// merging (tgDiv) changes the launch grid. Every K/V length is at least its Q length,
+// so bottom-right causal masks no row out fully.
+constexpr std::array<int32_t, 2> K_GROUP_SEQ_LENS_Q = {401, 260};
+constexpr std::array<int32_t, 2> K_GROUP_SEQ_LENS_KV = {483, 299};
 
 // Writes the exclusive prefix sum of @p lengths, the [B+1] token seqstarts AITER's group
 // mode reads, into @p tensor.
@@ -173,6 +175,9 @@ protected:
                       testCase.seqQ);
             ASSERT_LE(*std::max_element(K_GROUP_SEQ_LENS_KV.begin(), K_GROUP_SEQ_LENS_KV.end()),
                       testCase.seqKv);
+            // Each batch must span at least two Q-tiles of this row.
+            ASSERT_GT(*std::min_element(K_GROUP_SEQ_LENS_Q.begin(), K_GROUP_SEQ_LENS_Q.end()),
+                      testCase.config.ts_qo);
         }
 
         GraphVerificationContext context(*graph);

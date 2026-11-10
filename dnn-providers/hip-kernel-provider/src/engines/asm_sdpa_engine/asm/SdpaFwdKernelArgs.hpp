@@ -4,8 +4,8 @@
 // =============================================================================
 // AITER Provenance
 //
-// Commit:  ad0554a97858d8089e92c2d8b5db7017a6efc0f2 (v0.1.28.post1; the forward
-//          host-code commit pinned in asm_kernels/aiter_fwd_pins.json)
+// Commit:  the `abi_commit` of each <arch>/fmha_v3_fwd module in
+//          asm_kernels/aiter_fwd_pins.json (the forward host code the engine mirrors)
 // Sources:
 //   - aiter/csrc/include/mha_fwd.h        (lines 274-358: fmha_fwd_v3_args)
 //   - aiter/csrc/include/aiter_hip_common.h (lines 144-154: p3, p2 padding structs)
@@ -160,9 +160,7 @@ struct __attribute__((packed)) fmha_fwd_v3_args
 // Compile-time ABI verification: the struct size must match AITER's definition
 // exactly.  Any mismatch indicates the kernel ABI has changed and the struct
 // must be updated.
-static_assert(sizeof(fmha_fwd_v3_args) == 656,
-              "fmha_fwd_v3_args size mismatch with AITER ABI "
-              "(commit ad0554a97858d8089e92c2d8b5db7017a6efc0f2)");
+static_assert(sizeof(fmha_fwd_v3_args) == 656, "fmha_fwd_v3_args size mismatch with AITER ABI");
 
 // NOLINTEND(readability-identifier-naming)
 

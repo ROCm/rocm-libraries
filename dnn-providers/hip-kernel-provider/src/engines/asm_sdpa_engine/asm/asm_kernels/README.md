@@ -6,7 +6,7 @@ snapshots were taken from **different** AITER commits (see table below).
 
 | Kernel group | AITER commit | Platforms | Per-arch SOURCE.md |
 |---|---|---|---|
-| `fmha_v3_fwd` (gfx942, gfx950) | `ad0554a97858d8089e92c2d8b5db7017a6efc0f2` (v0.1.28.post1) | gfx942, gfx950 | `gfx942/fmha_v3_fwd/SOURCE.md`, `gfx950/fmha_v3_fwd/SOURCE.md` |
+| `fmha_v3_fwd` (gfx942, gfx950) | `commit` (objects) and `abi_commit` (host code) of each `<arch>/fmha_v3_fwd` module in `aiter_fwd_pins.json` | gfx942, gfx950 | `gfx942/fmha_v3_fwd/SOURCE.md`, `gfx950/fmha_v3_fwd/SOURCE.md` |
 | `fmha_v3_bwd` (gfx942, gfx950) | `cdcfa833bdf554ca75594c90dde4316ea9b50199` (v0.1.13) | gfx942, gfx950 | `gfx942/fmha_v3_bwd/SOURCE.md`, `gfx950/fmha_v3_bwd/SOURCE.md` |
 
 The forward kernels are pinned in `aiter_fwd_pins.json`, which records for each
@@ -19,8 +19,10 @@ from different AITER commits, so check each group against its own row above.
 ## Directory layout notes
 
 - **Forward kernels** (`fmha_v3_fwd/`): gfx942 keeps AITER's separate `MI300/` and `MI308/`
-  subdirectories, because MI308 (MI300A APU) needs its own objects; the engine picks one at
-  runtime from the PCI chip ID. gfx950 stores its objects flat.
+  subdirectories, because MI308X needs its own objects. The engine picks `MI308/` at runtime
+  when the device's PCI chip ID is an MI308X ID (`isMi308Device` in `SdpaFwdPlanBuilder.cpp`)
+  and `MI300/` for every other gfx942 device, including MI300X and MI300A. gfx950 stores its
+  objects flat.
 - **Backward kernels** (`fmha_v3_bwd/`): AITER stores these flat (no MI300/MI308 split) because
   backward kernels only support bf16/fp16 (no fp8), so the same binary works on both MI300X and
   MI300A. SHA256 manifests for each arch are recorded in the per-arch `SOURCE.md` files.
