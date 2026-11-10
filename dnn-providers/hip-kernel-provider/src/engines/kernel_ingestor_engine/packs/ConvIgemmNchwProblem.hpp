@@ -21,10 +21,12 @@
  *        declares, and the launch of a config on a problem. Kept apart from the dispatch code so
  *        every gate can be tested without a device.
  *
- * The kernel reads dy, the K C S filter and writes dx in place, so it serves backward data whose
- * operands are all packed channels-first and whose convolution runs along the width only: the
- * depth and height map one to one (filter extent 1, stride 1, no padding). That is the shape of
- * ConvTranspose1d (as 1-D, or 2-D with height 1) and of per-row 1-D convolutions.
+ * The kernel reads dy, the K C T R S filter and writes dx in place, so it serves backward data
+ * whose operands are all packed channels-first and whose depth and height filter extents are at
+ * most their strides: each dx row then takes at most one dy row and one filter row (or none, and
+ * is zero), and the convolution runs along the width. That is the shape of ConvTranspose1d (as
+ * 1-D, or 2-D with height 1), of per-row 1-D convolutions, and of strided 1x1, patchify (filter
+ * equal to stride) and 2x2x2 stride-2 backward data.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_igemm_nchw
 {
@@ -68,6 +70,9 @@ struct NchwConfig
     int64_t taps = 0;
     /// LDS tiles in turn: FMA 1, or 2 (one barrier per k-step); matrix core 1.
     int64_t stages = 0;
+    /// 0, or the stride phases computed over the flattened dy plane (the rest zero): the
+    /// problem must be flat (NchwProblem::flat) with at most this many filter taps.
+    int64_t flat = 0;
 };
 
 /// A backward-data convolution the kernel serves.
@@ -82,6 +87,9 @@ struct NchwProblem
     int elementBytes = 0;
     /// The stride along the width.
     int64_t stride = 0;
+    /// The dy plane can be read flattened: no padding on any axis, dx exactly the strides times
+    /// dy on every axis, and one tap per width phase (S <= stride).
+    bool flat = false;
 };
 
 /// The launch of a config on a problem.
@@ -100,11 +108,11 @@ struct NchwLaunch
  *        does not serve it.
  *
  * Everything parseConvNaiveProblem gates, plus: fp32, fp16 or bf16; one group;
- * cross-correlation; dy, dx and the filter packed channels-first (N C D H W, K C T R S); the
- * depth and height axes the identity (filter extent 1, stride 1, no padding, unit dilation, dx
- * and dy the same extent); unit dilation along the width; every extent within 32 bits, one
- * image of dy and the whole filter within 32-bit byte offsets, images times rows within the
- * grid's third axis.
+ * cross-correlation; dy, dx and the filter packed channels-first (N C D H W, K C T R S); along
+ * depth and height unit dilation, non-negative padding and a filter extent of at most the stride;
+ * unit dilation along the width; every extent, stride and padding within 32 bits, one image of
+ * dy and the whole filter within 32-bit byte offsets, images times dx rows within the grid's
+ * third axis.
  */
 std::optional<NchwProblem>
     parseNchwProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context);

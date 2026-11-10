@@ -108,11 +108,13 @@ std::optional<NchwProblem>
     {
         return std::nullopt;
     }
-    // Depth and height: the identity.
+    // Depth and height: unit dilation and a filter no longer than the stride, so each dx row
+    // takes at most one dy row and one filter row.
     for(int axis = 0; axis < 2; ++axis)
     {
-        if(a.filter[axis] != 1 || a.stride[axis] != 1 || a.prePadding[axis] != 0
-           || a.dilation[axis] != 1 || a.inSpatial[axis] != a.outSpatial[axis])
+        if(a.dilation[axis] != 1 || a.stride[axis] < 1 || a.prePadding[axis] < 0
+           || a.filter[axis] < 1 || a.filter[axis] > a.stride[axis] || a.inSpatial[axis] < 1
+           || a.outSpatial[axis] < 1)
         {
             return std::nullopt;
         }
@@ -123,22 +125,31 @@ std::optional<NchwProblem>
         return std::nullopt;
     }
     const long long d = a.inSpatial[0], h = a.inSpatial[1];
+    const long long dyD = a.outSpatial[0], dyH = a.outSpatial[1];
     if(!channelsFirst(a.xStrides, {a.n, a.c, d, h, a.inSpatial[2]})
-       || !channelsFirst(a.yStrides, {a.n, a.k, d, h, a.outSpatial[2]})
+       || !channelsFirst(a.yStrides, {a.n, a.k, dyD, dyH, a.outSpatial[2]})
        || !channelsFirst(a.wStrides, {a.k, a.c, a.filter[0], a.filter[1], a.filter[2]}))
     {
         return std::nullopt;
     }
     const long long rows = d * h;
+    const long long rowsY = dyD * dyH;
+    const long long filterRun = a.filter[0] * a.filter[1] * a.filter[2];
     for(const long long value : {a.n,
                                  a.c,
                                  a.k,
                                  rows,
+                                 rowsY,
                                  a.inSpatial[2],
                                  a.outSpatial[2],
                                  a.filter[2],
                                  a.prePadding[2],
-                                 a.stride[2]})
+                                 a.stride[2],
+                                 a.prePadding[0],
+                                 a.prePadding[1],
+                                 a.stride[0],
+                                 a.stride[1],
+                                 filterRun})
     {
         if(value < 0 || !fitsInt(value))
         {
@@ -146,9 +157,9 @@ std::optional<NchwProblem>
         }
     }
     // dy is addressed by 32-bit byte offsets within an image, the filter as a whole.
-    const auto dyImage = pack_features::checkedProduct({a.k, rows, a.outSpatial[2]});
+    const auto dyImage = pack_features::checkedProduct({a.k, rowsY, a.outSpatial[2]});
     const auto dxImage = pack_features::checkedProduct({a.c, rows, a.inSpatial[2]});
-    const auto filterElements = pack_features::checkedProduct({a.k, a.c, a.filter[2]});
+    const auto filterElements = pack_features::checkedProduct({a.k, a.c, filterRun});
     if(!dyImage.has_value() || !dxImage.has_value() || !filterElements.has_value()
        || *dyImage > INT_LIMIT / elementBytes || *filterElements > INT_LIMIT / elementBytes
        || a.n * rows > MAX_GRID_YZ)
@@ -159,6 +170,15 @@ std::optional<NchwProblem>
     NchwProblem problem;
     problem.elementBytes = elementBytes;
     problem.stride = a.stride[2];
+    // Flat also reads dy as one buffer (32-bit byte offsets) and numbers the outputs of every
+    // image's channel plane (n rows Wx) in 32 bits.
+    problem.flat = a.filter[2] <= a.stride[2] && a.n * *dyImage <= INT_LIMIT / elementBytes
+                   && a.n * rows * a.inSpatial[2] <= INT_LIMIT;
+    for(int axis = 0; axis < 3; ++axis)
+    {
+        problem.flat = problem.flat && a.prePadding[axis] == 0
+                       && a.inSpatial[axis] == a.stride[axis] * a.outSpatial[axis];
+    }
     problem.dxUid = base->operands.x;
     problem.wUid = base->operands.w;
     problem.dyUid = base->operands.y;
@@ -172,6 +192,17 @@ std::optional<NchwProblem>
     k7.fs = static_cast<int>(a.filter[2]);
     k7.pad = static_cast<int>(a.prePadding[2]);
     k7.qBase = static_cast<int>(a.prePadding[2] / a.stride[2]);
+    k7.rowsY = static_cast<int>(rowsY);
+    k7.hx = static_cast<int>(h);
+    k7.hy = static_cast<int>(dyH);
+    k7.dyDepth = static_cast<int>(dyD);
+    k7.sd = static_cast<int>(a.stride[0]);
+    k7.pd = static_cast<int>(a.prePadding[0]);
+    k7.fd = static_cast<int>(a.filter[0]);
+    k7.sh = static_cast<int>(a.stride[1]);
+    k7.ph = static_cast<int>(a.prePadding[1]);
+    k7.fh = static_cast<int>(a.filter[1]);
+    k7.fStride = static_cast<int>(filterRun);
     k7.dyImage = *dyImage;
     k7.dxImage = *dxImage;
     problem.base = std::move(*base);
@@ -235,6 +266,21 @@ std::optional<NchwLaunch> nchwLaunchFor(const NchwProblem& problem, const NchwCo
     {
         return std::nullopt;
     }
+    // Flat: the problem flat; its filter's taps exactly the computed phases, or every phase
+    // when the filter has more than one tap (a phase computed for no tap is waste, not a
+    // different answer); the vector dividing an image's dy positions (no load straddles
+    // images); the classes within the grid.
+    const int64_t classes = static_cast<int64_t>(a.sd) * a.sh;
+    if(config.flat < 0 || config.flat > config.stride
+       || (config.flat > 0
+           && (!problem.flat || config.flat < a.fs
+               || (config.flat != a.fs && (config.flat != config.stride || a.fs == 1))
+               || config.taps != 1 || (static_cast<int64_t>(a.rowsY) * a.wy) % config.vec != 0
+               || classes > MAX_GRID_YZ)))
+    {
+        return std::nullopt;
+    }
+    const int64_t phases = config.flat > 0 ? config.flat : config.stride;
     NchwLaunch launch;
     int64_t threads = 0;
     if(fma)
@@ -253,7 +299,7 @@ std::optional<NchwLaunch> nchwLaunchFor(const NchwProblem& problem, const NchwCo
         const auto shape = shapeOf(config.atom);
         if(!info.has_value() || info->wave == 0 || shape.dim == 0 || config.tq != 0
            || config.tc != 0 || config.wm < 1 || config.wn < 1 || config.wp < 1
-           || config.stride % config.wp != 0 || config.stages != 1)
+           || phases % config.wp != 0 || config.stages != 1)
         {
             return std::nullopt;
         }
@@ -271,9 +317,10 @@ std::optional<NchwLaunch> nchwLaunchFor(const NchwProblem& problem, const NchwCo
         return std::nullopt;
     }
     const int64_t span = config.bmq * config.stride;
-    const int64_t gridX = divUp(a.wx, span);
+    const int64_t positions = static_cast<int64_t>(a.n) * a.rowsY * a.wy;
+    const int64_t gridX = config.flat > 0 ? divUp(positions, config.bmq) : divUp(a.wx, span);
     const int64_t gridY = divUp(a.c, config.bn);
-    const int64_t gridZ = static_cast<int64_t>(a.n) * a.rows;
+    const int64_t gridZ = config.flat > 0 ? classes : static_cast<int64_t>(a.n) * a.rows;
     if(gridX < 1 || gridX > INT_LIMIT || gridX * span > INT_LIMIT || gridY > MAX_GRID_YZ
        || gridZ < 1 || gridZ > MAX_GRID_YZ)
     {

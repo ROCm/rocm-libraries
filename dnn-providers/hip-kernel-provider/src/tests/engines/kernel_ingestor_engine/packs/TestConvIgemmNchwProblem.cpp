@@ -113,6 +113,41 @@ std::vector<AcceptCase> acceptCases()
     oddChannels.c = 3;
     oddChannels.k = 5;
     cases.push_back({"OddChannels", oddChannels});
+    // Depth and height filters no longer than their strides: strided 1x1, patchify, 2x2x2.
+    auto pointwise = baseShape();
+    pointwise.input = {9, 37};
+    pointwise.filter = {1, 1};
+    pointwise.prePadding = pointwise.postPadding = {0, 0};
+    pointwise.stride = {2, 2};
+    cases.push_back({"Pointwise1x1Stride2", pointwise});
+    auto patchify = baseShape();
+    patchify.input = {8, 36};
+    patchify.filter = {2, 2};
+    patchify.prePadding = patchify.postPadding = {0, 0};
+    patchify.stride = {2, 2};
+    cases.push_back({"Patchify2x2Stride2", patchify});
+    auto cube = baseShape();
+    cube.input = {6, 8, 36};
+    cube.filter = {2, 2, 2};
+    cube.prePadding = cube.postPadding = {0, 0, 0};
+    cube.stride = {2, 2, 2};
+    cube.dilation = {1, 1, 1};
+    cases.push_back({"ThreeD2x2x2Stride2", cube});
+    auto heightPad = baseShape();
+    heightPad.input = {7, 37};
+    heightPad.filter = {2, 8};
+    heightPad.prePadding = {1, 2};
+    heightPad.postPadding = {0, 2};
+    heightPad.stride = {3, 4};
+    cases.push_back({"HeightFilter2Stride3Padded", heightPad});
+    auto heightOnly = baseShape();
+    heightOnly.input = {4, 37};
+    heightOnly.stride = {2, 4};
+    cases.push_back({"StrideOnHeightOnly", heightOnly});
+    auto heightPadOnly = baseShape();
+    heightPadOnly.prePadding = {1, 2};
+    heightPadOnly.postPadding = {1, 2};
+    cases.push_back({"PaddingOnHeight", heightPadOnly});
     return cases;
 }
 
@@ -155,6 +190,52 @@ TEST(TestConvIgemmNchwForm, TheArgumentsAreTheWidthConvolutionOverRows)
     EXPECT_EQ(problem->dxUid, X_UID);
     EXPECT_EQ(problem->wUid, W_UID);
     EXPECT_EQ(problem->dyUid, Y_UID);
+    // The identity rows.
+    EXPECT_EQ(a.rowsY, 3);
+    EXPECT_EQ(a.hx, 3);
+    EXPECT_EQ(a.hy, 3);
+    EXPECT_EQ(a.dyDepth, 1);
+    EXPECT_EQ(a.sd, 1);
+    EXPECT_EQ(a.pd, 0);
+    EXPECT_EQ(a.fd, 1);
+    EXPECT_EQ(a.sh, 1);
+    EXPECT_EQ(a.ph, 0);
+    EXPECT_EQ(a.fh, 1);
+    EXPECT_EQ(a.fStride, 8);
+}
+
+TEST(TestConvIgemmNchwForm, StridedRowsCarryTheirGeometry)
+{
+    auto shape = baseShape();
+    shape.input = {7, 11, 36};
+    shape.filter = {2, 3, 2};
+    shape.prePadding = {1, 2, 0};
+    shape.postPadding = {0, 0, 0};
+    shape.stride = {3, 4, 2};
+    shape.dilation = {1, 1, 1};
+    const auto problem = parse(specFor(shape, ConvDirection::BACKWARD_DATA));
+    ASSERT_TRUE(problem.has_value());
+    const auto& a = problem->args;
+    const int dyD = (7 + 1 - 2) / 3 + 1;
+    const int dyH = (11 + 2 - 3) / 4 + 1;
+    const int dyW = (36 - 2) / 2 + 1;
+    EXPECT_EQ(a.rows, 7 * 11);
+    EXPECT_EQ(a.rowsY, dyD * dyH);
+    EXPECT_EQ(a.hx, 11);
+    EXPECT_EQ(a.hy, dyH);
+    EXPECT_EQ(a.dyDepth, dyD);
+    EXPECT_EQ(a.wy, dyW);
+    EXPECT_EQ(a.sd, 3);
+    EXPECT_EQ(a.pd, 1);
+    EXPECT_EQ(a.fd, 2);
+    EXPECT_EQ(a.sh, 4);
+    EXPECT_EQ(a.ph, 2);
+    EXPECT_EQ(a.fh, 3);
+    EXPECT_EQ(a.fs, 2);
+    EXPECT_EQ(a.fStride, 2 * 3 * 2);
+    EXPECT_EQ(a.dyImage, int64_t{40} * dyD * dyH * dyW);
+    EXPECT_EQ(a.dxImage, int64_t{24} * 7 * 11 * 36);
+    EXPECT_EQ(problem->stride, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -204,37 +285,39 @@ std::vector<RefusalCase> refusalCases()
              shape.mode = ConvMode::CONVOLUTION;
              reshape(s, shape);
          }},
-        // The height axis must be the identity: filter, stride, padding, dilation, extent.
-        {"FilterHeight3",
+        // Depth and height: a filter no longer than the stride, unit dilation.
+        {"FilterHeightPastTheStride",
          [](ConvGraphSpec& s) {
              auto shape = baseShape();
-             shape.input = {5, 37};
+             shape.input = {9, 37};
              shape.filter = {3, 8};
-             reshape(s, shape);
-         }},
-        {"StrideOnHeight",
-         [](ConvGraphSpec& s) {
-             auto shape = baseShape();
-             shape.input = {4, 37};
              shape.stride = {2, 4};
              reshape(s, shape);
          }},
-        {"PaddingOnHeight",
+        {"FilterDepthPastTheStride",
          [](ConvGraphSpec& s) {
              auto shape = baseShape();
-             shape.prePadding = {1, 2};
-             reshape(s, shape);
-         }},
-        {"PostPaddingOnHeight",
-         [](ConvGraphSpec& s) {
-             auto shape = baseShape();
-             shape.postPadding = {1, 2};
+             shape.input = {6, 3, 37};
+             shape.filter = {2, 1, 8};
+             shape.prePadding = shape.postPadding = {0, 0, 2};
+             shape.stride = {1, 1, 4};
+             shape.dilation = {1, 1, 1};
              reshape(s, shape);
          }},
         {"DilationOnHeight",
          [](ConvGraphSpec& s) {
              auto shape = baseShape();
              shape.dilation = {2, 1};
+             reshape(s, shape);
+         }},
+        {"DilationOnDepth",
+         [](ConvGraphSpec& s) {
+             auto shape = baseShape();
+             shape.input = {2, 3, 37};
+             shape.filter = {1, 1, 8};
+             shape.prePadding = shape.postPadding = {0, 0, 2};
+             shape.stride = {1, 1, 4};
+             shape.dilation = {2, 1, 1};
              reshape(s, shape);
          }},
         // The width: unit dilation.
@@ -331,7 +414,7 @@ struct ConfigFields
     std::string atom = "wmma11_f16";
     int64_t atomId = 7;
     int64_t bmq = 64, bn = 32, bk = 32, wm = 2, wn = 1, wp = 4;
-    int64_t tq = 0, tc = 0, vec = 8, stride = 4, taps = 2, stages = 1;
+    int64_t tq = 0, tc = 0, vec = 8, stride = 4, taps = 2, stages = 1, flat = 0;
 };
 
 ConfigFields fmaFields()
@@ -368,7 +451,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"vec", f.vec},
                        {"stride", f.stride},
                        {"taps", f.taps},
-                       {"stages", f.stages}};
+                       {"stages", f.stages},
+                       {"flat", f.flat}};
     return kernel;
 }
 
@@ -448,6 +532,7 @@ std::vector<ConfigRefusal> configRefusals()
         {"FmaTqNotDividingBmq", [](ConfigFields& f) { f.tq = 3; }, true},
         {"FmaTcZero", [](ConfigFields& f) { f.tc = 0; }, true},
         {"FmaBkZero", [](ConfigFields& f) { f.bk = 0; }, true},
+        {"FlatNegative", [](ConfigFields& f) { f.flat = -1; }},
         {"FmaVecNotDividingBmq",
          [](ConfigFields& f) {
              f.bmq = 66;
@@ -573,6 +658,126 @@ TEST(TestConvIgemmNchwKernelMatch, StrideAndTapsFollowTheFilter)
     g.stride = 9;
     g.taps = 2;
     EXPECT_FALSE(admits(g, "gfx1100", wide, "FLOAT"));
+}
+
+/// A strided 1x1 backward data whose dy plane reads flattened: no padding, dx twice dy, 8 x 16
+/// dy positions per image.
+ConvShape flatShape()
+{
+    auto shape = baseShape();
+    shape.input = {16, 32};
+    shape.filter = {1, 1};
+    shape.prePadding = shape.postPadding = {0, 0};
+    shape.stride = {2, 2};
+    return shape;
+}
+
+ConfigFields flatFields()
+{
+    auto f = ConfigFields{};
+    f.bmq = 64;
+    f.bn = 64;
+    f.wm = 2;
+    f.wn = 2;
+    f.wp = 1;
+    f.stride = 2;
+    f.taps = 1;
+    f.flat = 1;
+    return f;
+}
+
+TEST(TestConvIgemmNchwKernelMatch, FlatConfigsServeFlatProblems)
+{
+    EXPECT_TRUE(admits(flatFields(), "gfx1100", flatShape()));
+    auto fma = fmaFields();
+    fma.bmq = 64;
+    fma.bn = 64;
+    fma.tq = 4;
+    fma.tc = 4;
+    fma.stride = 2;
+    fma.taps = 1;
+    fma.flat = 1;
+    EXPECT_TRUE(admits(fma, "gfx1100", flatShape(), "FLOAT"));
+    // The same problem with its per-row configs.
+    auto rows = flatFields();
+    rows.flat = 0;
+    rows.wp = 2;
+    rows.bn = 32;
+    EXPECT_TRUE(admits(rows, "gfx1100", flatShape()));
+    // Patchify: two taps, both phases computed.
+    auto patch = flatShape();
+    patch.filter = {2, 2};
+    auto two = flatFields();
+    two.flat = 2;
+    EXPECT_TRUE(admits(two, "gfx1100", patch));
+    // 3-D, 2x2x2 stride 2: four classes.
+    ConvShape cube = flatShape();
+    cube.input = {6, 8, 36};
+    cube.filter = {2, 2, 2};
+    cube.prePadding = cube.postPadding = {0, 0, 0};
+    cube.stride = {2, 2, 2};
+    cube.dilation = {1, 1, 1};
+    EXPECT_TRUE(admits(two, "gfx1100", cube));
+}
+
+std::vector<ConfigRefusal> flatRefusals()
+{
+    return {
+        {"FlatPastTheStride", [](ConfigFields& f) { f.flat = 3; }},
+        {"FlatWavesNotDividingThePhases", [](ConfigFields& f) { f.wp = 2; }},
+    };
+}
+
+class TestConvIgemmNchwFlatRefuses : public ::testing::TestWithParam<ConfigRefusal>
+{
+};
+
+TEST_P(TestConvIgemmNchwFlatRefuses, OneField)
+{
+    auto fields = flatFields();
+    ASSERT_TRUE(admits(fields, "gfx1100", flatShape()));
+    GetParam().mutate(fields);
+    EXPECT_FALSE(admits(fields, "gfx1100", flatShape()));
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestConvIgemmNchwFlatRefuses,
+                         ::testing::ValuesIn(flatRefusals()),
+                         [](const auto& info) { return info.param.name; });
+
+TEST(TestConvIgemmNchwKernelMatch, FlatNeedsAFlatProblem)
+{
+    auto f = flatFields();
+    // The filter's taps must be computed: patchify with one computed phase.
+    auto patch = flatShape();
+    patch.filter = {2, 2};
+    EXPECT_FALSE(admits(f, "gfx1100", patch));
+    // A 1x1 filter runs on one computed phase only: every phase would compute zeros.
+    auto all = f;
+    all.flat = 2;
+    EXPECT_FALSE(admits(all, "gfx1100", flatShape()));
+    // dx not exactly twice dy along the width (odd width): not flat.
+    auto odd = flatShape();
+    odd.input = {16, 31};
+    EXPECT_FALSE(admits(f, "gfx1100", odd));
+    // Padding on the height: not flat.
+    auto padded = flatShape();
+    padded.input = {14, 32};
+    padded.prePadding = {1, 0};
+    padded.postPadding = {1, 0};
+    EXPECT_FALSE(admits(f, "gfx1100", padded));
+    // Each refused shape is still served by a per-row config.
+    auto rows = flatFields();
+    rows.flat = 0;
+    rows.wp = 2;
+    rows.bn = 32;
+    // A vector of 8 that does not divide an image's dy positions (9 x 18): not flat.
+    auto straddle = flatShape();
+    straddle.input = {18, 36};
+    EXPECT_FALSE(admits(f, "gfx1100", straddle));
+    EXPECT_TRUE(admits(rows, "gfx1100", odd));
+    EXPECT_TRUE(admits(rows, "gfx1100", padded));
+    EXPECT_TRUE(admits(rows, "gfx1100", straddle));
 }
 
 TEST(TestConvIgemmNchwLds, MirrorsTheKernelsArithmetic)

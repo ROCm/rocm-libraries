@@ -105,6 +105,7 @@ NchwConfig configOf(const KernelDefinition& kernel)
     config.stride = kernel.getIntMetadata("stride");
     config.taps = kernel.getIntMetadata("taps");
     config.stages = kernel.getIntMetadata("stages");
+    config.flat = kernel.getIntMetadata("flat");
     return config;
 }
 
@@ -272,7 +273,8 @@ public:
         {
             options.add("CONV_K7_ATOM", std::string(launch->kernelType));
         }
-        const std::array<std::pair<const char*, int64_t>, 12> fields{{{"STAGES", config.stages},
+        const std::array<std::pair<const char*, int64_t>, 13> fields{{{"STAGES", config.stages},
+                                                                      {"FLAT", config.flat},
                                                                       {"BMQ", config.bmq},
                                                                       {"BN", config.bn},
                                                                       {"BK", config.bk},

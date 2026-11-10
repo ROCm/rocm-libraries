@@ -39,7 +39,9 @@
  * every case, in fp32, fp16 and bf16. The cases cover every shipped stride (2, 3, 4, 5, 6, 8),
  * filters that fill their last tap row and filters that do not, padding below, at and past the
  * stride (every pad mod stride class the tiles distinguish), 1-D, 2-D and 3-D graphs with
- * height and depth rows, channel counts no tile divides, and widths spanning several tiles.
+ * height and depth rows (identity, or strided with filters no longer than the stride, padded or
+ * not, so some dx rows take no dy row), channel counts no tile divides, and widths spanning
+ * several tiles.
  */
 namespace
 {
@@ -244,6 +246,21 @@ ConvShape upsample(int64_t c,
     return shape;
 }
 
+/// @p shape with its depth/height axes (all but the width) given filter, stride and padding.
+ConvShape strideRows(ConvShape shape,
+                     std::vector<int64_t> filter,
+                     std::vector<int64_t> stride,
+                     std::vector<int64_t> pre)
+{
+    for(size_t axis = 0; axis < filter.size(); ++axis)
+    {
+        shape.filter[axis] = filter[axis];
+        shape.stride[axis] = stride[axis];
+        shape.prePadding[axis] = pre[axis];
+    }
+    return shape;
+}
+
 // Channel counts are not multiples of the channel tiles; widths are not multiples of the dx
 // tiles, and the 600-wide case spans several of them.
 std::vector<DeviceCase> deviceCases()
@@ -266,6 +283,17 @@ std::vector<DeviceCase> deviceCases()
         // dx 9 from a K8 S4 filter, its last row reached by no tap.
         {"K8S4OutputOne", upsample(24, 16, {1}, 9, 8, 4, 0, 0)},
         {"RowsK4S2OutputOne", upsample(16, 24, {3}, 5, 4, 2, 0, 0)},
+        // Depth and height filters no longer than their strides: rows with no dy row are zero.
+        {"Pointwise1x1S2", strideRows(upsample(24, 40, {19}, 37, 1, 2, 0, 0), {1}, {2}, {0})},
+        {"Pointwise1x1S2Padded", strideRows(upsample(13, 9, {11}, 23, 1, 2, 1, 1), {1}, {3}, {2})},
+        {"Pointwise1x1S4", strideRows(upsample(16, 32, {13}, 50, 1, 4, 0, 0), {1}, {4}, {0})},
+        {"Patchify2x2S2", strideRows(upsample(16, 24, {22}, 30, 2, 2, 0, 0), {2}, {2}, {0})},
+        {"Patchify4x4S4", strideRows(upsample(16, 24, {20}, 48, 4, 4, 0, 0), {4}, {4}, {0})},
+        {"HeightR2K4S2", strideRows(upsample(16, 8, {9}, 26, 4, 2, 1, 1), {2}, {2}, {1})},
+        {"ThreeD2x2x2S2",
+         strideRows(upsample(8, 16, {9, 10}, 18, 2, 2, 0, 0), {2, 2}, {2, 2}, {0, 0})},
+        {"ThreeDDepthT2S3Padded",
+         strideRows(upsample(20, 12, {5, 13}, 41, 1, 2, 1, 1), {2, 1}, {3, 2}, {1, 1})},
     };
 }
 
@@ -409,7 +437,7 @@ TEST(TestConvIgemmNchwCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 13> KNOBS{"atom_id",
+    static constexpr std::array<const char*, 14> KNOBS{"atom_id",
                                                        "bmq",
                                                        "bn",
                                                        "bk",
@@ -421,7 +449,8 @@ TEST(TestConvIgemmNchwCatalog, KnobsTellApartEveryConfigOfAGraph)
                                                        "vec",
                                                        "stride",
                                                        "taps",
-                                                       "stages"};
+                                                       "stages",
+                                                       "flat"};
     std::set<std::vector<int64_t>> seen[3];
     for(const auto& kernel : catalog())
     {
