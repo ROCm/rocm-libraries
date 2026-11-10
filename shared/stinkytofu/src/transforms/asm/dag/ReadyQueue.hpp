@@ -26,7 +26,6 @@
 #include <cmath>
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
-#include <optional>
 #include <queue>
 #include <utility>
 #include <vector>
@@ -166,7 +165,6 @@ struct BBScheduleState {
 // When an AnalysisManager is added, this class moves there — same interface.
 class ScheduleAnalysisCache {
     std::map<BasicBlock*, BBScheduleState> bbStates_;
-    std::optional<bool> queueFillPolicy_;
 
    public:
     void store(BasicBlock* bb, const BBScheduleState& state) {
@@ -180,14 +178,6 @@ class ScheduleAnalysisCache {
 
     void erase(BasicBlock* bb) {
         bbStates_.erase(bb);
-    }
-
-    std::optional<bool> queueFillPolicy() const {
-        return queueFillPolicy_;
-    }
-
-    void setQueueFillPolicy(bool enabled) {
-        queueFillPolicy_ = enabled;
     }
 };
 
