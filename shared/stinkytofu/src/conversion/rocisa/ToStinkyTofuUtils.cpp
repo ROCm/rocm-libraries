@@ -1278,6 +1278,8 @@ void applyLogicalPayload(LogicalInstruction* logical, const rocisa::Instruction*
         if (typed->modifier) logical->global = convertGLOBALModifiers(*typed->modifier, asmCaps);
     } else if (const auto* typed = dynamic_cast<const rocisa::TensorLoadToLds*>(inst)) {
         if (typed->tensor) logical->tensor = convertTENSORModifiers(*typed->tensor);
+    } else if (const auto* typed = dynamic_cast<const rocisa::TensorStoreFromLds*>(inst)) {
+        if (typed->tensor) logical->tensor = convertTENSORModifiers(*typed->tensor);
     } else if (const auto* typed = dynamic_cast<const rocisa::MUBUFReadInstruction*>(inst)) {
         logical->mubuf = buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps);
     } else if (const auto* typed = dynamic_cast<const rocisa::MUBUFStoreInstruction*>(inst)) {
