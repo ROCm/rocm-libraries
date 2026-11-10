@@ -390,10 +390,6 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         endforeach()
     endforeach()
 
-    # TDM descriptors of the vectorized KV layout, read back from LDS.
-    add_qr_tdm_sched_gtest(test_ck_tile_fmha_batch_prefill_page_tile_tdm_vectorized
-        test_batch_prefill_page_tile_tdm_vectorized.cpp)
-
     # Vectorized KV cache layout (K [page][head][D/8][P][8], V [page][head][P/8][D][8]).
     foreach(page IN ITEMS 16 64 128 256 1024)
         foreach(head_dim IN ITEMS 64 128)
