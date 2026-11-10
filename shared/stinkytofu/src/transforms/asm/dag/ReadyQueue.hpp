@@ -83,9 +83,6 @@ struct DAGNode {
     // deadline (earliest in-region matrix consumer), parent-VALU inputs first,
     // then DsReadOrder + WMMA-affinity.
     unsigned dsReadPriority = UINT_MAX;
-    // Develop-compatible priority used when the reset-time queue-fill policy is disabled.
-    // Kept separately so evaluating the policy never changes the baseline ordering model.
-    unsigned dsReadPriorityBaseline = UINT_MAX;
     // Earliest in-region matrix consumer of this ds_read, in DAG-node id order.
     // UINT_MAX means that the load feeds a later region/iteration. The pre-scan owns this
     // relationship so queue policies do not have to repeat its graph walk.
