@@ -29,6 +29,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaRaggedFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SoftmaxSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/TopkSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedSdpaDensify.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedSdpaFwdSupport.hpp>
 
@@ -279,6 +280,8 @@ private:
             return detail::MoeGroupedMatmulBwdSignatureKey(node, tensorMap, computeType);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SoftmaxAttributes:
             return detail::SoftmaxSignatureKey(node, tensorMap, computeType);
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::TopkAttributes:
+            return detail::TopkSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RopeAttributes:
             return detail::RopeSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes:

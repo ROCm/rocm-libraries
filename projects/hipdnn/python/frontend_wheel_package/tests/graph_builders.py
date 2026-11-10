@@ -585,6 +585,24 @@ def build_softmax_graph():
     return graph, p, s, stats
 
 
+def build_topk_graph():
+    """Build a top-k graph (x [2, 3, 16], k 4, largest) with INT64 indices and values.
+
+    Returns (graph, x, values, indices).
+    """
+    graph = create_float_graph()
+    x = hipdnn.Tensor.create([2, 3, 16], hipdnn.DataType.FLOAT)
+    x.set_name("x")
+
+    values, indices = graph.topk(x, hipdnn.TopkAttributes().set_k(4))
+    values.set_name("values")
+    values.set_output(True)
+    indices.set_name("indices")
+    indices.set_output(True)
+
+    return graph, x, values, indices
+
+
 def build_custom_op_graph():
     """Build a two-in/two-out custom-op graph returning (graph, a, b, y0, y1)."""
     graph = create_float_graph()

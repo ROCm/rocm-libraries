@@ -42,6 +42,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "sdpa_backward_attributes_generated.h"
 #include "softmax_attributes_generated.h"
 #include "tensor_attributes_generated.h"
+#include "topk_attributes_generated.h"
 
 namespace hipdnn_flatbuffers_sdk {
 namespace data_objects {
@@ -96,11 +97,12 @@ enum class NodeAttributes : uint8_t {
   KdaAttributes = 25,
   RopeAttributes = 26,
   SoftmaxAttributes = 27,
+  TopkAttributes = 28,
   MIN = NONE,
-  MAX = SoftmaxAttributes
+  MAX = TopkAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[28] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[29] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -129,13 +131,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[28] {
     NodeAttributes::GdnAttributes,
     NodeAttributes::KdaAttributes,
     NodeAttributes::RopeAttributes,
-    NodeAttributes::SoftmaxAttributes
+    NodeAttributes::SoftmaxAttributes,
+    NodeAttributes::TopkAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[29] = {
+  static const char * const names[30] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -164,13 +167,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "KdaAttributes",
     "RopeAttributes",
     "SoftmaxAttributes",
+    "TopkAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::SoftmaxAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::TopkAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -287,6 +291,10 @@ template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::Sof
   static const NodeAttributes enum_value = NodeAttributes::SoftmaxAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::TopkAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::TopkAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -397,6 +405,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects
 
 template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::SoftmaxAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::TopkAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -645,6 +657,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::SoftmaxAttributes ?
       reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(value) : nullptr;
   }
+  hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *AsTopkAttributes() {
+    return type == NodeAttributes::TopkAttributes ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *AsTopkAttributes() const {
+    return type == NodeAttributes::TopkAttributes ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -761,6 +781,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::SoftmaxAttributes: {
       return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::TopkAttributes: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -971,6 +995,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes *attributes_as_SoftmaxAttributes() const {
     return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SoftmaxAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_flatbuffers_sdk::data_objects::TopkAttributes *attributes_as_TopkAttributes() const {
+    return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::TopkAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -1095,6 +1122,10 @@ template<> inline const hipdnn_flatbuffers_sdk::data_objects::RopeAttributes *No
 
 template<> inline const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes>() const {
   return attributes_as_SoftmaxAttributes();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::TopkAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::TopkAttributes>() const {
+  return attributes_as_TopkAttributes();
 }
 
 struct NodeBuilder {
@@ -1637,6 +1668,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::TopkAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -1764,6 +1799,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::TopkAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -1879,6 +1918,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(value);
       return CreateSoftmaxAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::TopkAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(value);
+      return CreateTopkAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -1991,6 +2034,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::SoftmaxAttributes: {
       value = new hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::TopkAttributes: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(u.value));
       break;
     }
     default:
@@ -2132,6 +2179,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::SoftmaxAttributes: {
       auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::SoftmaxAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::TopkAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::TopkAttributesT *>(value);
       delete ptr;
       break;
     }

@@ -242,6 +242,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid softmax graph)";
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::TopkAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidTopkGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid top-k graph)";
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RopeAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidRopeGraph();
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
@@ -428,6 +433,33 @@ TEST(TestJson, RopeWithoutOffsetRoundTrip)
     EXPECT_TRUE(graphJson.at("nodes").at(0).at("rope_offset_ext").is_null());
 
     toJsonAndBackTestSuite(graph, "(RoPE trailing segment)");
+}
+
+TEST(TestJson, TopkRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidTopkGraph();
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+
+    const auto& node = graphJson.at("nodes").at(0);
+    EXPECT_EQ(node.at("inputs").at("x_tensor_uid").get<int64_t>(), 1);
+    EXPECT_EQ(node.at("outputs").at("indices_tensor_uid").get<int64_t>(), 2);
+    EXPECT_EQ(node.at("outputs").at("values_tensor_uid").get<int64_t>(), 3);
+    EXPECT_EQ(node.at("k").get<int64_t>(), 3);
+    EXPECT_FALSE(node.at("largest").get<bool>());
+
+    toJsonAndBackTestSuite(graph, "(top-k with values)");
+}
+
+TEST(TestJson, TopkWithoutValuesRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidTopkGraph(false);
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+
+    EXPECT_FALSE(graphJson.at("nodes").at(0).at("outputs").contains("values_tensor_uid"));
+
+    toJsonAndBackTestSuite(graph, "(top-k indices only)");
 }
 
 // GraphToJsonAndBack covers one graph per node type; these cover the second

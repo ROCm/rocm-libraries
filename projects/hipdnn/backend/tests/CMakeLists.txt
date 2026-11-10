@@ -63,6 +63,9 @@ add_executable(
     descriptors/TestSoftmaxOperationDescriptor.cpp
     descriptors/TestSoftmaxOperationFromNode.cpp
     descriptors/TestGraphDescriptorSoftmax.cpp
+    descriptors/TestTopkOperationDescriptor.cpp
+    descriptors/TestTopkOperationFromNode.cpp
+    descriptors/TestGraphDescriptorTopk.cpp
     descriptors/TestRopeOperationDescriptor.cpp
     descriptors/TestRopeOperationFromNode.cpp
     descriptors/TestGraphDescriptorRope.cpp

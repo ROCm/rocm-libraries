@@ -1,0 +1,101 @@
+operation:
+  name: "Topk"
+  class_name: "TopkOperationDescriptor"
+  fbs_table: "TopkAttributes"
+  fbs_generated_header: "topk_attributes_generated.h"
+
+  # cuDNN has no top-k node (cudnn-frontend include/cudnn_frontend/node/ has no
+  # topk header), so every backend name carries the _EXT suffix.
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_TOPK_DESCRIPTOR_EXT"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_TOPK"
+
+  error_label: "Top-k"
+  packer_operation_label: "top-k"
+  packer_finalize_label: "top-k"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_TOPK_EXT"
+
+  frontend:
+    packer_function: "createTopkOperation"
+    unpacker_function: "unpackTopkOperation"
+    node_class: "TopkNode"
+    attributes_class: "TopkAttributes"
+
+    inputs:
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+    outputs:
+      - name: "values"
+        enum_name: "VALUES"
+        required: false
+        getter_name: "get_values"
+        setter_name: "set_values"
+      - name: "indices"
+        enum_name: "INDICES"
+        required: true
+        getter_name: "get_indices"
+        setter_name: "set_indices"
+    graph_method_name: "topk"
+    graph_method_params:
+      - name: "x"
+        tensor_name: "x"
+    graph_return_type: "array"
+    graph_return_outputs:
+      - "values"
+      - "indices"
+    node_type_enum: "NodeType::TOPK"
+    node_attributes_union_type: "TopkAttributes"
+
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "XDESC_EXT"
+      required: true
+      frontend_getter: "get_x()"
+
+    - name: "indices"
+      fbs_field: "indices_tensor_uid"
+      attr_suffix: "INDICES_DESC_EXT"
+      required: true
+      frontend_getter: "get_indices()"
+
+    - name: "values"
+      fbs_field: "values_tensor_uid"
+      attr_suffix: "VALUES_DESC_EXT"
+      required: false
+      frontend_getter: "get_values()"
+
+  data_fields:
+    - name: "k"
+      fbs_field: "k"
+      attr_name: "HIPDNN_ATTR_OPERATION_TOPK_K_EXT"
+      type: "scalar_int64"
+      required: true
+      frontend_getter: "get_k()"
+
+    - name: "largest"
+      fbs_field: "largest"
+      attr_name: "HIPDNN_ATTR_OPERATION_TOPK_LARGEST_EXT"
+      type: "bool"
+      required: false
+      default_value: "true"
+      frontend_getter: "get_largest()"
+
+  tensor_array_fields: []
+
+  has_compute_data_type: false
+
+  test_data:
+    tensor_const_prefix: "K_TOPK_"
+    tensor_uids: { x: 9300, indices: 9301, values: 9302 }
+    tensor_configs:
+      x: { dims: [2, 3, 8], strides: [24, 8, 1] }
+      indices: { dims: [2, 3, 4], strides: [12, 4, 1], data_type: INT64 }
+      values: { dims: [2, 3, 4], strides: [12, 4, 1] }
+    field_values:
+      k: 4
+      largest: "false"

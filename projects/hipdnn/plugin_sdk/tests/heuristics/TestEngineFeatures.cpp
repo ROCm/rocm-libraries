@@ -867,7 +867,7 @@ TEST(TestEngineFeatures, EveryNodeTypePublishesItsOperands)
             EXPECT_GT(operands, 0U);
         }
     }
-    EXPECT_EQ(visited, 27U);
+    EXPECT_EQ(visited, 28U);
 }
 
 TEST(TestEngineFeatures, ConvolutionBackwardDataPublishesItsOperands)
@@ -1511,6 +1511,16 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
              return single({{2, 4, 8, 16}, {2, 4, 8, 16}}, softmax);
          },
          5120.0},
+        // 1 * x.numel (2 * 3 * 8 = 48).
+        {[] {
+             TopkAttributesT topk;
+             topk.x_tensor_uid = 1;
+             topk.indices_tensor_uid = 2;
+             topk.values_tensor_uid = 3;
+             topk.k = 4;
+             return single({{2, 3, 8}, {2, 3, 4}, {2, 3, 4}}, topk);
+         },
+         48.0},
     };
     std::set<NodeAttributes> counted;
     for(const auto& [make, flops] : cases)

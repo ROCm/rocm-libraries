@@ -174,6 +174,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         schemas/kda_attributes.fbs
         schemas/rope_attributes.fbs
         schemas/softmax_attributes.fbs
+        schemas/topk_attributes.fbs
     )
     hipdnn_generate_flatbuffer_headers(
         TARGET hipdnn_flatbuffers_sdk

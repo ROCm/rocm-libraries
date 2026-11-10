@@ -105,6 +105,7 @@
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
 #endif
+#include <hipdnn_frontend/attributes/TopkAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ConvolutionFpropUnpacker.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
@@ -149,6 +150,7 @@
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 #endif
+#include <hipdnn_frontend/node/TopkNode.hpp>
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 
 #include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
@@ -6337,6 +6339,55 @@ public:
             std::make_shared<SoftmaxNode>(std::move(attributes), graph_attributes));
 
         return ret;
+    }
+
+    /**
+     * @brief Selects the top-k entries along the last dimension of `x`.
+     *
+     * For each row (all leading dims of `x`), writes the `k` largest (`set_largest(true)`,
+     * the default) or smallest entries, sorted best-first. Equal values keep the lower index
+     * first, so the result is deterministic; NaN compares greater than every number (first
+     * when selecting the largest, last when selecting the smallest). `k = 1` with
+     * `largest = true` is argmax.
+     *
+     * Both outputs are created by this method and have the dims of `x` with the last dim
+     * replaced by `k`. `indices` is INT32 or INT64 and defaults to INT64 (torch.topk
+     * convention) when its data type is left unset; `values` takes the data type of `x` when
+     * left unset. `values` is always created and returned; mark it
+     * virtual (`set_is_virtual(true)`) when only the indices are consumed. (The serialized
+     * node also accepts no values tensor, e.g. when lifted from a backend descriptor.)
+     *
+     * @param x Input tensor, rank >= 1, with `1 <= k <= x.dims.back()`.
+     * @param attributes Operation configuration (`set_k()`, `set_largest()`).
+     * @return `{values, indices}`.
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 2> topk(std::shared_ptr<TensorAttributes> x,
+                                                          TopkAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Topk_" + std::to_string(_sub_nodes.size()));
+        }
+        // A null x is tolerated here so the error surfaces from pre_validate_node() as a
+        // missing-input error rather than a crash while auto-naming.
+        if(x && x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+
+        auto values = outputTensor(attributes.get_name() + "::VALUES");
+        auto indices = outputTensor(attributes.get_name() + "::INDICES");
+
+        attributes.set_x(std::move(x));
+        attributes.set_values(values);
+        attributes.set_indices(indices);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<TopkNode>(std::move(attributes), graph_attributes));
+
+        return {values, indices};
     }
 
     /**

@@ -60,6 +60,7 @@ from support_features import (
     sdpa,
     scalar_source,
     sdpa_backward,
+    topk,
 )
 from support_features.coverage import (
     DEFAULT_BUNDLES_DIR,
@@ -791,6 +792,7 @@ class TestFeatureMatrixNames:
             "RMSNorm",
             "Rope",
             "Softmax",
+            "Topk",
         }
 
     def test_rmsnorm_backward_is_rmsnorm_not_pointwise(self) -> None:
@@ -7061,6 +7063,91 @@ def _custom_op(
         "data": list(data),
     }
     return node, tensors
+
+
+def _topk(
+    x_dims=(2, 8),
+    k=3,
+    largest=True,
+    dtype="float",
+    values_dtype=None,
+    index_dtype="int64",
+    values=True,
+    out_dims=None,
+) -> tuple[dict, dict]:
+    x_dims = list(x_dims)
+    if out_dims is None:
+        out_dims = x_dims[:-1] + [k]
+    tensors = {
+        1: {"uid": 1, "dims": x_dims, "data_type": dtype},
+        2: {"uid": 2, "dims": list(out_dims), "data_type": index_dtype},
+    }
+    node = {
+        "inputs": {"x_tensor_uid": 1},
+        "outputs": {"indices_tensor_uid": 2},
+        "k": k,
+        "largest": largest,
+    }
+    if values:
+        tensors[3] = {
+            "uid": 3,
+            "dims": list(out_dims),
+            "data_type": values_dtype or dtype,
+        }
+        node["outputs"]["values_tensor_uid"] = 3
+    return node, tensors
+
+
+class TestTopkExtract:
+    PLAIN = {
+        "dtype:fp32",
+        "index_dtype:int64",
+        "order:largest",
+        "values:present",
+        "k:partial",
+    }
+
+    def test_node_and_ports_cover_every_schema_field(self) -> None:
+        node, _ = _topk()
+        assert set(batchnorm.bound(node)) | {"k", "largest"} == table_fields(
+            topk.SCHEMA_FILE, topk.SCHEMA_TABLE
+        )
+
+    def test_plain_graph(self) -> None:
+        assert topk.extract(*_topk()) == self.PLAIN
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = topk.extract(*_topk())
+        for kwargs in (
+            {"dtype": "half", "index_dtype": "int32", "k": 1, "largest": False},
+            {"dtype": "bfloat16", "k": 8, "values": False},
+        ):
+            reached |= topk.extract(*_topk(**kwargs))
+        assert reached == {f.id for f in topk.FEATURES}
+
+    def test_k_one_equal_to_last_dim_is_argmax(self) -> None:
+        features = topk.extract(*_topk(x_dims=(4, 1), k=1))
+        assert "k:argmax" in features
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            ({"k": 0}, "k 0 is not in"),
+            ({"k": 9}, "k 9 is not in"),
+            ({"out_dims": (2, 4)}, "indices_tensor_uid dims"),
+            ({"index_dtype": "float"}, "is not int32 or int64"),
+            ({"values_dtype": "half"}, "is not that of x_tensor_uid"),
+        ],
+    )
+    def test_rejects(self, kwargs: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            topk.extract(*_topk(**kwargs))
+
+    def test_rejects_unbound_port(self) -> None:
+        node, tensors = _topk()
+        node["outputs"]["indices_tensor_uid"] = None
+        with pytest.raises(FeatureError, match="indices_tensor_uid is not bound"):
+            topk.extract(node, tensors)
 
 
 def _softmax(

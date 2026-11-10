@@ -38,6 +38,7 @@
 #include "SdpaFwdOperationDescriptor.hpp"
 #include "SoftmaxOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
+#include "TopkOperationDescriptor.hpp"
 #include "VariantDescriptor.hpp"
 // Required: EngineHeuristicDescriptor holds std::unique_ptr<SelectionHeuristic>
 // via forward declaration, so the complete type must be visible where
@@ -125,6 +126,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR:
         privateDesc = std::make_shared<RopeOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_TOPK_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<TopkOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<RMSNormOperationDescriptor>();

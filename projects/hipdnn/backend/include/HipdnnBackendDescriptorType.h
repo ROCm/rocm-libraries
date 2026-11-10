@@ -361,6 +361,14 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_SOFTMAX_DESCRIPTOR = 40,
 
     /**
+     * @brief Top-k operation descriptor (extension)
+     *
+     * Selects the k largest or smallest entries along the last dimension of X,
+     * producing an INT32/INT64 INDICES tensor and an optional VALUES tensor.
+     */
+    HIPDNN_BACKEND_OPERATION_TOPK_DESCRIPTOR_EXT = 41,
+
+    /**
      * @brief RoPE forward operation descriptor
      *
      * Applies rotate-half rotary position embedding to a segment of the last

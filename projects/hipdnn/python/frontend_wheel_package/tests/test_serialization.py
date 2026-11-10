@@ -40,6 +40,7 @@ from .graph_builders import (
     build_rope_graph,
     build_sdpa_backward_graph,
     build_sdpa_graph,
+    build_topk_graph,
 )
 
 # One entry per graph-construction operation exposed by the Python bindings.
@@ -101,6 +102,7 @@ _OPERATION_CASES = (
         "MoeGroupedMatmulAttributes",
     ),
     ("rope", lambda: build_rope_graph()[0], "RopeAttributes"),
+    ("topk", lambda: build_topk_graph()[0], "TopkAttributes"),
     ("custom_op", lambda: build_custom_op_graph()[0], "CustomOpAttributes"),
     ("resample_fwd", lambda: build_resample_fwd_graph()[0], "ResampleFwdAttributes"),
     ("resample_bwd", lambda: build_resample_bwd_graph()[0], "ResampleBwdAttributes"),

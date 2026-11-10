@@ -1661,6 +1661,7 @@ the trainer, and the runtime compute the same number.
    | `ResampleBwdAttributes` | `dy.numel · Π window[i]` | |
    | `BlockScaleQuantizeAttributes`, `BlockScaleDequantizeAttributes` | `2·x.numel` | |
    | `RopeAttributes` | `3·y.numel` | The rotation's multiply-add pair and the output scale, on every element. |
+   | `TopkAttributes` | `x.numel` | One comparison per input element. |
    | `SoftmaxAttributes` | `5·p.numel` | Max, subtract, exp, sum and divide on every element. |
    | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` is `Sq·Sk`, or the attended pairs under a causal mask. |
    | `SdpaBackwardAttributes` | `2.5 ×` the forward count on its `q`/`k`/`v`/`o` | The FlashAttention convention. |
@@ -1671,7 +1672,7 @@ the trainer, and the runtime compute the same number.
    chosen once and held; what matters is that every engine counts the same. A formula refuses — the
    node's work is unknown — when its operands are inconsistent: a missing tensor, a non-positive dim, or
    shapes that do not compose. The convolutions, Matmul, and SDPA forward and backward also require
-   floating-point operands. So 22 of the 25 node types have a static count; whether a given graph has one
+   floating-point operands. So 23 of the 26 node types have a static count; whether a given graph has one
    is still rule 3's to decide.
 6. **Bytes are a declared convention, and three different quantities are kept apart.**
    - **Logical footprint** — `$graph.logical_bytes`, a feature. The sum over the graph's non-virtual

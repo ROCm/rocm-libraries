@@ -3807,6 +3807,65 @@ inline flatbuffers::FlatBufferBuilder createValidSoftmaxGraph(bool withStats = t
     return builder;
 }
 
+// Top-k smallest: x [2, 8] FLOAT, k 3, largest false -> indices [2, 3] INT32 and, when
+// withValues is true, values [2, 3] FLOAT.
+inline flatbuffers::FlatBufferBuilder createValidTopkGraph(bool withValues = true)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> xDims = {2, 8};
+    const std::vector<int64_t> xStrides = {8, 1};
+    const std::vector<int64_t> outDims = {2, 3};
+    const std::vector<int64_t> outStrides = {3, 1};
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        2,
+        "indices",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+        &outStrides,
+        &outDims));
+    ::flatbuffers::Optional<int64_t> valuesUid = ::flatbuffers::nullopt;
+    if(withValues)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                3,
+                "values",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &outStrides,
+                &outDims));
+        valuesUid = 3;
+    }
+
+    auto topkAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateTopkAttributes(
+        builder, 1, 2, valuesUid, 3, false);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "topk",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::TopkAttributes,
+        topkAttributes.Union()));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 // RoPE, Qwen-style partial rotary: x [1, 2, 3, 8] FLOAT, freqs [1, 1, 3, 4] FLOAT, rope_dim 4,
 // leading segment (rope_offset_ext 0), output_scale 0.5 -> y [1, 2, 3, 8]. When
 // withOffset is false, rope_offset_ext is absent (cuDNN trailing segment).

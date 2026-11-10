@@ -35,6 +35,7 @@
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 #include <hipdnn_frontend/node/SoftmaxNode.hpp>
+#include <hipdnn_frontend/node/TopkNode.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -117,6 +118,8 @@ namespace hipdnn_frontend::detail
     case HIPDNN_OPERATION_TYPE_LAYERNORM_EXT:
         return {std::make_shared<graph::LayerNormNode>(graph::LayernormAttributes{}, graphAttrs),
                 {}};
+    case HIPDNN_OPERATION_TYPE_TOPK_EXT:
+        return {std::make_shared<graph::TopkNode>(graph::TopkAttributes{}, graphAttrs), {}};
     case HIPDNN_OPERATION_TYPE_ROPE_FWD_EXT:
         return {std::make_shared<graph::RopeNode>(graph::RopeAttributes{}, graphAttrs), {}};
     case HIPDNN_OPERATION_TYPE_MATMUL_EXT:

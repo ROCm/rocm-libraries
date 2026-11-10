@@ -62,6 +62,8 @@ add_executable(
     IntegrationSoftmaxDescriptorLowering.cpp
     IntegrationMoeGroupedMatmulDescriptorLifting.cpp
     IntegrationMoeGroupedMatmulDescriptorLowering.cpp
+    IntegrationTopkDescriptorLifting.cpp
+    IntegrationTopkDescriptorLowering.cpp
     IntegrationRopeDescriptorLifting.cpp
     IntegrationRopeDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp

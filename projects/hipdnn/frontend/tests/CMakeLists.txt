@@ -88,6 +88,9 @@ add_executable(
     TestSoftmaxAttributes.cpp
     TestSoftmaxNode.cpp
     TestGraphSoftmax.cpp
+    TestTopkAttributes.cpp
+    TestTopkNode.cpp
+    TestGraphTopk.cpp
     TestRopeAttributes.cpp
     TestRopeNode.cpp
     TestGraphRope.cpp

@@ -36,6 +36,7 @@ enum class NodeType
     MOE_GROUPED_MATMUL = 22,
     MOE_GROUPED_MATMUL_BWD = 23,
     SOFTMAX = 25,
+    TOPK = 26,
     ROPE = 24,
 };
 
