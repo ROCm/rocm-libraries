@@ -311,7 +311,7 @@ rules:
       - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [one_token], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
       - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token], strides_v: [self_overlapping]}
     source: "a stride on a dimension of extent 1 is never used; with non-zero strides two different indices reach one element only when two dimensions have extent > 1"
-    adapted: "The Layer 1 form also counts zero extents. O and Stats list only `negative`: D-OUTPUT-SELF-ALIAS already removes their other two classes. Stats has no head-dim stride class. A view (`inherited`) reads with its owner's strides: the owner's own clause removes the row, and a stride on a view dimension of extent 1 is never used. The self_overlapping clauses count the dimensions of the stored tensor: K heads are 1 with q_heads one or mqa; a paged K or V is the pool [B x pages, H, page size, D] (class_to_value paging; page_size partial gives two dimensions above 1, and V's pages hold two tokens with page_size_k_vs_v differ); a dense side beside a paged one spans max_seq_len_kv. The class value many is taken as three or more tokens (the shape tiers and the size sweep give 31 or more)."
+    adapted: "The Layer 1 form also counts zero extents. O and Stats list only `negative`: D-OUTPUT-SELF-ALIAS already removes their other two classes. Stats has no head-dim stride class. A view (`inherited`) reads with its owner's strides: the owner's own clause removes the row, and a stride on a view dimension of extent 1 is never used. The self_overlapping clauses count the dimensions of the stored tensor: K heads are 1 with q_heads one or mqa; a paged K or V is the pool [B x pages, H, page size, D] (class_to_value paging; page_size partial gives two dimensions above 1, and V's pages hold two tokens with page_size_k_vs_v differ); a dense side beside a paged one spans max_seq_len_kv. The class value many is taken as three or more tokens (the shape classes and the size sweep give 31 or more)."
     evidence: inferred
 
   - id: D-REL-ALIBI-HEAD-COUNT
@@ -619,6 +619,7 @@ rules:
       - {causal_alignment: [bottom_right], window_alignment: [top_left]}
     source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp::set_causal_mask and ::set_causal_mask_bottom_right (the causal setters write diagonal_alignment and right_bound); projects/hipdnn/flatbuffers_sdk/schemas/sdpa_attributes.fbs SdpaAttributes fields left_bound, right_bound and diagonal_alignment (one of each); projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp::SdpaAttributes::diagonal_alignment (one member), written by the two causal setters and by ::set_diagonal_alignment, the only other writer; node/SdpaFwdNode.hpp::pre_validate_node -> node/detail/Utilities.hpp::validateSdpaDiagonalBand (one left_bound and one right_bound checked)"
     note: "Removed at every length relation. With equal lengths the two diagonals give the same scores, but a graph can state only one alignment, so a row that names two alignments cannot be built. Causal and sliding-window alignment must be the same."
+    debatable: "The same score pattern can still be written another way, as an additive bias of 0 / -inf or a block mask; that changes other axes of the case, so the settings themselves stay unexpressible."
     evidence: read in code
 
   - id: F-EXTENT-NONZERO
@@ -638,6 +639,7 @@ rules:
     shapes_axes: [alibi]
     omits: "the slope axis (standard, other positive, zero, negative)"
     source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp::set_alibi_mask; FBS SdpaAttributes::alibi_mask; no 'slope' setting in SA, NODE, the schemas or PY"
+    debatable: "The API does not document which slopes alibi_mask = true uses, nor which diagonal ALiBi measures distance from. If the slopes are not the standard sequence, alibi = present itself is underspecified, not only the other slope classes."
     evidence: "read in code (absence); the meaning of alibi = present is inferred"
 
   - id: F-NO-SOFTCAP
@@ -675,6 +677,7 @@ rules:
     omits: "scale_source value 'default'"
     source: "the SA header comment ('When neither is set'); projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp::sdpa, its doc comment (scale 1.0 when none is set); FBS SdpaAttributes::attn_scale_value"
     still_expressible: "The same number: scale_value = inverse_sqrt_d. Unset is an API-path variant (unset vs set-to-default)."
+    debatable: "Because an equivalent value stays expressible, this can also be read as an API-path variant rather than an exclusion."
     evidence: read in code
 
   - id: F-RAGGED-OFFSETS-ARE-LENGTHS

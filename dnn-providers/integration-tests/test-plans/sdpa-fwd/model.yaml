@@ -9,7 +9,7 @@
 #
 # Fixed choices
 #   - The class-to-value table includes the values the engine under test is sensitive to
-#     (head sizes 64, 128, 192). Rules hold only for the tested values.
+#     (head sizes 64, 128, 192).
 #   - The shared base case is one that ASM_SDPA_ENGINE accepts on both gfx942 and gfx950:
 #     bf16, head size 128/128, no mask.
 #   - Only the C++ API route is run.
@@ -21,6 +21,9 @@
 #   class          a group of values chosen by MEANING (for example "one" vs "many"). A value of a
 #                  class axis is a class; the class-to-value table gives the concrete number(s).
 #   relationship   an axis that says how two sizes relate (shorter / equal / longer).
+#   shape class    one set of concrete sizes: S, H, M, L or X (`level_labels.shape_tiers`). In
+#                  keys and notes, "tier" with S, H, M, L or X names a shape class; a test tier
+#                  (quick, standard, comprehensive, full) is a `level`.
 #   child          an axis that exists only under a parent value. When the parent has another
 #                  value, the child is absent from the case and adds no pair.
 #   level          graph   = decided by the graph alone (validate, build, applicability query);
@@ -43,20 +46,13 @@
 #   in a short recipe.
 #   Each axis carries `group` (its interaction group) and `labels`, one entry per value:
 #       <value>: [usage, changes_numbers, answer_key]
-#     usage            common | rare | fringe — how often real software uses the value. fringe: no
-#                      mainstream software uses it; only a level with `usage: any` (full) takes it.
-#     changes_numbers  "yes"     the correct output changes (a requested extra output counts: it is
-#                                compared too);
-#                      layout    the correct output stays the same, but the engine reads or writes
-#                                memory differently, so only a numerical check shows a mistake;
-#                      unclear   the evidence supports both "yes" and layout;
-#                      "no"      no number can change (acceptance only).
-#     answer_key       "yes" a reference can compute the expected output; partial = only together
-#                      with other values (see level_labels.answer_key_needs); "no" = no reference.
+#   The label values and their meanings are in docs/test-plans/sdpa-fwd.md section 4. A requested
+#   extra output counts as a changed number: it is compared too. Only a level with `usage: any`
+#   (full) takes a fringe value.
 #   Values that a rule removes still carry labels; no case can hold them, so the labels never matter.
-#   Each axis also carries `size_sensitive: [yes | no, reason]`: "yes" when a larger shape tier can
+#   Each axis also carries `size_sensitive: [yes | no, reason]`: "yes" when a larger shape class can
 #   change what the setting exercises (tile edges, many pages, long accumulation), "no" when the
-#   smallest tier already shows everything it does (element formats, scalars, layouts).
+#   smallest shape class already shows everything it does (element formats, scalars, layouts).
 #   The level recipe is `levels:` at the end; the extra label data it uses is `level_labels:`.
 #   Only the level step of the generator reads them; the pairwise case generator does not.
 #   The answer_key labels follow the SDPA CPU and GPU reference executors
@@ -67,9 +63,9 @@
 #   strides from the levels.
 #   Quick treats the data-type combination as one setting (levels `super_setting`). Every level
 #   admits answer_key partial; full holds the answer-key "no" values only in its uncheckable singles.
-#   Five paging and packing values carry usage `fringe`, so only full runs them. Comprehensive
-#   keeps one shape tier per row, uses tiers above S only for size-sensitive rows, and keeps an M
-#   case and an L case for every value. Over budget, the level step only reports.
+#   Eight paging and packing values carry usage `fringe`, so only full runs them. Comprehensive
+#   keeps one shape class per row, uses shape classes above S only for size-sensitive rows, and
+#   keeps an M case and an L case for every value. Over budget, the level step only reports.
 #   The references decline ALiBi with bottom-right causal alignment (AK-ALIBI-TOP-LEFT-CAUSAL), so
 #   the BLOOM real-world row uses top-left causal. A ragged offset on a paged K or V has no defined
 #   meaning (rule D-RAGGED-NOT-THROUGH-PAGES); ragged Q over paged K/V is checkable.
@@ -88,6 +84,9 @@ api_record:
   # `<file>::<function>` for a path. A quoted string after a function is an error message or a
   # condition in it. Every citation is at `sha`, unless it names a later commit (`at <sha>`): the
   # ragged-container citations are at 4faed2e1219, a develop commit after `sha`.
+  # The reference-executor abbreviations (PU, CSK, GSK, RSD, RTB, SRI) are listed in the comment
+  # above `level_labels.answer_key_needs`. UTIL is
+  # frontend/include/hipdnn_frontend/node/detail/Utilities.hpp.
   paths:  # relative to projects/hipdnn/
     SA: frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp
     ATTR: frontend/include/hipdnn_frontend/attributes/Attributes.hpp
@@ -1292,7 +1291,7 @@ axes:
       - {id: max_only, meaning: "set_logit_max alone"}
       - {id: sum_exp_only, meaning: "set_score_sum_exp alone"}
     api_paths: [cpp, python]
-    cite: "SA::set_logit_max, SA::set_score_sum_exp (two independent setters); references PU::isSupportedSdpaFwdNode ('cuDNN Max / Sum_exp row statistics'), SdpaFwdPlan.hpp::SdpaFwdPlanBuilder::buildNodePlan (each output handled alone)"
+    cite: "SA::set_logit_max, SA::set_score_sum_exp (two independent setters); references PU::isSupportedSdpaFwdNode ('cuDNN Max / Sum_exp row statistics'), cpu_graph_executor/detail/SdpaFwdPlan.hpp::SdpaFwdPlanBuilder::buildNodePlan (each output handled alone)"
     group: G7-aux-outputs
     size_sensitive: ["no", "reduced over the key tiles, but tier H (two tiles, one partial) already runs it in standard"]
     labels:
@@ -1649,7 +1648,7 @@ class_to_value:
   alibi_head_count:
     power_of_two: {H_q: q_heads}
     not_power_of_two: {H_q_by_power_of_two: {8: 6, 32: 24}, otherwise: null,
-                       note: "H_q = 3/4 of the power-of-two count it replaces (8 -> 6, the BLOOM-style count of the reference bundle alibi_causal_tl_h6; 32 -> 24). q_heads one never reaches it (D-REL-ALIBI-HEAD-COUNT). Shape tiers set the power-of-two count first; they use only 8 and 32, so no other count needs a value (otherwise: null)."}
+                       note: "H_q = 3/4 of the power-of-two count it replaces (8 -> 6, the BLOOM-style count of the reference bundle alibi_causal_tl_h6; 32 -> 24). q_heads one never reaches it (D-REL-ALIBI-HEAD-COUNT). Shape classes set the power-of-two count first; they use only 8 and 32, so no other count needs a value (otherwise: null)."}
   head_dim:
     d1: 1
     d64: 64
@@ -1659,7 +1658,7 @@ class_to_value:
     d96: 96
     d512: 512
     d576: 576
-    note: "Engine answer-key pairs (head_dim_qk, head_dim_v): (128,128) and (192,128) forward. 64 is a backward-table value, included as a likely-refused probe value. 256 is a real-model size (Gemma 2 9B head_dim 256) with no ASM kernel: a likely-refused value for ASM, a real value for other engines. 96 is Phi-3 mini; 576 (Q, K) with 512 (V) is DeepSeek-V3 MLA decode. Their answer_key yes is read in code: the reference gate has no head-size check (PlanUtils.hpp); no run has measured them yet."
+    note: "Engine answer-key pairs (head_dim_qk, head_dim_v): (128,128) and (192,128) forward. 64 is a backward-table value, included as a likely-refused probe value. 256 is a real-model size (Gemma 2 9B head_dim 256) with no ASM kernel: a likely-refused value for ASM, a real value for other engines. 96 is Phi-3 mini; 576 (Q, K) with 512 (V) is DeepSeek-V3 MLA decode. Their answer_key yes is read in code: the reference gate has no head-size check (PU::isSupportedSdpaFwdNode); no run has measured them yet."
   dtype_relation:
     same: {k_v: same_as_q}
     differs:
@@ -1803,7 +1802,7 @@ class_to_value:
   block_mask_pattern:
     layout: {tile: [128, 128], dtype: uint8, dims: [B, H_q, {ceil_div: [S_q, 128]}, {ceil_div: [{ceil_div: [S_kv, 128]}, 8]}],
              bits: {per_tile: 1, tiles_per_byte: 8, order: least_significant_first, clear_bit: masks_the_tile},
-             note: "One bit per 128 x 128 score tile, 8 key tiles per byte, least significant bit first; a clear bit masks the tile. The references take a mask over more than one key tile: the reference gate checks only the mask's shape (isSupportedSdpaBlockMask, PlanUtils.hpp), and both references answered and agreed on 2-key-tile masks (runner, gfx942). With paged K/V, S_kv is the paged key extent"}
+             note: "One bit per 128 x 128 score tile, 8 key tiles per byte, least significant bit first; a clear bit masks the tile. The references take a mask over more than one key tile: the reference gate checks only the mask's shape (PU::isSupportedSdpaBlockMask), and both references answered and agreed on 2-key-tile masks (runner, gfx942). With paged K/V, S_kv is the paged key extent"}
     all_open: {allowed: all}
     mixed: {allowed: alternating, always_allowed: first_column, note: "the first tile column allowed, every other tile alternating"}
     some_rows_blocked: {allowed: all, blocked_rows: [last]}
@@ -1869,7 +1868,7 @@ class_to_value:
 base_cases:
   shared:
     decided_by: "a base ASM_SDPA_ENGINE accepts on gfx942 and gfx950 — bf16, head size 128/128, no mask. Every other value is chosen from inside the engine's answer key."
-    concrete: "B 2, H_q = H_k = H_v 8, S_q = S_kv 256, d 128/128, bf16 in and out, fp32 compute, BHSD packed, scale 1/sqrt(128) as a float attribute, no mask, no optional input or output"
+    concrete: "B 2, H_q = H_k = H_v 8, S_q = S_kv from the shape class (64 at S), d 128/128, bf16 in and out, fp32 compute, BHSD packed, scale 1/sqrt(128) as a float attribute, no mask, no optional input or output"
     values:
       batch_packing: padded
       sequence_lengths: uniform
@@ -2057,8 +2056,8 @@ level_labels:
     - {id: AK-RAGGED-ONE-SIDE-NEEDS-LENGTHS, why: "a ragged side beside a dense side runs only through the dense rewrite, which takes the dense side's lengths from seq_len_q / seq_len_kv and declines without them (RSD::densify: 'no lengths for a dense Q beside a ragged K'). sequence_lengths variable and variable_no_flag state the length tensors; uniform and lengths_in_offsets state none", forbid_any: [
         {batch_packing: [ragged_q_side, ragged_kv_side], sequence_lengths: [uniform, lengths_in_offsets]}]}
 
-  # Concrete sizes per shape tier (S small, L medium, M model, H hazard,
-  # X stress). A tier gives the size of every "many"; a "one" stays 1. Sequence pairs: equal =
+  # Concrete sizes per shape class (S small, L medium, M model, H hazard,
+  # X stress). A shape class gives the size of every "many"; a "one" stays 1. Sequence pairs: equal =
   # S/S; shorter = S_short/S; longer = S/S_short. Head counts and head sizes come from
   # class_to_value (gqa = H_q / 4, at least 2). work = 2 * B * H_q * S_q * S_kv * (d_qk + d_v).
   shape_tiers:
@@ -2358,7 +2357,7 @@ numeric_domains:
 # value is added. Each sweep size has a label:
 #   typical  the class's representative values (shape_tiers and class_to_value);
 #   corner   boundary values near a representative value or a tile edge (rule below);
-#   stress   the axis's extent in shape tier X.
+#   stress   the axis's extent in shape class X.
 # The derivation is a pure function of numeric_domains, the boundary set and the cost model. It
 # uses no seed: the same inputs give the same sweep.
 # ---------------------------------------------------------------------------------------------
@@ -2375,7 +2374,7 @@ size_sweep:
     crossing: "K entries of the interleaved list (axis 1 corner 1, axis 2 corner 1, ..., then corner 2 of each axis, ...) that the value's row can take; the j-th crossed value (from 0, in model order) starts at entry j x K and wraps around; an axis the value fixes is skipped"
   stress:
     tier: X
-    note: "Each size axis takes at most one stress value. Page size whole_sequence and the window sizes scale with tier X's S 4096. The head size takes its largest class value, 256, because tier X's D 128 is not larger than its typical values."
+    note: "Each size axis takes at most one stress value. Page size whole_sequence and the window sizes scale with shape class X's S 4096."
   target_rows: [200, 500]
   over_budget_drop_order: "crossed rows first, from the end of the interleaved list; then plain corner rows, last axis first. Typical, stress and hand-picked rows are never dropped."
   rules: "each derived row is checked by the rule checker; a row that breaks a rule is listed as rejected with its rule and never emitted"
@@ -2383,7 +2382,7 @@ size_sweep:
 # ---------------------------------------------------------------------------------------------
 # Level recipe (draft). Budgets: minutes for the whole level, cumulative;
 # per-case ceilings: MFLOP. The shared base value of a setting is always allowed.
-# An S-tier case is never removed by a ceiling: S is the smallest form of a case.
+# A case at shape class S is never removed by a ceiling: S is the smallest form of a case.
 # ---------------------------------------------------------------------------------------------
 # max_changes: low-change pairwise, counted from the shared base (a child setting switched on or off by its
 # parent's change does not count). Levels without it use packed pairwise.
@@ -2405,19 +2404,20 @@ size_sweep:
 # answer_key: every level admits `yes` and `partial`. Every level is `answerable`: answer_key_needs
 #   removes the combinations the references cannot check. So no generated row pairs an answer-key "no"
 #   value or such a combination with other settings; targeted, real-world and seed rows skip the labels.
-# uncheckable_singles: <shape tier>: the level adds one case at that tier per answer-key "no" value
+# uncheckable_singles: <shape class>: the level adds one case at that shape class per answer-key "no" value
 #   and one per answer_key_needs combination. Each holds only its own reason when a valid row can.
 # Restricting a level's own new cases (each case a level does not keep moves up one level):
-#   larger_tiers: size_sensitive   tiers other than S only for rows that change a setting whose
+#   larger_tiers: size_sensitive   shape classes other than S only for rows that change a setting whose
 #                                  size_sensitive label is "yes"; other rows keep only their S case.
-#   tiers_per_row: one             each row keeps exactly one of its remaining tiers, handed out in turn
-#                                  so that no tier gets more rows than another tier those rows could take.
-#   tiers_per_value: [M, L]        every value that a case at that tier can hold keeps at least one
-#                                  case at that tier, counting lower levels.
+#   tiers_per_row: one             each row keeps exactly one of its remaining shape classes, handed out
+#                                  in turn so that no shape class gets more rows than another one those
+#                                  rows could take.
+#   tiers_per_value: [M, L]        every value that a case at that shape class can hold keeps at least
+#                                  one case at that shape class, counting lower levels.
 # size_sweep: the size-sweep rows a level takes (section `size_sweep`). quick takes the typical
 #   sizes, the cases most likely to pass; standard takes the corner sizes on the plain case and
 #   crossed with size_sensitive settings, the cases most likely to find a defect; comprehensive takes
-#   standard's crossings again at shape tier L; full takes the stress sizes (tier X). It is the one
+#   standard's crossings again at shape class L; full takes the stress sizes (shape class X). It is the one
 #   change to the recipe's selection rules that sizes make.
 levels:
   - {name: quick, budget_min: 5, ceiling_mflop: 20, shapes: [S],
@@ -2429,7 +2429,7 @@ levels:
      usage: [common, rare], changes_numbers: ["yes", layout, unclear], answer_key: ["yes", partial], answerable: true,
      pairs: all, max_changes: {start: 3, escalate: true}, bundle_first: true, one_at_a_time: false, targeted: true,
      size_sweep: [corner_plain, corner_crossed]}
-  - {name: comprehensive, budget_min: 60, ceiling_mflop: 8000, shapes: [S, H, M, L],
+  - {name: comprehensive, budget_min: 120, ceiling_mflop: 8000, shapes: [S, H, M, L],
      usage: [common, rare], changes_numbers: ["yes", layout, unclear], answer_key: ["yes", partial], answerable: true,
      pairs: groups_and_bridges, max_changes: {start: 3, escalate: true}, bundle_first: true, one_at_a_time: true, oat_shapes: [S, L], targeted: true,
      larger_tiers: size_sensitive, tiers_per_row: one, tiers_per_value: [M, L],
