@@ -38,7 +38,7 @@ def test_interleaved_wait_preserves_unconsumed_loads(bias, sav, multi_du):
         _plsinFusedSkipEpilogueMul=lambda: False,
     )
     writer.ss = SimpleNamespace(emitGateResidual=False)
-    writer.beta = writer.loadE = False
+    writer.beta = writer.loadE = writer.tdmStoreLoadC = False
     writer.biasLoadIssued = writer.scaleAlphaVecLoadIssued = [1, 2]
     writer.storesIssued = 0
     # Two elements, one independent LDS read per enabled feature per element.
