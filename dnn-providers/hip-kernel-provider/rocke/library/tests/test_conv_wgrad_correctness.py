@@ -3023,7 +3023,7 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
 @unittest.skipUnless(
     not _SKIP_REASON and _IS_MFMA, _SKIP_REASON or "needs an MFMA GPU + torch"
 )
-class TestWgradPrefetchRegsNumerics(unittest.TestCase):
+class TestWgradPrefetchGlobalRegsNumerics(unittest.TestCase):
     """GPU numerics for ``prefetch_global_regs`` (the register-prefetch K loop).
 
     The flag replaces the synchronous K loop of every pipeline that shares it

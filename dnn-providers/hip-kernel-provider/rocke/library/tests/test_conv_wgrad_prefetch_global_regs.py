@@ -5,7 +5,7 @@
 No GPU and no comgr: spec construction, the validity gates, the lowered IR,
 the kernel identity and the AOT grid, plus the C++ engine's IR where the
 ``rocke_engine`` binding is importable. The numerical counterpart is
-``TestWgradPrefetchRegsNumerics`` in ``test_conv_wgrad_correctness.py``; the
+``TestWgradPrefetchGlobalRegsNumerics`` in ``test_conv_wgrad_correctness.py``; the
 two-engine counterpart is configs 89-105 of the wgrad parity emitters.
 """
 
@@ -66,7 +66,7 @@ def _loop_body(ll: str) -> str:
 _WAIT_LGKM_ONLY = "s.waitcnt(i32 49279)"
 
 
-class TestWgradPrefetchRegsGate(unittest.TestCase):
+class TestWgradPrefetchGlobalRegsGate(unittest.TestCase):
     def test_default_is_off_and_untagged(self):
         spec = _spec()
         self.assertFalse(spec.prefetch_global_regs)
@@ -261,7 +261,7 @@ def _ident(**kw):
     return KernelIdentity(**base)
 
 
-class TestKernelIdentityPrefetchRegs(unittest.TestCase):
+class TestKernelIdentityPrefetchGlobalRegs(unittest.TestCase):
     def test_off_keeps_the_hash(self):
         from kernels.conv.kernel_identity import KernelIdentity
 
@@ -295,7 +295,7 @@ def _geometry(tm, tn, tk, wm, wn, wt, pipeline, epilogue):
     return (tm, tn, tk, wm, wn, wt, pipeline, epilogue, atom)
 
 
-class TestAotPrefetchRegsGrid(unittest.TestCase):
+class TestAotPrefetchGlobalRegsGrid(unittest.TestCase):
     def _jobs(self, arch, geometries, dtype="fp16"):
         from kernels.conv import aot_jobs as aj
         from rocke.core.arch import ArchTarget
@@ -392,7 +392,7 @@ class TestAotPrefetchRegsGrid(unittest.TestCase):
         )
 
 
-class TestPrefetchRegsCrossEngine(unittest.TestCase):
+class TestPrefetchGlobalRegsCrossEngine(unittest.TestCase):
     """The C++ engine emits the Python IR byte for byte and rejects alike."""
 
     def setUp(self):
