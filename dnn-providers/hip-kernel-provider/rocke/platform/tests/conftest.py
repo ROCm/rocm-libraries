@@ -9,6 +9,7 @@
 
 import os
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,37 @@ def pytest_runtest_makereport(item, call):
     report = outcome.get_result()
     report.outcome = "skipped"
     report.longrepr = (str(item.path), item.location[1] + 1, str(call.excinfo.value))
+
+
+def pytest_collection_finish(session):
+    """Before any test runs, call ``prepare_before_tests(items)`` on each
+    collected test module that defines it, with that module's collected items.
+
+    A module uses it for one-time work that would otherwise land inside the
+    first test that needs it and count toward that test's time limit, such as
+    a compile that takes a large share of the limit on a slow host (the library
+    tree's prebuild in library/tests/conftest.py is the same idea for its
+    kernels). The module keeps any error for the tests that need its result; an
+    error that escapes is reported as a warning, never as a session error, so no
+    unrelated test is affected. A ``--collect-only`` run prepares nothing. Under
+    pytest-xdist each worker prepares for itself.
+    """
+    if session.config.option.collectonly:
+        return
+    by_module = {}
+    for item in session.items:
+        module = getattr(item, "module", None)
+        if module is not None and hasattr(module, "prepare_before_tests"):
+            by_module.setdefault(module, []).append(item)
+    for module, items in by_module.items():
+        try:
+            module.prepare_before_tests(items)
+        except Exception as error:  # noqa: BLE001 - must not fail unrelated tests
+            warnings.warn(
+                f"{module.__name__}.prepare_before_tests failed, so its tests do "
+                f"that work themselves: {error!r}",
+                stacklevel=1,
+            )
 
 
 # The IR parity harness' attention families are the one sanctioned platform ->

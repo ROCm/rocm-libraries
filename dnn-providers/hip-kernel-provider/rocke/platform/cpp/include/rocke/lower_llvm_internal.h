@@ -429,6 +429,9 @@ struct rocke_lower
     ROCKE_VEC(rocke_ll_lds_prov_t) lds_prov; /* i64 LDS address value -> gname */
     int smem_pool_size; /* total pool size in bytes (rounded to 16) */
     const char* smem_pool_name; /* "@smem_pool.<kernel>" */
+    /* The GPU-check word's symbol once a tile.gpu_check_failed stores to it
+     * (Python _gpu_check_word); NULL until then. */
+    const char* gpu_check_word;
     ROCKE_VEC(rocke_ll_smem_base_cache_t) smem_base_cache; /* per-(block,alloc) base ptr */
 
     /* scf.for yield recording stack (Python _yield_stack: list of list[str]).
