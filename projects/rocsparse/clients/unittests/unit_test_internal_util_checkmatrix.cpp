@@ -257,9 +257,9 @@ TEST_F(CheckMatrixCsr, empty_check_spmat)
             ASSERT_EQ(rocsparse_spmat_set_attribute(
                           mat, rocsparse_spmat_matrix_type, &matrix_type, sizeof(matrix_type)),
                       rocsparse_status_success);
-            ASSERT_EQ(rocsparse_spmat_set_attribute(
-                          mat, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)),
-                      rocsparse_status_success);
+            ASSERT_EQ(
+                rocsparse_spmat_set_attribute(mat, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)),
+                rocsparse_status_success);
             ASSERT_EQ(rocsparse_spmat_set_attribute(
                           mat, rocsparse_spmat_storage_mode, &storage, sizeof(storage)),
                       rocsparse_status_success);
