@@ -232,8 +232,31 @@ _CASES: tuple[dict, ...] = (
         num_kv_heads=-8,
         sliding_window=256,
     ),
+    dict(paged=True, block_size=16, num_kv_blocks=1 << 20, use_i64_kv_addr=True),
+    dict(use_i64_kv_addr=True),
     dict(paged=True, block_size=16, num_kv_blocks=64, batch=2),
     dict(paged=True, block_size=16, num_kv_blocks=64, varlen=True),
+    dict(paged=True, block_size=16, num_kv_blocks=64, varlen=True, seqlen_kv=1024),
+    # Paged varlen: lengths are maxima (no whole-tile rule), and several sequences
+    # take the head-band order, or qb_minor when the heads do not fill the XCDs.
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        varlen=True,
+        batch=3,
+        seqlen_q=1000,
+        seqlen_kv=1000,
+    ),
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        varlen=True,
+        batch=3,
+        num_query_heads=12,
+        num_kv_heads=2,
+    ),
     dict(paged=True, block_size=16, num_kv_blocks=64, persistent=True),
     dict(paged=True, block_size=16, num_kv_blocks=64, head_size=64),
     dict(paged=True, block_size=16, num_kv_blocks=64),
@@ -297,6 +320,26 @@ _CASES: tuple[dict, ...] = (
     dict(batch=2048, seqlen_q=65536, seqlen_kv=64, num_query_heads=8, num_kv_heads=8),
     dict(seqlen_q=131072, seqlen_kv=64, num_query_heads=128, num_kv_heads=1),
     dict(batch=1953125),
+    # The byte-addressed Q of the ragged and paged varlen bodies: 2 * Q/O elements
+    # at the limit while the element count and K/V stay under theirs.
+    dict(
+        ragged=True,
+        seqlen_q=65500,
+        seqlen_kv=65500,
+        num_query_heads=256,
+        num_kv_heads=2,
+    ),
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        varlen=True,
+        seqlen_q=65500,
+        seqlen_kv=65500,
+        num_query_heads=256,
+        num_kv_heads=2,
+    ),
+    dict(seqlen_q=65536, seqlen_kv=65536, num_query_heads=256, num_kv_heads=2),
     dict(batch=2147483647, seqlen_kv=1048576, num_kv_heads=8),
     # A ragged Q is bounded in BYTES, so it rejects at half the element count the
     # element-addressed paths take. Q/O is 1310720000 elements (under the limit) and
@@ -926,15 +969,26 @@ def test_cases_reach_every_reject_site():
     decides on its own (as the varlen and paged pair-decode rows do)."""
     # Unreachable in both engines: __post_init__ already rejects any dtype other
     # than bf16 / fp16 before the paged block, so no spec reaches this re-check.
-    # The C struct's ``paged`` is a bool, so the Python-only type check has no
-    # C counterpart.
-    unreachable = ("paged not yet implemented for dtype", "paged must be a bool")
+    # The C struct's ``paged`` and ``use_i64_kv_addr`` are bools, so the Python-only
+    # type checks have no C counterpart.
+    # emit_lse is an arch field (gfx950), so no base spec has it; the arch validator
+    # refuses it there.
+    unreachable = (
+        "paged not yet implemented for dtype",
+        "paged must be a bool",
+        "use_i64_kv_addr must be a bool",
+        "emit_lse is not yet supported with paged varlen",
+    )
     all_sites, divisions = _reject_sites()
     sites = {
         (path, line)
         for path, line in all_sites
+        # The reject's text: on its raise line, or on the next when it wraps.
         if not any(
-            text in Path(path).read_text(encoding="utf-8").splitlines()[line - 1]
+            text
+            in "\n".join(
+                Path(path).read_text(encoding="utf-8").splitlines()[line - 1 : line + 1]
+            )
             for text in unreachable
         )
     }

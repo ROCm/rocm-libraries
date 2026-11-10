@@ -106,6 +106,9 @@ extern const rocke_dense_tile_geometry_t
 
 /* INT32_LIMIT = 2**31: signed 32-bit ceiling for tensor extents. */
 #define ROCKE_ATTENTION_DENSE_INT32_LIMIT 2147483648LL
+/* attention_unified.I32_KV_BUFFER_BYTES: the largest K/V cache one i32-addressed
+ * buffer resource covers; a paged cache past it needs use_i64_kv_addr. */
+#define ROCKE_ATTENTION_DENSE_I32_KV_BUFFER_BYTES 0x7FFF0000ULL
 
 /* Reason / message buffers: every reject reason fits. */
 #define ROCKE_ATTENTION_DENSE_REASON_CAP 512
@@ -146,6 +149,7 @@ typedef struct rocke_attention_dense_spec
     bool use_sinks; /* False */
     bool causal_bottom_right; /* False (kw_only) */
     const char* nonpersist_decode; /* "auto" */
+    bool use_i64_kv_addr; /* False (kw_only) */
     int chiplet_num_xcds; /* 8 */
 } rocke_attention_dense_spec_t;
 
