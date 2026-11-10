@@ -44,6 +44,16 @@ Generated or bulk data files (for example rocRoller `.s` assembly, logic/tuning 
   - generated files added as test files or fixtures, and any other change that must be atomic with its code (the code and the files cannot each build and pass without the other in either order): the Inventory excludes them with `--exclude-generated GLOB` (recorded in the ledger header) and says why in `inventory.md`.
 - Generated files are never hand-edited or synthesized; they are always taken whole from L. If a generated file would need different states in two groups, keep both changes in one group.
 
+## Characterization tests
+
+A characterization (golden or snapshot) test pins what code does today: for example the TensileLite suite under `tensilelite/Tests/unit/characterization/`, whose goldens are syrupy `.ambr` files in `__snapshots__/` directories. **Characterization changes land with the feature or fix whose behavior they pin, never in a standalone branch.** This covers the test code, the golden and snapshot files, the fixture data they read, and the records that explain them (an ADR, a `DECISIONS.md` row).
+
+- **Not generated.** Goldens are written by a test tool, but they are the test's expected values and are reviewed as such. They never form a generated set, and the default generated globs do not apply to them; if a glob or `linguist-generated` attribute would claim them (for example `*Logic*/**.yaml` matching a fixture), the Inventory excludes them with `--exclude-generated` and says so in `inventory.md`.
+- **Golden diff = behavior change.** A changed golden shows that the group's code changes what an existing path produces. It goes in the group whose code causes the change, and that group's type is `fix` or `feat`, never `refactor`, `chore` or `style`. A new golden for new behavior goes with the code that adds the behavior.
+- **Shared golden files are entangled entries.** One golden file (or one test module) that pins behavior from several groups is staged like any shared test file (Entangled changes): each snapshot block goes with the group that introduces it, by subtractive states for added blocks and history states for changed values. The intermediate golden must always match the intermediate code: a test case and its snapshot block are in the same group.
+- **Repo gates on goldens apply per branch.** Each branch becomes a PR checked against its parent, so a component's golden rules (for TensileLite, the CI guard that fails a PR changing more than 3 `.ambr` files unless the same PR adds an ADR with `Bulk-Snapshot-Update: yes`) must hold for every branch on its own. The ADR goes in the same group as the goldens it justifies. Never spread a bulk regeneration over several branches to stay under such a threshold.
+- **One exception: pinning before a refactor.** New goldens that pin behavior already on B, placed directly below a `refactor` group that must preserve it, may be their own branch, so the refactor's diff shows no golden change. Their consumer is that refactor; the Planner states this in `plan.md`. Goldens for new or changed behavior are never standalone.
+
 ## Formatting changes
 
 The pre-commit hooks run on the copy before and after the update (0e), so the source arrives hook-clean. Consequences:
@@ -83,7 +93,7 @@ Types are the conventional-commit types. They are used in the Phase 6 `type` col
 | `fix` | bug fixes: small, urgent, uncontroversial. Requires a stated defect: the wrong output, crash or misbehavior the group repairs, and the evidence for it (a failing case, a reachable input). A change that only alters behavior, or whose effect is unverified, is not a `fix` | 1st |
 | `chore` | removing dead code | 2nd |
 | `style` | formatting only | 2nd |
-| `test`, `ci`, `build`, `docs` | changes that are only coverage, CI, build configuration, or documentation. Tests, build lines and docs for code in this split travel inside that code's group (see Phase 4 in `analyze-and-plan.md`) and take its type (`fix`, `feat`, ...); a standalone `test` group is for tests of code that is not part of this split, or tests that cannot be split without invented text. If it depends on a group in this split it goes right after that group; if independent it is 3rd | 3rd |
+| `test`, `ci`, `build`, `docs` | changes that are only coverage, CI, build configuration, or documentation. Tests (including characterization goldens), build lines and docs for code in this split travel inside that code's group (see Phase 4 in `analyze-and-plan.md`) and take its type (`fix`, `feat`, ...); a standalone `test` group is for tests of code that is not part of this split, or tests that cannot be split without invented text. If it depends on a group in this split it goes right after that group; if independent it is 3rd | 3rd |
 | `refactor`, `perf` | restructuring with no behavior change; performance work | 4th |
 | `feat` | new behavior, and plumbing that later features need | 5th |
 
