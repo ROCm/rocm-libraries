@@ -135,6 +135,13 @@ inline const CDNA5Config& cdna5ConfigForArch(const std::array<int, 3>& arch) {
 
 using WmmaQueueWindow = WmmaQueueTimeline::Window;
 
+struct QueueFillResetSegment {
+    std::span<const WmmaQueueWindow> wmmas;
+    int remainingDsLoads = 0;
+    unsigned beginNode = 0;
+    unsigned endNode = 0;
+};
+
 // A VALU feeding a WMMA is placed this many matrix windows before that consumer. Queue-fill
 // profitability uses the same effective consumer position instead of maintaining a second lead.
 inline constexpr int kWmmaParentValuLeadWindows = 2;
@@ -171,13 +178,13 @@ inline bool queueFillConsumerSlackAllows(int consumerCycle, int criticalDsReadyC
     return consumerCycle - criticalDsReadyCycle >= std::max(0, safetyMarginCycles);
 }
 
-// Experimental result: when ds_loads remain, a reset burst is useful only if at least one hardware
-// queue's worth of WMMAs remains after that burst. This reuses the queue timeline's predicted burst
-// and the instruction metadata depth; it does not introduce a second queue model or a tunable
-// threshold.
+// Experimental result: a DS-free reset does not need a queue-fill ordering, and when ds_loads
+// remain, a reset burst is useful only if at least one hardware queue's worth of WMMAs remains
+// after that burst. This reuses the queue timeline's predicted burst and the instruction metadata
+// depth; it does not introduce a second queue model or a tunable threshold.
 inline bool experimentalQueueFillTailSizeAllows(int remainingWmmas, int burstWmmas,
                                                 int remainingDsLoads, int hardwareQueueDepth) {
-    if (remainingDsLoads == 0) return true;
+    if (remainingDsLoads == 0) return false;
     return remainingWmmas - burstWmmas >= hardwareQueueDepth;
 }
 
@@ -810,8 +817,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool wmmaQueueFillPending_ = false;
     bool headerFillPending_ = false;  // per BB: the loop header's first WMMA region is still ahead
     // Immutable region plan used by the Method-1 queue-fill gate. Node positions are in WMMA
-    // program order; remainingDs_ is cleared as loads are scheduled.
+    // program order; the remaining masks are cleared as instructions are scheduled.
     std::vector<int> wmmaPosByNode_;
+    std::vector<bool> remainingWmmas_;
     std::vector<bool> remainingDs_;
     std::vector<WmmaQueueWindow> regionWmmaWindows_;
     std::unordered_map<const StinkyInstruction*, unsigned> regionNodeId_;
@@ -1032,7 +1040,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool promotePrefetchAddressValu();
     bool promotePrefetchAtWindow();
     bool promoteWmmaQueueFill();
-    bool resetQueueFillPolicyAllowsBurst();
+    QueueFillResetSegment queueFillResetSegment(
+        std::optional<unsigned> resetNodeId = std::nullopt) const;
+    bool resetQueueFillPolicyAllowsBurst(std::optional<unsigned> resetNodeId = std::nullopt);
     bool issuableNow(DAGNode* node) const;
     DAGNode* bestDsRead() const;
     bool loopHeadBalanceHoldsWmma() const;
@@ -1104,8 +1114,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
         });
         if (waitAlu_) waitAlu_->commit(inst);
         const auto nodeIt = regionNodeId_.find(&inst);
-        if (nodeIt != regionNodeId_.end() && nodeIt->second < remainingDs_.size() && isDSRead(inst))
-            remainingDs_[nodeIt->second] = false;
+        if (nodeIt != regionNodeId_.end()) {
+            const unsigned id = nodeIt->second;
+            if (id < remainingDs_.size() && isDSRead(inst)) remainingDs_[id] = false;
+        }
         if (wmmaQueueFillPending_ && outstandingWmmas() >= effectiveWmmaQueueDepth()) {
             wmmaQueueFillPending_ = false;
             dsSpread_.noteHeldUntil(wmmaIssuedCountThisRegion_);
@@ -1593,6 +1605,9 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     advanceTime(node->inst->issueCycles, TimeKind::Issue);
     wmmaIssueConfig.issuedCount--;
 
+    const auto nodeIt = regionNodeId_.find(node->inst);
+    if (nodeIt != regionNodeId_.end() && nodeIt->second < remainingWmmas_.size())
+        remainingWmmas_[nodeIt->second] = false;
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
     wmmaIssuedCountThisRegion_++;
     if (wmmaRefilling_ && wmmaRefillLeft_ > 0) --wmmaRefillLeft_;
@@ -1928,6 +1943,41 @@ bool CDNA5ReadyQueue::promoteDueLastDs() {
     return true;
 }
 
+QueueFillResetSegment CDNA5ReadyQueue::queueFillResetSegment(
+    std::optional<unsigned> resetNodeId) const {
+    const auto emptyWmmas =
+        std::span<const WmmaQueueWindow>(regionWmmaWindows_).subspan(regionWmmaWindows_.size());
+    if (!regionDag_) return {emptyWmmas};
+
+    const unsigned nodeCount = static_cast<unsigned>(regionDag_->nodes.size());
+    const unsigned beginNode = resetNodeId ? std::min(*resetNodeId + 1, nodeCount) : 0;
+    unsigned endNode = nodeCount;
+    for (unsigned id = beginNode; id < nodeCount; ++id) {
+        if (isBarrierWait(*regionDag_->nodes[id].inst)) {
+            endNode = id;
+            break;
+        }
+    }
+
+    int firstWmma = static_cast<int>(regionWmmaWindows_.size());
+    int pastLastWmma = 0;
+    int remainingDsLoads = 0;
+    for (unsigned id = beginNode; id < endNode; ++id) {
+        if (id < remainingDs_.size() && remainingDs_[id]) ++remainingDsLoads;
+        if (id >= wmmaPosByNode_.size() || id >= remainingWmmas_.size() || !remainingWmmas_[id])
+            continue;
+        const int position = wmmaPosByNode_[id];
+        firstWmma = std::min(firstWmma, position);
+        pastLastWmma = std::max(pastLastWmma, position + 1);
+    }
+
+    const auto wmmas = firstWmma < pastLastWmma
+                           ? std::span<const WmmaQueueWindow>(regionWmmaWindows_)
+                                 .subspan(firstWmma, pastLastWmma - firstWmma)
+                           : emptyWmmas;
+    return {wmmas, remainingDsLoads, beginNode, endNode};
+}
+
 // L4 reset-fill eligibility policy: decide once at each queue reset whether to permit its WMMA
 // burst. It consults the completed L5 DS plan only as a forecast; it is not an L5 run-time veto
 // over an admitted L4 promotion. The reset's scheduling snapshot predicts the burst with the live
@@ -1938,20 +1988,16 @@ bool CDNA5ReadyQueue::promoteDueLastDs() {
 //
 // Permit the burst only when every required ds_load returns before the first in-region matrix
 // consumer with the scheduling policy's additional cycle margin.
-bool CDNA5ReadyQueue::resetQueueFillPolicyAllowsBurst() {
-    const int firstRemainingWmma =
-        std::clamp(wmmaIssuedCountThisRegion_, 0, static_cast<int>(regionWmmaWindows_.size()));
-    const auto remainingWmmas =
-        std::span<const WmmaQueueWindow>(regionWmmaWindows_).subspan(firstRemainingWmma);
-    const int burst = predictWmmaQueueFillBurst(remainingWmmas, hardwareWmmaQueueDepth_);
-    const int remainingDsLoads = std::count(remainingDs_.begin(), remainingDs_.end(), true);
+bool CDNA5ReadyQueue::resetQueueFillPolicyAllowsBurst(std::optional<unsigned> resetNodeId) {
+    const QueueFillResetSegment segment = queueFillResetSegment(resetNodeId);
+    const int burst = predictWmmaQueueFillBurst(segment.wmmas, hardwareWmmaQueueDepth_);
     const auto experimentalTailAllows = [&]() {
         const bool enable =
-            experimentalQueueFillTailSizeAllows(static_cast<int>(remainingWmmas.size()), burst,
-                                                remainingDsLoads, hardwareWmmaQueueDepth_);
+            experimentalQueueFillTailSizeAllows(static_cast<int>(segment.wmmas.size()), burst,
+                                                segment.remainingDsLoads, hardwareWmmaQueueDepth_);
         PASS_DEBUG(
-            std::cerr << "[CDNA5 queueFillTailExperiment] remainingWMMA=" << remainingWmmas.size()
-                      << " burst=" << burst << " remainingDS=" << remainingDsLoads
+            std::cerr << "[CDNA5 queueFillTailExperiment] remainingWMMA=" << segment.wmmas.size()
+                      << " burst=" << burst << " remainingDS=" << segment.remainingDsLoads
                       << " queueDepth=" << hardwareWmmaQueueDepth_ << " enable=" << enable << "\n");
         return enable;
     };
@@ -1961,7 +2007,7 @@ bool CDNA5ReadyQueue::resetQueueFillPolicyAllowsBurst() {
 
     unsigned firstConsumer = UINT_MAX;
     int firstConsumerWindow = INT_MAX;
-    for (unsigned id = 0; id < remainingDs_.size(); ++id) {
+    for (unsigned id = segment.beginNode; id < segment.endNode; ++id) {
         if (!remainingDs_[id]) continue;
         const DAGNode& ds = regionDag_->nodes[id];
         const unsigned consumer = ds.dsFirstMatrixConsumer;
@@ -1982,7 +2028,7 @@ bool CDNA5ReadyQueue::resetQueueFillPolicyAllowsBurst() {
     int criticalDsWindow = -1;
     int criticalDsReadyCycle = -1;
     int requiredDs = 0;
-    for (unsigned id = 0; id < remainingDs_.size(); ++id) {
+    for (unsigned id = segment.beginNode; id < segment.endNode; ++id) {
         if (!remainingDs_[id] || regionDag_->nodes[id].dsFirstMatrixConsumer != firstConsumer)
             continue;
         const int issue = dsSpread_.plannedIssueWindow(id, heldUntil);
@@ -2817,7 +2863,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             // barrier pair). Count the batches from here; the stage's planned end stays.
             dsSpread_.noteOpen(barrier->id, wmmaIssuedCountThisRegion_);
             if (queueReset)
-                wmmaQueueFillPending_ = wmmaQueueOn() && resetQueueFillPolicyAllowsBurst();
+                wmmaQueueFillPending_ =
+                    wmmaQueueOn() && resetQueueFillPolicyAllowsBurst(barrier->id);
             PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
                                  << " promoted=" << (promotedPhase_ == PromotePhase::Barrier)
                                  << "\n";
@@ -3160,6 +3207,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     }
 
     wmmaPosByNode_.assign(deps.dag.nodes.size(), -1);
+    remainingWmmas_.assign(deps.dag.nodes.size(), false);
     remainingDs_.assign(deps.dag.nodes.size(), false);
     regionWmmaWindows_.clear();
     regionNodeId_.clear();
@@ -3167,6 +3215,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         const DAGNode& node = deps.dag.nodes[id];
         regionNodeId_[node.inst] = id;
         if (isMatrixInstruction(*node.inst)) {
+            remainingWmmas_[id] = true;
             wmmaPosByNode_[id] = static_cast<int>(regionWmmaWindows_.size());
             regionWmmaWindows_.push_back({node.inst->latencyCycles, node.inst->issueCycles,
                                           node.inst->coIssueWindow,
