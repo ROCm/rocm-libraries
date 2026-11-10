@@ -13,6 +13,7 @@
 #include "ck_tile/ops/fmha/block/cast_tile_mx.hpp"
 #include "ck_tile/ops/fmha/block/page_block_navigator.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_fwd_kernel_path_markers.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_affine_k_read.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_affine_v_read.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_prepared_k_read.hpp"

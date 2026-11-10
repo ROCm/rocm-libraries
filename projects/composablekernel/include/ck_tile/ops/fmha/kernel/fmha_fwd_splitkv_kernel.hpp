@@ -7,6 +7,7 @@
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_fwd_kernel_path_markers.hpp"
 
 #include <string>
 #include <type_traits>
@@ -18,35 +19,6 @@
 // O[seqlen_q, hdim_v] = P[seqlen_q, seqlen_k] @ V^T[hdim_v, seqlen_k]
 
 namespace ck_tile {
-
-namespace detail {
-
-// Opt-in markers a pipeline may define to request the TDM DRAM view shapes.
-// Named with a splitkv_ prefix so they cannot collide with the equivalent
-// detectors in fmha_fwd_kernel.hpp when both headers are included.
-template <typename T>
-using splitkv_has_untransposed_v_kernel_path = decltype(T::kUsesUntransposedVKernelPath);
-
-template <typename T>
-using splitkv_has_tdm_affine_dram_path = decltype(T::kUsesTdmAffineDramPath);
-
-template <typename T>
-static inline constexpr bool splitkv_uses_untransposed_v_kernel_path_v = []() {
-    if constexpr(is_detected<splitkv_has_untransposed_v_kernel_path, T>::value)
-        return static_cast<bool>(T::kUsesUntransposedVKernelPath);
-    else
-        return false;
-}();
-
-template <typename T>
-static inline constexpr bool splitkv_uses_tdm_affine_dram_path_v = []() {
-    if constexpr(is_detected<splitkv_has_tdm_affine_dram_path, T>::value)
-        return static_cast<bool>(T::kUsesTdmAffineDramPath);
-    else
-        return false;
-}();
-
-} // namespace detail
 
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
 struct FmhaFwdSplitKVKernel
@@ -87,14 +59,13 @@ struct FmhaFwdSplitKVKernel
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
 
-    // V arrives as (seqlen_k, hdim_v) rather than transposed; this also picks
-    // the page navigator's virtual dim.
+    // Markers are described in fmha_fwd_kernel_path_markers.hpp. Unlike
+    // fmha_fwd_kernel.hpp there is no name-based fallback: a pipeline that
+    // wants these paths must declare them.
     static constexpr bool kUsesUntransposedVKernelPath =
-        detail::splitkv_uses_untransposed_v_kernel_path_v<FmhaPipeline>;
-    // K/V DRAM views stay unpadded; the TDM box clamp zero-fills whatever falls
-    // outside them.
+        detail::uses_untransposed_v_kernel_path_v<FmhaPipeline>;
     static constexpr bool kUsesTdmAffineDramPath =
-        detail::splitkv_uses_tdm_affine_dram_path_v<FmhaPipeline>;
+        detail::uses_tdm_affine_dram_path_v<FmhaPipeline>;
 
     // PageBlockNavigator's VirtualDim names the dimension that is paged, i.e.
     // the one holding seqlen_k. The generic path transposes V to
