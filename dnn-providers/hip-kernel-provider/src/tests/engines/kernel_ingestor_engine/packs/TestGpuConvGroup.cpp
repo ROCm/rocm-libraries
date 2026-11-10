@@ -39,7 +39,8 @@
  *
  * Every config of the installed catalog that the kernel match admits on this device runs on
  * every case, forward and backward data, in fp32, fp16 and bf16: groups of 2, 4, 8 and 16
- * channels, both layouts, stride 2 (forward), asymmetric padding, extents that are not tile
+ * channels, both layouts, stride 2 (backward data by stride phases), asymmetric padding, extents
+ * that are not tile
  * multiples, several channel blocks, and true convolution (the expansion reflects the filter).
  */
 namespace
@@ -285,11 +286,15 @@ std::vector<DeviceCase> deviceCases()
     auto nchw = dense(128, 128, {9, 13}, {3, 3}, {1, 1}, false);
     nchw.groups = 32;
     cases.push_back({"NchwGroups4", nchw});
-    // Forward stride 2 (ResNeXt's stage entries); backward data declines it.
+    // Stride 2 (ResNeXt's stage entries): backward data by stride phases.
     auto strided = dense(64, 64, {13, 34}, {3, 3}, {1, 1}, true);
     strided.groups = 16;
     strided.stride = {2, 2};
     cases.push_back({"NhwcGroups4Stride2", strided});
+    auto stridedFirst = dense(32, 32, {12, 19}, {3, 3}, {0, 1}, false);
+    stridedFirst.groups = 4;
+    stridedFirst.stride = {2, 2};
+    cases.push_back({"NchwGroups8Stride2", stridedFirst});
     // Asymmetric and no padding.
     auto asymmetric = dense(32, 32, {10, 18}, {3, 3}, {0, 2}, true);
     asymmetric.prePadding = {2, 0};
@@ -311,7 +316,7 @@ std::vector<DeviceCase> deviceCases()
 bool served(const ConvShape& shape, ConvDirection direction)
 {
     if(direction == ConvDirection::BACKWARD_DATA
-       && std::any_of(shape.stride.begin(), shape.stride.end(), [](int64_t s) { return s != 1; }))
+       && std::any_of(shape.stride.begin(), shape.stride.end(), [](int64_t s) { return s > 2; }))
     {
         return false;
     }
@@ -492,21 +497,40 @@ TEST(TestConvGroupProblem, ServesSmallGroupsBothDirections)
     {
         const auto problem = parsed(resnext(), direction);
         ASSERT_TRUE(problem.has_value());
-        EXPECT_EQ(problem->args.cg, 4);
-        EXPECT_EQ(problem->args.c, 64);
+        ASSERT_EQ(problem->phases.size(), 1u);
+        const auto& phase = problem->phases.front();
+        EXPECT_EQ(phase.args.cg, 4);
+        EXPECT_EQ(phase.args.c, 64);
         EXPECT_EQ(problem->filterR, 3);
-        EXPECT_EQ(problem->filterS, 3);
-        EXPECT_EQ(problem->expand.backward, direction == ConvDirection::FORWARD ? 0 : 1);
-        EXPECT_EQ(problem->expandBytes, static_cast<size_t>(64 / 16 * 9 * 256 * 2));
+        EXPECT_EQ(problem->kernelR, 3);
+        EXPECT_EQ(phase.expand.swap, direction == ConvDirection::FORWARD ? 0 : 1);
+        // Backward data reflects the taps: tap q reads filter tap 2 - q.
+        EXPECT_EQ(phase.expand.rBase, direction == ConvDirection::FORWARD ? 0 : 2);
+        EXPECT_EQ(phase.expand.rStep, direction == ConvDirection::FORWARD ? 1 : -1);
         // Backward data gathers dy with leading padding R - 1 - ph.
-        EXPECT_EQ(problem->args.ph, direction == ConvDirection::FORWARD ? 1 : 1);
+        EXPECT_EQ(phase.args.ph, 1);
     }
     auto asymmetric = resnext();
     asymmetric.prePadding = {0, 2};
     const auto backward = parsed(asymmetric, ConvDirection::BACKWARD_DATA);
     ASSERT_TRUE(backward.has_value());
-    EXPECT_EQ(backward->args.ph, 2);
-    EXPECT_EQ(backward->args.pw, 0);
+    EXPECT_EQ(backward->phases.front().args.ph, 2);
+    EXPECT_EQ(backward->phases.front().args.pw, 0);
+    // Stride 2: four phases of 2 x 2 taps, each writing every other dx row and column.
+    auto strided = resnext();
+    strided.stride = {2, 2};
+    const auto phased = parsed(strided, ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(phased.has_value());
+    EXPECT_EQ(phased->phases.size(), 4u);
+    EXPECT_EQ(phased->kernelR, 2);
+    EXPECT_EQ(phased->kernelStride, 1);
+    for(const auto& phase : phased->phases)
+    {
+        EXPECT_EQ(phase.args.osh, 2);
+        EXPECT_EQ(phase.args.outH, 12);
+        EXPECT_EQ(phase.args.ho, (12 - phase.args.ooh + 1) / 2);
+        EXPECT_EQ(phase.expand.rStep, -2);
+    }
 }
 
 TEST(TestConvGroupProblem, DeclinesEveryUnservedGraph)
@@ -551,9 +575,9 @@ TEST(TestConvGroupProblem, DeclinesEveryUnservedGraph)
         uneven.stride = {1, 2};
         EXPECT_FALSE(parsed(uneven, direction).has_value());
     }
-    // Backward data at stride 2; forward serves it.
+    // Backward data past stride 2; forward serves it (no kernel ships it).
     auto strided = resnext();
-    strided.stride = {2, 2};
+    strided.stride = {3, 3};
     EXPECT_TRUE(parsed(strided, ConvDirection::FORWARD).has_value());
     EXPECT_FALSE(parsed(strided, ConvDirection::BACKWARD_DATA).has_value());
 }
@@ -618,10 +642,7 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                                                 static_cast<int>(kernel.getIntMetadata("wp")),
                                                 static_cast<int>(kernel.getIntMetadata("cb"))),
                       64 * 1024);
-            if(direction == ConvDirection::BACKWARD_DATA)
-            {
-                EXPECT_EQ(kernel.getIntMetadata("stride"), 1);
-            }
+            EXPECT_LE(kernel.getIntMetadata("stride"), 2);
             std::string tuple = kernel.getStringMetadata("dtype");
             for(const char* knob : KNOBS)
             {

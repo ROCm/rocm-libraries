@@ -85,9 +85,8 @@ long long groupLdsBytes(int elementBytes, int r, int s, int stride, int th, int 
     return rows * cols * (16LL * cb + vec) * elementBytes;
 }
 
-std::optional<unsigned int> groupBlocks(const GroupProblem& problem, int th, int wp, int cb)
+std::optional<unsigned int> phaseBlocks(const K4Args& a, int th, int wp, int cb)
 {
-    const auto& a = problem.args;
     if(th < 1 || wp < 1 || cb < 1 || a.c % (16 * cb) != 0)
     {
         return std::nullopt;
@@ -122,9 +121,9 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
         return std::nullopt;
     }
     // 2-D (a unit depth, its filter one tap deep), unit dilation, one stride both ways
-    // (backward data: unit).
+    // (backward data: 1 or 2).
     if(k.di != 1 || k.dout != 1 || k.ft != 1 || k.pd != 0 || k.sd != 1 || k.dd != 1 || k.dh != 1
-       || k.dw != 1 || k.sh != k.sw || (!forward && k.sh != 1))
+       || k.dw != 1 || k.sh != k.sw || (!forward && k.sh > 2))
     {
         return std::nullopt;
     }
@@ -132,44 +131,98 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
     problem.filterR = k.fr;
     problem.filterS = k.fs;
     problem.stride = k.sh;
-    auto& a = problem.args;
-    a.n = k.n;
-    a.c = k.c;
-    a.cg = cg;
+    const int st = k.sh;
+    // The filter, any strides; true convolution reflected by the expansion.
+    K4ExpandArgs expand{};
+    expand.sK = base.wStrides[0];
+    expand.sC = base.wStrides[1];
+    expand.sR = base.wStrides[3];
+    expand.sS = base.wStrides[4];
+    expand.c = k.c;
+    expand.cg = cg;
+    expand.r = k.fr;
+    expand.s = k.fs;
+    expand.reflect = base.flipFilter != 0 ? 1 : 0;
+    expand.elementBytes = igemm->elementBytes;
+    K4Args args{};
+    args.n = k.n;
+    args.c = k.c;
+    args.cg = cg;
     if(forward)
     {
-        a.hi = k.hi;
-        a.wi = k.wi;
-        a.ho = k.ho;
-        a.wo = k.wo;
-        a.ph = k.ph;
-        a.pw = k.pw;
+        problem.kernelR = k.fr;
+        problem.kernelS = k.fs;
+        problem.kernelStride = st;
+        GroupPhase phase;
+        args.hi = k.hi;
+        args.wi = k.wi;
+        args.ho = k.ho;
+        args.wo = k.wo;
+        args.ph = k.ph;
+        args.pw = k.pw;
+        args.outH = k.ho;
+        args.outW = k.wo;
+        args.osh = args.osw = 1;
+        phase.args = args;
+        expand.rc = k.fr;
+        expand.sc = k.fs;
+        expand.rStep = expand.sStep = 1;
+        phase.expand = expand;
+        problem.phases.push_back(phase);
     }
     else
     {
-        // dx gathers dy with the reflected filter: leading padding R - 1 - ph.
-        a.hi = k.ho;
-        a.wi = k.wo;
-        a.ho = k.hi;
-        a.wo = k.wi;
-        a.ph = k.fr - 1 - k.ph;
-        a.pw = k.fs - 1 - k.pw;
+        // dx[i] gathers dy[(i + pad - r) / st] over the taps r that divide: by phases p = i mod
+        // st, dx[st j + p] = sum over q < ceil(R / st) of dy[j + dmin + q] w[p + pad - st (dmin
+        // + q)], dmin = ceil((p + pad - R + 1) / st), taps past the filter zero.
+        problem.kernelR = static_cast<int>(divUp(k.fr, st));
+        problem.kernelS = static_cast<int>(divUp(k.fs, st));
+        problem.kernelStride = 1;
+        const auto ceilDiv
+            = [](long long a, long long b) { return a >= 0 ? (a + b - 1) / b : -((-a) / b); };
+        for(int pr = 0; pr < st; ++pr)
+        {
+            for(int pc = 0; pc < st; ++pc)
+            {
+                GroupPhase phase;
+                phase.args = args;
+                auto& p = phase.args;
+                p.hi = k.ho;
+                p.wi = k.wo;
+                p.ho = static_cast<int>(divUp(k.hi - pr, st));
+                p.wo = static_cast<int>(divUp(k.wi - pc, st));
+                if(p.ho < 1 || p.wo < 1)
+                {
+                    continue;
+                }
+                const long long dminH = ceilDiv(pr + k.ph - k.fr + 1, st);
+                const long long dminW = ceilDiv(pc + k.pw - k.fs + 1, st);
+                p.ph = static_cast<int>(-dminH);
+                p.pw = static_cast<int>(-dminW);
+                p.outH = k.hi;
+                p.outW = k.wi;
+                p.osh = p.osw = st;
+                p.ooh = pr;
+                p.oow = pc;
+                phase.expand = expand;
+                auto& e = phase.expand;
+                e.rc = problem.kernelR;
+                e.sc = problem.kernelS;
+                e.rBase = static_cast<int>(pr + k.ph - st * dminH);
+                e.rStep = -st;
+                e.sBase = static_cast<int>(pc + k.pw - st * dminW);
+                e.sStep = -st;
+                e.swap = 1;
+                problem.phases.push_back(phase);
+            }
+        }
     }
-    // The filter, any strides (reflected for true convolution by the expansion itself).
-    auto& e = problem.expand;
-    e.sK = base.wStrides[0];
-    e.sC = base.wStrides[1];
-    e.sR = base.wStrides[3];
-    e.sS = base.wStrides[4];
-    e.c = k.c;
-    e.cg = cg;
-    e.r = k.fr;
-    e.s = k.fs;
-    e.backward = forward ? 0 : 1;
-    e.reflect = base.flipFilter != 0 ? 1 : 0;
-    e.elementBytes = igemm->elementBytes;
-    // Workspace: the staged activations (the implicit-GEMM layout of them), then the expanded
-    // filter; the implicit-GEMM filter staging is not used.
+    if(problem.phases.empty())
+    {
+        return std::nullopt;
+    }
+    // Workspace: the staged activations (the implicit-GEMM layout of them), then each phase's
+    // expanded filter; the implicit-GEMM filter staging is not used.
     igemm->w = conv_igemm::Staging{};
     size_t offset = 0;
     for(auto* staging : {&igemm->x, &igemm->y})
@@ -180,16 +233,21 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
             offset = alignUp(offset + staging->bytes);
         }
     }
-    problem.expandOffset = offset;
-    problem.expandBytes = static_cast<size_t>(k.c / 16) * static_cast<size_t>(k.fr * k.fs) * 256
-                          * static_cast<size_t>(igemm->elementBytes);
-    problem.workspaceBytes = alignUp(offset + problem.expandBytes);
-    problem.igemm = std::move(*igemm);
-    // The smallest tile's grid within the launch limits.
-    if(!groupBlocks(problem, 1, 1, 1).has_value())
+    const size_t expandBytes = static_cast<size_t>(k.c / 16)
+                               * static_cast<size_t>(problem.kernelR * problem.kernelS) * 256
+                               * static_cast<size_t>(igemm->elementBytes);
+    for(auto& phase : problem.phases)
     {
-        return std::nullopt;
+        phase.expandOffset = offset;
+        offset = alignUp(offset + expandBytes);
+        // The smallest tile's grid within the launch limits.
+        if(!phaseBlocks(phase.args, 1, 1, 1).has_value())
+        {
+            return std::nullopt;
+        }
     }
+    problem.workspaceBytes = offset;
+    problem.igemm = std::move(*igemm);
     return problem;
 }
 
@@ -328,11 +386,12 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    const int elementBytes = problem->igemm.elementBytes;
-    if(conv_group::groupLdsBytes(elementBytes,
-                                 static_cast<int>(tile->r),
-                                 static_cast<int>(tile->s),
-                                 static_cast<int>(tile->stride),
+    // The halo the kernel stages: its compile-time filter and gather stride (backward data's
+    // stride phases gather at unit stride over the taps a phase reaches).
+    if(conv_group::groupLdsBytes(problem->igemm.elementBytes,
+                                 problem->kernelR,
+                                 problem->kernelS,
+                                 problem->kernelStride,
                                  static_cast<int>(tile->th),
                                  static_cast<int>(tile->wp),
                                  static_cast<int>(tile->cb))
@@ -340,11 +399,13 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    return conv_group::groupBlocks(*problem,
-                                   static_cast<int>(tile->th),
-                                   static_cast<int>(tile->wp),
-                                   static_cast<int>(tile->cb))
-        .has_value();
+    return std::all_of(problem->phases.begin(), problem->phases.end(), [&](const auto& phase) {
+        return conv_group::phaseBlocks(phase.args,
+                                       static_cast<int>(tile->th),
+                                       static_cast<int>(tile->wp),
+                                       static_cast<int>(tile->cb))
+            .has_value();
+    });
 }
 
 std::string elementTypeFor(data_objects::DataType dataType)
@@ -377,12 +438,20 @@ public:
     PreparedConvGroup(IngestorKernelCode conv,
                       IngestorKernelCode expand,
                       std::array<std::optional<IngestorKernelCode>, 2> copies,
-                      GroupProblem problem)
+                      GroupProblem problem,
+                      std::vector<unsigned int> blocks)
         : _conv(std::move(conv))
         , _expand(std::move(expand))
         , _copies(std::move(copies))
         , _problem(std::move(problem))
+        , _blocks(std::move(blocks))
     {
+    }
+
+    /// Each phase's workgroups.
+    const std::vector<unsigned int>& blocks() const
+    {
+        return _blocks;
     }
 
     const IngestorKernelCode& kernelCode() const override
@@ -416,6 +485,7 @@ private:
     IngestorKernelCode _expand;
     std::array<std::optional<IngestorKernelCode>, 2> _copies;
     GroupProblem _problem;
+    std::vector<unsigned int> _blocks;
 };
 
 class ConvGroupDispatchHandler : public IKernelDispatchHandler<Handle>
@@ -464,23 +534,28 @@ public:
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "conv_group dispatch was given a graph its matcher did not admit");
         }
-        const auto blocks = conv_group::groupBlocks(*problem,
-                                                    static_cast<int>(tile->th),
-                                                    static_cast<int>(tile->wp),
-                                                    static_cast<int>(tile->cb));
-        if(!blocks.has_value())
+        std::vector<unsigned int> blocks;
+        for(const auto& phase : problem->phases)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "conv_group dispatch was given a config its kernel match declines");
+            const auto phaseGrid = conv_group::phaseBlocks(phase.args,
+                                                           static_cast<int>(tile->th),
+                                                           static_cast<int>(tile->wp),
+                                                           static_cast<int>(tile->cb));
+            if(!phaseGrid.has_value())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                    "conv_group dispatch was given a config its kernel match declines");
+            }
+            blocks.push_back(*phaseGrid);
         }
 
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         options.add("CONV_GROUP_T", elementTypeFor(problem->igemm.base.dataType));
         options.add("CONV_GROUP_ATOM", std::string(tile->info.kernelType));
-        options.add("CONV_GROUP_R", std::to_string(tile->r));
-        options.add("CONV_GROUP_S", std::to_string(tile->s));
-        options.add("CONV_GROUP_ST", std::to_string(tile->stride));
+        options.add("CONV_GROUP_R", std::to_string(problem->kernelR));
+        options.add("CONV_GROUP_S", std::to_string(problem->kernelS));
+        options.add("CONV_GROUP_ST", std::to_string(problem->kernelStride));
         options.add("CONV_GROUP_TH", std::to_string(tile->th));
         options.add("CONV_GROUP_WP", std::to_string(tile->wp));
         options.add("CONV_GROUP_CB", std::to_string(tile->cb));
@@ -488,7 +563,7 @@ public:
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4Args>());
         conv.setBlockSize(static_cast<unsigned int>(4 * tile->info.wave), 1, 1);
-        conv.setGridSize(*blocks, 1, 1);
+        conv.setGridSize(blocks.front(), 1, 1);
 
         KernelDefinition expandKernel = kernel;
         expandKernel.source.entryPoint = std::string(EXPAND_ENTRY_POINT);
@@ -498,8 +573,8 @@ public:
                                               expandKernel,
                                               options,
                                               signatureOf<K4ExpandArgs>());
-        const long long expandElems
-            = static_cast<long long>(problem->expandBytes) / problem->igemm.elementBytes;
+        const long long expandElems = static_cast<long long>(problem->igemm.args.c / 16)
+                                      * problem->kernelR * problem->kernelS * 256;
         expand.setBlockSize(COPY_BLOCK, 1, 1);
         expand.setGridSize(static_cast<unsigned int>(std::clamp<long long>(
                                (expandElems + COPY_BLOCK - 1) / COPY_BLOCK, 1, COPY_MAX_BLOCKS)),
@@ -549,7 +624,7 @@ public:
             copies[i].emplace(std::move(copy));
         }
         return std::make_unique<PreparedConvGroup>(
-            std::move(conv), std::move(expand), std::move(copies), *problem);
+            std::move(conv), std::move(expand), std::move(copies), *problem, std::move(blocks));
     }
 
     void launch(const Handle& handle,
@@ -610,16 +685,23 @@ public:
                 }
             }
         }
-        void* expanded = base + problem.expandOffset;
-        K4ExpandArgs expand = problem.expand;
-        expand.src = w;
-        expand.dst = expanded;
-        dispatch.expandForStream(stream).launch(stream, expand);
-        K4Args args = problem.args;
-        args.in = forward ? operand[0] : operand[1];
-        args.w = expanded;
-        args.out = forward ? operand[1] : operand[0];
-        dispatch.convForStream(stream).launch(stream, args);
+        // Each phase: its filter expansion, then its gather.
+        for(size_t i = 0; i < problem.phases.size(); ++i)
+        {
+            const auto& phase = problem.phases[i];
+            void* expanded = base + phase.expandOffset;
+            K4ExpandArgs expand = phase.expand;
+            expand.src = w;
+            expand.dst = expanded;
+            dispatch.expandForStream(stream).launch(stream, expand);
+            K4Args args = phase.args;
+            args.in = forward ? operand[0] : operand[1];
+            args.w = expanded;
+            args.out = forward ? operand[1] : operand[0];
+            auto& conv = dispatch.convForStream(stream);
+            conv.setGridSize(dispatch.blocks()[i], 1, 1);
+            conv.launch(stream, args);
+        }
         for(size_t i = 0; i < stagings.size(); ++i)
         {
             if(stagings[i]->needed && !read[i])

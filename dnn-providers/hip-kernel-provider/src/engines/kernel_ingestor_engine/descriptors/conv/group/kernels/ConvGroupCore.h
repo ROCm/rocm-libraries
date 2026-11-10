@@ -107,7 +107,8 @@ __device__ void k4ConvMma(const K4Args& a)
             {
                 const int ow = ow0 + p * 16 + Atom::dRow(lane, e);
                 if(ow < a.wo)
-                    out[((img * a.ho + oh) * a.wo + ow) * a.c + cb * 16 + lane % 16]
+                    out[((img * a.outH + oh * a.osh + a.ooh) * a.outW + ow * a.osw + a.oow) * a.c
+                        + cb * 16 + lane % 16]
                         = K1Elem<T>::store(acc[p][e]);
             }
     }
@@ -116,7 +117,7 @@ __device__ void k4ConvMma(const K4Args& a)
 // The filter expansion (K4ExpandArgs), one element per thread, grid-strided.
 __device__ inline void k4Expand(const K4ExpandArgs& a)
 {
-    const int taps = a.r * a.s;
+    const int taps = a.rc * a.sc;
     const long long total = static_cast<long long>(a.c / 16) * taps * 256;
     const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
     for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
@@ -127,17 +128,17 @@ __device__ inline void k4Expand(const K4ExpandArgs& a)
         const int t = static_cast<int>((i / 256) % taps);
         const int cb = static_cast<int>(i / (256LL * taps));
         const int n = cb * 16 + nn, k = cb * 16 + kk;
-        int fr = t / a.s, fs = t % a.s;
-        // Backward data reflects the tap; true convolution reflects it (again).
-        if(a.backward != a.reflect)
+        int fr = a.rBase + a.rStep * (t / a.sc), fs = a.sBase + a.sStep * (t % a.sc);
+        const bool inside = fr >= 0 && fr < a.r && fs >= 0 && fs < a.s;
+        if(a.reflect)
         {
             fr = a.r - 1 - fr;
             fs = a.s - 1 - fs;
         }
         // The graph filter's output channel and its group-local input channel.
-        const int oc = a.backward ? k : n, ic = a.backward ? n : k;
-        const bool own = oc / a.cg == ic / a.cg;
-        const long long src = oc * a.sK + (ic % a.cg) * a.sC + fr * a.sR + fs * a.sS;
+        const int oc = a.swap ? k : n, ic = a.swap ? n : k;
+        const bool own = inside && oc / a.cg == ic / a.cg;
+        const long long src = own ? oc * a.sK + (ic % a.cg) * a.sC + fr * a.sR + fs * a.sS : 0;
         if(a.elementBytes == 4)
             static_cast<unsigned*>(a.dst)[i] = own ? static_cast<const unsigned*>(a.src)[src] : 0u;
         else
