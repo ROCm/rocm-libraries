@@ -424,10 +424,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Owned by the library, one object per arch, so this reference is stable too.
     const HWModel& hw_;
 
-    // Active queue depth for the region, read from its matrix instructions'
-    // HwInstDesc::matrixQueueDepth metadata.
-    int regionWmmaQueueDepth_ = 1;
-    int regionQueueFillDepth_ = 1;
+    // Hardware queue depth, read from the region's WMMA instruction metadata.
+    int hardwareWmmaQueueDepth_ = 1;
     bool queueFillPolicyEnabled_ = false;
     // Fallback for direct queue use without the function-wide ScheduleAnalysisCache.
     std::optional<bool> localQueueFillPolicy_;
@@ -494,17 +492,16 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
         return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;
     }
-    // WMMA issue queue: the region's per-instruction metadata depth
-    // (regionWmmaQueueDepth_). Depth 1 is the single-window model: a WMMA waits for the
-    // previous one to finish.
+    // WMMA issue queue: the hardware metadata depth (hardwareWmmaQueueDepth_). Depth 1 is the
+    // single-window model: a WMMA waits for the previous one to finish.
     // The queue model runs only with a cover (wmmaQueueCoverCycles) other than 0; otherwise the
     // depth is 1.
-    int wmmaQueueDepth() const {
+    int effectiveWmmaQueueDepth() const {
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
-        return f.wmmaQueueCoverCycles != 0 ? std::max(1, regionWmmaQueueDepth_) : 1;
+        return f.wmmaQueueCoverCycles != 0 ? std::max(1, hardwareWmmaQueueDepth_) : 1;
     }
     bool wmmaQueueOn() const {
-        return wmmaQueueDepth() > 1;
+        return effectiveWmmaQueueDepth() > 1;
     }
     unsigned dsReadPriority(const DAGNode* node) const {
         return queueFillPolicyEnabled_ ? node->dsReadPriority : node->dsReadPriorityBaseline;
@@ -516,7 +513,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
         if (!wmmaQueueOn()) return 0;
         const int cover = getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueCoverCycles;
         if (cover >= 0) return cover;
-        return (wmmaQueueDepth() - 1) * std::max(1, wmmaLatency);
+        return (effectiveWmmaQueueDepth() - 1) * std::max(1, wmmaLatency);
     }
     // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
     // queued cover drops below the refill line (wmmaQueueCover) with room in the queue, and
@@ -532,12 +529,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
     WmmaRefillState wmmaRefillState(int wmmaLatency) const {
         if (!wmmaQueueOn()) return {wmmaRefilling_, wmmaRefillLeft_};
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
-        const bool room = outstandingWmmas() < wmmaQueueDepth();
+        const bool room = outstandingWmmas() < effectiveWmmaQueueDepth();
         WmmaRefillState st{wmmaRefilling_, wmmaRefillLeft_};
         if (st.active) {
             const int target = f.wmmaRefillToCycles > 0
                                    ? f.wmmaRefillToCycles
-                                   : wmmaQueueDepth() * std::max(1, wmmaLatency);
+                                   : effectiveWmmaQueueDepth() * std::max(1, wmmaLatency);
             const bool more = f.wmmaRefillMode == PassFeatureConfig::WmmaRefillMode::Fixed
                                   ? st.left > 0
                                   : queuedCoverCycles() < target;
@@ -1098,7 +1095,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const auto nodeIt = regionNodeId_.find(&inst);
         if (nodeIt != regionNodeId_.end() && nodeIt->second < remainingDs_.size() && isDSRead(inst))
             remainingDs_[nodeIt->second] = false;
-        if (wmmaQueueFillPending_ && outstandingWmmas() >= wmmaQueueDepth()) {
+        if (wmmaQueueFillPending_ && outstandingWmmas() >= effectiveWmmaQueueDepth()) {
             wmmaQueueFillPending_ = false;
             dsSpread_.noteHeldUntil(wmmaIssuedCountThisRegion_);
         }
@@ -1563,7 +1560,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
 
     // Wait until the queue has room (depth 1: until the previous WMMA finished). The
     // queue never waits for a window end while it has room.
-    while (outstandingWmmas() >= wmmaQueueDepth())
+    while (outstandingWmmas() >= effectiveWmmaQueueDepth())
         advanceTime(soonestQueueEnd(), TimeKind::Elapsed);
     if (coIssueCyclePos_ >= activeWmmaLatency_) resetActiveWindow();
     // A WMMA queued behind others starts when the previous one ends: its D is ready later.
@@ -1931,7 +1928,7 @@ bool CDNA5ReadyQueue::queueFillHasConsumerDistance() {
         std::clamp(wmmaIssuedCountThisRegion_, 0, static_cast<int>(regionWmmaWindows_.size()));
     const auto remainingWmmas =
         std::span<const WmmaQueueWindow>(regionWmmaWindows_).subspan(firstRemainingWmma);
-    const int burst = predictWmmaQueueFillBurst(remainingWmmas, regionQueueFillDepth_);
+    const int burst = predictWmmaQueueFillBurst(remainingWmmas, hardwareWmmaQueueDepth_);
     const int heldUntil = wmmaIssuedCountThisRegion_ + burst;
 
     unsigned firstConsumer = UINT_MAX;
@@ -1979,7 +1976,8 @@ bool CDNA5ReadyQueue::queueFillHasConsumerDistance() {
 // prefetch that is the next pickable non-WMMA keeps its own schedule. The vetoes no queue fill
 // overrides still hold the WMMA.
 bool CDNA5ReadyQueue::promoteWmmaQueueFill() {
-    if (!wmmaQueueFillPending_ || wmmaQueue.empty() || outstandingWmmas() >= wmmaQueueDepth())
+    if (!wmmaQueueFillPending_ || wmmaQueue.empty() ||
+        outstandingWmmas() >= effectiveWmmaQueueDepth())
         return false;
     auto [best, latency] = findMostReadyWMMA();
     if (latency > 0 || !issuableNow(best)) return false;
@@ -3014,15 +3012,16 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                    IRList::iterator blockBegin, const RegionDependencies& deps) {
     regionDag_ = &deps.dag;
     carryQueuedWar();
-    regionQueueFillDepth_ = INT_MAX;
+    hardwareWmmaQueueDepth_ = 1;
     queueFillPolicyEnabled_ = queueFillPolicy().value_or(false);
     for (const auto& n : deps.dag.nodes) {
         if (!isMatrixInstruction(*n.inst)) continue;
-        const int depth = n.inst->getHwInstDesc()->matrixQueueDepth;
-        if (depth > 0) regionQueueFillDepth_ = std::min(regionQueueFillDepth_, depth);
+        const int depth = n.inst->getHwInstDesc()->wmmaQueueDepth;
+        if (depth > 0) {
+            hardwareWmmaQueueDepth_ = depth;
+            break;
+        }
     }
-    if (regionQueueFillDepth_ == INT_MAX) regionQueueFillDepth_ = 1;
-    regionWmmaQueueDepth_ = regionQueueFillDepth_;
     wmmaIssuedCountThisRegion_ = 0;
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
@@ -3155,7 +3154,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         wmmaQueueFillPending_ = resetCandidate && queueFillPolicy().value_or(true);
         if (wmmaQueueFillPending_) {
             queueFillPolicyEnabled_ = true;
-            regionWmmaQueueDepth_ = regionQueueFillDepth_;
         }
     }
 
@@ -3869,7 +3867,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // ready queue is first come first serve, so in a rare case it could issue them in
         // another one. A DAG-only edge between consecutive WMMAs, the way the ds read order is
         // locked, makes what is scheduled equal what was planned.
-        const int queueDelay = wmmaQueueDepth() > 1 ? wmmaQueueDepth() : 0;
+        const int queueDelay = effectiveWmmaQueueDepth() > 1 ? effectiveWmmaQueueDepth() : 0;
         const int batch = std::max(1, dagFeatures.dsBatchWmmas);
         const int cyclesPerLoad = effectiveDsCyclesPerLoad(dsTotalThisRegion_);
         // Signal and wait of one barrier share an LDS token. Two tokens at the same window are
@@ -4083,7 +4081,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             wmmaQueueFillPending_ = false;
             queueFillPolicyEnabled_ = false;
             setQueueFillPolicy(false);
-            regionWmmaQueueDepth_ = regionQueueFillDepth_;
             barrierWmmaThresholds_ = unplannedBarrierThresholds;
             planDsSpread();
         }

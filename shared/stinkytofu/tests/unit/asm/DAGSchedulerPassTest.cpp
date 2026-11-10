@@ -1143,7 +1143,7 @@ TEST_F(DAGSchedulerPassTest, StageAnchorAddsWmmaQueueDelayToTheDrain) {
     pfc.loopConfig.unrollGemm = true;
     pfc.dagFeatures.dsSpread = true;
     pfc.dagFeatures.dsReadCyclesPerLoad = 8;
-    // Cover must be non-zero or wmmaQueueDepth() stays 1 and the queue delay is 0.
+    // Cover must be non-zero or effectiveWmmaQueueDepth() stays 1 and the queue delay is 0.
     pfc.dagFeatures.wmmaQueueCoverCycles = 1;
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
@@ -2610,7 +2610,7 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_AutomaticCoverIsOneWmmaShortOfFull) {
         for (int i = 0; i < 8; i++) {
             StinkyInstruction* wmma = createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
             latency = wmma->latencyCycles;
-            depth = wmma->getHwInstDesc()->matrixQueueDepth;
+            depth = wmma->getHwInstDesc()->wmmaQueueDepth;
         }
         ASSERT_GT(depth, 0);
         PassContext ctx;

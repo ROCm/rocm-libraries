@@ -158,8 +158,7 @@ struct CDNA5ReadyQueueTestPeer {
         return q.destOverlapsActiveWmmaSrc(n);
     }
     static void setQueueDepth(CDNA5ReadyQueue& q, const HwInstDesc& desc) {
-        q.regionWmmaQueueDepth_ = std::max(1, static_cast<int>(desc.matrixQueueDepth));
-        q.regionQueueFillDepth_ = q.regionWmmaQueueDepth_;
+        q.hardwareWmmaQueueDepth_ = std::max(1, static_cast<int>(desc.wmmaQueueDepth));
     }
     static constexpr uint8_t kBlocked = CDNA5ReadyQueue::kBlockedSlot;
 };

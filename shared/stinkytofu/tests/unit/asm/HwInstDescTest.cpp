@@ -251,7 +251,7 @@ TEST_F(HwInstDescTest, WMMA_F32_16x16x16_F16) {
     EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3P);
     EXPECT_EQ(desc->unit, ExecUnit::MatrixUnit);
     EXPECT_TRUE(desc->has(IF_WMMA));
-    EXPECT_EQ(desc->matrixQueueDepth, 8);
+    EXPECT_EQ(desc->wmmaQueueDepth, 8);
 
     auto fields = desc->operandFields;
     ASSERT_GE(fields.size(), 3u);
@@ -351,7 +351,7 @@ TEST_F(HwInstDescTest, SWMMA_XDL_F32_16x16x64_BF16) {
     ASSERT_NE(desc, nullptr);
     EXPECT_TRUE(desc->has(IF_SWMMA));
     EXPECT_TRUE(desc->has(IF_WMMA_XDL));
-    EXPECT_EQ(desc->matrixQueueDepth, 8);
+    EXPECT_EQ(desc->wmmaQueueDepth, 8);
 }
 
 // ---------------------------------------------------------------------------
@@ -383,7 +383,7 @@ TEST_F(HwInstDescTest, MXWMMA_XDL_Scale_F32_16x16x128) {
     ASSERT_NE(desc, nullptr);
     EXPECT_TRUE(desc->has(IF_MXWMMA));
     EXPECT_TRUE(desc->has(IF_WMMA_XDL));
-    EXPECT_EQ(desc->matrixQueueDepth, 5);
+    EXPECT_EQ(desc->wmmaQueueDepth, 5);
 }
 
 // ---------------------------------------------------------------------------
