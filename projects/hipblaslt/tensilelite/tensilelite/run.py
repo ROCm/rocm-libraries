@@ -22,6 +22,14 @@
 #
 ################################################################################
 
+"""The TensileLite benchmark and tuning workflow behind ``bin/Tensile``.
+
+``main`` reads one or more config YAMLs and an output directory. It then
+generates candidate kernels, compiles them, benchmarks them on the GPU, picks
+the winners, and writes the library logic and client library. See
+``executeStepsInConfig`` for the steps and their output directories.
+"""
+
 if __name__ == "__main__":
     print("This file can no longer be run as a script.  Run 'tensilelite/bin/Tensile' instead.")
     exit(1)
@@ -66,7 +74,7 @@ TENSILE_CLIENT_PATH = TENSILE_SCRIPT_DIR.parent / TENSILE_CLIENT_PATH
 
 ###############################################################################
 # Execute Steps in Config
-# called from Tensile() below
+# called from main() below
 # calls
 #   BenchmarkProblems.main() to run benchmark steps
 #   LibraryLogic.main() to analyse final benchmark data and produce logic/yaml
@@ -374,7 +382,7 @@ def get_user_max_frequency() -> Optional[int]:
     '''
     # Non-interactive guard: when stdin is not a tty (CI, --build-only via
     # pytest, etc.) we cannot prompt.  Returning None is safe because:
-    #   - The caller in Tensile() already handles None/<=0 with a warning and
+    #   - The caller in main() already handles None/<=0 with a warning and
     #     skips store_max_frequency().
     #   - The downstream consumer (LibraryLogic.read_max_freq) also handles a
     #     missing MAX_FREQ env var gracefully (returns None, caller checks).
@@ -594,11 +602,12 @@ def archNamesFromConfig(configArchitecture, isaList, archNames):
 
 
 ################################################################################
-# TensileLite
-# - below entry points call here
+# main
+# - the installed "Tensile" command and the entry points below call here
 ################################################################################
-def Tensile(userArgs):
+def main(argv=None):
     global globalParameters
+    userArgs = sys.argv[1:] if argv is None else argv
 
     print1("")
     print1(HR)
@@ -869,29 +878,24 @@ def TensileTestPath(*args):
 
 # installed "tensile_rocblas_sgemm" command
 def TensileROCBLASSGEMM():
-    Tensile([TensileConfigPath("rocblas_sgemm.yaml"), "."])
+    main([TensileConfigPath("rocblas_sgemm.yaml"), "."])
 
 
 # installed "tensile_rocblas_dgemm" command
 def TensileROCBLASDGEMM():
-    Tensile([TensileConfigPath("rocblas_dgemm.yaml"), "."])
+    main([TensileConfigPath("rocblas_dgemm.yaml"), "."])
 
 
 # installed "tensile_rocblas_cgemm" command
 def TensileROCBLASCGEMM():
-    Tensile([TensileConfigPath("rocblas_cgemm.yaml"), "."])
+    main([TensileConfigPath("rocblas_cgemm.yaml"), "."])
 
 
 # installed "tensile_rocblas_zgemm" command
 def TensileROCBLASZGEMM():
-    Tensile([TensileConfigPath("rocblas_zgemm.yaml"), "."])
+    main([TensileConfigPath("rocblas_zgemm.yaml"), "."])
 
 
 # installed "tensile_sgemm" command
 def TensileSGEMM5760():
-    Tensile([TensileConfigPath("sgemm_5760.yaml"), "."])
-
-
-# installed "tensile" command
-def main():
-    Tensile(sys.argv[1:])
+    main([TensileConfigPath("sgemm_5760.yaml"), "."])
