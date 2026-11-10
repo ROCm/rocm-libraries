@@ -2169,6 +2169,10 @@ __device__ inline void k1Transpose(const ConvIgemmTransposeArgs& a)
     const long long tileCol = block % colTiles;
     const long long tileRow = (block / colTiles) % rowTiles;
     const long long b = block / (colTiles * rowTiles);
+    if(b >= a.batches)
+    {
+        return;
+    }
     if(a.elementBytes == 4)
         k1TransposeTile<unsigned>(a, tileCol, tileRow, b);
     else
