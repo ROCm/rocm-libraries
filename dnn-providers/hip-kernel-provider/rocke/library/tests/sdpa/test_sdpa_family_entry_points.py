@@ -13,6 +13,7 @@ request both gates decline.
 from __future__ import annotations
 
 from dataclasses import replace
+from functools import cache
 
 import pytest
 
@@ -54,6 +55,13 @@ _ADMITTED = {
 }
 
 
+@cache
+def _admitted_combos(arch):
+    """``registered_sdpa_combos`` for ``_ADMITTED[arch]``, computed once: it
+    enumerates every attention combo, and three tests compare against it."""
+    return registered_sdpa_combos(_ADMITTED[arch])
+
+
 @pytest.mark.parametrize("arch", ARCHES)
 def test_combos_are_exactly_the_gate_admitted_families(arch):
     """The gate-admitted families are reachable and nothing else is."""
@@ -68,7 +76,7 @@ def test_combos_are_exactly_the_gate_admitted_families(arch):
         if _expected(req, c, spec)
     )
     assert want
-    assert registered_sdpa_combos(req) == want
+    assert _admitted_combos(arch) == want
     dense = {c.name for c, _ in want if c.algorithm != TUNING_ALGORITHM}
     assert dense == set(sdpa_dense_candidates(req))
 
@@ -139,7 +147,7 @@ def test_lse_tuning_sweep_includes_the_tiled_2d_path_on_a_prefill_shape():
 def test_sweep_space_is_the_specs_of_the_combos(arch):
     req = _ADMITTED[arch]
     assert tuple(sdpa_sweep_space(req)) == tuple(
-        spec for _, spec in registered_sdpa_combos(req)
+        spec for _, spec in _admitted_combos(arch)
     )
 
 
@@ -148,7 +156,7 @@ def test_dispatch_all_matches_registered_combos(arch):
     req = _ADMITTED[arch]
     results = dispatch_sdpa_all(req)
     assert results
-    assert [(r.candidate, r.spec) for r in results] == list(registered_sdpa_combos(req))
+    assert [(r.candidate, r.spec) for r in results] == list(_admitted_combos(arch))
 
 
 def _declined_by_both(arch):
