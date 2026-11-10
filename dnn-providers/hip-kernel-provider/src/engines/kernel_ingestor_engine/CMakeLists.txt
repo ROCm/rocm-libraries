@@ -246,6 +246,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWrwProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWinogradNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDirectNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvSmallcNative.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_CONV=1)
     include("${PROJECT_SOURCE_DIR}/src/cmake/KernelEmbedding.cmake")
@@ -280,6 +281,10 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirect.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectCore.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectRows.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/smallc/kernels/ConvSmallc.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/smallc/kernels/ConvSmallcArgs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/smallc/kernels/ConvSmallcCore.h"
         CACHE INTERNAL "Kernel sources of the conv engine group, embedded for HIPRTC")
     set(HKP_CONV_KERNEL_KEYS
         kernels/ConvNaive.cpp
@@ -312,6 +317,10 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         kernels/ConvDirect.cpp
         ConvDirectArgs.h
         ConvDirectCore.h
+        ConvDirectRows.h
+        kernels/ConvSmallc.cpp
+        ConvSmallcArgs.h
+        ConvSmallcCore.h
         CACHE INTERNAL "Embedding keys of HKP_CONV_KERNEL_SOURCES, in the same order")
     add_kernels_for_embedding(
         TARGET hip_kernel_provider_impl
