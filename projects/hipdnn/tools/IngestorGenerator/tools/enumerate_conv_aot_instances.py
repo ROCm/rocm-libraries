@@ -256,6 +256,15 @@ def main(argv=None) -> int:
             listed = read_dispatcher_instances(args.rocke_root)
             excludes = read_excludes(args.excludes)
             if excludes:
+                labels = {identity_label(identity) for identity in listed}
+                stale = set(excludes) - labels
+                if stale:
+                    print(
+                        f"{args.excludes}: exclude(s) not in rocKE's gfx950 fwd "
+                        f"dispatcher: {sorted(stale)}",
+                        file=sys.stderr,
+                    )
+                    return 1
                 kept = []
                 for identity in listed:
                     reason = excludes.get(identity_label(identity))

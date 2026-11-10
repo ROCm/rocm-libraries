@@ -321,6 +321,31 @@ def test_main_refuses_a_dtype_the_catalog_does_not_package(
     assert "fp32" in capsys.readouterr().err
 
 
+def test_main_refuses_a_stale_exclude_label(tmp_path, capsys):
+    """An exclude naming a kernel the dispatcher no longer lists is an error, not a
+    silently-ignored no-op: it would otherwise let a since-removed kernel's reason go
+    stale without anyone noticing the exclusion stopped applying."""
+    excludes = tmp_path / "excludes.json"
+    excludes.write_text(
+        json.dumps([{"label": "not-a-real-kernel-label", "reason": "stale"}])
+    )
+    out = tmp_path / "lists"
+    argv = [
+        "--rocke-root",
+        str(_ROCKE),
+        "--excludes",
+        str(excludes),
+        "--output-dir",
+        str(out),
+        "--jobs",
+        "1",
+    ]
+    status = tool.main(argv)
+    assert status == 1
+    assert not out.exists()
+    assert "not-a-real-kernel-label" in capsys.readouterr().err
+
+
 def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path):
     """The shipped catalog's lists are the tool's output for the committed labels and
     the rocKE tree beside them: a change to either has to regenerate the lists (and
