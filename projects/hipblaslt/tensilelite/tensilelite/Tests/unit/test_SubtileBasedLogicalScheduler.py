@@ -7402,7 +7402,7 @@ class TestHalfDisjointClumping:
         from tensilelite.Components.Subtile.InstructionScheduler import (
             _scheduleHalfDisjointHalf)
         return _scheduleHalfDisjointHalf(
-            self._firstHalf(comments), 4, {}, 0, 0,
+            self._firstHalf(comments), 4, {}, 0, None,
             [TestHalfDisjointHalf._marker("cell 1")], True)
 
     def _body(self):

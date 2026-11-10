@@ -4304,8 +4304,6 @@ def _scheduleHalfDisjointHalf(
         conflict = [[any(not _mayReorder(a, b, scc=False)
                          for _, a in first for _, b in second)
                      for _, second in units] for _, first in units]
-    saluEnd = max(firstInterval, intervals - math.ceil(
-        tailScaleReads / _MXFP8_DATA_DS_READS))
 
     def saluCount(insts):
         return sum(_isScalarAlu(x) or _isM0Update(x) for x in insts)
@@ -4317,7 +4315,8 @@ def _scheduleHalfDisjointHalf(
         The loads keep their chained gaps. In stream order, a unit takes
         the least loaded gap between the stream entries it depends on,
         under _MXFP8_SALU_PER_GAP scalar ALU and away from loads and
-        waits. Returns False when a unit finds no run of free slots.
+        waits, outside the gaps kept for scale refreshes. Returns False
+        when a unit finds no run of free slots.
         """
         lifted = {id(inst) for isPair, items in units if not isPair for _, inst in items}
         for slot in placer._placed:
@@ -4339,11 +4338,9 @@ def _scheduleHalfDisjointHalf(
                 else:
                     latest = min(latest, min(spots) - 1)
             high = latest
-            if saluEnd * spi - 1 >= low + len(items) - 1:
-                high = min(latest, saluEnd * spi - 1)
             best = None
             for gap in range(max(low // spi, firstInterval), high // spi + 1):
-                if gap in seams:
+                if gap in seams or shadowReads[gap]:
                     continue
                 insts = intervalInsts(gap)
                 for p in range(max(low, gap * spi),
