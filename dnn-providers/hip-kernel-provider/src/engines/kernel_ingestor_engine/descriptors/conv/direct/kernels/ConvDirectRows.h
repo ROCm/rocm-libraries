@@ -163,12 +163,13 @@ __device__ void k2ConvRows(const K2Args& a)
     static_assert(BC % GE == 0 && BC % KA == 0 && G >= 1 && (G & (G - 1)) == 0, "chunk");
     static_assert(WAVE % G == 0 && G <= 8, "DMA lane map");
     static_assert(PP == 0 || (PP == 1 && WK == 2), "ping-pong needs two channel halves");
-    static_assert(NQ >= 2, "steps");
     constexpr int XPI = WAVE / G; // columns per DMA instruction
     constexpr int XG = (HW + XPI - 1) / XPI; // instructions per halo row
     constexpr int NI = HH * XG; // instructions per stage
     constexpr int IPW = (NI + NW - 1) / NW; // per wave (the last one only for some waves)
-    constexpr int DPS = (IPW + NQ - 2) / (NQ - 1); // per step, steps 0..NQ-2
+    // DMA per step over steps 0..NQ-2 (step 0 alone when a chunk is one step).
+    constexpr int DSTEPS = NQ > 1 ? NQ - 1 : 1;
+    constexpr int DPS = (IPW + DSTEPS - 1) / DSTEPS;
     typedef typename K1Raw<16>::type Raw16;
     typedef typename K1Raw<FB>::type RawF;
     typedef typename Atom::frag Frag;
@@ -298,7 +299,7 @@ __device__ void k2ConvRows(const K2Args& a)
 #pragma unroll
             for(int r = 0; r < R; ++r)
                 loadW(wfr[r], r, nb, cc, q);
-            if constexpr(q < NQ - 1)
+            if constexpr(q < DSTEPS)
             {
                 if(pf)
                     dma(nxt, dmaTile, dmaCc, q * DPS, (q + 1) * DPS);
