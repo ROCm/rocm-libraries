@@ -360,8 +360,6 @@ class FmhaFwdApiTrait:
             f"{self.hdim}-{self.dtype}-{self.mode}-{self.bm0}-{self.bn0}-{self.bk0}-{self.bn0}-{self.bk1}-{self.bk0max}-"
             + f"{self.vlayout}-{self.logits}-{self.mask}-{self.bias}-{self.lse}-{self.dropout}-{self.qscale}-{self.spad}-{self.skpad}-{self.dpad}-{self.dvpad}-{self.kv_memory_layout}-{self.kv_lookup_table}-ps{self.page_size}"
             + ("-gload" if self.use_global_load else "-bload")
-            + ("" if self.kv_splits == 1 else f"-ks{self.kv_splits}")
-            + ("" if self.query_tail_rows == 0 else f"-qt{self.query_tail_rows}")
         )
 
     @property
@@ -1013,8 +1011,6 @@ class PageTileFactoryGfx125:
     SGLang 1D page table, group mode, no mask or a causal/sliding window from either corner (optionally with sink
     tokens and per-head sink logits), optional tanh logits soft cap or elementwise bias or ALiBi,
     optional LSE."""
-
-    arch = GFX125_ARCH
 
     # Unsplit arms: the caller asks for no KV split (num_splits 1). A problem that asks for a split
     # and matches no split arm matches no arm: the dispatch returns -1.
