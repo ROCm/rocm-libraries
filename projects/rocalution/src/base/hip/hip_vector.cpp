@@ -1808,6 +1808,7 @@ namespace rocalution
                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
                 free_hip(&buffer);
+                free_hip(&workspace);
             }
         }
     }
