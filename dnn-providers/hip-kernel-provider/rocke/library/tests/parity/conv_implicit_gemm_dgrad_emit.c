@@ -22,6 +22,64 @@
 
 /* Fill the config for index `idx`.  Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
+/* TF32 compute (mma_dtype "tf32"): fp32 dY / W / dX, each LDS fragment bitcast
+ * to vec<tf32xN> for the arch's TF32 atom -- native XF32 on gfx942 (16x16x8,
+ * 32x32x4), BF16x3 emulation on gfx950 (16x16x32, 32x32x16). N=2 16x16 C=K=64
+ * 3x3 pad 1, 64x64 tile, 2x2 warps. Keep in lockstep with _tf32_spec() in
+ * conv_implicit_gemm_dgrad_emit.py (which lists what each index covers). */
+static int make_cfg_tf32(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    static const struct
+    {
+        const char* arch;
+        int m;
+        int k;
+        int tile_k;
+        int stride;
+        const char* pipeline;
+        const char* epilogue;
+        int split_k;
+    } cfgs[] = {
+        {"gfx950", 16, 32, 64, 1, "mem", "default", 1}, /* 57 */
+        {"gfx950", 32, 16, 32, 2, "compv4", "cshuffle", 1}, /* 58 */
+        {"gfx942", 16, 8, 32, 1, "compv3", "cshuffle", 1}, /* 59 */
+        {"gfx942", 32, 4, 32, 2, "mem", "default", 1}, /* 60 */
+        {"gfx950", 16, 32, 64, 2, "mem", "cshuffle", 2}, /* 61 */
+        {"gfx942", 16, 8, 32, 1, "mem", "default", 2}, /* 62: groups=2 */
+        {"gfx950", 16, 32, 64, 1, "mem", "default", 1}, /* 63: tap_outer_k + dy_halo */
+        {"gfx942", 32, 4, 32, 2, "compv4", "default", 1}, /* 64: uniform_k_decode */
+        {"gfx950", 16, 32, 64, 1, "mem", "default", 1}, /* 65: lds_k_outer, rejected */
+        {"gfx950", 16, 8, 32, 1, "mem", "default", 1}, /* 66: gfx942's atom, rejected */
+    };
+    const int i = idx - 57;
+    const int groups = (idx == 62) ? 2 : 1;
+    const int s = cfgs[i].stride;
+    spec->problem
+        = rocke_conv_problem_make(2, 16, 16, 64 * groups, 64 * groups, 3, 3, s, s, 1, 1, 1, 1);
+    spec->problem.groups = groups;
+    spec->dtype_a = "fp32";
+    spec->dtype_b = "fp32";
+    spec->dtype_d = "fp32";
+    spec->mma_dtype = "tf32";
+    spec->tile_k = cfgs[i].tile_k;
+    spec->warp_tile_m = cfgs[i].m;
+    spec->warp_tile_n = cfgs[i].m;
+    spec->warp_tile_k = cfgs[i].k;
+    spec->pipeline = cfgs[i].pipeline;
+    spec->epilogue = cfgs[i].epilogue;
+    spec->split_k = cfgs[i].split_k;
+    if(idx == 63)
+    {
+        spec->tap_outer_k = true;
+        spec->dy_halo = 2;
+        spec->halo_max_wo = 16;
+    }
+    spec->uniform_k_decode = (idx == 64);
+    spec->lds_k_outer = (idx == 65);
+    *arch = cfgs[i].arch;
+    return 0;
+}
+
 static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
     *spec = rocke_dgrad_conv_spec_default();
@@ -35,6 +93,9 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
     spec->warp_tile_k = 16;
     spec->pipeline = "mem";
     spec->epilogue = "default";
+
+    if(idx >= 57 && idx <= 66)
+        return make_cfg_tf32(idx, spec, arch);
 
     switch(idx)
     {
