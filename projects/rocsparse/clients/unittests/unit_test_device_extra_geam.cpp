@@ -219,13 +219,19 @@ namespace
 
     // C = alpha * A + beta * B where A and B have no rows / no columns / no
     // entries: C has no entries. Combined and split stage sequences.
-    // C is always supplied up front: rocsparse_spgeam analysis without C and
-    // with empty operands writes through a null pointer (library bug, AISPARSE-926).
+    // supply_c is false for the documented order: analysis runs before C is
+    // created, and rocsparse_spgeam_get_output reports nnz (AISPARSE-926).
     template <typename T>
-    void empty_spgeam(rocsparse_handle handle, int64_t m, int64_t n, bool split)
+    void empty_spgeam(rocsparse_handle       handle,
+                      int64_t                m,
+                      int64_t                n,
+                      bool                   split,
+                      bool                   supply_c,
+                      rocsparse_pointer_mode mode)
     {
-        SCOPED_TRACE("m=" + std::to_string(m) + " n=" + std::to_string(n)
-                     + " split=" + std::to_string(split));
+        SCOPED_TRACE("m=" + std::to_string(m) + " n=" + std::to_string(n) + " split="
+                     + std::to_string(split) + " supply_c=" + std::to_string(supply_c)
+                     + " device=" + std::to_string(mode == rocsparse_pointer_mode_device));
         const rocsparse_datatype dt = rocsparse_ut::dt_of<T>();
         Rng                      rng(7);
         const Csr                E
@@ -270,32 +276,70 @@ namespace
                                              dt),
                   rocsparse_status_success);
 
-        PointerModeGuard mode(handle, rocsparse_pointer_mode_host);
-        const T          alpha = from_c<T>(cplx(2.0, 0.0));
-        const T          beta  = from_c<T>(cplx(-1.0, 0.0));
+        PointerModeGuard mode_guard(handle, mode);
+        const bool       device = (mode == rocsparse_pointer_mode_device);
+        Scalar<T>        alpha(cplx(2.0, 0.0), device);
+        Scalar<T>        beta(cplx(-1.0, 0.0), device);
         SpgeamDescrH     descr;
         ASSERT_NE(descr.d, nullptr);
-        spgeam_set_inputs(
-            handle, descr.d, rocsparse_ut::dt_of<T>(), rocsparse_ut::dt_of<T>(), &alpha, &beta);
+        spgeam_set_inputs(handle,
+                          descr.d,
+                          rocsparse_ut::dt_of<T>(),
+                          rocsparse_ut::dt_of<T>(),
+                          alpha.get(),
+                          beta.get());
         if(::testing::Test::HasFatalFailure())
             return;
 
+        auto mat_c_for = [&](stage_t stage) -> rocsparse_spmat_descr {
+            const bool analysis = stage == rocsparse_spgeam_stage_analysis
+                                  || stage == rocsparse_spgeam_stage_symbolic_analysis
+                                  || stage == rocsparse_spgeam_stage_numeric_analysis;
+            if(!supply_c && analysis)
+            {
+                return nullptr;
+            }
+            return sC.p;
+        };
+
         auto run = [&](stage_t stage) {
-            size_t bs = 0;
+            rocsparse_spmat_descr mat_c = mat_c_for(stage);
+            size_t                bs    = 0;
             ASSERT_EQ(rocsparse_spgeam_buffer_size(
-                          handle, descr.d, sA.p, sB.p, sC.p, stage, &bs, nullptr),
+                          handle, descr.d, sA.p, sB.p, mat_c, stage, &bs, nullptr),
                       rocsparse_status_success);
             DevBuf<char> tmp(bs);
-            ASSERT_EQ(
-                rocsparse_spgeam(
-                    handle, descr.d, sA.p, sB.p, sC.p, stage, bs, bs ? tmp.ptr : nullptr, nullptr),
-                rocsparse_status_success);
+            ASSERT_EQ(rocsparse_spgeam(handle,
+                                       descr.d,
+                                       sA.p,
+                                       sB.p,
+                                       mat_c,
+                                       stage,
+                                       bs,
+                                       bs ? tmp.ptr : nullptr,
+                                       nullptr),
+                      rocsparse_status_success);
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         };
         auto analysis_nnz = [&]() {
-            int64_t nnz = -1, r = 0, c = 0;
-            ASSERT_EQ(rocsparse_spmat_get_size(sC.p, &r, &c, &nnz), rocsparse_status_success);
-            ASSERT_EQ(nnz, 0);
+            if(supply_c)
+            {
+                int64_t nnz = -1, r = 0, c = 0;
+                ASSERT_EQ(rocsparse_spmat_get_size(sC.p, &r, &c, &nnz), rocsparse_status_success);
+                ASSERT_EQ(nnz, 0);
+            }
+            else
+            {
+                int64_t nnz = -1;
+                ASSERT_EQ(rocsparse_spgeam_get_output(handle,
+                                                      descr.d,
+                                                      rocsparse_spgeam_output_nnz,
+                                                      &nnz,
+                                                      sizeof(nnz),
+                                                      nullptr),
+                          rocsparse_status_success);
+                ASSERT_EQ(nnz, 0);
+            }
         };
 
         if(!split)
@@ -341,10 +385,20 @@ TEST_F(ExtraGeam, spgeam_empty_operands)
     for(const Dims& d : {Dims{0, 4}, Dims{4, 0}, Dims{6, 5}})
         for(bool split : {false, true})
         {
-            empty_spgeam<float>(handle, d.m, d.n, split);
-            if(HasFatalFailure())
-                return;
-            empty_spgeam<rocsparse_double_complex>(handle, d.m, d.n, split);
+            for(bool supply_c : {true, false})
+            {
+                empty_spgeam<float>(
+                    handle, d.m, d.n, split, supply_c, rocsparse_pointer_mode_host);
+                if(HasFatalFailure())
+                    return;
+                empty_spgeam<rocsparse_double_complex>(
+                    handle, d.m, d.n, split, supply_c, rocsparse_pointer_mode_host);
+                if(HasFatalFailure())
+                    return;
+            }
+            // Device pointer mode used to memset a null nnz. C is omitted.
+            empty_spgeam<float>(
+                handle, d.m, d.n, split, false, rocsparse_pointer_mode_device);
             if(HasFatalFailure())
                 return;
         }

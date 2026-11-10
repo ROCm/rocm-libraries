@@ -525,21 +525,61 @@ namespace rocsparse
         // Quick return if possible
         if(m == 0 || n == 0 || (nnz_A == 0 && nnz_B == 0))
         {
-            if(handle->pointer_mode == rocsparse_pointer_mode_host)
+            // rocsparse_spgeam analysis is documented to run before C exists.
+            // The nonzero count is stored on the descriptor; do not write nnz_C
+            // when the caller has not supplied C.
+            if(called_from_spgeam && descr != nullptr)
             {
-                *nnz_C = 0;
-            }
-            else
-            {
-                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
+                descr->nnz_C = 0;
             }
 
-            if(nnz_A == 0 && nnz_B == 0)
+            if(nnz_C != nullptr)
             {
-                if(csr_row_ptr_C != nullptr)
+                if(handle->pointer_mode == rocsparse_pointer_mode_host)
+                {
+                    *nnz_C = 0;
+                }
+                else
+                {
+                    RETURN_IF_HIP_ERROR(
+                        rocsparse_hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
+                }
+            }
+
+            if((nnz_A == 0 && nnz_B == 0) && csr_row_ptr_C != nullptr)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
+                    handle, m + 1, static_cast<I>(descr_C->base), csr_row_ptr_C));
+            }
+            else if(csr_row_ptr_C == nullptr && called_from_spgeam && descr != nullptr
+                    && descr->csr_row_ptr_C != nullptr)
+            {
+                // The descriptor row pointer is base 0. Fill it so a later compute
+                // copies a valid empty pattern into C.
+                switch(descr->indextype)
+                {
+                case rocsparse_indextype_i32:
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
-                        handle, m + 1, static_cast<I>(descr_C->base), csr_row_ptr_C));
+                        handle,
+                        m + 1,
+                        static_cast<int32_t>(rocsparse_index_base_zero),
+                        static_cast<int32_t*>(descr->csr_row_ptr_C)));
+                    break;
+                }
+                case rocsparse_indextype_i64:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
+                        handle,
+                        m + 1,
+                        static_cast<int64_t>(rocsparse_index_base_zero),
+                        static_cast<int64_t*>(descr->csr_row_ptr_C)));
+                    break;
+                }
+                default:
+                {
+                    return rocsparse_status_internal_error;
+                }
                 }
             }
             return rocsparse_status_success;
