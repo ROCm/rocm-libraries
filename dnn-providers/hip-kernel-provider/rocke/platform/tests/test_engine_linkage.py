@@ -271,31 +271,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             expected_mla_environment.update(compiler_environment)
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
 
-        cohorts = [
-            test
-            for test in tests
-            if test["name"] == "rocke_pytest"
-            or test["name"].startswith("rocke_pytest_")
-        ]
-        assert {test["name"] for test in cohorts} == {
-            "rocke_pytest",
-            "rocke_pytest_core",
-            "rocke_pytest_helpers",
-            "rocke_pytest_instances",
-        }
-        selected = []
-        for cohort in cohorts:
-            command = cohort["command"]
-            runner = f"{test_ctest_rel}tests/run_pytest_cohort.py"
-            runner_index = command.index(runner)
-            selected.append(command[runner_index + 1])
-            assert command[runner_index + 2 :] == ["-v", "-rs", "--timeout=60"]
-            properties = {p["name"]: p["value"] for p in cohort["properties"]}
-            assert properties["TIMEOUT"] == 300
-            assert (
-                environment_for(tests, cohort["name"]) == expected_platform_environment
-            )
-        assert sorted(selected) == ["core", "helpers", "instances", "other"]
+        assert environment_for(tests, "rocke_pytest") == expected_platform_environment
         assert (
             environment_for(tests, "rocke_tensor_transforms_pytest")
             == expected_tensor_transforms_environment

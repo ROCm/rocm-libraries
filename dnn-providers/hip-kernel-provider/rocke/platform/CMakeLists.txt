@@ -670,23 +670,13 @@ if(ROCKE_INSTALL_TESTS)
       endforeach()
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_platform_pytest_environment \"${_ROCKE_PYTEST_ENVIRONMENT}\")\n"
-             "list(APPEND _rocke_platform_pytest_environment \${_rocke_compiler_tool_environment})\n")
-      # The runner discovers the relocated payload, including staged-only tests
-      # and packaging exclusions. Cohorts are disjoint and keep the same native
-      # environment, marker selection, assertions and per-item timeouts.
-      foreach(_cohort IN ITEMS other core helpers instances)
-        if(_cohort STREQUAL "other")
-          set(_test_name rocke_pytest)
-        else()
-          set(_test_name "rocke_pytest_${_cohort}")
-        endif()
-        string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-               "add_test(${_test_name} python \"${ROCKE_TEST_CTEST_REL}tests/run_pytest_cohort.py\" ${_cohort} -v -rs --timeout=60)\n"
-               "set_tests_properties(${_test_name} PROPERTIES\n"
-               "  LABELS \"ckc\\;python\\;quick\"\n"
-               "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
-               "  TIMEOUT 300)\n")
-      endforeach()
+             "list(APPEND _rocke_platform_pytest_environment \${_rocke_compiler_tool_environment})\n"
+             "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -m \"not integration\" -v -rs --timeout=60)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;quick\"\n"
+             "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
+             "  TIMEOUT 300)\n")
 
       # The tensor_transforms tests live inside the package
       # (rocke/tests/helpers/tiling/tensor_transforms), so rocke_pytest above, which

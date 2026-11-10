@@ -527,15 +527,9 @@ registered tests actually execute. Check the selected list in the job log or
 with CTest's verbose listing. Registration alone does not establish CI coverage.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
-The developer pytest step collects `platform/tests`. Installed platform pytest
-runs four disjoint cohorts: `rocke_pytest_core`, `rocke_pytest_helpers`,
-`rocke_pytest_instances`, and `rocke_pytest` for every remaining test directory
-and root test file. `platform/tests/run_pytest_cohort.py` discovers the installed
-payload rather than assuming source-tree topology; packaging exclusions and
-staged-only tests therefore remain effective. Every cohort retains the same
-pytest configuration, `not integration` marker selection, native/compiler
-environment and per-item timeout. The staged library tests stay excluded and
-have separate CTest entries with explicit file lists. The byte-identity corpus also reaches
+The developer pytest step collects `platform/tests`. The installed platform
+pytest entry excludes the staged library tests, which have separate CTest
+entries with explicit file lists. The byte-identity corpus also reaches
 `library/`. Tests outside these selections need explicit enrollment; neither
 their presence in the source tree nor their installation makes them gated.
 Coverage gaps in [§7](#7-current-state-vs-target-the-gap-registry-wip) therefore
@@ -656,12 +650,7 @@ with the same selection flags to check the selected names, working directory,
 commands, and environment. `ROCKE_ENGINE_test_categories_external.yaml` in the
 provider and TheRock's categorization script determine tier membership. A
 passing command that selected zero tests is not validation. In particular,
-check that all four `rocke_pytest` cohorts are selected when platform pytest is
-part of the intended coverage. TheRock's mixed hipkernelprovider scheduler runs
-categorized GTest entries on every shard with case-level sharding, and assigns
-other CTest entries by stable name round-robin with GTest variables cleared.
-Never combine a CTest entry stride with case-level GTest sharding: that drops
-cases. A complete CI verdict requires the union of all shards.
+check that `rocke_pytest` is selected when it is part of the intended coverage.
 
 That entry runs from `build/bin/hip_kernel_provider`, with `PYTHONPATH=.`:
 
@@ -782,7 +771,7 @@ python -m pytest \
 
 The test reads the standalone and provider-layout generated manifests through
 CTest, rejects duplicate variable names, and compares the complete environments
-of every platform pytest cohort and `rocke_library_mla_pytest` with and without a synthetic
+of `rocke_pytest` and `rocke_library_mla_pytest` with and without a synthetic
 `ROCM_PATH`. Keep the expectations independently constructed rather than reusing
 the production CMake lists; otherwise production and test can repeat the same
 mistake.
