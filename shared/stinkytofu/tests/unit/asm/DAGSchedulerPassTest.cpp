@@ -2666,11 +2666,14 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_ReadyDsLoadWithoutAWaitIssuesBeforeTheQu
 
 // The loop header's first WMMA region starts with an empty queue: the WMMAs go ahead of the
 // ready ds_loads until the queue depth (8, not scale pairs) are outstanding. The first WMMA has
-// ended as the 9th issues, so 9 go first.
+// ended as the 9th issues, so 9 go first. Seventeen WMMAs leave exactly one hardware queue depth
+// after that burst, meeting the experimental tail-size boundary.
 TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_LoopHeaderFillsTheQueueFirst) {
     bb->addSuccessor(bb);
     for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
-    for (int i = 0; i < 12; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+    for (int i = 0; i < 17; i++)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/8 * i,
+                                    /*src0Start=*/1000 + 8 * i);
     PassContext ctx;
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
@@ -2707,8 +2710,9 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_CloseDsConsumerUsesBaselineOrder
 }
 
 // A close consumer rejects the loop-header fill, but that decision is not function-wide. The
-// barrier wait starts a new reset whose unrelated DS has no matrix consumer, so it fills the
-// queue independently. Explicit register edges keep the two WMMA groups on their barrier sides.
+// barrier wait starts a new reset whose unrelated DS has no matrix consumer and whose 17-WMMA
+// tail leaves one hardware queue depth after the nine-WMMA burst, so it fills independently.
+// Explicit register edges keep the two WMMA groups on their barrier sides.
 TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_EachResetDecidesIndependently) {
     bb->addSuccessor(bb);
     StinkyInstruction* firstDs =
@@ -2727,7 +2731,7 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_EachResetDecidesIndependently) {
     StinkyInstruction* secondDs =
         createMovableDsLoad(/*destReg=*/800, /*addrReg=*/84, /*ldsToken=*/3);
     secondDs->addSrcReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
-    for (int i = 0; i < 12; ++i) {
+    for (int i = 0; i < 17; ++i) {
         StinkyInstruction* wmma = createWmmaF32_16x16x16_bf16(
             /*destStart=*/4000 + 16 * i, /*src0Start=*/5000 + 16 * i);
         wmma->addSrcReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
@@ -2776,13 +2780,39 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_EachResetDecidesIndependently) {
     EXPECT_TRUE(sawSecondDs);
 }
 
+// Experimental result for the tail-size policy: the consumer-slack gate admits an unrelated DS,
+// but a 12-WMMA region has only three WMMAs after its predicted nine-WMMA burst. That is less than
+// the hardware depth of eight, so normal scheduling issues the DS after one WMMA.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_ExperimentalShortTailUsesBaselineOrdering) {
+    bb->addSuccessor(bb);
+    createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80, /*ldsToken=*/1);
+    for (int i = 0; i < 12; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/3000 + 16 * i,
+                                    /*src0Start=*/1000 + 16 * i);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.queueFillSafetyMarginCycles = 32;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_EQ(shape, "WdWWWWWWWWWWW");
+}
+
 // A ready tensor_load is placed at the Prefetch level, above the queue fill: it is not held
-// behind the fill's WMMAs.
+// behind the fill's WMMAs. The region is large enough to pass the experimental tail-size gate.
 TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_TensorLoadIsNotHeld) {
     bb->addSuccessor(bb);
     createMovableTensorLoad(bb, /*s0=*/0, /*s1=*/4, /*ldsToken=*/9);
     for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
-    for (int i = 0; i < 12; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+    for (int i = 0; i < 17; i++)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/8 * i,
+                                    /*src0Start=*/1000 + 8 * i);
     PassContext ctx;
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
