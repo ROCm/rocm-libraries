@@ -81,6 +81,8 @@ inline float toleranceForNodeAttributes(data::NodeAttributes attrType)
         return tol::rope::getTolerance<T>();
     case NA::SoftmaxAttributes:
         return tol::softmax::getTolerance<T>();
+    case NA::TopkAttributes:
+        return tol::topk::getTolerance<T>();
     default:
         return 1e-3f;
     }
@@ -103,6 +105,13 @@ inline float toleranceForNode(data::NodeAttributes attrType, data::DataType data
         return toleranceForNodeAttributes<bfloat16>(attrType);
     case DT::DOUBLE:
         return toleranceForNodeAttributes<float>(attrType);
+    // Integer outputs (indices, offsets) are graded exactly: the integer validator ignores
+    // atol/rtol, and 0 says so wherever the resolved number is reported.
+    case DT::INT8:
+    case DT::UINT8:
+    case DT::INT32:
+    case DT::INT64:
+        return 0.0f;
     default:
         return 1e-3f;
     }

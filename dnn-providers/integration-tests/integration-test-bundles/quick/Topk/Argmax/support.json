@@ -1,0 +1,25 @@
+{
+  "claims": {
+    "hipkernel:flydsl_topk": [
+      {
+        "cases": [
+          "4_3000_k1_f32_i32_argmax",
+          "4_512_k1_f16_i64_argmin",
+          "8_4096_k1_bf16_i32_argmax"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

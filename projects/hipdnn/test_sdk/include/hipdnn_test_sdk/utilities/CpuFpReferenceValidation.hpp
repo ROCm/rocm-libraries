@@ -200,16 +200,14 @@ public:
                 }
             }
 
-            T absDiff = static_cast<T>(hipdnn_data_sdk::types::abs(implValue - refValue));
-
-            // Integer values must be equal
-            if(absDiff > 0)
+            // Integer values must be equal. Compared directly: |a - b| has no unambiguous
+            // abs overload for int64_t and can overflow for wide types.
+            if(implValue != refValue)
             {
                 // Log error and mark as failed
                 HIPDNN_SDK_LOG_ERROR("Validation failed for integer values at indices "
                                      << StreamVec(indices) << ": reference value = " << refValue
-                                     << ", implementation value = " << implValue
-                                     << ", absolute difference = " << absDiff);
+                                     << ", implementation value = " << implValue);
                 result.store(false, std::memory_order_relaxed);
             }
             return result.load(std::memory_order_relaxed);
@@ -282,6 +280,9 @@ inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT32:
         rejectMatchingInfinitiesRequest(matchingInfinities);
         return std::make_unique<CpuIntReferenceValidation<int32_t>>();
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT64:
+        rejectMatchingInfinitiesRequest(matchingInfinities);
+        return std::make_unique<CpuIntReferenceValidation<int64_t>>();
     default:
         throw std::runtime_error("Unsupported data type for allClose validator");
     }

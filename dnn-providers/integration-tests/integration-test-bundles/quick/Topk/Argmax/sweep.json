@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "8_4096_k1_bf16_i32_argmax",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              8,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "k": 1,
+          "largest": true
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL topk",
+        "seed": 1,
+        "notes": "k = 1 argmax over a wide row, indices only, int32",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceTopk); router shape from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "4_3000_k1_f32_i32_argmax",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "int32"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              3000
+            ],
+            "strides": [
+              3000,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "k": 1,
+          "largest": true
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL topk",
+        "seed": 1,
+        "notes": "k = 1 argmax over a wide row not a multiple of the vector width, indices only",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceTopk); router shape from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "4_512_k1_f16_i64_argmin",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "int64"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              512
+            ],
+            "strides": [
+              512,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "k": 1,
+          "largest": false
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL topk",
+        "seed": 1,
+        "notes": "k = 1 argmin (smallest) over a router-width row, int64 indices",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceTopk); router shape from the Qwen3.8 layer graph"
+      }
+    }
+  ]
+}

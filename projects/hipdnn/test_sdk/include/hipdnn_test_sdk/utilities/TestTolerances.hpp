@@ -527,4 +527,26 @@ constexpr float getTolerance()
 
 } // namespace softmax
 
+namespace topk
+{
+
+// Exact for every dtype: the values output is a copy of the selected input elements (no
+// arithmetic), and the indices are integers, which the integer validators compare exactly
+// whatever the tolerance. Any difference is a wrong selection, not rounding.
+template <typename T>
+constexpr float getTolerance()
+{
+    if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float> || std::is_same_v<T, half>
+                 || std::is_same_v<T, bfloat16>)
+    {
+        return 0.0f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace topk
+
 } // namespace hipdnn_test_sdk::utilities

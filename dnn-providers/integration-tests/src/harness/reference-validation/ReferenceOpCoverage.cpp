@@ -35,6 +35,7 @@ const std::set<NodeAttributes>& cpuSupportedOps()
         NodeAttributes::SdpaBackwardAttributes,
         NodeAttributes::SoftmaxAttributes,
         NodeAttributes::RopeAttributes,
+        NodeAttributes::TopkAttributes,
     };
     return s_ops;
 }

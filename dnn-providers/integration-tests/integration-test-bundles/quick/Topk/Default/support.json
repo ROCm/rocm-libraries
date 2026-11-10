@@ -1,0 +1,25 @@
+{
+  "claims": {
+    "hipkernel:flydsl_topk": [
+      {
+        "cases": [
+          "16_512_k8_bf16_i64_largest",
+          "4_37_k5_f32_i32_smallest",
+          "8_4096_k16_f16_i32_largest"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

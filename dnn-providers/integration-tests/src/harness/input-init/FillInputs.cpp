@@ -334,6 +334,9 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
     case NA::RopeAttributes:
         setRopeInitDefaults(node, recipes);
         return true;
+    // x takes the [-1, 1] default. Ties (frequent in bf16 / f16 rows of thousands) need no
+    // avoiding: the FlyDSL kernel and the CPU reference both rank equal values by position.
+    case NA::TopkAttributes:
     // Ops whose inputs need no special init; they get defaultFillFor(dtype).
     case NA::PointwiseAttributes:
     case NA::ConvolutionFwdAttributes:

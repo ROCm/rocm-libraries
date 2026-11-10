@@ -1,0 +1,49 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "name": "TopkArgmaxTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "x_tensor_uid": 2
+      },
+      "k": "${case.attributes.k}",
+      "largest": "${case.attributes.largest}",
+      "name": "Topk_0",
+      "outputs": {
+        "indices_tensor_uid": 0
+      },
+      "type": "TopkAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Topk_0::INDICES",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "x",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    }
+  ]
+}
