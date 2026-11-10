@@ -132,8 +132,9 @@ public:
     void reduce(T input, T& output, BinaryFunction reduce_op)
     {
         // For u128 and i128, with a virtual wave size, warp_reduce_shuffle is faster.
-        if constexpr((VirtualWaveSize < ::rocprim::arch::wavefront::min_size())
-                     && (sizeof(T) >= 16))
+        if constexpr(VirtualWaveSize < ::rocprim::arch::wavefront::min_size()
+                     && (std::is_same_v<rocprim::uint128_t, T>
+                         || std::is_same_v<rocprim::int128_t, T>))
         {
             warp_reduce_shuffle<T, VirtualWaveSize, UseAllReduce>().reduce(input,
                                                                            output,
