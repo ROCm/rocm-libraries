@@ -72,7 +72,7 @@ TEST_P(GPU_BNBWDSerialRun3D_FP32, BnV2SerialRunBWDCKfp32_3D) {}
 TEST_P(GPU_BNBWDSerialRun3D_FP64, DISABLED_BnV2SerialRunBWDCKfp64_3D) {}
 
 // fp16
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_BNOCLBWDSerialRun3D_FP16,
                          testing::Combine(testing::ValuesIn(Network3DSerialCase<BN3DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
@@ -94,7 +94,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          TestNameGenerator<BN3DTestCase>());
 
 // fp32
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_BNBWDSerialRun3D_FP32,
                          testing::Combine(testing::ValuesIn(Network3DSerialCase<BN3DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
@@ -104,7 +104,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN3DTestCase>());
 // fp64
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_BNBWDSerialRun3D_FP64,
                          testing::Combine(testing::ValuesIn(Network3DSerialCase<BN3DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),

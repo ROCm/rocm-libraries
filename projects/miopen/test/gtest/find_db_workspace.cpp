@@ -419,12 +419,12 @@ TEST_P(GPU_FindDbWorkspaceCkWrw_BFP16, WorkSpaceSizeReportsMaximumOnFindDbHit)
     EXPECT_EQ(conv.GetWorkSpaceSize(ctx, problem), recorded.front().max_ws);
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_FindDbWorkspaceCkWrw_BFP16,
                          testing::Values(CkWrwProblem{{2, 64, 56, 56}, {64, 64, 3, 3}, 1},
                                          CkWrwProblem{{2, 128, 28, 28}, {128, 128, 3, 3}, 1}));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_FindDbWorkspace_FP32,
                          testing::Values(miopen::conv::Direction::Forward,
                                          miopen::conv::Direction::BackwardData,

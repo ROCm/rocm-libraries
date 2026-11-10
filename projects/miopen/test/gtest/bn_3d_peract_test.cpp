@@ -1093,28 +1093,28 @@ TEST_P(GPU_Bn3DPeract_FP16, AllModes) { this->RunAll(); }
 TEST_P(GPU_Bn3DPeract_FP32, AllModes) { this->RunAll(); }
 TEST_P(GPU_Bn3DPeract_BFP16, AllModes) { this->RunAll(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_Bn3DPeract_FP16,
                          GetSmokeTestCases(),
                          TestParameterNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_Bn3DPeract_FP32,
                          GetSmokeTestCases(),
                          TestParameterNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_Bn3DPeract_BFP16,
                          GetSmokeTestCases(),
                          TestParameterNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_Bn3DPeract_FP16,
                          GetFullTestCases(),
                          TestParameterNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_Bn3DPeract_FP32,
                          GetFullTestCases(),
                          TestParameterNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_Bn3DPeract_BFP16,
                          GetFullTestCases(),
                          TestParameterNameGenerator{});

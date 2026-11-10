@@ -719,7 +719,7 @@ std::string ConvNDParamName(const ::testing::TestParamInfo<ConvNDParams>& info)
 }
 
 // Instantiate tests for both 2D and 3D
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ConvNDAIHeuristics_FP32,
                          ::testing::ValuesIn(GenerateConvNDParams()),
                          ConvNDParamName);

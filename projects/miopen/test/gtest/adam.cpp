@@ -98,15 +98,15 @@ struct TestNameGenerator
 
 /////////////////////////////////////////////////////////
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_Adam_FP32,
                          testing::ValuesIn(AdamTestConfigs()),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_Adam_FP16,
                          testing::ValuesIn(AdamTestConfigs()),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_AmpAdam_FP32,
                          testing::ValuesIn(AdamTestConfigs()),
                          TestNameGenerator{});

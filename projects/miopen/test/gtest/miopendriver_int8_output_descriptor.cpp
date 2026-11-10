@@ -49,6 +49,6 @@ TEST_P(GPU_MIOpenDriverInt8OutputDescriptorTest_I8, MIOpenDriverInt8OutputDescri
     RunMIOpenDriver();
 };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_MIOpenDriverInt8OutputDescriptorTest_I8,
                          testing::Values(GetTestCases()));

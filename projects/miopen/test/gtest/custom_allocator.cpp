@@ -87,4 +87,4 @@ TEST_P(GPU_Allocator_FP32, Deallocator2)
     EXPECT_NE(buffer, nullptr);
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Allocator_FP32, testing::ValuesIn({0}));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_Allocator_FP32, testing::ValuesIn({0}));

@@ -229,7 +229,7 @@ TEST_P(CPU_UnitTestImplicitGemmCKUtil_NONE, TestParsing)
 #endif
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestImplicitGemmCKUtil_NONE,
                          testing::ValuesIn(GetTestCases()));
 
@@ -432,7 +432,7 @@ TEST_P(CPU_SplitKGenericTest_NONE, ValidatesSplitKSupport)
 #endif
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_SplitKGenericTest_NONE,
                          testing::ValuesIn(GetSplitKGenericTestCases()));
 

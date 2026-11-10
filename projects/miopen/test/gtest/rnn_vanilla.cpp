@@ -29,12 +29,12 @@ using GPU_RNNVanilla_FP32 = RNNVanillaCommon<float>;
 
 TEST_P(GPU_RNNVanilla_FP32, FloatTest) { run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_RNNVanilla_FP32, GenCases());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNVanilla_FP32, GenCases(true));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_RNNVanilla_FP32, GenCases());
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_RNNVanilla_FP32, GenCases(true));
 
 using GPU_RNNVanilla_FP16 = RNNVanillaCommon<half_float::half>;
 
 TEST_P(GPU_RNNVanilla_FP16, FloatTest) { run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_RNNVanilla_FP16, GenCases());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNVanilla_FP16, GenCases(true));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_RNNVanilla_FP16, GenCases());
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_RNNVanilla_FP16, GenCases(true));

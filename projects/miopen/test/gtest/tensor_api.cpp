@@ -672,10 +672,10 @@ TEST_P(CPU_ApiTestSetTensorDescriptor_NONE, TD) { RunTest(); }
 
 TEST_P(CPU_ApiTestSetWrongTensorDescriptor_NONE, TD) { RunTest(); }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_ApiTestSetTensorDescriptor_NONE,
                          testing::ValuesIn(TestSetTensor::GetValidConfigs()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_ApiTestSetWrongTensorDescriptor_NONE,
                          testing::ValuesIn(TestSetTensor::GetWrongConfigs()));

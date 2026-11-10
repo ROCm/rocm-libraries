@@ -91,9 +91,9 @@ TEST_P(GPU_RoPEBwdTest_BFP16, RoPEBwdTest)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RoPEFwdTest_FP32, testing::ValuesIn(RoPETestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RoPEFwdTest_FP16, testing::ValuesIn(RoPETestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RoPEFwdTest_BFP16, testing::ValuesIn(RoPETestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RoPEBwdTest_FP32, testing::ValuesIn(RoPETestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RoPEBwdTest_FP16, testing::ValuesIn(RoPETestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RoPEBwdTest_BFP16, testing::ValuesIn(RoPETestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_RoPEFwdTest_FP32, testing::ValuesIn(RoPETestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_RoPEFwdTest_FP16, testing::ValuesIn(RoPETestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_RoPEFwdTest_BFP16, testing::ValuesIn(RoPETestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_RoPEBwdTest_FP32, testing::ValuesIn(RoPETestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_RoPEBwdTest_FP16, testing::ValuesIn(RoPETestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_RoPEBwdTest_BFP16, testing::ValuesIn(RoPETestConfigs()));

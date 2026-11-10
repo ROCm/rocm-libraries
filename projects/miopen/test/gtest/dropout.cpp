@@ -423,8 +423,8 @@ using GPU_Dropout_FP16 = DropoutCommon<half_float::half>;
 TEST_P(GPU_Dropout_FP32, TestFloat) { this->Run(); }
 TEST_P(GPU_Dropout_FP16, TestFloat16) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Dropout_FP32, GetCases());
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Dropout_FP16, GetCases());
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_Dropout_FP32, GetCases());
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_Dropout_FP16, GetCases());
 
 struct TestCaseValues
 {

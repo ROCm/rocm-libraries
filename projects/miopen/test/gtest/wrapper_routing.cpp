@@ -143,7 +143,7 @@ TEST_P(CPU_WrapperRoutingParse_NONE, Maps)
         << "value=" << printed << " output=" << result.output;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_WrapperRoutingParse_NONE,
                          ::testing::Values(
                              // Unset is the default path, and silent: a wrapper build must look
@@ -280,7 +280,7 @@ TEST_P(CPU_WrapperRoutingResolve_NONE, Decides)
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_WrapperRoutingResolve_NONE,
     ::testing::Values(
         // The kill switch: Disabled routes everything to MIOpen, set membership
@@ -353,7 +353,7 @@ TEST_P(CPU_WrapperRoutingDisabledSet_NONE, Parses)
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_WrapperRoutingDisabledSet_NONE,
     ::testing::Values(
         // Unset and empty disable nothing, silently.
@@ -672,7 +672,7 @@ TEST_P(CPU_WrapperRoutingDispatch_NONE, AgreesWithResolveRoute)
         << "entryPoint=" << entryPoint;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_WrapperRoutingDispatch_NONE,
                          ::testing::Values("miopenConvolutionForward",
                                            "miopenCreate",
@@ -690,7 +690,7 @@ TEST_P(CPU_WrapperRoutingDispatchUnforwarded_NONE, RoutesToMiopen)
     EXPECT_EQ(Dispatch(entryPoint), Route::Miopen) << "entryPoint=" << entryPoint;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_WrapperRoutingDispatchUnforwarded_NONE,
                          ::testing::Values("miopenCreate", "miopenGetErrorString"));
 

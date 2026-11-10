@@ -412,7 +412,7 @@ protected:
         RunTest();                                                            \
     }                                                                         \
     INSTANTIATE_TEST_SUITE_P(                                                 \
-        Full,                                                                 \
+        Standard,                                                             \
         GPU_LayoutTransposeTest_2D_##sol##_##naming_type,                     \
         testing::Combine(testing::ValuesIn(transpose_dims::get_batch_size()), \
                          testing::ValuesIn(transpose_dims::get_channel_size())));
@@ -438,7 +438,7 @@ DEFINE_2D_TYPED_TESTS(TransposeSolutionNhwc2Default);
         RunTest();                                                            \
     }                                                                         \
     INSTANTIATE_TEST_SUITE_P(                                                 \
-        Full,                                                                 \
+        Standard,                                                             \
         GPU_LayoutTransposeTest_3D_##sol##_##naming_type,                     \
         testing::Combine(testing::ValuesIn(transpose_dims::get_batch_size()), \
                          testing::ValuesIn(transpose_dims::get_channel_size())));

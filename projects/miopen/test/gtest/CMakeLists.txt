@@ -188,7 +188,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if (MIOPEN_TEST_ALL)
       set(MIOPEN_GTEST_PREFIX "")
     else()
-      set(MIOPEN_GTEST_PREFIX "Smoke")
+      set(MIOPEN_GTEST_PREFIX "Quick")
     endif()
 
     if (NOT MIOPEN_TEST_DBSYNC)
@@ -235,7 +235,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if (MIOPEN_TEST_ALL)
       set(MIOPEN_GTEST_PREFIX "")
     else()
-      set(MIOPEN_GTEST_PREFIX "Smoke")
+      set(MIOPEN_GTEST_PREFIX "Quick")
     endif()
 
     if (NOT MIOPEN_TEST_DBSYNC)
@@ -255,10 +255,11 @@ function(add_gtest TEST_NAME TEST_CPP)
     endif()
 
     if(MIOPEN_TEST_GFX115X)
-        add_gtest_negative_filter("Full/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
-        add_gtest_negative_filter("Full/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
+        add_gtest_negative_filter("Comprehensive/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
+        add_gtest_negative_filter("Comprehensive/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("*SerialRun3D*") # These FP32 SerialRun3D tests use so much memory that they have a risk of timing out the machine during tests
     endif()
+
 
     # Excluded from MIOpen CI: the FP32 case OOMs when shards run concurrently on a single GPU.
     add_gtest_negative_filter("*UnitTestConvSolver*LargeStride*")

@@ -1055,7 +1055,7 @@ std::vector<CandidateSelectionParams> GenerateCandidateSelectionParams()
     };
 }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_CandidateSelection_FP32,
                          ::testing::ValuesIn(GenerateCandidateSelectionParams()),
                          [](const ::testing::TestParamInfo<CandidateSelectionParams>& testInfo) {

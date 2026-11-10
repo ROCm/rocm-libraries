@@ -72,6 +72,6 @@ using namespace miopendriver_regression_half;
 
 TEST_P(GPU_MIOpenDriverRegressionTest_FP16, MIOpenDriverRegressionHalf) { RunMIOpenDriver(); };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_MIOpenDriverRegressionTest_FP16,
                          testing::Values(GetTestCases()));

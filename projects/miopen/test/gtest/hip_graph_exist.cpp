@@ -252,4 +252,4 @@ TEST_P(GPU_HipGraphExistTest_FP32, HipGraphExist)
     RunHipGraphTest(test_case, temp_dir);
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_HipGraphExistTest_FP32, testing::ValuesIn(GenSmokeTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_HipGraphExistTest_FP32, testing::ValuesIn(GenSmokeTestCases()));

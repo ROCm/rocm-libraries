@@ -1557,7 +1557,7 @@ TEST_P(CPU_SplitKValidation_Parameterized_NONE, ValidateSplitKRange)
                                 << " but got " << (actual ? "true" : "false");
 }
 
-INSTANTIATE_TEST_SUITE_P(Unit,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_SplitKValidation_Parameterized_NONE,
                          ::testing::Values(
                              // (value, min, max, expected)
@@ -1656,18 +1656,18 @@ TEST_F(CPU_DeterministicMode_NONE, AllBackwardSolvers_SupportDeterministic)
 
 // ------------------- Test Instantiations -------------------
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvNDKernelTuning_FP32,
                          ::testing::ValuesIn(GenSmokeTestCases()),
                          ConvNDKernelTuningTestName);
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ConvNDKernelTuning_FP32,
                          ::testing::ValuesIn(GenFullTestCases()),
                          ConvNDKernelTuningTestName);
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_ConvNDKernelTuningAI_FP32,
     ::testing::Values(ConvNDKernelTuningTestParam{2,
                                                   miopenFloat,

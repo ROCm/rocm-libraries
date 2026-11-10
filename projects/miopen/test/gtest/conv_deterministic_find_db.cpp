@@ -146,11 +146,11 @@ void RunTest()
 } // namespace
 
 // The parameter is not read. It exists only for the GPU_<Name>_FP32 naming convention and the
-// "Smoke/" prefix that the CI test categories select.
+// "Quick/" prefix that the CI test categories select.
 class GPU_ConvDeterministicFindDb_FP32 : public testing::TestWithParam<miopenDataType_t>
 {
 };
 
 TEST_P(GPU_ConvDeterministicFindDb_FP32, DefaultFindIsNotReused) { RunTest(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_ConvDeterministicFindDb_FP32, testing::Values(miopenFloat));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_ConvDeterministicFindDb_FP32, testing::Values(miopenFloat));

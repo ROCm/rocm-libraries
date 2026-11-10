@@ -160,10 +160,12 @@ TEST_P(GPU_AsymPooling2d_BFP16, BFloat16Test_pooling2d_asymmetric)
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_AsymPooling2d_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_AsymPooling2d_FP32,
+                         testing::Values(GetTestCases("--float")));
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_AsymPooling2d_FP16, testing::Values(GetTestCases("--half")));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_AsymPooling2d_FP16, testing::Values(GetTestCases("--half")));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_AsymPooling2d_BFP16,
                          testing::Values(GetTestCases("--bfloat16")));
