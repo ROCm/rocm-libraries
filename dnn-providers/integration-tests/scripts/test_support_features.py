@@ -1081,28 +1081,21 @@ class TestStdoutEncoding:
 # --------------------------------------------------------------------------
 
 
-def _bhsd_strides(dims: list[int]) -> list[int]:
-    b, h, s, d = dims
-    return [h * s * d, s * d, d, 1]
-
-
-def _bshd_strides(dims: list[int]) -> list[int]:
-    b, h, s, d = dims
-    return [s * h * d, d, h * d, 1]
+def _strides_for_order(dims: list[int], order) -> list[int]:
+    """Packed strides for ``dims`` laid out in ``order``, the largest stride first."""
+    result, step = [0] * len(dims), 1
+    for dim in reversed(order):
+        result[dim] = step
+        step *= dims[dim]
+    return result
 
 
 def _packed_strides(order: tuple[int, ...]):
-    """Strides that pack the dims in ``order``, the largest stride first."""
+    return lambda dims: _strides_for_order(dims, order)
 
-    def strides(dims: list[int]) -> list[int]:
-        result = [0] * len(dims)
-        step = 1
-        for dim in reversed(order):
-            result[dim] = step
-            step *= dims[dim]
-        return result
 
-    return strides
+_bhsd_strides = _packed_strides((0, 1, 2, 3))
+_bshd_strides = _packed_strides((0, 2, 1, 3))
 
 
 def _sdpa(
@@ -1851,12 +1844,7 @@ def _layout_strides(dims: list[int], layout: str) -> list[int]:
     """Packed strides for ``dims`` in channels-first or channels-last order."""
     rank = len(dims)
     order = list(range(rank)) if layout == "nchw" else [0, *range(2, rank), 1]
-    strides = [0] * rank
-    step = 1
-    for dim in reversed(order):
-        strides[dim] = step
-        step *= dims[dim]
-    return strides
+    return _strides_for_order(dims, order)
 
 
 # Op module -> its ports, and the shape role its serializer writes under
