@@ -40,16 +40,17 @@
 #include "device/ScopedDevice.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
-#include "engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvDgradAotGeometry.hpp"
 
-/// @file Gfx950ConvDgradNative.cpp
-/// hipkernel:Gfx950ConvDgradAot: shape-generic AOT instances of rocKE's backward-data
-/// (dgrad) convolution kernels. Each kernel is one rocKE dgrad KernelIdentity: an
-/// implicit-GEMM tile (kernel_family 0), one of rocKE's direct dgrad pipelines
-/// (kernel_family 1), or one of the MFMA pipelines' weight transforms (kernel_family 2,
-/// never matched; an MFMA dispatch loads it beside its instance). Its metadata holds
+/// @file ConvDgradAotNative.cpp
+/// hipkernel:Gfx950ConvDgradAot and hipkernel:Gfx1250ConvDgradAot: shape-generic AOT
+/// instances of rocKE's backward-data (dgrad) convolution kernels, one engine per
+/// architecture (Engine; the hooks are templates over it). Each kernel is one rocKE dgrad
+/// KernelIdentity: an implicit-GEMM tile (kernel_family 0), one of rocKE's direct dgrad
+/// pipelines (kernel_family 1), or one of gfx950's MFMA pipelines' weight transforms
+/// (kernel_family 2, never matched; an MFMA dispatch loads it beside its instance). Its metadata holds
 /// tuning and capability fields only and the problem reaches the kernel as AOT
-/// arguments, so matching is the launch plan of Gfx950ConvDgradGeometry.hpp, not an
+/// arguments, so matching is the launch plan of ConvDgradAotGeometry.hpp, not an
 /// equality on the geometry: a kernel serves a graph exactly when it has a plan there,
 /// and the dispatch runs that plan. Mirrors
 /// rocke/library/builders/common/convolution_backward_data.py.
@@ -58,22 +59,54 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 
 using namespace hipdnn_plugin_sdk::ingestor;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-namespace dgrad = gfx950_conv_dgrad;
+namespace dgrad = conv_dgrad_aot;
 
 namespace
 {
 
-constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_conv_dgrad_aot.graph_match";
-constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_conv_dgrad_aot.kernel_match";
-constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_conv_dgrad_aot.score";
-constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_conv_dgrad_aot.dispatch";
-constexpr std::string_view DY_TOKEN = "gfx950_conv_dgrad.dy.uid";
-constexpr std::string_view W_TOKEN = "gfx950_conv_dgrad.w.uid";
-constexpr std::string_view DX_TOKEN = "gfx950_conv_dgrad.dx.uid";
-/// The whole matched problem, so a kernel matcher reads it from what graph_match bound
-/// instead of walking the graph again for every kernel: problemTokenValues() order.
-/// Private (`_`): the graph features already describe the problem, so this is no feature.
-constexpr std::string_view PROBLEM_TOKEN = "_gfx950_conv_dgrad.problem";
+/// One engine this file serves: its architecture's target, its name (for messages), the
+/// native symbols its descriptors name, its binding tokens and its kpack module cache.
+/// problemToken carries the whole matched problem, so a kernel matcher reads it from what
+/// graph_match bound instead of walking the graph again for every kernel
+/// (problemTokenValues() order); it is private (`_`), since the graph features already
+/// describe the problem.
+struct Engine
+{
+    const dgrad::Target& target;
+    std::string_view name;
+    std::string_view graphMatcherSymbol;
+    std::string_view kernelMatcherSymbol;
+    std::string_view scoreSymbol;
+    std::string_view dispatchSymbol;
+    std::string_view dyToken;
+    std::string_view wToken;
+    std::string_view dxToken;
+    std::string_view problemToken;
+    compilation::KpackModuleCache& (*moduleCache)();
+};
+
+constexpr Engine GFX950_ENGINE{dgrad::GFX950,
+                               "hipkernel:Gfx950ConvDgradAot",
+                               "hipkernel.gfx950_conv_dgrad_aot.graph_match",
+                               "hipkernel.gfx950_conv_dgrad_aot.kernel_match",
+                               "hipkernel.gfx950_conv_dgrad_aot.score",
+                               "hipkernel.gfx950_conv_dgrad_aot.dispatch",
+                               "gfx950_conv_dgrad.dy.uid",
+                               "gfx950_conv_dgrad.w.uid",
+                               "gfx950_conv_dgrad.dx.uid",
+                               "_gfx950_conv_dgrad.problem",
+                               &gfx950ConvDgradAotKpackModuleCache};
+constexpr Engine GFX1250_ENGINE{dgrad::GFX1250,
+                                "hipkernel:Gfx1250ConvDgradAot",
+                                "hipkernel.gfx1250_conv_dgrad_aot.graph_match",
+                                "hipkernel.gfx1250_conv_dgrad_aot.kernel_match",
+                                "hipkernel.gfx1250_conv_dgrad_aot.score",
+                                "hipkernel.gfx1250_conv_dgrad_aot.dispatch",
+                                "gfx1250_conv_dgrad.dy.uid",
+                                "gfx1250_conv_dgrad.w.uid",
+                                "gfx1250_conv_dgrad.dx.uid",
+                                "_gfx1250_conv_dgrad.problem",
+                                &gfx1250ConvDgradAotKpackModuleCache};
 constexpr size_t PROBLEM_TOKEN_SIZE = 18;
 
 struct Binding
@@ -143,17 +176,19 @@ bool hasSpatialRankTwo(const flatbuffers::Vector<int64_t>* values)
     return values != nullptr && values->size() == 2;
 }
 
-/// The graph contract: one ConvolutionBwdAttributes node on gfx950 (wave64) with FLOAT
-/// accumulation, cross-correlation, 2-D symmetric padding, three distinct device tensors
-/// of one 16-bit dtype in packed NHWC, groups = dX.C / W.dims[1] in [1, 65535] dividing
-/// K, and dY's dims equal to the forward output of dX (whose dims define the problem:
-/// several Hi give one Ho under a stride).
-std::optional<MatchedProblem> matchProblem(const MatchContext& context)
+/// The graph contract: one ConvolutionBwdAttributes node on @p engine's architecture (at
+/// its wave size) with FLOAT accumulation, cross-correlation, 2-D symmetric padding, three
+/// distinct device tensors of one 16-bit dtype in packed NHWC, groups = dX.C / W.dims[1]
+/// in [1, 65535] dividing K, and dY's dims equal to the forward output of dX (whose dims
+/// define the problem: several Hi give one Ho under a stride).
+std::optional<MatchedProblem> matchProblem(const Engine& engine, const MatchContext& context)
 {
     if(!context.graph.isValid() || context.graph.getGraph().is_override_shape_enabled()
-       || !hipdnn_plugin_sdk::archMatches(
-           context.deviceProperties.gcnArchName, "gfx950", hipdnn_plugin_sdk::ArchMatchMode::PREFIX)
-       || context.deviceProperties.warpSize != 64 || context.graph.nodeCount() != 1)
+       || !hipdnn_plugin_sdk::archMatches(context.deviceProperties.gcnArchName,
+                                          std::string(engine.target.arch),
+                                          hipdnn_plugin_sdk::ArchMatchMode::PREFIX)
+       || context.deviceProperties.warpSize != engine.target.waveSize
+       || context.graph.nodeCount() != 1)
     {
         return std::nullopt;
     }
@@ -226,7 +261,7 @@ std::optional<MatchedProblem> matchProblem(const MatchContext& context)
     return MatchedProblem{binding, problem, *geometry, dx->data_type()};
 }
 
-/// PROBLEM_TOKEN's value: the binding, the problem in dgrad::Problem's field order, then
+/// The problem token's value: the binding, the problem in dgrad::Problem's field order, then
 /// the dtype. The geometry is derived from the problem again on reading.
 std::vector<int64_t> problemTokenValues(const MatchedProblem& matched)
 {
@@ -254,16 +289,15 @@ std::vector<int64_t> problemTokenValues(const MatchedProblem& matched)
 /// The problem graphMatches resolved for @p context, read back from @p bound: the SDK
 /// passes every kernel matcher what graph_match bound for that same context. Falls back
 /// to matching the graph when the token is absent, as for a caller with no graph match.
-std::optional<MatchedProblem> matchedFromBound(const MatchContext& context,
-                                               const BoundTokens& bound)
+std::optional<MatchedProblem>
+    matchedFromBound(const Engine& engine, const MatchContext& context, const BoundTokens& bound)
 {
-    static const std::string s_problemToken(PROBLEM_TOKEN);
-    const auto it = bound.find(s_problemToken);
+    const auto it = bound.find(std::string(engine.problemToken));
     const auto* values
         = it == bound.end() ? nullptr : std::get_if<std::vector<int64_t>>(&it->second);
     if(values == nullptr || values->size() != PROBLEM_TOKEN_SIZE)
     {
-        return matchProblem(context);
+        return matchProblem(engine, context);
     }
     const auto& v = *values;
     const dgrad::Problem problem{
@@ -277,17 +311,18 @@ std::optional<MatchedProblem> matchedFromBound(const MatchContext& context,
         Binding{v[0], v[1], v[2]}, problem, *geometry, static_cast<data_objects::DataType>(v[17])};
 }
 
+template <const Engine& E>
 std::optional<BoundTokens> graphMatches(const MatchContext& context)
 {
-    const auto matched = matchProblem(context);
+    const auto matched = matchProblem(E, context);
     if(!matched)
     {
         return std::nullopt;
     }
-    return BoundTokens{{std::string(DY_TOKEN), matched->binding.dy},
-                       {std::string(W_TOKEN), matched->binding.w},
-                       {std::string(DX_TOKEN), matched->binding.dx},
-                       {std::string(PROBLEM_TOKEN), problemTokenValues(*matched)}};
+    return BoundTokens{{std::string(E.dyToken), matched->binding.dy},
+                       {std::string(E.wToken), matched->binding.w},
+                       {std::string(E.dxToken), matched->binding.dx},
+                       {std::string(E.problemToken), problemTokenValues(*matched)}};
 }
 
 /// A kernel's metadata as parseAotInstance reads it.
@@ -311,14 +346,15 @@ struct KernelMetadata
 };
 
 /// The instance @p kernel describes, when it is a kpack kernel whose metadata is a
-/// complete instance of one family (dgrad::parseAotInstance).
-std::optional<dgrad::AotInstance> aotInstance(const KernelDefinition& kernel)
+/// complete instance of one family of @p target's engine (dgrad::parseAotInstance).
+std::optional<dgrad::AotInstance> aotInstance(const KernelDefinition& kernel,
+                                              const dgrad::Target& target)
 {
     if(kernel.source.kind != KernelSourceKind::KPACK)
     {
         return std::nullopt;
     }
-    return dgrad::parseAotInstance(KernelMetadata{kernel});
+    return dgrad::parseAotInstance(KernelMetadata{kernel}, target);
 }
 
 /// Where a helper is looked up: the same pack, the same archive, the instance's dtype,
@@ -470,8 +506,7 @@ std::optional<KernelDefinition> findHelper(const KernelDefinition& kernel,
                                            reorganize ? instance.knobs.foldK32 : 0});
 }
 
-/// What hipkernel:Gfx950ConvDgradAot reads of one kernel on every graph, decoded from its
-/// metadata once: its dtype and its instance (nullopt for metadata no reviewed launch
+/// What an engine reads of one kernel on every graph, decoded from its metadata once: its dtype and its instance (nullopt for metadata no reviewed launch
 /// contract describes).
 struct AotPrepared
 {
@@ -479,21 +514,22 @@ struct AotPrepared
     std::optional<dgrad::AotInstance> instance;
 };
 
-AotPrepared decodeAot(const KernelDefinition& kernel)
+AotPrepared decodeAot(const KernelDefinition& kernel, const dgrad::Target& target)
 {
     const auto* dtype = KernelMetadata{kernel}.stringField("dtype");
-    return AotPrepared{dtype == nullptr ? std::string() : *dtype, aotInstance(kernel)};
+    return AotPrepared{dtype == nullptr ? std::string() : *dtype, aotInstance(kernel, target)};
 }
 
 /// The KernelPrepareFn registered under the kernel matcher's symbol: the SDK runs it once
 /// per kernel when the engine loads, so matching a graph reads AotPrepared instead of
 /// parsing some sixty metadata fields per kernel. It also files each helper kernel for
 /// the MFMA pipelines to find. Must not throw.
+template <const Engine& E>
 std::shared_ptr<const void> aotPrepare(const KernelDefinition& kernel)
 {
     try
     {
-        auto prepared = std::make_shared<const AotPrepared>(decodeAot(kernel));
+        auto prepared = std::make_shared<const AotPrepared>(decodeAot(kernel, E.target));
         const auto& instance = prepared->instance;
         if(instance && instance->direct && dgrad::isHelperVariant(instance->direct->variant)
            && (prepared->dtype == "fp16" || prepared->dtype == "bf16"))
@@ -510,13 +546,14 @@ std::shared_ptr<const void> aotPrepare(const KernelDefinition& kernel)
 
 /// @p kernel's AotPrepared: the one aotPrepare stored, or one decoded into @p scratch for
 /// a definition that carries none (one built outside the engine's shared state).
+template <const Engine& E>
 const AotPrepared& preparedOf(const KernelDefinition& kernel, AotPrepared& scratch)
 {
-    if(kernel.preparedBy == &aotPrepare && kernel.prepared != nullptr)
+    if(kernel.preparedBy == &aotPrepare<E> && kernel.prepared != nullptr)
     {
         return *static_cast<const AotPrepared*>(kernel.prepared.get());
     }
-    scratch = decodeAot(kernel);
+    scratch = decodeAot(kernel, E.target);
     return scratch;
 }
 
@@ -528,11 +565,12 @@ const char* dtypeName(data_objects::DataType dtype)
 /// The plan of @p kernel on @p matched when it is packaged code of a reviewed launch
 /// contract that computes it: the dtype pinned, then the instance's plan, and every
 /// helper the plan launches present in its pack.
+template <const Engine& E>
 std::optional<dgrad::Plan> aotKernelPlan(const MatchedProblem& matched,
                                          const KernelDefinition& kernel)
 {
     AotPrepared scratch;
-    const auto& prepared = preparedOf(kernel, scratch);
+    const auto& prepared = preparedOf<E>(kernel, scratch);
     if(prepared.dtype != dtypeName(matched.dtype) || !prepared.instance)
     {
         return std::nullopt;
@@ -553,42 +591,50 @@ std::optional<dgrad::Plan> aotKernelPlan(const MatchedProblem& matched,
     return plan;
 }
 
+template <const Engine& E>
 bool aotKernelMatches(const MatchContext& context,
                       const BoundTokens& bound,
                       const KernelDefinition& kernel)
 {
-    const auto matched = matchedFromBound(context, bound);
-    return matched && aotKernelPlan(*matched, kernel).has_value();
+    const auto matched = matchedFromBound(E, context, bound);
+    return matched && aotKernelPlan<E>(*matched, kernel).has_value();
 }
 
+template <const Engine& E>
 double
     aotScore(const MatchContext& context, const BoundTokens& bound, const KernelDefinition& kernel)
 {
     // Deterministic fallback only; a trained ranker or BenchmarkPlan replaces it. Only
     // kernels the matcher admitted are scored, so a refusal (and every helper) ranks last.
-    const auto matched = matchedFromBound(context, bound);
+    const auto matched = matchedFromBound(E, context, bound);
     if(!matched)
     {
         return -1.0;
     }
-    const auto plan = aotKernelPlan(*matched, kernel);
+    const auto plan = aotKernelPlan<E>(*matched, kernel);
     if(!plan)
     {
         return -1.0;
     }
     AotPrepared scratch;
-    return dgrad::planScore(*preparedOf(kernel, scratch).instance, *plan);
+    return dgrad::planScore(*preparedOf<E>(kernel, scratch).instance, *plan);
 }
 
-void requireBindings(const BoundTokens& bound, const Binding& binding)
+/// @p message prefixed with @p engine's name.
+std::string engineMessage(const Engine& engine, std::string_view message)
 {
-    if(tryGetBoundInt(bound, DY_TOKEN) != std::optional<int64_t>(binding.dy)
-       || tryGetBoundInt(bound, W_TOKEN) != std::optional<int64_t>(binding.w)
-       || tryGetBoundInt(bound, DX_TOKEN) != std::optional<int64_t>(binding.dx))
+    return std::string(engine.name) + " " + std::string(message);
+}
+
+void requireBindings(const Engine& engine, const BoundTokens& bound, const Binding& binding)
+{
+    if(tryGetBoundInt(bound, engine.dyToken) != std::optional<int64_t>(binding.dy)
+       || tryGetBoundInt(bound, engine.wToken) != std::optional<int64_t>(binding.w)
+       || tryGetBoundInt(bound, engine.dxToken) != std::optional<int64_t>(binding.dx))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "gfx950_conv_dgrad dispatch requires this graph matcher's tensor bindings");
+            engineMessage(engine, "dispatch requires this graph matcher's tensor bindings"));
     }
 }
 
@@ -701,7 +747,7 @@ void checkHip(hipError_t status, const char* what)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            std::string("gfx950_conv_dgrad ") + what + " failed: " + hipGetErrorString(status));
+            std::string("dgrad AOT ") + what + " failed: " + hipGetErrorString(status));
     }
 }
 
@@ -847,6 +893,7 @@ private:
     bool _zeroDx;
 };
 
+template <const Engine& E>
 class ConvDgradDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
@@ -863,8 +910,8 @@ public:
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& kernel) const override
     {
-        const auto matched = matchProblem(context);
-        const auto plan = matched ? aotKernelPlan(*matched, kernel) : std::nullopt;
+        const auto matched = matchProblem(E, context);
+        const auto plan = matched ? aotKernelPlan<E>(*matched, kernel) : std::nullopt;
         return plan ? static_cast<size_t>(callerWorkspaceBytes(*plan)) : 0;
     }
 
@@ -872,18 +919,18 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& kernel) const override
     {
-        const auto matched = matchProblem(context);
-        auto plan = matched ? aotKernelPlan(*matched, kernel) : std::nullopt;
+        const auto matched = matchProblem(E, context);
+        auto plan = matched ? aotKernelPlan<E>(*matched, kernel) : std::nullopt;
         if(!plan)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950_conv_dgrad graph or packaged kernel does not satisfy the convolution "
-                "contract");
+                engineMessage(
+                    E, "graph or packaged kernel does not satisfy the convolution contract"));
         }
-        requireBindings(bound, matched->binding);
+        requireBindings(E, bound, matched->binding);
         AotPrepared scratch;
-        const auto& prepared = preparedOf(kernel, scratch);
+        const auto& prepared = preparedOf<E>(kernel, scratch);
         // This pack ships prebuilt code objects only; aotKernelPlan already refused every
         // other source kind. Each step loads its own kernel under its ABI's signature.
         std::vector<PreparedStep> steps;
@@ -900,8 +947,7 @@ public:
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    "gfx950_conv_dgrad MFMA instance has no weight-transform helper in its "
-                    "pack");
+                    engineMessage(E, "MFMA instance has no weight-transform helper in its pack"));
             }
             steps.push_back({loadKernel(_loader, context, *helper, step), std::move(step)});
         }
@@ -934,7 +980,7 @@ public:
         if(deviceBuffers == nullptr)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "gfx950_conv_dgrad requires device buffers");
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM, engineMessage(E, "requires device buffers"));
         }
         const auto& binding = dgradPrepared.binding();
         void* dy
@@ -949,7 +995,7 @@ public:
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    "gfx950_conv_dgrad requires non-null device pointers aligned to 16 bytes");
+                    engineMessage(E, "requires non-null device pointers aligned to 16 bytes"));
             }
         }
         const auto& bytes = dgradPrepared.bytes();
@@ -960,8 +1006,9 @@ public:
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950_conv_dgrad requires nonoverlapping gradient, filter, and input-gradient "
-                "storage");
+                engineMessage(E,
+                              "requires nonoverlapping gradient, filter, and input-gradient "
+                              "storage"));
         }
         const auto& workspaces = dgradPrepared.workspaces();
         if(!workspaces.empty()
@@ -969,7 +1016,7 @@ public:
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950_conv_dgrad requires a workspace aligned to 16 bytes");
+                engineMessage(E, "requires a workspace aligned to 16 bytes"));
         }
         // Each buffer a step can bind, with its size: the graph tensors and the regions
         // of the caller's workspace (SUB_GEMM is the prepared plan's own).
@@ -994,7 +1041,7 @@ public:
             }
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "gfx950_conv_dgrad plan binds a buffer it does not lay out");
+                engineMessage(E, "plan binds a buffer it does not lay out"));
         };
         // Every step below goes on the launch stream, so the plan stays stream-ordered.
         const auto stream = handle.getStream();
@@ -1065,13 +1112,26 @@ private:
     const compilation::KpackKernelLoader& _loader;
 };
 
-const ConvDgradDispatchHandler& dispatchHandler()
+template <const Engine& E>
+const ConvDgradDispatchHandler<E>& dispatchHandler()
 {
     // The registries retain non-owning pointers; both dependencies live for the process,
     // including across provider handle destruction and recreation.
-    static const compilation::KpackKernelLoader s_loader(gfx950ConvDgradAotKpackModuleCache());
-    static const ConvDgradDispatchHandler s_handler(s_loader);
+    static const compilation::KpackKernelLoader s_loader(E.moduleCache());
+    static const ConvDgradDispatchHandler<E> s_handler(s_loader);
     return s_handler;
+}
+
+template <const Engine& E>
+void registerSymbols(SymbolScope<Handle>& scope)
+{
+    // No CandidateFilterFn: the catalog is small, so every serving instance is a
+    // candidate and the ranker chooses.
+    scope.add(std::string(E.graphMatcherSymbol), &graphMatches<E>);
+    scope.add(std::string(E.kernelMatcherSymbol), &aotKernelMatches<E>);
+    scope.add(std::string(E.kernelMatcherSymbol), &aotPrepare<E>);
+    scope.add(std::string(E.scoreSymbol), &aotScore<E>);
+    scope.add(std::string(E.dispatchSymbol), &dispatchHandler<E>());
 }
 
 } // namespace
@@ -1082,15 +1142,20 @@ compilation::KpackModuleCache& gfx950ConvDgradAotKpackModuleCache()
     return s_moduleCache;
 }
 
+compilation::KpackModuleCache& gfx1250ConvDgradAotKpackModuleCache()
+{
+    static compilation::KpackModuleCache s_moduleCache;
+    return s_moduleCache;
+}
+
 void registerGfx950ConvDgradAotSymbols(SymbolScope<Handle>& scope)
 {
-    // No CandidateFilterFn: the catalog is small, so every serving instance is a
-    // candidate and the ranker chooses.
-    scope.add(std::string(GRAPH_MATCHER_SYMBOL), &graphMatches);
-    scope.add(std::string(KERNEL_MATCHER_SYMBOL), &aotKernelMatches);
-    scope.add(std::string(KERNEL_MATCHER_SYMBOL), &aotPrepare);
-    scope.add(std::string(SCORE_SYMBOL), &aotScore);
-    scope.add(std::string(DISPATCH_SYMBOL), &dispatchHandler());
+    registerSymbols<GFX950_ENGINE>(scope);
+}
+
+void registerGfx1250ConvDgradAotSymbols(SymbolScope<Handle>& scope)
+{
+    registerSymbols<GFX1250_ENGINE>(scope);
 }
 
 void resetGfx950ConvDgradAotModuleCache()
@@ -1098,7 +1163,12 @@ void resetGfx950ConvDgradAotModuleCache()
     gfx950ConvDgradAotKpackModuleCache().clear();
 }
 
-void setGfx950ConvDgradAotBatchChunkByteLimitForTesting(int64_t limit)
+void resetGfx1250ConvDgradAotModuleCache()
+{
+    gfx1250ConvDgradAotKpackModuleCache().clear();
+}
+
+void setConvDgradAotBatchChunkByteLimitForTesting(int64_t limit)
 {
     dgrad::batchChunkByteLimitForTesting() = limit;
 }

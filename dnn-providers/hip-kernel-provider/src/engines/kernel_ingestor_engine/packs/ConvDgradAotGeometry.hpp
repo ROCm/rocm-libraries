@@ -16,17 +16,18 @@
 #include <utility>
 #include <vector>
 
-/// @file Gfx950ConvDgradGeometry.hpp
-/// The launch contract of hipkernel:Gfx950ConvDgradAot, the shape-generic backward-data
-/// (dgrad) AOT-instance engine: the instances its catalog describes, the problem it
-/// matches, and the launch plan of one instance on one problem -- the served predicate,
-/// the kernels it launches with their grids and arguments, the workspace and the dX
-/// zero-fill. It ports conv_dgrad_aot_plan of the rocKE adapter
+/// @file ConvDgradAotGeometry.hpp
+/// The launch contract of the shape-generic backward-data (dgrad) AOT-instance engines,
+/// hipkernel:Gfx950ConvDgradAot and hipkernel:Gfx1250ConvDgradAot (one per Target): the
+/// instances a catalog describes, the problem an engine matches, and the launch plan of
+/// one instance on one problem -- the served predicate, the kernels it launches with
+/// their grids and arguments, the workspace and the dX zero-fill. It ports
+/// conv_dgrad_aot_plan of the rocKE adapter
 /// rocke/library/builders/common/convolution_backward_data.py, which is rocKE's own offer
 /// (identity_supports_problem, direct_spec_for_problem) plus the launch bounds; the unit
-/// tests compare the two plan for plan by digest (serializePlan / planDigest) over the
-/// shipped catalog.
-namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_dgrad
+/// tests compare the two plan for plan by digest (serializePlan / planDigest) over each
+/// engine's shipped catalog.
+namespace hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot
 {
 
 // Launch geometry, ceiling division and magic-number division: pure helpers with no
@@ -79,10 +80,19 @@ constexpr int64_t I32_MIN = std::numeric_limits<int32_t>::min();
 constexpr int64_t MAX_GRID_DIM = 65535;
 /// A dispatch's x extent in work-items is 32-bit.
 constexpr int64_t MAX_DISPATCH_ITEMS = (int64_t{1} << 32) - 1;
-constexpr int64_t WAVE_SIZE = 64;
 constexpr int64_t MAX_BLOCK_THREADS = 1024;
-/// gfx950's LDS per workgroup (ArchTarget.lds_capacity_bytes).
-constexpr int64_t LDS_CAPACITY_BYTES = 163840;
+
+/// One architecture's packaged dgrad engine (TARGETS in convolution_backward_data.py):
+/// its wave size and LDS per workgroup (ArchTarget.lds_capacity_bytes).
+struct Target
+{
+    std::string_view arch;
+    int64_t waveSize;
+    int64_t ldsCapacityBytes;
+};
+
+inline constexpr Target GFX950{"gfx950", 64, 163840};
+inline constexpr Target GFX1250{"gfx1250", 32, 327680};
 
 /// Record and magic-table widths of the implicit-GEMM sub_gemm_buf, in i32
 /// (SUB_GEMM_RECORD_FIELDS, SUB_GEMM_MAGIC_FIELDS in convolution_backward_data.py).
@@ -104,6 +114,8 @@ constexpr int64_t RTC_WIDE_Q_PRELOAD_VGPR_BUDGET = 216;
 /// channels one MFMA wave of it owns.
 constexpr int64_t DW_DGRAD_WIN_MAX_TENSOR_BYTES = (int64_t{1} << 30) - 1;
 constexpr int64_t DW_DGRAD_MFMA_CH = 8;
+/// DgradConvSpec.num_load_waves: the load waves the wavelet pipeline adds to a workgroup.
+constexpr int64_t WAVELET_LOAD_WAVES = 4;
 
 inline bool fitsI32(int64_t value)
 {
@@ -704,6 +716,9 @@ enum class DirectVariant
     MFMA_RTC, ///< "dgrad_mfma_rtc": the same with runtime channel counts.
     FUSED, ///< "grouped_dgrad_fused": a forward DirectConvSpec reading the original W.
     FOUR_C, ///< "grouped_dgrad_4c": a forward DirectConv4cSpec reading the original W.
+    WMMA, ///< "dgrad_wmma": DirectDgradWmmaSpec (gfx1250).
+    SMALLC_WMMA, ///< "dgrad_smallc_wmma": DgradSmallcWmmaSpec (gfx1250).
+    PATCH_WMMA, ///< "dgrad_patch_wmma": DgradPatchWmmaSpec (gfx1250).
     TRANSPOSE, ///< "transpose": DirectTransposeWeightsDgradSpec (helper).
     REORGANIZE, ///< "reorganize": DirectReorganizeWeightsSpec (helper).
     TRANSPOSE_RTC, ///< "transpose_rtc": the runtime-channel transpose (helper).
@@ -712,7 +727,7 @@ enum class DirectVariant
 
 inline std::optional<DirectVariant> parseDirectVariant(std::string_view value)
 {
-    static constexpr std::array<std::pair<std::string_view, DirectVariant>, 11> NAMES{{
+    static constexpr std::array<std::pair<std::string_view, DirectVariant>, 14> NAMES{{
         {"none", DirectVariant::NONE},
         {"depthwise_dgrad", DirectVariant::DEPTHWISE},
         {"depthwise_dgrad_win", DirectVariant::DEPTHWISE_WIN},
@@ -720,6 +735,9 @@ inline std::optional<DirectVariant> parseDirectVariant(std::string_view value)
         {"dgrad_mfma_rtc", DirectVariant::MFMA_RTC},
         {"grouped_dgrad_fused", DirectVariant::FUSED},
         {"grouped_dgrad_4c", DirectVariant::FOUR_C},
+        {"dgrad_wmma", DirectVariant::WMMA},
+        {"dgrad_smallc_wmma", DirectVariant::SMALLC_WMMA},
+        {"dgrad_patch_wmma", DirectVariant::PATCH_WMMA},
         {"transpose", DirectVariant::TRANSPOSE},
         {"reorganize", DirectVariant::REORGANIZE},
         {"transpose_rtc", DirectVariant::TRANSPOSE_RTC},
@@ -746,8 +764,34 @@ inline bool isMfmaVariant(DirectVariant variant)
     return variant == DirectVariant::MFMA || variant == DirectVariant::MFMA_RTC;
 }
 
+/// The gfx1250 WMMA pipelines (_WMMA_VARIANTS).
+inline bool isWmmaVariant(DirectVariant variant)
+{
+    return variant == DirectVariant::WMMA || variant == DirectVariant::SMALLC_WMMA
+           || variant == DirectVariant::PATCH_WMMA;
+}
+
+/// Whether @p target's engine packages @p variant (TARGETS[arch].direct_algorithms).
+inline bool targetPackages(const Target& target, DirectVariant variant)
+{
+    switch(variant)
+    {
+    case DirectVariant::DEPTHWISE:
+    case DirectVariant::DEPTHWISE_WIN:
+        return true;
+    case DirectVariant::WMMA:
+    case DirectVariant::SMALLC_WMMA:
+    case DirectVariant::PATCH_WMMA:
+        return target.arch == GFX1250.arch;
+    case DirectVariant::NONE:
+        return false;
+    default:
+        return target.arch == GFX950.arch;
+    }
+}
+
 /// One implicit-GEMM instance: the build-time fields of a rocKE dgrad KernelIdentity that
-/// bound which problems its binary computes and how it launches (Gfx950ConvDgradAotSpec).
+/// bound which problems its binary computes and how it launches (ConvDgradAotSpec).
 struct ImplicitInstance
 {
     int64_t tileM;
@@ -777,6 +821,15 @@ struct ImplicitInstance
     bool patch = false;
     /// The stride-1 tap-outer K loop: every K tile inside one tap (kpg % tile_k == 0).
     bool tapOuterK = false;
+    /// The binary's wave size, and the load waves its pipeline adds to the warpM * warpN
+    /// compute waves (WAVELET_LOAD_WAVES for wavelet, else 0): launch_block_size.
+    int64_t waveSize = GFX950.waveSize;
+    int64_t loadWaves = 0;
+
+    int64_t threads() const
+    {
+        return (warpM * warpN + loadWaves) * waveSize;
+    }
 };
 
 /// What a direct or helper binary compiles in. 0 cpg / kpg: runtime channel counts
@@ -824,10 +877,27 @@ struct DirectKnobs
     int64_t wavesPerEu = 0;
     int64_t xcdTiles = 0;
     int64_t stageRows = 0;
+    // gfx1250: the streaming depthwise channels per lane, and the WMMA pipelines' knobs.
+    int64_t cpl = 0;
+    int64_t ck = 0;
+    int64_t prefetch = 0;
+    int64_t stages = 0;
+    int64_t tilesC = 0;
+    int64_t tilesP = 0;
+    int64_t wavesC = 0;
+    int64_t wavesP = 0;
+    int64_t packGroups = 0;
+    int64_t splitBarrier = 0;
+    int64_t batchTile = 0; ///< The dense pipeline's tile_n: images per tile.
+    int64_t tileW = 0;
+    int64_t waveEpilogue = 0;
+    int64_t outH = 0;
+    int64_t outW = 0;
+    int64_t rBlk = 0;
 };
 
-/// The knob fields in KMD order (_KNOB_DEFAULTS in convolution_backward_data.py), each
-/// with its member.
+/// The knob fields every engine's KMD holds, in KMD order (_KNOB_DEFAULTS in
+/// convolution_backward_data.py), each with its member.
 constexpr std::array<std::pair<std::string_view, int64_t DirectKnobs::*>, 25> DIRECT_KNOB_FIELDS{{
     {"block_w", &DirectKnobs::blockW},
     {"block_waves", &DirectKnobs::blockWaves},
@@ -856,8 +926,30 @@ constexpr std::array<std::pair<std::string_view, int64_t DirectKnobs::*>, 25> DI
     {"stage_rows", &DirectKnobs::stageRows},
 }};
 
+/// The knob fields gfx1250's KMD holds after DIRECT_KNOB_FIELDS, in KMD order
+/// (_GFX1250_KNOB_DEFAULTS), each with its member; "sched" is a string field of its own.
+constexpr std::array<std::pair<std::string_view, int64_t DirectKnobs::*>, 16>
+    GFX1250_DIRECT_KNOB_FIELDS{{
+        {"cpl", &DirectKnobs::cpl},
+        {"ck", &DirectKnobs::ck},
+        {"prefetch", &DirectKnobs::prefetch},
+        {"stages", &DirectKnobs::stages},
+        {"tiles_c", &DirectKnobs::tilesC},
+        {"tiles_p", &DirectKnobs::tilesP},
+        {"waves_c", &DirectKnobs::wavesC},
+        {"waves_p", &DirectKnobs::wavesP},
+        {"pack_groups", &DirectKnobs::packGroups},
+        {"split_barrier", &DirectKnobs::splitBarrier},
+        {"batch_tile", &DirectKnobs::batchTile},
+        {"tile_w", &DirectKnobs::tileW},
+        {"wave_epilogue", &DirectKnobs::waveEpilogue},
+        {"out_h", &DirectKnobs::outH},
+        {"out_w", &DirectKnobs::outW},
+        {"r_blk", &DirectKnobs::rBlk},
+    }};
+
 /// The 0/1 knobs (_BOOL_KNOBS).
-constexpr std::array<std::string_view, 11> DIRECT_FLAG_KNOBS{"fold_k32",
+constexpr std::array<std::string_view, 14> DIRECT_FLAG_KNOBS{"fold_k32",
                                                              "persistent_grid",
                                                              "runtime_k_loop",
                                                              "dot2",
@@ -867,15 +959,21 @@ constexpr std::array<std::string_view, 11> DIRECT_FLAG_KNOBS{"fold_k32",
                                                              "row_exit",
                                                              "stage_out",
                                                              "xcd_tiles",
-                                                             "stage_rows"};
+                                                             "stage_rows",
+                                                             "prefetch",
+                                                             "split_barrier",
+                                                             "wave_epilogue"};
 
-/// Whether @p variant states @p knob (AOT_DGRAD_DIRECT_KNOBS); every other knob holds 0.
-/// A transpose states fold_k32 too, always 0 (the helper lookup keys on it).
+/// Whether @p variant states @p knob (the spec class's DIRECT_KNOBS); every other knob
+/// holds 0 (sched ""). A transpose states fold_k32 too, always 0 (the helper lookup keys on
+/// it). Only gfx1250's depthwise dgrad states cpl, and only its KMD has the field.
 inline bool directVariantUses(DirectVariant variant, std::string_view knob)
 {
     const auto among = [&](std::initializer_list<std::string_view> knobs) {
         return std::find(knobs.begin(), knobs.end(), knob) != knobs.end();
     };
+    const std::initializer_list<std::string_view> wmmaKnobs{
+        "ck", "prefetch", "sched", "stages", "tiles_c", "tiles_p", "waves_c", "waves_p"};
     const std::initializer_list<std::string_view> mfmaKnobs{"block_groups",
                                                             "block_h",
                                                             "block_q",
@@ -887,7 +985,7 @@ inline bool directVariantUses(DirectVariant variant, std::string_view knob)
     switch(variant)
     {
     case DirectVariant::DEPTHWISE:
-        return among({"block_w", "block_waves"});
+        return among({"block_w", "block_waves", "cpl"});
     case DirectVariant::DEPTHWISE_WIN:
         return among({"block_h",
                       "block_w",
@@ -916,6 +1014,13 @@ inline bool directVariantUses(DirectVariant variant, std::string_view knob)
                       "xcd_tiles"});
     case DirectVariant::FOUR_C:
         return among({"block_groups", "block_q", "dgrad_weights_lds", "stage_rows"});
+    case DirectVariant::WMMA:
+        return among(wmmaKnobs)
+               || among({"pack_groups", "split_barrier", "batch_tile", "tile_w", "wave_epilogue"});
+    case DirectVariant::SMALLC_WMMA:
+        return among(wmmaKnobs) || among({"out_h", "out_w"});
+    case DirectVariant::PATCH_WMMA:
+        return among(wmmaKnobs) || among({"r_blk", "tile_w"});
     case DirectVariant::TRANSPOSE:
     case DirectVariant::TRANSPOSE_RTC:
     case DirectVariant::REORGANIZE:
@@ -927,18 +1032,34 @@ inline bool directVariantUses(DirectVariant variant, std::string_view knob)
     }
 }
 
-/// One direct or helper instance (the direct fields of Gfx950ConvDgradAotSpec).
+/// One direct or helper instance (the direct fields of ConvDgradAotSpec), and its
+/// binary's wave size.
 struct DirectInstance
 {
     DirectVariant variant;
     DirectCapabilities compiled;
     DirectKnobs knobs{};
+    int64_t waveSize = GFX950.waveSize;
 };
 
 /// A knob's value, or rocKE's spec default where the instance left it at 0.
 inline int64_t knobOr(int64_t value, int64_t fallback)
 {
     return value != 0 ? value : fallback;
+}
+
+/// The logical wave the VALU depthwise kernels group threads in, on every target.
+constexpr int64_t LOGICAL_WAVE_SIZE = 64;
+
+/// The wave size @p instance's spec groups its threads in (direct_spec_takes_target_wave):
+/// the binary's own for the matrix pipelines -- MFMA, WMMA, and the windowed depthwise
+/// kernel's Toeplitz form -- and a logical wave64 for the VALU depthwise kernels.
+inline int64_t specWaveSize(const DirectInstance& instance)
+{
+    const bool valu
+        = instance.variant == DirectVariant::DEPTHWISE
+          || (instance.variant == DirectVariant::DEPTHWISE_WIN && instance.knobs.mfma == 0);
+    return valu ? LOGICAL_WAVE_SIZE : instance.waveSize;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -986,13 +1107,24 @@ struct AotInstance
     std::optional<DirectInstance> direct;
 };
 
-/// The instance a kernel's metadata describes (supports_conv_dgrad_aot), when it is
-/// a complete instance of one family with a reviewed launch contract. @p metadata answers
-/// intField(name) -> std::optional<int64_t> and stringField(name) -> const std::string*.
-/// kernel_family is read first, so no family's checks run on another's placeholders; a
-/// missing or malformed field refuses the kernel.
+/// The implicit-GEMM pipelines @p target's dgrad AOT sweep builds (TARGETS[arch].pipelines).
+inline bool implicitPipelineBuilt(const Target& target, std::string_view pipeline)
+{
+    if(target.arch == GFX1250.arch)
+    {
+        return pipeline == "mem" || pipeline == "wavelet";
+    }
+    return pipeline == "mem" || pipeline == "compv3" || pipeline == "compv4";
+}
+
+/// The instance a kernel's metadata describes for @p target's engine
+/// (supports_conv_dgrad_aot), when it is a complete instance of one family with a
+/// reviewed launch contract. @p metadata answers intField(name) -> std::optional<int64_t>
+/// and stringField(name) -> const std::string*. kernel_family is read first, so no
+/// family's checks run on another's placeholders; a missing or malformed field refuses the
+/// kernel, and so does a field the target's KMD does not have.
 template <typename Metadata>
-std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
+std::optional<AotInstance> parseAotInstance(const Metadata& metadata, const Target& target)
 {
     const auto equalsString = [&](std::string_view field, std::string_view expected) {
         const auto* value = metadata.stringField(field);
@@ -1001,7 +1133,19 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
     const auto equalsInt = [&](std::string_view field, int64_t expected) {
         return metadata.intField(field) == std::optional<int64_t>(expected);
     };
-    if(!equalsString("layout", "NHWC") || !equalsInt("wave_size", WAVE_SIZE))
+    if(!equalsString("layout", "NHWC") || !equalsInt("wave_size", target.waveSize))
+    {
+        return std::nullopt;
+    }
+    const bool gfx1250 = target.arch == GFX1250.arch;
+    // gfx1250's knobs past the shared ones: a gfx950 kernel carries none of them, and a
+    // gfx1250 one holds every one (0 where its variant does not use it).
+    const auto* sched = metadata.stringField("sched");
+    if(gfx1250 ? sched == nullptr
+               : (sched != nullptr
+                  || std::any_of(GFX1250_DIRECT_KNOB_FIELDS.begin(),
+                                 GFX1250_DIRECT_KNOB_FIELDS.end(),
+                                 [&](const auto& f) { return metadata.intField(f.first); })))
     {
         return std::nullopt;
     }
@@ -1024,13 +1168,18 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
         const auto* pipeline = metadata.stringField("pipeline");
         const auto* epilogue = metadata.stringField("epilogue");
         if(*variant != DirectVariant::NONE || pipeline == nullptr || epilogue == nullptr
-           || (*pipeline != "mem" && *pipeline != "compv3" && *pipeline != "compv4")
+           || !implicitPipelineBuilt(target, *pipeline)
            || (*epilogue != "default" && *epilogue != "cshuffle")
            || !std::all_of(
                IMPLICIT_RUNTIME_ONLY_FIELDS.begin(), IMPLICIT_RUNTIME_ONLY_FIELDS.end(), isZero)
            || !std::all_of(DIRECT_KNOB_FIELDS.begin(),
                            DIRECT_KNOB_FIELDS.end(),
-                           [&](const auto& f) { return isZero(f.first); }))
+                           [&](const auto& f) { return isZero(f.first); })
+           || (gfx1250
+               && (!sched->empty()
+                   || !std::all_of(GFX1250_DIRECT_KNOB_FIELDS.begin(),
+                                   GFX1250_DIRECT_KNOB_FIELDS.end(),
+                                   [&](const auto& f) { return isZero(f.first); }))))
         {
             return std::nullopt;
         }
@@ -1109,8 +1258,11 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
         instance.haloMaxWo = *haloMaxWo;
         instance.patch = *patch == 1;
         instance.tapOuterK = *tapOuterK == 1;
-        if(instance.warpM > MAX_BLOCK_THREADS / WAVE_SIZE
-           || instance.warpN > MAX_BLOCK_THREADS / (WAVE_SIZE * instance.warpM))
+        instance.waveSize = target.waveSize;
+        instance.loadWaves = *pipeline == "wavelet" ? WAVELET_LOAD_WAVES : 0;
+        if(instance.warpM > MAX_BLOCK_THREADS / target.waveSize
+           || instance.warpN > MAX_BLOCK_THREADS / (target.waveSize * instance.warpM)
+           || instance.threads() > MAX_BLOCK_THREADS)
         {
             return std::nullopt;
         }
@@ -1118,7 +1270,7 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
     }
 
     const bool helper = isHelperVariant(*variant);
-    if(*variant == DirectVariant::NONE || (*family == KernelFamily::HELPER) != helper
+    if(!targetPackages(target, *variant) || (*family == KernelFamily::HELPER) != helper
        || !equalsString("pipeline", "direct") || !equalsString("epilogue", "direct")
        || !std::all_of(GEMM_TUNING_FIELDS.begin(), GEMM_TUNING_FIELDS.end(), isZero)
        || !std::all_of(GEMM_ONLY_FIELDS.begin(), GEMM_ONLY_FIELDS.end(), isZero)
@@ -1149,12 +1301,23 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
     const bool runtimeChannels = *variant == DirectVariant::MFMA_RTC
                                  || *variant == DirectVariant::TRANSPOSE_RTC
                                  || *variant == DirectVariant::REORGANIZE_RTC;
-    if(capabilities.filterH < 1 || capabilities.filterH != capabilities.filterW
-       || capabilities.dilationH != 1
-       || capabilities.dilationW != 1
-       // 0 channel counts are runtime, and only the runtime-channel kernels take them.
-       || (capabilities.cpg == 0) != (capabilities.kpg == 0)
-       || (capabilities.cpg == 0) != runtimeChannels)
+    // Only a dense WMMA binary takes a dilation (the problem's); every other direct kernel
+    // is undilated.
+    const bool dilation = *variant == DirectVariant::WMMA
+                              ? capabilities.dilationH >= 1 && capabilities.dilationW >= 1
+                              : capabilities.dilationH == 1 && capabilities.dilationW == 1;
+    // 0 channel counts are runtime. A dense WMMA binary takes both from the problem or
+    // bakes both (its packed groups); a stem bakes its few input channels and reads K; any
+    // other kernel bakes both, unless it is a runtime-channel one, which takes both.
+    const bool stem
+        = *variant == DirectVariant::SMALLC_WMMA || *variant == DirectVariant::PATCH_WMMA;
+    const bool paired = (capabilities.cpg == 0) == (capabilities.kpg == 0);
+    const bool channels = stem ? capabilities.cpg >= 1
+                               : paired
+                                     && (*variant == DirectVariant::WMMA
+                                         || (capabilities.cpg == 0) == runtimeChannels);
+    if(capabilities.filterH < 1 || capabilities.filterH != capabilities.filterW || !dilation
+       || !channels)
     {
         return std::nullopt;
     }
@@ -1178,12 +1341,11 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
         return std::nullopt;
     }
     DirectKnobs knobs{};
-    for(const auto& [field, member] : DIRECT_KNOB_FIELDS)
-    {
+    const auto readKnob = [&](std::string_view field, int64_t DirectKnobs::*member) {
         const auto value = metadata.intField(field);
         if(!value)
         {
-            return std::nullopt;
+            return false;
         }
         const bool flag = std::find(DIRECT_FLAG_KNOBS.begin(), DIRECT_FLAG_KNOBS.end(), field)
                           != DIRECT_FLAG_KNOBS.end();
@@ -1191,14 +1353,37 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
         {
             if(*value != 0)
             {
-                return std::nullopt;
+                return false;
             }
         }
         else if(flag ? (*value != 0 && *value != 1) : (*value < 0 || *value > I32_MAX))
         {
-            return std::nullopt;
+            return false;
         }
         knobs.*member = *value;
+        return true;
+    };
+    for(const auto& [field, member] : DIRECT_KNOB_FIELDS)
+    {
+        if(!readKnob(field, member))
+        {
+            return std::nullopt;
+        }
+    }
+    if(gfx1250)
+    {
+        for(const auto& [field, member] : GFX1250_DIRECT_KNOB_FIELDS)
+        {
+            if(!readKnob(field, member))
+            {
+                return std::nullopt;
+            }
+        }
+        // The schedule only selects emission; a variant without one holds "".
+        if(!directVariantUses(*variant, "sched") && !sched->empty())
+        {
+            return std::nullopt;
+        }
     }
     // A transpose writes the plain layout; only a reorganize helper is keyed on fold_k32.
     if((*variant == DirectVariant::TRANSPOSE || *variant == DirectVariant::TRANSPOSE_RTC)
@@ -1206,7 +1391,8 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
     {
         return std::nullopt;
     }
-    return AotInstance{*family, std::nullopt, DirectInstance{*variant, capabilities, knobs}};
+    return AotInstance{
+        *family, std::nullopt, DirectInstance{*variant, capabilities, knobs, target.waveSize}};
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1695,8 +1881,9 @@ inline std::optional<std::vector<SubGemm>>
 
 /// _implicit_plan: the launch of an implicit-GEMM instance on @p problem -- the width
 /// folded, the batch split where dY or dX exceeds the 32-bit ABI, each slice's records,
-/// table, grid (flat tiles, groups, 1) of warp_m * warp_n * 64 threads and kernargs, and a
-/// zero-filled dX when the records leave some of it unwritten.
+/// table, grid (flat tiles, groups, 1) of ImplicitInstance::threads() threads (the compute
+/// waves plus a wavelet pipeline's load waves) and kernargs, and a zero-filled dX when the
+/// records leave some of it unwritten.
 inline std::optional<Plan> implicitPlan(const Problem& problem, const ImplicitInstance& instance)
 {
     const auto launched = implicitLaunchProblem(problem);
@@ -1710,7 +1897,7 @@ inline std::optional<Plan> implicitPlan(const Problem& problem, const ImplicitIn
     {
         return std::nullopt;
     }
-    const auto threads = instance.warpM * instance.warpN * WAVE_SIZE;
+    const auto threads = instance.threads();
     Plan plan{launched, *geometry, {}, {}, false};
     int64_t tableBytes = 0;
     for(const auto& [n0, n] : *chunks)
@@ -1873,7 +2060,7 @@ inline std::optional<std::pair<std::array<int64_t, 3>, int64_t>>
             return std::nullopt;
         }
     }
-    const auto threads = blockGroups * wavesQ * wavesK * WAVE_SIZE;
+    const auto threads = blockGroups * wavesQ * wavesK * instance.waveSize;
     // The A/B staging ring of build_direct_conv (double-buffered) and the waves_k > 1
     // cross-wave reduction scratch.
     const auto loadVec = knobs.foldK32 != 0 ? 8 : 4;
@@ -1881,8 +2068,9 @@ inline std::optional<std::pair<std::array<int64_t, 3>, int64_t>>
     const auto chunks = ldsW * blockGroups * (t.cpg / loadVec);
     const auto passes = ceilDiv(chunks, threads);
     const auto staging = passes * threads * loadVec * 2 * 2;
-    const auto reduction = wavesK > 1 ? wavesQ * wavesK * WAVE_SIZE * 4 * 4 : 0;
-    if(staging + reduction > LDS_CAPACITY_BYTES)
+    const auto reduction = wavesK > 1 ? wavesQ * wavesK * instance.waveSize * 4 * 4 : 0;
+    // The forward-on-transposed pipelines are gfx950's.
+    if(staging + reduction > GFX950.ldsCapacityBytes)
     {
         return std::nullopt;
     }
@@ -1910,9 +2098,148 @@ inline std::optional<std::pair<std::array<int64_t, 3>, int64_t>>
     return std::pair{grid, threads};
 }
 
+// ---- gfx1250 WMMA pipelines ----------------------------------------------------------
+
+/// Whether at least half of a padded tile grid is real work, @p useful of @p padded (both
+/// wideProduct results, so below 2^62): direct_spec_for_problem's `tile efficiency < 0.5`
+/// refusal, in exact integers.
+inline bool halfUseful(int64_t useful, int64_t padded)
+{
+    return padded > 0 && 2 * useful >= padded;
+}
+
+/// ceil(a / b) * b.
+inline int64_t alignUp(int64_t a, int64_t b)
+{
+    return ceilDiv(a, b) * b;
+}
+
+/// The one direct-dgrad launch of a WMMA pipeline: (@p blocks, 1, 1) workgroups of
+/// waves_c * waves_p waves, the block id an i32.
+inline std::optional<std::pair<std::array<int64_t, 3>, int64_t>>
+    wmmaLaunch(int64_t blocks, int64_t wavesC, int64_t wavesP, int64_t waveSize)
+{
+    const auto threads = wavesC * wavesP * waveSize;
+    const std::array<int64_t, 3> grid{blocks, 1, 1};
+    if(blocks > I32_MAX || !gridFits(grid, threads, I32_MAX))
+    {
+        return std::nullopt;
+    }
+    return std::pair{grid, threads};
+}
+
+/// DirectDgradWmmaSpec on @p p (dgrad_wmma_reason's run-time half, then
+/// dgrad_wmma_tile_efficiency): the packed groups divide the problem's, the effective
+/// channels are 16-byte rows, at least half the padded tile grid is real, and the grid is
+/// ceil(N / tile_n) * groups / pack_groups * ceil(ceil(Hi / S) / tile_h) *
+/// ceil(ceil(Wi / S) / tile_w) * ceil(cpg_eff / block_c) blocks, tile_h = block_p /
+/// (tile_w * tile_n). An unstated knob takes the spec's default.
+inline std::optional<std::pair<std::array<int64_t, 3>, int64_t>>
+    dgradWmmaLaunch(const Problem& p, const Geometry& g, const DirectInstance& instance)
+{
+    const auto& knobs = instance.knobs;
+    const auto wavesC = knobOr(knobs.wavesC, 2);
+    const auto wavesP = knobOr(knobs.wavesP, 4);
+    const auto blockC = wavesC * knobOr(knobs.tilesC, 4) * 16;
+    const auto blockP = wavesP * knobOr(knobs.tilesP, 4) * 16;
+    const auto tileW = knobOr(knobs.tileW, 16);
+    const auto tileN = knobOr(knobs.batchTile, 1);
+    const auto packGroups = knobOr(knobs.packGroups, 1);
+    const auto tileH = blockP / (tileW * tileN);
+    if(p.groups % packGroups != 0 || tileH < 1)
+    {
+        return std::nullopt;
+    }
+    const auto cpgEff = packGroups * g.cpg;
+    const auto kpgEff = packGroups * g.kpg;
+    if(cpgEff % 8 != 0 || kpgEff % 8 != 0)
+    {
+        return std::nullopt;
+    }
+    const auto hq = ceilDiv(p.hi, p.strideH);
+    const auto wq = ceilDiv(p.wi, p.strideW);
+    const auto useful = wideProduct({p.n, hq, wq, cpgEff});
+    const auto padded = wideProduct(
+        {alignUp(p.n, tileN), alignUp(hq, tileH), alignUp(wq, tileW), alignUp(cpgEff, blockC)});
+    if(!useful || !padded || !halfUseful(*useful, *padded))
+    {
+        return std::nullopt;
+    }
+    const auto blocks = wideProduct({ceilDiv(p.n, tileN),
+                                     p.groups / packGroups,
+                                     ceilDiv(hq, tileH),
+                                     ceilDiv(wq, tileW),
+                                     ceilDiv(cpgEff, blockC)});
+    return blocks ? wmmaLaunch(*blocks, wavesC, wavesP, instance.waveSize) : std::nullopt;
+}
+
+/// DgradSmallcWmmaSpec on @p p (dgrad_smallc_reason's run-time half, then
+/// dgrad_smallc_tile_efficiency): ungrouped, K a multiple of 8 (16-byte dY rows), at least
+/// half the padded dX tile grid real, and N * ceil(Hi / out_h) * ceil(Wi / out_w) blocks.
+inline std::optional<std::pair<std::array<int64_t, 3>, int64_t>>
+    dgradSmallcLaunch(const Problem& p, const Geometry& g, const DirectInstance& instance)
+{
+    const auto& knobs = instance.knobs;
+    const auto outH = knobOr(knobs.outH, 32);
+    const auto outW = knobOr(knobs.outW, 32);
+    if(p.groups != 1 || g.kpg % 8 != 0)
+    {
+        return std::nullopt;
+    }
+    const auto useful = wideProduct({p.hi, p.wi});
+    const auto padded = wideProduct({alignUp(p.hi, outH), alignUp(p.wi, outW)});
+    if(!useful || !padded || !halfUseful(*useful, *padded))
+    {
+        return std::nullopt;
+    }
+    const auto blocks = wideProduct({p.n, ceilDiv(p.hi, outH), ceilDiv(p.wi, outW)});
+    return blocks
+               ? wmmaLaunch(
+                     *blocks, knobOr(knobs.wavesC, 1), knobOr(knobs.wavesP, 4), instance.waveSize)
+               : std::nullopt;
+}
+
+/// DgradPatchWmmaSpec on @p p (dgrad_patch_reason's run-time half, then
+/// dgrad_patch_tile_efficiency): ungrouped, K a multiple of 8, at least half of the padded
+/// dY tile grid's GEMM columns real, and N * ceil(Ho / tile_h) * ceil(Wo / tile_w) *
+/// (P / r_blk) blocks, tile_h = block_p / tile_w, plus N more when the patches leave a dX
+/// border.
+inline std::optional<std::pair<std::array<int64_t, 3>, int64_t>>
+    dgradPatchLaunch(const Problem& p, const Geometry& g, const DirectInstance& instance)
+{
+    const auto& knobs = instance.knobs;
+    const auto wavesC = knobOr(knobs.wavesC, 4);
+    const auto wavesP = knobOr(knobs.wavesP, 2);
+    const auto blockC = wavesC * knobOr(knobs.tilesC, 3) * 16;
+    const auto blockP = wavesP * knobOr(knobs.tilesP, 4) * 16;
+    const auto tileW = knobOr(knobs.tileW, 16);
+    const auto rBlk = knobOr(knobs.rBlk, 4);
+    const auto patch = instance.compiled.filterH;
+    const auto tileH = blockP / tileW;
+    if(p.groups != 1 || g.kpg % 8 != 0 || tileH < 1)
+    {
+        return std::nullopt;
+    }
+    const auto blockCols = rBlk * patch * g.cpg;
+    const auto useful = wideProduct({g.ho, g.wo, blockCols});
+    const auto padded = wideProduct({alignUp(g.ho, tileH), alignUp(g.wo, tileW), blockC});
+    if(!useful || !padded || !halfUseful(*useful, *padded))
+    {
+        return std::nullopt;
+    }
+    const auto main = wideProduct({p.n, ceilDiv(g.ho, tileH), ceilDiv(g.wo, tileW), patch / rBlk});
+    if(!main)
+    {
+        return std::nullopt;
+    }
+    const bool border = g.ho * patch < p.hi || g.wo * patch < p.wi;
+    return wmmaLaunch(*main + (border ? p.n : 0), wavesC, wavesP, instance.waveSize);
+}
+
 /// _direct_plan: rocKE's offer for a direct instance and its plan_for steps.
-///   * depthwise_dgrad: one direct-dgrad launch, (ceil(Wi / block_w), ceil(groups /
-///     (64 * block_waves)), N) of 64 * block_waves threads.
+///   * depthwise_dgrad: groups a multiple of cpl (gfx1250's channels per lane, else 1),
+///     then one direct-dgrad launch, (ceil(Wi / block_w), ceil(groups / (64 * block_waves
+///     * cpl)), N) of 64 * block_waves threads (a logical wave64 on every target).
 ///   * depthwise_dgrad_win: groups a multiple of ch_per_lane (of 8 in the MFMA form) and
 ///     dY and dX within the kernel's 2^30-byte sentinel range, then one direct-dgrad
 ///     launch of DirectDepthwiseDgradWindowedSpec.grid().
@@ -1929,6 +2256,8 @@ inline std::optional<std::pair<std::array<int64_t, 3>, int64_t>>
 ///     compute pass on (dY, ws, dX). ws_t is C * KH * KW * kpg * 2 bytes at offset 0, ws_coa
 ///     groups * KH * KW * ceil(kpg / k_atom) * ceil(cpg / 16) * 64 * (8 | 4) * 2 bytes at
 ///     ws_t rounded up to 256. The runtime-channel transforms take the per-group cpg and kpg.
+///   * dgrad_wmma / dgrad_smallc_wmma / dgrad_patch_wmma (gfx1250): one direct-dgrad launch
+///     of dgradWmmaLaunch / dgradSmallcLaunch / dgradPatchLaunch.
 /// Every tensor and workspace stays within the 32-bit kernel ABI.
 inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstance& instance)
 {
@@ -1953,10 +2282,12 @@ inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstan
     case DirectVariant::DEPTHWISE:
     {
         const auto blockW = knobOr(knobs.blockW, 8);
-        const auto threads = knobOr(knobs.blockWaves, 1) * WAVE_SIZE;
+        const auto threads = knobOr(knobs.blockWaves, 1) * specWaveSize(instance);
+        // gfx1250's lanes may own cpl adjacent channels each (DirectDepthwiseDgradStreamSpec).
+        const auto cpl = knobOr(knobs.cpl, 1);
         const std::array<int64_t, 3> grid{
-            ceilDiv(problem.wi, blockW), ceilDiv(problem.groups, threads), problem.n};
-        if(!gridFits(grid, threads, I32_MAX))
+            ceilDiv(problem.wi, blockW), ceilDiv(problem.groups, threads * cpl), problem.n};
+        if(problem.groups % cpl != 0 || !gridFits(grid, threads, I32_MAX))
         {
             return std::nullopt;
         }
@@ -1974,7 +2305,7 @@ inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstan
         const auto chPerLane = knobOr(knobs.chPerLane, 1);
         const auto blockWaves = knobOr(knobs.blockWaves, 1);
         const auto wFold = knobOr(knobs.wFold, 1);
-        const auto threads = blockWaves * WAVE_SIZE;
+        const auto threads = blockWaves * specWaveSize(instance);
         if(problem.groups % chPerLane != 0 || (mfma && problem.groups % DW_DGRAD_MFMA_CH != 0)
            || std::max(g.tensorBytes[0], g.tensorBytes[2]) > DW_DGRAD_WIN_MAX_TENSOR_BYTES)
         {
@@ -2026,7 +2357,7 @@ inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstan
             return std::nullopt;
         }
         const auto wavesQ = knobs.stageRows != 0 ? blockQ / 4 : 1;
-        const auto threads = blockGroups / 16 * wavesQ * WAVE_SIZE;
+        const auto threads = blockGroups / 16 * wavesQ * instance.waveSize;
         const std::array<int64_t, 3> grid{
             ceilDiv(t->wo, blockQ), problem.groups / blockGroups, problem.n};
         if(!gridFits(grid, threads, I32_MAX))
@@ -2035,6 +2366,35 @@ inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstan
         }
         plan.steps.push_back(makeStep(
             PlanKernel::SELF, Abi::DIRECT_FWD, grid, threads, tensors, transposedValues(*t)));
+        return plan;
+    }
+    case DirectVariant::WMMA:
+    case DirectVariant::SMALLC_WMMA:
+    case DirectVariant::PATCH_WMMA:
+    {
+        std::optional<std::pair<std::array<int64_t, 3>, int64_t>> launch;
+        if(instance.variant == DirectVariant::WMMA)
+        {
+            launch = dgradWmmaLaunch(problem, g, instance);
+        }
+        else if(instance.variant == DirectVariant::SMALLC_WMMA)
+        {
+            launch = dgradSmallcLaunch(problem, g, instance);
+        }
+        else
+        {
+            launch = dgradPatchLaunch(problem, g, instance);
+        }
+        if(!launch)
+        {
+            return std::nullopt;
+        }
+        plan.steps.push_back(makeStep(PlanKernel::SELF,
+                                      Abi::DIRECT_DGRAD,
+                                      launch->first,
+                                      launch->second,
+                                      tensors,
+                                      directDgradValues(problem, g)));
         return plan;
     }
     case DirectVariant::MFMA:
@@ -2145,12 +2505,15 @@ inline std::optional<Plan> instancePlan(const Problem& problem, const AotInstanc
 // ---- the deterministic fallback order --------------------------------------------------
 
 /// Deterministic order among the instances serving one problem, used only when nothing is
-/// benchmarked, recorded or trained; higher is better. The direct pipelines rank above
-/// implicit GEMM (whose N tile is mostly idle at these few channels per group): the
-/// single-kernel ones (windowed and streaming depthwise, fused, 4c) in [3, 3.5], the MFMA
-/// pipelines in [2, 2.5); implicit GEMM in [0, 1.01) by the fraction of the launched tile
-/// area that is real output times how well the grid fills a device of 256 compute units,
-/// with wider vectors breaking ties.
+/// benchmarked, recorded or trained; higher is better. Both engines share it; gfx1250's
+/// UED ranks tflops requests with its trained model, so there this decides only for
+/// other metrics or without the model. The
+/// direct pipelines rank above implicit GEMM (whose N tile is mostly idle at these few
+/// channels per group): the single-kernel ones (gfx950's windowed and streaming
+/// depthwise, fused, 4c; gfx1250's depthwise and WMMA dense, small-C and patch) in
+/// [3, 3.5], gfx950's MFMA pipelines in [2, 2.5); implicit GEMM in [0, 1.01) by the
+/// fraction of the launched tile area that is real output times how well the grid fills
+/// a device of 256 compute units, with wider vectors breaking ties.
 inline double planScore(const AotInstance& instance, const Plan& plan)
 {
     constexpr double CU_COUNT = 256.0;
@@ -2185,4 +2548,4 @@ inline double planScore(const AotInstance& instance, const Plan& plan)
     return (launched > 0.0 ? useful / launched : 0.0) * fill + 1e-3 * widths;
 }
 
-} // namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_dgrad
+} // namespace hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot
