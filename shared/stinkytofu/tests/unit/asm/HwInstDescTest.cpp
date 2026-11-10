@@ -709,3 +709,47 @@ TEST_F(HwInstDescTest, TensorStoreFromLdsIsAnOrderedStoreNotALoad) {
         EXPECT_EQ(storeFields[i].fieldSizeBits, loadFields[i].fieldSizeBits) << i;
     }
 }
+
+// ---------------------------------------------------------------------------
+// TENSOR_STORE: tensor_store_from_lds is a tensor store, not a tensor load
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, TensorStoreFromLds_IsATensorStoreOnBothSteppings) {
+    for (const GfxArchID a : {arch, getGfxArchID("gfx1250v0")}) {
+        uint16_t isaOp = getMnemonicToIsaOpcode("tensor_store_from_lds", a);
+        ASSERT_NE(isaOp, GFX::INVALID);
+        const HwInstDesc* desc = getMCIDByIsaOp(isaOp, a);
+        ASSERT_NE(desc, nullptr);
+        EXPECT_TRUE(desc->has(IF_TENSORStoreFromLds));
+        EXPECT_TRUE(desc->has(IF_HasSideEffect));
+        EXPECT_FALSE(desc->has(IF_TENSORLoadToLds));
+        EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VIMAGE);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DS d16 loads put the value in one half of the destination. ECC makes every
+// gfx1250 VGPR write 32 bits wide (hasD16Writes32BitVgpr), so the other half is
+// not kept: the destination is a plain 32-bit write, as for the MUBUF and FLAT
+// d16 loads, and code that packs two halves merges them with a VALU instruction.
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, DS_D16Loads_OnBothSteppings) {
+    for (const GfxArchID a : {arch, getGfxArchID("gfx1250v0")}) {
+        const auto* info = ArchHelper::getInstance().getArchInfo(a);
+        ASSERT_NE(info, nullptr);
+        EXPECT_TRUE(info->hasD16Writes32BitVgpr());
+        for (const char* name : {"ds_load_u8_d16", "ds_load_u8_d16_hi", "ds_load_i8_d16",
+                                 "ds_load_i8_d16_hi", "ds_load_u16_d16", "ds_load_u16_d16_hi"}) {
+            uint16_t isaOp = getMnemonicToIsaOpcode(name, a);
+            ASSERT_NE(isaOp, GFX::INVALID) << name;
+            const HwInstDesc* desc = getMCIDByIsaOp(isaOp, a);
+            ASSERT_NE(desc, nullptr) << name;
+            EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VDS) << name;
+            EXPECT_EQ(desc->unit, ExecUnit::LDS) << name;
+            EXPECT_TRUE(desc->has(IF_DSRead)) << name;
+            ASSERT_EQ(desc->operandFields.size(), 2u) << name;
+            EXPECT_TRUE(desc->operandFields[0].isDest) << name;
+            EXPECT_FALSE(desc->operandFields[0].isReadWrite) << name;
+            EXPECT_EQ(desc->operandFields[0].fieldSizeBits, 32u) << name;
+        }
+    }
+}

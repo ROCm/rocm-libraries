@@ -164,6 +164,18 @@ DEF_BATCH(.format = DS_READ,
         .dsMaxDrain = 120, .dsThroughput = 4,
     DsLoadI16Inst, "ds_load_i16", .logical = "DSLoadI16",
         .dsMaxDrain = 120, .dsThroughput = 4,
+    DsLoadU8D16Inst, "ds_load_u8_d16", .logical = "DSLoadD16U8",
+        .dsMaxDrain = 120, .dsThroughput = 4,
+    DsLoadU8D16HiInst, "ds_load_u8_d16_hi", .logical = "DSLoadD16HIU8",
+        .dsMaxDrain = 120, .dsThroughput = 4,
+    DsLoadI8D16Inst, "ds_load_i8_d16", .logical = "DSLoadD16I8",
+        .dsMaxDrain = 120, .dsThroughput = 4,
+    DsLoadI8D16HiInst, "ds_load_i8_d16_hi", .logical = "DSLoadD16HII8",
+        .dsMaxDrain = 120, .dsThroughput = 4,
+    DsLoadU16D16Inst, "ds_load_u16_d16", .logical = "DSLoadD16U16",
+        .dsMaxDrain = 120, .dsThroughput = 4,
+    DsLoadU16D16HiInst, "ds_load_u16_d16_hi", .logical = "DSLoadD16HIU16",
+        .dsMaxDrain = 120, .dsThroughput = 4,
     DsLoadB32Inst, "ds_load_b32", .logical = "DSLoadB32",
         .dsMaxDrain = 120, .dsThroughput = 4,
     DsRead2B32Inst, "ds_load_2addr_b32", .logical = "DSLoad2B32",
@@ -667,7 +679,7 @@ DEF_BATCH(.format = SOPC,
 // Tensor Operations
 DEF_T(TensorLoadToLdsInst, "tensor_load_to_lds", .format = TENSOR, .logical = "TensorLoadToLds")
 DEF_T(TensorStoreFromLdsInst, "tensor_store_from_lds", .format = TENSOR_STORE,
-    .flags = {HasSideEffect})
+    .flags = {HasSideEffect}, .logical = "TensorStoreFromLds")
 
 // Vector ALU — dual VOP2/VOP3 encoding (primary = VOP2, promoted = VOP3)
 DEF_BATCH(.format = VOP2_COMMUTATIVE,

@@ -1612,3 +1612,37 @@ st.func @test_barrier_anchor_missing_tokens() {
 
     EXPECT_EQ(countWaitCnt(entryBB), 1);
 }
+
+// The TDM store read-back of fp16 C at store vector width 1: ds_load_u16 for an
+// even element and ds_load_u16_d16_hi for an odd one, each into a VGPR of its own
+// (a d16 load writes all 32 bits on gfx1250). The loads write different VGPRs, so
+// nothing waits between them; the consumer of the odd element waits for both.
+TEST_F(WaitCntInsertionTest, DSLoadD16HiWaitedForByItsConsumer) {
+    std::string irString = R"(
+st.func @test_ds_load_d16_hi() {
+^entry:
+  v1 = "st.ds_load_u16"(v10) { issueCycles = 1, latencyCycles = 52 }
+  v2 = "st.ds_load_u16_d16_hi"(v10) { issueCycles = 1, latencyCycles = 52 }
+  v3 = "st.v_add_f32"(v2, v4) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    StinkyInstruction* hi = findNthInst(entryBB, GFX::ds_load_u16_d16_hi, 0);
+    StinkyInstruction* use = findNthInst(entryBB, GFX::v_add_f32, 0);
+    ASSERT_NE(findNthInst(entryBB, GFX::ds_load_u16, 0), nullptr);
+    ASSERT_NE(hi, nullptr);
+    ASSERT_NE(use, nullptr);
+
+    auto waitcnts = getAllWaitCnts(entryBB);
+    ASSERT_EQ(waitcnts.size(), 1u) << "one wait, before the consumer";
+    EXPECT_EQ(waitcnts[0].position, getInstructionPosition(entryBB, use) - 1);
+    EXPECT_GT(waitcnts[0].position, getInstructionPosition(entryBB, hi));
+    EXPECT_EQ(waitcnts[0].waitData->dlcnt, 0) << "the odd element is the last load in flight";
+}

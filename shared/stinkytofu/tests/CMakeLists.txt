@@ -121,6 +121,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/AccumulateInstructionSizePassRunTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp
     unit/asm/RemoveInstructionPassTest.cpp
+    unit/asm/StinkyRemoveWaitCntPassTest.cpp
     unit/asm/RemoveDscntPassTest.cpp
     unit/asm/FlattenCalleesPassTest.cpp
     unit/asm/Gfx1250XnackHazardPassTest.cpp
