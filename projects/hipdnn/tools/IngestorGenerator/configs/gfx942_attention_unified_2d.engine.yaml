@@ -152,7 +152,7 @@ kernel_name_template: attention_unified_2d.{dtype}_d{head_size}_g{num_queries_pe
 enumerate:
   candidates: dispatch.attention:attention_candidates
   request: dispatch.attention.common:AttentionRequest
-  # D64's best geometry: transposed 32x32x8, 4 warps x 32 rows, 4-page KV tile. Its
+  # D64's default geometry: transposed 32x32x8, 4 warps x 32 rows, 4-page KV tile. Its
   # section lists only D64 cells, so it is their default; the next section is D128's.
   # Only llvm candidates are pinned: hkp_pack compiles every spec through the LLVM path.
   pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_transposed_x8_nw4_mw32_t4xb_llvm}
@@ -194,7 +194,7 @@ enumerate:
   # it, and the aot_budget_per_arch WARN is the live check.
   max_kernels: 100
   also:
-    # D128's best geometry, listed first among the D128 sections so it is their default:
+    # D128's default geometry, listed first among the D128 sections so it is their default:
     # transposed 32x32x8, 2 warps x 32 rows, 2-page KV tile.
     - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_transposed_x8_nw2_mw32_t2xb_llvm}
       fixed: *fixed
@@ -212,7 +212,7 @@ enumerate:
           values: [BOTTOM_RIGHT_CAUSAL]
       spec_fields: *spec_fields
       neutral_fields: *neutral
-    # The rest of D64's five, in the sweep's order of benefit.
+    # The rest of D64's five, in the sweep's order.
     - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_transposed_x8_nw8_mw32_t4xb_llvm}
       fixed: *fixed
       cells: *d64_cells
@@ -233,7 +233,7 @@ enumerate:
       cells: *d64_cells
       spec_fields: *spec_fields
       neutral_fields: *neutral
-    # The rest of D128's five, in the sweep's order of benefit.
+    # The rest of D128's five, in the sweep's order.
     - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_transposed_x8_nw4_mw32_t2xb_llvm}
       fixed: *fixed
       cells: *d128_cells
