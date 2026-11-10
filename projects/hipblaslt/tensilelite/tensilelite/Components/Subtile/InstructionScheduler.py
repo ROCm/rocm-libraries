@@ -3637,6 +3637,9 @@ def _scheduleHalfDisjointCell(
 _GAP_ISSUE_BUDGET = 28
 _BARRIER_CYCLES = 17
 _WAITING_DRAIN_CYCLES = 20
+# A drain behind older reads still waits over 20 cycles a third of the
+# time (pre-barrier lgkmcnt(0): 65% one slot, 35% over five).
+_LIVE_DRAIN_CYCLES = 12
 _LOAD_CYCLES = 12
 _VALU_AFTER_MFMA_STALL = 8
 _ONE_ISSUE_CYCLES = 4
@@ -3652,22 +3655,30 @@ def _issueExcess(gaps):
     gaps holds each gap's instructions in issue order. A gap costs what it
     issues beyond _GAP_ISSUE_BUDGET: a barrier 17 cycles, a local-read
     drain 20 while a ds_read is fewer than _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT
-    MFMAs old (else 4), a load 12, a VALU 4 plus 8 when it opens the gap,
-    anything else 4. More than _SALU_BURST SALUs add 6, a load beside a
-    barrier or wait 20, every load
-    past _MXFP8_MAX_DTL_RUN in a row 23, and every ds_read past the first
-    beside a load 1.
+    MFMAs old, 12 behind older ones and nothing when no LDS op issued
+    since the last drain (dropDominatedLgkmWaits removes it), a load 12,
+    a VALU 4 plus 8 when it opens the gap, anything else 4. More than
+    _SALU_BURST SALUs add 6, a load beside a barrier or wait 20, every
+    load past _MXFP8_MAX_DTL_RUN in a row 23, and every ds_read past the
+    first beside a load 1.
     """
-    total, run, lastRead = 0.0, 0, None
+    total, run, lastRead, live = 0.0, 0, None, True
     for index, gap in enumerate(gaps):
         insts = [inst for inst in gap if not isinstance(inst, TextBlock)]
         issue = 0.0
         for position, inst in enumerate(insts):
             if _isBarrier(inst):
                 issue += _BARRIER_CYCLES
-            elif _isFullLgkmDrain(inst) and lastRead is not None and (
-                    index - lastRead < _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT):
-                issue += _WAITING_DRAIN_CYCLES
+            elif _isFullLgkmDrain(inst):
+                if live and lastRead is not None and (
+                        index - lastRead < _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT):
+                    issue += _WAITING_DRAIN_CYCLES
+                elif live:
+                    issue += _LIVE_DRAIN_CYCLES
+                live = False
+            elif _incrementsLgkm(inst):
+                live = True
+                issue += _ONE_ISSUE_CYCLES
             elif _isBufferLoad(inst):
                 issue += _LOAD_CYCLES
             elif _isVALU(inst):
@@ -3703,7 +3714,7 @@ def _moduleGaps(module):
     return gaps
 
 
-def _halfMemoryPlan(eligible, readGroups, loadCount):
+def _halfMemoryPlan(eligible, readGroups, loadCount, evenLoads=False):
     """Joint ds_read and load gaps for one half, one memory op a gap
     where the half has room.
 
@@ -3711,9 +3722,13 @@ def _halfMemoryPlan(eligible, readGroups, loadCount):
     readGroups holds (allowed gaps, read count) per group of reads that
     keep their order; a group's last allowed gap is its deadline. Loads
     are paced evenly over the capacity the reads leave: a gap counts only
-    for the share of it no read group needs. Reads take the other gaps,
-    earliest deadline first and as early as allowed, two to a gap only
-    where one a gap would miss a deadline. A load never shares its gap.
+    for the share of it no read group needs. With evenLoads the loads are
+    first paced over the whole half, which keeps them from bunching late
+    when wide read windows overlap narrow ones, and fall back to the
+    read-aware pacing only if the reads then miss a deadline. Reads take
+    the other gaps, earliest deadline first and as early as allowed, two
+    to a gap only where one a gap would miss a deadline. A load never
+    shares its gap.
 
     Returns (gaps per read group, load gaps), or None when the reads
     leave the loads no capacity or a group cannot meet its deadline.
@@ -3730,10 +3745,15 @@ def _halfMemoryPlan(eligible, readGroups, loadCount):
         for i in positions if count else ():
             capacity[i] -= min(1.0, count / len(positions))
     capacity = [max(0.0, c) for c in capacity]
+    allowedSets = [set(positions) for positions in allowed]
+    deadline = [positions[-1] if positions else -1 for positions in allowed]
+    order = sorted(range(len(readGroups)), key=lambda g: (deadline[g], g))
 
-    loads = []
-    room = sum(capacity)
-    if loadCount:
+    def paced(capacity):
+        loads = []
+        room = sum(capacity)
+        if not loadCount:
+            return loads
         if room <= 0:
             return None
         acc = 0.0
@@ -3744,39 +3764,45 @@ def _halfMemoryPlan(eligible, readGroups, loadCount):
                 loads.append(max(i, loads[-1] + 1) if loads else i)
         if len(loads) < loadCount or loads[-1] >= n:
             return None
+        return loads
 
-    loadSet = set(loads)
-    free = [i for i in range(n) if i not in loadSet]
-    remaining = [count for _, count in readGroups]
-    allowedSets = [set(positions) for positions in allowed]
-    deadline = [positions[-1] if positions else -1 for positions in allowed]
-    targets = [[] for _ in readGroups]
-    order = sorted(range(len(readGroups)), key=lambda g: (deadline[g], g))
-    for cursor, i in enumerate(free):
-        pending = [g for g in order if remaining[g]]
-        if not pending:
-            break
-        if any(deadline[g] < i for g in pending):
-            return None
-        doubled = False
-        for g in pending:
-            group = [k for k in pending if deadline[k] <= deadline[g]]
-            demand = sum(remaining[k] for k in group)
-            avail = sum(
-                1 for j in free[cursor:]
-                if j <= deadline[g] and any(j in allowedSets[k] for k in group))
-            if demand > 2 * avail:
-                return None
-            doubled = doubled or demand > avail
-        for _ in range(2 if doubled else 1):
-            ready = [g for g in order if remaining[g] and i in allowedSets[g]]
-            if not ready:
+    def assigned(loads):
+        loadSet = set(loads)
+        free = [i for i in range(n) if i not in loadSet]
+        remaining = [count for _, count in readGroups]
+        targets = [[] for _ in readGroups]
+        for cursor, i in enumerate(free):
+            pending = [g for g in order if remaining[g]]
+            if not pending:
                 break
-            targets[ready[0]].append(eligible[i])
-            remaining[ready[0]] -= 1
-    if any(remaining):
-        return None
-    return targets, [eligible[i] for i in loads]
+            if any(deadline[g] < i for g in pending):
+                return None
+            doubled = False
+            for g in pending:
+                group = [k for k in pending if deadline[k] <= deadline[g]]
+                demand = sum(remaining[k] for k in group)
+                avail = sum(
+                    1 for j in free[cursor:]
+                    if j <= deadline[g] and any(j in allowedSets[k] for k in group))
+                if demand > 2 * avail:
+                    return None
+                doubled = doubled or demand > avail
+            for _ in range(2 if doubled else 1):
+                ready = [g for g in order if remaining[g] and i in allowedSets[g]]
+                if not ready:
+                    break
+                targets[ready[0]].append(eligible[i])
+                remaining[ready[0]] -= 1
+        if any(remaining):
+            return None
+        return targets, [eligible[i] for i in loads]
+
+    for pacing in ([1.0] * n, capacity) if evenLoads else (capacity,):
+        loads = paced(pacing)
+        plan = None if loads is None else assigned(loads)
+        if plan is not None:
+            return plan
+    return None
 
 
 def _halfCellOrderSafe(sequence, cellOf, pathOrders, modules):
@@ -3829,9 +3855,71 @@ def _halfCellOrderSafe(sequence, cellOf, pathOrders, modules):
     return True
 
 
+def _crossCellReadFloors(readPath, mfmas, start, end, openGap):
+    """Earliest gap for each item of a later cell's read path in its half.
+
+    A ds_read may leave its cell for an earlier one once its LDS data is
+    there, which is from openGap, the half's barrier, on. It still issues
+    an MFMA after every MFMA ahead of its cell that reads its destination.
+    A scale read stays in its cell: its last reader can sit in the half
+    before, within the scale-source retain distance. So does a read whose
+    destination an MFMA of its own cell reads. Floors never decrease
+    along the path.
+    """
+    operands = [
+        (set().union(*(_vgprIndices(getattr(m, name, None)) for name in ("a", "b"))),
+         set().union(*(_vgprIndices(getattr(m, name, None)) for name in ("mxsa", "mxsb"))))
+        for m in mfmas]
+    scales = set().union(*(scale for _data, scale in operands))
+    floor, floors = openGap, []
+    for _mid, inst in readPath:
+        if _isDsRead(inst):
+            dest = set(_vgprIndices(_dsReadDstAddr(inst)[0]))
+            if (dest & scales or (inst.comment or "").startswith(("SA ", "SB "))
+                    or any(dest & (data | scale) for data, scale in operands[start:end])):
+                floor = max(floor, start)
+            for j, (data, _scale) in enumerate(operands[:start]):
+                if dest & data:
+                    floor = max(floor, j + 1)
+        floors.append(floor)
+    return floors
+
+
+_MAX_LGKM_COUNT = 15
+
+
+def _relaxCrossedFences(sequence, cellOf, fenceCell):
+    """Let a later cell's local-read drain leave the reads moved ahead of it.
+
+    sequence is a half's (moduleId, instruction) in issue order and
+    fenceCell maps a cell's leading wait to its cell. A full drain there
+    only owes the cell the LDS ops of the cells before it. LDS ops return
+    in order, so it waits with lgkmcnt(N), N the LDS ops of this or later
+    cells issued after the last one of an earlier cell. A scalar load
+    among those keeps the full drain: it may return out of order.
+    """
+    issued = []
+    for mid, inst in sequence:
+        cell = cellOf.get(mid)
+        if id(inst) in fenceCell and _isFullLgkmDrain(inst) and not getattr(
+                inst, "waitAll", False) and inst.kmcnt < 0:
+            c = fenceCell[id(inst)]
+            last = max((i for i, (k, _) in enumerate(issued) if k < c), default=-1)
+            tail = issued[last + 1:]
+            if tail and not any(isinstance(op, SMemLoadInstruction) for _, op in tail):
+                count = min(len(tail), _MAX_LGKM_COUNT)
+                inst.dscnt = count
+                issued = issued[-count:]
+                continue
+        if _isFullLgkmDrain(inst):
+            issued = []
+        elif _incrementsLgkm(inst):
+            issued.append((cell, inst))
+
+
 def _scheduleHalfDisjointHalf(
         cells, minGapDsReadToWait, earliestWriteShadow=None, mfmaBase=0,
-        tailScaleReads=0, cellComments=()):
+        tailScaleReads=0, cellComments=(), crossCellReads=False):
     """Schedule every partition cell of one half-disjoint half together.
 
     cells holds (emittedModules, pathOrders, preMfmaOrders, mfmas) per cell
@@ -3848,8 +3936,15 @@ def _scheduleHalfDisjointHalf(
     cell scheduler puts them, and places the loads over the whole half
     by the cell scheduler's rules.
 
+    With crossCellReads a later cell's reads may also take the gaps of
+    earlier cells in the half, from their floors (_crossCellReadFloors)
+    on, and at least minGapDsReadToWait MFMAs ahead of every fence they
+    cross. A half with a partial local-read wait keeps its reads in their
+    cells, since a read moved ahead of it would change what it waits for.
+
     cellComments is the marker emitted ahead of each later cell's wait.
-    Returns None when the cells do not fit this scheme, or the result
+    Returns None when the cells do not fit this scheme, no load placement
+    keeps every gap within its limits and the load-run cap, or the result
     would reorder a cross-cell dependency; the caller then schedules each
     cell on its own.
     """
@@ -3889,10 +3984,19 @@ def _scheduleHalfDisjointHalf(
     def outsideSeams(placer, pos, inst):
         return pos // spi not in seams
 
+    crossCellReads = crossCellReads and not any(
+        isinstance(inst, SWaitCnt) and not _isFullLgkmDrain(inst)
+        and (inst.dscnt > 0 or inst.kmcnt > 0)
+        for em in modules for inst in em.instructions)
+
+    def clearOfLaterFences(placer, pos, inst):
+        gap = pos // spi
+        return not _isDsRead(inst) or all(
+            fence - gap >= minGapDsReadToWait for fence in seams if fence > gap)
+
     placer = _SlotPlacer(
         intervals, len(modules), orders,
-        validators=[
-            outsideSeams,
+        validators=[outsideSeams] + ([clearOfLaterFences] if crossCellReads else []) + [
             rules.oneDsReadPerInterval, rules.oneDtlLoadPerInterval,
             rules.noDsReadOrValuInFirstSlot, rules.minGapDsReadBeforeWait,
             rules.minGapDsReadToWait, rules.noM0WithBufferLoad,
@@ -3950,30 +4054,48 @@ def _scheduleHalfDisjointHalf(
         if interval not in seams and not any(
             _isWaitCnt(x) or _isBarrier(x) or _isVALU(x)
             for x in intervalInsts(interval))]
+    # Each item's earliest gap; a cell's reads are planned in groups of
+    # equal floor, which keep their path order.
+    floors = [[-(-cellOpen[c] // spi)] * len(readPaths[c]) for c in range(len(cells))]
+    if crossCellReads:
+        for c in range(1, len(cells)):
+            floors[c] = [
+                max(floor, -(-opened // spi)) for floor in _crossCellReadFloors(
+                    readPaths[c], mfmas, starts[c], ends[c], firstInterval)]
+    nearFence = {
+        gap for fence in seams if crossCellReads
+        for gap in range(fence - minGapDsReadToWait + 1, fence)}
     groups, groupCells = [], []
     for c in range(len(cells)):
-        count = sum(_isDsRead(inst) for _, inst in readPaths[c])
-        if not count:
-            continue
-        low = -(-cellOpen[c] // spi)
         high = ends[c] - 1 - minGapDsReadToWait
-        groups.append(([g for g in eligible if low <= g <= high], count))
-        groupCells.append(c)
-    plan = _halfMemoryPlan(eligible, groups, len(bundles))
+        runs = {}
+        for (_mid, inst), floor in zip(readPaths[c], floors[c]):
+            runs[floor] = runs.get(floor, 0) + _isDsRead(inst)
+        for low, count in runs.items():
+            if count:
+                groups.append(([g for g in eligible if low <= g <= high
+                                and g not in nearFence], count))
+                groupCells.append(c)
+    plan = _halfMemoryPlan(eligible, groups, len(bundles),
+                           evenLoads=crossCellReads)
 
     def placeReads(c, targets):
-        """One cell's read path from its open slot, inside its own cell.
+        """One cell's read path from its floor on, inside its own cell
+        unless crossCellReads lets it into earlier cells.
 
         Without targets the reads pack as the cell scheduler packs them,
         which keeps them minGapDsReadToWait MFMAs ahead of the cell's end.
         """
-        placer.window = (cellOpen[c], (ends[c] - 1) * spi - 1)
+        placer.window = (opened if crossCellReads else cellOpen[c],
+                         (ends[c] - 1) * spi - 1)
         savedWait = rules.earliestWaitCntPos
         if c:
             rules.earliestWaitCntPos = (ends[c] - 1) * spi
         remaining = iter(targets or ())
-        limit = cellOpen[c]
-        for mid, inst in readPaths[c]:
+        limit = opened if crossCellReads else cellOpen[c]
+        for (mid, inst), floor in zip(readPaths[c], floors[c]):
+            if crossCellReads and c:
+                limit = max(limit, floor * spi)
             if targets is not None and _isDsRead(inst):
                 target = next(remaining, None)
                 if target is not None:
@@ -3981,7 +4103,8 @@ def _scheduleHalfDisjointHalf(
             limit = placer.adjustLimit(limit, inst)
             pos = placer.findSlot(mid, inst, limit)
             if pos is None:
-                pos = placer._forceSlot(mid, limit, False)
+                # A forced read skips the fence rules, so it stays in its cell.
+                pos = placer._forceSlot(mid, max(limit, cellOpen[c]), False)
             placer.place(pos, (mid, inst))
             limit = pos + 1
         rules.earliestWaitCntPos = savedWait
@@ -3989,7 +4112,8 @@ def _scheduleHalfDisjointHalf(
 
     readTargets = {}
     if plan is not None:
-        readTargets = dict(zip(groupCells, plan[0]))
+        for c, targets in zip(groupCells, plan[0]):
+            readTargets.setdefault(c, []).extend(targets)
     for c in range(len(cells)):
         if readPaths[c]:
             placeReads(c, readTargets.get(c) if plan is not None else None)
@@ -4097,22 +4221,15 @@ def _scheduleHalfDisjointHalf(
         placeRequestsAndOthers(targets)
 
     # The first attempt that keeps the rules wins. When none does, the
-    # half is too dense for them, and the attempt with the least estimated
-    # excess over the MFMA cadence wins (_issueExcess).
-    cheapest = None
-    for index, (targets, readLimit, capped) in enumerate(attempts):
+    # half is too dense to place jointly; its cells keep their own
+    # schedules, which measure faster there than any joint packing.
+    for targets, readLimit, capped in attempts:
         attempt(targets, readLimit, capped)
         if capped and overfullIntervals() <= before and (
                 readLimit is None or longestDtlRun() <= _MXFP8_MAX_DTL_RUN):
             break
-        cost = _issueExcess(
-            [[item[1] for slot in placer._placed[i * spi:(i + 1) * spi] for item in slot]
-             for i in range(intervals)])
-        if cheapest is None or cost < cheapest[0]:
-            cheapest = (cost, index)
     else:
-        if cheapest[1] != len(attempts) - 1:
-            attempt(*attempts[cheapest[1]])
+        return None
 
     sequence = [item for item in split[0][1]] + [(None, mfmas[0])]
     scheduled = Module()
@@ -4150,6 +4267,10 @@ def _scheduleHalfDisjointHalf(
         keyed.append((mid, inst))
     if not _halfCellOrderSafe(keyed, cellOf, orders, modules):
         return None
+    if crossCellReads:
+        _relaxCrossedFences(
+            keyed, cellOf,
+            {id(inst): c for c in seams.values() for _, inst in split[c][1]})
 
     bufLoadCount = 0
     for inst in scheduled.flatitems():
@@ -4288,9 +4409,10 @@ def instructionScheduleHalf(
 
     emittedLists holds each cell's emitted modules in issue order and
     cellComments the marker ahead of every cell after the first. The half
-    is scheduled as one cell (_scheduleHalfDisjointHalf) unless that does
-    not fit, or scheduling each cell on its own, as instructionSchedule
-    would, is estimated to run closer to the MFMA cadence (_issueExcess).
+    is scheduled as one cell (_scheduleHalfDisjointHalf), with reads free
+    to move into earlier cells and then without, or each cell on its own
+    as instructionSchedule would; the schedule estimated to run closest
+    to the MFMA cadence (_issueExcess) wins.
     tailScaleReads belongs to the last cell.
     """
     cells = []
@@ -4300,38 +4422,50 @@ def instructionScheduleHalf(
             inst for inst in emitted[mfmaIdx].instructions
             if isinstance(inst, (MFMAInstruction, MXMFMAInstruction))]
         cells.append((emitted, pathOrders, preMfmaOrders, mfmas))
-    # Both schedulers add the loads ahead of a VMEM wait to its count.
+    # The schedulers add the loads ahead of a VMEM wait to its count, and
+    # relax the local-read drains reads were moved ahead of.
     waits = [inst for emitted in emittedLists for em in emitted
              for inst in em.instructions if _isWaitCnt(inst)]
-    counts = [inst.vlcnt for inst in waits]
+    counts = [(inst.vlcnt, inst.dscnt) for inst in waits]
 
     def restoreCounts():
-        for inst, count in zip(waits, counts):
-            inst.vlcnt = count
+        for inst, (vlcnt, dscnt) in zip(waits, counts):
+            inst.vlcnt, inst.dscnt = vlcnt, dscnt
 
-    def joint():
+    def joint(crossCellReads):
         if not all(_isMx8Schedule(cell[3]) for cell in cells):
             return None
         return _scheduleHalfDisjointHalf(
             cells, minGapDsReadToWait, earliestWriteShadow, mfmaBase,
-            tailScaleReads, cellComments)
+            tailScaleReads, cellComments, crossCellReads)
 
-    scheduled = joint()
-    jointCost = None if scheduled is None else _issueExcess(_moduleGaps(scheduled))
-    restoreCounts()
-    result = Module()
-    base = mfmaBase
-    for c, cell in enumerate(cells):
-        if c:
-            result.add(cellComments[c - 1])
-        result.add(_scheduleHalfDisjointCell(
-            *cell, minGapDsReadToWait, earliestWriteShadow, base,
-            tailScaleReads if c == len(cells) - 1 else 0))
-        base += len(cell[3])
-    if jointCost is None or _issueExcess(_moduleGaps(result)) < jointCost:
+    def alone():
+        result = Module()
+        base = mfmaBase
+        for c, cell in enumerate(cells):
+            if c:
+                result.add(cellComments[c - 1])
+            result.add(_scheduleHalfDisjointCell(
+                *cell, minGapDsReadToWait, earliestWriteShadow, base,
+                tailScaleReads if c == len(cells) - 1 else 0))
+            base += len(cell[3])
         return result
+
+    # In order of preference on equal cost.
+    builds = [lambda: joint(True), lambda: joint(False), alone]
+    best = None
+    for index, build in enumerate(builds):
+        restoreCounts()
+        scheduled = build()
+        if scheduled is None:
+            continue
+        cost = _issueExcess(_moduleGaps(scheduled))
+        if best is None or cost < best[0]:
+            best = (cost, index, scheduled)
+    if best[1] == len(builds) - 1:
+        return best[2]
     restoreCounts()
-    return joint()
+    return builds[best[1]]()
 
 
 def instructionSchedule(emittedModules, multiDU: bool = False,

@@ -6658,12 +6658,20 @@ class TestHalfDisjointHalf:
         marker.addComment0(text)
         return marker.items()[0]
 
-    def _half(self, cells, tailScaleReads=0):
+    def _half(self, cells, tailScaleReads=0, crossCellReads=False):
         from tensilelite.Components.Subtile.InstructionScheduler import (
             _scheduleHalfDisjointHalf)
         return _scheduleHalfDisjointHalf(
             cells, 4, {}, 0, tailScaleReads,
-            [self._marker(f"cell {c}") for c in range(1, len(cells))])
+            [self._marker(f"cell {c}") for c in range(1, len(cells))],
+            crossCellReads)
+
+    @staticmethod
+    def _read_into(register, comment):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        return DSLoadB128(dst=vgpr(register, 4), src=vgpr(7),
+                          ds=DSModifiers(offset=0), comment=comment)
 
     def _twoCells(self, reads, loads, mfmas=8):
         """Cell 0 opens the half; cell 1 starts behind its own read fence."""
@@ -6700,6 +6708,28 @@ class TestHalfDisjointHalf:
         assert len(set(loads)) == 2 and len(set(reads[0])) == 1
         assert not set(loads) & set(reads[0])
         assert _halfMemoryPlan([1, 2, 3], [([1, 2, 3], 3)], 1) is None
+
+    def test_half_too_dense_for_one_load_a_gap_is_left_to_its_cells(self):
+        assert self._half(self._twoCells(reads=2, loads=6, mfmas=3)) is None
+        assert self._half(self._twoCells(reads=2, loads=6, mfmas=3),
+                          crossCellReads=True) is None
+        assert self._half(self._twoCells(reads=2, loads=2)) is not None
+
+    def test_even_load_pacing_keeps_loads_out_of_the_tail(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _halfMemoryPlan)
+        eligible = list(range(10))
+        groups = [(list(range(5)), 4), (eligible, 2)]
+        _reads, late = _halfMemoryPlan(eligible, groups, 3)
+        assert min(late) >= 5
+        reads, loads = _halfMemoryPlan(eligible, groups, 3, evenLoads=True)
+        assert min(loads) < 5 and max(loads) - min(loads) >= 6
+        assert len(reads[0]) == 4 and max(reads[0]) <= 4
+        assert not set(loads) & {g for group in reads for g in group}
+        # Even pacing that would miss a deadline falls back to the reads' leftovers.
+        tight = [(list(range(5)), 7), (eligible, 2)]
+        assert (_halfMemoryPlan(eligible, tight, 3, evenLoads=True)
+                == _halfMemoryPlan(eligible, tight, 3))
 
     def test_half_spreads_reads_and_loads_one_per_gap(self):
         scheduled = self._half(self._twoCells(reads=2, loads=2))
@@ -6776,7 +6806,7 @@ class TestHalfDisjointHalf:
             cellwise.add(IS._scheduleHalfDisjointCell(*cell, 4, {}, 6 * c, 0))
         chosen = IS.instructionScheduleHalf(emittedLists, 4, {}, 0, 0, markers)
         costs = [IS._issueExcess(IS._moduleGaps(m)) for m in (joint, cellwise, chosen)]
-        assert costs[2] == min(costs[:2]), costs
+        assert costs[2] <= min(costs[:2]), costs
         assert str(chosen).count("A MT=n+2") == 6
 
     def test_issue_excess_charges_the_measured_stalls(self):
@@ -6818,6 +6848,55 @@ class TestHalfDisjointHalf:
                     4, {}, c * mfmas, 0))
             cost = lambda m: IS._issueExcess(IS._moduleGaps(m))
             assert cost(half) <= cost(alone), (reads, loads, mfmas)
+
+    def test_cross_cell_floor_follows_the_last_reader_ahead_of_the_cell(self):
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import MXMFMAInstruction
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _crossCellReadFloors)
+        mfmas = self._mfmas(8)
+        mfmas[2] = MXMFMAInstruction(
+            instType=InstType.INST_F32, accType=InstType.INST_F32,
+            variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(84, 8),
+            b=vgpr(300, 8), mxsa=vgpr(17), mxsb=vgpr(246), comment="M2")
+        free = (None, self._read_into(212, "free"))
+        afterTwo = (None, self._read_into(300, "after M2"))
+        assert _crossCellReadFloors([free, afterTwo], mfmas, 4, 8, 1) == [1, 3]
+        assert _crossCellReadFloors([afterTwo, free], mfmas, 4, 8, 1) == [3, 3]
+        # Its own cell reads it, or it is a scale: it stays in its cell.
+        ownCell = (None, self._read_into(84, "own cell"))
+        scale = (None, self._read_into(212, "SA tile=0"))
+        assert _crossCellReadFloors([ownCell], mfmas, 4, 8, 1) == [4]
+        assert _crossCellReadFloors([scale], mfmas, 4, 8, 1) == [4]
+
+    def test_cross_cell_reads_take_earlier_gaps_ahead_of_the_fence(self):
+        scheduled = self._half(self._twoCells(reads=2, loads=1), crossCellReads=True)
+        assert scheduled is not None
+        _prefix, gaps = self._gaps(scheduled)
+        where = {c: i for i, gap in enumerate(gaps) for c in gap}
+        moved = [tile for tile in (8, 9)
+                 if where[f"B MT=n tile={tile} K=0 read=0"] < 7]
+        assert moved
+        assert all(where[f"B MT=n tile={t} K=0 read=0"] <= 7 - 4 for t in moved)
+        # The fence lets the moved reads stay in flight.
+        fence = next(inst for inst in scheduled.flatitems()
+                     if getattr(inst, "comment", "") == "fence 1")
+        assert fence.dscnt == len(moved)
+
+    def test_relaxed_fence_owes_only_the_earlier_cells(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _relaxCrossedFences)
+        def run(cells):
+            fence = self._fence("fence")[0][1][0]
+            sequence = [(i, self._read_into(212, f"r{i}")) for i in range(len(cells))]
+            cellOf = dict(enumerate(cells))
+            sequence.append(("f", fence))
+            _relaxCrossedFences(sequence, cellOf, {id(fence): 1})
+            return fence.dscnt
+        assert run([0, 1, 1]) == 2
+        assert run([0, 1, 0]) == 0
+        assert run([0, 0]) == 0
 
     def test_half_with_a_second_opener_is_left_to_the_cells(self):
         cells = self._twoCells(reads=2, loads=2)
