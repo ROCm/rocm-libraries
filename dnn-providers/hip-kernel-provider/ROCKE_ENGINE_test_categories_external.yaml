@@ -24,7 +24,7 @@
 # registered in both build-tree and installed-artifact CTest, so developers and
 # provider CI execute the same logical gate against their respective package data.
 #
-# The pinned GPU reference entries are regex patterns, unlike the other
+# The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers
 # rocke_<operation>_reference_unit_pytest for each reference operation and
 # rocke_<operation>_gpu_<arch>_pytest for each published architecture, so a
@@ -40,6 +40,14 @@
 # rocke/platform/tests/test_gpu_references.py checks that each registered
 # pinned reference name still gets the labels of
 # rocke_reference_common_pytest.
+#
+# The platform pytest suite is a pattern too: rocke/platform/CMakeLists.txt
+# registers one rocke_pytest_<group> entry per group of test directories, so
+# a new group is labeled without an edit here. The rocke_pytest_ prefix is
+# reserved for those entries.
+# rocke/platform/tests/test_engine_linkage.py checks that every registered
+# part gets the same labels, including the quick, standard and ffm-quick
+# tiers.
 test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
@@ -105,7 +113,7 @@ test_categories:
       - "rocke_library_attention_bias_gpu_pytest"
       - "rocke_library_mla_pytest"
       - "rocke_library_sdpa_pytest"
-      - "rocke_pytest"
+      - "rocke_pytest_[a-z0-9_]+"
       - "rocke_tensor_transforms_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_reference_common_pytest"
@@ -180,7 +188,7 @@ test_categories:
       - "rocke_library_attention_bias_gpu_pytest"
       - "rocke_library_mla_pytest"
       - "rocke_library_sdpa_pytest"
-      - "rocke_pytest"
+      - "rocke_pytest_[a-z0-9_]+"
       - "rocke_tensor_transforms_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_reference_common_pytest"
