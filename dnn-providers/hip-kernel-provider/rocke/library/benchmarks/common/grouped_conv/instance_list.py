@@ -15,10 +15,16 @@ record spells are the ones that leave the family's baseline (format:
 logs name kernels by their lossless labels instead; this tool moves between
 the two.
 
-  labels LIST                 print the instances' labels, sorted
-  add LIST [LABEL...]         add the labelled kernels (position does not
-                              matter -- the write sorts); --from FILE reads
-                              one label per line, '#' starting a comment
+  labels LIST                 print the instances' labels: sorted for a set
+                              direction (dgrad), in on-disk priority order
+                              otherwise (fwd)
+  add LIST [LABEL...]         add the labelled kernels; for a set direction
+                              (dgrad) position does not matter -- the write
+                              sorts. For a priority-order direction (fwd) a
+                              new kernel is appended (lowest priority) unless
+                              --at N inserts it at position N instead.
+                              --from FILE reads one label per line, '#'
+                              starting a comment
   new LIST [LABEL...]         write a new list of the labelled kernels; arch
                               and direction come from the labels, and the
                               LLVM flavor and wave size they share become the
@@ -44,6 +50,7 @@ from pathlib import Path
 from dispatch.grouped_convolution import (
     InstanceList,
     format_instance_list,
+    has_set_semantics,
     load_instance_list,
 )
 from kernels.conv.kernel_identity import KernelIdentity
@@ -101,9 +108,13 @@ def _write(path: Path, lst: InstanceList) -> None:
 
 
 def _cmd_labels(args: argparse.Namespace) -> None:
-    for identity in sorted(
-        load_instance_list(args.list).identities, key=lambda i: i.label()
-    ):
+    lst = load_instance_list(args.list)
+    identities = (
+        sorted(lst.identities, key=lambda i: i.label())
+        if has_set_semantics(lst.direction)
+        else lst.identities
+    )
+    for identity in identities:
         print(identity.label())
 
 
@@ -111,10 +122,20 @@ def _cmd_add(args: argparse.Namespace) -> None:
     lst = load_instance_list(args.list)
     current = list(lst.identities)
     added = _identities(_labels(args))
+    if args.at is not None and has_set_semantics(lst.direction):
+        raise SystemExit(
+            f"error: --at makes no sense on {lst.direction}, a set direction "
+            "sorted on write"
+        )
+    if args.at is not None and len(added) != 1:
+        raise SystemExit("error: --at takes exactly one LABEL")
     for identity in added:
         if identity in current:
             raise SystemExit(f"error: {identity.label()} is already listed")
-        current.append(identity)
+        if args.at is None:
+            current.append(identity)
+        else:
+            current.insert(args.at, identity)
     _write(args.list, dataclasses.replace(lst, identities=tuple(current)))
 
 
@@ -164,13 +185,23 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(run=_cmd_labels)
 
     for name, run, helptext in (
-        ("add", _cmd_add, "append labelled kernels to a list"),
+        ("add", _cmd_add, "add labelled kernels to a list"),
         ("new", _cmd_new, "write a new list of labelled kernels"),
     ):
         p = sub.add_parser(name, help=helptext)
         p.add_argument("list", type=Path)
         p.add_argument("label", nargs="*")
         p.add_argument("--from", dest="from_file", help="file of labels")
+        if name == "add":
+            p.add_argument(
+                "--at",
+                type=int,
+                default=None,
+                help="insert the one LABEL at this position in a "
+                "priority-order list (fwd); default: append (lowest "
+                "priority). Rejected on a set-direction list (dgrad), "
+                "which sorts on write regardless of position.",
+            )
         p.set_defaults(run=run)
 
     p = sub.add_parser("format", help="rewrite a list canonically")

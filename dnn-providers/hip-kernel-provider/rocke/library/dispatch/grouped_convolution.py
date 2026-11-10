@@ -1215,6 +1215,14 @@ def format_instance_list(lst: InstanceList) -> str:
 _SET_SEMANTICS_DIRECTIONS = frozenset({"dgrad"})
 
 
+def has_set_semantics(direction: str) -> bool:
+    """Whether ``direction``'s instance list is a set (:data:`_SET_SEMANTICS_DIRECTIONS`),
+    sorted by :func:`_instance_sort_key`, rather than a file-order priority list. The public
+    predicate a caller outside this module (``instance_list.py``) asks instead of reaching
+    into :data:`_SET_SEMANTICS_DIRECTIONS` directly."""
+    return direction in _SET_SEMANTICS_DIRECTIONS
+
+
 def _read_instance_list(arch: str, direction: str) -> tuple[KernelIdentity, ...]:
     """The registered instances of ``(arch, direction)``.
 

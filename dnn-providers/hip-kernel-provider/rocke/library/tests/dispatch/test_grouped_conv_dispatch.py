@@ -976,9 +976,32 @@ def test_registered_list_must_declare_its_arch_and_direction(tmp_path, monkeypat
         gc._read_instance_list(_ARCH, "fwd")
 
 
-def test_instance_list_tool_adds_labels_and_rebuilds_lists(tmp_path, capsys):
-    """Add order never matters: the written file is always sorted by label,
-    regardless of what order names were added in (a list is a set)."""
+def test_instance_list_tool_adds_labels_and_rebuilds_lists_dgrad(tmp_path, capsys):
+    """dgrad is a set direction: add order never matters, the written file is
+    always sorted by label regardless of what order names were added in, and
+    --at makes no sense on it."""
+    names = _listed_names(_LISTS[(_ARCH, "dgrad")])
+    labels = tmp_path / "labels.txt"
+    labels.write_text("# picked\n" + "\n".join(names[:3]) + "\n", encoding="utf-8")
+    path = tmp_path / "new.json"
+    instance_list.main(["new", str(path), "--from", str(labels)])
+    instance_list.main(["add", str(path), names[3]])
+    with pytest.raises(SystemExit, match="already listed"):
+        instance_list.main(["add", str(path), names[0]])
+    with pytest.raises(SystemExit, match="--at makes no sense"):
+        instance_list.main(["add", str(path), names[4], "--at", "0"])
+    capsys.readouterr()
+    instance_list.main(["labels", str(path)])
+    assert capsys.readouterr().out.split() == sorted(names[:4])
+    instance_list.main(["format", "--check", str(path)])
+    lst = gc.load_instance_list(path)
+    assert lst.defaults == gc.load_instance_list(_LISTS[(_ARCH, "dgrad")]).defaults
+
+
+def test_instance_list_tool_adds_labels_and_rebuilds_lists_fwd(tmp_path, capsys):
+    """fwd keeps priority-order semantics: labels prints file order (not
+    sorted), a plain add appends (lowest priority), and --at N inserts at
+    position N instead."""
     names = _listed_names()
     labels = tmp_path / "labels.txt"
     labels.write_text("# picked\n" + "\n".join(names[:3]) + "\n", encoding="utf-8")
@@ -989,7 +1012,11 @@ def test_instance_list_tool_adds_labels_and_rebuilds_lists(tmp_path, capsys):
         instance_list.main(["add", str(path), names[0]])
     capsys.readouterr()
     instance_list.main(["labels", str(path)])
-    assert capsys.readouterr().out.split() == sorted(names[:4])
+    assert capsys.readouterr().out.split() == names[:4]
+    instance_list.main(["add", str(path), names[4], "--at", "0"])
+    capsys.readouterr()
+    instance_list.main(["labels", str(path)])
+    assert capsys.readouterr().out.split() == [names[4], *names[:4]]
     instance_list.main(["format", "--check", str(path)])
     lst = gc.load_instance_list(path)
     assert lst.defaults == gc.load_instance_list(_LIST).defaults
