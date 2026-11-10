@@ -205,7 +205,8 @@ inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order
 }
 
 /// HIPBLASLT_ORDER_COL256_R128_EXT and HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT
-/// describe one input layout: accepted only together, on both A and B of an FP6 TN GEMM.
+/// describe one input layout: accepted only together, on both A and B of an FP6 TN GEMM,
+/// except that B may keep HIPBLASLT_ORDER_COL.
 /// Shared by rocblaslt_matmul_valid_args and the ext and grouped setProblem paths.
 /// Returns rocblaslt_status_continue if the problem uses neither or uses them validly.
 inline rocblaslt_status
@@ -225,12 +226,12 @@ inline rocblaslt_status
     const bool     scaleB = scaleBType == kScale;
     if(!tiledA && !tiledB && !scaleA && !scaleB)
         return rocblaslt_status_continue;
-    if(!(tiledA && tiledB && scaleA && scaleB))
+    if(!(tiledA && (tiledB || orderB == HIPBLASLT_ORDER_COL) && scaleA && scaleB))
     {
         log_error(__func__,
                   "HIPBLASLT_ORDER_COL256_R128_EXT and "
                   "HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT must be set together on "
-                  "both A and B; got orderA=",
+                  "both A and B, except that B may use HIPBLASLT_ORDER_COL; got orderA=",
                   static_cast<int>(orderA),
                   " orderB=",
                   static_cast<int>(orderB),
