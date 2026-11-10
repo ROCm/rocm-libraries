@@ -87,7 +87,7 @@ TEST(TestContainer, CopyEngineIdsAdvertisesEveryExpectedEngine)
 {
     std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
     uint32_t numEngines = 0;
-    auto totalEngines
+    auto const totalEngines
         = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
 
     ASSERT_LE(totalEngines, MAX_EXPECTED_ENGINES) << "raise MAX_EXPECTED_ENGINES";
@@ -127,7 +127,7 @@ TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
 #else
     std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
     uint32_t numEngines = 0;
-    auto totalEngines
+    auto const totalEngines
         = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
 
     EXPECT_EQ(numEngines, totalEngines);
@@ -417,7 +417,7 @@ TEST(TestContainer, GetEngineNameRejectsANullNameArgument)
 TEST(TestContainer, GetEngineManagerReturnsValidReference)
 {
     Container container;
-    auto& engineManager = container.getEngineManager();
+    auto const& engineManager = container.getEngineManager();
 
     (void)engineManager;
 }
@@ -428,7 +428,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     Handle handle;
-    auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
+    auto const deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
     if(deviceString != "gfx90a" && deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
@@ -437,7 +437,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
     auto& engineManager = container.getEngineManager();
 
     const std::vector<int64_t> dims{4, 8, 256, 128};
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto const strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto graph = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
                                                                      strides,
                                                                      dims,
@@ -450,7 +450,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
                                                                      DataType::FLOAT);
     auto graphBuffer = graph.Release();
 
-    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    auto const graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuffer.data(), graphBuffer.size());
 
     auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
@@ -521,7 +521,7 @@ TEST(TestContainer, GetApplicableEngineIdsPointwiseAddGraph)
 TEST(TestContainer, GetAllEngineIds)
 {
     Container container;
-    auto& engineManager = container.getEngineManager();
+    auto const& engineManager = container.getEngineManager();
 
     auto allEngines = engineManager.getAllEngineIds();
 

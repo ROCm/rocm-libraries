@@ -55,7 +55,7 @@ protected:
 
 TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForValidGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -64,7 +64,7 @@ TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForValidGraph)
 
 TEST_F(TestResamplePlanBuilder, IsApplicableReturnsFalseForNonResampleGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -75,7 +75,7 @@ TEST_F(TestResamplePlanBuilder, BuildPlanSetsPlanForSingleNodeGraph)
 {
     setupMockCompileChain();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     Context ctx;
@@ -86,7 +86,7 @@ TEST_F(TestResamplePlanBuilder, BuildPlanSetsPlanForSingleNodeGraph)
 
 TEST_F(TestResamplePlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const Settings settings;
@@ -96,10 +96,10 @@ TEST_F(TestResamplePlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 
 TEST_F(TestResamplePlanBuilder, GetCustomKnobsReturnsEmpty)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
+    auto const knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }

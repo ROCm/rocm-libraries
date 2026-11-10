@@ -38,7 +38,7 @@ bool GpuIntReferenceValidation<T>::gpuExact(
     hipdnn_data_sdk::utilities::ITensor& reference,
     hipdnn_data_sdk::utilities::ITensor& implementation) const
 {
-    auto totalElements = static_cast<int64_t>(reference.elementCount());
+    const auto totalElements = static_cast<int64_t>(reference.elementCount());
 
     // Allocate single failure flag using MigratableMemory
     hipdnn_data_sdk::utilities::MigratableMemory<int> flagBuf(1);
@@ -47,7 +47,7 @@ bool GpuIntReferenceValidation<T>::gpuExact(
     auto* refPtr = reference.rawDeviceData();
     auto* implPtr = implementation.rawDeviceData();
 
-    auto defines = detail::buildValidatorDefines(detail::HipRtcTypeName<T>::VALUE, "double");
+    const auto defines = detail::buildValidatorDefines(detail::HipRtcTypeName<T>::VALUE, "double");
 
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefValidator.cpp", defines, "validateExact");
@@ -66,7 +66,7 @@ bool GpuIntReferenceValidation<T>::gpuExact(
 
     // Read back single failure flag
     flagBuf.markDeviceModified();
-    auto hostFlag = flagBuf.hostData()[0];
+    const auto hostFlag = flagBuf.hostData()[0];
 
     return hostFlag == 0;
 }

@@ -133,8 +133,8 @@ private:
     void addDataTypeAndLayoutOptions(
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensorAttrs)
     {
-        auto inputDataType = tensorAttrs->data_type();
-        auto isLayoutChannelLast = core::utils::isChannelLastLayout(tensorAttrs);
+        auto const inputDataType = tensorAttrs->data_type();
+        auto const isLayoutChannelLast = core::utils::isChannelLastLayout(tensorAttrs);
 
         add("HIP_PLUGIN_USE_FP32",
             inputDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
@@ -168,7 +168,7 @@ private:
 
     void updateIfExists(const std::string& name, std::string value)
     {
-        auto it = _mutableCompileOptionsMap.find(name);
+        auto const it = _mutableCompileOptionsMap.find(name);
         if(it != _mutableCompileOptionsMap.end())
         {
             it->second = std::move(value);

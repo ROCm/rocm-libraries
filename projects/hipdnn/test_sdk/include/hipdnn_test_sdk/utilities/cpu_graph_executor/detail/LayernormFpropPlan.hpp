@@ -85,7 +85,7 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowXTensor
+        const auto shallowXTensor
             = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
         auto shallowYTensor = createShallowTensor<OutputDataType>(
@@ -97,11 +97,11 @@ public:
                 _params.epsilonTensor, variantPack, "Epsilon");
 
         // Scale tensor (required)
-        auto scaleTensor = createShallowTensor<ScaleBiasDataType>(
+        const auto scaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
         // Bias tensor (required)
-        auto biasTensor = createShallowTensor<ScaleBiasDataType>(
+        const auto biasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.biasTensor, variantPack.at(_params.biasTensor.uid));
 
         // Optional mean output tensor

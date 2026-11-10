@@ -109,7 +109,7 @@ protected:
         fixtures::writeMetadata(dir, name);
         const auto basePath = dir / name;
 
-        auto writeBin = [&](int64_t uid, size_t byteCount) {
+        const auto writeBin = [&](int64_t uid, size_t byteCount) {
             std::vector<char> data(byteCount, 0);
             std::ofstream out(basePath.string() + ".tensor" + std::to_string(uid) + ".bin",
                               std::ios::binary);
@@ -297,7 +297,7 @@ TEST_F(TestBundleDiscoveryFixture, TemplateSweepCasesAreExpandedFromManifest)
         {{"small_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}},
          {"small_fp16_nchw", "half", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
 
-    auto result = discoverBundles(_tempDir);
+    const auto result = discoverBundles(_tempDir);
     ASSERT_EQ(result.size(), 2u);
 
     const auto* fp32 = findByTest(result, "small_fp32_nchw");
@@ -478,16 +478,16 @@ TEST_F(TestBundleDiscoveryFixture, EmptyLeafFolderWarnsAndSkips)
 
 TEST_F(TestBundleDiscoveryFixture, LeafWithOnlyMetaJsonWarnsAndSkips)
 {
-    auto dir = _tempDir / "conv" / "meta_only";
+    const auto dir = _tempDir / "conv" / "meta_only";
     std::filesystem::create_directories(dir);
     std::ofstream(dir / "meta.json") << "{}";
-    auto result = discoverBundles(_tempDir);
+    const auto result = discoverBundles(_tempDir);
     EXPECT_TRUE(result.empty());
 }
 
 TEST_F(TestBundleDiscoveryFixture, EmptyRootReturnsEmpty)
 {
-    auto result = discoverBundles(_tempDir);
+    const auto result = discoverBundles(_tempDir);
     EXPECT_TRUE(result.empty());
 }
 
@@ -503,7 +503,7 @@ TEST_F(TestBundleDiscoveryFixture, CustomerDropAndTieredLayoutCoexistUnderOneRoo
     createMinimalBundle(_tempDir / "case_1", "graph");
     createMinimalBundle(_tempDir / "conv" / "nchw" / "fp16" / "resnet50", "resnet50");
 
-    auto result = discoverBundles(_tempDir);
+    const auto result = discoverBundles(_tempDir);
     ASSERT_EQ(result.size(), 2u);
 
     const auto* flat = findByTest(result, "graph");
@@ -517,7 +517,7 @@ TEST_F(TestBundleDiscoveryFixture, CustomerDropAndTieredLayoutCoexistUnderOneRoo
 
 TEST_F(TestBundleDiscoveryFixture, SkipsMetaJson)
 {
-    auto bundleDir = _tempDir / "conv" / "nchw" / "fp32" / "withmeta";
+    const auto bundleDir = _tempDir / "conv" / "nchw" / "fp32" / "withmeta";
     createMinimalBundle(bundleDir, "withmeta");
     std::ofstream(bundleDir / "withmeta.meta.json") << "{}";
     std::ofstream(bundleDir / "meta.json") << "{}";
@@ -529,7 +529,7 @@ TEST_F(TestBundleDiscoveryFixture, SkipsMetaJson)
 
 TEST_F(TestBundleDiscoveryFixture, SkipsSupportJson)
 {
-    auto bundleDir = _tempDir / "conv" / "nchw" / "fp32" / "withsupport";
+    const auto bundleDir = _tempDir / "conv" / "nchw" / "fp32" / "withsupport";
     createMinimalBundle(bundleDir, "withsupport");
     std::ofstream(bundleDir / "withsupport.support.json") << R"({"version": 1, "claims": {}})";
 
@@ -540,7 +540,7 @@ TEST_F(TestBundleDiscoveryFixture, SkipsSupportJson)
 
 TEST_F(TestBundleDiscoveryFixture, SweepSupportJsonIsNotDiscoveredAsGraph)
 {
-    auto sweepDir = _tempDir / "conv" / "sweep";
+    const auto sweepDir = _tempDir / "conv" / "sweep";
     createTemplateSweep(sweepDir,
                         {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
     std::ofstream(sweepDir / "support.json") << R"({"version": 1, "claims": {}})";
@@ -611,12 +611,12 @@ TEST(TestExtractOutputUidsFromJson, ReadsFlatOutputKeys)
 
 TEST_F(TestBundleDiscoveryFixture, UnparseableJsonIsDiscoveredButLoadThrows)
 {
-    auto badDir = _tempDir / "BadOp" / "Malformed";
+    const auto badDir = _tempDir / "BadOp" / "Malformed";
     std::filesystem::create_directories(badDir);
     std::ofstream(badDir / "Malformed.json") << "{{NOT VALID JSON AT ALL";
 
     auto bundles = discoverBundles(_tempDir);
-    auto it = std::find_if(bundles.begin(), bundles.end(), [](const DiscoveredBundle& b) {
+    const auto it = std::find_if(bundles.begin(), bundles.end(), [](const DiscoveredBundle& b) {
         return b.testName == "Malformed";
     });
     ASSERT_NE(it, bundles.end()) << "Malformed bundle should be discovered (valid .json path)";
@@ -626,7 +626,7 @@ TEST_F(TestBundleDiscoveryFixture, UnparseableJsonIsDiscoveredButLoadThrows)
 
 TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesAllFields)
 {
-    auto dir = _tempDir / "op" / "loadtest";
+    const auto dir = _tempDir / "op" / "loadtest";
     createLoadableBundle(dir, "loadtest");
     const auto jsonPath = dir / "loadtest.json";
 
@@ -649,7 +649,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesAllFields)
 
 TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesMetadataWhenPresent)
 {
-    auto dir = _tempDir / "op" / "withmeta";
+    const auto dir = _tempDir / "op" / "withmeta";
     createMinimalBundle(dir, "withmeta");
     std::ofstream(dir / "withmeta.meta.json")
         << R"({"format_version": 1, "operation": "BatchnormInference", "seed": 42})";
@@ -670,7 +670,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesMetadataWhenPresent)
 // none here, so absent metadata is valid and default-constructed.
 TEST_F(TestBundleDiscoveryFixture, LoadGraphOnlyBundleMissingMetadataLoads)
 {
-    auto dir = _tempDir / "op" / "nometa";
+    const auto dir = _tempDir / "op" / "nometa";
     createMinimalBundle(dir, "nometa"); // graph only, no .meta.json, no .bin
     const auto jsonPath = dir / "nometa.json";
 
@@ -689,7 +689,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadGraphOnlyBundleMissingMetadataLoads)
 // distinction is what makes classifyBundle() fail instead of skip.
 TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleMissingMetadataIsError)
 {
-    auto dir = _tempDir / "op" / "goldennometa";
+    const auto dir = _tempDir / "op" / "goldennometa";
     createLoadableBundle(dir, "goldennometa"); // writes .bin (inputs+outputs) + meta
     std::filesystem::remove(dir / "goldennometa.meta.json"); // drop the metadata
     const auto jsonPath = dir / "goldennometa.json";
@@ -705,7 +705,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleMissingMetadataIsError)
 // `format_version`) throws, so the parser's detail reaches the failure message.
 TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleUnparseableMetadataIsError)
 {
-    auto dir = _tempDir / "op" / "goldenbadmeta";
+    const auto dir = _tempDir / "op" / "goldenbadmeta";
     createLoadableBundle(dir, "goldenbadmeta");
     writeMetadataWithoutFormatVersion(dir, "goldenbadmeta");
 
@@ -718,7 +718,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleUnparseableMetadataIsError)
 // the golden case does.
 TEST_F(TestBundleDiscoveryFixture, LoadGraphOnlyBundleMalformedMetadataIsError)
 {
-    auto dir = _tempDir / "op" / "graphbadmeta";
+    const auto dir = _tempDir / "op" / "graphbadmeta";
     createMinimalBundle(dir, "graphbadmeta"); // graph only, no .bin
     std::ofstream(dir / "graphbadmeta.meta.json")
         << R"({"format_version": 1, "enforcement_level": "buildible"})";
@@ -733,12 +733,12 @@ TEST_F(TestBundleDiscoveryFixture, LoadGraphOnlyBundleMalformedMetadataIsError)
 // states. Neither ever goes from a test to a silent skip.
 TEST_F(TestBundleDiscoveryFixture, PullingGoldenDataNeverSilentlyDropsABundle)
 {
-    auto absentDir = _tempDir / "op" / "pullabsent";
+    const auto absentDir = _tempDir / "op" / "pullabsent";
     createLoadableBundle(absentDir, "pullabsent");
     std::filesystem::remove(absentDir / "pullabsent.meta.json");
     std::filesystem::remove(absentDir / "pullabsent.tensor5.bin"); // pre-`dvc pull` state
 
-    auto badDir = _tempDir / "op" / "pullbad";
+    const auto badDir = _tempDir / "op" / "pullbad";
     createLoadableBundle(badDir, "pullbad");
     writeMetadataWithoutFormatVersion(badDir, "pullbad");
     std::filesystem::remove(badDir / "pullbad.tensor5.bin"); // pre-`dvc pull` state
@@ -769,7 +769,7 @@ TEST_F(TestBundleDiscoveryFixture, PullingGoldenDataNeverSilentlyDropsABundle)
 
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingBinIsGraphOnly)
 {
-    auto dir = _tempDir / "op" / "nobin";
+    const auto dir = _tempDir / "op" / "nobin";
     createMinimalBundle(dir, "nobin");
     fixtures::writeMetadata(dir, "nobin"); // metadata present (optional here, but exercised)
     const auto jsonPath = dir / "nobin.json";
@@ -974,7 +974,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseWithBakedValueAndRuntime
 // this path loaded a contradictory tensor without complaint.
 TEST_F(TestBundleDiscoveryFixture, LoadDirectBundleWithBakedValueAndRuntimePassByValueIsError)
 {
-    auto dir = _tempDir / "op" / "bakedscale";
+    const auto dir = _tempDir / "op" / "bakedscale";
     std::filesystem::create_directories(dir);
     std::ofstream(dir / "bakedscale.json")
         << R"({"tensors": [{"uid": 0, "is_runtime_pass_by_value": true, )"
@@ -988,7 +988,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadDirectBundleWithBakedValueAndRuntimePassB
 // test that needs it, instead of dropping the bundle from the run when it is loaded.
 TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinFailsOnlyWhenTheTensorsAreRead)
 {
-    auto dir = _tempDir / "op" / "badbin";
+    const auto dir = _tempDir / "op" / "badbin";
     createLoadableBundle(dir, "badbin");
     std::ofstream(dir / "badbin.tensor0.bin", std::ios::binary) << "too short";
     const auto jsonPath = dir / "badbin.json";
@@ -1000,13 +1000,13 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinFailsOnlyWhenTheTensors
 
 TEST_F(TestBundleDiscoveryFixture, LoadRaggedBundleLoadsInputsAndGoldenOutputs)
 {
-    auto dir = _tempDir / "op" / "ragged";
+    const auto dir = _tempDir / "op" / "ragged";
     fixtures::writeRaggedBundleFiles(
         dir, "ragged", {0, 40, 60}, std::vector<float>(fixtures::K_RAGGED_OUTPUT_ELEMS, 0.0f));
 
     auto result = loadIntegrationTestBundle(dir / "ragged.json");
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
-    auto& bundle = std::get<IntegrationTestBundle>(result);
+    const auto& bundle = std::get<IntegrationTestBundle>(result);
 
     EXPECT_TRUE(bundle.hasGoldenOutputs);
     const auto tensors = bundle.loadTensors();
@@ -1120,7 +1120,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadRaggedSdpaBundleWithDoubledOffsetsIsRejec
 
 TEST_F(TestBundleDiscoveryFixture, LoadRaggedBundleWithInvalidOffsetsFailsOnlyWhenTheTensorsAreRead)
 {
-    auto dir = _tempDir / "op" / "badragged";
+    const auto dir = _tempDir / "op" / "badragged";
     fixtures::writeRaggedBundleFiles(
         dir, "badragged", {1, 40, 60}, std::vector<float>(fixtures::K_RAGGED_OUTPUT_ELEMS, 0.0f));
 
@@ -1132,7 +1132,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadRaggedBundleWithInvalidOffsetsFailsOnlyWh
 TEST_F(TestBundleDiscoveryFixture,
        LoadRaggedBundleWithMissingOffsetTensorFailsOnlyWhenTheTensorsAreRead)
 {
-    auto dir = _tempDir / "op" / "nooffset";
+    const auto dir = _tempDir / "op" / "nooffset";
     const int64_t undeclaredUid = fixtures::K_RAGGED_OFFSET_UID + 1;
     fixtures::writeRaggedBundleFiles(dir,
                                      "nooffset",
@@ -1147,7 +1147,7 @@ TEST_F(TestBundleDiscoveryFixture,
 
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingTensorsKeyIsSchemaError)
 {
-    auto dir = _tempDir / "op" / "notensorskey";
+    const auto dir = _tempDir / "op" / "notensorskey";
     std::filesystem::create_directories(dir);
     std::ofstream(dir / "notensorskey.json") << R"({"nodes": []})";
 
@@ -1158,7 +1158,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingTensorsKeyIsSchemaError)
 
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMalformedJsonIsError)
 {
-    auto dir = _tempDir / "op" / "badjson";
+    const auto dir = _tempDir / "op" / "badjson";
     std::filesystem::create_directories(dir);
     std::ofstream(dir / "badjson.json") << "{{NOT VALID";
 
@@ -1346,7 +1346,7 @@ TEST_F(TestBundleDiscoveryFixture, UnusedSweepValueWarnsButLoadSucceeds)
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto result = loadIntegrationTestBundle(discovered.front());
+    const auto result = loadIntegrationTestBundle(discovered.front());
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
 }
 
@@ -1358,7 +1358,7 @@ TEST_F(TestBundleDiscoveryFixture, UnusedSweepValueWarnsButLoadSucceeds)
 // FailedLoad — since nothing previously exercised that routing directly.
 TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsLoadedBundleForGoodBundle)
 {
-    auto dir = _tempDir / "op" / "goodbundle";
+    const auto dir = _tempDir / "op" / "goodbundle";
     createLoadableBundle(dir, "goodbundle");
 
     const auto discovered = discoverBundles(_tempDir);
@@ -1366,7 +1366,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsLoadedBundleForGoodBundl
 
     auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::LoadedBundle>(outcome));
-    auto& loaded = std::get<detail::LoadedBundle>(outcome);
+    const auto& loaded = std::get<detail::LoadedBundle>(outcome);
     EXPECT_EQ(loaded.suiteName, discovered.front().suiteName);
     EXPECT_EQ(loaded.testName, discovered.front().testName);
     ASSERT_NE(loaded.bundle, nullptr);
@@ -1388,7 +1388,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleSetsLocatorForSweepCase)
 
     auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::LoadedBundle>(outcome));
-    auto& loaded = std::get<detail::LoadedBundle>(outcome);
+    const auto& loaded = std::get<detail::LoadedBundle>(outcome);
 
     EXPECT_EQ(loaded.claimLocator.sidecarPath,
               discovered.front().jsonPath.parent_path() / "support.json");
@@ -1506,7 +1506,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForRuntimePass
 
     auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
-    auto& failed = std::get<detail::FailedLoad>(outcome);
+    const auto& failed = std::get<detail::FailedLoad>(outcome);
     EXPECT_EQ(failed.suiteName, discovered.front().suiteName);
     EXPECT_EQ(failed.testName, discovered.front().testName);
     EXPECT_NE(failed.message.find(discovered.front().diagnosticPath().string()), std::string::npos);
@@ -1535,7 +1535,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsSkippedLoadForOrdinaryIn
 
     auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::SkippedLoad>(outcome));
-    auto& skipped = std::get<detail::SkippedLoad>(outcome);
+    const auto& skipped = std::get<detail::SkippedLoad>(outcome);
     EXPECT_NE(skipped.message.find(discovered.front().diagnosticPath().string()),
               std::string::npos);
     EXPECT_NE(skipped.message.find(toString(LoadError::INVALID_SWEEP_CASE)), std::string::npos);
@@ -1547,7 +1547,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsSkippedLoadForOrdinaryIn
 // regression that let 35 SdpaFwd bundles disappear.
 TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForUnvalidatableGoldenData)
 {
-    auto dir = _tempDir / "op" / "goldennometa";
+    const auto dir = _tempDir / "op" / "goldennometa";
     createLoadableBundle(dir, "goldennometa");
     std::filesystem::remove(dir / "goldennometa.meta.json");
 
@@ -1556,7 +1556,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForUnvalidatab
 
     auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
-    auto& failed = std::get<detail::FailedLoad>(outcome);
+    const auto& failed = std::get<detail::FailedLoad>(outcome);
     EXPECT_EQ(failed.suiteName, discovered.front().suiteName);
     EXPECT_EQ(failed.testName, discovered.front().testName);
     EXPECT_NE(failed.message.find(discovered.front().diagnosticPath().string()), std::string::npos);
@@ -1569,7 +1569,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForUnvalidatab
 // to fix (HIPDNN_LOG_LEVEL is off by default, so a WARN log would be invisible).
 TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadWithDetailForMalformedMetadata)
 {
-    auto dir = _tempDir / "op" / "graphbadmeta";
+    const auto dir = _tempDir / "op" / "graphbadmeta";
     createMinimalBundle(dir, "graphbadmeta"); // graph only, no .bin
     std::ofstream(dir / "graphbadmeta.meta.json")
         << R"({"format_version": 1, "enforcement_level": "buildible"})";
@@ -1579,7 +1579,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadWithDetailForM
 
     auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
-    auto& failed = std::get<detail::FailedLoad>(outcome);
+    const auto& failed = std::get<detail::FailedLoad>(outcome);
     EXPECT_EQ(failed.suiteName, discovered.front().suiteName);
     EXPECT_EQ(failed.testName, discovered.front().testName);
     EXPECT_NE(failed.message.find(discovered.front().diagnosticPath().string()), std::string::npos);
@@ -1591,7 +1591,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadWithDetailForM
 // discovered alongside it.
 TEST_F(TestBundleDiscoveryFixture, ClassifyBundleIsolatesFailureAmongMultipleDiscoveredBundles)
 {
-    auto goodDir = _tempDir / "op" / "goodbundle";
+    const auto goodDir = _tempDir / "op" / "goodbundle";
     createLoadableBundle(goodDir, "goodbundle");
 
     const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";

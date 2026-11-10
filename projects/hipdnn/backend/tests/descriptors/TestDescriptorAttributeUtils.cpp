@@ -679,7 +679,7 @@ TEST(TestDescriptorAttributeUtils, SetTensorDescriptorThrowsOnNullErrorPrefix)
 {
     std::shared_ptr<TensorDescriptor> descTarget;
     int64_t uidTarget = 0;
-    auto wrapper = test_utilities::createFinalizedTensor(1);
+    const auto wrapper = test_utilities::createFinalizedTensor(1);
     const auto* ptr = wrapper.get();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -692,7 +692,7 @@ TEST(TestDescriptorAttributeUtils, SetTensorDescriptorThrowsOnWrongAttributeType
 {
     std::shared_ptr<TensorDescriptor> descTarget;
     int64_t uidTarget = 0;
-    auto wrapper = test_utilities::createFinalizedTensor(1);
+    const auto wrapper = test_utilities::createFinalizedTensor(1);
     const auto* ptr = wrapper.get();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -704,7 +704,7 @@ TEST(TestDescriptorAttributeUtils, SetTensorDescriptorThrowsOnWrongElementCount)
 {
     std::shared_ptr<TensorDescriptor> descTarget;
     int64_t uidTarget = 0;
-    auto wrapper = test_utilities::createFinalizedTensor(1);
+    const auto wrapper = test_utilities::createFinalizedTensor(1);
     const auto* ptr = wrapper.get();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -716,7 +716,7 @@ TEST(TestDescriptorAttributeUtils, SetTensorDescriptorThrowsOnUnfinalizedTensor)
 {
     std::shared_ptr<TensorDescriptor> descTarget;
     int64_t uidTarget = 0;
-    auto wrapper = test_utilities::createDescriptor<TensorDescriptor>();
+    const auto wrapper = test_utilities::createDescriptor<TensorDescriptor>();
     const auto* ptr = wrapper.get();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -728,7 +728,7 @@ TEST(TestDescriptorAttributeUtils, SetTensorDescriptorSuccess)
 {
     std::shared_ptr<TensorDescriptor> descTarget;
     int64_t uidTarget = 0;
-    auto wrapper = test_utilities::createFinalizedTensor(42);
+    const auto wrapper = test_utilities::createFinalizedTensor(42);
     const auto* ptr = wrapper.get();
 
     ASSERT_NO_THROW(setTensorDescriptor(descTarget,
@@ -745,8 +745,8 @@ TEST(TestDescriptorAttributeUtils, SetTensorDescriptorSuccess)
 
 TEST(TestDescriptorAttributeUtils, GetTensorDescriptorQueryReturnsOneOnNullArray)
 {
-    auto wrapper = test_utilities::createFinalizedTensor(1);
-    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+    const auto wrapper = test_utilities::createFinalizedTensor(1);
+    const auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
     int64_t count = 0;
 
@@ -757,8 +757,8 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorQueryReturnsOneOnNullArray
 
 TEST(TestDescriptorAttributeUtils, GetTensorDescriptorQueryReturnsOneOnZeroRequestedCount)
 {
-    auto wrapper = test_utilities::createFinalizedTensor(1);
-    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+    const auto wrapper = test_utilities::createFinalizedTensor(1);
+    const auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
     int64_t count = 0;
     HipdnnBackendDescriptor* output = nullptr;
@@ -770,8 +770,8 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorQueryReturnsOneOnZeroReque
 
 TEST(TestDescriptorAttributeUtils, GetTensorDescriptorQueryThrowsWhenBothPointersNull)
 {
-    auto wrapper = test_utilities::createFinalizedTensor(1);
-    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+    const auto wrapper = test_utilities::createFinalizedTensor(1);
+    const auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -781,8 +781,8 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorQueryThrowsWhenBothPointer
 
 TEST(TestDescriptorAttributeUtils, GetTensorDescriptorThrowsOnNullErrorPrefix)
 {
-    auto wrapper = test_utilities::createFinalizedTensor(1);
-    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+    const auto wrapper = test_utilities::createFinalizedTensor(1);
+    const auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
     int64_t count = 0;
     HipdnnBackendDescriptor* output = nullptr;
@@ -794,8 +794,8 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorThrowsOnNullErrorPrefix)
 
 TEST(TestDescriptorAttributeUtils, GetTensorDescriptorThrowsOnWrongAttributeType)
 {
-    auto wrapper = test_utilities::createFinalizedTensor(1);
-    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+    const auto wrapper = test_utilities::createFinalizedTensor(1);
+    const auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
     int64_t count = 0;
     HipdnnBackendDescriptor* output = nullptr;
@@ -807,8 +807,8 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorThrowsOnWrongAttributeType
 
 TEST(TestDescriptorAttributeUtils, GetTensorDescriptorSuccess)
 {
-    auto wrapper = test_utilities::createFinalizedTensor(1);
-    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+    const auto wrapper = test_utilities::createFinalizedTensor(1);
+    const auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
     int64_t count = 0;
     HipdnnBackendDescriptor* rawOutput = nullptr;
@@ -1472,7 +1472,7 @@ TEST(TestDescriptorAttributeUtils, SetOptionalTensorDescriptorSuccess)
 {
     std::shared_ptr<TensorDescriptor> descTarget;
     std::optional<int64_t> uidTarget;
-    auto wrapper = test_utilities::createFinalizedTensor(7);
+    const auto wrapper = test_utilities::createFinalizedTensor(7);
     const auto* ptr = wrapper.get();
 
     ASSERT_NO_THROW(setOptionalTensorDescriptor(descTarget,
@@ -1490,7 +1490,7 @@ TEST(TestDescriptorAttributeUtils, SetOptionalTensorDescriptorThrowsOnWrongType)
 {
     std::shared_ptr<TensorDescriptor> descTarget;
     std::optional<int64_t> uidTarget;
-    auto wrapper = test_utilities::createFinalizedTensor(7);
+    const auto wrapper = test_utilities::createFinalizedTensor(7);
     const auto* ptr = wrapper.get();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -1501,8 +1501,8 @@ TEST(TestDescriptorAttributeUtils, SetOptionalTensorDescriptorThrowsOnWrongType)
 
 TEST(TestDescriptorAttributeUtils, GetOptionalTensorDescriptorSuccessWhenSet)
 {
-    auto wrapper = test_utilities::createFinalizedTensor(5);
-    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+    const auto wrapper = test_utilities::createFinalizedTensor(5);
+    const auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
     int64_t count = 0;
     HipdnnBackendDescriptor* rawOutput = nullptr;
@@ -1526,8 +1526,8 @@ TEST(TestDescriptorAttributeUtils, GetOptionalTensorDescriptorReturnsZeroCountWh
 
 TEST(TestDescriptorAttributeUtils, GetOptionalTensorDescriptorThrowsOnWrongType)
 {
-    auto wrapper = test_utilities::createFinalizedTensor(5);
-    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+    const auto wrapper = test_utilities::createFinalizedTensor(5);
+    const auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
     int64_t count = 0;
     HipdnnBackendDescriptor* rawOutput = nullptr;
@@ -1544,8 +1544,8 @@ TEST(TestDescriptorAttributeUtils, SetTensorDescriptorArraySuccess)
 {
     std::vector<std::shared_ptr<TensorDescriptor>> descTarget;
     std::vector<int64_t> uidTarget;
-    auto wrapper1 = test_utilities::createFinalizedTensor(10);
-    auto wrapper2 = test_utilities::createFinalizedTensor(20);
+    const auto wrapper1 = test_utilities::createFinalizedTensor(10);
+    const auto wrapper2 = test_utilities::createFinalizedTensor(20);
     std::array<HipdnnBackendDescriptor*, 2> ptrs = {wrapper1.get(), wrapper2.get()};
 
     ASSERT_NO_THROW(setTensorDescriptorArray(descTarget,
@@ -1564,7 +1564,7 @@ TEST(TestDescriptorAttributeUtils, SetTensorDescriptorArrayThrowsOnWrongType)
 {
     std::vector<std::shared_ptr<TensorDescriptor>> descTarget;
     std::vector<int64_t> uidTarget;
-    auto wrapper = test_utilities::createFinalizedTensor(10);
+    const auto wrapper = test_utilities::createFinalizedTensor(10);
     std::array<HipdnnBackendDescriptor*, 1> ptrs = {wrapper.get()};
 
     ASSERT_THROW_HIPDNN_STATUS(setTensorDescriptorArray(descTarget,
@@ -1589,8 +1589,8 @@ TEST(TestDescriptorAttributeUtils, SetTensorDescriptorArrayThrowsOnNullArray)
 
 TEST(TestDescriptorAttributeUtils, GetTensorDescriptorArraySuccess)
 {
-    auto wrapper1 = test_utilities::createFinalizedTensor(10);
-    auto wrapper2 = test_utilities::createFinalizedTensor(20);
+    const auto wrapper1 = test_utilities::createFinalizedTensor(10);
+    const auto wrapper2 = test_utilities::createFinalizedTensor(20);
     std::vector<std::shared_ptr<TensorDescriptor>> source;
     source.push_back(HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper1.get(), HIPDNN_STATUS_BAD_PARAM, "unpack"));
@@ -1617,7 +1617,7 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorArraySuccess)
 
 TEST(TestDescriptorAttributeUtils, GetTensorDescriptorArrayThrowsOnWrongType)
 {
-    auto wrapper = test_utilities::createFinalizedTensor(10);
+    const auto wrapper = test_utilities::createFinalizedTensor(10);
     std::vector<std::shared_ptr<TensorDescriptor>> source;
     source.push_back(HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack"));
@@ -1633,7 +1633,7 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorArrayThrowsOnWrongType)
 
 TEST(TestDescriptorAttributeUtils, GetTensorDescriptorArrayQueryReturnsSizeOnNullArray)
 {
-    auto wrapper = test_utilities::createFinalizedTensor(10);
+    const auto wrapper = test_utilities::createFinalizedTensor(10);
     std::vector<std::shared_ptr<TensorDescriptor>> source;
     source.push_back(HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack"));
@@ -1854,8 +1854,8 @@ TEST(TestDescriptorAttributeUtils, GetAttentionImplementationQueryReturnsSizeOnZ
 
 TEST(TestDescriptorAttributeUtils, FindTensorInMapSuccess)
 {
-    auto wrapper = test_utilities::createFinalizedTensor(42);
-    auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+    const auto wrapper = test_utilities::createFinalizedTensor(42);
+    const auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> tensorMap;

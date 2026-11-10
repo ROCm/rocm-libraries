@@ -44,17 +44,17 @@ class IntegrationPointwiseDescriptorLowering : public IntegrationTestFixture
 // Binary pointwise (ADD) round-trip: lower and verify deserialized graph
 TEST_F(IntegrationPointwiseDescriptorLowering, PointwiseGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestPointwiseGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
-    auto in1 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
     in1->set_uid(K_PW_TENSOR_IN1_UID).set_name("IN1").set_data_type(DataType::FLOAT);
     in1->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -62,7 +62,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, PointwiseGraphRoundTrip)
     pwAttrs.set_name("add_op");
     pwAttrs.set_mode(PointwiseMode::ADD);
 
-    auto out0 = graph->pointwise(in0, in1, pwAttrs);
+    const auto out0 = graph->pointwise(in0, in1, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -112,13 +112,13 @@ TEST_F(IntegrationPointwiseDescriptorLowering, PointwiseGraphRoundTrip)
 // Unary pointwise (RELU_FWD) round-trip with single input
 TEST_F(IntegrationPointwiseDescriptorLowering, UnaryPointwiseRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestUnaryPointwiseGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -126,7 +126,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, UnaryPointwiseRoundTrip)
     pwAttrs.set_name("relu_op");
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
 
-    auto out0 = graph->pointwise(in0, pwAttrs);
+    const auto out0 = graph->pointwise(in0, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -146,13 +146,13 @@ TEST_F(IntegrationPointwiseDescriptorLowering, UnaryPointwiseRoundTrip)
 // RELU_FWD with activation scalar parameters round-trip
 TEST_F(IntegrationPointwiseDescriptorLowering, ScalarAttributesPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestScalarAttrsGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -167,7 +167,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, ScalarAttributesPreservedInRoundT
     pwAttrs.set_relu_upper_clip(K_UPPER_CLIP);
     pwAttrs.set_relu_lower_clip_slope(K_LOWER_CLIP_SLOPE);
 
-    auto out0 = graph->pointwise(in0, pwAttrs);
+    const auto out0 = graph->pointwise(in0, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -191,21 +191,21 @@ TEST_F(IntegrationPointwiseDescriptorLowering, ScalarAttributesPreservedInRoundT
 // Ternary pointwise (BINARY_SELECT) round-trip with 3 inputs
 TEST_F(IntegrationPointwiseDescriptorLowering, TernaryPointwiseRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestTernaryPointwiseGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
-    auto in1 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
     in1->set_uid(K_PW_TENSOR_IN1_UID).set_name("IN1").set_data_type(DataType::FLOAT);
     in1->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
-    auto in2 = std::make_shared<TensorAttributes>();
+    const auto in2 = std::make_shared<TensorAttributes>();
     in2->set_uid(K_PW_TENSOR_IN2_UID).set_name("IN2").set_data_type(DataType::FLOAT);
     in2->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -213,7 +213,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, TernaryPointwiseRoundTrip)
     pwAttrs.set_name("select_op");
     pwAttrs.set_mode(PointwiseMode::BINARY_SELECT);
 
-    auto out0 = graph->pointwise(in0, in1, in2, pwAttrs);
+    const auto out0 = graph->pointwise(in0, in1, in2, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -236,24 +236,24 @@ TEST_F(IntegrationPointwiseDescriptorLowering, TernaryPointwiseRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationPointwiseDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidPointwiseGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
-    auto in1 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
     in1->set_name("IN1").set_data_type(DataType::FLOAT);
     in1->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::MUL);
 
-    auto out0 = graph->pointwise(in0, in1, pwAttrs);
+    const auto out0 = graph->pointwise(in0, in1, pwAttrs);
     out0->set_output(true);
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -296,13 +296,13 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 // Additional activation scalars (swish_beta, elu_alpha, softplus_beta) round-trip
 TEST_F(IntegrationPointwiseDescriptorLowering, AdditionalScalarAttributesPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestAdditionalScalarAttrsGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -317,7 +317,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AdditionalScalarAttributesPreserv
     pwAttrs.set_elu_alpha(K_ELU_ALPHA);
     pwAttrs.set_softplus_beta(K_SOFTPLUS_BETA);
 
-    auto out0 = graph->pointwise(in0, pwAttrs);
+    const auto out0 = graph->pointwise(in0, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -341,13 +341,13 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AdditionalScalarAttributesPreserv
 // GEN_INDEX mode with axis attribute round-trip
 TEST_F(IntegrationPointwiseDescriptorLowering, AxisAttributePreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestAxisAttrGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -358,7 +358,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AxisAttributePreservedInRoundTrip
     pwAttrs.set_mode(PointwiseMode::GEN_INDEX);
     pwAttrs.set_axis(K_AXIS);
 
-    auto out0 = graph->pointwise(in0, pwAttrs);
+    const auto out0 = graph->pointwise(in0, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);

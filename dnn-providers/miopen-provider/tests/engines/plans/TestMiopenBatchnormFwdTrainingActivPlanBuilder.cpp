@@ -37,7 +37,7 @@ protected:
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
        IsApplicableReturnsTrueForValidSingleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -58,7 +58,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseF
 
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsTrueForValidTwoNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -71,7 +71,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
        IsApplicableReturnsTrueForFusionWithoutRunningStatistics)
 {
     // Create a fused batchnorm training + activation graph WITHOUT running statistics
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -83,7 +83,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseForNonReluActivation)
 {
     // Graph with SIGMOID_FWD instead of RELU_FWD
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
         false, false, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -95,7 +95,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseF
 
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, GetWorkspaceSizeReturnsZero)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -107,7 +107,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, GetWorkspaceSizeReturnsZe
 
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, BuildPlanSetsPlanForValidGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const MockEngineConfig mockEngineConfig;
@@ -127,7 +127,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
     // Node with BatchnormAttributes type but null attributes pointer
-    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "malformed_bn_training",
         hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
@@ -135,7 +135,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
         0);
     nodes.push_back(node);
 
-    auto actAttr = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto actAttr = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
@@ -153,7 +153,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -226,7 +226,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
     // Valid batchnorm training node
-    auto bnormAttributes
+    const auto bnormAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormAttributes(builder,
                                                                           1,
                                                                           3,
@@ -256,7 +256,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         0));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -285,7 +285,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseF
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
     // Wrong order: activation first
-    auto actAttr = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto actAttr = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
@@ -316,7 +316,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseF
         hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    auto bnormAttributes
+    const auto bnormAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormAttributes(builder,
                                                                           1,
                                                                           3,
@@ -338,7 +338,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseF
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes,
         bnormAttributes.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -417,7 +417,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
-    auto bnormAttributes
+    const auto bnormAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormAttributes(builder,
                                                                           1,
                                                                           3,
@@ -439,7 +439,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes,
         bnormAttributes.Union()));
 
-    auto actAttr = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto actAttr = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
@@ -457,7 +457,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -484,7 +484,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsTrueFo
     const std::vector<int64_t> dims3D = {2, 3, 14};
     const std::vector<int64_t> strides3D = {42, 14, 1};
 
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(strides3D, dims3D);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -498,7 +498,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     const std::vector<int64_t> dims3D = {2, 3, 14};
     const std::vector<int64_t> strides3D = {42, 1, 3};
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
         true,
         false,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
@@ -515,7 +515,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, BuildPlanSetsPlanFor3dNcl
     const std::vector<int64_t> dims3D = {2, 3, 14};
     const std::vector<int64_t> strides3D = {42, 14, 1};
 
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(strides3D, dims3D);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -531,7 +531,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, BuildPlanSetsPlanFor3dNlc
     const std::vector<int64_t> dims3D = {2, 3, 14};
     const std::vector<int64_t> strides3D = {42, 1, 3};
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
         true,
         false,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,

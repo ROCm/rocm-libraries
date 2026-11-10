@@ -145,7 +145,7 @@ TEST(TestEngineOverrideConfig, NoRuleMatchesWrongDims)
 
     const std::vector<TensorData> tensors = {{{1, 3, 112, 112}, {}}};
 
-    auto result = config.matchOperation("conv_fprop", viewsOf(tensors));
+    const auto result = config.matchOperation("conv_fprop", viewsOf(tensors));
     EXPECT_FALSE(result.has_value());
 }
 
@@ -387,7 +387,7 @@ TEST(TestEngineOverrideConfig, NewerVersionUsesNamedTensorMatching)
 
 TEST(TestEngineOverrideConfig, LoadFromContentRejectsDuplicateTensorIdsInNamedConfig)
 {
-    auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
+    const auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
         {config_json::VERSION, config_version::CURRENT},
         {config_json::ENGINE_OVERRIDES,
          nlohmann::json::array(
@@ -404,7 +404,7 @@ TEST(TestEngineOverrideConfig, LoadFromContentRejectsDuplicateTensorIdsInNamedCo
 
 TEST(TestEngineOverrideConfig, LoadFromContentRejectsMissingTensorIdInNamedConfig)
 {
-    auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
+    const auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
         {config_json::VERSION, config_version::CURRENT},
         {config_json::ENGINE_OVERRIDES,
          nlohmann::json::array(
@@ -738,7 +738,7 @@ TEST(TestEngineOverrideConfig, LoadFromJsonParsesCriteria)
 
 TEST(TestEngineOverrideConfig, LoadFromMissingFileReturnsNullopt)
 {
-    auto config = EngineOverrideConfig::load("/nonexistent/path/hipdnn_no_such_file.json");
+    const auto config = EngineOverrideConfig::load("/nonexistent/path/hipdnn_no_such_file.json");
     EXPECT_FALSE(config.has_value());
 }
 

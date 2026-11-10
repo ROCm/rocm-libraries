@@ -53,29 +53,29 @@ class IntegrationBatchnormBackwardDescriptorLowering : public IntegrationTestFix
 
 TEST_F(IntegrationBatchnormBackwardDescriptorLowering, BatchnormBackwardGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestBnBwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_uid(K_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_TENSOR_DATA_DIMS)).set_stride(toVec(K_TENSOR_DATA_STRIDES));
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_TENSOR_DATA_DIMS)).set_stride(toVec(K_TENSOR_DATA_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(K_TENSOR_MEAN_UID).set_name("Mean").set_data_type(DataType::FLOAT);
     mean->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
 
-    auto invVar = std::make_shared<TensorAttributes>();
+    const auto invVar = std::make_shared<TensorAttributes>();
     invVar->set_uid(K_TENSOR_INV_VAR_UID).set_name("InvVariance").set_data_type(DataType::FLOAT);
     invVar->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
 
@@ -159,21 +159,21 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, BatchnormBackwardGraphRou
 
 TEST_F(IntegrationBatchnormBackwardDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidBnBwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_name("DY").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_TENSOR_DATA_DIMS)).set_stride(toVec(K_TENSOR_DATA_STRIDES));
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_TENSOR_DATA_DIMS)).set_stride(toVec(K_TENSOR_DATA_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
 

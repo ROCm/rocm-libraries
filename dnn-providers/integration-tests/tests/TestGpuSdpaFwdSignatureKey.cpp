@@ -81,10 +81,10 @@ TEST(TestGpuSdpaFwdSignatureKey, CreateFromNodeAndTensorMap)
     // [B=1, H=2, Sq=8, D=16], V/O head_dim_v = 16.
     const std::vector<int64_t> dims = {1, 2, 8, 16};
 
-    auto graphBuilder
+    const auto graphBuilder
         = createSdpaFwdGraph(Q_UID, K_UID, V_UID, O_UID, dims, dims, dims, dims, DataType::FLOAT);
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuSdpaFwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -134,22 +134,22 @@ TEST(TestGpuSdpaFwdSignatureKey, CreateFromNodeAndTensorMapWithMask)
 
     for(const auto maskType : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
     {
-        auto graphBuilder = createSdpaFwdGraph(Q_UID,
-                                               K_UID,
-                                               V_UID,
-                                               O_UID,
-                                               dims,
-                                               dims,
-                                               dims,
-                                               dims,
-                                               DataType::FLOAT,
-                                               {},
-                                               std::nullopt,
-                                               /*scale=*/std::nullopt,
-                                               MASK_UID,
-                                               maskDims,
-                                               maskType);
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graphBuilder = createSdpaFwdGraph(Q_UID,
+                                                     K_UID,
+                                                     V_UID,
+                                                     O_UID,
+                                                     dims,
+                                                     dims,
+                                                     dims,
+                                                     dims,
+                                                     DataType::FLOAT,
+                                                     {},
+                                                     std::nullopt,
+                                                     /*scale=*/std::nullopt,
+                                                     MASK_UID,
+                                                     maskDims,
+                                                     maskType);
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
         const GpuSdpaFwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -171,22 +171,22 @@ TEST(TestGpuSdpaFwdSignatureKey, CreateFromNodeWithDanglingMaskUidThrows)
     const std::vector<int64_t> dims = {1, 2, 8, 16};
 
     // A mask uid with no tensor behind it.
-    auto graphBuilder = createSdpaFwdGraph(Q_UID,
-                                           K_UID,
-                                           V_UID,
-                                           O_UID,
-                                           dims,
-                                           dims,
-                                           dims,
-                                           dims,
-                                           DataType::FLOAT,
-                                           {},
-                                           std::nullopt,
-                                           /*scale=*/std::nullopt,
-                                           MASK_UID,
-                                           {1, 1, 8, 8},
-                                           std::nullopt);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createSdpaFwdGraph(Q_UID,
+                                                 K_UID,
+                                                 V_UID,
+                                                 O_UID,
+                                                 dims,
+                                                 dims,
+                                                 dims,
+                                                 dims,
+                                                 DataType::FLOAT,
+                                                 {},
+                                                 std::nullopt,
+                                                 /*scale=*/std::nullopt,
+                                                 MASK_UID,
+                                                 {1, 1, 8, 8},
+                                                 std::nullopt);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     EXPECT_THROW(GpuSdpaFwdSignatureKey(graphWrap.getNode(0), graphWrap.getTensorMap()),

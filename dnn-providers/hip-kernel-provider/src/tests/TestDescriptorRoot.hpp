@@ -41,7 +41,7 @@ inline std::filesystem::path descriptorSetRoot(const char* relativeSubdir)
                                   reinterpret_cast<const void*>(&descriptorSetRoot))
                               / relativeSubdir;
         std::error_code failed;
-        auto collapsed = std::filesystem::weakly_canonical(resolved, failed);
+        auto const collapsed = std::filesystem::weakly_canonical(resolved, failed);
         return failed ? resolved : collapsed;
     }
     catch(const std::runtime_error&)

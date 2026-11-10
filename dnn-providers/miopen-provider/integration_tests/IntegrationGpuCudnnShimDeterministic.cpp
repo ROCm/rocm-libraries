@@ -44,7 +44,7 @@ protected:
 
         ASSERT_EQ(hipInit(0), hipSuccess);
 
-        auto pluginPath
+        const auto pluginPath
             = std::filesystem::weakly_canonical(getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
@@ -127,9 +127,9 @@ protected:
 
         fe::graph::Graph graph;
         initGraph(graph);
-        auto x = makeTensor(graph, "x", testCase.xDims);
-        auto w = makeTensor(graph, "w", testCase.wDims);
-        auto y = graph.conv_fprop(
+        const auto x = makeTensor(graph, "x", testCase.xDims);
+        const auto w = makeTensor(graph, "w", testCase.wDims);
+        const auto y = graph.conv_fprop(
             x, w, makeConvAttributes<fe::graph::Conv_fprop_attributes>(testCase));
         y->set_output(true);
 
@@ -150,9 +150,9 @@ protected:
 
         fe::graph::Graph graph;
         initGraph(graph);
-        auto dy = makeTensor(graph, "dy", testCase.yDims);
-        auto w = makeTensor(graph, "w", testCase.wDims);
-        auto dx = graph.conv_dgrad(
+        const auto dy = makeTensor(graph, "dy", testCase.yDims);
+        const auto w = makeTensor(graph, "w", testCase.wDims);
+        const auto dx = graph.conv_dgrad(
             dy, w, makeConvAttributes<fe::graph::Conv_dgrad_attributes>(testCase));
         dx->set_output(true).set_dim(testCase.xDims).set_stride(generateStrides(testCase.xDims));
 
@@ -173,9 +173,9 @@ protected:
 
         fe::graph::Graph graph;
         initGraph(graph);
-        auto dy = makeTensor(graph, "dy", testCase.yDims);
-        auto x = makeTensor(graph, "x", testCase.xDims);
-        auto dw = graph.conv_wgrad(
+        const auto dy = makeTensor(graph, "dy", testCase.yDims);
+        const auto x = makeTensor(graph, "x", testCase.xDims);
+        const auto dw = graph.conv_wgrad(
             dy, x, makeConvAttributes<fe::graph::Conv_wgrad_attributes>(testCase));
         dw->set_output(true).set_dim(testCase.wDims).set_stride(generateStrides(testCase.wDims));
 

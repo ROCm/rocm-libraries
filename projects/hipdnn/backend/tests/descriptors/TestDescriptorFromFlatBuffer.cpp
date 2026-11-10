@@ -46,8 +46,8 @@ protected:
 
 TEST_F(TestTensorDescriptorFromFlatBuffer, CreatesValidFinalizedDescriptor)
 {
-    auto attrs = createStandardTensorAttrs(K_FPROP_TENSOR_X_UID);
-    auto desc = TensorDescriptor::fromFlatBuffer(attrs);
+    const auto attrs = createStandardTensorAttrs(K_FPROP_TENSOR_X_UID);
+    const auto desc = TensorDescriptor::fromFlatBuffer(attrs);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -57,8 +57,8 @@ TEST_F(TestTensorDescriptorFromFlatBuffer, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestTensorDescriptorFromFlatBuffer, PopulatesAllFieldsCorrectly)
 {
-    auto attrs = createStandardTensorAttrs(K_FPROP_TENSOR_X_UID);
-    auto desc = TensorDescriptor::fromFlatBuffer(attrs);
+    const auto attrs = createStandardTensorAttrs(K_FPROP_TENSOR_X_UID);
+    const auto desc = TensorDescriptor::fromFlatBuffer(attrs);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -72,7 +72,7 @@ TEST_F(TestTensorDescriptorFromFlatBuffer, PopulatesAllFieldsCorrectly)
 TEST_F(TestTensorDescriptorFromFlatBuffer, MoveOverloadPopulatesAllFields)
 {
     auto attrs = createStandardTensorAttrs(K_FPROP_TENSOR_X_UID);
-    auto desc = TensorDescriptor::fromFlatBuffer(std::move(attrs));
+    const auto desc = TensorDescriptor::fromFlatBuffer(std::move(attrs));
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -87,15 +87,15 @@ TEST_F(TestTensorDescriptorFromFlatBuffer, PreservesVirtualFlag)
 {
     auto attrs = createStandardTensorAttrs(K_FPROP_TENSOR_X_UID);
     attrs.virtual_ = true;
-    auto desc = TensorDescriptor::fromFlatBuffer(attrs);
+    const auto desc = TensorDescriptor::fromFlatBuffer(attrs);
 
     ASSERT_TRUE(desc->getData().virtual_);
 }
 
 TEST_F(TestTensorDescriptorFromFlatBuffer, GetAttributeWorksAfterFromFlatBuffer)
 {
-    auto attrs = createStandardTensorAttrs(K_FPROP_TENSOR_X_UID);
-    auto desc = TensorDescriptor::fromFlatBuffer(attrs);
+    const auto attrs = createStandardTensorAttrs(K_FPROP_TENSOR_X_UID);
+    const auto desc = TensorDescriptor::fromFlatBuffer(attrs);
 
     // Verify getAttribute returns the correct UID
     int64_t uid = 0;
@@ -156,17 +156,17 @@ TEST_F(TestTensorDescriptorFromFlatBuffer, PreservesName)
 {
     auto attrs = createStandardTensorAttrs(K_FPROP_TENSOR_X_UID);
     attrs.name = "test_tensor";
-    auto desc = TensorDescriptor::fromFlatBuffer(attrs);
+    const auto desc = TensorDescriptor::fromFlatBuffer(attrs);
 
     ASSERT_EQ(desc->getData().name, "test_tensor");
 }
 
 TEST_F(TestTensorDescriptorFromFlatBuffer, RoundTripWithMultipleDataTypes)
 {
-    for(auto dt : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE})
+    for(const auto dt : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE})
     {
-        auto attrs = createStandardTensorAttrs(K_FPROP_TENSOR_X_UID, dt);
-        auto desc = TensorDescriptor::fromFlatBuffer(attrs);
+        const auto attrs = createStandardTensorAttrs(K_FPROP_TENSOR_X_UID, dt);
+        const auto desc = TensorDescriptor::fromFlatBuffer(attrs);
 
         ASSERT_EQ(desc->getData().data_type, dt) << "Failed for DataType: " << EnumNameDataType(dt);
         ASSERT_TRUE(desc->isFinalized()) << "Not finalized for DataType: " << EnumNameDataType(dt);
@@ -235,8 +235,8 @@ protected:
 
 TEST_F(TestConvolutionFwdOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -246,11 +246,11 @@ TEST_F(TestConvolutionFwdOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestConvolutionFwdOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -259,7 +259,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
-    auto desc = std::static_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -279,8 +279,8 @@ TEST_F(TestConvolutionFwdOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestConvolutionFwdOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
@@ -291,15 +291,15 @@ TEST_F(TestConvolutionFwdOperationFromNode, PreservesConvMode)
     auto convAttrs = createStandardConvAttrs();
     convAttrs.conv_mode = ConvMode::CONVOLUTION;
     node.attributes.Set(convAttrs);
-    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().conv_mode, ConvMode::CONVOLUTION);
 }
 
 TEST_F(TestConvolutionFwdOperationFromNode, PreservesPaddingStridesDilation)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getData().pre_padding, toVec(K_FPROP_CONV_PADDING));
     EXPECT_EQ(desc->getData().post_padding, toVec(K_FPROP_CONV_PADDING));
@@ -309,8 +309,8 @@ TEST_F(TestConvolutionFwdOperationFromNode, PreservesPaddingStridesDilation)
 
 TEST_F(TestConvolutionFwdOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     ASSERT_NE(desc->getWDesc(), nullptr);
@@ -322,8 +322,8 @@ TEST_F(TestConvolutionFwdOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestConvolutionFwdOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify the shared_ptrs point to the same objects in the tensor map
     EXPECT_EQ(desc->getXDesc(), _tensorMap[K_FPROP_TENSOR_X_UID]);
@@ -334,7 +334,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, TensorReferencesMatchTensorMap)
 TEST_F(TestConvolutionFwdOperationFromNode, FailsWithMissingXTensor)
 {
     _tensorMap.erase(K_FPROP_TENSOR_X_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -343,7 +343,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, FailsWithMissingXTensor)
 TEST_F(TestConvolutionFwdOperationFromNode, FailsWithMissingWTensor)
 {
     _tensorMap.erase(K_FPROP_TENSOR_W_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -352,7 +352,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, FailsWithMissingWTensor)
 TEST_F(TestConvolutionFwdOperationFromNode, FailsWithMissingYTensor)
 {
     _tensorMap.erase(K_FPROP_TENSOR_Y_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -360,8 +360,8 @@ TEST_F(TestConvolutionFwdOperationFromNode, FailsWithMissingYTensor)
 
 TEST_F(TestConvolutionFwdOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
@@ -372,8 +372,8 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetTensorDescriptorsReturnsAllTensor
 
 TEST_F(TestConvolutionFwdOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     // Build a new node from the descriptor and verify it matches the original
     auto rebuiltNode = desc->buildNode();
@@ -395,8 +395,8 @@ TEST_F(TestConvolutionFwdOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify getAttribute returns correct pre_padding
     std::vector<int64_t> prePadding(2);
@@ -518,7 +518,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "conv_fprop_1";
 
-    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     // Query the name size
     int64_t count = 0;
@@ -535,10 +535,10 @@ TEST_F(TestConvolutionFwdOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestConvolutionFwdOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
     // node.name is empty by default
 
-    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -547,7 +547,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, EmptyNamePreservedFromNode)
 
 TEST_F(TestConvolutionFwdOperationFromNode, NameSetViaAttributeRoundTrips)
 {
-    auto desc = std::make_shared<ConvolutionFwdOperationDescriptor>();
+    const auto desc = std::make_shared<ConvolutionFwdOperationDescriptor>();
 
     // Wrap tensor descriptors into HipdnnBackendDescriptor for the C API boundary
     const std::unique_ptr<HipdnnBackendDescriptor> xPacked(
@@ -628,7 +628,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);

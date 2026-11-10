@@ -24,14 +24,14 @@ TEST(TestHipMlopsModuleCache, EmptyOnConstruction)
 
 TEST(TestHipMlopsModuleCache, MakeKeyFormatsCorrectly)
 {
-    auto key = HipMlopsModuleCache::makeKey("/path/to/module.cpp", {"-O3"});
+    auto const key = HipMlopsModuleCache::makeKey("/path/to/module.cpp", {"-O3"});
     EXPECT_EQ(key, "/path/to/module.cpp::-O3");
 }
 
 TEST(TestHipMlopsModuleCache, NullReturnedForInvalidPath)
 {
     HipMlopsModuleCache cache;
-    auto result = cache.getOrLoad("/path/to/nonexistant.cpp", {"-03"});
+    auto const result = cache.getOrLoad("/path/to/nonexistant.cpp", {"-03"});
     EXPECT_EQ(result, nullptr);
 }
 
@@ -40,11 +40,11 @@ TEST(TestHipMlopsModuleCache, InvalidPathNotCached)
     HipMlopsModuleCache cache;
 
     // First call with invalid path returns nullptr
-    auto first = cache.getOrLoad("/path/to/nonexistant.cpp", {"-03"});
+    auto const first = cache.getOrLoad("/path/to/nonexistant.cpp", {"-03"});
     EXPECT_EQ(first, nullptr);
 
     // Second call with same invalid path should also return nullptr (not a cached nullptr)
-    auto second = cache.getOrLoad("/path/to/nonexistant.cpp", {"-03"});
+    auto const second = cache.getOrLoad("/path/to/nonexistant.cpp", {"-03"});
     EXPECT_EQ(second, nullptr);
 
     // Failed loads must not be cached
@@ -56,8 +56,8 @@ TEST(TestHipMlopsModuleCache, DifferentInvalidPathsReturnNull)
 {
     HipMlopsModuleCache cache;
 
-    auto a = cache.getOrLoad("/path/to/nonexistant/a.cpp", {"-00"});
-    auto b = cache.getOrLoad("/path/to/nonexistant/b.cpp", {"-03"});
+    auto const a = cache.getOrLoad("/path/to/nonexistant/a.cpp", {"-00"});
+    auto const b = cache.getOrLoad("/path/to/nonexistant/b.cpp", {"-03"});
     EXPECT_EQ(a, nullptr);
     EXPECT_EQ(b, nullptr);
 

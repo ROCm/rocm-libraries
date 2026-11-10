@@ -66,12 +66,12 @@ public:
                                        params.reluUpperClip,
                                        params.reluLowerClipSlope);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
+        const auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
         const auto& nodeWrap = graphWrap.getNodeWrapper(0);
         const auto& attributes = nodeWrap.attributesAs<PointwiseAttributes>();
 
@@ -105,12 +105,12 @@ public:
                                         params.reluUpperClip,
                                         params.reluLowerClipSlope);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
+        const auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
         const auto& nodeWrap = graphWrap.getNodeWrapper(0);
         const auto& attributes = nodeWrap.attributesAs<PointwiseAttributes>();
 
@@ -467,7 +467,7 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
     Tensor<float> dx(tensorDims);
     Tensor<float> dalpha(alphaDims);
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("PreluBackwardComposedGraph");
     graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -495,52 +495,53 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
                   generateStrides(dims, TensorLayout::NCHW.strideOrder));
           };
 
-    auto dyTensor = makeInput("dy", tensorDims);
-    auto xTensor = makeInput("x", tensorDims);
-    auto alphaTensor = makeInput("alpha", alphaDims);
-    auto zeroTensor = makeInput("zero", scalarDims);
+    const auto dyTensor = makeInput("dy", tensorDims);
+    const auto xTensor = makeInput("x", tensorDims);
+    const auto alphaTensor = makeInput("alpha", alphaDims);
+    const auto zeroTensor = makeInput("zero", scalarDims);
 
     hipdnn_frontend::graph::PointwiseAttributes compareAttrs;
     compareAttrs.set_name("positive_mask").set_mode(hipdnn_frontend::PointwiseMode::CMP_GT);
-    auto positiveMask = graph->pointwise(xTensor, zeroTensor, compareAttrs);
+    const auto positiveMask = graph->pointwise(xTensor, zeroTensor, compareAttrs);
     configureOutput(positiveMask, hipdnn_frontend::DataType::BOOLEAN, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes multiplyXAlphaAttrs;
     multiplyXAlphaAttrs.set_name("x_times_alpha").set_mode(hipdnn_frontend::PointwiseMode::MUL);
-    auto xTimesAlpha = graph->pointwise(xTensor, alphaTensor, multiplyXAlphaAttrs);
+    const auto xTimesAlpha = graph->pointwise(xTensor, alphaTensor, multiplyXAlphaAttrs);
     configureOutput(xTimesAlpha, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes ySelectAttrs;
     ySelectAttrs.set_name("y_select").set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
-    auto yTensor = graph->pointwise(xTensor, xTimesAlpha, positiveMask, ySelectAttrs);
+    const auto yTensor = graph->pointwise(xTensor, xTimesAlpha, positiveMask, ySelectAttrs);
     configureOutput(yTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
     yTensor->set_output(true);
 
     hipdnn_frontend::graph::PointwiseAttributes multiplyAlphaAttrs;
     multiplyAlphaAttrs.set_name("dy_times_alpha").set_mode(hipdnn_frontend::PointwiseMode::MUL);
-    auto dyTimesAlpha = graph->pointwise(dyTensor, alphaTensor, multiplyAlphaAttrs);
+    const auto dyTimesAlpha = graph->pointwise(dyTensor, alphaTensor, multiplyAlphaAttrs);
     configureOutput(dyTimesAlpha, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes dxSelectAttrs;
     dxSelectAttrs.set_name("dx_select").set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
-    auto dxTensor = graph->pointwise(dyTensor, dyTimesAlpha, positiveMask, dxSelectAttrs);
+    const auto dxTensor = graph->pointwise(dyTensor, dyTimesAlpha, positiveMask, dxSelectAttrs);
     configureOutput(dxTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
     dxTensor->set_output(true);
 
     hipdnn_frontend::graph::PointwiseAttributes multiplyXAttrs;
     multiplyXAttrs.set_name("dy_times_x").set_mode(hipdnn_frontend::PointwiseMode::MUL);
-    auto dyTimesX = graph->pointwise(dyTensor, xTensor, multiplyXAttrs);
+    const auto dyTimesX = graph->pointwise(dyTensor, xTensor, multiplyXAttrs);
     configureOutput(dyTimesX, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes dalphaSelectAttrs;
     dalphaSelectAttrs.set_name("dalpha_select")
         .set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
-    auto dalphaTerms = graph->pointwise(zeroTensor, dyTimesX, positiveMask, dalphaSelectAttrs);
+    const auto dalphaTerms
+        = graph->pointwise(zeroTensor, dyTimesX, positiveMask, dalphaSelectAttrs);
     configureOutput(dalphaTerms, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::ReductionAttributes reduceAttrs;
     reduceAttrs.set_name("dalpha_reduce").set_mode(hipdnn_frontend::ReductionMode::ADD);
-    auto dalphaTensor = graph->reduction(dalphaTerms, reduceAttrs);
+    const auto dalphaTensor = graph->reduction(dalphaTerms, reduceAttrs);
     configureOutput(dalphaTensor, hipdnn_frontend::DataType::FLOAT, alphaDims);
     dalphaTensor->set_output(true);
 

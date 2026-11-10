@@ -159,7 +159,7 @@ TEST(TestGpuConvBwdRefAlphaBeta, AlphaOnly)
 
     const auto* refData = dxRef.memory().hostData();
     const auto* scaledData = dxScaled.memory().hostData();
-    auto numElements = dxRef.elementCount();
+    const auto numElements = dxRef.elementCount();
 
     for(size_t i = 0; i < numElements; ++i)
     {
@@ -189,7 +189,7 @@ TEST(TestGpuConvBwdRefAlphaBeta, BetaAccumulate)
 
     const auto* noAccumData = dxNoAccum.memory().hostData();
     const auto* accumData = dxTensor.memory().hostData();
-    auto numElements = dxTensor.elementCount();
+    const auto numElements = dxTensor.elementCount();
 
     for(size_t i = 0; i < numElements; ++i)
     {
@@ -220,7 +220,7 @@ TEST(TestGpuConvBwdRefAlphaBeta, BetaZeroSkipsRead)
 
     const auto* defaultData = dxDefault.memory().hostData();
     const auto* betaZeroData = dxBetaZero.memory().hostData();
-    auto numElements = dxDefault.elementCount();
+    const auto numElements = dxDefault.elementCount();
 
     for(size_t i = 0; i < numElements; ++i)
     {

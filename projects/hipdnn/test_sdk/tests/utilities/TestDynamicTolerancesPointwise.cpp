@@ -180,9 +180,10 @@ protected:
     {
         const auto& params = GetParam();
 
-        auto tol = calculatePointwiseTolerance<Out, In, Comp>(params.scale, params.errorClass);
+        const auto tol
+            = calculatePointwiseTolerance<Out, In, Comp>(params.scale, params.errorClass);
 
-        auto expected = static_cast<float>(params.expectedTolerance);
+        const auto expected = static_cast<float>(params.expectedTolerance);
 
         EXPECT_NEAR(tol, expected, 1e-10f);
     }
@@ -257,15 +258,17 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(TestCalculatePointwiseTolerance, BitwiseHasNonZeroTolerance)
 {
     // float/float/float: C=1 * 2^-23 * 1.0 > 0
-    auto tol = calculatePointwiseTolerance<float, float, float>(1.0, PointwiseErrorClass::BITWISE);
+    const auto tol
+        = calculatePointwiseTolerance<float, float, float>(1.0, PointwiseErrorClass::BITWISE);
     EXPECT_GT(tol, 0.0f);
 
     // half/half/half: C=1 * 2^-10 * 1.0 > 0
-    auto tolHalf = calculatePointwiseTolerance<half, half, half>(1.0, PointwiseErrorClass::BITWISE);
+    const auto tolHalf
+        = calculatePointwiseTolerance<half, half, half>(1.0, PointwiseErrorClass::BITWISE);
     EXPECT_GT(tolHalf, 0.0f);
 
     // bfloat16/bfloat16/bfloat16: C=1 * 2^-7 * 1.0 > 0
-    auto tolBf16 = calculatePointwiseTolerance<bfloat16, bfloat16, bfloat16>(
+    const auto tolBf16 = calculatePointwiseTolerance<bfloat16, bfloat16, bfloat16>(
         1.0, PointwiseErrorClass::BITWISE);
     EXPECT_GT(tolBf16, 0.0f);
 }
@@ -273,8 +276,9 @@ TEST(TestCalculatePointwiseTolerance, BitwiseHasNonZeroTolerance)
 // Test that tolerance scales linearly with scale
 TEST(TestCalculatePointwiseTolerance, ScalesWithScale)
 {
-    auto tol1 = calculatePointwiseTolerance<float, float, float>(1.0, PointwiseErrorClass::LINEAR);
-    auto tol100
+    const auto tol1
+        = calculatePointwiseTolerance<float, float, float>(1.0, PointwiseErrorClass::LINEAR);
+    const auto tol100
         = calculatePointwiseTolerance<float, float, float>(100.0, PointwiseErrorClass::LINEAR);
 
     EXPECT_NEAR(tol100 / tol1, 100.0f, 1e-3f);
@@ -283,26 +287,26 @@ TEST(TestCalculatePointwiseTolerance, ScalesWithScale)
 // Test that C_low >= C_high for all error classes (invariant)
 TEST(TestCalculatePointwiseTolerance, LowPrecisionMultiplierNotLessThanHigh)
 {
-    for(auto errorClass : {PointwiseErrorClass::BITWISE,
-                           PointwiseErrorClass::LINEAR,
-                           PointwiseErrorClass::RATIONAL,
-                           PointwiseErrorClass::TRANSCENDENTAL_FWD,
-                           PointwiseErrorClass::TRANSCENDENTAL_BWD,
-                           PointwiseErrorClass::COMPOSITE_FWD,
-                           PointwiseErrorClass::COMPOSITE_BWD})
+    for(const auto errorClass : {PointwiseErrorClass::BITWISE,
+                                 PointwiseErrorClass::LINEAR,
+                                 PointwiseErrorClass::RATIONAL,
+                                 PointwiseErrorClass::TRANSCENDENTAL_FWD,
+                                 PointwiseErrorClass::TRANSCENDENTAL_BWD,
+                                 PointwiseErrorClass::COMPOSITE_FWD,
+                                 PointwiseErrorClass::COMPOSITE_BWD})
     {
         // Compare tolerance for low-precision compute vs high-precision compute,
         // both with same type for input/output to isolate the C multiplier.
-        auto tolHigh = calculatePointwiseTolerance<float, float, float>(1.0, errorClass);
-        auto tolLowBf16
+        const auto tolHigh = calculatePointwiseTolerance<float, float, float>(1.0, errorClass);
+        const auto tolLowBf16
             = calculatePointwiseTolerance<bfloat16, bfloat16, bfloat16>(1.0, errorClass);
-        auto tolLowHalf = calculatePointwiseTolerance<half, half, half>(1.0, errorClass);
+        const auto tolLowHalf = calculatePointwiseTolerance<half, half, half>(1.0, errorClass);
 
         // Normalize by epsilon to extract C: tol = C * epsilon * inputScale
         // C_high = tolHigh / epsilon_float, C_low_bf16 = tolLowBf16 / epsilon_bf16
-        auto epsFloat = static_cast<double>(std::numeric_limits<float>::epsilon());
-        auto epsBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
-        auto epsHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
+        const auto epsFloat = static_cast<double>(std::numeric_limits<float>::epsilon());
+        const auto epsBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+        const auto epsHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
 
         const double cHigh = static_cast<double>(tolHigh) / epsFloat;
         const double cLowBf16 = static_cast<double>(tolLowBf16) / epsBf16;
@@ -331,7 +335,7 @@ TEST(TestCalculatePointwiseTolerance, DetectsFailure)
     actualPassing->fillTensorWithValue(1.0f + 1.0e-7f); // Error 1e-7 < 9.54e-7
     actualFailing->fillTensorWithValue(1.0f + 2.0e-6f); // Error 2e-6 > 9.54e-7
 
-    auto tol = calculatePointwiseTolerance<float, float, float>(
+    const auto tol = calculatePointwiseTolerance<float, float, float>(
         1.0, PointwiseErrorClass::TRANSCENDENTAL_FWD);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
@@ -347,22 +351,22 @@ TEST(TestCalculatePointwiseTolerance, DetectsFailure)
 // Test that backward ops always have higher tolerance than forward ops
 TEST(TestCalculatePointwiseTolerance, BackwardToleranceExceedsForward)
 {
-    auto transFwd = calculatePointwiseTolerance<float, float, float>(
+    const auto transFwd = calculatePointwiseTolerance<float, float, float>(
         1.0, PointwiseErrorClass::TRANSCENDENTAL_FWD);
-    auto transBwd = calculatePointwiseTolerance<float, float, float>(
+    const auto transBwd = calculatePointwiseTolerance<float, float, float>(
         1.0, PointwiseErrorClass::TRANSCENDENTAL_BWD);
     EXPECT_GT(transBwd, transFwd);
 
-    auto compFwd
+    const auto compFwd
         = calculatePointwiseTolerance<float, float, float>(1.0, PointwiseErrorClass::COMPOSITE_FWD);
-    auto compBwd
+    const auto compBwd
         = calculatePointwiseTolerance<float, float, float>(1.0, PointwiseErrorClass::COMPOSITE_BWD);
     EXPECT_GT(compBwd, compFwd);
 
     // Same invariant for low precision
-    auto transFwdBf16 = calculatePointwiseTolerance<bfloat16, bfloat16, bfloat16>(
+    const auto transFwdBf16 = calculatePointwiseTolerance<bfloat16, bfloat16, bfloat16>(
         1.0, PointwiseErrorClass::TRANSCENDENTAL_FWD);
-    auto transBwdBf16 = calculatePointwiseTolerance<bfloat16, bfloat16, bfloat16>(
+    const auto transBwdBf16 = calculatePointwiseTolerance<bfloat16, bfloat16, bfloat16>(
         1.0, PointwiseErrorClass::TRANSCENDENTAL_BWD);
     EXPECT_GT(transBwdBf16, transFwdBf16);
 }
@@ -392,13 +396,13 @@ TEST(TestClassifyPointwiseOp, OnePerClassCorrect)
 // Exercise every enum value for branch coverage; verify result is a valid class
 TEST(TestClassifyPointwiseOp, AllModesReturnValidClass)
 {
-    for(auto mode : EnumValuesPointwiseMode())
+    for(const auto mode : EnumValuesPointwiseMode())
     {
         if(mode == PointwiseMode::UNSET)
         {
             continue;
         }
-        auto errorClass = classifyPointwiseOp(mode);
+        const auto errorClass = classifyPointwiseOp(mode);
         EXPECT_LE(static_cast<uint8_t>(errorClass),
                   static_cast<uint8_t>(PointwiseErrorClass::COMPOSITE_BWD))
             << "invalid class for " << EnumNamesPointwiseMode()[static_cast<int>(mode)];
@@ -412,7 +416,7 @@ TEST(TestClassifyPointwiseOp, BoundedOutputCorrect)
     EXPECT_TRUE(isBoundedOutput(PointwiseMode::TANH_FWD));
     EXPECT_TRUE(isBoundedOutput(PointwiseMode::ERF));
 
-    for(auto mode : EnumValuesPointwiseMode())
+    for(const auto mode : EnumValuesPointwiseMode())
     {
         if(mode == PointwiseMode::UNSET || mode == PointwiseMode::SIGMOID_FWD
            || mode == PointwiseMode::TANH_FWD || mode == PointwiseMode::ERF)

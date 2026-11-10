@@ -95,7 +95,7 @@ inline std::pair<std::vector<HeuristicPolicyInfo>, Error>
         return {{}, {ErrorCode::INVALID_VALUE, "Cannot query policies from null handle"}};
     }
 
-    auto backend = detail::hipdnnBackend();
+    const auto backend = detail::hipdnnBackend();
 
     using hipdnn_data_sdk::utilities::bufferToString;
 

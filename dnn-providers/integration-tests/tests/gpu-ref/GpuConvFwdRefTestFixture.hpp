@@ -127,7 +127,7 @@ protected:
     {
         SKIP_IF_NO_DEVICES();
         const auto& tc = GetParam();
-        auto yDims = tc.computeOutputDims();
+        const auto yDims = tc.computeOutputDims();
         runGpuVsCpuConvFwd<DataType>(tc.xDims,
                                      tc.wDims,
                                      yDims,

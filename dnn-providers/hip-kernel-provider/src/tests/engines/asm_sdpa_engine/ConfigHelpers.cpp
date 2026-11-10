@@ -76,7 +76,7 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     const std::vector<int64_t> offsetDims = {batch + 1, 1, 1, 1};
     const std::vector<int64_t> offsetStrides
         = hipdnn_data_sdk::utilities::generateStrides(offsetDims);
-    auto appendRaggedOffset = [&](const char* name) -> flatbuffers::Optional<int64_t> {
+    auto const appendRaggedOffset = [&](const char* name) -> flatbuffers::Optional<int64_t> {
         if(!isGroup)
         {
             return flatbuffers::nullopt;

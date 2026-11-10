@@ -80,14 +80,14 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& dyDims,
     constexpr int64_t W_UID = 2;
     constexpr int64_t DX_UID = 3;
 
-    auto dyStrides = generateStrides(dyDims);
-    auto wStrides = generateStrides(wDims);
-    auto dxStrides = generateStrides(dxDims);
+    const auto dyStrides = generateStrides(dyDims);
+    const auto wStrides = generateStrides(wDims);
+    const auto dxStrides = generateStrides(dxDims);
 
     // An empty override means symmetric padding.
     const auto& postPadding = postPaddingOverride.empty() ? padding : postPaddingOverride;
 
-    auto graphBuilder
+    const auto graphBuilder
         = createConvBwdGraphWithPadding(DY_UID,
                                         W_UID,
                                         DX_UID,
@@ -104,7 +104,7 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& dyDims,
                                         hipdnn_test_sdk::utilities::nativeTypeToDataType<DyType>(),
                                         hipdnn_test_sdk::utilities::nativeTypeToDataType<DxType>());
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const auto* nodeAttributes = graphWrap.getNode(0).attributes_as_ConvolutionBwdAttributes();
@@ -121,11 +121,11 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& dyDims,
 
     GpuConvolutionBwdPlan<DyType, WType, DxType, ComputeType> patient(std::move(params));
 
-    auto dyCount = std::accumulate(
+    const auto dyCount = std::accumulate(
         dyDims.begin(), dyDims.end(), static_cast<size_t>(1), std::multiplies<size_t>());
-    auto wCount = std::accumulate(
+    const auto wCount = std::accumulate(
         wDims.begin(), wDims.end(), static_cast<size_t>(1), std::multiplies<size_t>());
-    auto dxCount = std::accumulate(
+    const auto dxCount = std::accumulate(
         dxDims.begin(), dxDims.end(), static_cast<size_t>(1), std::multiplies<size_t>());
 
     // Prepare CPU tensors and fill with random data
@@ -188,8 +188,8 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& dyDims,
 
 TEST(TestGpuConvolutionBwdPlanBuilder, PlanConstruction)
 {
-    auto graphBuilder = createCustomConvBwdGraph();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createCustomConvBwdGraph();
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
@@ -198,7 +198,7 @@ TEST(TestGpuConvolutionBwdPlanBuilder, PlanConstruction)
                                        DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<GpuConvolutionBwdPlan<float, float, float, float>*>(builtPlan.get())
@@ -208,8 +208,8 @@ TEST(TestGpuConvolutionBwdPlanBuilder, PlanConstruction)
 
 TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicable)
 {
-    auto graphBuilder = createCustomConvBwdGraph();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createCustomConvBwdGraph();
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
@@ -237,7 +237,7 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicable)
 
 TEST(TestGpuConvolutionBwdPlanBuilder, IsNotApplicableForRaggedTensors)
 {
-    auto graphBuilder = createCustomConvBwdGraph();
+    const auto graphBuilder = createCustomConvBwdGraph();
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
                                        DataType::FLOAT,
@@ -245,20 +245,20 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsNotApplicableForRaggedTensors)
                                        DataType::FLOAT>
         floatPlanBuilder;
 
-    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     ASSERT_TRUE(floatPlanBuilder.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
 
     auto ragged = markFirstTensorRagged(graphBuilder.GetBufferPointer());
-    auto raggedWrap
+    const auto raggedWrap
         = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenDyTypeMismatched)
 {
-    auto graphBuilder = createCustomConvBwdGraph(DataType::HALF, DataType::FLOAT);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createCustomConvBwdGraph(DataType::HALF, DataType::FLOAT);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
@@ -312,16 +312,17 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenWTypeMismatched)
     const std::vector<int64_t> padding = {0, 0};
     const std::vector<int64_t> stride = {1, 1};
     const std::vector<int64_t> dilation = {1, 1};
-    auto convBwdAttrs = hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionBwdAttributesDirect(
-        builder,
-        DY_UID,
-        W_UID,
-        DX_UID,
-        &padding,
-        &padding,
-        &stride,
-        &dilation,
-        hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+    const auto convBwdAttrs
+        = hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionBwdAttributesDirect(
+            builder,
+            DY_UID,
+            W_UID,
+            DX_UID,
+            &padding,
+            &padding,
+            &stride,
+            &dilation,
+            hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 
     std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -331,7 +332,7 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenWTypeMismatched)
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes,
         convBwdAttrs.Union()));
 
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graph = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "ConvBwdTestGraph",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -341,7 +342,7 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenWTypeMismatched)
         &nodes);
     builder.Finish(graph);
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
@@ -355,8 +356,8 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenWTypeMismatched)
 
 TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenDxTypeMismatched)
 {
-    auto graphBuilder = createCustomConvBwdGraph(DataType::FLOAT, DataType::HALF);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createCustomConvBwdGraph(DataType::FLOAT, DataType::HALF);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
@@ -370,8 +371,8 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenDxTypeMismatched)
 
 TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenComputeTypeMismatched)
 {
-    auto graphBuilder = createCustomConvBwdGraph();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createCustomConvBwdGraph();
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
@@ -396,8 +397,8 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenOnlyOneOperandTypeDi
         std::vector<std::pair<const char*, int64_t>>{{"dy", 10}, {"w", 11}, {"dx", 12}})
     {
         SCOPED_TRACE(name);
-        auto graphBuilder = createCustomConvBwdGraph();
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graphBuilder = createCustomConvBwdGraph();
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         ASSERT_TRUE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
@@ -420,8 +421,8 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenOperandIsRuntimePass
         std::vector<std::pair<const char*, int64_t>>{{"dy", 10}, {"w", 11}, {"dx", 12}})
     {
         SCOPED_TRACE(name);
-        auto graphBuilder = createCustomConvBwdGraph();
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graphBuilder = createCustomConvBwdGraph();
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         ASSERT_TRUE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
@@ -448,8 +449,8 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenOperandIsRuntimePass
 
 TEST(TestGpuConvolutionBwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
@@ -463,8 +464,8 @@ TEST(TestGpuConvolutionBwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType
 
 TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableReturnsFalseForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
@@ -479,8 +480,8 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableReturnsFalseForWrongAttribute
 TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenDyTensorMissing)
 {
     constexpr int64_t DY_UID = 10;
-    auto graphBuilder = createCustomConvBwdGraph(DataType::FLOAT, DataType::FLOAT, DY_UID);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createCustomConvBwdGraph(DataType::FLOAT, DataType::FLOAT, DY_UID);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
@@ -498,8 +499,8 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenDyTensorMissing)
 TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenWTensorMissing)
 {
     constexpr int64_t W_UID = 11;
-    auto graphBuilder = createCustomConvBwdGraph(DataType::FLOAT, DataType::FLOAT, 10, W_UID);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createCustomConvBwdGraph(DataType::FLOAT, DataType::FLOAT, 10, W_UID);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
@@ -517,8 +518,9 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenWTensorMissing)
 TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenDxTensorMissing)
 {
     constexpr int64_t DX_UID = 12;
-    auto graphBuilder = createCustomConvBwdGraph(DataType::FLOAT, DataType::FLOAT, 10, 11, DX_UID);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder
+        = createCustomConvBwdGraph(DataType::FLOAT, DataType::FLOAT, 10, 11, DX_UID);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
@@ -614,8 +616,8 @@ TEST(TestGpuConvolutionBwdPlanBfp16, ExecutePlan)
 
 TEST(TestGpuConvolutionBwdPlanBuilder, IsNotApplicableForConvolutionMode)
 {
-    auto graphBuilder = createCustomConvBwdGraph();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createCustomConvBwdGraph();
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,

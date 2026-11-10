@@ -36,7 +36,7 @@ protected:
 TEST_F(TestAsmSdpaEngine, IsApplicableReturnsFalseForNonSdpaGraph)
 {
     // Create a batchnorm inference graph - this does not use SDPA attributes
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
@@ -56,7 +56,7 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForSdpaGraph)
 
     const std::vector<int64_t> dims{4, 8, 256, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+    auto const builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
         dims,
         strides,
         dims,
@@ -86,7 +86,7 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForRaggedSdpaGraph)
 
     const std::vector<int64_t> dims{4, 8, 256, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, {3, 1, 2, 0});
-    auto builder
+    auto const builder
         = sdpa::withRaggedTensors(hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
                                       dims,
                                       strides,

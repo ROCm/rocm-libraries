@@ -105,9 +105,9 @@ public:
                                    ErrorCode::INVALID_VALUE,
                                    "LayernormBackwardNode requires that normalized_dim_count is "
                                    "less than or equal to the number of dimensions of x (input)");
-            auto batchDimCount = static_cast<int64_t>(attributes.get_x()->get_dim().size())
-                                 - attributes.get_normalized_dim_count();
-            auto scaleOnePadded
+            const auto batchDimCount = static_cast<int64_t>(attributes.get_x()->get_dim().size())
+                                       - attributes.get_normalized_dim_count();
+            const auto scaleOnePadded
                 = attributes.get_scale()->get_dim().size() == attributes.get_x()->get_dim().size();
             if(scaleOnePadded)
             {
@@ -131,8 +131,8 @@ public:
             }
             if(attributes.get_mean() != nullptr)
             {
-                auto meanOnePadded = attributes.get_mean()->get_dim().size()
-                                     == attributes.get_x()->get_dim().size();
+                const auto meanOnePadded = attributes.get_mean()->get_dim().size()
+                                           == attributes.get_x()->get_dim().size();
                 HIPDNN_RETURN_IF_TRUE(
                     meanOnePadded ^ scaleOnePadded,
                     ErrorCode::INVALID_VALUE,

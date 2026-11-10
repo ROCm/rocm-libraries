@@ -139,7 +139,7 @@ inline uint16_t float_to_bfloat16_bits_rne(float f) noexcept
     }
 
     // Extract lower 16 bits (the bits being truncated)
-    auto lower = static_cast<uint16_t>(bits & 0xFFFF);
+    const auto lower = static_cast<uint16_t>(bits & 0xFFFF);
 
     // Round-to-nearest-even:
     // - Round up if remainder > 0.5 (lower > 0x8000)

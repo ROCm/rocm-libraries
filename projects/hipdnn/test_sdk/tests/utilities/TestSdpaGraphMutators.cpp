@@ -72,7 +72,7 @@ TEST(TestSdpaGraphMutators, RaggedQkvoShareQoAndKvOffsets)
     // Batch 3 distinguishes the [B+1] offset extent from the default graph's other dims.
     const std::vector<int64_t> dims = {3, 8, 16, 64};
     const std::vector<int64_t> strides = {8192, 1024, 64, 1};
-    auto builder = sdpa::withRaggedTensors(
+    const auto builder = sdpa::withRaggedTensors(
         createValidSdpaFwdGraph(dims, strides, dims, strides, dims, strides, dims, strides),
         {"q", "k", "v", "o"});
     const auto graph = UnPackGraph(builder.GetBufferPointer());
@@ -108,7 +108,7 @@ TEST(TestSdpaGraphMutators, RaggedQkvoShareQoAndKvOffsets)
 
 TEST(TestSdpaGraphMutators, RaggedMarksOnlyNamedTensors)
 {
-    auto builder = sdpa::withRaggedTensors(createValidSdpaFwdGraph(), {"q"});
+    const auto builder = sdpa::withRaggedTensors(createValidSdpaFwdGraph(), {"q"});
     const auto graph = UnPackGraph(builder.GetBufferPointer());
 
     EXPECT_TRUE(findTensor(*graph, "q").ragged_offset_tensor_uid.has_value());
@@ -123,7 +123,7 @@ TEST(TestSdpaGraphMutators, RaggedMarksOnlyNamedTensors)
 
 TEST(TestSdpaGraphMutators, RaggedOAndVAloneUseSharedOffsetNames)
 {
-    auto builder = sdpa::withRaggedTensors(createValidSdpaFwdGraph(), {"o", "v"});
+    const auto builder = sdpa::withRaggedTensors(createValidSdpaFwdGraph(), {"o", "v"});
     const auto graph = UnPackGraph(builder.GetBufferPointer());
 
     const auto& o = findTensor(*graph, "o");
@@ -138,18 +138,18 @@ TEST(TestSdpaGraphMutators, RaggedOAndVAloneUseSharedOffsetNames)
 
 TEST(TestSdpaGraphMutators, RaggedNonQkvoTensorGetsOwnOffset)
 {
-    auto builder = sdpa::withRaggedTensors(createValidSdpaFwdGraph({2, 8, 16, 64},
-                                                                   {8192, 1024, 64, 1},
-                                                                   {2, 8, 16, 64},
-                                                                   {8192, 1024, 64, 1},
-                                                                   {2, 8, 16, 64},
-                                                                   {8192, 1024, 64, 1},
-                                                                   {2, 8, 16, 64},
-                                                                   {8192, 1024, 64, 1},
-                                                                   DataType::HALF,
-                                                                   /*withAttnMask=*/false,
-                                                                   /*withScale=*/true),
-                                           {"scale"});
+    const auto builder = sdpa::withRaggedTensors(createValidSdpaFwdGraph({2, 8, 16, 64},
+                                                                         {8192, 1024, 64, 1},
+                                                                         {2, 8, 16, 64},
+                                                                         {8192, 1024, 64, 1},
+                                                                         {2, 8, 16, 64},
+                                                                         {8192, 1024, 64, 1},
+                                                                         {2, 8, 16, 64},
+                                                                         {8192, 1024, 64, 1},
+                                                                         DataType::HALF,
+                                                                         /*withAttnMask=*/false,
+                                                                         /*withScale=*/true),
+                                                 {"scale"});
     const auto graph = UnPackGraph(builder.GetBufferPointer());
 
     const auto& scale = findTensor(*graph, "scale");
@@ -169,7 +169,7 @@ TEST(TestSdpaGraphMutators, RaggedReadsBatchFromBackwardGraphQ)
 {
     const std::vector<int64_t> qDims = {5, 8, 16, 64};
     const std::vector<int64_t> strides = {8192, 1024, 64, 1};
-    auto builder = sdpa::withRaggedTensors(createValidSdpaBwdGraph(qDims, strides), {"q"});
+    const auto builder = sdpa::withRaggedTensors(createValidSdpaBwdGraph(qDims, strides), {"q"});
     const auto graph = UnPackGraph(builder.GetBufferPointer());
 
     const auto& q = findTensor(*graph, "q");
@@ -187,7 +187,7 @@ TEST(TestSdpaGraphMutators, RaggedThrowsWithoutSdpaQTensor)
 
 TEST(TestSdpaGraphMutators, SeqLenTensorsAttachToForwardNode)
 {
-    auto builder = sdpa::withSeqLenKv(sdpa::withSeqLenQ(createValidSdpaFwdGraph()));
+    const auto builder = sdpa::withSeqLenKv(sdpa::withSeqLenQ(createValidSdpaFwdGraph()));
     const auto graph = UnPackGraph(builder.GetBufferPointer());
 
     ASSERT_FALSE(graph->nodes.empty());

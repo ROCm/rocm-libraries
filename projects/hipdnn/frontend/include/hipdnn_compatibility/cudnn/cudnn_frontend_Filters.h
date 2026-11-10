@@ -37,7 +37,7 @@ inline void filter(EngineConfigList& from,
                    EngineConfigList& to,
                    std::function<bool(cudnnBackendDescriptor_t)> filter_fn)
 {
-    auto p
+    const auto p
         = std::stable_partition(from.begin(), from.end(), [filter_fn](ManagedOpaqueDescriptor& p) {
               return filter_fn(const_cast<cudnnBackendDescriptor_t>(p->get_backend_descriptor()));
           });

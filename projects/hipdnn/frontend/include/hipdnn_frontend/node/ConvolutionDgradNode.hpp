@@ -66,9 +66,9 @@ public:
                               ErrorCode::ATTRIBUTE_NOT_SET,
                               "ConvolutionDgradNode missing dilation for pre-validation");
 
-        auto dy = attributes.get_dy();
-        auto w = attributes.get_w();
-        auto dx = attributes.get_dx();
+        const auto dy = attributes.get_dy();
+        const auto w = attributes.get_w();
+        const auto dx = attributes.get_dx();
 
         auto& dyDims = dy->get_dim();
 
@@ -123,7 +123,7 @@ public:
         // dxDims[1] / wDims[1] is group count
         // weightChannels = inputChannels / groups
         // groups = inputChannels / weightChannels
-        auto groupCount = dxDims[1] / wDims[1];
+        const auto groupCount = dxDims[1] / wDims[1];
         HIPDNN_RETURN_IF_NE(
             wDims[0] % groupCount,
             0,
@@ -132,7 +132,7 @@ public:
             "the number of groups");
 
         // Validate spatial parameter counts match spatial dimensions
-        auto spatialDims = dyDims.size() - 2; // Skip N and C dimensions
+        const auto spatialDims = dyDims.size() - 2; // Skip N and C dimensions
         auto& prePadding = attributes.get_pre_padding();
         auto& postPadding = attributes.get_post_padding();
         auto& stride = attributes.get_stride();
@@ -165,10 +165,10 @@ public:
         // Check spatial parameters for each dimension
         for(size_t i = 0; i < spatialDims; ++i)
         {
-            auto prePad = prePadding[i];
-            auto postPad = postPadding[i];
-            auto strideVal = stride[i];
-            auto dilationVal = dilation[i];
+            const auto prePad = prePadding[i];
+            const auto postPad = postPadding[i];
+            const auto strideVal = stride[i];
+            const auto dilationVal = dilation[i];
 
             HIPDNN_RETURN_IF_LT(
                 strideVal, 1, ErrorCode::INVALID_VALUE, "ConvolutionDgradNode: Stride must be > 0");
@@ -188,12 +188,12 @@ public:
                                 ErrorCode::INVALID_VALUE,
                                 "ConvolutionDgradNode: Post-padding must be non-negative");
 
-            auto outputSize = dyDims[i + 2];
-            auto kernelSize = wDims[i + 2];
-            auto inputSize = dxDims[i + 2];
+            const auto outputSize = dyDims[i + 2];
+            const auto kernelSize = wDims[i + 2];
+            const auto inputSize = dxDims[i + 2];
 
-            auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
-            auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
+            const auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
+            const auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
 
             HIPDNN_RETURN_IF_LT(numerator,
                                 0,
@@ -221,9 +221,9 @@ public:
 
     Error infer_properties_node() override
     {
-        auto dy = attributes.get_dy();
-        auto w = attributes.get_w();
-        auto dx = attributes.get_dx();
+        const auto dy = attributes.get_dy();
+        const auto w = attributes.get_w();
+        const auto dx = attributes.get_dx();
 
         HIPDNN_RETURN_IF_FALSE(dy,
                                ErrorCode::ATTRIBUTE_NOT_SET,
@@ -263,10 +263,11 @@ public:
                 "ConvolutionDgradNode: Stride dimension mismatch between dy and dx tensors");
 
             // Extract stride order from dy tensor and apply to dx tensor
-            auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(dyStrides);
+            const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(dyStrides);
 
             // Generate dx strides using the extracted stride order and dx dimensions
-            auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(dxDimsFinal, strideOrder);
+            const auto dxStrides
+                = hipdnn_data_sdk::utilities::generateStrides(dxDimsFinal, strideOrder);
 
             dx->set_stride(dxStrides);
         }

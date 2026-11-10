@@ -85,8 +85,8 @@ protected:
 
 TEST_F(TestConvolutionWrwOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -96,11 +96,11 @@ TEST_F(TestConvolutionWrwOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestConvolutionWrwOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -109,7 +109,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionWrwAttributes);
-    auto desc = std::static_pointer_cast<ConvolutionWrwOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<ConvolutionWrwOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -129,8 +129,8 @@ TEST_F(TestConvolutionWrwOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestConvolutionWrwOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
@@ -141,15 +141,15 @@ TEST_F(TestConvolutionWrwOperationFromNode, PreservesConvMode)
     auto attrs = createStandardConvolutionWrwAttrs();
     attrs.conv_mode = ConvMode::CONVOLUTION;
     node.attributes.Set(attrs);
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().conv_mode, ConvMode::CONVOLUTION);
 }
 
 TEST_F(TestConvolutionWrwOperationFromNode, PreservesDataFields)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getData().pre_padding, hipdnn_tests::toVec(K_WGRAD_CONV_PADDING));
     EXPECT_EQ(desc->getData().post_padding, hipdnn_tests::toVec(K_WGRAD_CONV_PADDING));
@@ -160,8 +160,8 @@ TEST_F(TestConvolutionWrwOperationFromNode, PreservesDataFields)
 
 TEST_F(TestConvolutionWrwOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_WGRAD_TENSOR_X_UID);
@@ -173,8 +173,8 @@ TEST_F(TestConvolutionWrwOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestConvolutionWrwOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getXDesc(), _tensorMap[K_WGRAD_TENSOR_X_UID]);
     EXPECT_EQ(desc->getDyDesc(), _tensorMap[K_WGRAD_TENSOR_DY_UID]);
@@ -183,8 +183,8 @@ TEST_F(TestConvolutionWrwOperationFromNode, TensorReferencesMatchTensorMap)
 
 TEST_F(TestConvolutionWrwOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_WGRAD_TENSOR_X_UID);
@@ -208,7 +208,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, SetsTensorReferencesWithFullValues)
 TEST_F(TestConvolutionWrwOperationFromNode, FailsWithMissingXTensor)
 {
     _tensorMap.erase(K_WGRAD_TENSOR_X_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -217,7 +217,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, FailsWithMissingXTensor)
 TEST_F(TestConvolutionWrwOperationFromNode, FailsWithMissingDyTensor)
 {
     _tensorMap.erase(K_WGRAD_TENSOR_DY_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -226,7 +226,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, FailsWithMissingDyTensor)
 TEST_F(TestConvolutionWrwOperationFromNode, FailsWithMissingDwTensor)
 {
     _tensorMap.erase(K_WGRAD_TENSOR_DW_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -234,8 +234,8 @@ TEST_F(TestConvolutionWrwOperationFromNode, FailsWithMissingDwTensor)
 
 TEST_F(TestConvolutionWrwOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
@@ -246,8 +246,8 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetTensorDescriptorsReturnsAllTensor
 
 TEST_F(TestConvolutionWrwOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -268,8 +268,8 @@ TEST_F(TestConvolutionWrwOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestConvolutionWrwOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify pre_padding
     std::vector<int64_t> prePadding(2);
@@ -391,7 +391,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_convolutionwrw_1";
 
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -406,8 +406,8 @@ TEST_F(TestConvolutionWrwOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestConvolutionWrwOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -419,7 +419,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
@@ -431,8 +431,8 @@ TEST_F(TestConvolutionWrwOperationFromNode, ToStringIncludesName)
     auto node = createStandardNode();
     node.name = "my_wrw_op";
 
-    auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
-    auto str = desc->toString();
+    const auto desc = ConvolutionWrwOperationDescriptor::fromNode(node, _tensorMap);
+    const auto str = desc->toString();
 
     EXPECT_NE(str.find("name=my_wrw_op"), std::string::npos);
 }

@@ -224,7 +224,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp16, ComputeUpscale)
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance<half, half, half, half, float>(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 
-    auto tolerance = batchnorm::getToleranceInferenceWithVariance<half>();
+    const auto tolerance = batchnorm::getToleranceInferenceWithVariance<half>();
 
     EXPECT_NEAR(
         static_cast<float>(outputTensor.getHostValue(0, 0, 0, 0)), expectedOutput[0], tolerance);
@@ -275,7 +275,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceBfp16, ComputeUpscale)
         fwdInferenceWithVariance<bfloat16, bfloat16, bfloat16, bfloat16, float>(
             inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 
-    auto tolerance = batchnorm::getToleranceInferenceWithVariance<bfloat16>();
+    const auto tolerance = batchnorm::getToleranceInferenceWithVariance<bfloat16>();
 
     EXPECT_NEAR(
         static_cast<float>(outputTensor.getHostValue(0, 0, 0, 0)), expectedOutput[0], tolerance);
@@ -416,8 +416,8 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, EpsilonProducesDifferentResults)
     Tensor<ParamType> meanTensor({1, 3});
     Tensor<ParamType> varianceTensor({1, 3});
 
-    auto min = safeTestTypeCast<DataType>(-5.0f);
-    auto max = safeTestTypeCast<DataType>(5.0f);
+    const auto min = safeTestTypeCast<DataType>(-5.0f);
+    const auto max = safeTestTypeCast<DataType>(5.0f);
     inputTensor.fillWithRandomValues(min, max, 42);
 
     for(int i = 0; i < 3; i++)
@@ -445,8 +445,10 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, EpsilonProducesDifferentResults)
             {
                 for(int w = 0; w < 4 && !foundDifference; w++)
                 {
-                    auto valSmall = static_cast<double>(outputSmallEps.getHostValue(b, c, h, w));
-                    auto valLarge = static_cast<double>(outputLargeEps.getHostValue(b, c, h, w));
+                    const auto valSmall
+                        = static_cast<double>(outputSmallEps.getHostValue(b, c, h, w));
+                    const auto valLarge
+                        = static_cast<double>(outputLargeEps.getHostValue(b, c, h, w));
                     if(hipdnn_data_sdk::types::abs(valSmall - valLarge) > 0.001)
                     {
                         foundDifference = true;
@@ -491,7 +493,7 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, NoNaNOrInfProduced)
     {
         for(int j = 0; j < 2; j++)
         {
-            auto val = static_cast<double>(outputTensor.getHostValue(0, 0, i, j));
+            const auto val = static_cast<double>(outputTensor.getHostValue(0, 0, i, j));
             EXPECT_TRUE(hipdnn_data_sdk::types::isfinite(val))
                 << "NaN/Inf detected at [" << i << "," << j << "]";
         }
@@ -543,7 +545,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp64, BatchnormFwdInferenceWithVaria
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 
-    auto tolerance = 1e-6;
+    const auto tolerance = 1e-6;
 
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), expectedOutput[0], tolerance);
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 1), expectedOutput[1], tolerance);
@@ -576,9 +578,9 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp32, CompareVarianceVsInvVarianceIm
         meanTensor.setHostValue(1.0f + (static_cast<float>(i) * 0.3f), 0, i);
 
         // Set variance and compute corresponding inv_variance
-        auto var = 2.0f + (static_cast<float>(i) * 0.5f);
+        const auto var = 2.0f + (static_cast<float>(i) * 0.5f);
         varianceTensor.setHostValue(var, 0, i);
-        auto invVar
+        const auto invVar
             = 1.0f
               / hipdnn_data_sdk::types::sqrt(var + static_cast<float>(BATCHNORM_DEFAULT_EPSILON));
         invVarianceTensor.setHostValue(invVar, 0, i);
@@ -592,7 +594,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp32, CompareVarianceVsInvVarianceIm
         inputTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, outputFromInvVariance);
 
     // Compare results
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
     for(int b = 0; b < 2; b++)
     {
         for(int c = 0; c < 3; c++)
@@ -601,8 +603,8 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp32, CompareVarianceVsInvVarianceIm
             {
                 for(int w = 0; w < 4; w++)
                 {
-                    auto valFromVariance = outputFromVariance.getHostValue(b, c, h, w);
-                    auto valFromInvVariance = outputFromInvVariance.getHostValue(b, c, h, w);
+                    const auto valFromVariance = outputFromVariance.getHostValue(b, c, h, w);
+                    const auto valFromInvVariance = outputFromInvVariance.getHostValue(b, c, h, w);
                     EXPECT_NEAR(valFromVariance, valFromInvVariance, tolerance)
                         << "Mismatch at [" << b << "," << c << "," << h << "," << w << "]";
                 }

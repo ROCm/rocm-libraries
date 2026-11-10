@@ -93,11 +93,11 @@ public:
     {
         validateFwdInput(input, scale, output, invRms, bias);
 
-        auto defines = detail::buildRMSNormFwdDefines<InputDataType,
-                                                      ScaleDataType,
-                                                      OutputDataType,
-                                                      ComputeDataType,
-                                                      BLOCK_SIZE>(bias != nullptr);
+        const auto defines = detail::buildRMSNormFwdDefines<InputDataType,
+                                                            ScaleDataType,
+                                                            OutputDataType,
+                                                            ComputeDataType,
+                                                            BLOCK_SIZE>(bias != nullptr);
 
         launchFprop(input.memory().deviceData(),
                     input.dims(),
@@ -135,12 +135,12 @@ public:
     {
         validateBwdInput(gradOutput, input, scale, invRms, gradInput, gradScale, gradBias);
 
-        auto defines = detail::buildRMSNormBwdDefines<GradOutputDataType,
-                                                      InputDataType,
-                                                      ScaleDataType,
-                                                      GradInputDataType,
-                                                      ComputeDataType,
-                                                      BLOCK_SIZE>();
+        const auto defines = detail::buildRMSNormBwdDefines<GradOutputDataType,
+                                                            InputDataType,
+                                                            ScaleDataType,
+                                                            GradInputDataType,
+                                                            ComputeDataType,
+                                                            BLOCK_SIZE>();
 
         // Launch backward data kernel
         launchDgrad(gradOutput.memory().deviceData(),
@@ -556,7 +556,7 @@ private:
                              size_t normalizeDim)
     {
         int64_t stride = 1;
-        auto isLayoutNHWC = isChannelLastLayout(inputStrides);
+        const auto isLayoutNHWC = isChannelLastLayout(inputStrides);
         if(normalizeDim > 1 && isLayoutNHWC)
         {
             stride = inputDims[1];

@@ -86,8 +86,8 @@ protected:
 
 TEST_F(TestNodeFactory, CreateOperationFromNodeConvFwd)
 {
-    auto node = createStandardNode();
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
 
     ASSERT_NE(graphOp, nullptr);
 
@@ -97,7 +97,7 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeConvFwd)
     ASSERT_NE(op, nullptr);
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
-    auto desc = std::static_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
     EXPECT_EQ(desc->getData().x_tensor_uid, K_FPROP_TENSOR_X_UID);
     EXPECT_EQ(desc->getData().w_tensor_uid, K_FPROP_TENSOR_W_UID);
@@ -108,7 +108,7 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeLayernorm)
 {
     // Build a minimal layernorm tensor map
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> lnTensorMap;
-    auto makeTensor = [](int64_t uid) {
+    const auto makeTensor = [](int64_t uid) {
         TensorAttributesT attrs;
         attrs.uid = uid;
         attrs.data_type = DataType::FLOAT;
@@ -135,7 +135,7 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeLayernorm)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(lnAttrs);
 
-    auto graphOp = NodeFactory::createOperationFromNode(node, lnTensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, lnTensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     auto* op = graphOp->asGraphOperation();
@@ -143,7 +143,7 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeLayernorm)
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::LayernormAttributes);
 
-    auto desc = std::static_pointer_cast<LayernormOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<LayernormOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
     EXPECT_EQ(desc->getData().x_tensor_uid, K_LAYERNORM_TENSOR_X_UID);
     EXPECT_EQ(desc->getData().normalized_dim_count, 3);
@@ -153,7 +153,7 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeLayernorm)
 TEST_F(TestNodeFactory, CreateOperationFromNodeSdpaBwd)
 {
     // Set up tensor map with 9 required SDPA bwd tensors
-    auto makeTensor =
+    const auto makeTensor =
         [](int64_t uid, const std::array<int64_t, 4>& dims, const std::array<int64_t, 4>& strides) {
             TensorAttributesT t;
             t.uid = uid;
@@ -199,7 +199,7 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeSdpaBwd)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(sdpaAttrs);
 
-    auto graphOp = NodeFactory::createOperationFromNode(node, sdpaTensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, sdpaTensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     auto* op = graphOp->asGraphOperation();
@@ -207,7 +207,7 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeSdpaBwd)
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaBackwardAttributes);
 
-    auto desc = std::static_pointer_cast<SdpaBwdOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<SdpaBwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
     EXPECT_EQ(desc->getData().q_tensor_uid, K_SDPA_BWD_TENSOR_Q_UID);
     EXPECT_EQ(desc->getData().k_tensor_uid, K_SDPA_BWD_TENSOR_K_UID);
@@ -274,7 +274,7 @@ TEST_F(TestNodeFactory, BuildTensorMapEmptyVector)
 {
     const std::vector<std::unique_ptr<TensorAttributesT>> tensors;
 
-    auto result = NodeFactory::buildTensorMap(tensors);
+    const auto result = NodeFactory::buildTensorMap(tensors);
 
     EXPECT_TRUE(result.empty());
 }

@@ -194,7 +194,8 @@ TEST_F(IntegrationCudnnCompatibilityV8BuilderEnginesMultiEngine, ContextFailureF
     {
         SCOPED_TRACE(index);
         const cudnnStatus_t status = statusOf([&] {
-            [[maybe_unused]] auto plan = hipdnn_compatibility_v8_test::planFor(*_graph, index);
+            [[maybe_unused]] const auto plan
+                = hipdnn_compatibility_v8_test::planFor(*_graph, index);
         });
         if(index == K_CONTEXT_FAILS_INDEX)
         {

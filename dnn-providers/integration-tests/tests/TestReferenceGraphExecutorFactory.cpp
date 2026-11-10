@@ -50,36 +50,36 @@ TEST(TestGpuReferenceGraphExecutorFactory, CpuAndDeviceExecutorsAgreeOnConvFwd)
     constexpr int64_t W_UID = 2;
     constexpr int64_t Y_UID = 3;
 
-    auto xStrides = generateStrides(tc.xDims);
-    auto wStrides = generateStrides(tc.wDims);
-    auto yStrides = generateStrides(tc.yDims);
+    const auto xStrides = generateStrides(tc.xDims);
+    const auto wStrides = generateStrides(tc.wDims);
+    const auto yStrides = generateStrides(tc.yDims);
 
-    auto graphBuilder = createConvFwdGraph(X_UID,
-                                           W_UID,
-                                           Y_UID,
-                                           tc.xDims,
-                                           tc.wDims,
-                                           tc.yDims,
-                                           xStrides,
-                                           wStrides,
-                                           yStrides,
-                                           tc.convPrePadding,
-                                           tc.convStride,
-                                           tc.convDilation,
-                                           DataType::FLOAT);
+    const auto graphBuilder = createConvFwdGraph(X_UID,
+                                                 W_UID,
+                                                 Y_UID,
+                                                 tc.xDims,
+                                                 tc.wDims,
+                                                 tc.yDims,
+                                                 xStrides,
+                                                 wStrides,
+                                                 yStrides,
+                                                 tc.convPrePadding,
+                                                 tc.convStride,
+                                                 tc.convDilation,
+                                                 DataType::FLOAT);
 
-    auto elemCount = [](const std::vector<int64_t>& dims) {
+    const auto elemCount = [](const std::vector<int64_t>& dims) {
         size_t count = 1;
-        for(auto d : dims)
+        for(const auto d : dims)
         {
             count *= static_cast<size_t>(d);
         }
         return count;
     };
 
-    auto xCount = elemCount(tc.xDims);
-    auto wCount = elemCount(tc.wDims);
-    auto yCount = elemCount(tc.yDims);
+    const auto xCount = elemCount(tc.xDims);
+    const auto wCount = elemCount(tc.wDims);
+    const auto yCount = elemCount(tc.yDims);
 
     // Fill input data
     std::vector<float> xData(xCount);

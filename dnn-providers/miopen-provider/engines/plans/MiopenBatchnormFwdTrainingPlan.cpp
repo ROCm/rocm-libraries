@@ -281,11 +281,11 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
     }
 
     // Get all required device buffers
-    auto xBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+    const auto xBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _trainingParams.x().uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+    const auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _trainingParams.scale().uid(), deviceBuffers, numDeviceBuffers);
-    auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+    const auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _trainingParams.bias().uid(), deviceBuffers, numDeviceBuffers);
 
     // Handle save mean/variance if provided (optional)
@@ -296,9 +296,9 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
 
     if(_trainingParams.hasSaveMeanVariance())
     {
-        auto meanBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        const auto meanBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _trainingParams.mean().uid(), deviceBuffers, numDeviceBuffers);
-        auto invVarianceBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        const auto invVarianceBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _trainingParams.invVariance().uid(), deviceBuffers, numDeviceBuffers);
 
         resultSaveMeanPtr = meanBuffer.ptr;
@@ -340,16 +340,16 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
         const auto& activOutTensor = *optActivationOut;
 
         // Use activation fusion API
-        auto yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        const auto yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             activOutTensor.uid(), deviceBuffers, numDeviceBuffers);
 
         // Create activation descriptor
         miopenActivationDescriptor_t activationDesc;
         THROW_ON_MIOPEN_FAILURE(miopenCreateActivationDescriptor(&activationDesc));
-        auto activationDescRes
+        const auto activationDescRes
             = hipdnn_data_sdk::utilities::ScopedResource<miopenActivationDescriptor_t>(
                 activationDesc, [](miopenActivationDescriptor_t desc) {
-                    auto status = miopenDestroyActivationDescriptor(desc);
+                    const auto status = miopenDestroyActivationDescriptor(desc);
                     if(status != miopenStatusSuccess)
                     {
                         HIPDNN_PLUGIN_LOG_ERROR("miopenDestroyActivationDescriptor failed in "
@@ -420,7 +420,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
     else
     {
         // Use standard batchnorm training API (no activation)
-        auto yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        const auto yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _trainingParams.y().uid(), deviceBuffers, numDeviceBuffers);
 
         if(_trainingParams.hasRunningStats())

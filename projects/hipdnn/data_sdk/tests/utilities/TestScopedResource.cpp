@@ -51,7 +51,7 @@ TEST(TestScopedResource, CheckMoveAssign)
     Resource r2;
 
     {
-        auto dtor = [](auto r) { r->released = true; };
+        const auto dtor = [](auto r) { r->released = true; };
         utilities::ScopedResource sr1(&r1, dtor);
         utilities::ScopedResource sr2(&r2, dtor);
         sr2 = std::move(sr1);

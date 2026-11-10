@@ -37,7 +37,7 @@ TYPED_TEST_SUITE(RaggedTensorTyped, IndexTypes, );
 
 TYPED_TEST(RaggedTensorTyped, Addressing)
 {
-    auto aux = makeOffsetAux<TypeParam>(K_OFFSETS);
+    const auto aux = makeOffsetAux<TypeParam>(K_OFFSETS);
     RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
     tensor.fillWithValue(0.0f);
 
@@ -46,7 +46,7 @@ TYPED_TEST(RaggedTensorTyped, Addressing)
 
 TYPED_TEST(RaggedTensorTyped, Iteration)
 {
-    auto aux = makeOffsetAux<TypeParam>(K_OFFSETS);
+    const auto aux = makeOffsetAux<TypeParam>(K_OFFSETS);
     RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
     tensor.fillWithValue(0.0f);
 
@@ -55,7 +55,7 @@ TYPED_TEST(RaggedTensorTyped, Iteration)
 
 TYPED_TEST(RaggedTensorTyped, Reporting)
 {
-    auto aux = makeOffsetAux<TypeParam>(K_OFFSETS);
+    const auto aux = makeOffsetAux<TypeParam>(K_OFFSETS);
     const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
     checkReporting(tensor, K_OFFSETS.back());
@@ -67,7 +67,7 @@ TYPED_TEST(RaggedTensorTyped, Reporting)
 
 TEST(TestRaggedTensor, GetIndexUsesRaggedBase)
 {
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
     // batch 0 base 0: {b=0, h=1, s=1, d=1} -> 0 + 1*2 + 1*4 + 1 = 7
@@ -89,7 +89,7 @@ TEST(TestRaggedTensor, EmptyBatchSkipped)
     const std::vector<int64_t> strides = {12, 2, 4, 1};
     const std::vector<int64_t> offsets = {0, 4, 4, 8};
 
-    auto aux = makeOffsetAux<int32_t>(offsets);
+    const auto aux = makeOffsetAux<int32_t>(offsets);
     RaggedTensor<float> tensor(dims, strides, SDPA_SEQ_AXIS, aux);
     tensor.fillWithValue(0.0f);
 
@@ -104,7 +104,7 @@ TEST(TestRaggedTensor, LeadingAndTrailingEmptyBatches)
     const std::vector<int64_t> strides = {8, 2, 4, 1};
     const std::vector<int64_t> offsets = {0, 0, 4, 8, 8};
 
-    auto aux = makeOffsetAux<int32_t>(offsets);
+    const auto aux = makeOffsetAux<int32_t>(offsets);
     RaggedTensor<float> tensor(dims, strides, SDPA_SEQ_AXIS, aux);
     tensor.fillWithValue(0.0f);
 
@@ -118,7 +118,7 @@ TEST(TestRaggedTensor, AllEmptyBatchesBeginEqualsEnd)
     const std::vector<int64_t> strides = {8, 2, 4, 1};
     const std::vector<int64_t> offsets = {0, 0, 0};
 
-    auto aux = makeOffsetAux<int32_t>(offsets);
+    const auto aux = makeOffsetAux<int32_t>(offsets);
     RaggedTensor<float> tensor(dims, strides, SDPA_SEQ_AXIS, aux);
 
     EXPECT_EQ(tensor.elementCount(), 0u);
@@ -131,10 +131,10 @@ TEST(TestRaggedTensor, AllEmptyBatchesBeginEqualsEnd)
 
 TEST(TestRaggedTensor, PhysicalElementCountInferredVsExplicit)
 {
-    auto auxInferred = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto auxInferred = makeOffsetAux<int32_t>(K_OFFSETS);
     const RaggedTensor<float> inferred(K_DIMS, K_STRIDES, K_SEQ_AXIS, auxInferred);
 
-    auto auxExplicit = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto auxExplicit = makeOffsetAux<int32_t>(K_OFFSETS);
     const RaggedTensor<float> explicitCount(
         K_DIMS, K_STRIDES, K_SEQ_AXIS, auxExplicit, static_cast<size_t>(20));
 
@@ -220,8 +220,8 @@ TEST(TestRaggedTensor, StridedLengthsMatchPacked)
 
 TEST(TestRaggedTensor, ZeroAuxStrideThrowsWithMultipleBatches)
 {
-    auto aux = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{3, 1, 1, 1},
-                                                 std::vector<int64_t>{0, 1, 1, 1});
+    const auto aux = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{3, 1, 1, 1},
+                                                       std::vector<int64_t>{0, 1, 1, 1});
     // Every batch reads slot 0; offsets {0, 0, 0} are valid, so only the stride guard rejects.
     fillLeading(*aux, {0});
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux),
@@ -234,7 +234,7 @@ TEST(TestRaggedTensor, ZeroAuxStrideThrowsWithMultipleBatches)
 
 TEST(TestRaggedTensor, RaggedOffsetAccessor)
 {
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
     EXPECT_EQ(tensor.raggedOffset(), aux.get());
@@ -253,7 +253,7 @@ TEST(TestRaggedTensor, ValidationNullAuxThrows)
 TEST(TestRaggedTensor, ValidationWrongElementCountThrows)
 {
     // Aux with B (not B+1) entries.
-    auto aux = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{2, 1, 1, 1});
+    const auto aux = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{2, 1, 1, 1});
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux),
                  std::invalid_argument);
 }
@@ -261,7 +261,7 @@ TEST(TestRaggedTensor, ValidationWrongElementCountThrows)
 TEST(TestRaggedTensor, ValidationWrongRankThrows)
 {
     // Rank-3 aux with elementCount B+1 == 3 (passes count check, fails rank check).
-    auto aux = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{3, 1, 1});
+    const auto aux = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{3, 1, 1});
     fillLeading(*aux, K_OFFSETS);
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux),
                  std::invalid_argument);
@@ -281,12 +281,12 @@ TEST(TestRaggedTensor, ValidationOffsetsOffTheBatchAxisThrows)
 TEST(TestRaggedTensor, ValidationBadElementSizeThrows)
 {
     // int16_t aux -> elementSize 2, not in {4, 8}.
-    auto aux16 = std::make_shared<Tensor<int16_t>>(std::vector<int64_t>{3, 1, 1, 1});
+    const auto aux16 = std::make_shared<Tensor<int16_t>>(std::vector<int64_t>{3, 1, 1, 1});
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux16),
                  std::invalid_argument);
 
     // int8_t aux -> elementSize 1.
-    auto aux8 = std::make_shared<Tensor<int8_t>>(std::vector<int64_t>{3, 1, 1, 1});
+    const auto aux8 = std::make_shared<Tensor<int8_t>>(std::vector<int64_t>{3, 1, 1, 1});
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux8),
                  std::invalid_argument);
 }
@@ -298,12 +298,12 @@ TEST(TestRaggedTensor, ValidationBadElementSizeThrows)
 TEST(TestRaggedTensor, ValidationNonMonotonicThrows)
 {
     // off[2] < off[1] -> negative block; without lengths the blocks define the batches.
-    auto aux = makeOffsetAux<int32_t>({0, 8, 4});
+    const auto aux = makeOffsetAux<int32_t>({0, 8, 4});
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux),
                  std::invalid_argument);
 
     // With lengths only the origins are used: batch 0 at 0, batch 1 at 8, offset[B] unused.
-    auto lengths = makeOffsetAux<int32_t>({2, 3});
+    const auto lengths = makeOffsetAux<int32_t>({2, 3});
     const RaggedTensor<float> bound(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux, std::nullopt, 1, lengths);
     EXPECT_EQ(bound.elementCount(), 20u);
     EXPECT_EQ(bound.elementSpace(), 20u);
@@ -312,7 +312,7 @@ TEST(TestRaggedTensor, ValidationNonMonotonicThrows)
 TEST(TestRaggedTensor, ValidationBlockNotDivisibleThrows)
 {
     // seqStride = H*D = 4; a per-batch block of 2 is not a whole number of rows.
-    auto aux = makeOffsetAux<int32_t>({0, 2, 4});
+    const auto aux = makeOffsetAux<int32_t>({0, 2, 4});
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux),
                  std::invalid_argument);
 }
@@ -320,7 +320,7 @@ TEST(TestRaggedTensor, ValidationBlockNotDivisibleThrows)
 TEST(TestRaggedTensor, ValidationExplicitPhysicalElementCountMismatchThrows)
 {
     // Explicit physicalElementCount must equal elementSpace (20).
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     EXPECT_THROW(const RaggedTensor<float> tensor(
                      K_DIMS, K_STRIDES, K_SEQ_AXIS, aux, static_cast<size_t>(24)),
                  std::invalid_argument);
@@ -335,7 +335,7 @@ TEST(TestRaggedTensor, IterationIsPerBatchAscendingForPhysicalBshd)
     const std::vector<int64_t> physicalDims = {2, 3, 2, 2};
     const std::vector<int64_t> physicalStrides = {12, 4, 2, 1};
 
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     RaggedTensor<float> tensor(physicalDims, physicalStrides, BSHD_SEQ_AXIS, aux);
     tensor.fillWithValue(0.0f);
 
@@ -360,7 +360,7 @@ TEST(TestGpuRaggedTensor, PinnedVariantRoundTrips)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     PinnedRaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
     tensor.fillWithValue(0.0f);
 
@@ -376,7 +376,7 @@ TEST(TestGpuRaggedTensor, PinnedVariantRoundTrips)
 
 TEST(TestRaggedTensor, FillWithData)
 {
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     RaggedTensor<int> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
     std::vector<int> data(20);
@@ -407,7 +407,7 @@ TEST(TestRaggedTensor, LargeOffsetExceedsInt32Max)
     const int64_t twoLargeOffsets = largeOffset * 2; // 2^32
     const std::vector<int64_t> dims = {2, 1, 1, 1};
     const std::vector<int64_t> strides = {largeOffset, largeOffset, 1, 1};
-    auto aux = makeOffsetAux<int64_t>({0, largeOffset, twoLargeOffsets});
+    const auto aux = makeOffsetAux<int64_t>({0, largeOffset, twoLargeOffsets});
 
     // Shallow (borrowed) so no buffer is allocated for the ~2^32 element span; only the
     // addressing math is exercised, without touching the backing memory.
@@ -427,7 +427,7 @@ TEST(TestRaggedTensor, LargeOffsetExceedsInt32Max)
 
 TEST(TestRaggedTensor, SharedAuxBacksTwoTensors)
 {
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
 
     const RaggedTensor<float> first(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
     const RaggedTensor<float> second(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
@@ -452,7 +452,7 @@ TEST(TestRaggedTensor, MultiplierRecoversElementOffsets)
     const int64_t multiplier = K_STRIDES[K_SEQ_AXIS]; // seqStride = H*D = 4
     const std::vector<int64_t> tokenOffsets = {0, 2, 5};
 
-    auto aux = makeOffsetAux<int32_t>(tokenOffsets);
+    const auto aux = makeOffsetAux<int32_t>(tokenOffsets);
     RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux, std::nullopt, multiplier);
     tensor.fillWithValue(0.0f);
 
@@ -465,7 +465,7 @@ TEST(TestRaggedTensor, MultiplierRecoversElementOffsets)
 TEST(TestRaggedTensor, MultiplierScalesGetIndexBase)
 {
     const std::vector<int64_t> tokenOffsets = {0, 2, 5};
-    auto aux = makeOffsetAux<int32_t>(tokenOffsets);
+    const auto aux = makeOffsetAux<int32_t>(tokenOffsets);
     const RaggedTensor<float> tensor(
         K_DIMS, K_STRIDES, K_SEQ_AXIS, aux, std::nullopt, /*raggedOffsetMultiplier=*/4);
 
@@ -476,7 +476,7 @@ TEST(TestRaggedTensor, MultiplierScalesGetIndexBase)
 
 TEST(TestRaggedTensor, MultiplierBelowOneThrows)
 {
-    auto aux = makeOffsetAux<int32_t>({0, 2, 5});
+    const auto aux = makeOffsetAux<int32_t>({0, 2, 5});
     EXPECT_THROW(
         const RaggedTensor<float> tensor(
             K_DIMS, K_STRIDES, K_SEQ_AXIS, aux, std::nullopt, /*raggedOffsetMultiplier=*/0),
@@ -487,7 +487,7 @@ TEST(TestRaggedTensor, MultiplierBelowOneThrows)
 // multipliers (the D_qk != D_v case where Q and O share a token offset).
 TEST(TestRaggedTensor, SharedAuxDistinctMultipliers)
 {
-    auto aux = makeOffsetAux<int32_t>({0, 1, 2}); // one token per batch
+    const auto aux = makeOffsetAux<int32_t>({0, 1, 2}); // one token per batch
 
     // Q-like: H*D_qk = 4.
     const std::vector<int64_t> dimsQ = {2, 2, 1, 2};
@@ -515,7 +515,7 @@ TEST(TestRaggedTensor, SingleBatch)
     const std::vector<int64_t> strides = {12, 2, 4, 1};
     const std::vector<int64_t> offsets = {0, 8};
 
-    auto aux = makeOffsetAux<int32_t>(offsets);
+    const auto aux = makeOffsetAux<int32_t>(offsets);
     RaggedTensor<float> tensor(dims, strides, SDPA_SEQ_AXIS, aux);
     tensor.fillWithValue(0.0f);
 
@@ -534,7 +534,7 @@ TEST(TestRaggedTensor, SingleRowSequences)
     const std::vector<int64_t> strides = {4, 2, 4, 1};
     const std::vector<int64_t> offsets = {0, 4, 8};
 
-    auto aux = makeOffsetAux<int32_t>(offsets);
+    const auto aux = makeOffsetAux<int32_t>(offsets);
     RaggedTensor<float> tensor(dims, strides, SDPA_SEQ_AXIS, aux);
     tensor.fillWithValue(0.0f);
 
@@ -549,7 +549,7 @@ TEST(TestRaggedTensor, SingleRowSequences)
 
 TEST(TestRaggedTensor, ValidationEmptyPaddedDimsThrows)
 {
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     EXPECT_THROW(const RaggedTensor<float> tensor({}, K_STRIDES, K_SEQ_AXIS, aux),
                  std::invalid_argument);
 }
@@ -558,7 +558,7 @@ TEST(TestRaggedTensor, ValidationNonPositiveSequenceStrideThrows)
 {
     // All non-batch strides negative -> the sequence axis stride is negative.
     const std::vector<int64_t> strides = {12, -1, -2, -3};
-    auto aux = makeOffsetAux<int32_t>({0, 0, 0});
+    const auto aux = makeOffsetAux<int32_t>({0, 0, 0});
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, strides, K_SEQ_AXIS, aux),
                  std::invalid_argument);
 }
@@ -582,7 +582,7 @@ void expectConstructionRejected(const std::vector<int64_t>& dims,
                                 const std::vector<int64_t>& offsets,
                                 const std::string& expectedMessage)
 {
-    auto aux = makeOffsetAux<int32_t>(offsets);
+    const auto aux = makeOffsetAux<int32_t>(offsets);
     try
     {
         const RaggedTensor<float> tensor(dims, strides, seqAxis, aux);
@@ -609,7 +609,7 @@ TEST(TestRaggedTensor, SingletonHeadExplicitSeqAxis)
     const std::vector<int64_t> strides = {6, 2, 2, 1};
     const std::vector<int64_t> offsets = {0, 4, 10};
 
-    auto aux = makeOffsetAux<int32_t>(offsets);
+    const auto aux = makeOffsetAux<int32_t>(offsets);
     RaggedTensor<float> tensor(dims, strides, SDPA_SEQ_AXIS, aux);
     tensor.fillWithValue(0.0f);
 
@@ -624,21 +624,21 @@ TEST(TestRaggedTensor, SingletonHeadExplicitSeqAxis)
 
 TEST(TestRaggedTensor, ValidationRankBelowTwoThrows)
 {
-    auto aux = makeOffsetAux<int32_t>({0, 0});
+    const auto aux = makeOffsetAux<int32_t>({0, 0});
     EXPECT_THROW(const RaggedTensor<float> tensor({4}, {1}, K_SEQ_AXIS, aux),
                  std::invalid_argument);
 }
 
 TEST(TestRaggedTensor, ValidationStridesDimsSizeMismatchThrows)
 {
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, {12, 2, 4}, K_SEQ_AXIS, aux),
                  std::invalid_argument);
 }
 
 TEST(TestRaggedTensor, ValidationSeqAxisOutOfRangeThrows)
 {
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     // Batch axis (0) is not a valid sequence axis.
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, 0, aux),
                  std::invalid_argument);
@@ -658,7 +658,7 @@ TEST(TestRaggedTensor, TokenMajorSingletonHeadDimAccepted)
     const std::vector<int64_t> strides = {6, 1, 2, 1};
     const std::vector<int64_t> offsets = {0, 4, 10};
 
-    auto aux = makeOffsetAux<int32_t>(offsets);
+    const auto aux = makeOffsetAux<int32_t>(offsets);
     RaggedTensor<float> tensor(dims, strides, SDPA_SEQ_AXIS, aux);
     tensor.fillWithValue(0.0f);
 
@@ -673,7 +673,7 @@ TEST(TestRaggedTensor, ZeroHeadDimSkipsSpanRule)
     const std::vector<int64_t> dims = {2, 0, 3, 2};
     const std::vector<int64_t> strides = {12, 6, 2, 1};
 
-    auto aux = makeOffsetAux<int32_t>({0, 0, 0});
+    const auto aux = makeOffsetAux<int32_t>({0, 0, 0});
     RaggedTensor<float> tensor(dims, strides, SDPA_SEQ_AXIS, aux);
 
     EXPECT_EQ(tensor.elementCount(), 0u);
@@ -684,14 +684,14 @@ TEST(TestRaggedTensor, ZeroHeadDimSkipsSpanRule)
 TEST(TestRaggedTensor, PhysicalBhsdStridesThrow)
 {
     // Head-major (BHSD) strides alias the sequence rows of one batch with the heads of the next.
-    auto aux = makeOffsetAux<int32_t>({0, 4, 10});
+    const auto aux = makeOffsetAux<int32_t>({0, 4, 10});
     EXPECT_THROW(const RaggedTensor<float> tensor({2, 2, 3, 2}, {12, 6, 2, 1}, SDPA_SEQ_AXIS, aux),
                  std::invalid_argument);
 }
 
 TEST(TestRaggedTensor, SingleRowBhsdStridesThrow)
 {
-    auto aux = makeOffsetAux<int32_t>({0, 2, 4});
+    const auto aux = makeOffsetAux<int32_t>({0, 2, 4});
     EXPECT_THROW(const RaggedTensor<float> tensor({2, 2, 1, 2}, {4, 2, 2, 1}, SDPA_SEQ_AXIS, aux),
                  std::invalid_argument);
 }
@@ -759,7 +759,7 @@ TEST(TestRaggedIterationInfo, EqualityComparesEveryField)
 
 TEST(TestRaggedIterationInfo, TensorReportsElementUnitOrigins)
 {
-    auto aux = makeOffsetAux<int32_t>({0, 2, 5});
+    const auto aux = makeOffsetAux<int32_t>({0, 2, 5});
     const RaggedTensor<float> tensor(
         K_DIMS, K_STRIDES, K_SEQ_AXIS, aux, std::nullopt, /*raggedOffsetMultiplier=*/4);
 
@@ -771,8 +771,8 @@ TEST(TestRaggedIterationInfo, TensorReportsElementUnitOrigins)
 // Tensors that differ only in their origins report different layouts.
 TEST(TestRaggedIterationInfo, OriginsDistinguishLayouts)
 {
-    auto packed = makeOffsetAux<int32_t>({0, 8, 20});
-    auto shifted = makeOffsetAux<int32_t>({4, 12, 24});
+    const auto packed = makeOffsetAux<int32_t>({0, 8, 20});
+    const auto shifted = makeOffsetAux<int32_t>({4, 12, 24});
     const RaggedTensor<float> a(K_DIMS, K_STRIDES, K_SEQ_AXIS, packed);
     const RaggedTensor<float> b(K_DIMS, K_STRIDES, K_SEQ_AXIS, shifted);
 
@@ -786,7 +786,7 @@ TEST(TestRaggedIterationInfo, OriginsDistinguishLayouts)
 
 TEST(TestRaggedTensor, FillWithValuesHostGenerator)
 {
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
     struct UniformCpuGenerator
@@ -821,7 +821,7 @@ TEST(TestRaggedTensor, FillWithValuesHostGenerator)
 
     for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
     {
-        auto val{(*static_cast<const float*>((*it)))};
+        const auto val{(*static_cast<const float*>((*it)))};
         EXPECT_GE(val, min);
         EXPECT_LE(val, max);
     }
@@ -831,7 +831,7 @@ TEST(TestRaggedTensor, FillWithValuesDeviceGenerator)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
     struct DeviceGpuGenerator
@@ -841,7 +841,7 @@ TEST(TestRaggedTensor, FillWithValuesDeviceGenerator)
             std::vector<float> writeData(count);
             std::iota(writeData.begin(), writeData.end(), 0.0f);
 
-            auto err = hipMemcpyWithStream(
+            const auto err = hipMemcpyWithStream(
                 data, writeData.data(), count * sizeof(float), hipMemcpyHostToDevice, nullptr);
             if(err != hipSuccess)
             {
@@ -861,13 +861,13 @@ TEST(TestRaggedTensor, FillWithValuesDeviceGenerator)
 
 TEST(TestRaggedTensor, FillWithRandomValues)
 {
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
     tensor.fillWithRandomValues(1.0f, 3.0f);
     for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
     {
-        auto val{(*static_cast<const float*>((*it)))};
+        const auto val{(*static_cast<const float*>((*it)))};
         EXPECT_GE(val, 1.0f);
         EXPECT_LE(val, 3.0f);
     }
@@ -892,7 +892,7 @@ struct LayoutCaseName
 template <typename OffsetT, typename LengthT>
 void checkLayoutCase(const LayoutCase& layout)
 {
-    auto offsets = makeOffsetAux<OffsetT>(layout.offsets);
+    const auto offsets = makeOffsetAux<OffsetT>(layout.offsets);
     std::shared_ptr<ITensor> lengths;
     if(layout.seqLen.has_value())
     {
@@ -1369,12 +1369,12 @@ TEST(TestRaggedLayoutRejections, NegativeStrideWithLengths)
 
 TEST(TestRaggedLayoutRejections, LengthTensorElementCountMustEqualB)
 {
-    auto offsets = makeOffsetAux<int32_t>(K_OFFSETS);
-    auto tooMany = makeOffsetAux<int32_t>({2, 3, 0});
+    const auto offsets = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto tooMany = makeOffsetAux<int32_t>({2, 3, 0});
     EXPECT_THROW(const RaggedTensor<float> tensor(
                      K_DIMS, K_STRIDES, K_SEQ_AXIS, offsets, std::nullopt, 1, tooMany),
                  std::invalid_argument);
-    auto tooFew = makeOffsetAux<int32_t>({2});
+    const auto tooFew = makeOffsetAux<int32_t>({2});
     EXPECT_THROW(const RaggedTensor<float> tensor(
                      K_DIMS, K_STRIDES, K_SEQ_AXIS, offsets, std::nullopt, 1, tooFew),
                  std::invalid_argument);
@@ -1382,8 +1382,8 @@ TEST(TestRaggedLayoutRejections, LengthTensorElementCountMustEqualB)
 
 TEST(TestRaggedLayoutRejections, LengthTensorElementSizeMustBe4Or8)
 {
-    auto offsets = makeOffsetAux<int32_t>(K_OFFSETS);
-    auto lengths16 = std::make_shared<Tensor<int16_t>>(std::vector<int64_t>{2, 1, 1, 1});
+    const auto offsets = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto lengths16 = std::make_shared<Tensor<int16_t>>(std::vector<int64_t>{2, 1, 1, 1});
     EXPECT_THROW(const RaggedTensor<float> tensor(
                      K_DIMS, K_STRIDES, K_SEQ_AXIS, offsets, std::nullopt, 1, lengths16),
                  std::invalid_argument);
@@ -1391,8 +1391,8 @@ TEST(TestRaggedLayoutRejections, LengthTensorElementSizeMustBe4Or8)
 
 TEST(TestRaggedLayoutRejections, LengthTensorMustBeRank4)
 {
-    auto offsets = makeOffsetAux<int32_t>(K_OFFSETS);
-    auto rank2 = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{2, 1});
+    const auto offsets = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto rank2 = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{2, 1});
     fillLeading(*rank2, K_LENGTHS);
     EXPECT_THROW(const RaggedTensor<float> tensor(
                      K_DIMS, K_STRIDES, K_SEQ_AXIS, offsets, std::nullopt, 1, rank2),
@@ -1401,8 +1401,8 @@ TEST(TestRaggedLayoutRejections, LengthTensorMustBeRank4)
 
 TEST(TestRaggedLayoutRejections, LengthTensorOffTheBatchAxisThrows)
 {
-    auto offsets = makeOffsetAux<int32_t>(K_OFFSETS);
-    auto lengths = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{1, 2, 1, 1});
+    const auto offsets = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto lengths = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{1, 2, 1, 1});
     fillLeading(*lengths, K_LENGTHS);
     EXPECT_THROW(const RaggedTensor<float> tensor(
                      K_DIMS, K_STRIDES, K_SEQ_AXIS, offsets, std::nullopt, 1, lengths),
@@ -1411,8 +1411,8 @@ TEST(TestRaggedLayoutRejections, LengthTensorOffTheBatchAxisThrows)
 
 TEST(TestRaggedLayoutRejections, ShallowTensorValidatesLengthTensorToo)
 {
-    auto offsets = makeOffsetAux<int32_t>(K_OFFSETS);
-    auto tooMany = makeOffsetAux<int32_t>({2, 3, 0});
+    const auto offsets = makeOffsetAux<int32_t>(K_OFFSETS);
+    const auto tooMany = makeOffsetAux<int32_t>({2, 3, 0});
     std::vector<float> backing(20, 0.0f);
     EXPECT_THROW(
         const ShallowRaggedTensor<float> tensor(
@@ -1426,8 +1426,8 @@ TEST(TestRaggedLayoutRejections, ShallowTensorValidatesLengthTensorToo)
 
 TEST(TestRaggedTensor, OffsetsAndLengthsAreSnapshotted)
 {
-    auto offsets = makeOffsetAux<int32_t>({0, 8, 20});
-    auto lengths = makeOffsetAux<int32_t>({2, 3});
+    const auto offsets = makeOffsetAux<int32_t>({0, 8, 20});
+    const auto lengths = makeOffsetAux<int32_t>({2, 3});
     const RaggedTensor<float> tensor(
         K_DIMS, K_STRIDES, K_SEQ_AXIS, offsets, std::nullopt, 1, lengths);
 

@@ -13,7 +13,7 @@ TEST(TestMatmulAttributes, CreateMatmulAttributes)
     matmulAttributes.set_c(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
 
     // Configure A tensor
-    auto aTensor = matmulAttributes.get_a();
+    const auto aTensor = matmulAttributes.get_a();
     aTensor->set_uid(1)
         .set_name("ATensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -21,7 +21,7 @@ TEST(TestMatmulAttributes, CreateMatmulAttributes)
         .set_stride({8, 1});
 
     // Configure B tensor
-    auto bTensor = matmulAttributes.get_b();
+    const auto bTensor = matmulAttributes.get_b();
     bTensor->set_uid(2)
         .set_name("BTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -29,7 +29,7 @@ TEST(TestMatmulAttributes, CreateMatmulAttributes)
         .set_stride({16, 1});
 
     // Configure C tensor (output)
-    auto cTensor = matmulAttributes.get_c();
+    const auto cTensor = matmulAttributes.get_c();
     cTensor->set_uid(3)
         .set_name("CTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -88,7 +88,7 @@ TEST(TestMatmulAttributes, SetAMove)
     EXPECT_EQ(aTensor, nullptr);
 
     // The moved tensor should be accessible through get_a()
-    auto retrievedTensor = matmulAttributes.get_a();
+    const auto retrievedTensor = matmulAttributes.get_a();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -112,7 +112,7 @@ TEST(TestMatmulAttributes, SetBMove)
     EXPECT_EQ(bTensor, nullptr);
 
     // The moved tensor should be accessible through get_b()
-    auto retrievedTensor = matmulAttributes.get_b();
+    const auto retrievedTensor = matmulAttributes.get_b();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -136,7 +136,7 @@ TEST(TestMatmulAttributes, SetCMove)
     EXPECT_EQ(cTensor, nullptr);
 
     // The moved tensor should be accessible through get_c()
-    auto retrievedTensor = matmulAttributes.get_c();
+    const auto retrievedTensor = matmulAttributes.get_c();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -145,13 +145,13 @@ TEST(TestMatmulAttributes, SetTensorsConstRef)
     hipdnn_frontend::graph::MatmulAttributes matmulAttributes;
 
     // Create tensors
-    auto aTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto aTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     aTensor->set_uid(40).set_name("AConstRef");
 
-    auto bTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto bTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     bTensor->set_uid(50).set_name("BConstRef");
 
-    auto cTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto cTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     cTensor->set_uid(60).set_name("CConstRef");
 
     // Set using const reference (copy)
@@ -175,30 +175,30 @@ TEST(TestMatmulAttributes, LogicalAndStrictEquality)
     hipdnn_frontend::graph::MatmulAttributes attr1;
     attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto a1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto a1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     a1->set_uid(1).set_name("A").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_a(a1);
 
-    auto b1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto b1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     b1->set_uid(2).set_name("B").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_b(b1);
 
-    auto c1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto c1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     c1->set_uid(3).set_name("C").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_c(c1);
 
     hipdnn_frontend::graph::MatmulAttributes attr2;
     attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto a2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto a2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     a2->set_uid(1).set_name("A").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_a(a2);
 
-    auto b2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto b2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     b2->set_uid(2).set_name("B").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_b(b2);
 
-    auto c2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto c2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     c2->set_uid(3).set_name("C").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_c(c2);
 
@@ -208,7 +208,7 @@ TEST(TestMatmulAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchA = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto structuralMismatchA = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     structuralMismatchA->set_uid(99).set_name("MismatchedA");
     attr2.set_a(structuralMismatchA);
 
@@ -218,7 +218,7 @@ TEST(TestMatmulAttributes, LogicalAndStrictEquality)
     attr2.set_a(a2); // Revert
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchA = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto logicalMatchA = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchA
         ->set_uid(555) // Diverges from attr1's a1 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's a1 ("A")

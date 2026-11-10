@@ -26,7 +26,7 @@ class TestMiopenBinaryPointwiseChecksModes : public ::testing::TestWithParam<Mod
 
 TEST_P(TestMiopenBinaryPointwiseChecksModes, IsSupportedTrueForValidGraph)
 {
-    auto builder = createPointwiseGraph(PointwiseGraphSpec::binary(GetParam().mode));
+    const auto builder = createPointwiseGraph(PointwiseGraphSpec::binary(GetParam().mode));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(binary_pointwise_applicability::isSupported(graph));
@@ -65,7 +65,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForUnsupportedAttributes)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForNonFloatComputeType)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -83,7 +83,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForNonFloatComputeType)
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForMissingSecondInput)
 {
     // A node with no in_1_tensor_uid is a unary node, not this provider's concern.
-    auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::ADD));
+    const auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::ADD));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
@@ -93,7 +93,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForThirdInputPresent)
 {
     auto spec = PointwiseGraphSpec::binary();
     spec.thirdInputDims = std::vector<int64_t>{1, 3, 4, 4};
-    auto builder = createPointwiseGraph(spec);
+    const auto builder = createPointwiseGraph(spec);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
@@ -101,7 +101,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForThirdInputPresent)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForVirtualFirstInput)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -120,7 +120,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForVirtualFirstInput)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForVirtualSecondInput)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -141,7 +141,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForVirtualSecondInput)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForVirtualOutput)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -161,7 +161,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForVirtualOutput)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForBfloat16Dtype)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -179,7 +179,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForBfloat16Dtype)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedTrueForHalfDtype)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -197,7 +197,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedTrueForHalfDtype)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForMismatchedDtypes)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -215,7 +215,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForMismatchedDtypes)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForNullSecondInputStrides)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -230,13 +230,14 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForNullSecondInputStrides)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForOutputRankBelowThree)
 {
-    auto builder = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
-                                                                   {3, 4},
-                                                                   std::vector<int64_t>{4, 1},
-                                                                   {3, 4},
-                                                                   std::vector<int64_t>{4, 1},
-                                                                   std::vector<int64_t>{3, 4},
-                                                                   std::vector<int64_t>{4, 1}));
+    const auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
+                                                          {3, 4},
+                                                          std::vector<int64_t>{4, 1},
+                                                          {3, 4},
+                                                          std::vector<int64_t>{4, 1},
+                                                          std::vector<int64_t>{3, 4},
+                                                          std::vector<int64_t>{4, 1}));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
@@ -244,7 +245,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForOutputRankBelowThree)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForOutputRankAboveFive)
 {
-    auto builder = createPointwiseGraph(
+    const auto builder = createPointwiseGraph(
         PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                    {1, 2, 3, 4, 5, 1},
                                    std::vector<int64_t>{120, 60, 20, 5, 1, 1},
@@ -259,7 +260,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForOutputRankAboveFive)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForSecondInputRankMismatch)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -274,7 +275,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForSecondInputRankMismatch
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForNonPositiveDim)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -290,7 +291,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForNonPositiveDim)
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForNonPackedFirstInput)
 {
     // Channel stride does not equal the product of trailing dims (4*4=16, not 8).
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 8, 4, 1},
@@ -307,7 +308,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForFirstInputBroadcasting)
 {
     // A must equal the output shape exactly; MIOpen's tensorOp cannot broadcast its first
     // operand and this provider does not swap operands to make it fit.
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 1, 4, 4},
                                                           std::vector<int64_t>{16, 16, 4, 1},
@@ -323,7 +324,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForFirstInputBroadcasting)
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForSecondInputNotBroadcastable)
 {
     // b's dim at an axis must be either 1 or equal to c's -- 2 is neither.
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -338,7 +339,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForSecondInputNotBroadcast
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedTrueForFullSizeSecondInputNoBroadcast)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -355,7 +356,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedTrueRegardlessOfOverrideShape)
 {
     // isApplicable (in the plan builder) declines override-shape graphs; the applicability
     // resolver tested here has no opinion on that flag at all.
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -383,7 +384,7 @@ class TestMiopenBinaryPointwiseChecksUnsupportedModes : public ::testing::TestWi
 
 TEST_P(TestMiopenBinaryPointwiseChecksUnsupportedModes, IsSupportedFalseForUnsupportedMode)
 {
-    auto builder = createPointwiseGraph(PointwiseGraphSpec::binary(GetParam().mode));
+    const auto builder = createPointwiseGraph(PointwiseGraphSpec::binary(GetParam().mode));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
@@ -422,16 +423,16 @@ flatbuffers::FlatBufferBuilder buildGraphWithUnresolvableSecondInputUid()
         fbb, 2, "output", DataType::FLOAT, &strides, &dims, false));
     // Deliberately no tensor with uid 3 -- in_1_tensor_uid below dangles.
 
-    auto pwAttr = data_objects::CreatePointwiseAttributes(fbb,
-                                                          PointwiseMode::ADD,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          1,
-                                                          3,
-                                                          flatbuffers::nullopt,
-                                                          2);
+    const auto pwAttr = data_objects::CreatePointwiseAttributes(fbb,
+                                                                PointwiseMode::ADD,
+                                                                flatbuffers::nullopt,
+                                                                flatbuffers::nullopt,
+                                                                flatbuffers::nullopt,
+                                                                flatbuffers::nullopt,
+                                                                1,
+                                                                3,
+                                                                flatbuffers::nullopt,
+                                                                2);
 
     std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
     nodes.push_back(
@@ -441,7 +442,7 @@ flatbuffers::FlatBufferBuilder buildGraphWithUnresolvableSecondInputUid()
                                        data_objects::NodeAttributes::PointwiseAttributes,
                                        pwAttr.Union()));
 
-    auto graphOffset = data_objects::CreateGraphDirect(
+    const auto graphOffset = data_objects::CreateGraphDirect(
         fbb, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensorAttributes, &nodes);
     fbb.Finish(graphOffset);
     return fbb;
@@ -477,16 +478,16 @@ flatbuffers::FlatBufferBuilder
                                                    isRuntimePassByValue,
                                                    raggedOffsetTensorUid));
 
-    auto pwAttr = data_objects::CreatePointwiseAttributes(fbb,
-                                                          PointwiseMode::ADD,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          1,
-                                                          3,
-                                                          flatbuffers::nullopt,
-                                                          2);
+    const auto pwAttr = data_objects::CreatePointwiseAttributes(fbb,
+                                                                PointwiseMode::ADD,
+                                                                flatbuffers::nullopt,
+                                                                flatbuffers::nullopt,
+                                                                flatbuffers::nullopt,
+                                                                flatbuffers::nullopt,
+                                                                1,
+                                                                3,
+                                                                flatbuffers::nullopt,
+                                                                2);
 
     std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
     nodes.push_back(
@@ -496,7 +497,7 @@ flatbuffers::FlatBufferBuilder
                                        data_objects::NodeAttributes::PointwiseAttributes,
                                        pwAttr.Union()));
 
-    auto graphOffset = data_objects::CreateGraphDirect(
+    const auto graphOffset = data_objects::CreateGraphDirect(
         fbb, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensorAttributes, &nodes);
     fbb.Finish(graphOffset);
     return fbb;
@@ -516,16 +517,17 @@ flatbuffers::FlatBufferBuilder buildGraphWithInPlaceOutput(int64_t outUid)
     tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         fbb, 3, "second_input", DataType::FLOAT, &strides, &dims, false));
 
-    auto pwAttr = data_objects::CreatePointwiseAttributes(fbb,
-                                                          PointwiseMode::ADD,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          1,
-                                                          3,
-                                                          flatbuffers::nullopt,
-                                                          outUid); // in-place: aliases in_0 or in_1
+    const auto pwAttr
+        = data_objects::CreatePointwiseAttributes(fbb,
+                                                  PointwiseMode::ADD,
+                                                  flatbuffers::nullopt,
+                                                  flatbuffers::nullopt,
+                                                  flatbuffers::nullopt,
+                                                  flatbuffers::nullopt,
+                                                  1,
+                                                  3,
+                                                  flatbuffers::nullopt,
+                                                  outUid); // in-place: aliases in_0 or in_1
 
     std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
     nodes.push_back(
@@ -535,7 +537,7 @@ flatbuffers::FlatBufferBuilder buildGraphWithInPlaceOutput(int64_t outUid)
                                        data_objects::NodeAttributes::PointwiseAttributes,
                                        pwAttr.Union()));
 
-    auto graphOffset = data_objects::CreateGraphDirect(
+    const auto graphOffset = data_objects::CreateGraphDirect(
         fbb, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensorAttributes, &nodes);
     fbb.Finish(graphOffset);
     return fbb;
@@ -545,7 +547,7 @@ flatbuffers::FlatBufferBuilder buildGraphWithInPlaceOutput(int64_t outUid)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForUnresolvableSecondInputUid)
 {
-    auto builder = buildGraphWithUnresolvableSecondInputUid();
+    const auto builder = buildGraphWithUnresolvableSecondInputUid();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
@@ -553,7 +555,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForUnresolvableSecondInput
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForDimsStridesSizeMismatch)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -568,7 +570,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForDimsStridesSizeMismatch
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForPassByValueSecondInput)
 {
-    auto builder = buildGraphWithTweakedSecondInput(true, flatbuffers::nullopt);
+    const auto builder = buildGraphWithTweakedSecondInput(true, flatbuffers::nullopt);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
@@ -576,7 +578,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForPassByValueSecondInput)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForRaggedSecondInput)
 {
-    auto builder = buildGraphWithTweakedSecondInput(false, 7);
+    const auto builder = buildGraphWithTweakedSecondInput(false, 7);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
@@ -584,7 +586,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForRaggedSecondInput)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForInPlaceOutputEqualsFirstInput)
 {
-    auto builder = buildGraphWithInPlaceOutput(1);
+    const auto builder = buildGraphWithInPlaceOutput(1);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
@@ -592,7 +594,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForInPlaceOutputEqualsFirs
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForInPlaceOutputEqualsSecondInput)
 {
-    auto builder = buildGraphWithInPlaceOutput(3);
+    const auto builder = buildGraphWithInPlaceOutput(3);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
@@ -600,13 +602,13 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForInPlaceOutputEqualsSeco
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForOutputRankZero)
 {
-    auto builder = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
-                                                                   {},
-                                                                   std::vector<int64_t>{},
-                                                                   {},
-                                                                   std::vector<int64_t>{},
-                                                                   std::vector<int64_t>{},
-                                                                   std::vector<int64_t>{}));
+    const auto builder = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
+                                                                         {},
+                                                                         std::vector<int64_t>{},
+                                                                         {},
+                                                                         std::vector<int64_t>{},
+                                                                         std::vector<int64_t>{},
+                                                                         std::vector<int64_t>{}));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
@@ -614,7 +616,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForOutputRankZero)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForFirstInputRankMismatch)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {3, 4, 4},
                                                           std::vector<int64_t>{16, 4, 1},
@@ -629,7 +631,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForFirstInputRankMismatch)
 
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForNegativeStride)
 {
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::binary(PointwiseMode::ADD,
                                                           {1, 3, 4, 4},
                                                           std::vector<int64_t>{48, 16, 4, 1},
@@ -647,7 +649,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForOutputElementCountExcee
     // 2 * 40000 * 40000 * 1 > INT32_MAX, and stays packed/channels-first.
     const std::vector<int64_t> dims{2, 40000, 40000, 1};
     const std::vector<int64_t> strides{1600000000, 40000, 1, 1};
-    auto builder = createPointwiseGraph(PointwiseGraphSpec::binary(
+    const auto builder = createPointwiseGraph(PointwiseGraphSpec::binary(
         PointwiseMode::ADD, dims, strides, dims, strides, dims, strides));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -658,7 +660,7 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForElementCountOverflowing
 {
     const std::vector<int64_t> dims{8192, 8192, 8192, 8192, 8192};
     const std::vector<int64_t> strides{4503599627370496, 549755813888, 67108864, 8192, 1};
-    auto builder = createPointwiseGraph(PointwiseGraphSpec::binary(
+    const auto builder = createPointwiseGraph(PointwiseGraphSpec::binary(
         PointwiseMode::ADD, dims, strides, dims, strides, dims, strides));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 

@@ -66,7 +66,7 @@ protected:
 
 TEST_F(TestKnobSettingDescriptor, CreateDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR);

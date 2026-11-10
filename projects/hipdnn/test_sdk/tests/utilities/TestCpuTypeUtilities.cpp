@@ -15,7 +15,7 @@ using hipdnn_test_sdk::detail::safeTestTypeCast;
 
 TEST(TestCpuTypeUtilities, CastInRangeIntToInt)
 {
-    auto v = safeTestTypeCast<int8_t>(127);
+    const auto v = safeTestTypeCast<int8_t>(127);
     EXPECT_EQ(v, static_cast<int8_t>(127));
 }
 
@@ -63,11 +63,11 @@ TEST(TestCpuTypeUtilities, CastInt64BoundaryToInt32)
 
 TEST(TestCpuTypeUtilities, CastDoubleToFloatBoundary)
 {
-    auto vMin = static_cast<double>(std::numeric_limits<float>::lowest());
+    const auto vMin = static_cast<double>(std::numeric_limits<float>::lowest());
     EXPECT_FLOAT_EQ(safeTestTypeCast<float>(vMin), std::numeric_limits<float>::lowest());
     EXPECT_THROW((safeTestTypeCast<float>(vMin * 1.1)), std::out_of_range);
 
-    auto vMax = static_cast<double>(std::numeric_limits<float>::max());
+    const auto vMax = static_cast<double>(std::numeric_limits<float>::max());
     EXPECT_FLOAT_EQ(safeTestTypeCast<float>(vMax), std::numeric_limits<float>::max());
     EXPECT_THROW((safeTestTypeCast<float>(vMax * 1.1)), std::out_of_range);
 }

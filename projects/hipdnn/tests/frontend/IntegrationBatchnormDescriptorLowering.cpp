@@ -43,44 +43,44 @@ class IntegrationBatchnormDescriptorLowering : public IntegrationTestFixture
 TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTripAllOptionals)
 {
     // Full round-trip with all optional tensors including running stats.
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestBnFwdGraphAllOptionals")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_BATCHNORM_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_BATCHNORM_TENSOR_X_DIMS)).set_stride(toVec(K_BATCHNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_BATCHNORM_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(K_BATCHNORM_TENSOR_BIAS_UID).set_name("Bias").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_uid(K_BATCHNORM_TENSOR_EPSILON_UID).set_name("Epsilon");
 
-    auto prevRunMean = std::make_shared<TensorAttributes>();
+    const auto prevRunMean = std::make_shared<TensorAttributes>();
     prevRunMean->set_uid(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID)
         .set_name("PrevRunMean")
         .set_data_type(DataType::FLOAT);
     prevRunMean->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
-    auto prevRunVar = std::make_shared<TensorAttributes>();
+    const auto prevRunVar = std::make_shared<TensorAttributes>();
     prevRunVar->set_uid(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID)
         .set_name("PrevRunVar")
         .set_data_type(DataType::FLOAT);
     prevRunVar->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
-    auto momentum = std::make_shared<TensorAttributes>(0.1f);
+    const auto momentum = std::make_shared<TensorAttributes>(0.1f);
     momentum->set_uid(K_BATCHNORM_TENSOR_MOMENTUM_UID).set_name("Momentum");
 
     BatchnormAttributes bnAttrs;
@@ -239,27 +239,27 @@ TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTripAllOptiona
 
 TEST_F(IntegrationBatchnormDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidBnFwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_BATCHNORM_TENSOR_X_DIMS)).set_stride(toVec(K_BATCHNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_name("Bias").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_name("Epsilon");
 
     BatchnormAttributes bnAttrs;
@@ -332,31 +332,31 @@ TEST_F(IntegrationBatchnormDescriptorLowering, MinimalRequiredOnlyRoundTrip)
 {
     // Tests the absolute minimum: x, scale, bias, epsilon as inputs -> y, mean, invVar as outputs
     // No running stats, no peer stats
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("MinimalBnFwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_BATCHNORM_MINIMAL_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_BATCHNORM_TENSOR_X_DIMS)).set_stride(toVec(K_BATCHNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_BATCHNORM_MINIMAL_TENSOR_SCALE_UID)
         .set_name("Scale")
         .set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(K_BATCHNORM_MINIMAL_TENSOR_BIAS_UID)
         .set_name("Bias")
         .set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_uid(K_BATCHNORM_MINIMAL_TENSOR_EPSILON_UID).set_name("Epsilon");
 
     BatchnormAttributes bnAttrs;
@@ -404,27 +404,27 @@ TEST_F(IntegrationBatchnormDescriptorLowering, MinimalRequiredOnlyRoundTrip)
 // successfully lowered and packed into backend descriptors during integration.
 TEST_F(IntegrationBatchnormDescriptorLowering, AcceptsBroadcastableScaleBiasShapesDuringLowering)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("BroadcastableScaleBiasLoweringGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_dim({2, 64, 32, 32})
         .set_stride({65536, 1024, 32, 1})
         .set_data_type(DataType::FLOAT);
 
     // Broadcastable (not full {1,C,1,1})
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(2).set_dim({64}).set_stride({1}).set_data_type(DataType::FLOAT);
 
     // Must match scale shape
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(3).set_dim({64}).set_stride({1}).set_data_type(DataType::FLOAT);
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_uid(4);
 
     BatchnormAttributes bnAttrs;

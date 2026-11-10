@@ -315,7 +315,7 @@ void EngineConfigDescriptor::setEngine(hipdnnBackendAttributeType_t attributeTyp
                 "EngineConfigDescriptor failed to set engine: "
                 "Invalid element count.");
 
-    auto engine = HipdnnBackendDescriptor::unpackDescriptor<const EngineDescriptor>(
+    const auto engine = HipdnnBackendDescriptor::unpackDescriptor<const EngineDescriptor>(
         arrayOfElements,
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
         "EngineConfigDescriptor failed to set engine: Engine is null.");
@@ -503,12 +503,13 @@ void EngineConfigDescriptor::setKnobSettingDescriptor(hipdnnBackendAttributeType
 
     for(int64_t i = 0; i < elementCount; ++i)
     {
-        auto knobDesc = HipdnnBackendDescriptor::unpackDescriptor<const KnobSettingDescriptor>(
-            descriptorArray[i],
-            HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-            "EngineConfigDescriptor failed to set knob choices: "
-            "Knob setting descriptor at index "
-                + std::to_string(i) + " is null.");
+        const auto knobDesc
+            = HipdnnBackendDescriptor::unpackDescriptor<const KnobSettingDescriptor>(
+                descriptorArray[i],
+                HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                "EngineConfigDescriptor failed to set knob choices: "
+                "Knob setting descriptor at index "
+                    + std::to_string(i) + " is null.");
 
         THROW_IF_FALSE(knobDesc->isFinalized(),
                        HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,

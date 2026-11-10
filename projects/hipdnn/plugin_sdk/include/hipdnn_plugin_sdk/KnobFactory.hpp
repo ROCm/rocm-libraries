@@ -27,12 +27,12 @@ public:
                       const std::vector<int64_t>& options,
                       bool deprecated = false)
     {
-        auto knobIdStr = builder.CreateString(name);
-        auto descStr = builder.CreateString(description);
-        auto defaultValOffset
+        const auto knobIdStr = builder.CreateString(name);
+        const auto descStr = builder.CreateString(description);
+        const auto defaultValOffset
             = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, defaultValue);
-        auto optionsVector = builder.CreateVector(options);
-        auto constraintOffset = hipdnn_flatbuffers_sdk::data_objects::CreateIntConstraint(
+        const auto optionsVector = builder.CreateVector(options);
+        const auto constraintOffset = hipdnn_flatbuffers_sdk::data_objects::CreateIntConstraint(
             builder, min, max, step, optionsVector);
 
         return hipdnn_flatbuffers_sdk::data_objects::CreateKnob(
@@ -55,11 +55,11 @@ public:
                         float max,
                         bool deprecated = false)
     {
-        auto knobIdStr = builder.CreateString(name);
-        auto descStr = builder.CreateString(description);
-        auto defaultValOffset = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(
+        const auto knobIdStr = builder.CreateString(name);
+        const auto descStr = builder.CreateString(description);
+        const auto defaultValOffset = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(
             builder, static_cast<double>(defaultValue));
-        auto constraintOffset = hipdnn_flatbuffers_sdk::data_objects::CreateFloatConstraint(
+        const auto constraintOffset = hipdnn_flatbuffers_sdk::data_objects::CreateFloatConstraint(
             builder, static_cast<double>(min), static_cast<double>(max));
 
         return hipdnn_flatbuffers_sdk::data_objects::CreateKnob(
@@ -81,10 +81,10 @@ public:
                          const std::vector<std::string>& options,
                          bool deprecated = false)
     {
-        auto knobIdStr = builder.CreateString(name);
-        auto descStr = builder.CreateString(description);
-        auto defaultValStr = builder.CreateString(defaultValue);
-        auto defaultValOffset
+        const auto knobIdStr = builder.CreateString(name);
+        const auto descStr = builder.CreateString(description);
+        const auto defaultValStr = builder.CreateString(defaultValue);
+        const auto defaultValOffset
             = hipdnn_flatbuffers_sdk::data_objects::CreateStringValue(builder, defaultValStr);
 
         std::vector<flatbuffers::Offset<flatbuffers::String>> optionsOffsets;
@@ -93,8 +93,8 @@ public:
         {
             optionsOffsets.push_back(builder.CreateString(opt));
         }
-        auto optionsVector = builder.CreateVector(optionsOffsets);
-        auto constraintOffset = hipdnn_flatbuffers_sdk::data_objects::CreateStringConstraint(
+        const auto optionsVector = builder.CreateVector(optionsOffsets);
+        const auto constraintOffset = hipdnn_flatbuffers_sdk::data_objects::CreateStringConstraint(
             builder, 0, optionsVector);
 
         return hipdnn_flatbuffers_sdk::data_objects::CreateKnob(

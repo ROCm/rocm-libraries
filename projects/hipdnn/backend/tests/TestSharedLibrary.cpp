@@ -97,7 +97,7 @@ TEST(TestSharedLibrary, CallFunction)
 
     // Call the function to get the plugin name
     const char* name = nullptr;
-    auto status = funcGetName(&name);
+    const auto status = funcGetName(&name);
     ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
     ASSERT_NE(name, nullptr);
     ASSERT_STREQ(name, "Plugin1");

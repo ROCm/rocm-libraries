@@ -209,7 +209,7 @@ std::shared_ptr<CustomOpOperationDescriptor> CustomOpOperationDescriptor::fromNo
 
     // Look up input tensors from the tensor map
     desc->_inputDescs.reserve(attrs->input_tensor_uids.size());
-    for(auto uid : attrs->input_tensor_uids)
+    for(const auto uid : attrs->input_tensor_uids)
     {
         desc->_inputDescs.push_back(
             findTensorInMap(tensorMap, uid, "CustomOpOperationDescriptor::fromNode: input tensor"));
@@ -217,7 +217,7 @@ std::shared_ptr<CustomOpOperationDescriptor> CustomOpOperationDescriptor::fromNo
 
     // Look up output tensors from the tensor map
     desc->_outputDescs.reserve(attrs->output_tensor_uids.size());
-    for(auto uid : attrs->output_tensor_uids)
+    for(const auto uid : attrs->output_tensor_uids)
     {
         desc->_outputDescs.push_back(findTensorInMap(
             tensorMap, uid, "CustomOpOperationDescriptor::fromNode: output tensor"));

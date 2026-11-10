@@ -38,18 +38,18 @@ class IntegrationCustomOpDescriptorLowering : public IntegrationTestFixture
 
 TEST_F(IntegrationCustomOpDescriptorLowering, CustomOpGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestCustomOpGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
     // Create input tensors
-    auto input0 = std::make_shared<TensorAttributes>();
+    const auto input0 = std::make_shared<TensorAttributes>();
     input0->set_uid(K_CUSTOM_OP_INPUT_UID_0).set_name("input0").set_data_type(DataType::FLOAT);
     input0->set_dim({2, 3}).set_stride({3, 1});
 
-    auto input1 = std::make_shared<TensorAttributes>();
+    const auto input1 = std::make_shared<TensorAttributes>();
     input1->set_uid(K_CUSTOM_OP_INPUT_UID_1).set_name("input1").set_data_type(DataType::FLOAT);
     input1->set_dim({2, 3}).set_stride({3, 1});
 
@@ -115,13 +115,13 @@ TEST_F(IntegrationCustomOpDescriptorLowering, CustomOpGraphRoundTrip)
 // Verifies minimal custom op with 1 input, 1 output, and no opaque data payload.
 TEST_F(IntegrationCustomOpDescriptorLowering, MinimalCustomOpRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("MinimalCustomOpGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto input0 = std::make_shared<TensorAttributes>();
+    const auto input0 = std::make_shared<TensorAttributes>();
     input0->set_uid(K_CUSTOM_OP_INPUT_UID_0).set_name("input0").set_data_type(DataType::FLOAT);
     input0->set_dim({2, 3}).set_stride({3, 1});
 
@@ -151,18 +151,18 @@ TEST_F(IntegrationCustomOpDescriptorLowering, MinimalCustomOpRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationCustomOpDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidCustomOpGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
     // Create tensors without explicit UIDs (auto-assigned)
-    auto input0 = std::make_shared<TensorAttributes>();
+    const auto input0 = std::make_shared<TensorAttributes>();
     input0->set_name("input0").set_data_type(DataType::FLOAT);
     input0->set_dim({2, 3}).set_stride({3, 1});
 
-    auto input1 = std::make_shared<TensorAttributes>();
+    const auto input1 = std::make_shared<TensorAttributes>();
     input1->set_name("input1").set_data_type(DataType::FLOAT);
     input1->set_dim({2, 3}).set_stride({3, 1});
 
@@ -192,13 +192,13 @@ TEST_F(IntegrationCustomOpDescriptorLowering, AutoAssignedUidsPreservedInRoundTr
     ASSERT_NE(customOp, nullptr);
 
     // Input tensor UIDs in the node should match tensors in the graph
-    for(auto inputUid : customOp->input_tensor_uids)
+    for(const auto inputUid : customOp->input_tensor_uids)
     {
         EXPECT_TRUE(uids.count(inputUid) > 0)
             << "Input tensor UID " << inputUid
             << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     }
-    for(auto outputUid : customOp->output_tensor_uids)
+    for(const auto outputUid : customOp->output_tensor_uids)
     {
         EXPECT_TRUE(uids.count(outputUid) > 0)
             << "Output tensor UID " << outputUid
@@ -217,7 +217,7 @@ TEST_F(IntegrationCustomOpDescriptorLowering, AutoAssignedUidsPreservedInRoundTr
 // through the descriptor path (e.g. a side-effect-only custom op).
 TEST_F(IntegrationCustomOpDescriptorLowering, ZeroInputZeroOutputCustomOpRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("ZeroIOCustomOpGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -226,7 +226,7 @@ TEST_F(IntegrationCustomOpDescriptorLowering, ZeroInputZeroOutputCustomOpRoundTr
     CustomOpAttributes attrs;
     attrs.set_custom_op_id("test.zero_io").set_name("zero_io_op");
 
-    auto outputs = graph->custom_op({}, 0, attrs);
+    const auto outputs = graph->custom_op({}, 0, attrs);
     ASSERT_EQ(outputs.size(), 0u);
 
     auto graphT = lowerAndDeserialize(*graph, _handle);

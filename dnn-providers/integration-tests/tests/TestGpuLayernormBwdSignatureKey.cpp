@@ -50,9 +50,9 @@ TEST(TestGpuLayernormBwdSignatureKey, HashFunction)
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     const GpuLayernormBwdSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    auto hash3 = key3.hashSelf();
-    auto hash4 = key4.hashSelf();
-    auto hash5 = key5.hashSelf();
+    const auto hash3 = key3.hashSelf();
+    const auto hash4 = key4.hashSelf();
+    const auto hash5 = key5.hashSelf();
     EXPECT_TRUE(hash3 != hash4 && hash3 != hash5 && hash4 != hash5);
 }
 
@@ -87,27 +87,27 @@ TEST(TestGpuLayernormBwdSignatureKey, CreateFromNodeAndTensorMap)
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     const int64_t normalizedDimCount = 2;
 
-    auto graphBuilder = createLayernormBwdGraph(DY_UID,
-                                                X_UID,
-                                                SCALE_UID,
-                                                DX_UID,
-                                                DSCALE_UID,
-                                                DBIAS_UID,
-                                                EPSILON_UID,
-                                                MEAN_UID,
-                                                INV_VARIANCE_UID,
-                                                ioDims,
-                                                layout,
-                                                epsilon,
-                                                normalizedDimCount,
-                                                DataType::FLOAT,
-                                                DataType::BFLOAT16,
-                                                DataType::HALF,
-                                                DataType::DOUBLE,
-                                                DataType::DOUBLE,
-                                                DataType::DOUBLE);
+    const auto graphBuilder = createLayernormBwdGraph(DY_UID,
+                                                      X_UID,
+                                                      SCALE_UID,
+                                                      DX_UID,
+                                                      DSCALE_UID,
+                                                      DBIAS_UID,
+                                                      EPSILON_UID,
+                                                      MEAN_UID,
+                                                      INV_VARIANCE_UID,
+                                                      ioDims,
+                                                      layout,
+                                                      epsilon,
+                                                      normalizedDimCount,
+                                                      DataType::FLOAT,
+                                                      DataType::BFLOAT16,
+                                                      DataType::HALF,
+                                                      DataType::DOUBLE,
+                                                      DataType::DOUBLE,
+                                                      DataType::DOUBLE);
 
-    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuLayernormBwdSignatureKey keyFromNode(

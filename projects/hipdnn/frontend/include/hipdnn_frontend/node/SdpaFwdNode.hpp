@@ -396,7 +396,7 @@ public:
 
         if(o->get_stride().empty())
         {
-            auto oStrides = hipdnn_data_sdk::utilities::generateStrides(o->get_dim());
+            const auto oStrides = hipdnn_data_sdk::utilities::generateStrides(o->get_dim());
             o->set_stride(oStrides);
         }
 
@@ -411,7 +411,8 @@ public:
             }
             if(stats->get_stride().empty())
             {
-                auto statsStrides = hipdnn_data_sdk::utilities::generateStrides(stats->get_dim());
+                const auto statsStrides
+                    = hipdnn_data_sdk::utilities::generateStrides(stats->get_dim());
                 stats->set_stride(statsStrides);
             }
         }

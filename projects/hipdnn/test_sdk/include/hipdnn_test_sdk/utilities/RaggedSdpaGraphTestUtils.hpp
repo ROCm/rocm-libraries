@@ -250,7 +250,7 @@ inline flatbuffers::FlatBufferBuilder
         }
     }
 
-    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    const auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -259,7 +259,7 @@ inline flatbuffers::FlatBufferBuilder
                                      NodeAttributes::SdpaAttributes,
                                      sdpaAttrs.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "SdpaRaggedFwdTestGraph", dataType, dataType, DataType::FLOAT, &tensors, &nodes);
 
     builder.Finish(graph);

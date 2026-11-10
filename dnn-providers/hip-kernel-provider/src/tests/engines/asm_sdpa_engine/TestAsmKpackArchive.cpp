@@ -39,7 +39,7 @@ TEST(TestAsmKpackArchive, FwdTocKeyMi300Variant)
 {
     // Forward builder: insert MI300 variant then strip arch prefix
     std::string coName = "gfx942/fmha_v3_fwd/fwd_hd128_bf16_rtne.co";
-    auto pos = coName.rfind('/');
+    auto const pos = coName.rfind('/');
     coName = coName.substr(0, pos + 1) + "MI300/" + coName.substr(pos + 1);
     EXPECT_EQ(getAsmKernelTocKey(coName), "fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co");
 }
@@ -47,7 +47,7 @@ TEST(TestAsmKpackArchive, FwdTocKeyMi300Variant)
 TEST(TestAsmKpackArchive, FwdTocKeyMi308Variant)
 {
     std::string coName = "gfx942/fmha_v3_fwd/fwd_hd128_bf16_rtne.co";
-    auto pos = coName.rfind('/');
+    auto const pos = coName.rfind('/');
     coName = coName.substr(0, pos + 1) + "MI308/" + coName.substr(pos + 1);
     EXPECT_EQ(getAsmKernelTocKey(coName), "fmha_v3_fwd/MI308/fwd_hd128_bf16_rtne.co");
 }

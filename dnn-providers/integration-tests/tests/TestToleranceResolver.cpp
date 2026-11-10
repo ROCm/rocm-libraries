@@ -42,7 +42,7 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& builder,
         nodes.push_back(CreateNodeDirect(builder, "n", DataType::FLOAT, attr, 0));
     }
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     builder.Finish(graph);
     return fb::GraphWrapper(builder.GetBufferPointer(), builder.GetSize());
@@ -61,14 +61,14 @@ constexpr float kFallback = 1e-3f;
 TEST(TestToleranceResolver, SingleConvFwdMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::ConvolutionFwdAttributes});
+    const auto w = buildGraph(b, {NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kConvFwdFp32);
 }
 
 TEST(TestToleranceResolver, SingleConvFwdOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::ConvolutionFwdAttributes});
+    const auto w = buildGraph(b, {NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kConvFwdFp32);
 }
 
@@ -78,7 +78,7 @@ TEST(TestToleranceResolver, SingleConvFwdOutputOpTolerance)
 TEST(TestToleranceResolver, BnInferenceConvFwdMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(
+    const auto w = buildGraph(
         b,
         {NodeAttributes::BatchnormInferenceAttributes, NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kBnInferenceFp32);
@@ -87,7 +87,7 @@ TEST(TestToleranceResolver, BnInferenceConvFwdMaxAcrossNodes)
 TEST(TestToleranceResolver, BnInferenceConvFwdOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(
+    const auto w = buildGraph(
         b,
         {NodeAttributes::BatchnormInferenceAttributes, NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kConvFwdFp32);
@@ -98,14 +98,14 @@ TEST(TestToleranceResolver, BnInferenceConvFwdOutputOpTolerance)
 TEST(TestToleranceResolver, AllPointwiseMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::PointwiseAttributes});
+    const auto w = buildGraph(b, {NodeAttributes::PointwiseAttributes});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kPointwiseFp32);
 }
 
 TEST(TestToleranceResolver, AllPointwiseOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::PointwiseAttributes});
+    const auto w = buildGraph(b, {NodeAttributes::PointwiseAttributes});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kPointwiseFp32);
 }
 
@@ -114,14 +114,14 @@ TEST(TestToleranceResolver, AllPointwiseOutputOpTolerance)
 TEST(TestToleranceResolver, EmptyGraphMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {});
+    const auto w = buildGraph(b, {});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kFallback);
 }
 
 TEST(TestToleranceResolver, EmptyGraphOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {});
+    const auto w = buildGraph(b, {});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kFallback);
 }
 
@@ -130,14 +130,14 @@ TEST(TestToleranceResolver, EmptyGraphOutputOpTolerance)
 TEST(TestToleranceResolver, UnknownOpMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::NONE});
+    const auto w = buildGraph(b, {NodeAttributes::NONE});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kFallback);
 }
 
 TEST(TestToleranceResolver, UnknownOpOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::NONE});
+    const auto w = buildGraph(b, {NodeAttributes::NONE});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kFallback);
 }
 

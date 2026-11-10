@@ -33,7 +33,7 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& findTensorAttribut
         tensorMap,
     int64_t uid)
 {
-    if(auto tensorAttr = tensorMap.find(uid); tensorAttr != tensorMap.end())
+    if(const auto tensorAttr = tensorMap.find(uid); tensorAttr != tensorMap.end())
     {
         return *tensorAttr->second;
     }

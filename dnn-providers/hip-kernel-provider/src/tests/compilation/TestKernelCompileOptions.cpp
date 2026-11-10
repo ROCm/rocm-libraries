@@ -61,7 +61,7 @@ protected:
             = {CreateTensorAttributesDirect(_fbb, 1, "tensor", dataType, &strides, &dims)};
         const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
-        auto graphOffset
+        auto const graphOffset
             = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(_fbb,
                                                                       "test",
                                                                       DataType::FLOAT,

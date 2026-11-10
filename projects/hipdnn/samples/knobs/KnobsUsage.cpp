@@ -78,7 +78,7 @@ void demonstrateKnobQuery(int64_t engineId, const std::string& engineName, graph
 
     if(error.is_good())
     {
-        auto it = knobMap.find("global.benchmarking");
+        const auto it = knobMap.find("global.benchmarking");
         if(it != knobMap.end())
         {
             std::cout << "    Found 'global.benchmarking': " << it->second.description() << "\n";
@@ -100,7 +100,7 @@ void demonstrateSettingKnobs(int64_t engineId, graph::Graph& graph)
 
     std::cout << "    Settings: global.benchmarking=1, global.workspace_size_limit=64MB\n";
 
-    auto error = graph.create_execution_plan_ext(engineId, settings);
+    const auto error = graph.create_execution_plan_ext(engineId, settings);
     std::cout << "    Execution plan: " << (error.is_good() ? "OK" : error.get_message()) << "\n";
 }
 
@@ -109,7 +109,7 @@ void demonstrateKnobValidation(int64_t engineId, graph::Graph& graph)
     std::cout << "Validating KnobSettings:\n";
 
     std::vector<Knob> knobs;
-    auto error = graph.get_knobs_for_engine(engineId, knobs);
+    const auto error = graph.get_knobs_for_engine(engineId, knobs);
 
     if(!error.is_good())
     {
@@ -176,7 +176,7 @@ int main(int argc, char* argv[])
         hipdnnHandle_t handle = nullptr;
         HIPDNN_CHECK(hipdnnCreate(&handle));
 
-        auto graph = std::make_shared<graph::Graph>();
+        const auto graph = std::make_shared<graph::Graph>();
         graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
@@ -189,14 +189,14 @@ int main(int argc, char* argv[])
         const auto inputType = hipdnn_frontend::DataType::FLOAT;
         const auto intermediateType = hipdnn_frontend::DataType::FLOAT;
         const auto layout = utilities::TensorLayout::NCHW;
-        auto x = createTensor({n, c, h, w}, inputType, layout);
-        auto scale = createTensor({1, c, 1, 1}, intermediateType, layout);
-        auto bias = createTensor({1, c, 1, 1}, intermediateType, layout);
-        auto mean = createTensor({1, c, 1, 1}, intermediateType, layout);
-        auto invVariance = createTensor({1, c, 1, 1}, intermediateType, layout);
+        const auto x = createTensor({n, c, h, w}, inputType, layout);
+        const auto scale = createTensor({1, c, 1, 1}, intermediateType, layout);
+        const auto bias = createTensor({1, c, 1, 1}, intermediateType, layout);
+        const auto mean = createTensor({1, c, 1, 1}, intermediateType, layout);
+        const auto invVariance = createTensor({1, c, 1, 1}, intermediateType, layout);
 
-        auto bnAttributes = graph::BatchnormInferenceAttributes();
-        auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttributes);
+        const auto bnAttributes = graph::BatchnormInferenceAttributes();
+        const auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttributes);
         y->set_output(true);
 
         HIPDNN_FE_CHECK(graph->validate());

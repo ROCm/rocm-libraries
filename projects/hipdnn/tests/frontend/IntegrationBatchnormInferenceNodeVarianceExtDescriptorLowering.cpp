@@ -52,39 +52,39 @@ class IntegrationBnInfVarExtDescriptorLowering : public IntegrationTestFixture
 // graph, and verifies all tensor and operation attributes match.
 TEST_F(IntegrationBnInfVarExtDescriptorLowering, BnInfVarExtGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestBnInfVarExtGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_BN_INF_VAR_EXT_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_BN_INF_VAR_EXT_X_DIMS)).set_stride(toVec(K_BN_INF_VAR_EXT_X_STRIDES));
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(K_BN_INF_VAR_EXT_MEAN_UID).set_name("Mean").set_data_type(DataType::FLOAT);
     mean->set_dim(toVec(K_BN_INF_VAR_EXT_MEAN_DIMS))
         .set_stride(toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
 
-    auto variance = std::make_shared<TensorAttributes>();
+    const auto variance = std::make_shared<TensorAttributes>();
     variance->set_uid(K_BN_INF_VAR_EXT_VARIANCE_UID)
         .set_name("Variance")
         .set_data_type(DataType::FLOAT);
     variance->set_dim(toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS))
         .set_stride(toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_BN_INF_VAR_EXT_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_BN_INF_VAR_EXT_SCALE_DIMS))
         .set_stride(toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(K_BN_INF_VAR_EXT_BIAS_UID).set_name("Bias").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_BN_INF_VAR_EXT_BIAS_DIMS))
         .set_stride(toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_uid(K_BN_INF_VAR_EXT_EPSILON_UID)
         .set_name("Epsilon")
         .set_data_type(DataType::FLOAT);
@@ -95,7 +95,7 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, BnInfVarExtGraphRoundTrip)
     BatchnormInferenceAttributesVarianceExt bnAttrs;
     bnAttrs.set_name("bn_inf_var_ext_op");
 
-    auto y = graph->batchnorm_inference_variance_ext(
+    const auto y = graph->batchnorm_inference_variance_ext(
         x, mean, variance, scale, bias, epsilon, std::move(bnAttrs));
     y->set_uid(K_BN_INF_VAR_EXT_Y_UID).set_output(true).set_name("Y");
 
@@ -181,33 +181,33 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, BnInfVarExtGraphRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationBnInfVarExtDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidBnGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_AUTO_X_DIMS)).set_stride(toVec(K_AUTO_X_STRIDES));
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_name("Mean").set_data_type(DataType::FLOAT);
     mean->set_dim(toVec(K_AUTO_PARAM_DIMS)).set_stride(toVec(K_AUTO_PARAM_STRIDES));
 
-    auto variance = std::make_shared<TensorAttributes>();
+    const auto variance = std::make_shared<TensorAttributes>();
     variance->set_name("Variance").set_data_type(DataType::FLOAT);
     variance->set_dim(toVec(K_AUTO_PARAM_DIMS)).set_stride(toVec(K_AUTO_PARAM_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_AUTO_PARAM_DIMS)).set_stride(toVec(K_AUTO_PARAM_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_name("Bias").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_AUTO_PARAM_DIMS)).set_stride(toVec(K_AUTO_PARAM_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_name("Epsilon").set_data_type(DataType::FLOAT);
     epsilon->set_dim(toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS))
         .set_stride(toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
@@ -215,7 +215,7 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, AutoAssignedUidsPreservedInRoun
 
     const BatchnormInferenceAttributesVarianceExt bnAttrs;
 
-    auto y = graph->batchnorm_inference_variance_ext(
+    const auto y = graph->batchnorm_inference_variance_ext(
         x, mean, variance, scale, bias, epsilon, BatchnormInferenceAttributesVarianceExt{bnAttrs});
     y->set_output(true);
 

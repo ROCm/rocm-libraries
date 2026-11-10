@@ -32,8 +32,8 @@ using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 TEST(TestGpuResampleFwdPlanBuilder, PlanConstruction)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleFwdPlanBuilder<DataType::FLOAT,
@@ -42,7 +42,7 @@ TEST(TestGpuResampleFwdPlanBuilder, PlanConstruction)
                                     DataType::INT32>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
 
     const bool result
         = dynamic_cast<GpuResampleFwdPlan<float, float, float, int32_t>*>(builtPlan.get())
@@ -52,8 +52,8 @@ TEST(TestGpuResampleFwdPlanBuilder, PlanConstruction)
 
 TEST(TestGpuResampleFwdPlanBuilder, IsApplicable)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleFwdPlanBuilder<DataType::FLOAT,
@@ -78,7 +78,7 @@ TEST(TestGpuResampleFwdPlanBuilder, IsApplicable)
 
 TEST(TestGpuResampleFwdPlanBuilder, IsNotApplicableForRaggedTensors)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
 
     const GpuResampleFwdPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,
@@ -86,21 +86,21 @@ TEST(TestGpuResampleFwdPlanBuilder, IsNotApplicableForRaggedTensors)
                                     DataType::UNSET>
         patient;
 
-    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     ASSERT_TRUE(patient.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
 
     auto ragged
         = hipdnn_integration_tests::test_utils::markFirstTensorRagged(builder.GetBufferPointer());
-    auto raggedWrap
+    const auto raggedWrap
         = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
     EXPECT_FALSE(patient.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuResampleFwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleFwdPlanBuilder<DataType::FLOAT,
@@ -114,8 +114,8 @@ TEST(TestGpuResampleFwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 
 TEST(TestGpuResampleFwdPlanBuilder, IsApplicableReturnsFalseForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleFwdPlanBuilder<DataType::FLOAT,
@@ -129,8 +129,8 @@ TEST(TestGpuResampleFwdPlanBuilder, IsApplicableReturnsFalseForWrongAttributesTy
 
 TEST(TestGpuResampleFwdPlanBuilder, IsApplicableFalseWhenOutputTensorMissing)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleFwdPlanBuilder<DataType::FLOAT,
@@ -148,8 +148,8 @@ TEST(TestGpuResampleFwdPlanBuilder, IsApplicableFalseWhenOutputTensorMissing)
 
 TEST(TestGpuResampleFwdPlanBuilder, IsApplicableFalseWhenTensorTypeMismatched)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleFwdPlanBuilder<DataType::HALF,
@@ -170,8 +170,8 @@ TEST(TestGpuResampleFwdPlanBuilder, IsApplicableFalseWhenTensorTypeMismatched)
 
 TEST(TestGpuResampleFwdPlanBuilder, IsApplicableFalseForUnsupportedModes)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleFwdPlanBuilder<DataType::FLOAT,
@@ -196,8 +196,8 @@ TEST(TestGpuResampleFwdPlanBuilder, IsApplicableFalseForUnsupportedModes)
 
 TEST(TestGpuResampleFwdPlanBuilder, IsApplicableFalseWithIndexTensor)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleFwdPlanBuilder<DataType::FLOAT,
@@ -207,8 +207,8 @@ TEST(TestGpuResampleFwdPlanBuilder, IsApplicableFalseWithIndexTensor)
         patient;
     EXPECT_FALSE(patient.isApplicable(graph.getNode(0), graph.getTensorMap()));
 
-    auto builderWithIndex = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
-    auto graphWithIndex = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builderWithIndex = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    const auto graphWithIndex = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builderWithIndex.GetBufferPointer(), builderWithIndex.GetSize());
 
     const GpuResampleFwdPlanBuilder<DataType::FLOAT,
@@ -232,8 +232,8 @@ TEST(TestGpuResampleFwdPlanBuilder, IsApplicableFalseWithIndexTensor)
 
 TEST(TestGpuResampleBwdPlanBuilder, PlanConstruction)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleBwdPlanBuilder<DataType::FLOAT,
@@ -242,7 +242,7 @@ TEST(TestGpuResampleBwdPlanBuilder, PlanConstruction)
                                     DataType::INT32>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
 
     const bool result
         = dynamic_cast<GpuResampleBwdPlan<float, float, float, int32_t>*>(builtPlan.get())
@@ -252,8 +252,8 @@ TEST(TestGpuResampleBwdPlanBuilder, PlanConstruction)
 
 TEST(TestGpuResampleBwdPlanBuilder, IsApplicable)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleBwdPlanBuilder<DataType::FLOAT,
@@ -278,7 +278,7 @@ TEST(TestGpuResampleBwdPlanBuilder, IsApplicable)
 
 TEST(TestGpuResampleBwdPlanBuilder, IsNotApplicableForRaggedTensors)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
 
     const GpuResampleBwdPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,
@@ -286,21 +286,21 @@ TEST(TestGpuResampleBwdPlanBuilder, IsNotApplicableForRaggedTensors)
                                     DataType::INT32>
         patient;
 
-    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     ASSERT_TRUE(patient.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
 
     auto ragged
         = hipdnn_integration_tests::test_utils::markFirstTensorRagged(builder.GetBufferPointer());
-    auto raggedWrap
+    const auto raggedWrap
         = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
     EXPECT_FALSE(patient.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuResampleBwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleBwdPlanBuilder<DataType::FLOAT,
@@ -314,8 +314,8 @@ TEST(TestGpuResampleBwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 
 TEST(TestGpuResampleBwdPlanBuilder, IsApplicableReturnsFalseForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleBwdPlanBuilder<DataType::FLOAT,
@@ -329,8 +329,8 @@ TEST(TestGpuResampleBwdPlanBuilder, IsApplicableReturnsFalseForWrongAttributesTy
 
 TEST(TestGpuResampleBwdPlanBuilder, IsApplicableFalseWhenInputTensorMissing)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleBwdPlanBuilder<DataType::FLOAT,
@@ -348,8 +348,8 @@ TEST(TestGpuResampleBwdPlanBuilder, IsApplicableFalseWhenInputTensorMissing)
 
 TEST(TestGpuResampleBwdPlanBuilder, IsApplicableFalseWhenTensorTypeMismatched)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleBwdPlanBuilder<DataType::HALF,
@@ -370,8 +370,8 @@ TEST(TestGpuResampleBwdPlanBuilder, IsApplicableFalseWhenTensorTypeMismatched)
 
 TEST(TestGpuResampleBwdPlanBuilder, IsApplicableFalseForUnsupportedModes)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleBwdPlanBuilder<DataType::FLOAT,
@@ -396,9 +396,9 @@ TEST(TestGpuResampleBwdPlanBuilder, IsApplicableFalseForUnsupportedModes)
 
 TEST(TestGpuResampleBwdPlanBuilder, IsApplicableFalseWithIndexTensor)
 {
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(false, ResampleMode::MAXPOOL);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleBwdPlanBuilder<DataType::FLOAT,
@@ -408,8 +408,8 @@ TEST(TestGpuResampleBwdPlanBuilder, IsApplicableFalseWithIndexTensor)
         patient;
     EXPECT_FALSE(patient.isApplicable(graph.getNode(0), graph.getTensorMap()));
 
-    auto builderWithIndex = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(true);
-    auto graphWithIndex = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builderWithIndex = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(true);
+    const auto graphWithIndex = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builderWithIndex.GetBufferPointer(), builderWithIndex.GetSize());
 
     const GpuResampleBwdPlanBuilder<DataType::FLOAT,
@@ -478,7 +478,7 @@ void runResampleFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
                 builder, INDEX_UID, "index", indexDataType, &yStrides, &yDims));
     }
 
-    auto resampleAttributes
+    const auto resampleAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateResampleFwdAttributesDirect(
             builder,
             X_UID,
@@ -500,7 +500,7 @@ void runResampleFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes,
         resampleAttributes.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         computeDataType,
@@ -628,7 +628,7 @@ void runResampleBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& dxDims,
                 builder, INDEX_UID, "index", indexDataType, &dyStrides, &dyDims));
     }
 
-    auto resampleAttributes
+    const auto resampleAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateResampleBwdAttributesDirect(
             builder,
             DY_UID,
@@ -649,7 +649,7 @@ void runResampleBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& dxDims,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleBwdAttributes,
         resampleAttributes.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         computeDataType,

@@ -14,42 +14,42 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, CreateBatchnormInferenceVarian
     batchnormAttributes.set_scale(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
     batchnormAttributes.set_bias(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
 
-    auto inputTensor = batchnormAttributes.get_x();
+    const auto inputTensor = batchnormAttributes.get_x();
     inputTensor->set_uid(1)
         .set_name("InputTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto outputTensor = batchnormAttributes.get_y();
+    const auto outputTensor = batchnormAttributes.get_y();
     outputTensor->set_uid(2)
         .set_name("OutputTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto meanTensor = batchnormAttributes.get_mean();
+    const auto meanTensor = batchnormAttributes.get_mean();
     meanTensor->set_uid(3)
         .set_name("MeanTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto varianceTensor = batchnormAttributes.get_variance();
+    const auto varianceTensor = batchnormAttributes.get_variance();
     varianceTensor->set_uid(4)
         .set_name("VarianceTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto scaleTensor = batchnormAttributes.get_scale();
+    const auto scaleTensor = batchnormAttributes.get_scale();
     scaleTensor->set_uid(5)
         .set_name("ScaleTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto biasTensor = batchnormAttributes.get_bias();
+    const auto biasTensor = batchnormAttributes.get_bias();
     biasTensor->set_uid(6)
         .set_name("BiasTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -104,7 +104,7 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, SetXWithMove)
 
     batchnormAttributes.set_x(std::move(xTensor));
 
-    auto retrieved = batchnormAttributes.get_x();
+    const auto retrieved = batchnormAttributes.get_x();
     EXPECT_EQ(retrieved->get_uid(), 1);
     EXPECT_EQ(retrieved->get_name(), "XTensor");
 
@@ -123,7 +123,7 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, SetMeanWithMove)
 
     batchnormAttributes.set_mean(std::move(meanTensor));
 
-    auto retrieved = batchnormAttributes.get_mean();
+    const auto retrieved = batchnormAttributes.get_mean();
     EXPECT_EQ(retrieved->get_uid(), 2);
     EXPECT_EQ(retrieved->get_name(), "MeanTensor");
 
@@ -142,7 +142,7 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, SetVarianceWithMove)
 
     batchnormAttributes.set_variance(std::move(varianceTensor));
 
-    auto retrieved = batchnormAttributes.get_variance();
+    const auto retrieved = batchnormAttributes.get_variance();
     EXPECT_EQ(retrieved->get_uid(), 3);
     EXPECT_EQ(retrieved->get_name(), "VarianceTensor");
 
@@ -161,7 +161,7 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, SetScaleWithMove)
 
     batchnormAttributes.set_scale(std::move(scaleTensor));
 
-    auto retrieved = batchnormAttributes.get_scale();
+    const auto retrieved = batchnormAttributes.get_scale();
     EXPECT_EQ(retrieved->get_uid(), 4);
     EXPECT_EQ(retrieved->get_name(), "ScaleTensor");
 
@@ -180,7 +180,7 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, SetBiasWithMove)
 
     batchnormAttributes.set_bias(std::move(biasTensor));
 
-    auto retrieved = batchnormAttributes.get_bias();
+    const auto retrieved = batchnormAttributes.get_bias();
     EXPECT_EQ(retrieved->get_uid(), 5);
     EXPECT_EQ(retrieved->get_name(), "BiasTensor");
 
@@ -199,7 +199,7 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, SetYWithMove)
 
     batchnormAttributes.set_y(std::move(yTensor));
 
-    auto retrieved = batchnormAttributes.get_y();
+    const auto retrieved = batchnormAttributes.get_y();
     EXPECT_EQ(retrieved->get_uid(), 6);
     EXPECT_EQ(retrieved->get_name(), "YTensor");
 
@@ -280,7 +280,7 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, LogicalAndStrictEquality)
     hipdnn_frontend::graph::BatchnormInferenceAttributesVarianceExt attr1;
     attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x1->set_uid(10)
         .set_name("InputX")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -288,7 +288,7 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, LogicalAndStrictEquality)
         .set_stride({150528, 50176, 224, 1});
     attr1.set_x(x1);
 
-    auto epsilon1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto epsilon1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilon1->set_uid(20)
         .set_name("Eps")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -299,7 +299,7 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, LogicalAndStrictEquality)
     hipdnn_frontend::graph::BatchnormInferenceAttributesVarianceExt attr2;
     attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x2->set_uid(10)
         .set_name("InputX")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -307,7 +307,7 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, LogicalAndStrictEquality)
         .set_stride({150528, 50176, 224, 1});
     attr2.set_x(x2);
 
-    auto epsilon2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto epsilon2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilon2->set_uid(20)
         .set_name("Eps")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -325,7 +325,7 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, LogicalAndStrictEquality)
     attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT); // Revert
 
     // Test Strict Mismatch (Diverging UID)
-    auto mismatchedEpsilon = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto mismatchedEpsilon = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     mismatchedEpsilon->set_uid(999)
         .set_name("Eps")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)

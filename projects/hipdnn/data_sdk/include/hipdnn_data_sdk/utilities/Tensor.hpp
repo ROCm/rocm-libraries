@@ -358,7 +358,7 @@ public:
             const auto& dims = tensor.get().dims();
             for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
             {
-                auto dimIdx = static_cast<size_t>(dim);
+                const auto dimIdx = static_cast<size_t>(dim);
                 indices[dimIdx]++;
                 if(indices[dimIdx] < dims[dimIdx])
                 {

@@ -23,7 +23,7 @@ public:
         // compilation options. A nullptr will be returned if this fails, in which case
         // create the compilation objects directly, which will generate a more helpful
         // exception if the program cannot be created.
-        auto program = moduleCache().getOrLoad(kernelFileName, options);
+        auto const program = moduleCache().getOrLoad(kernelFileName, options);
         if(program)
         {
             return std::make_unique<compilation::CompiledProgram>(program);

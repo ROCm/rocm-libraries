@@ -216,9 +216,9 @@ void checkRaggedVsDense(const std::vector<int64_t>& seqQ,
         {
             continue; // nothing to check, and the dense reference rejects empty dims
         }
-        auto qd = extractDenseSlice(q, b, sQ);
-        auto kd = extractDenseSlice(k, b, sKv);
-        auto vd = extractDenseSlice(v, b, sKv);
+        const auto qd = extractDenseSlice(q, b, sQ);
+        const auto kd = extractDenseSlice(k, b, sKv);
+        const auto vd = extractDenseSlice(v, b, sKv);
         Tensor<float> oDense({1, numHeads, sQ, headDimV});
         Tensor<float> lseDense({1, numHeads, sQ, 1});
 
@@ -317,9 +317,9 @@ void checkRaggedFp8VsDense(const std::vector<int64_t>& seqQ,
     {
         const auto sQ = seqQ[static_cast<size_t>(b)];
         const auto sKv = seqKv[static_cast<size_t>(b)];
-        auto qd = dequantDenseSlice(q, b, sQ, descaleQ, numHeads / numHeadsKv);
-        auto kd = dequantDenseSlice(k, b, sKv, descaleK, 1);
-        auto vd = dequantDenseSlice(v, b, sKv, descaleV, 1);
+        const auto qd = dequantDenseSlice(q, b, sQ, descaleQ, numHeads / numHeadsKv);
+        const auto kd = dequantDenseSlice(k, b, sKv, descaleK, 1);
+        const auto vd = dequantDenseSlice(v, b, sKv, descaleV, 1);
         Tensor<bfloat16> oDense({1, numHeads, sQ, headDim});
         CpuFpReferenceSdpa::forward<float, float, float, bfloat16, float>(
             qd,
@@ -1027,8 +1027,8 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, TokenOffsetsMatchElementOffsets)
     std::vector<float> oTok(oElem.size(), 0.0f);
     std::vector<float> lseTok(lseElem.size(), 0.0f);
     {
-        auto qoTable = makeRaggedOffsetAux(cumQ, 1);
-        auto kvTable = makeRaggedOffsetAux(cumKv, 1);
+        const auto qoTable = makeRaggedOffsetAux(cumQ, 1);
+        const auto kvTable = makeRaggedOffsetAux(cumKv, 1);
         const auto wrap = [](float* buf,
                              const std::vector<int64_t>& dims,
                              const std::shared_ptr<ITensor>& table,
@@ -1234,9 +1234,9 @@ DenseRun
         return seqLen;
     };
 
-    auto qd = fillDense(q, ROLE_Q);
-    auto kd = fillDense(k, ROLE_K);
-    auto vd = fillDense(v, ROLE_V);
+    const auto qd = fillDense(q, ROLE_Q);
+    const auto kd = fillDense(k, ROLE_K);
+    const auto vd = fillDense(v, ROLE_V);
     auto seqQ = seqLens(q);
     auto seqKv = seqLens(k);
     DenseRun run{Tensor<float>({q.dims[0], q.dims[1], q.dims[2], v.dims[3]}),

@@ -38,28 +38,28 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(ln_constants::K_LAYERNORM_TENSOR_X_UID)
             .set_name("X")
             .set_data_type(DataType::FLOAT)
             .set_dim(toVec(ln_constants::K_LAYERNORM_TENSOR_X_DIMS))
             .set_stride(toVec(ln_constants::K_LAYERNORM_TENSOR_X_STRIDES));
 
-        auto scale = std::make_shared<TensorAttributes>();
+        const auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(ln_constants::K_LAYERNORM_TENSOR_SCALE_UID)
             .set_name("SCALE")
             .set_data_type(DataType::FLOAT)
             .set_dim(toVec(ln_constants::K_LAYERNORM_TENSOR_SCALE_DIMS))
             .set_stride(toVec(ln_constants::K_LAYERNORM_TENSOR_SCALE_STRIDES));
 
-        auto bias = std::make_shared<TensorAttributes>();
+        const auto bias = std::make_shared<TensorAttributes>();
         bias->set_uid(ln_constants::K_LAYERNORM_TENSOR_BIAS_UID)
             .set_name("BIAS")
             .set_data_type(DataType::FLOAT)
             .set_dim(toVec(ln_constants::K_LAYERNORM_TENSOR_BIAS_DIMS))
             .set_stride(toVec(ln_constants::K_LAYERNORM_TENSOR_BIAS_STRIDES));
 
-        auto epsilon = std::make_shared<TensorAttributes>();
+        const auto epsilon = std::make_shared<TensorAttributes>();
         epsilon->set_uid(ln_constants::K_LAYERNORM_TENSOR_EPSILON_UID)
             .set_name("EPSILON")
             .set_data_type(DataType::FLOAT)
@@ -88,9 +88,9 @@ protected:
 // and verifies all operation attributes and tensors.
 TEST_F(IntegrationLayerNormDescriptorLifting, LayernormTrainingRoundTripViaCApi)
 {
-    auto graph = buildTrainingGraph();
+    const auto graph = buildTrainingGraph();
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -180,34 +180,34 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormTrainingRoundTripViaCApi)
 // and verifies all operation attributes and that optional tensors are absent.
 TEST_F(IntegrationLayerNormDescriptorLifting, LayernormInferenceRoundTripViaCApi)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("LayernormInferenceLiftingTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(ln_constants::K_LAYERNORM_TENSOR_X_UID)
         .set_name("X")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(ln_constants::K_LAYERNORM_TENSOR_X_DIMS))
         .set_stride(toVec(ln_constants::K_LAYERNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(ln_constants::K_LAYERNORM_TENSOR_SCALE_UID)
         .set_name("SCALE")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(ln_constants::K_LAYERNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(ln_constants::K_LAYERNORM_TENSOR_SCALE_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(ln_constants::K_LAYERNORM_TENSOR_BIAS_UID)
         .set_name("BIAS")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(ln_constants::K_LAYERNORM_TENSOR_BIAS_DIMS))
         .set_stride(toVec(ln_constants::K_LAYERNORM_TENSOR_BIAS_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_uid(ln_constants::K_LAYERNORM_TENSOR_EPSILON_UID)
         .set_name("EPSILON")
         .set_data_type(DataType::FLOAT)
@@ -226,11 +226,11 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormInferenceRoundTripViaCApi
     EXPECT_EQ(mean, nullptr);
     EXPECT_EQ(invVariance, nullptr);
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify tensors by UID (5 tensors: x, scale, bias, epsilon, y — no mean or inv_variance)
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 5u);
 
     ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_X_UID), 0u);
@@ -262,10 +262,10 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormInferenceRoundTripViaCApi
 // layernorm node attributes after lifting.
 TEST_F(IntegrationLayerNormDescriptorLifting, LayernormTensorSharingPreserved)
 {
-    auto graph = buildTrainingGraph();
+    const auto graph = buildTrainingGraph();
     graph->set_name("LayernormTensorSharingTest");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -297,10 +297,10 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormTensorSharingPreserved)
 // the layernorm operation survives the FlatBuffer-direct deserialization path.
 TEST_F(IntegrationLayerNormDescriptorLifting, LayernormLiftWithoutFinalization)
 {
-    auto graph = buildTrainingGraph();
+    const auto graph = buildTrainingGraph();
     graph->set_name("LayernormFlatBufferLiftTest");
 
-    auto liftedGraph = liftGraphWithoutFinalization(*graph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*graph);
     ASSERT_NE(liftedGraph, nullptr);
 
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -342,7 +342,7 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormLiftWithoutFinalization)
 // Exercises the deserialize() path with a handle for a layernorm graph.
 TEST_F(IntegrationLayerNormDescriptorLifting, LayernormDeserializeViaBackendWithHandle)
 {
-    auto graph = buildTrainingGraph();
+    const auto graph = buildTrainingGraph();
     graph->set_name("LayernormDeserializeTest");
 
     auto result = graph->validate();
@@ -352,7 +352,7 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormDeserializeViaBackendWith
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
     // Create a new graph and use deserialize with handle
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 

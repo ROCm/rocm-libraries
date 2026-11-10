@@ -175,7 +175,7 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
         detail::throwOnHipError(hipMemset(fp8.amaxS, 0, sizeof(float)), "hipMemset");
     }
 
-    auto totalElements = batch * numHeads * seqQ * headDimV;
+    const auto totalElements = batch * numHeads * seqQ * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 

@@ -19,14 +19,14 @@ ReductionAttributes makeValidAttrs()
     ReductionAttributes attrs;
     attrs.set_mode(ReductionMode::ADD);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("InputTensor")
         .set_data_type(DataType::FLOAT)
         .set_dim({4, 8})
         .set_stride({8, 1});
 
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -44,7 +44,7 @@ TEST(TestReductionNode, ValidNodePreValidates)
     const GraphAttributes graphAttributes;
     const ReductionNode node(makeValidAttrs(), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
@@ -57,7 +57,7 @@ TEST(TestReductionNode, MissingXError)
     const GraphAttributes graphAttributes;
     const ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
@@ -70,7 +70,7 @@ TEST(TestReductionNode, MissingYError)
     const GraphAttributes graphAttributes;
     const ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
@@ -84,7 +84,7 @@ TEST(TestReductionNode, MissingModeError)
     const GraphAttributes graphAttributes;
     const ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
@@ -98,7 +98,7 @@ TEST(TestReductionNode, NotSetModeError)
     const GraphAttributes graphAttributes;
     const ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
@@ -108,7 +108,7 @@ TEST(TestReductionNode, InferPropertiesNode)
     auto attrs = makeValidAttrs();
     ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
@@ -118,19 +118,19 @@ class TestReductionNodeAllModes : public ::testing::TestWithParam<ReductionMode>
 
 TEST_P(TestReductionNodeAllModes, ValidNodePreValidates)
 {
-    auto mode = GetParam();
+    const auto mode = GetParam();
 
     ReductionAttributes attrs;
     attrs.set_mode(mode);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("InputTensor")
         .set_data_type(DataType::FLOAT)
         .set_dim({4, 8})
         .set_stride({8, 1});
 
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -143,7 +143,7 @@ TEST_P(TestReductionNodeAllModes, ValidNodePreValidates)
     const GraphAttributes graphAttributes;
     const ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK) << "Mode " << static_cast<int>(mode) << " should be valid";
 }
 
@@ -164,10 +164,10 @@ TEST(TestReductionNode, RankMismatchError)
     ReductionAttributes attrs;
     attrs.set_mode(ReductionMode::ADD);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_data_type(DataType::FLOAT).set_dim({4, 8, 16}).set_stride({128, 16, 1});
 
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2).set_data_type(DataType::FLOAT).set_dim({1, 8}).set_stride({8, 1});
 
     attrs.set_x(x);
@@ -176,7 +176,7 @@ TEST(TestReductionNode, RankMismatchError)
     const GraphAttributes graphAttributes;
     const ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -185,11 +185,11 @@ TEST(TestReductionNode, OutputDimExceedsInputError)
     ReductionAttributes attrs;
     attrs.set_mode(ReductionMode::ADD);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_data_type(DataType::FLOAT).set_dim({4, 8}).set_stride({8, 1});
 
     // Y dim[1] = 16 > X dim[1] = 8
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2).set_data_type(DataType::FLOAT).set_dim({1, 16}).set_stride({16, 1});
 
     attrs.set_x(x);
@@ -198,7 +198,7 @@ TEST(TestReductionNode, OutputDimExceedsInputError)
     const GraphAttributes graphAttributes;
     const ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -207,11 +207,11 @@ TEST(TestReductionNode, NoReductionDimError)
     ReductionAttributes attrs;
     attrs.set_mode(ReductionMode::ADD);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_data_type(DataType::FLOAT).set_dim({4, 8}).set_stride({8, 1});
 
     // Y dims identical to X — not a reduction
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2).set_data_type(DataType::FLOAT).set_dim({4, 8}).set_stride({8, 1});
 
     attrs.set_x(x);
@@ -220,7 +220,7 @@ TEST(TestReductionNode, NoReductionDimError)
     const GraphAttributes graphAttributes;
     const ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -229,14 +229,14 @@ TEST(TestReductionNode, PartialReductionValid)
     ReductionAttributes attrs;
     attrs.set_mode(ReductionMode::ADD);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 8, 16, 64})
         .set_stride({8192, 1024, 64, 1});
 
     // Reduce last two dims to 1
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2).set_data_type(DataType::FLOAT).set_dim({2, 8, 1, 1}).set_stride({8, 1, 1, 1});
 
     attrs.set_x(x);
@@ -245,7 +245,7 @@ TEST(TestReductionNode, PartialReductionValid)
     const GraphAttributes graphAttributes;
     const ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
@@ -254,11 +254,11 @@ TEST(TestReductionNode, ReducedDimNotOneError)
     ReductionAttributes attrs;
     attrs.set_mode(ReductionMode::ADD);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_data_type(DataType::FLOAT).set_dim({4, 8}).set_stride({8, 1});
 
     // Y dim[0] = 2 < X dim[0] = 4, but not 1
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2).set_data_type(DataType::FLOAT).set_dim({2, 8}).set_stride({8, 1});
 
     attrs.set_x(x);
@@ -267,7 +267,7 @@ TEST(TestReductionNode, ReducedDimNotOneError)
     const GraphAttributes graphAttributes;
     const ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -277,10 +277,10 @@ TEST(TestReductionNode, NoDimsSkipsDimValidation)
     ReductionAttributes attrs;
     attrs.set_mode(ReductionMode::ADD);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_data_type(DataType::FLOAT);
 
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2).set_data_type(DataType::FLOAT);
 
     attrs.set_x(x);
@@ -289,6 +289,6 @@ TEST(TestReductionNode, NoDimsSkipsDimValidation)
     const GraphAttributes graphAttributes;
     const ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 }

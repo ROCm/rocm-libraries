@@ -119,7 +119,8 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
         }
         throwIfNull(numEngines);
 
-        auto allEngineIds = std::vector<int64_t>({hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID});
+        auto const allEngineIds
+            = std::vector<int64_t>({hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID});
         if(allEngineIds.size() > std::numeric_limits<uint32_t>::max())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -133,7 +134,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
         else
         {
             *numEngines = 0;
-            for(auto engineId : allEngineIds)
+            for(auto const engineId : allEngineIds)
             {
                 if(*numEngines == maxEngines)
                 {
@@ -246,10 +247,11 @@ hipdnnPluginStatus_t
         auto& engineManager = handle->getEngineManager();
         GraphWrapper const opGraphWrapper(opGraph->ptr, opGraph->size);
 
-        auto applicableEngines = engineManager.getApplicableEngineIds(*handle, opGraphWrapper);
+        auto const applicableEngines
+            = engineManager.getApplicableEngineIds(*handle, opGraphWrapper);
 
         *numEngines = 0;
-        for(auto& engineId : applicableEngines)
+        for(auto const& engineId : applicableEngines)
         {
             if(*numEngines == maxEngines)
             {
@@ -327,7 +329,7 @@ hipdnnPluginStatus_t
         throwIfNull(opGraph);
         throwIfNull(workspaceSize);
 
-        auto& engineManager = handle->getEngineManager();
+        auto const& engineManager = handle->getEngineManager();
 
         EngineConfigWrapper const engineConfigWrapper(engineConfig->ptr, engineConfig->size);
         GraphWrapper const opGraphWrapper(opGraph->ptr, opGraph->size);
@@ -358,7 +360,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextImpl(
         GraphWrapper const opGraphWrapper(opGraph->ptr, opGraph->size);
         EngineConfigWrapper const engineConfigWrapper(engineConfig->ptr, engineConfig->size);
 
-        auto& engineManager = handle->getEngineManager();
+        auto const& engineManager = handle->getEngineManager();
 
         auto context = new HipdnnEnginePluginExecutionContext;
 

@@ -230,7 +230,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, DifferentLayoutsSameLogicalVa
             {
                 for(int w = 0; w < 5; ++w)
                 {
-                    auto value = static_cast<float>((n * 60) + (c * 20) + (h * 5) + w);
+                    const auto value = static_cast<float>((n * 60) + (c * 20) + (h * 5) + w);
                     tensorNchw.setHostValue(value, n, c, h, w);
                     tensorNhwc.setHostValue(value, n, c, h, w);
                 }
@@ -332,7 +332,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, SparseTensor)
         {
             for(int k = 0; k < 2; ++k)
             {
-                auto value = static_cast<float>((i * 4) + (j * 2) + k);
+                const auto value = static_cast<float>((i * 4) + (j * 2) + k);
                 tensor1.setHostValue(value, i, j, k);
                 tensor2.setHostValue(value, i, j, k);
             }

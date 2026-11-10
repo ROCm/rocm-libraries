@@ -28,7 +28,7 @@ TEST_F(TestHipblasltHipdnnEnginePluginHandle, DefaultConstruction)
 TEST_F(TestHipblasltHipdnnEnginePluginHandle, StoreDetachedBuffer)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto createdString = builder.CreateString("test");
+    auto const createdString = builder.CreateString("test");
     builder.Finish(createdString);
     auto buffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     const void* ptr = reinterpret_cast<const void*>(0x12354);
@@ -42,7 +42,7 @@ TEST_F(TestHipblasltHipdnnEnginePluginHandle, StoreDetachedBuffer)
 TEST_F(TestHipblasltHipdnnEnginePluginHandle, RemoveDetachedBuffer)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto createdString = builder.CreateString("test");
+    auto const createdString = builder.CreateString("test");
     builder.Finish(createdString);
     auto buffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     const void* ptr = reinterpret_cast<const void*>(0x12354);
@@ -65,13 +65,13 @@ TEST_F(TestHipblasltHipdnnEnginePluginHandle, RemoveNonExistentBuffer)
 TEST_F(TestHipblasltHipdnnEnginePluginHandle, MultipleBuffers)
 {
     flatbuffers::FlatBufferBuilder builder1;
-    auto createdString1 = builder1.CreateString("test");
+    auto const createdString1 = builder1.CreateString("test");
     builder1.Finish(createdString1);
     auto buffer1 = std::make_unique<flatbuffers::DetachedBuffer>(builder1.Release());
     const void* ptr1 = reinterpret_cast<const void*>(0x12354);
 
     flatbuffers::FlatBufferBuilder builder2;
-    auto createdString2 = builder2.CreateString("test2");
+    auto const createdString2 = builder2.CreateString("test2");
     builder2.Finish(createdString2);
     auto buffer2 = std::make_unique<flatbuffers::DetachedBuffer>(builder2.Release());
     const void* ptr2 = reinterpret_cast<const void*>(0x54311);

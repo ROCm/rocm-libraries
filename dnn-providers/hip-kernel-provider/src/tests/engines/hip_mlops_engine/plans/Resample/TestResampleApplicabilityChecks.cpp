@@ -85,7 +85,7 @@ flatbuffers::FlatBufferBuilder createResampleFwdGraph(const ResampleGraphConfig&
         flatbufferGenerateIndex = ::flatbuffers::Optional<bool>(generateIndex);
     }
 
-    auto resampleAttr = data_objects::CreateResampleFwdAttributesDirect(
+    auto const resampleAttr = data_objects::CreateResampleFwdAttributesDirect(
         builder,
         1,
         2,
@@ -106,13 +106,13 @@ flatbuffers::FlatBufferBuilder createResampleFwdGraph(const ResampleGraphConfig&
                                        data_objects::NodeAttributes::ResampleFwdAttributes,
                                        resampleAttr.Union()));
 
-    auto graphOffset = data_objects::CreateGraphDirect(builder,
-                                                       "test",
-                                                       data_objects::DataType::FLOAT,
-                                                       data_objects::DataType::FLOAT,
-                                                       data_objects::DataType::FLOAT,
-                                                       &tensorAttributes,
-                                                       &nodes);
+    auto const graphOffset = data_objects::CreateGraphDirect(builder,
+                                                             "test",
+                                                             data_objects::DataType::FLOAT,
+                                                             data_objects::DataType::FLOAT,
+                                                             data_objects::DataType::FLOAT,
+                                                             &tensorAttributes,
+                                                             &nodes);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -145,7 +145,7 @@ flatbuffers::FlatBufferBuilder createResampleBwdGraph(const ResampleBwdGraphConf
             builder, 3, "index", config.indexType, &config.indexStrides, &config.indexDims));
     }
 
-    auto resampleAttr = data_objects::CreateResampleBwdAttributesDirect(
+    auto const resampleAttr = data_objects::CreateResampleBwdAttributesDirect(
         builder,
         1,
         2,
@@ -165,13 +165,13 @@ flatbuffers::FlatBufferBuilder createResampleBwdGraph(const ResampleBwdGraphConf
                                        data_objects::NodeAttributes::ResampleBwdAttributes,
                                        resampleAttr.Union()));
 
-    auto graphOffset = data_objects::CreateGraphDirect(builder,
-                                                       "test",
-                                                       data_objects::DataType::FLOAT,
-                                                       data_objects::DataType::FLOAT,
-                                                       data_objects::DataType::FLOAT,
-                                                       &tensorAttributes,
-                                                       &nodes);
+    auto const graphOffset = data_objects::CreateGraphDirect(builder,
+                                                             "test",
+                                                             data_objects::DataType::FLOAT,
+                                                             data_objects::DataType::FLOAT,
+                                                             data_objects::DataType::FLOAT,
+                                                             &tensorAttributes,
+                                                             &nodes);
     builder.Finish(graphOffset);
     return builder;
 }

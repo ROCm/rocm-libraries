@@ -64,11 +64,11 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto input0 = std::make_shared<TensorAttributes>();
+        const auto input0 = std::make_shared<TensorAttributes>();
         input0->set_uid(K_CUSTOM_OP_INPUT_UID_0).set_name("input0").set_data_type(DataType::FLOAT);
         input0->set_dim({2, 3}).set_stride({3, 1});
 
-        auto input1 = std::make_shared<TensorAttributes>();
+        const auto input1 = std::make_shared<TensorAttributes>();
         input1->set_uid(K_CUSTOM_OP_INPUT_UID_1).set_name("input1").set_data_type(DataType::FLOAT);
         input1->set_dim({2, 3}).set_stride({3, 1});
 
@@ -77,7 +77,7 @@ protected:
             .set_custom_op_id(K_CUSTOM_OP_ID)
             .set_data(K_CUSTOM_OP_OPAQUE_DATA);
 
-        auto outputs = graph->custom_op({input0, input1}, 0, attrs);
+        const auto outputs = graph->custom_op({input0, input1}, 0, attrs);
         EXPECT_EQ(outputs.size(), 0u);
 
         return graph;
@@ -95,11 +95,11 @@ protected:
             .set_intermediate_data_type(intermediateType)
             .set_io_data_type(ioType);
 
-        auto input0 = std::make_shared<TensorAttributes>();
+        const auto input0 = std::make_shared<TensorAttributes>();
         input0->set_uid(K_CUSTOM_OP_INPUT_UID_0).set_name("input0").set_data_type(DataType::FLOAT);
         input0->set_dim({2, 3}).set_stride({3, 1});
 
-        auto input1 = std::make_shared<TensorAttributes>();
+        const auto input1 = std::make_shared<TensorAttributes>();
         input1->set_uid(K_CUSTOM_OP_INPUT_UID_1).set_name("input1").set_data_type(DataType::FLOAT);
         input1->set_dim({2, 3}).set_stride({3, 1});
 
@@ -127,9 +127,9 @@ protected:
 // validation of graph data types, tensor attributes, and custom op parameters.
 TEST_F(IntegrationCustomOpDescriptorLifting, BasicCustomOpRoundTrip)
 {
-    auto originalGraph = buildCustomOpGraph();
+    const auto originalGraph = buildCustomOpGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -144,7 +144,7 @@ TEST_F(IntegrationCustomOpDescriptorLifting, BasicCustomOpRoundTrip)
 
     // Verify input0 tensor
     ASSERT_NE(tensorMap.count(K_CUSTOM_OP_INPUT_UID_0), 0u);
-    auto liftedInput0 = tensorMap[K_CUSTOM_OP_INPUT_UID_0];
+    const auto liftedInput0 = tensorMap[K_CUSTOM_OP_INPUT_UID_0];
     EXPECT_EQ(liftedInput0->get_uid(), K_CUSTOM_OP_INPUT_UID_0);
     EXPECT_EQ(liftedInput0->get_name(), "input0");
     EXPECT_EQ(liftedInput0->get_dim(), (std::vector<int64_t>{2, 3}));
@@ -153,7 +153,7 @@ TEST_F(IntegrationCustomOpDescriptorLifting, BasicCustomOpRoundTrip)
 
     // Verify input1 tensor
     ASSERT_NE(tensorMap.count(K_CUSTOM_OP_INPUT_UID_1), 0u);
-    auto liftedInput1 = tensorMap[K_CUSTOM_OP_INPUT_UID_1];
+    const auto liftedInput1 = tensorMap[K_CUSTOM_OP_INPUT_UID_1];
     EXPECT_EQ(liftedInput1->get_uid(), K_CUSTOM_OP_INPUT_UID_1);
     EXPECT_EQ(liftedInput1->get_name(), "input1");
     EXPECT_EQ(liftedInput1->get_dim(), (std::vector<int64_t>{2, 3}));
@@ -161,7 +161,7 @@ TEST_F(IntegrationCustomOpDescriptorLifting, BasicCustomOpRoundTrip)
 
     // Verify output0 tensor
     ASSERT_NE(tensorMap.count(K_CUSTOM_OP_OUTPUT_UID_0), 0u);
-    auto liftedOutput0 = tensorMap[K_CUSTOM_OP_OUTPUT_UID_0];
+    const auto liftedOutput0 = tensorMap[K_CUSTOM_OP_OUTPUT_UID_0];
     EXPECT_EQ(liftedOutput0->get_uid(), K_CUSTOM_OP_OUTPUT_UID_0);
     EXPECT_EQ(liftedOutput0->get_name(), "output0");
     EXPECT_EQ(liftedOutput0->get_dim(), (std::vector<int64_t>{2, 3}));
@@ -194,9 +194,9 @@ TEST_F(IntegrationCustomOpDescriptorLifting, BasicCustomOpRoundTrip)
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationCustomOpDescriptorLifting, CustomOpTensorSharingPreserved)
 {
-    auto originalGraph = buildCustomOpGraph();
+    const auto originalGraph = buildCustomOpGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -220,18 +220,18 @@ TEST_F(IntegrationCustomOpDescriptorLifting, CustomOpTensorSharingPreserved)
 // survive the round trip and are all distinct.
 TEST_F(IntegrationCustomOpDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AutoUidCustomOpLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
     // Create tensors without explicit UIDs (auto-assigned)
-    auto input0 = std::make_shared<TensorAttributes>();
+    const auto input0 = std::make_shared<TensorAttributes>();
     input0->set_name("input0").set_data_type(DataType::FLOAT);
     input0->set_dim({2, 3}).set_stride({3, 1});
 
-    auto input1 = std::make_shared<TensorAttributes>();
+    const auto input1 = std::make_shared<TensorAttributes>();
     input1->set_name("input1").set_data_type(DataType::FLOAT);
     input1->set_dim({2, 3}).set_stride({3, 1});
 
@@ -245,10 +245,10 @@ TEST_F(IntegrationCustomOpDescriptorLifting, AutoAssignedUidsPreservedInRoundTri
     outputs[0]->set_output(true).set_name("output0");
     outputs[0]->set_dim({2, 3}).set_stride({3, 1}).set_data_type(DataType::FLOAT);
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 3u)
         << "Expected 3 tensors in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
@@ -289,9 +289,9 @@ TEST_F(IntegrationCustomOpDescriptorLifting, AutoAssignedUidsPreservedInRoundTri
 // all custom op fields survive the FlatBuffer-direct path.
 TEST_F(IntegrationCustomOpDescriptorLifting, CustomOpLiftWithoutFinalization)
 {
-    auto originalGraph = buildCustomOpGraph();
+    const auto originalGraph = buildCustomOpGraph();
 
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -335,13 +335,13 @@ TEST_F(IntegrationCustomOpDescriptorLifting, CustomOpLiftWithoutFinalization)
 // preserves tensor counts and UIDs correctly.
 TEST_F(IntegrationCustomOpDescriptorLifting, SingleInputTwoOutputsRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("SingleInputTwoOutputsTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto input0 = std::make_shared<TensorAttributes>();
+    const auto input0 = std::make_shared<TensorAttributes>();
     input0->set_uid(K_CUSTOM_OP_INPUT_UID_0).set_name("input0").set_data_type(DataType::FLOAT);
     input0->set_dim({2, 3}).set_stride({3, 1});
 
@@ -367,11 +367,11 @@ TEST_F(IntegrationCustomOpDescriptorLifting, SingleInputTwoOutputsRoundTrip)
         .set_stride({3, 1})
         .set_data_type(DataType::FLOAT);
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify 3 tensors: 1 input + 2 outputs
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 3u);
 
     ASSERT_NE(tensorMap.count(K_CUSTOM_OP_INPUT_UID_0), 0u);
@@ -394,9 +394,9 @@ TEST_F(IntegrationCustomOpDescriptorLifting, SingleInputTwoOutputsRoundTrip)
 
 TEST_F(IntegrationCustomOpDescriptorLifting, ZeroInputCustomOpRoundTrip)
 {
-    auto originalGraph = buildZeroInputCustomOpGraph();
+    const auto originalGraph = buildZeroInputCustomOpGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
@@ -412,9 +412,9 @@ TEST_F(IntegrationCustomOpDescriptorLifting, ZeroInputCustomOpRoundTrip)
 
 TEST_F(IntegrationCustomOpDescriptorLifting, ZeroOutputCustomOpRoundTrip)
 {
-    auto originalGraph = buildZeroOutputCustomOpGraph();
+    const auto originalGraph = buildZeroOutputCustomOpGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();

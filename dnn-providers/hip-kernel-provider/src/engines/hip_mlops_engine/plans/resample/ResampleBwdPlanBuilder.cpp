@@ -25,7 +25,7 @@ bool ResampleBwdPlanBuilder::isApplicable(
     [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    auto anyNodeIsNotF32Compute = [&]() {
+    auto const anyNodeIsNotF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
                 return node->computeDataType()

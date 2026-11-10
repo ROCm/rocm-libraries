@@ -63,8 +63,8 @@ public:
                                    + std::to_string(blockSize.value()));
 
         // SECTION 3: Validate tensor dimensions (when set)
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
 
         if(detail::areTensorDimensionsSet(x))
         {
@@ -114,9 +114,9 @@ public:
 
     Error infer_properties_node() override
     {
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
-        auto scale = attributes.get_scale();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
+        const auto scale = attributes.get_scale();
 
         if(!x)
         {
@@ -190,7 +190,8 @@ public:
             }
             else if(!x->get_stride().empty() && !scale->get_dim().empty())
             {
-                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                const auto strideOrder
+                    = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
                 scale->set_stride(
                     hipdnn_data_sdk::utilities::generateStrides(scale->get_dim(), strideOrder));
             }

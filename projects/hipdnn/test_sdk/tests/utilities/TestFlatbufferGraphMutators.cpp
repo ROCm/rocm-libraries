@@ -76,9 +76,9 @@ const TensorAttributesT& findTensor(const GraphT& graph, const std::string& name
 
 TEST(TestFlatbufferGraphMutators, RaggedTensorMarksFirstNonVirtualTensor)
 {
-    auto mixed = makeMixedTensorGraph();
+    const auto mixed = makeMixedTensorGraph();
 
-    auto builder = makeGraphWithRaggedTensor(pack(mixed));
+    const auto builder = makeGraphWithRaggedTensor(pack(mixed));
     const auto graph = UnPackGraph(builder.GetBufferPointer());
 
     ASSERT_EQ(graph->tensors.size(), mixed.tensors.size());
@@ -97,16 +97,16 @@ TEST(TestFlatbufferGraphMutators, RaggedTensorThrowsWhenNoTensorIsNonVirtual)
     virtualTensor->virtual_ = true;
     graph.tensors.push_back(std::move(virtualTensor));
 
-    auto builder = pack(graph);
+    const auto builder = pack(graph);
     EXPECT_THROW(makeGraphWithRaggedTensor(builder.GetBufferPointer()), std::runtime_error);
     EXPECT_THROW(makeGraphWithRaggedTensor(createEmptyValidGraph()), std::runtime_error);
 }
 
 TEST(TestFlatbufferGraphMutators, TensorAlignmentSetsOnlyFirstDeviceTensor)
 {
-    auto builder = pack(makeMixedTensorGraph());
+    const auto builder = pack(makeMixedTensorGraph());
 
-    auto realigned = makeGraphWithTensorAlignment(builder.GetBufferPointer(), 8);
+    const auto realigned = makeGraphWithTensorAlignment(builder.GetBufferPointer(), 8);
     const auto graph = UnPackGraph(realigned.GetBufferPointer());
 
     constexpr int64_t DEFAULT_ALIGNMENT = 16;
@@ -119,7 +119,7 @@ TEST(TestFlatbufferGraphMutators, TensorAlignmentSetsOnlyFirstDeviceTensor)
 
 TEST(TestFlatbufferGraphMutators, TensorAlignmentAppliesToBuiltGraph)
 {
-    auto realigned = makeGraphWithTensorAlignment(createValidMatmulGraph(), 32);
+    const auto realigned = makeGraphWithTensorAlignment(createValidMatmulGraph(), 32);
     const auto graph = UnPackGraph(realigned.GetBufferPointer());
 
     ASSERT_FALSE(graph->tensors.empty());

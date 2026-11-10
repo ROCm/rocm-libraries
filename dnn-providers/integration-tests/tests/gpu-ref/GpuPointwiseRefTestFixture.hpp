@@ -30,8 +30,9 @@ template <typename InputType, typename OutputType = InputType>
 float getDynamicTolerance(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                           float scale)
 {
-    auto errorClass = pointwise::classifyPointwiseOp(operation);
-    auto effectiveScale = static_cast<double>(pointwise::isBoundedOutput(operation) ? 1.0f : scale);
+    const auto errorClass = pointwise::classifyPointwiseOp(operation);
+    const auto effectiveScale
+        = static_cast<double>(pointwise::isBoundedOutput(operation) ? 1.0f : scale);
     return pointwise::calculatePointwiseTolerance<OutputType, InputType>(effectiveScale,
                                                                          errorClass);
 }

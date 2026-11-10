@@ -98,7 +98,7 @@ public:
 private:
     void executeNonParameterized(const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto shallowIn0Tensor = createShallowTensor<Input0Type>(
+        const auto shallowIn0Tensor = createShallowTensor<Input0Type>(
             _params.in0Tensor, variantPack.at(_params.in0Tensor.uid));
 
         auto shallowOut0Tensor = createShallowTensor<OutputType>(
@@ -116,7 +116,7 @@ private:
                 throw std::runtime_error("Binary pointwise operation requires in1 tensor");
             }
 
-            auto shallowIn1Tensor = createShallowTensor<Input1Type>(
+            const auto shallowIn1Tensor = createShallowTensor<Input1Type>(
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
             utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
@@ -133,9 +133,9 @@ private:
                         "Ternary pointwise operation requires in1 and in2 tensors");
                 }
 
-                auto shallowIn1Tensor = createShallowTensor<Input1Type>(
+                const auto shallowIn1Tensor = createShallowTensor<Input1Type>(
                     _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
-                auto shallowIn2Tensor = createShallowTensor<Input2Type>(
+                const auto shallowIn2Tensor = createShallowTensor<Input2Type>(
                     _params.in2Tensor.value(), variantPack.at(_params.in2Tensor.value().uid));
 
                 utilities::
@@ -159,7 +159,7 @@ private:
 
     void executeParameterized(const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto shallowIn0Tensor = createShallowTensor<Input0Type>(
+        const auto shallowIn0Tensor = createShallowTensor<Input0Type>(
             _params.in0Tensor, variantPack.at(_params.in0Tensor.uid));
 
         auto shallowOut0Tensor = createShallowTensor<OutputType>(
@@ -184,7 +184,7 @@ private:
                 throw std::runtime_error("Binary pointwise operation requires in1 tensor");
             }
 
-            auto shallowIn1Tensor = createShallowTensor<Input1Type>(
+            const auto shallowIn1Tensor = createShallowTensor<Input1Type>(
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
             utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
@@ -240,7 +240,7 @@ public:
         }
 
         // Check that the operation is implemented
-        auto mode = nodeAttributes->operation();
+        const auto mode = nodeAttributes->operation();
         bool isImplemented = false;
         if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(mode))
         {

@@ -100,7 +100,7 @@ TEST(TestBlockScaleQuantizeSignatureKey, CreateFromNodeAndTensorMap)
     const BlockScaleQuantizeSignatureKey expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
-    auto builder = createValidBlockScaleQuantizeGraph();
+    const auto builder = createValidBlockScaleQuantizeGraph();
     const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 

@@ -171,7 +171,7 @@ TEST(TestTensorView, EndComparison)
     TensorView<float> view(*iTensor);
 
     auto it = view.begin();
-    auto end = view.end();
+    const auto end = view.end();
 
     EXPECT_NE(it, end);
 
@@ -215,7 +215,7 @@ TEST(TestTensorView, CopyAssignment)
     ITensor* iTensor = &tensor;
     TensorView<float> view(*iTensor);
 
-    auto it1 = view.begin();
+    const auto it1 = view.begin();
     auto it2 = view.end();
 
     it2 = it1; // Copy assignment
@@ -500,7 +500,7 @@ TEST(TestTensorView, StdCount)
     }
 
     // Count occurrences of 1
-    auto count = std::count(view.begin(), view.end(), 1);
+    const auto count = std::count(view.begin(), view.end(), 1);
     EXPECT_EQ(count, 3); // Indices 0, 2, 4
 }
 

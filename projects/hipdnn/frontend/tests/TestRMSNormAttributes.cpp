@@ -12,28 +12,28 @@ TEST(TestRMSNormAttributes, CreateRMSNormAttributes)
     rmsnormAttributes.set_scale(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
     rmsnormAttributes.set_epsilon(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
 
-    auto inputTensor = rmsnormAttributes.get_x();
+    const auto inputTensor = rmsnormAttributes.get_x();
     inputTensor->set_uid(1)
         .set_name("InputTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto outputTensor = rmsnormAttributes.get_y();
+    const auto outputTensor = rmsnormAttributes.get_y();
     outputTensor->set_uid(2)
         .set_name("OutputTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto scaleTensor = rmsnormAttributes.get_scale();
+    const auto scaleTensor = rmsnormAttributes.get_scale();
     scaleTensor->set_uid(3)
         .set_name("ScaleTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 1, 1})
         .set_stride({2, 1, 1, 1});
 
-    auto epsilonTensor = rmsnormAttributes.get_epsilon();
+    const auto epsilonTensor = rmsnormAttributes.get_epsilon();
     epsilonTensor->set_uid(4).set_name("EpsilonTensor").set_value(1e-5f);
 
     EXPECT_EQ(inputTensor->get_uid(), 1);
@@ -63,7 +63,7 @@ TEST(TestRMSNormAttributes, SetXWithMove)
 
     rmsnormAttributes.set_x(std::move(xTensor));
 
-    auto retrieved = rmsnormAttributes.get_x();
+    const auto retrieved = rmsnormAttributes.get_x();
     EXPECT_EQ(retrieved->get_uid(), 1);
     EXPECT_EQ(retrieved->get_name(), "XTensor");
 
@@ -82,7 +82,7 @@ TEST(TestRMSNormAttributes, SetScaleWithMove)
 
     rmsnormAttributes.set_scale(std::move(scaleTensor));
 
-    auto retrieved = rmsnormAttributes.get_scale();
+    const auto retrieved = rmsnormAttributes.get_scale();
     EXPECT_EQ(retrieved->get_uid(), 2);
     EXPECT_EQ(retrieved->get_name(), "ScaleTensor");
 
@@ -101,7 +101,7 @@ TEST(TestRMSNormAttributes, SetEpsilonWithMove)
 
     rmsnormAttributes.set_epsilon(std::move(epsilonTensor));
 
-    auto retrieved = rmsnormAttributes.get_epsilon();
+    const auto retrieved = rmsnormAttributes.get_epsilon();
     EXPECT_EQ(retrieved->get_uid(), 3);
     EXPECT_EQ(retrieved->get_name(), "EpsilonTensor");
 
@@ -120,7 +120,7 @@ TEST(TestRMSNormAttributes, SetBiasWithMove)
 
     rmsnormAttributes.set_bias(std::move(biasTensor));
 
-    auto retrieved = rmsnormAttributes.get_bias();
+    const auto retrieved = rmsnormAttributes.get_bias();
     EXPECT_EQ(retrieved->get_uid(), 5);
     EXPECT_EQ(retrieved->get_name(), "BiasTensor");
 
@@ -139,7 +139,7 @@ TEST(TestRMSNormAttributes, SetYWithMove)
 
     rmsnormAttributes.set_y(std::move(yTensor));
 
-    auto retrieved = rmsnormAttributes.get_y();
+    const auto retrieved = rmsnormAttributes.get_y();
     EXPECT_EQ(retrieved->get_uid(), 4);
     EXPECT_EQ(retrieved->get_name(), "YTensor");
 
@@ -158,7 +158,7 @@ TEST(TestRMSNormAttributes, SetInvRmsWithMove)
 
     rmsnormAttributes.set_inv_rms(std::move(invRmsTensor));
 
-    auto retrieved = rmsnormAttributes.get_inv_rms();
+    const auto retrieved = rmsnormAttributes.get_inv_rms();
     EXPECT_EQ(retrieved->get_uid(), 5);
     EXPECT_EQ(retrieved->get_name(), "InvRmsTensor");
 
@@ -269,27 +269,27 @@ TEST(TestRMSNormAttributes, LogicalAndStrictEquality)
     attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_forward_phase(hipdnn_frontend::NormFwdPhase::TRAINING);
 
-    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x1->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_x(x1);
 
-    auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     scale1->set_uid(2).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_scale(scale1);
 
-    auto epsilon1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto epsilon1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilon1->set_uid(3).set_name("Epsilon").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_epsilon(epsilon1);
 
-    auto bias1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto bias1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     bias1->set_uid(4).set_name("Bias").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_bias(bias1);
 
-    auto y1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto y1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     y1->set_uid(5).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_y(y1);
 
-    auto invRms1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto invRms1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     invRms1->set_uid(6).set_name("InvRms").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_inv_rms(invRms1);
 
@@ -297,27 +297,27 @@ TEST(TestRMSNormAttributes, LogicalAndStrictEquality)
     attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_forward_phase(hipdnn_frontend::NormFwdPhase::TRAINING);
 
-    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x2->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_x(x2);
 
-    auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     scale2->set_uid(2).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_scale(scale2);
 
-    auto epsilon2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto epsilon2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilon2->set_uid(3).set_name("Epsilon").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_epsilon(epsilon2);
 
-    auto bias2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto bias2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     bias2->set_uid(4).set_name("Bias").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_bias(bias2);
 
-    auto y2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto y2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     y2->set_uid(5).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_y(y2);
 
-    auto invRms2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto invRms2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     invRms2->set_uid(6).set_name("InvRms").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_inv_rms(invRms2);
 
@@ -327,7 +327,7 @@ TEST(TestRMSNormAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto structuralMismatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     structuralMismatchX->set_uid(99).set_name("MismatchedX");
     attr2.set_x(structuralMismatchX);
 
@@ -355,7 +355,7 @@ TEST(TestRMSNormAttributes, LogicalAndStrictEquality)
     EXPECT_FALSE(sparse1.logicallyEquals(sparse2));
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchX
         ->set_uid(555) // Diverges from attr1's x1 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's x1 ("X")

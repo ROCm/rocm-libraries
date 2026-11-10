@@ -22,8 +22,8 @@ using namespace hipdnn_test_sdk::utilities;
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, PlanConstruction)
 {
-    auto builder = createBatchnormFwdTrainGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBatchnormFwdTrainGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -32,7 +32,7 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, PlanConstruction)
                                           DataType::FLOAT,
                                           DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
 
     const bool result = dynamic_cast<GpuBatchnormFwdTrainPlan<float, float, float, float, float>*>(
                             builtPlan.get())
@@ -42,8 +42,8 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, PlanConstruction)
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, PlanConstructionWithSaveStatsTensors)
 {
-    auto builder = createBatchnormFwdTrainGraph({1, 3, 14, 14}, {588, 196, 14, 1}, true);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBatchnormFwdTrainGraph({1, 3, 14, 14}, {588, 196, 14, 1}, true);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -52,7 +52,7 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, PlanConstructionWithSaveStatsTensors)
                                           DataType::FLOAT,
                                           DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
 
     const bool result = dynamic_cast<GpuBatchnormFwdTrainPlan<float, float, float, float, float>*>(
                             builtPlan.get())
@@ -62,8 +62,9 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, PlanConstructionWithSaveStatsTensors)
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, PlanConstructionWithRunningStatsTensors)
 {
-    auto builder = createBatchnormFwdTrainGraph({1, 3, 14, 14}, {588, 196, 14, 1}, false, true);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder
+        = createBatchnormFwdTrainGraph({1, 3, 14, 14}, {588, 196, 14, 1}, false, true);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -72,7 +73,7 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, PlanConstructionWithRunningStatsTensor
                                           DataType::FLOAT,
                                           DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
 
     const bool result = dynamic_cast<GpuBatchnormFwdTrainPlan<float, float, float, float, float>*>(
                             builtPlan.get())
@@ -82,8 +83,8 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, PlanConstructionWithRunningStatsTensor
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicable)
 {
-    auto builder = createBatchnormFwdTrainGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBatchnormFwdTrainGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -113,8 +114,9 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicable)
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableTrueWhenAllStatsPresent)
 {
-    auto builder = createBatchnormFwdTrainGraph({1, 3, 14, 14}, {588, 196, 14, 1}, true, true);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder
+        = createBatchnormFwdTrainGraph({1, 3, 14, 14}, {588, 196, 14, 1}, true, true);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -128,9 +130,9 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableTrueWhenAllStatsPresent)
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenInputTypeMismatched)
 {
-    auto builder = createBatchnormFwdTrainGraph(
+    const auto builder = createBatchnormFwdTrainGraph(
         {1, 3, 14, 14}, {588, 196, 14, 1}, false, false, DataType::HALF);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -145,9 +147,9 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenInputTypeMismatch
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenScaleTypeMismatched)
 {
-    auto builder = createBatchnormFwdTrainGraph(
+    const auto builder = createBatchnormFwdTrainGraph(
         {1, 3, 14, 14}, {588, 196, 14, 1}, false, false, DataType::FLOAT, DataType::BFLOAT16);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -162,14 +164,14 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenScaleTypeMismatch
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenMeanVarianceTypeMismatched)
 {
-    auto builder = createBatchnormFwdTrainGraph({1, 3, 14, 14},
-                                                {588, 196, 14, 1},
-                                                false,
-                                                true,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::HALF);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBatchnormFwdTrainGraph({1, 3, 14, 14},
+                                                      {588, 196, 14, 1},
+                                                      false,
+                                                      true,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::HALF);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -184,16 +186,16 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenMeanVarianceTypeM
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenComputeTypeMismatched)
 {
-    auto builder = createBatchnormFwdTrainGraph({1, 3, 14, 14},
-                                                {588, 196, 14, 1},
-                                                false,
-                                                false,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::DOUBLE);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBatchnormFwdTrainGraph({1, 3, 14, 14},
+                                                      {588, 196, 14, 1},
+                                                      false,
+                                                      false,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::DOUBLE);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -208,8 +210,8 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenComputeTypeMismat
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, BuildNodePlanThrowsForMissingMomentumTensor)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -224,8 +226,8 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, BuildNodePlanThrowsForMissingMomentumT
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -240,8 +242,8 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, BuildNodePlanThrowsForWrongAttributesT
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableReturnsFalseForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -256,8 +258,8 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableReturnsFalseForWrongAttrib
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenBiasTensorMissing)
 {
-    auto builder = createBatchnormFwdTrainGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBatchnormFwdTrainGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -277,8 +279,8 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenBiasTensorMissing
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenOutputTensorMissing)
 {
-    auto builder = createBatchnormFwdTrainGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBatchnormFwdTrainGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -298,8 +300,8 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenOutputTensorMissi
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenEpsilonTensorMissing)
 {
-    auto builder = createBatchnormFwdTrainGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBatchnormFwdTrainGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -319,8 +321,8 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenEpsilonTensorMiss
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenMomentumTensorIsMissing)
 {
-    auto builder = createBatchnormFwdTrainGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBatchnormFwdTrainGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -341,8 +343,9 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenMomentumTensorIsM
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenNotAllSaveStatsTensorsArePresent)
 {
-    auto builder = createBatchnormFwdTrainGraph({1, 3, 14, 14}, {588, 196, 14, 1}, true, true);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder
+        = createBatchnormFwdTrainGraph({1, 3, 14, 14}, {588, 196, 14, 1}, true, true);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -368,8 +371,9 @@ TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenNotAllSaveStatsTe
 
 TEST(TestGpuBatchnormFwdTrainPlanBuilder, IsApplicableFalseWhenNotAllRunStatsTensorsArePresent)
 {
-    auto builder = createBatchnormFwdTrainGraph({1, 3, 14, 14}, {588, 196, 14, 1}, false, true);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder
+        = createBatchnormFwdTrainGraph({1, 3, 14, 14}, {588, 196, 14, 1}, false, true);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainPlanBuilder<DataType::FLOAT,
@@ -408,17 +412,17 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims, const TensorLayout
 {
     const auto strides = generateStrides(dims, layout.strideOrder);
 
-    auto dataType = nativeTypeToDataType<DType>();
+    const auto dataType = nativeTypeToDataType<DType>();
 
-    auto builder = createBatchnormFwdTrainGraph(dims,
-                                                strides,
-                                                true,
-                                                true,
-                                                dataType,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                dataType,
-                                                DataType::FLOAT);
+    const auto builder = createBatchnormFwdTrainGraph(dims,
+                                                      strides,
+                                                      true,
+                                                      true,
+                                                      dataType,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      dataType,
+                                                      DataType::FLOAT);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());

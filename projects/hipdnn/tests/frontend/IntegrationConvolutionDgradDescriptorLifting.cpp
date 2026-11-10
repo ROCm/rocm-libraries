@@ -42,11 +42,11 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto dy = std::make_shared<TensorAttributes>();
+        const auto dy = std::make_shared<TensorAttributes>();
         dy->set_uid(K_DGRAD_TENSOR_DY_UID).set_name("dy").set_data_type(DataType::FLOAT);
         dy->set_dim(toVec(K_DGRAD_TENSOR_DY_DIMS)).set_stride(toVec(K_DGRAD_TENSOR_DY_STRIDES));
 
-        auto w = std::make_shared<TensorAttributes>();
+        const auto w = std::make_shared<TensorAttributes>();
         w->set_uid(K_DGRAD_TENSOR_W_UID).set_name("w").set_data_type(DataType::FLOAT);
         w->set_dim(toVec(K_DGRAD_TENSOR_W_DIMS)).set_stride(toVec(K_DGRAD_TENSOR_W_STRIDES));
 
@@ -58,7 +58,7 @@ protected:
         attrs.set_stride(toVec(K_DGRAD_CONV_STRIDE));
         attrs.set_dilation(toVec(K_DGRAD_CONV_DILATION));
 
-        auto dx = graph->conv_dgrad(dy, w, attrs);
+        const auto dx = graph->conv_dgrad(dy, w, attrs);
         dx->set_dim(toVec(K_DGRAD_TENSOR_DX_DIMS));
         dx->set_uid(K_DGRAD_TENSOR_DX_UID).set_output(true).set_name("dx");
 
@@ -71,9 +71,9 @@ protected:
 // validation of graph data types, tensor attributes, and operation parameters.
 TEST_F(IntegrationConvolutionBwdDescriptorLifting, BasicConvolutionBwdRoundTrip)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -138,9 +138,9 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, BasicConvolutionBwdRoundTrip)
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationConvolutionBwdDescriptorLifting, ConvolutionBwdTensorSharingPreserved)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -167,9 +167,9 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, ConvolutionBwdTensorSharingPr
 // all fields survive the backend C API serialization path.
 TEST_F(IntegrationConvolutionBwdDescriptorLifting, ConvolutionBwdLiftWithoutFinalization)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -225,17 +225,17 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AutoAssignedUidsPreservedInLi
     constexpr std::array<int64_t, 4> K_AUTO_DX_DIMS = {1, 3, 32, 32};
     constexpr std::array<int64_t, 4> K_AUTO_DX_STRIDES = {3072, 1024, 32, 1};
 
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AutoUidDgradLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_name("dy").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_AUTO_DY_DIMS)).set_stride(toVec(K_AUTO_DY_STRIDES));
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_name("w").set_data_type(DataType::FLOAT);
     w->set_dim(toVec(K_AUTO_W_DIMS)).set_stride(toVec(K_AUTO_W_STRIDES));
 
@@ -247,11 +247,11 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AutoAssignedUidsPreservedInLi
     convAttrs.set_dilation({1, 1});
     convAttrs.set_convolution_mode(ConvolutionMode::CONVOLUTION);
 
-    auto dx = graph->conv_dgrad(dy, w, convAttrs);
+    const auto dx = graph->conv_dgrad(dy, w, convAttrs);
     dx->set_dim(toVec(K_AUTO_DX_DIMS));
     dx->set_output(true).set_name("dx");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -277,9 +277,9 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AutoAssignedUidsPreservedInLi
     ASSERT_NE(opNode, nullptr);
 
     // Verify tensor dims survived the round trip
-    auto dyUid = opNode->attributes.get_dy()->get_uid();
-    auto wUid = opNode->attributes.get_w()->get_uid();
-    auto dxUid = opNode->attributes.get_dx()->get_uid();
+    const auto dyUid = opNode->attributes.get_dy()->get_uid();
+    const auto wUid = opNode->attributes.get_w()->get_uid();
+    const auto dxUid = opNode->attributes.get_dx()->get_uid();
 
     EXPECT_NE(dyUid, wUid);
     EXPECT_NE(dyUid, dxUid);
@@ -300,17 +300,17 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AsymmetricPaddingPreservedInL
     constexpr std::array<int64_t, 2> K_ASYM_POST_PADDING = {0, 1};
     constexpr std::array<int64_t, 4> K_ASYM_DX_DIMS = {1, 3, 33, 33};
 
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AsymPaddingDgradLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_uid(K_DGRAD_TENSOR_DY_UID).set_name("dy").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_DGRAD_TENSOR_DY_DIMS)).set_stride(toVec(K_DGRAD_TENSOR_DY_STRIDES));
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_uid(K_DGRAD_TENSOR_W_UID).set_name("w").set_data_type(DataType::FLOAT);
     w->set_dim(toVec(K_DGRAD_TENSOR_W_DIMS)).set_stride(toVec(K_DGRAD_TENSOR_W_STRIDES));
 
@@ -322,11 +322,11 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AsymmetricPaddingPreservedInL
     convAttrs.set_dilation({1, 1});
     convAttrs.set_convolution_mode(ConvolutionMode::CONVOLUTION);
 
-    auto dx = graph->conv_dgrad(dy, w, convAttrs);
+    const auto dx = graph->conv_dgrad(dy, w, convAttrs);
     dx->set_dim(toVec(K_ASYM_DX_DIMS));
     dx->set_uid(K_DGRAD_TENSOR_DX_UID).set_output(true).set_name("dx");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
@@ -346,7 +346,7 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AsymmetricPaddingPreservedInL
 // for a conv backward data graph.
 TEST_F(IntegrationConvolutionBwdDescriptorLifting, JsonRoundTripWithHandle)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -358,7 +358,7 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, JsonRoundTripWithHandle)
     ASSERT_FALSE(jsonData.empty());
 
     // Deserialize from JSON with handle
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize(_handle, jsonData);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -369,7 +369,7 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
 
     // Verify tensors by UID
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors (dy, w, dx)";
 
     hipdnn_tests::verifyTensorInGraph(tensorMap,

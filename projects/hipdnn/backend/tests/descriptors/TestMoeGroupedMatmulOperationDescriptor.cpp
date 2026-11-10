@@ -39,7 +39,7 @@ public:
 
     void setTensors() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
@@ -69,7 +69,7 @@ public:
                                std::optional<hipdnnBackendAttributeName_t> excluded
                                = std::nullopt) const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         if(!excluded || *excluded != HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC)
         {
             desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC,
@@ -160,7 +160,7 @@ public:
 
     void setMoeGroupedMatmulParams() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
 
         auto topK = static_cast<int32_t>(2);
         desc->setAttribute(
@@ -250,7 +250,7 @@ protected:
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, CreateDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_DESCRIPTOR);
@@ -297,7 +297,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeSucceedsForNONEMode)
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeRejectsTokenIndexInNONEMode)
 {
     setModeRuleAttributes(HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE);
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
@@ -308,7 +308,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeRejectsTokenIndexInNONEM
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeRejectsTokenKsInNONEMode)
 {
     setModeRuleAttributes(HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE);
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
@@ -342,7 +342,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeRejectsMissingTokenIndex
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeRejectsTokenKsInGATHERMode)
 {
     setModeRuleAttributes(HIPDNN_MOE_GROUPED_MATMUL_MODE_GATHER);
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
@@ -416,7 +416,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeFailsWithoutComputeType)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorDescriptorToken)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -429,7 +429,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorDescriptorToken)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorDescriptorWeight)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_WEIGHT_DESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -441,7 +441,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorDescriptorWeight)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorDescriptorFirstTokenOffset)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(
         desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_FIRST_TOKEN_OFFSET_DESC,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -455,7 +455,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorDescriptorFirstTokenOff
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorDescriptorTokenIndex)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -467,7 +467,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorDescriptorTokenIndex)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorDescriptorTokenKs)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -479,7 +479,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorDescriptorTokenKs)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorDescriptorOutput)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_OUTPUT_DESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -491,7 +491,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorDescriptorOutput)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorFailsNotFinalized)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -502,7 +502,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorFailsNotFinalized)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorFailsWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC, HIPDNN_TYPE_INT64, 1, &_tokenDesc),
@@ -511,7 +511,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorFailsWrongType)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorFailsWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -522,7 +522,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorFailsWrongElementCount)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorFailsNullPointer)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -537,7 +537,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTensorFailsNullPointer)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetMoeGroupedMatmulMode)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto mode = HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER;
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE,
@@ -550,7 +550,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetMoeGroupedMatmulMode)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetMoeGroupedMatmulModeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto mode = HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER;
 
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE,
@@ -562,7 +562,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetMoeGroupedMatmulModeWrongElem
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTopK)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto topK = static_cast<int32_t>(2);
 
     ASSERT_NO_THROW(desc->setAttribute(
@@ -572,7 +572,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetTopK)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetComputeDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC,
@@ -585,7 +585,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetComputeDataType)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetComputeDataTypeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -603,7 +603,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetComputeDataTypeWrongElementCo
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetAttributeFailsAfterFinalize)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC,
@@ -615,7 +615,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetAttributeFailsAfterFinalize)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetAttributeUnsupported)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -630,7 +630,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetAttributeUnsupported)
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorDescriptor)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     HipdnnBackendDescriptor* retrievedToken = nullptr;
     int64_t elementCount = 0;
@@ -652,7 +652,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorDescriptor)
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeMoeGroupedMatmulParams)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // mode
     hipdnnMoeGroupedMatmulMode_t mode = HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER;
@@ -676,7 +676,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeMoeGroupedMatmulPara
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeComputeType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(
@@ -701,7 +701,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeComputeType)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeFailsBeforeFinalize)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
 
     HipdnnBackendDescriptor* dummy = nullptr;
@@ -717,7 +717,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeFailsBeforeFinalize)
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeFailsNullPointer)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC,
@@ -731,7 +731,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeFailsNullPointer)
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeUnsupported)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -746,7 +746,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeUnsupported)
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorTokenQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC,
@@ -760,7 +760,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorTokenQueryRetu
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorWeightQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_WEIGHT_DESC,
@@ -774,7 +774,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorWeightQueryRet
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorFirstTokenOffsetQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(
@@ -789,7 +789,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorFirstTokenOffs
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorTokenIndexQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC,
@@ -803,7 +803,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorTokenIndexQuer
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorTokenKsQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC,
@@ -817,7 +817,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorTokenKsQueryRe
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorOutputQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_OUTPUT_DESC,
@@ -831,7 +831,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorOutputQueryRet
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeMoeGroupedMatmulModeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE,
@@ -845,7 +845,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeMoeGroupedMatmulMode
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC,
@@ -859,7 +859,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeComputeTypeQueryRetu
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeTensorQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC,
@@ -874,7 +874,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor,
        GetAttributeMoeGroupedMatmulModeQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE,
                                                   HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE,
@@ -891,7 +891,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor,
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizePreservesTensorReferences)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // Verify the tensor descriptors are preserved
     ASSERT_NE(desc->getTokenDesc(), nullptr);
@@ -919,7 +919,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizePreservesTensorReference
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, ToStringContainsExpectedInfo)
 {
     setRequiredAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("MoeGroupedMatmulOperationDescriptor"), std::string::npos);
@@ -947,7 +947,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, ToStringContainsExpectedInfo)
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 6);
@@ -963,7 +963,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, BuildNodeProducesCorrectNodeT)
 {
     setRequiredAttributes();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -990,7 +990,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, BuildNodeWithHalfComputeType)
 {
     setRequiredAttributes();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -1005,7 +1005,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor,
        GetTensorDescriptorsOrderIsTokenWeightFirstTokenOffsetTokenIndexTokenKsOutput)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 6);
@@ -1022,7 +1022,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, TryAsInterfaceReturnsValidGraphO
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsGraphOperation();
+    const auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -1034,7 +1034,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, TryAsInterfaceReturnsValidGraphO
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _tokenDesc->tryAsGraphOperation();
+    const auto graphOp = _tokenDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 
@@ -1044,7 +1044,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, TryAsInterfaceReturnsNullForWron
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetAttributeNameSuccess)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const std::string name = "test_moegroupedmatmul_op";
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
@@ -1069,7 +1069,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, SetAttributeNameSuccess)
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeNameQueryReturnsSizeInclNull)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const std::string name = "my_op";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
@@ -1090,7 +1090,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeNameQueryReturnsSize
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeOperationTypeReturnsCorrectType)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t elementCount = 0;
@@ -1104,7 +1104,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeOperationTypeReturns
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeOperationTypeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -1115,7 +1115,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, GetAttributeOperationTypeQueryRe
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, BuildNodePreservesName)
 {
     setRequiredAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     const std::string opName = "test_moegroupedmatmul";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,

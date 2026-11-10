@@ -29,7 +29,7 @@ TEST(TestGpuPointwiseMixedLayouts, Unary)
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     inputTensor.memory().hostData();
 
-    auto operation = PointwiseMode::ABS;
+    const auto operation = PointwiseMode::ABS;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
@@ -57,7 +57,7 @@ TEST(TestGpuPointwiseMixedLayouts, Binary)
     input0Tensor.memory().hostData();
     input1Tensor.memory().hostData();
 
-    auto operation = PointwiseMode::ADD;
+    const auto operation = PointwiseMode::ADD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
@@ -86,7 +86,7 @@ TEST(TestGpuPointwiseMixedTypes, UnaryUpcast)
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     inputTensor.memory().hostData();
 
-    auto operation = PointwiseMode::ABS;
+    const auto operation = PointwiseMode::ABS;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
@@ -112,7 +112,7 @@ TEST(TestGpuPointwiseMixedTypes, UnaryDowncast)
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     inputTensor.memory().hostData();
 
-    auto operation = PointwiseMode::ABS;
+    const auto operation = PointwiseMode::ABS;
     CpuReferencePointwiseImpl<BFloat16Type>::pointwiseCompute(
         operation, outputCpuTensor, inputTensor);
 
@@ -142,7 +142,7 @@ TEST(TestGpuPointwiseMixedTypes, BinaryMixedInputs)
     input0Tensor.memory().hostData();
     input1Tensor.memory().hostData();
 
-    auto operation = PointwiseMode::ADD;
+    const auto operation = PointwiseMode::ADD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
@@ -171,7 +171,7 @@ TEST(TestGpuPointwise1DShapes, Unary)
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     inputTensor.memory().hostData();
 
-    auto operation = PointwiseMode::ABS;
+    const auto operation = PointwiseMode::ABS;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
@@ -198,7 +198,7 @@ TEST(TestGpuPointwise1DShapes, Binary)
     input0Tensor.memory().hostData();
     input1Tensor.memory().hostData();
 
-    auto operation = PointwiseMode::ADD;
+    const auto operation = PointwiseMode::ADD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
@@ -224,7 +224,7 @@ TEST(TestGpuPointwise2DShapes, Unary)
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     inputTensor.memory().hostData();
 
-    auto operation = PointwiseMode::ABS;
+    const auto operation = PointwiseMode::ABS;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
@@ -251,7 +251,7 @@ TEST(TestGpuPointwise2DShapes, Binary)
     input0Tensor.memory().hostData();
     input1Tensor.memory().hostData();
 
-    auto operation = PointwiseMode::ADD;
+    const auto operation = PointwiseMode::ADD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
@@ -277,7 +277,7 @@ TEST(TestGpuPointwise3DShapes, Unary)
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     inputTensor.memory().hostData();
 
-    auto operation = PointwiseMode::ABS;
+    const auto operation = PointwiseMode::ABS;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
@@ -304,7 +304,7 @@ TEST(TestGpuPointwise3DShapes, Binary)
     input0Tensor.memory().hostData();
     input1Tensor.memory().hostData();
 
-    auto operation = PointwiseMode::ADD;
+    const auto operation = PointwiseMode::ADD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
@@ -333,7 +333,7 @@ TEST(TestGpuPointwise5DShapes, DISABLED_ExceedsInt32MaxElements)
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     inputTensor.memory().hostData();
 
-    auto operation = PointwiseMode::ABS;
+    const auto operation = PointwiseMode::ABS;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
@@ -348,7 +348,7 @@ TEST(TestGpuPointwiseValidation, UnaryNotBroadcastable)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto operation = PointwiseMode::ABS;
+    const auto operation = PointwiseMode::ABS;
 
     // Not broadcastable if output tensor has less dimensions than input
     {
@@ -422,7 +422,7 @@ TEST(TestGpuPointwiseBroadcast, Broadcast2D)
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     inputTensor.memory().hostData();
 
-    auto operation = PointwiseMode::ABS;
+    const auto operation = PointwiseMode::ABS;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
@@ -450,7 +450,7 @@ TEST(TestGpuPointwiseBroadcast, Broadcast2DImplicitLeading)
     input1Tensor.memory().hostData();
     input2Tensor.memory().hostData();
 
-    auto operation = PointwiseMode::MUL;
+    const auto operation = PointwiseMode::MUL;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
@@ -480,7 +480,7 @@ TEST(TestGpuPointwiseBroadcast, Broadcast3D)
     input1Tensor.memory().hostData();
     input2Tensor.memory().hostData();
 
-    auto operation = PointwiseMode::MUL;
+    const auto operation = PointwiseMode::MUL;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
@@ -510,7 +510,7 @@ TEST(TestGpuPointwiseBroadcast, Broadcast3DImplicitLeading)
     input1Tensor.memory().hostData();
     input2Tensor.memory().hostData();
 
-    auto operation = PointwiseMode::MUL;
+    const auto operation = PointwiseMode::MUL;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
@@ -540,7 +540,7 @@ TEST(TestGpuPointwiseBroadcast, Broadcast4D)
     input1Tensor.memory().hostData();
     input2Tensor.memory().hostData();
 
-    auto operation = PointwiseMode::MUL;
+    const auto operation = PointwiseMode::MUL;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
@@ -570,7 +570,7 @@ TEST(TestGpuPointwiseBroadcast, Broadcast5D)
     input1Tensor.memory().hostData();
     input2Tensor.memory().hostData();
 
-    auto operation = PointwiseMode::MUL;
+    const auto operation = PointwiseMode::MUL;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
@@ -598,7 +598,7 @@ TEST(TestGpuPointwiseRefSwishForward, WithBetaVal)
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     inputTensor.memory().hostData();
 
-    auto operation = PointwiseMode::SWISH_FWD;
+    const auto operation = PointwiseMode::SWISH_FWD;
     const float beta = 2.0f;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, inputTensor, 0.f, 0.f, 0.f, beta);
@@ -632,7 +632,7 @@ TEST(TestGpuPointwiseRefRELuForward, WithVals)
     const float upperClip = 4.0f;
     const float lowerSlope = 0.1f;
 
-    auto operation = PointwiseMode::RELU_FWD;
+    const auto operation = PointwiseMode::RELU_FWD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, inputTensor, lowerClip, upperClip, lowerSlope);
 
@@ -674,7 +674,7 @@ TEST(TestGpuPointwiseRefRELuBackward, WithVals)
     const float upperClip = 4.f;
     const float lowerSlope = 0.1f;
 
-    auto operation = PointwiseMode::RELU_BWD;
+    const auto operation = PointwiseMode::RELU_BWD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor, lowerClip, upperClip, lowerSlope);
 

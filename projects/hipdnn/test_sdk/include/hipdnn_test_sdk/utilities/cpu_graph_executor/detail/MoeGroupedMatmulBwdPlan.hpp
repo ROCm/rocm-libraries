@@ -56,11 +56,11 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto doutput = createShallowTensor<DoutputDataType>(
+        const auto doutput = createShallowTensor<DoutputDataType>(
             _params.doutputTensor, variantPack.at(_params.doutputTensor.uid));
-        auto token = createShallowTensor<TokenDataType>(_params.tokenTensor,
-                                                        variantPack.at(_params.tokenTensor.uid));
-        auto firstTokenOffset = createShallowTensor<int32_t>(
+        const auto token = createShallowTensor<TokenDataType>(
+            _params.tokenTensor, variantPack.at(_params.tokenTensor.uid));
+        const auto firstTokenOffset = createShallowTensor<int32_t>(
             _params.firstTokenOffsetTensor, variantPack.at(_params.firstTokenOffsetTensor.uid));
         auto dweight = createShallowTensor<DweightDataType>(
             _params.dweightTensor, variantPack.at(_params.dweightTensor.uid));

@@ -62,7 +62,7 @@ public:
         hipdnn_data_sdk::utilities::TensorView<T> refView(reference);
         hipdnn_data_sdk::utilities::TensorView<T> implView(implementation);
 
-        auto validateFunc = [&](const std::vector<int64_t>& indices) {
+        const auto validateFunc = [&](const std::vector<int64_t>& indices) {
             using hipdnn_data_sdk::types::fabs;
             using hipdnn_data_sdk::types::isnan;
             using hipdnn_data_sdk::types::isinf;
@@ -95,10 +95,10 @@ public:
                 return;
             }
 
-            auto refValue = static_cast<double>(refValueT);
-            auto implValue = static_cast<double>(implValueT);
+            const auto refValue = static_cast<double>(refValueT);
+            const auto implValue = static_cast<double>(implValueT);
 
-            auto diff = refValue - implValue;
+            const auto diff = refValue - implValue;
             const double diffSquared = diff * diff;
             double currentSum = squareDifference.load(std::memory_order_relaxed);
             while(!squareDifference.compare_exchange_weak(
@@ -123,7 +123,7 @@ public:
             {
             }
         };
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(validateFunc, reference.dims());
         parallelFunc(std::thread::hardware_concurrency());
 

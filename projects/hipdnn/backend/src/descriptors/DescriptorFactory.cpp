@@ -179,7 +179,7 @@ void DescriptorFactory::createGraphExt(hipdnnBackendDescriptor_t* descriptor,
         serializedGraph, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "serializedGraph is null.");
     THROW_IF_TRUE(graphByteSize == 0, HIPDNN_STATUS_BAD_PARAM, "graphByteSize is 0.");
 
-    auto graphDescriptor = std::make_shared<GraphDescriptor>();
+    const auto graphDescriptor = std::make_shared<GraphDescriptor>();
     graphDescriptor->deserializeGraph(serializedGraph, graphByteSize);
     *descriptor = HipdnnBackendDescriptor::packDescriptor(graphDescriptor);
 
@@ -195,7 +195,7 @@ void DescriptorFactory::createGraphFromJsonExt(hipdnnBackendDescriptor_t* descri
     THROW_IF_NULL(jsonGraph, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "jsonGraph is null.");
     THROW_IF_TRUE(jsonByteSize == 0, HIPDNN_STATUS_BAD_PARAM, "jsonByteSize is 0.");
 
-    auto graphDescriptor = std::make_shared<GraphDescriptor>();
+    const auto graphDescriptor = std::make_shared<GraphDescriptor>();
     GraphDescriptor::createFromJsonGraph(*graphDescriptor, jsonGraph, jsonByteSize);
     *descriptor = HipdnnBackendDescriptor::packDescriptor(graphDescriptor);
 

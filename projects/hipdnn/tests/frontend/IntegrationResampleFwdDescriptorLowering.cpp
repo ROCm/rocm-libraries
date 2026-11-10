@@ -39,18 +39,18 @@ protected:
     /// graph method, validates, lowers, serializes, and deserializes.
     hipdnn_flatbuffers_sdk::data_objects::GraphT buildAndDeserialize(ResampleFwdAttributes& attrs)
     {
-        auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
+        const auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
         graph->set_name("ResampleFwdIntegrationTest")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_RESAMPLE_FWD_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
         x->set_dim(toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS))
             .set_stride(toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
 
-        auto y = graph->resample(x, attrs)[0];
+        const auto y = graph->resample(x, attrs)[0];
         y->set_uid(K_RESAMPLE_FWD_TENSOR_Y_UID).set_output(true).set_name("y");
 
         auto result = graph->validate();
@@ -154,7 +154,7 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, ResampleFwdLoweringRoundTrip)
 // Verifies that the optional generate_index attribute survives lowering round-trip.
 TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
+    const auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
     graph->set_name("ResampleFwdIntegrationTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -170,7 +170,7 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexPreservedInRoundTr
     attrs.set_window(toVec(K_RESAMPLE_FWD_WINDOW));
     attrs.set_generate_index(true);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_RESAMPLE_FWD_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS))
         .set_stride(toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
@@ -213,13 +213,13 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexPreservedInRoundTr
 TEST_F(IntegrationResampleFwdDescriptorLowering,
        InferredOutputStridesPreserveChannelLastLayoutWithIndex)
 {
-    auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
+    const auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
     graph->set_name("ResampleFwdChannelLastIntegrationTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_RESAMPLE_FWD_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
     x->set_dim({2, 3, 7, 5}).set_stride({105, 1, 15, 3});
 
@@ -282,13 +282,13 @@ TEST_F(IntegrationResampleFwdDescriptorLowering,
 TEST_F(IntegrationResampleFwdDescriptorLowering,
        InferredOutputStridesPreserveChannelLastLayoutWithoutIndex)
 {
-    auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
+    const auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
     graph->set_name("ResampleFwdChannelLastIntegrationTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_RESAMPLE_FWD_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
     x->set_dim({2, 3, 7, 5}).set_stride({105, 1, 15, 3});
 
@@ -301,7 +301,7 @@ TEST_F(IntegrationResampleFwdDescriptorLowering,
     attrs.set_stride({2, 2});
     attrs.set_window({2, 2});
 
-    auto y = graph->resample(x, attrs)[0];
+    const auto y = graph->resample(x, attrs)[0];
     y->set_uid(K_RESAMPLE_FWD_TENSOR_Y_UID).set_output(true).set_name("y");
 
     auto result = graph->validate();
@@ -341,13 +341,13 @@ TEST_F(IntegrationResampleFwdDescriptorLowering,
 // through the lowering round-trip.
 TEST_F(IntegrationResampleFwdDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
+    const auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
     graph->set_name("AutoUidResampleFwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("x").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS))
         .set_stride(toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
@@ -419,13 +419,13 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, AutoAssignedUidsPreservedInRoun
 // Verifies that tensor types are preserved through the lowering round-trip.
 TEST_F(IntegrationResampleFwdDescriptorLowering, TensorTypesPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
+    const auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
     graph->set_name("TensorTypesResampleFwdGraph")
         .set_io_data_type(DataType::HALF)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("x").set_data_type(DataType::HALF);
     x->set_dim(toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS))
         .set_uid(K_RESAMPLE_FWD_TENSOR_X_UID)
@@ -496,7 +496,7 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, TensorTypesPreservedInRoundTrip
 
 TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexNotMaxPool)
 {
-    auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
+    const auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
     graph->set_name("ResampleFwdIntegrationTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -512,7 +512,7 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexNotMaxPool)
     attrs.set_window(toVec(K_RESAMPLE_FWD_WINDOW));
     attrs.set_generate_index(true);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_RESAMPLE_FWD_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS))
         .set_stride(toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));

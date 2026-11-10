@@ -29,7 +29,7 @@ TEST_F(TestSeeds, ReturnsDefaultSeedWhenEnvVarNotSet)
 {
     hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_GLOBAL_TEST_SEED");
 
-    auto seed = getGlobalTestSeed();
+    const auto seed = getGlobalTestSeed();
 
     EXPECT_EQ(seed, 1u) << "Expected default seed of 1 when environment variable is not set";
 }
@@ -38,7 +38,7 @@ TEST_F(TestSeeds, ReturnsDefaultSeedWhenEnvVarIsEmpty)
 {
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "");
 
-    auto seed = getGlobalTestSeed();
+    const auto seed = getGlobalTestSeed();
 
     EXPECT_EQ(seed, 1u) << "Expected default seed of 1 when environment variable is empty";
 }
@@ -47,7 +47,7 @@ TEST_F(TestSeeds, ReturnsSpecificSeedWhenNumericValueProvided)
 {
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "42");
 
-    auto seed = getGlobalTestSeed();
+    const auto seed = getGlobalTestSeed();
 
     EXPECT_EQ(seed, 42u) << "Expected seed to match numeric value from environment variable";
 }
@@ -56,7 +56,7 @@ TEST_F(TestSeeds, HandlesLargeNumericValues)
 {
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "4294967295"); // Max uint32
 
-    auto seed = getGlobalTestSeed();
+    const auto seed = getGlobalTestSeed();
 
     EXPECT_EQ(seed, 4294967295u) << "Expected seed to handle maximum unsigned int value";
 }
@@ -104,7 +104,7 @@ TEST_F(TestSeeds, ReturnsDefaultSeedForInvalidNumericValue)
 {
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "not_a_number");
 
-    auto seed = getGlobalTestSeed();
+    const auto seed = getGlobalTestSeed();
 
     EXPECT_EQ(seed, 1u)
         << "Expected default seed of 1 when environment variable contains invalid numeric value";
@@ -115,7 +115,7 @@ TEST_F(TestSeeds, ReturnsDefaultSeedForOutOfRangeValue)
     // Value larger than unsigned long can hold
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "99999999999999999999999999");
 
-    auto seed = getGlobalTestSeed();
+    const auto seed = getGlobalTestSeed();
 
     EXPECT_EQ(seed, 1u)
         << "Expected default seed of 1 when environment variable exceeds valid range";
@@ -125,9 +125,9 @@ TEST_F(TestSeeds, ConsistentSeedProducesSameValue)
 {
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "12345");
 
-    auto seed1 = getGlobalTestSeed();
-    auto seed2 = getGlobalTestSeed();
-    auto seed3 = getGlobalTestSeed();
+    const auto seed1 = getGlobalTestSeed();
+    const auto seed2 = getGlobalTestSeed();
+    const auto seed3 = getGlobalTestSeed();
 
     EXPECT_EQ(seed1, 12345u);
     EXPECT_EQ(seed2, 12345u);

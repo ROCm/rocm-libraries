@@ -77,14 +77,14 @@ float calculateMatmulTolerance(ITensor& a, ITensor& b)
         throw std::invalid_argument("Reduction dimension k must be positive.");
     }
 
-    auto numberOfAccumulations = static_cast<uint64_t>(k);
+    const auto numberOfAccumulations = static_cast<uint64_t>(k);
 
     // Compute infinity-norms of input matrices (max absolute row sum)
     const double normA = hipdnn_test_sdk::utilities::computeMatrixInfNorm<InputType>(a);
     const double normB = hipdnn_test_sdk::utilities::computeMatrixInfNorm<InputType>(b);
 
     // Apply Higham's error bound: max_ij |error_ij| <= γ_k * ||A||_inf * ||B||_inf
-    auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
     const double gamma = hipdnn_test_sdk::utilities::computeGamma(numberOfAccumulations, epsilon);
     hipdnn_test_sdk::utilities::validateGamma(gamma);
 

@@ -56,28 +56,28 @@ TEST(TestPlatformUtils, PathCompEqNativeUnicodePaths)
 
 TEST(TestPlatformUtils, GetCurrentExecutableDirectoryReturnsValidPath)
 {
-    auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
+    const auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
 
     EXPECT_FALSE(execDir.empty());
 }
 
 TEST(TestPlatformUtils, GetCurrentExecutableDirectoryExists)
 {
-    auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
+    const auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
 
     EXPECT_TRUE(std::filesystem::exists(execDir));
 }
 
 TEST(TestPlatformUtils, GetCurrentExecutableDirectoryIsAbsolute)
 {
-    auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
+    const auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
 
     EXPECT_TRUE(execDir.is_absolute());
 }
 
 TEST(TestPlatformUtils, GetCurrentExecutableDirectoryIsDirectory)
 {
-    auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
+    const auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
 
     EXPECT_TRUE(std::filesystem::is_directory(execDir));
 }
@@ -85,7 +85,7 @@ TEST(TestPlatformUtils, GetCurrentExecutableDirectoryIsDirectory)
 #if defined(__linux__)
 TEST(TestPlatformUtils, GetCurrentExecutableDirectoryContainsExecutable)
 {
-    auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
+    const auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
 
     std::array<char, PATH_MAX> execPath{};
     const ssize_t len = readlink("/proc/self/exe", execPath.data(), PATH_MAX);
@@ -103,7 +103,7 @@ TEST(TestPlatformUtils, GetCurrentExecutableDirectoryContainsExecutable)
 
 TEST(TestPlatformUtils, GetLibraryNameBasicName)
 {
-    auto result = hipdnn_data_sdk::utilities::getLibraryName("foo");
+    const auto result = hipdnn_data_sdk::utilities::getLibraryName("foo");
 
 #if defined(__linux__)
     EXPECT_EQ(result, "libfoo.so");
@@ -114,7 +114,7 @@ TEST(TestPlatformUtils, GetLibraryNameBasicName)
 
 TEST(TestPlatformUtils, GetLibraryNameEmptyName)
 {
-    auto result = hipdnn_data_sdk::utilities::getLibraryName("");
+    const auto result = hipdnn_data_sdk::utilities::getLibraryName("");
 
 #if defined(__linux__)
     EXPECT_EQ(result, "lib.so");
@@ -125,7 +125,7 @@ TEST(TestPlatformUtils, GetLibraryNameEmptyName)
 
 TEST(TestPlatformUtils, GetLibraryNameWithDots)
 {
-    auto result = hipdnn_data_sdk::utilities::getLibraryName("foo.bar");
+    const auto result = hipdnn_data_sdk::utilities::getLibraryName("foo.bar");
 
 #if defined(__linux__)
     EXPECT_EQ(result, "libfoo.bar.so");
@@ -138,7 +138,7 @@ TEST(TestPlatformUtils, GetLibraryNameWithDots)
 
 TEST(TestPlatformUtils, GetExecutableNameBasicName)
 {
-    auto result = hipdnn_data_sdk::utilities::getExecutableName("app");
+    const auto result = hipdnn_data_sdk::utilities::getExecutableName("app");
 
 #if defined(__linux__)
     EXPECT_EQ(result, "app");
@@ -149,7 +149,7 @@ TEST(TestPlatformUtils, GetExecutableNameBasicName)
 
 TEST(TestPlatformUtils, GetExecutableNameEmptyName)
 {
-    auto result = hipdnn_data_sdk::utilities::getExecutableName("");
+    const auto result = hipdnn_data_sdk::utilities::getExecutableName("");
 
 #if defined(__linux__)
     EXPECT_EQ(result, "");
@@ -165,7 +165,7 @@ TEST(TestPlatformUtils, GetEnvReturnsValue)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter(
         "HIPDNN_TEST_PLATFORMUTILS_GETENV", "test_value");
 
-    auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_GETENV");
+    const auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_GETENV");
 
     EXPECT_EQ(result, "test_value");
 }
@@ -174,7 +174,7 @@ TEST(TestPlatformUtils, GetEnvReturnsDefaultWhenUnset)
 {
     hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_PLATFORMUTILS_UNSET");
 
-    auto result
+    const auto result
         = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_UNSET", "default_value");
 
     EXPECT_EQ(result, "default_value");
@@ -184,7 +184,7 @@ TEST(TestPlatformUtils, GetEnvReturnsEmptyWhenUnsetNoDefault)
 {
     hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_PLATFORMUTILS_UNSET2");
 
-    auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_UNSET2");
+    const auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_UNSET2");
 
     EXPECT_EQ(result, "");
 }
@@ -194,7 +194,7 @@ TEST(TestPlatformUtils, GetEnvReturnsEmptyStringValue)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter(
         "HIPDNN_TEST_PLATFORMUTILS_EMPTY", "");
 
-    auto result
+    const auto result
         = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_EMPTY", "default_value");
 
     EXPECT_EQ(result, "");
@@ -207,7 +207,7 @@ TEST(TestPlatformUtils, SetEnvSetsValue)
     hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_PLATFORMUTILS_SET");
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_TEST_PLATFORMUTILS_SET", "new_value");
 
-    auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_SET");
+    const auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_SET");
 
     EXPECT_EQ(result, "new_value");
 
@@ -219,7 +219,7 @@ TEST(TestPlatformUtils, SetEnvNullValueDoesNotSetVariable)
     hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_PLATFORMUTILS_NULL_SET");
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_TEST_PLATFORMUTILS_NULL_SET", nullptr);
 
-    auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_NULL_SET");
+    const auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_NULL_SET");
 
     EXPECT_EQ(result, "");
 }
@@ -231,7 +231,7 @@ TEST(TestPlatformUtils, SetEnvOverwritesExisting)
 
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_TEST_PLATFORMUTILS_OVERWRITE", "updated");
 
-    auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_OVERWRITE");
+    const auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_OVERWRITE");
 
     EXPECT_EQ(result, "updated");
 }
@@ -243,7 +243,7 @@ TEST(TestPlatformUtils, UnsetEnvRemovesVariable)
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_TEST_PLATFORMUTILS_REMOVE", "to_remove");
     hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_PLATFORMUTILS_REMOVE");
 
-    auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_REMOVE");
+    const auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_REMOVE");
 
     EXPECT_EQ(result, "");
 }
@@ -252,7 +252,7 @@ TEST(TestPlatformUtils, UnsetEnvNoOpOnMissing)
 {
     hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_PLATFORMUTILS_NONEXISTENT");
 
-    auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_NONEXISTENT");
+    const auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_NONEXISTENT");
 
     EXPECT_EQ(result, "");
 }
@@ -266,7 +266,7 @@ TEST(TestPlatformUtils, ExpandUserLeadingTildeExpandsToHome)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME",
                                                                              "/home/testuser");
 
-    auto result = hipdnn_data_sdk::utilities::expandUser("~/foo");
+    const auto result = hipdnn_data_sdk::utilities::expandUser("~/foo");
 
     EXPECT_EQ(result, "/home/testuser/foo");
 }
@@ -276,7 +276,7 @@ TEST(TestPlatformUtils, ExpandUserBareTildeExpandsToHome)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME",
                                                                              "/home/testuser");
 
-    auto result = hipdnn_data_sdk::utilities::expandUser("~");
+    const auto result = hipdnn_data_sdk::utilities::expandUser("~");
 
     EXPECT_EQ(result, "/home/testuser");
 }
@@ -286,7 +286,7 @@ TEST(TestPlatformUtils, ExpandUserEmbeddedTildeIsReturnedVerbatim)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME",
                                                                              "/home/testuser");
 
-    auto result = hipdnn_data_sdk::utilities::expandUser("/tmp/a~b");
+    const auto result = hipdnn_data_sdk::utilities::expandUser("/tmp/a~b");
 
     EXPECT_EQ(result, "/tmp/a~b");
 }
@@ -296,7 +296,7 @@ TEST(TestPlatformUtils, ExpandUserNamedUserIsNotExpanded)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME",
                                                                              "/home/testuser");
 
-    auto result = hipdnn_data_sdk::utilities::expandUser("~otheruser/foo");
+    const auto result = hipdnn_data_sdk::utilities::expandUser("~otheruser/foo");
 
     EXPECT_EQ(result, "~otheruser/foo");
 }
@@ -326,7 +326,7 @@ TEST(TestPlatformUtils, ExpandUserNoLeadingTokenReturnsInputUnchanged)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME",
                                                                              "/home/testuser");
 
-    auto result = hipdnn_data_sdk::utilities::expandUser("relative/path");
+    const auto result = hipdnn_data_sdk::utilities::expandUser("relative/path");
 
     EXPECT_EQ(result, "relative/path");
 }
@@ -336,7 +336,7 @@ TEST(TestPlatformUtils, ExpandUserEmptyInputReturnsInputUnchanged)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME",
                                                                              "/home/testuser");
 
-    auto result = hipdnn_data_sdk::utilities::expandUser("");
+    const auto result = hipdnn_data_sdk::utilities::expandUser("");
 
     EXPECT_EQ(result, "");
 }

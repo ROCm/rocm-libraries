@@ -62,7 +62,7 @@ protected:
 
     static GraphDescriptor createAndFinalizeGraph(hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
     {
-        auto bundle = test_utilities::createDefaultConvOp(computeType);
+        const auto bundle = test_utilities::createDefaultConvOp(computeType);
 
         GraphDescriptor descriptor;
         const std::array<HipdnnBackendDescriptor*, 1> ops = {bundle.convOp.get()};
@@ -103,9 +103,9 @@ TEST_F(TestGraphLogger, GraphNotLoggedWhenDisabled)
     hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_LOG_GRAPH_DIR");
     hipdnn_backend::logging::loggerShutdown();
 
-    auto descriptor = createAndFinalizeGraph();
+    const auto descriptor = createAndFinalizeGraph();
 
-    auto jsonFiles = getJsonFilesInDir(_tempDir);
+    const auto jsonFiles = getJsonFilesInDir(_tempDir);
     EXPECT_TRUE(jsonFiles.empty());
 }
 
@@ -114,7 +114,7 @@ TEST_F(TestGraphLogger, GraphLoggedWhenEnabled)
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
-    auto descriptor = createAndFinalizeGraph();
+    const auto descriptor = createAndFinalizeGraph();
 
     auto jsonFiles = getJsonFilesInDir(_tempDir);
     ASSERT_EQ(jsonFiles.size(), 1u);
@@ -139,10 +139,10 @@ TEST_F(TestGraphLogger, EquivalentGraphsAreLoggedSeparately)
     hipdnn_backend::logging::loggerShutdown();
 
     // Two independently built graphs are two graph objects with two IDs, so each is dumped.
-    auto descriptor1 = createAndFinalizeGraph();
-    auto descriptor2 = createAndFinalizeGraph();
+    const auto descriptor1 = createAndFinalizeGraph();
+    const auto descriptor2 = createAndFinalizeGraph();
 
-    auto jsonFiles = getJsonFilesInDir(_tempDir);
+    const auto jsonFiles = getJsonFilesInDir(_tempDir);
     EXPECT_EQ(jsonFiles.size(), 2u);
 }
 
@@ -151,7 +151,7 @@ TEST_F(TestGraphLogger, ReLoggingSameFinalizedGraphIsDeduplicated)
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
-    auto descriptor = createAndFinalizeGraph();
+    const auto descriptor = createAndFinalizeGraph();
     const auto serialized = descriptor.getSerializedGraph();
     logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
 
@@ -165,7 +165,7 @@ TEST_F(TestGraphLogger, GraphWithoutIdIsNotLogged)
 
     // The guard is the missing id, not the route that produced it: a legacy graph carrying no id
     // reaches the logger the same way a graph serialized before finalizing does.
-    auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
     ASSERT_EQ(hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer())->id(),
               nullptr);
     logging::GraphLogger::logGraph(builder.GetBufferPointer(), builder.GetSize());
@@ -190,38 +190,38 @@ TEST_F(TestGraphLogger, DifferentGraphsLoggedSeparately)
     hipdnn_backend::logging::loggerShutdown();
 
     // Create first graph with FLOAT compute type
-    auto descriptor1 = createAndFinalizeGraph(HIPDNN_DATA_FLOAT);
+    const auto descriptor1 = createAndFinalizeGraph(HIPDNN_DATA_FLOAT);
 
     // Create a second graph with HALF compute type (produces different serialized content)
-    auto descriptor2 = createAndFinalizeGraph(HIPDNN_DATA_HALF);
+    const auto descriptor2 = createAndFinalizeGraph(HIPDNN_DATA_HALF);
 
-    auto jsonFiles = getJsonFilesInDir(_tempDir);
+    const auto jsonFiles = getJsonFilesInDir(_tempDir);
     EXPECT_EQ(jsonFiles.size(), 2u);
 }
 
 TEST_F(TestGraphLogger, OutputDirectoryUsesEnvVar)
 {
     // Create a subdirectory and point HIPDNN_LOG_GRAPH_DIR there
-    auto subDir = _tempDir / "graphs";
+    const auto subDir = _tempDir / "graphs";
     const std::string subDirStr = subDir.string();
     std::filesystem::create_directories(subDir);
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", subDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
-    auto descriptor = createAndFinalizeGraph();
+    const auto descriptor = createAndFinalizeGraph();
 
     // JSON should be in the specified directory
-    auto jsonFiles = getJsonFilesInDir(subDir);
+    const auto jsonFiles = getJsonFilesInDir(subDir);
     EXPECT_EQ(jsonFiles.size(), 1u);
 
     // And NOT in the temp dir root
-    auto rootJsonFiles = getJsonFilesInDir(_tempDir);
+    const auto rootJsonFiles = getJsonFilesInDir(_tempDir);
     EXPECT_TRUE(rootJsonFiles.empty());
 }
 
 TEST_F(TestGraphLogger, OutputDirectoryCreatedIfMissing)
 {
-    auto newDir = _tempDir / "new_subdir" / "graphs";
+    const auto newDir = _tempDir / "new_subdir" / "graphs";
     const std::string newDirStr = newDir.string();
 
     ASSERT_FALSE(std::filesystem::exists(newDir));
@@ -229,35 +229,35 @@ TEST_F(TestGraphLogger, OutputDirectoryCreatedIfMissing)
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", newDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
-    auto descriptor = createAndFinalizeGraph();
+    const auto descriptor = createAndFinalizeGraph();
 
     EXPECT_TRUE(std::filesystem::exists(newDir));
-    auto jsonFiles = getJsonFilesInDir(newDir);
+    const auto jsonFiles = getJsonFilesInDir(newDir);
     EXPECT_EQ(jsonFiles.size(), 1u);
 }
 
 TEST_F(TestGraphLogger, RelativePathResolvedFromCurrentDirectory)
 {
     // Use a relative path under the temp dir to avoid polluting the working directory
-    auto relativeSubdir
+    const auto relativeSubdir
         = std::string("hipdnn_rel_test_")
           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
 
     // Change the working directory to _tempDir so the relative path resolves inside it
-    auto originalCwd = std::filesystem::current_path();
+    const auto originalCwd = std::filesystem::current_path();
     std::filesystem::current_path(_tempDir);
 
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", relativeSubdir.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
-    auto descriptor = createAndFinalizeGraph();
+    const auto descriptor = createAndFinalizeGraph();
 
     // Restore the original working directory before assertions
     std::filesystem::current_path(originalCwd);
 
-    auto expectedDir = _tempDir / relativeSubdir;
+    const auto expectedDir = _tempDir / relativeSubdir;
     EXPECT_TRUE(std::filesystem::exists(expectedDir));
-    auto jsonFiles = getJsonFilesInDir(expectedDir);
+    const auto jsonFiles = getJsonFilesInDir(expectedDir);
     EXPECT_EQ(jsonFiles.size(), 1u);
 }
 

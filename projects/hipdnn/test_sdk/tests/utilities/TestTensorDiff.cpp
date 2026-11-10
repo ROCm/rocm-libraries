@@ -36,7 +36,7 @@ TEST(TestComputeTensorDiff, IdenticalTensorsHaveNoMismatches)
         impl.setHostValue(refView.getHostValue(indices), indices);
     });
 
-    auto summary = computeTensorDiff<float>(ref, impl, 1e-5f, 1e-5f);
+    const auto summary = computeTensorDiff<float>(ref, impl, 1e-5f, 1e-5f);
 
     EXPECT_EQ(summary.totalElements, 16u);
     EXPECT_EQ(summary.mismatchCount, 0u);
@@ -89,7 +89,7 @@ TEST(TestComputeTensorDiff, MismatchesWithinToleranceAreIgnored)
     // Introduce a small difference (0.001) within tolerance
     impl.setHostValue(1.001f, std::vector<int64_t>{0, 0});
 
-    auto summary = computeTensorDiff<float>(ref, impl, 0.01f, 0.0f);
+    const auto summary = computeTensorDiff<float>(ref, impl, 0.01f, 0.0f);
 
     EXPECT_EQ(summary.mismatchCount, 0u);
 }
@@ -99,7 +99,7 @@ TEST(TestComputeTensorDiff, ShapeMismatchReturnsEmptySummary)
     Tensor<float> ref({2, 3});
     Tensor<float> impl({3, 2});
 
-    auto summary = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f);
+    const auto summary = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f);
 
     EXPECT_EQ(summary.totalElements, 0u);
     EXPECT_EQ(summary.mismatchCount, 0u);
@@ -143,7 +143,7 @@ TEST(TestComputeTensorDiff, ZeroMaxMismatchesSuppressesEntries)
         impl.setHostValue(1.0f, std::vector<int64_t>{i});
     }
 
-    auto summary = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f, 0);
+    const auto summary = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f, 0);
 
     EXPECT_EQ(summary.mismatchCount, 4u);
     EXPECT_TRUE(summary.worstMismatches.empty());
@@ -271,7 +271,7 @@ TYPED_TEST(RaggedTensorDiff, IdenticalTensorsCountInBlockElements)
     auto ref = createRaggedSdpaTensor<TypeParam>(0.5f);
     auto impl = createRaggedSdpaTensor<TypeParam>(0.5f);
 
-    auto summary = computeTensorDiff<TypeParam>(ref, impl, 0.0f, 0.0f);
+    const auto summary = computeTensorDiff<TypeParam>(ref, impl, 0.0f, 0.0f);
 
     EXPECT_EQ(summary.totalElements, 20u);
     EXPECT_EQ(summary.mismatchCount, 0u);
@@ -284,7 +284,7 @@ TYPED_TEST(RaggedTensorDiff, InBlockNaNReferenceIsExcluded)
     ref.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 1, 1, 2, 1);
     impl.setHostValue(TypeParam(2.0f), 1, 1, 2, 1);
 
-    auto summary = computeTensorDiff<TypeParam>(ref, impl, 0.0f, 0.0f);
+    const auto summary = computeTensorDiff<TypeParam>(ref, impl, 0.0f, 0.0f);
 
     EXPECT_EQ(summary.totalElements, 19u);
     EXPECT_EQ(summary.mismatchCount, 0u);
@@ -296,7 +296,7 @@ TYPED_TEST(RaggedTensorDiff, ReportsInBlockDifference)
     auto impl = createRaggedSdpaTensor<TypeParam>(0.5f);
     impl.setHostValue(TypeParam(2.0f), 1, 1, 2, 1);
 
-    auto summary = computeTensorDiff<TypeParam>(ref, impl, 0.0f, 0.0f);
+    const auto summary = computeTensorDiff<TypeParam>(ref, impl, 0.0f, 0.0f);
 
     EXPECT_EQ(summary.totalElements, 20u);
     EXPECT_EQ(summary.mismatchCount, 1u);
@@ -309,7 +309,7 @@ TYPED_TEST(RaggedTensorDiff, MismatchedLayoutsReturnEmptySummary)
     auto ref = createRaggedSdpaTensor<TypeParam>(0.5f);
     auto impl = createRaggedSdpaTensor<TypeParam>(0.5f, {0, 3, 5});
 
-    auto summary = computeTensorDiff<TypeParam>(ref, impl, 0.0f, 0.0f);
+    const auto summary = computeTensorDiff<TypeParam>(ref, impl, 0.0f, 0.0f);
 
     EXPECT_EQ(summary.totalElements, 0u);
     EXPECT_EQ(summary.mismatchCount, 0u);

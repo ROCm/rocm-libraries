@@ -55,8 +55,8 @@ hipblasComputeType_t MatmulParams::getComputeDataType(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB)
 {
-    auto hipDataTypeA = hipblaslt_utils::tensorDataTypeToHipDataType(tA.dataType());
-    auto hipDataTypeB = hipblaslt_utils::tensorDataTypeToHipDataType(tB.dataType());
+    auto const hipDataTypeA = hipblaslt_utils::tensorDataTypeToHipDataType(tA.dataType());
+    auto const hipDataTypeB = hipblaslt_utils::tensorDataTypeToHipDataType(tB.dataType());
     if(hipDataTypeA == hipDataTypeB && hipDataTypeA == HIP_R_16F)
     {
         return HIPBLAS_COMPUTE_32F_FAST_16F;
@@ -343,11 +343,11 @@ void MatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
                          uint32_t numDeviceBuffers,
                          void* workspace) const
 {
-    auto aBuffer
+    auto const aBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.a().uid(), deviceBuffers, numDeviceBuffers);
-    auto bBuffer
+    auto const bBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.b().uid(), deviceBuffers, numDeviceBuffers);
-    auto cBuffer
+    auto const cBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.c().uid(), deviceBuffers, numDeviceBuffers);
 
     // Update bias pointer in the descriptor if they are present.

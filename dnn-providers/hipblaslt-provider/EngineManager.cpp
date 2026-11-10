@@ -41,7 +41,7 @@ void EngineManager::getEngineDetails(
     int64_t engineId,
     hipdnnPluginConstData_t& engineDetailsOut)
 {
-    auto& engine = getEngine(engineId);
+    auto const& engine = getEngine(engineId);
     engine.getDetails(handle, engineDetailsOut);
 }
 
@@ -50,7 +50,7 @@ size_t EngineManager::getWorkspaceSize(
     int64_t engineId,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    auto& engine = getEngine(engineId);
+    auto const& engine = getEngine(engineId);
     return engine.getWorkspaceSize(handle, opGraph);
 }
 
@@ -60,13 +60,13 @@ void EngineManager::initializeExecutionContext(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
-    auto& engine = getEngine(engineConfig.engineId());
+    auto const& engine = getEngine(engineConfig.engineId());
     engine.initializeExecutionContext(handle, opGraph, executionContext);
 }
 
 IEngine& EngineManager::getEngine(int64_t engineId) const
 {
-    auto it = _engines.find(engineId);
+    auto const it = _engines.find(engineId);
     if(it == _engines.end())
     {
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,

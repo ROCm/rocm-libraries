@@ -69,7 +69,7 @@ public:
         std::atomic<bool> result(true);
         std::atomic<size_t> comparedCount(0);
 
-        auto validateFunc = [&](const std::vector<int64_t>& indices) {
+        const auto validateFunc = [&](const std::vector<int64_t>& indices) {
             using hipdnn_data_sdk::types::fabs;
             using hipdnn_data_sdk::types::isnan;
             using hipdnn_data_sdk::types::isinf;
@@ -112,8 +112,8 @@ public:
                 return result.load(std::memory_order_relaxed);
             }
 
-            auto absDiff = fabs(static_cast<float>(implValue) - static_cast<float>(refValue));
-            auto threshold
+            const auto absDiff = fabs(static_cast<float>(implValue) - static_cast<float>(refValue));
+            const auto threshold
                 = _absoluteTolerance + _relativeTolerance * fabs(static_cast<float>(refValue));
 
             if(absDiff > threshold)
@@ -132,7 +132,7 @@ public:
         };
 
         // Create and execute parallel functor
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(validateFunc, reference.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
@@ -176,7 +176,7 @@ public:
 
         std::atomic<bool> result(true);
 
-        auto validateFunc = [&](const std::vector<int64_t>& indices) {
+        const auto validateFunc = [&](const std::vector<int64_t>& indices) {
             if(raggedLayout.has_value() && raggedLayout->isOutOfBlock(indices))
             {
                 return result.load(std::memory_order_relaxed);
@@ -216,7 +216,7 @@ public:
         };
 
         // Create and execute parallel functor
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(validateFunc, reference.dims());
         parallelFunc(std::thread::hardware_concurrency());
 

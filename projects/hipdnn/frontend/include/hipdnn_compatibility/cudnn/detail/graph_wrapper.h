@@ -749,7 +749,7 @@ public:
     /// @brief Copies the attributes of the tensor with `uid`; INVALID_VALUE if not found.
     error_t query_tensor_attributes_of_uid(int64_t uid, Tensor_attributes& tensorAttributes) const
     {
-        if(auto tensorPtr = findOwnedTensorByUid(uid))
+        if(const auto tensorPtr = findOwnedTensorByUid(uid))
         {
             tensorAttributes = *tensorPtr;
             return {};
@@ -758,7 +758,7 @@ public:
         if(hasOperationGraphState())
         {
             auto nativeTensors = _graph->getTensorsByUid();
-            auto it = nativeTensors.find(uid);
+            const auto it = nativeTensors.find(uid);
             if(it != nativeTensors.end() && it->second)
             {
                 tensorAttributes = *it->second;

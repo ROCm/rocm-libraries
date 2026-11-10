@@ -58,17 +58,17 @@ class IntegrationConvFpropDescriptorLowering : public IntegrationTestFixture
 // in the frontend.
 TEST_F(IntegrationConvFpropDescriptorLowering, ConvFpropGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestConvGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_FPROP_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_FPROP_TENSOR_X_DIMS)).set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_uid(K_FPROP_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
     w->set_dim(toVec(K_FPROP_TENSOR_W_DIMS)).set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
@@ -80,7 +80,7 @@ TEST_F(IntegrationConvFpropDescriptorLowering, ConvFpropGraphRoundTrip)
     convAttrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
     convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
-    auto y = graph->conv_fprop(x, w, convAttrs);
+    const auto y = graph->conv_fprop(x, w, convAttrs);
     y->set_uid(K_FPROP_TENSOR_Y_UID).set_output(true).set_name("Y");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -144,17 +144,17 @@ TEST_F(IntegrationConvFpropDescriptorLowering, ConvFpropGraphRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationConvFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_AUTO_X_DIMS)).set_stride(toVec(K_AUTO_X_STRIDES));
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_name("W").set_data_type(DataType::FLOAT);
     w->set_dim(toVec(K_AUTO_W_DIMS)).set_stride(toVec(K_AUTO_W_STRIDES));
 
@@ -163,7 +163,7 @@ TEST_F(IntegrationConvFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     convAttrs.set_stride(toVec(K_AUTO_STRIDE));
     convAttrs.set_dilation(toVec(K_AUTO_DILATION));
 
-    auto y = graph->conv_fprop(x, w, convAttrs);
+    const auto y = graph->conv_fprop(x, w, convAttrs);
     y->set_output(true);
 
     auto graphT = lowerAndDeserialize(*graph, _handle);

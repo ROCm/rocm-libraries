@@ -324,7 +324,7 @@ std::string MoeGroupedMatmulOperationDescriptor::toString() const
     str += ", top_k=" + std::to_string(_data.top_k);
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

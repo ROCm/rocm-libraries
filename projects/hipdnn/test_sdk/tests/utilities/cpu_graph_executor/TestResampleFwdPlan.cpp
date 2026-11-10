@@ -36,7 +36,7 @@ void fillSequential(Tensor<Type>& tensor)
 
 TEST(TestResampleFwdPlan, ExecuteMatchesCpuReference)
 {
-    auto builder = createValidResampleFwdGraph();
+    const auto builder = createValidResampleFwdGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attributes = *node.attributes_as_ResampleFwdAttributes();
@@ -66,7 +66,7 @@ TEST(TestResampleFwdPlan, ExecuteMatchesCpuReference)
 
 TEST(TestResampleFwdPlan, ExecuteWritesGeneratedIndex)
 {
-    auto builder = createValidResampleFwdGraph(true);
+    const auto builder = createValidResampleFwdGraph(true);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attributes = *node.attributes_as_ResampleFwdAttributes();
@@ -95,18 +95,18 @@ TEST(TestResampleFwdPlan, ExecuteWritesGeneratedIndex)
 
 TEST(TestResampleFwdGraphBuilder, PreservesOptionalGenerateIndex)
 {
-    auto absentBuilder = createValidResampleFwdGraph();
+    const auto absentBuilder = createValidResampleFwdGraph();
     const GraphWrapper absentGraph(absentBuilder.GetBufferPointer(), absentBuilder.GetSize());
     const auto& absentAttributes = *absentGraph.getNode(0).attributes_as_ResampleFwdAttributes();
     EXPECT_FALSE(absentAttributes.generate_index().has_value());
 
-    auto falseBuilder = createValidResampleFwdGraph(false);
+    const auto falseBuilder = createValidResampleFwdGraph(false);
     const GraphWrapper falseGraph(falseBuilder.GetBufferPointer(), falseBuilder.GetSize());
     const auto& falseAttributes = *falseGraph.getNode(0).attributes_as_ResampleFwdAttributes();
     ASSERT_TRUE(falseAttributes.generate_index().has_value());
     EXPECT_FALSE(falseAttributes.generate_index().value());
 
-    auto trueBuilder = createValidResampleFwdGraph(true);
+    const auto trueBuilder = createValidResampleFwdGraph(true);
     const GraphWrapper trueGraph(trueBuilder.GetBufferPointer(), trueBuilder.GetSize());
     const auto& trueAttributes = *trueGraph.getNode(0).attributes_as_ResampleFwdAttributes();
     ASSERT_TRUE(trueAttributes.generate_index().has_value());
@@ -115,7 +115,7 @@ TEST(TestResampleFwdGraphBuilder, PreservesOptionalGenerateIndex)
 
 TEST(TestResampleFwdPlanBuilder, IsApplicable)
 {
-    auto builder = createValidResampleFwdGraph();
+    const auto builder = createValidResampleFwdGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const ResampleFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::UNSET>
@@ -126,7 +126,7 @@ TEST(TestResampleFwdPlanBuilder, IsApplicable)
     EXPECT_TRUE(noIndexBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
     EXPECT_FALSE(indexBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
 
-    auto indexBuilderFbb = createValidResampleFwdGraph(true);
+    const auto indexBuilderFbb = createValidResampleFwdGraph(true);
     const GraphWrapper indexGraph(indexBuilderFbb.GetBufferPointer(), indexBuilderFbb.GetSize());
     EXPECT_FALSE(noIndexBuilder.isApplicable(indexGraph.getNode(0), indexGraph.getTensorMap()));
     EXPECT_TRUE(indexBuilder.isApplicable(indexGraph.getNode(0), indexGraph.getTensorMap()));
@@ -143,7 +143,7 @@ TEST(TestResampleFwdPlanBuilder, RejectsUnsupportedModes)
 
     for(const auto mode : {ResampleMode::NOT_SET, static_cast<ResampleMode>(127)})
     {
-        auto builder = createValidResampleFwdGraph(std::nullopt, mode);
+        const auto builder = createValidResampleFwdGraph(std::nullopt, mode);
         const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         EXPECT_FALSE(planBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
     }
@@ -156,7 +156,7 @@ TEST(TestResampleFwdPlanBuilder, RejectsUnsupportedPaddingModes)
 
     for(const auto paddingMode : {PaddingMode::PADDING_NOT_SET, static_cast<PaddingMode>(127)})
     {
-        auto builder
+        const auto builder
             = createValidResampleFwdGraph(std::nullopt, ResampleMode::MAXPOOL, paddingMode);
         const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         EXPECT_FALSE(planBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
@@ -165,14 +165,14 @@ TEST(TestResampleFwdPlanBuilder, RejectsUnsupportedPaddingModes)
 
 TEST(TestResampleFwdPlanBuilder, BuildNodePlan)
 {
-    auto builder = createValidResampleFwdGraph();
+    const auto builder = createValidResampleFwdGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const ResampleFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::UNSET>
         planBuilder;
     EXPECT_NO_THROW(planBuilder.buildNodePlan(graph, graph.getNode(0)));
 
-    auto reductionBuilder = createValidReductionGraph();
+    const auto reductionBuilder = createValidReductionGraph();
     const GraphWrapper reductionGraph(reductionBuilder.GetBufferPointer(),
                                       reductionBuilder.GetSize());
     EXPECT_THROW(planBuilder.buildNodePlan(reductionGraph, reductionGraph.getNode(0)),

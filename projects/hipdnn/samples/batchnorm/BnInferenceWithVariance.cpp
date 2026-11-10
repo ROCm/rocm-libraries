@@ -22,31 +22,31 @@ using namespace hipdnn_data_sdk;
 template <typename InputType, typename IntermediateType>
 bool SampleRunner::operator()(const TensorLayout& layout)
 {
-    auto inputType = getDataTypeEnumFromType<InputType>();
-    auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
+    const auto inputType = getDataTypeEnumFromType<InputType>();
+    const auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
 
     std::cout << "Running batch normalization inference with variance graph " << inputType << " ["
               << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "")
               << (config.useRuntimePassByValue ? " [runtime-pass-by-value]" : "") << "...\n";
 
     // Input dimensions
-    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t n = !config.dims.empty() ? config.dims[0] : 16; // BATCH SIZE
     const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
     const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
     const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
 
-    auto graph = std::make_shared<graph::Graph>();
+    const auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     setPreferredEngine(graph, config);
 
-    auto x = createTensor({n, c, h, w}, inputType, layout);
-    auto scale = createTensor({1, c, 1, 1}, intermediateType);
-    auto bias = createTensor({1, c, 1, 1}, intermediateType);
-    auto mean = createTensor({1, c, 1, 1}, intermediateType);
-    auto variance = createTensor({1, c, 1, 1}, intermediateType);
+    const auto x = createTensor({n, c, h, w}, inputType, layout);
+    const auto scale = createTensor({1, c, 1, 1}, intermediateType);
+    const auto bias = createTensor({1, c, 1, 1}, intermediateType);
+    const auto mean = createTensor({1, c, 1, 1}, intermediateType);
+    const auto variance = createTensor({1, c, 1, 1}, intermediateType);
     // Epsilon is a pass-by-value scalar, not a device buffer.
     // Compile-time constant: value is baked into the op-graph at build() and requires no
     // variant-pack entry at execute(). Works with any plugin version.
@@ -54,7 +54,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     // variant pack at execute(), allowing it to vary across executions without rebuilding the
     // graph. Requires plugin SDK >= 1.2.0.
     constexpr auto EPSILON = utilities::BATCHNORM_DEFAULT_EPSILON;
-    auto epsilon = std::make_shared<graph::TensorAttributes>();
+    const auto epsilon = std::make_shared<graph::TensorAttributes>();
     epsilon->set_dim({1}).set_stride({1}).set_data_type(getDataTypeEnumFromType<double>());
     if(config.useRuntimePassByValue)
     {
@@ -120,18 +120,18 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     auto yHostPtr = yTensor.memory().hostData();
 
-    auto runCpuValidation = [&]() -> bool {
+    const auto runCpuValidation = [&]() -> bool {
         std::cout << "Running CPU reference validation...\n";
 
         utilities::Tensor<InputType> yRefTensor(y->get_dim(), layout);
 
-        auto tolerance
+        const auto tolerance
             = hipdnn_test_sdk::utilities::batchnorm::getToleranceInferenceWithVariance<InputType>();
 
         hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
             xTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, yRefTensor, epsilonVal);
 
-        auto validator
+        const auto validator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         std::cout << "CPU reference validation:\n";
@@ -189,7 +189,7 @@ int main(int argc, char* argv[])
     {
         RETURN_SUCCESS_IF_NO_DEVICE();
 
-        auto config = parseCommandLineArgs(argc, argv, SampleType::BN_WITH_PASS_BY_VALUE);
+        const auto config = parseCommandLineArgs(argc, argv, SampleType::BN_WITH_PASS_BY_VALUE);
 
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);

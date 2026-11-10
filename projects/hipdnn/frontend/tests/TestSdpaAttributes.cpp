@@ -80,10 +80,10 @@ TEST(TestSdpaAttributes, SetRequiredTensors)
 {
     SdpaAttributes attrs;
 
-    auto q = makeTensor(1);
-    auto k = makeTensor(2);
-    auto v = makeTensor(3);
-    auto o = makeTensor(4);
+    const auto q = makeTensor(1);
+    const auto k = makeTensor(2);
+    const auto v = makeTensor(3);
+    const auto o = makeTensor(4);
 
     attrs.set_q(q).set_k(k).set_v(v).set_o(o);
 
@@ -102,24 +102,24 @@ TEST(TestSdpaAttributes, SetInputTensors)
 {
     SdpaAttributes attrs;
 
-    auto attnMask = makeTensor(10);
-    auto scale = makeTensor(11);
-    auto seqLenQ = makeTensor(12);
-    auto seqLenKv = makeTensor(13);
-    auto seed = makeTensor(14);
-    auto offset = makeTensor(15);
-    auto dropoutMask = makeTensor(16);
-    auto dropoutScale = makeTensor(17);
-    auto pageTableK = makeTensor(18);
-    auto pageTableV = makeTensor(19);
-    auto blockMask = makeTensor(20);
-    auto sinkToken = makeTensor(21);
-    auto descaleQ = makeTensor(22);
-    auto descaleK = makeTensor(23);
-    auto descaleV = makeTensor(24);
-    auto descaleS = makeTensor(25);
-    auto scaleS = makeTensor(26);
-    auto scaleO = makeTensor(27);
+    const auto attnMask = makeTensor(10);
+    const auto scale = makeTensor(11);
+    const auto seqLenQ = makeTensor(12);
+    const auto seqLenKv = makeTensor(13);
+    const auto seed = makeTensor(14);
+    const auto offset = makeTensor(15);
+    const auto dropoutMask = makeTensor(16);
+    const auto dropoutScale = makeTensor(17);
+    const auto pageTableK = makeTensor(18);
+    const auto pageTableV = makeTensor(19);
+    const auto blockMask = makeTensor(20);
+    const auto sinkToken = makeTensor(21);
+    const auto descaleQ = makeTensor(22);
+    const auto descaleK = makeTensor(23);
+    const auto descaleV = makeTensor(24);
+    const auto descaleS = makeTensor(25);
+    const auto scaleS = makeTensor(26);
+    const auto scaleO = makeTensor(27);
 
     attrs.set_bias(attnMask)
         .set_attn_scale(scale)
@@ -164,12 +164,12 @@ TEST(TestSdpaAttributes, SetOutputTensors)
 {
     SdpaAttributes attrs;
 
-    auto stats = makeTensor(100);
-    auto max = makeTensor(101);
-    auto sumExp = makeTensor(102);
-    auto rngDump = makeTensor(103);
-    auto amaxS = makeTensor(104);
-    auto amaxO = makeTensor(105);
+    const auto stats = makeTensor(100);
+    const auto max = makeTensor(101);
+    const auto sumExp = makeTensor(102);
+    const auto rngDump = makeTensor(103);
+    const auto amaxS = makeTensor(104);
+    const auto amaxO = makeTensor(105);
 
     attrs.set_stats(stats)
         .set_logit_max(max)
@@ -193,8 +193,8 @@ TEST(TestSdpaAttributes, SetDropout)
 {
     SdpaAttributes attrs;
 
-    auto seed = makeTensor(50);
-    auto offset = makeTensor(51);
+    const auto seed = makeTensor(50);
+    const auto offset = makeTensor(51);
     attrs.set_dropout(0.1f, seed, offset);
 
     ASSERT_TRUE(attrs.dropout_probability.has_value());
@@ -302,19 +302,19 @@ TEST(TestSdpaAttributes, LogicalAndStrictEquality)
     attr1.set_mma_core_mode(hipdnn_frontend::DataType::FLOAT);
     attr1.set_implementation(hipdnn_frontend::AttentionImplementation::AUTO);
 
-    auto q1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto q1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     q1->set_uid(1).set_name("Q").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_q(q1);
 
-    auto k1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto k1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     k1->set_uid(2).set_name("K").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_k(k1);
 
-    auto v1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto v1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     v1->set_uid(3).set_name("V").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_v(v1);
 
-    auto o1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto o1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     o1->set_uid(4).set_name("O").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_o(o1);
 
@@ -334,19 +334,19 @@ TEST(TestSdpaAttributes, LogicalAndStrictEquality)
     attr2.set_mma_core_mode(hipdnn_frontend::DataType::FLOAT);
     attr2.set_implementation(hipdnn_frontend::AttentionImplementation::AUTO);
 
-    auto q2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto q2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     q2->set_uid(1).set_name("Q").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_q(q2);
 
-    auto k2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto k2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     k2->set_uid(2).set_name("K").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_k(k2);
 
-    auto v2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto v2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     v2->set_uid(3).set_name("V").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_v(v2);
 
-    auto o2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto o2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     o2->set_uid(4).set_name("O").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_o(o2);
 
@@ -356,7 +356,7 @@ TEST(TestSdpaAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchQ = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto structuralMismatchQ = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     structuralMismatchQ->set_uid(99).set_name("MismatchedQ");
     attr2.set_q(structuralMismatchQ);
 
@@ -458,7 +458,7 @@ TEST(TestSdpaAttributes, LogicalAndStrictEquality)
     EXPECT_FALSE(sparse1.logicallyEquals(sparse2));
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchQ = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto logicalMatchQ = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchQ
         ->set_uid(555) // Diverges from attr1's q1 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's q1 ("Q")
@@ -488,7 +488,7 @@ TEST(TestSdpaAttributes, NativeSetAttnScaleFloatPopulatesValueNotTensor)
 TEST(TestSdpaAttributes, NativeSetLogitMaxRoundTrip)
 {
     SdpaAttributes attrs;
-    auto logitMax = makeTensor(60);
+    const auto logitMax = makeTensor(60);
     attrs.set_logit_max(logitMax);
     EXPECT_EQ(attrs.get_max(), logitMax);
 }
@@ -496,7 +496,7 @@ TEST(TestSdpaAttributes, NativeSetLogitMaxRoundTrip)
 TEST(TestSdpaAttributes, NativeSetScoreSumExpRoundTrip)
 {
     SdpaAttributes attrs;
-    auto sumExp = makeTensor(61);
+    const auto sumExp = makeTensor(61);
     attrs.set_score_sum_exp(sumExp);
     EXPECT_EQ(attrs.get_sum_exp(), sumExp);
 }
@@ -512,8 +512,8 @@ TEST(TestSdpaAttributes, NativeSetSlidingWindowLengthMapsToLeftBound)
 TEST(TestSdpaAttributes, NativePagedAttentionTablesRoundTrip)
 {
     SdpaAttributes attrs;
-    auto kTable = makeTensor(62);
-    auto vTable = makeTensor(63);
+    const auto kTable = makeTensor(62);
+    const auto vTable = makeTensor(63);
     attrs.set_paged_attention_k_table(kTable);
     attrs.set_paged_attention_v_table(vTable);
     EXPECT_EQ(attrs.get_page_table_k(), kTable);
@@ -531,8 +531,8 @@ TEST(TestSdpaAttributes, NativeSetMmaCoreMode)
 TEST(TestSdpaAttributes, NativeFusedDropoutTwoArg)
 {
     SdpaAttributes attrs;
-    auto mask = makeTensor(64);
-    auto scale = makeTensor(65);
+    const auto mask = makeTensor(64);
+    const auto scale = makeTensor(65);
     attrs.set_dropout(mask, scale);
     EXPECT_EQ(attrs.get_dropout_mask(), mask);
     EXPECT_EQ(attrs.get_dropout_scale(), scale);

@@ -97,8 +97,8 @@ public:
 
         // This lambda computes a single element of the y tensor. `window` is per-thread
         // scratch owned by the parallel functor, so rebuilding it here costs no allocation.
-        auto convolutionFunc = [&](hipdnn_test_sdk::detail::ConvolutionWindow& window,
-                                   const std::vector<int64_t>& indices) {
+        const auto convolutionFunc = [&](hipdnn_test_sdk::detail::ConvolutionWindow& window,
+                                         const std::vector<int64_t>& indices) {
             const int64_t gIdx = indices[0]; // group index
             const int64_t nIdx = indices[1]; // batch index
             const int64_t kIdx = indices[2]; // y channel within group
@@ -162,7 +162,7 @@ public:
         std::vector<int64_t> parallelDims = {nGroups, nBatch, yChannelsPerGroup};
         parallelDims.insert(parallelDims.end(), ySpatialDims.begin(), ySpatialDims.end());
 
-        auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctorWithScratch<
+        const auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctorWithScratch<
             hipdnn_test_sdk::detail::ConvolutionWindow>(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
@@ -223,8 +223,8 @@ public:
 
         // This lambda computes a single element of the x gradient tensor (dx). `window` is
         // per-thread scratch owned by the parallel functor.
-        auto convolutionFunc = [&](hipdnn_test_sdk::detail::ConvolutionWindow& window,
-                                   const std::vector<int64_t>& indices) {
+        const auto convolutionFunc = [&](hipdnn_test_sdk::detail::ConvolutionWindow& window,
+                                         const std::vector<int64_t>& indices) {
             const int64_t gIdx = indices[0]; // group index
             const int64_t nIdx = indices[1]; // batch index
             const int64_t cIdx = indices[2]; // channel index within group
@@ -293,7 +293,7 @@ public:
         std::vector<int64_t> parallelDims = {nGroups, nBatch, channelsPerGroup};
         parallelDims.insert(parallelDims.end(), xSpatialDims.begin(), xSpatialDims.end());
 
-        auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctorWithScratch<
+        const auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctorWithScratch<
             hipdnn_test_sdk::detail::ConvolutionWindow>(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
@@ -354,8 +354,8 @@ public:
 
         // `window` is per-thread scratch owned by the parallel functor. Its extent is the
         // y gradient's spatial extent, so it is walked rather than expanded.
-        auto convolutionFunc = [&](hipdnn_test_sdk::detail::ConvolutionWindow& window,
-                                   const std::vector<int64_t>& indices) {
+        const auto convolutionFunc = [&](hipdnn_test_sdk::detail::ConvolutionWindow& window,
+                                         const std::vector<int64_t>& indices) {
             const int64_t gIdx = indices[0];
             const int64_t kIdx = indices[1];
             const int64_t cIdx = indices[2];
@@ -408,7 +408,7 @@ public:
         std::vector<int64_t> parallelDims = {nGroups, yChannelsPerGroup, channelsPerGroup};
         parallelDims.insert(parallelDims.end(), kernelSpatialDims.begin(), kernelSpatialDims.end());
 
-        auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctorWithScratch<
+        const auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctorWithScratch<
             hipdnn_test_sdk::detail::ConvolutionWindow>(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 

@@ -150,17 +150,17 @@ void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
     float betaParamDiff = 0.0f;
     const double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
 
-    auto xBuffer
+    const auto xBuffer
         = hipdnn_plugin_sdk::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
-    auto dyBuffer
+    const auto dyBuffer
         = hipdnn_plugin_sdk::findDeviceBuffer(_params.dy().uid(), deviceBuffers, numDeviceBuffers);
-    auto dxBuffer
+    const auto dxBuffer
         = hipdnn_plugin_sdk::findDeviceBuffer(_params.dx().uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+    const auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _params.scale().uid(), deviceBuffers, numDeviceBuffers);
-    auto dscaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+    const auto dscaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _params.dscale().uid(), deviceBuffers, numDeviceBuffers);
-    auto dbiasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+    const auto dbiasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _params.dbias().uid(), deviceBuffers, numDeviceBuffers);
 
     hipdnnPluginDeviceBuffer_t meanBuffer = {0, nullptr};
@@ -184,7 +184,7 @@ void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
 
     if(_params.optActivation().has_value() && _params.optBias().has_value())
     {
-        auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        const auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _params.optBias().value().uid(), deviceBuffers, numDeviceBuffers);
         biasDescriptor = _params.optBias().value().tensorDescriptor();
         biasPtr = biasBuffer.ptr;

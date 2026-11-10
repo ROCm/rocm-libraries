@@ -32,7 +32,7 @@ void toJsonAndBackTestSuite(const hipdnn_flatbuffers_sdk::data_objects::Graph* g
     const nlohmann::json graphJson = *graph;
 
     flatbuffers::FlatBufferBuilder builder;
-    auto newGraphBuilder = hipdnn_flatbuffers_sdk::json::to<Graph>(builder, graphJson);
+    const auto newGraphBuilder = hipdnn_flatbuffers_sdk::json::to<Graph>(builder, graphJson);
     builder.Finish(newGraphBuilder);
     auto newGraph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
 
@@ -47,7 +47,7 @@ void toJsonAndBackTestSuite(const hipdnn_flatbuffers_sdk::data_objects::Graph* g
 
 TEST(TestJson, GraphUuidRoundTripsAsCanonicalString)
 {
-    auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
     auto graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
     const auto id
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("01234567-89AB-4DEF-8123-456789ABCDEF");
@@ -72,7 +72,7 @@ TEST(TestJson, GraphUuidRoundTripsAsCanonicalString)
 
 TEST(TestJson, LegacyGraphOmitsUuidAndStillRoundTrips)
 {
-    auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
     const auto* graph = GetGraph(builder.GetBufferPointer());
     const nlohmann::json graphJson = *graph;
     EXPECT_FALSE(graphJson.contains("id"));
@@ -84,7 +84,7 @@ TEST(TestJson, LegacyGraphOmitsUuidAndStillRoundTrips)
 
 TEST(TestJson, RejectsInvalidGraphUuid)
 {
-    auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
     const auto* graph = GetGraph(builder.GetBufferPointer());
     auto graphJson = nlohmann::json(*graph);
 
@@ -103,11 +103,11 @@ TEST(TestJson, RejectsInvalidGraphUuid)
 TEST(TestJson, GraphToJsonAndBack)
 {
     auto nodeAttributeValues = EnumValuesNodeAttributes();
-    auto maxEnumValue
+    const auto maxEnumValue
         = static_cast<size_t>(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MAX);
     for(size_t i = 0; i <= maxEnumValue; i++)
     {
-        auto enumValue = nodeAttributeValues[i];
+        const auto enumValue = nodeAttributeValues[i];
         flatbuffers::FlatBufferBuilder graphBuilder;
         const hipdnn_flatbuffers_sdk::data_objects::Graph* graph = nullptr;
         std::string context;
@@ -328,7 +328,7 @@ TEST(TestJson, GraphWithoutVersionRoundTripsWithVersionAbsent)
 }
 TEST(TestJson, MoeGroupedMatmulDefaultsRoundTrip)
 {
-    auto graphBuilder
+    const auto graphBuilder
         = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulGraph(MoeGroupedMatmulMode::NONE);
     const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
     const nlohmann::json graphJson = *graph;
@@ -346,7 +346,7 @@ TEST(TestJson, MoeGroupedMatmulDefaultsRoundTrip)
 
 TEST(TestJson, MoeGroupedMatmulBwdRoundTrip)
 {
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulBwdGraph();
+    const auto graphBuilder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulBwdGraph();
     const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
     const nlohmann::json graphJson = *graph;
     const auto& nodeJson = graphJson.at("nodes").at(0);
@@ -366,13 +366,13 @@ TEST(TestJson, MoeGroupedMatmulBwdRoundTrip)
 // GDN and KDA graphs, whose flag values differ from the first ones.
 TEST(TestJson, GdnSafeGateRoundTrip)
 {
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidGdnSafeGateGraph();
+    const auto graphBuilder = hipdnn_test_sdk::utilities::createValidGdnSafeGateGraph();
     toJsonAndBackTestSuite(GetGraph(graphBuilder.GetBufferPointer()), "(GDN safe-gate graph)");
 }
 
 TEST(TestJson, KdaStatePoolRoundTrip)
 {
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidKdaStatePoolGraph();
+    const auto graphBuilder = hipdnn_test_sdk::utilities::createValidKdaStatePoolGraph();
     toJsonAndBackTestSuite(GetGraph(graphBuilder.GetBufferPointer()), "(KDA state-pool graph)");
 }
 
@@ -420,7 +420,7 @@ void vectorTestSuite(const std::vector<int>& vec, const std::string& context)
 template <class T>
 void enumTestSuite(T value, const std::string& stringRep, const std::string& context)
 {
-    auto jsonStringRep = "\"" + stringRep + "\"";
+    const auto jsonStringRep = "\"" + stringRep + "\"";
     const nlohmann::json jsonValue = value;
     EXPECT_EQ(value, jsonValue.get<T>()) << context;
     EXPECT_EQ(jsonValue.dump(), std::string{jsonStringRep}) << context;
@@ -448,8 +448,8 @@ TEST(TestJson, Enum)
 TEST(TestJson, FlatbufferStringToJson)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto strOffset = builder.CreateString("hello_world");
-    auto svOffset = CreateStringValue(builder, strOffset);
+    const auto strOffset = builder.CreateString("hello_world");
+    const auto svOffset = CreateStringValue(builder, strOffset);
     builder.Finish(svOffset);
 
     auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
@@ -463,8 +463,8 @@ TEST(TestJson, FlatbufferStringToJson)
 TEST(TestJson, FlatbufferStringToJsonImplicit)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto strOffset = builder.CreateString("implicit_test");
-    auto svOffset = CreateStringValue(builder, strOffset);
+    const auto strOffset = builder.CreateString("implicit_test");
+    const auto svOffset = CreateStringValue(builder, strOffset);
     builder.Finish(svOffset);
 
     auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
@@ -477,7 +477,7 @@ TEST(TestJson, FlatbufferStringToJsonImplicit)
 TEST(TestJson, FlatbufferNullStringToJson)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto svOffset = CreateStringValue(builder);
+    const auto svOffset = CreateStringValue(builder);
     builder.Finish(svOffset);
 
     auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
@@ -491,8 +491,8 @@ TEST(TestJson, FlatbufferNullStringToJson)
 TEST(TestJson, FlatbufferEmptyStringToJson)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto strOffset = builder.CreateString("");
-    auto svOffset = CreateStringValue(builder, strOffset);
+    const auto strOffset = builder.CreateString("");
+    const auto svOffset = CreateStringValue(builder, strOffset);
     builder.Finish(svOffset);
 
     auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
@@ -510,9 +510,9 @@ TEST(TestJson, FlatbufferStringVectorToJson)
     stringOffsets.push_back(builder.CreateString("alpha"));
     stringOffsets.push_back(builder.CreateString("beta"));
     stringOffsets.push_back(builder.CreateString("gamma"));
-    auto vecOffset = builder.CreateVector(stringOffsets);
+    const auto vecOffset = builder.CreateVector(stringOffsets);
 
-    auto scOffset = CreateStringConstraint(builder, 100, vecOffset);
+    const auto scOffset = CreateStringConstraint(builder, 100, vecOffset);
     builder.Finish(scOffset);
 
     auto sc = flatbuffers::GetRoot<StringConstraint>(builder.GetBufferPointer());
@@ -530,9 +530,9 @@ TEST(TestJson, FlatbufferEmptyStringVectorToJson)
 {
     flatbuffers::FlatBufferBuilder builder;
     const std::vector<flatbuffers::Offset<flatbuffers::String>> emptyOffsets;
-    auto vecOffset = builder.CreateVector(emptyOffsets);
+    const auto vecOffset = builder.CreateVector(emptyOffsets);
 
-    auto scOffset = CreateStringConstraint(builder, 0, vecOffset);
+    const auto scOffset = CreateStringConstraint(builder, 0, vecOffset);
     builder.Finish(scOffset);
 
     auto sc = flatbuffers::GetRoot<StringConstraint>(builder.GetBufferPointer());
@@ -546,7 +546,7 @@ TEST(TestJson, FlatbufferEmptyStringVectorToJson)
 TEST(TestJson, FlatbufferNullStringVectorToJson)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto scOffset = CreateStringConstraint(builder);
+    const auto scOffset = CreateStringConstraint(builder);
     builder.Finish(scOffset);
 
     auto sc = flatbuffers::GetRoot<StringConstraint>(builder.GetBufferPointer());
@@ -565,16 +565,16 @@ TEST(TestJson, TensorAttributesBoolValueRoundTrip)
         const std::vector<int64_t> dims = {1};
         const std::vector<int64_t> strides = {1};
         const BoolValue value(boolVal);
-        auto valueOffset = builder.CreateStruct(value).Union();
-        auto attrOffset = CreateTensorAttributesDirect(builder,
-                                                       /*uid*/ 7,
-                                                       /*name*/ "boolean_attr",
-                                                       DataType::BOOLEAN,
-                                                       &strides,
-                                                       &dims,
-                                                       /*virtual*/ false,
-                                                       TensorValue::BoolValue,
-                                                       valueOffset);
+        const auto valueOffset = builder.CreateStruct(value).Union();
+        const auto attrOffset = CreateTensorAttributesDirect(builder,
+                                                             /*uid*/ 7,
+                                                             /*name*/ "boolean_attr",
+                                                             DataType::BOOLEAN,
+                                                             &strides,
+                                                             &dims,
+                                                             /*virtual*/ false,
+                                                             TensorValue::BoolValue,
+                                                             valueOffset);
         builder.Finish(attrOffset);
 
         auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
@@ -585,7 +585,7 @@ TEST(TestJson, TensorAttributesBoolValueRoundTrip)
         EXPECT_EQ(attrJson.at("value").get<bool>(), boolVal);
 
         flatbuffers::FlatBufferBuilder roundTripBuilder;
-        auto newAttrOffset
+        const auto newAttrOffset
             = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(roundTripBuilder, attrJson);
         roundTripBuilder.Finish(newAttrOffset);
 
@@ -607,19 +607,20 @@ TEST(TestJson, TensorAttributesRaggedOffsetAndAlignmentRoundTrip)
     const std::vector<int64_t> strides = {8, 1, 1, 1};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = CreateTensorAttributesDirect(builder,
-                                                   uid,
-                                                   "ragged_primary",
-                                                   DataType::FLOAT,
-                                                   &strides,
-                                                   &dims,
-                                                   /*virtual*/ false,
-                                                   TensorValue::NONE,
-                                                   /*value*/ 0,
-                                                   false,
-                                                   flatbuffers::Optional<int64_t>(raggedOffsetUid),
-                                                   alignment,
-                                                   raggedOffsetMultiplier);
+    const auto attrOffset
+        = CreateTensorAttributesDirect(builder,
+                                       uid,
+                                       "ragged_primary",
+                                       DataType::FLOAT,
+                                       &strides,
+                                       &dims,
+                                       /*virtual*/ false,
+                                       TensorValue::NONE,
+                                       /*value*/ 0,
+                                       false,
+                                       flatbuffers::Optional<int64_t>(raggedOffsetUid),
+                                       alignment,
+                                       raggedOffsetMultiplier);
     builder.Finish(attrOffset);
 
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
@@ -637,7 +638,7 @@ TEST(TestJson, TensorAttributesRaggedOffsetAndAlignmentRoundTrip)
     EXPECT_EQ(attrJson.at("ragged_offset_multiplier").get<int64_t>(), raggedOffsetMultiplier);
 
     flatbuffers::FlatBufferBuilder roundTripBuilder;
-    auto newAttrOffset
+    const auto newAttrOffset
         = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(roundTripBuilder, attrJson);
     roundTripBuilder.Finish(newAttrOffset);
 
@@ -660,7 +661,7 @@ TEST(TestJson, TensorAttributesOmittedRaggedOffsetMultiplierDefaultsToOne)
                                      {"virtual", false}};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(builder, attrJson);
+    const auto attrOffset = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(builder, attrJson);
     builder.Finish(attrOffset);
 
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
@@ -673,7 +674,7 @@ TEST(TestJson, TensorAttributesDefaultAlignmentAndNoRaggedOffset)
     const std::vector<int64_t> strides = {1, 1, 1, 1};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = CreateTensorAttributesDirect(
+    const auto attrOffset = CreateTensorAttributesDirect(
         builder, 1, "plain", DataType::FLOAT, &strides, &dims, false);
     builder.Finish(attrOffset);
 
@@ -697,7 +698,7 @@ TEST(TestJson, TensorAttributesLegacyJsonMissingAlignmentDefaultsTo16)
                                        {"virtual", false}};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(builder, legacyJson);
+    const auto attrOffset = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(builder, legacyJson);
     builder.Finish(attrOffset);
 
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());

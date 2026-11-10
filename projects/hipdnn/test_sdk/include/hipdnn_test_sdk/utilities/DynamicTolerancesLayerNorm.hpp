@@ -101,12 +101,12 @@ float calculateLayernormFpropTolerance(double xMin,
     // bounded by range^2.  We model this as 2M effective accumulations
     // (M for M2 multiply-adds + M for mean incremental updates that
     // feed into the delta values).
-    auto varianceAccumulations
+    const auto varianceAccumulations
         = static_cast<uint64_t>(2) * static_cast<uint64_t>(normalizedElementCount);
     const double maxProduct = range * range;
     const double sumAbsProductBound = static_cast<double>(varianceAccumulations) * maxProduct;
 
-    auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
     // Variance path: computeGamma for 2M effective accumulations
     const double gammaVar = computeGamma(varianceAccumulations, epsilon);
@@ -137,7 +137,7 @@ float calculateLayernormFpropTolerance(double xMin,
     // Note: the ratio maxAbsX/std is data-dependent (~ 1.7 for uniform [-a,a],
     // ~ 3.5 for uniform [0,a]).  The invStd ~ 1/maxAbsX assumption gives an
     // O(1) ratio, which is the same modelling choice the variance path makes.
-    auto meanAccumulations = static_cast<uint64_t>(normalizedElementCount);
+    const auto meanAccumulations = static_cast<uint64_t>(normalizedElementCount);
     const double gammaMean = computeGamma(meanAccumulations, epsilon);
     // gammaMean < gammaVar always (M < 2M, computeGamma is monotonic),
     // so if gammaVar passed validateGamma, gammaMean is also valid.

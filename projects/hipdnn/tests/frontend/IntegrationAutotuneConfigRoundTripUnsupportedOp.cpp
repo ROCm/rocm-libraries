@@ -66,11 +66,11 @@ std::shared_ptr<Graph> buildUnsupportedCustomOpGraph()
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto input0 = std::make_shared<TensorAttributes>();
+    const auto input0 = std::make_shared<TensorAttributes>();
     input0->set_uid(1).set_name("input0").set_data_type(DataType::FLOAT);
     input0->set_dim({2, 3}).set_stride({3, 1});
 
-    auto input1 = std::make_shared<TensorAttributes>();
+    const auto input1 = std::make_shared<TensorAttributes>();
     input1->set_uid(2).set_name("input1").set_data_type(DataType::FLOAT);
     input1->set_dim({2, 3}).set_stride({3, 1});
 

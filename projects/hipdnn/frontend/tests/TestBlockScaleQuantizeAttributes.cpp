@@ -13,21 +13,21 @@ TEST(TestBlockScaleQuantizeAttributes, CreateBlockScaleQuantizeAttributes)
     attrs.set_block_size(32);
     attrs.set_axis(1);
 
-    auto inputTensor = attrs.get_x();
+    const auto inputTensor = attrs.get_x();
     inputTensor->set_uid(1)
         .set_name("InputTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto outputTensor = attrs.get_y();
+    const auto outputTensor = attrs.get_y();
     outputTensor->set_uid(2)
         .set_name("OutputTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto scaleTensor = attrs.get_scale();
+    const auto scaleTensor = attrs.get_scale();
     scaleTensor->set_uid(3)
         .set_name("ScaleTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -62,7 +62,7 @@ TEST(TestBlockScaleQuantizeAttributes, SetXWithMove)
 
     attrs.set_x(std::move(xTensor));
 
-    auto retrieved = attrs.get_x();
+    const auto retrieved = attrs.get_x();
     EXPECT_EQ(retrieved->get_uid(), 1);
     EXPECT_EQ(retrieved->get_name(), "XTensor");
 
@@ -81,7 +81,7 @@ TEST(TestBlockScaleQuantizeAttributes, SetYWithMove)
 
     attrs.set_y(std::move(yTensor));
 
-    auto retrieved = attrs.get_y();
+    const auto retrieved = attrs.get_y();
     EXPECT_EQ(retrieved->get_uid(), 2);
     EXPECT_EQ(retrieved->get_name(), "YTensor");
 
@@ -100,7 +100,7 @@ TEST(TestBlockScaleQuantizeAttributes, SetScaleWithMove)
 
     attrs.set_scale(std::move(scaleTensor));
 
-    auto retrieved = attrs.get_scale();
+    const auto retrieved = attrs.get_scale();
     EXPECT_EQ(retrieved->get_uid(), 3);
     EXPECT_EQ(retrieved->get_name(), "ScaleTensor");
 
@@ -194,19 +194,19 @@ TEST(TestBlockScaleQuantizeAttributes, LogicalAndStrictEquality)
     hipdnn_frontend::graph::BlockScaleQuantizeAttributes attrD;
 
     // Baseline structural shared tensors
-    auto xShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto xShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     xShared->set_uid(100)
         .set_name("input_tensor")
         .set_dim({1, 256, 16, 16})
         .set_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto yShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto yShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     yShared->set_uid(200)
         .set_name("output_tensor")
         .set_dim({1, 256, 16, 16})
         .set_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto scaleShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto scaleShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     scaleShared->set_uid(300)
         .set_name("scale_tensor")
         .set_dim({1, 256, 1, 1})
@@ -230,7 +230,7 @@ TEST(TestBlockScaleQuantizeAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attrA == attrB);
 
     // Metadata Divergence (Varying tracking variables but identical logical topology)
-    auto xMetaDiff = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(*xShared);
+    const auto xMetaDiff = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(*xShared);
     xMetaDiff->set_uid(999).set_name("altered_tensor_name");
 
     attrC.set_x(xMetaDiff)

@@ -73,7 +73,7 @@ void GpuFpReferenceConvolution::launchFprop1d(const void* xPtr,
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefConvFwd.cpp", defines, "convFwdRef1d");
 
-    auto nGroups = xDims[1] / wDims[1];
+    const auto nGroups = xDims[1] / wDims[1];
 
     ConvFwdArgs1d args{};
     args.x = xPtr;
@@ -95,7 +95,7 @@ void GpuFpReferenceConvolution::launchFprop1d(const void* xPtr,
     args.alpha = alpha;
     args.beta = beta;
 
-    auto totalElements = xDims[0] * wDims[0] * yDims[2];
+    const auto totalElements = xDims[0] * wDims[0] * yDims[2];
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
@@ -120,7 +120,7 @@ void GpuFpReferenceConvolution::launchFprop2d(const void* xPtr,
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefConvFwd.cpp", defines, "convFwdRef2d");
 
-    auto nGroups = xDims[1] / wDims[1];
+    const auto nGroups = xDims[1] / wDims[1];
 
     ConvFwdArgs2d args{};
     args.x = xPtr;
@@ -148,7 +148,7 @@ void GpuFpReferenceConvolution::launchFprop2d(const void* xPtr,
     args.alpha = alpha;
     args.beta = beta;
 
-    auto totalElements = xDims[0] * wDims[0] * yDims[2] * yDims[3];
+    const auto totalElements = xDims[0] * wDims[0] * yDims[2] * yDims[3];
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
@@ -173,7 +173,7 @@ void GpuFpReferenceConvolution::launchFprop3d(const void* xPtr,
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefConvFwd.cpp", defines, "convFwdRef3d");
 
-    auto nGroups = xDims[1] / wDims[1];
+    const auto nGroups = xDims[1] / wDims[1];
 
     ConvFwdArgs3d args{};
     args.x = xPtr;
@@ -207,7 +207,7 @@ void GpuFpReferenceConvolution::launchFprop3d(const void* xPtr,
     args.alpha = alpha;
     args.beta = beta;
 
-    auto totalElements = xDims[0] * wDims[0] * yDims[2] * yDims[3] * yDims[4];
+    const auto totalElements = xDims[0] * wDims[0] * yDims[2] * yDims[3] * yDims[4];
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
@@ -232,7 +232,7 @@ void GpuFpReferenceConvolution::launchDgrad1d(void* dxPtr,
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefConvBwd.cpp", defines, "convBwdRef1d");
 
-    auto nGroups = dxDims[1] / wDims[1];
+    const auto nGroups = dxDims[1] / wDims[1];
 
     ConvBwdArgs1d args{};
     args.dx = dxPtr;
@@ -254,7 +254,7 @@ void GpuFpReferenceConvolution::launchDgrad1d(void* dxPtr,
     args.alpha = alpha;
     args.beta = beta;
 
-    auto totalElements = dxDims[0] * dxDims[1] * dxDims[2];
+    const auto totalElements = dxDims[0] * dxDims[1] * dxDims[2];
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
@@ -279,7 +279,7 @@ void GpuFpReferenceConvolution::launchDgrad2d(void* dxPtr,
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefConvBwd.cpp", defines, "convBwdRef2d");
 
-    auto nGroups = dxDims[1] / wDims[1];
+    const auto nGroups = dxDims[1] / wDims[1];
 
     ConvBwdArgs2d args{};
     args.dx = dxPtr;
@@ -307,7 +307,7 @@ void GpuFpReferenceConvolution::launchDgrad2d(void* dxPtr,
     args.alpha = alpha;
     args.beta = beta;
 
-    auto totalElements = dxDims[0] * dxDims[1] * dxDims[2] * dxDims[3];
+    const auto totalElements = dxDims[0] * dxDims[1] * dxDims[2] * dxDims[3];
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
@@ -332,7 +332,7 @@ void GpuFpReferenceConvolution::launchDgrad3d(void* dxPtr,
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefConvBwd.cpp", defines, "convBwdRef3d");
 
-    auto nGroups = dxDims[1] / wDims[1];
+    const auto nGroups = dxDims[1] / wDims[1];
 
     ConvBwdArgs3d args{};
     args.dx = dxPtr;
@@ -366,7 +366,7 @@ void GpuFpReferenceConvolution::launchDgrad3d(void* dxPtr,
     args.alpha = alpha;
     args.beta = beta;
 
-    auto totalElements = dxDims[0] * dxDims[1] * dxDims[2] * dxDims[3] * dxDims[4];
+    const auto totalElements = dxDims[0] * dxDims[1] * dxDims[2] * dxDims[3] * dxDims[4];
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
@@ -391,7 +391,7 @@ void GpuFpReferenceConvolution::launchWgrad1d(const void* xPtr,
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefConvWrw.cpp", defines, "convWrwRef1d");
 
-    auto nGroups = xDims[1] / dwDims[1];
+    const auto nGroups = xDims[1] / dwDims[1];
 
     ConvWrwArgs1d args{};
     args.x = xPtr;
@@ -413,7 +413,7 @@ void GpuFpReferenceConvolution::launchWgrad1d(const void* xPtr,
     args.alpha = alpha;
     args.beta = beta;
 
-    auto totalElements = dwDims[0] * dwDims[1] * dwDims[2];
+    const auto totalElements = dwDims[0] * dwDims[1] * dwDims[2];
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
@@ -438,7 +438,7 @@ void GpuFpReferenceConvolution::launchWgrad2d(const void* xPtr,
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefConvWrw.cpp", defines, "convWrwRef2d");
 
-    auto nGroups = xDims[1] / dwDims[1];
+    const auto nGroups = xDims[1] / dwDims[1];
 
     ConvWrwArgs2d args{};
     args.x = xPtr;
@@ -466,7 +466,7 @@ void GpuFpReferenceConvolution::launchWgrad2d(const void* xPtr,
     args.alpha = alpha;
     args.beta = beta;
 
-    auto totalElements = dwDims[0] * dwDims[1] * dwDims[2] * dwDims[3];
+    const auto totalElements = dwDims[0] * dwDims[1] * dwDims[2] * dwDims[3];
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
@@ -491,7 +491,7 @@ void GpuFpReferenceConvolution::launchWgrad3d(const void* xPtr,
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefConvWrw.cpp", defines, "convWrwRef3d");
 
-    auto nGroups = xDims[1] / dwDims[1];
+    const auto nGroups = xDims[1] / dwDims[1];
 
     ConvWrwArgs3d args{};
     args.x = xPtr;
@@ -525,7 +525,7 @@ void GpuFpReferenceConvolution::launchWgrad3d(const void* xPtr,
     args.alpha = alpha;
     args.beta = beta;
 
-    auto totalElements = dwDims[0] * dwDims[1] * dwDims[2] * dwDims[3] * dwDims[4];
+    const auto totalElements = dwDims[0] * dwDims[1] * dwDims[2] * dwDims[3] * dwDims[4];
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 

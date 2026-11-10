@@ -93,7 +93,7 @@ TEST(TestSelectionHeuristicHost, BoundsRequestsAndKeepsBorrowedBuffersUntilFinal
         hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME);
     const hipdnn_data_sdk::utilities::ScopedResource<hipdnnHeuristicHandle_t> handle(
         plugin->createHandle(), [&](auto value) { plugin->destroyHandle(value); });
-    auto manager = std::make_shared<NiceMock<MockHeuristicPluginResourceManager>>();
+    const auto manager = std::make_shared<NiceMock<MockHeuristicPluginResourceManager>>();
     EXPECT_CALL(*manager, getPluginForPolicyId(policyId))
         .WillRepeatedly(::testing::Return(plugin.get()));
     EXPECT_CALL(*manager, getHeuristicHandleForPolicyId(policyId))
@@ -369,7 +369,7 @@ TEST_F(TestSelectionHeuristic, GetSortedEngineIds)
 
     SelectionHeuristic heuristic(_mockResourceManager, _policyId);
     heuristic.setEngineIds(inputIds);
-    auto result = heuristic.getSortedEngineIds();
+    const auto result = heuristic.getSortedEngineIds();
 
     EXPECT_EQ(result, expectedIds);
 }

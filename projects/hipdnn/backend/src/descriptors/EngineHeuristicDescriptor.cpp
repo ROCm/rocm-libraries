@@ -146,7 +146,7 @@ void EngineHeuristicDescriptor::syncPolicySlots(const std::vector<int64_t>& orde
     _policySlots.clear();
 
     auto handle = _graph->getHandle();
-    auto heurRm = handle->getHeuristicPluginResourceManager();
+    const auto heurRm = handle->getHeuristicPluginResourceManager();
 
     // Create one SelectionHeuristic per policy slot. The slot holds a
     // shared_ptr to the resource manager so the underlying plugin and handle
@@ -257,7 +257,7 @@ void EngineHeuristicDescriptor::finalize()
           };
 
     // Resolve ordered policy IDs
-    auto orderedPolicyIds = resolveHeuristicPolicyOrder();
+    const auto orderedPolicyIds = resolveHeuristicPolicyOrder();
 
     // Ensure policy slots match the ordered policy list
     syncPolicySlots(orderedPolicyIds);
@@ -297,7 +297,7 @@ void EngineHeuristicDescriptor::finalize()
     // setDeviceProperties failure must not break the chain. Disable every slot
     // backed by a failed plugin handle so the policy loop skips it via the
     // existing nullptr branch.
-    auto disableSlotsForHandle = [&](hipdnnHeuristicHandle_t failedHandle) {
+    const auto disableSlotsForHandle = [&](hipdnnHeuristicHandle_t failedHandle) {
         for(size_t i = 0; i < _policySlots.size(); ++i)
         {
             if(_policySlots[i] != nullptr
@@ -522,7 +522,7 @@ void EngineHeuristicDescriptor::setHeuristicMode(hipdnnBackendAttributeType_t at
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
         "EngineHeuristicDescriptor failed to set heuristic mode: Heuristic mode is null.");
 
-    auto heurModeValue = *heurMode;
+    const auto heurModeValue = *heurMode;
     if(heurModeValue != HIPDNN_HEUR_MODE_FALLBACK)
     {
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -548,7 +548,7 @@ void EngineHeuristicDescriptor::setGraph(hipdnnBackendAttributeType_t attributeT
                 HIPDNN_STATUS_BAD_PARAM,
                 "EngineHeuristicDescriptor failed to set graph: Invalid element count.");
 
-    auto graph = HipdnnBackendDescriptor::unpackDescriptor<const GraphDescriptor>(
+    const auto graph = HipdnnBackendDescriptor::unpackDescriptor<const GraphDescriptor>(
         arrayOfElements,
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
         "EngineHeuristicDescriptor failed to set graph: Null pointer.");
@@ -622,13 +622,13 @@ void EngineHeuristicDescriptor::getEngineConfigs(hipdnnBackendAttributeType_t at
         for(size_t i = 0; i < _engineIds.size() && i < static_cast<size_t>(requestedElementCount);
             ++i)
         {
-            auto config = HipdnnBackendDescriptor::unpackDescriptor<EngineConfigDescriptor>(
+            const auto config = HipdnnBackendDescriptor::unpackDescriptor<EngineConfigDescriptor>(
                 outputArray[i],
                 HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                 "EngineHeuristicDescriptor failed to get engine config: Config "
                 "descriptor is null.");
 
-            auto engine = std::make_shared<EngineDescriptor>();
+            const auto engine = std::make_shared<EngineDescriptor>();
             // A result engine's own prediction answers in the metric it was ranked by.
             engine->setAttribute(HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT,
                                  HIPDNN_TYPE_CHAR,

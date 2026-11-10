@@ -31,14 +31,14 @@ TEST(TestSdpaModuleCache, EmptyOnConstruction)
 
 TEST(TestSdpaModuleCache, MakeKeyFormatsCorrectly)
 {
-    auto key
+    auto const key
         = SdpaModuleCache::makeKey("fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co", "gfx942", "myFunc");
     EXPECT_EQ(key, "gfx942/fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co::myFunc");
 }
 
 TEST(TestSdpaModuleCache, MakeKeyIncludesArchAndTocKey)
 {
-    auto key
+    auto const key
         = SdpaModuleCache::makeKey("fmha_v3_bwd/bwd_hd128_odo_bf16.co", "gfx950", "kernel_func");
     EXPECT_EQ(key, "gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co::kernel_func");
 }

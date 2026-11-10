@@ -288,7 +288,7 @@ TEST(TestGpuRaggedSdpaDensify, AuxOffTheBatchAxisIsNotApplicable)
         });
     };
     hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor gpu;
-    auto applicable
+    const auto applicable
         = [&](std::vector<uint8_t> graph) { return gpu.isApplicable(graph.data(), graph.size()); };
     const auto withLens = withSeqLens(raggedGraph(false, true));
     EXPECT_TRUE(applicable(withLens));

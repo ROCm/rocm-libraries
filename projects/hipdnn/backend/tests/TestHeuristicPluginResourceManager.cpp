@@ -48,14 +48,14 @@ protected:
 
 TEST_F(TestHeuristicPluginResourceManager, FactoryMethodCreatesInstance)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 }
 
 TEST_F(TestHeuristicPluginResourceManager, ConstructorWithPluginManagerSucceeds)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
     ASSERT_NE(rm, nullptr);
 }
 
@@ -63,8 +63,8 @@ TEST_F(TestHeuristicPluginResourceManager, ConstructorWithPluginManagerSucceeds)
 
 TEST_F(TestHeuristicPluginResourceManager, MoveConstructorTransfersOwnership)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm1 = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm1 = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     // Move construct
     const HeuristicPluginResourceManager rm2(std::move(*rm1));
@@ -77,9 +77,9 @@ TEST_F(TestHeuristicPluginResourceManager, MoveConstructorTransfersOwnership)
 
 TEST_F(TestHeuristicPluginResourceManager, MoveAssignmentTransfersOwnership)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm1 = std::make_shared<HeuristicPluginResourceManager>(pm);
-    auto rm2 = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm1 = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto rm2 = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     // Move assign
     *rm2 = std::move(*rm1);
@@ -95,8 +95,8 @@ TEST_F(TestHeuristicPluginResourceManager, MoveAssignmentTransfersOwnership)
 
 TEST_F(TestHeuristicPluginResourceManager, GetHandleForNonexistentPolicyReturnsNull)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     const int64_t fakePolicyId = 0x1234567890ABCDEF;
     auto handle = rm->getHeuristicHandleForPolicyId(fakePolicyId);
@@ -106,8 +106,8 @@ TEST_F(TestHeuristicPluginResourceManager, GetHandleForNonexistentPolicyReturnsN
 
 TEST_F(TestHeuristicPluginResourceManager, GetPluginForNonexistentPolicyReturnsNull)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     const int64_t fakePolicyId = 0x1234567890ABCDEF;
     auto plugin = rm->getPluginForPolicyId(fakePolicyId);
@@ -119,8 +119,8 @@ TEST_F(TestHeuristicPluginResourceManager, GetPluginForNonexistentPolicyReturnsN
 
 TEST_F(TestHeuristicPluginResourceManager, GetPolicyInfosWhenNoPluginsLoaded)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     // No external plugin paths configured, but the Config + StaticOrdering built-ins
     // are always registered in the plugin manager's constructor.
@@ -130,8 +130,8 @@ TEST_F(TestHeuristicPluginResourceManager, GetPolicyInfosWhenNoPluginsLoaded)
 
 TEST_F(TestHeuristicPluginResourceManager, GetPolicyInfosCachesResult)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     // First call
     const auto infos1 = rm->getHeuristicPolicyInfos();
@@ -146,8 +146,8 @@ TEST_F(TestHeuristicPluginResourceManager, GetPolicyInfosCachesResult)
 
 TEST_F(TestHeuristicPluginResourceManager, SetDevicePropertiesOnEmptyManagerDoesNotThrow)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     hipdnnPluginConstData_t deviceProps;
     deviceProps.ptr = nullptr;
@@ -159,8 +159,8 @@ TEST_F(TestHeuristicPluginResourceManager, SetDevicePropertiesOnEmptyManagerDoes
 
 TEST_F(TestHeuristicPluginResourceManager, SetDevicePropertiesWithNullPointerSucceeds)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     // Passing nullptr is allowed when no plugins loaded
     EXPECT_NO_THROW(rm->setDevicePropertiesOnAllHandles(nullptr));
@@ -170,8 +170,8 @@ TEST_F(TestHeuristicPluginResourceManager, SetDevicePropertiesWithNullPointerSuc
 
 TEST_F(TestHeuristicPluginResourceManager, GetLoadedPluginFilesWhenNoneLoaded)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     size_t numPlugins = 0;
     size_t maxStringLen = 0;
@@ -185,8 +185,8 @@ TEST_F(TestHeuristicPluginResourceManager, GetLoadedPluginFilesWhenNoneLoaded)
 
 TEST_F(TestHeuristicPluginResourceManager, GetLoadedPluginFilesWithNullNumPluginsThrows)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     // nullptr for numPlugins should throw
     EXPECT_THROW(rm->getLoadedPluginFiles(nullptr, nullptr, nullptr), HipdnnException);
@@ -196,8 +196,8 @@ TEST_F(TestHeuristicPluginResourceManager, GetLoadedPluginFilesWithNullNumPlugin
 
 TEST_F(TestHeuristicPluginResourceManager, ToStringReturnsNonEmptyString)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     const std::string str = rm->toString();
     EXPECT_FALSE(str.empty());
@@ -205,8 +205,8 @@ TEST_F(TestHeuristicPluginResourceManager, ToStringReturnsNonEmptyString)
 
 TEST_F(TestHeuristicPluginResourceManager, ToStringIncludesPluginCount)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     const std::string str = rm->toString();
 
@@ -261,11 +261,11 @@ TEST_F(TestHeuristicPluginResourceManager, SetPluginLogLevelSucceeds)
 
 TEST_F(TestHeuristicPluginResourceManager, MultipleInstancesCanCoexist)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto pm = std::make_shared<HeuristicPluginManager>();
 
-    auto rm1 = std::make_shared<HeuristicPluginResourceManager>(pm);
-    auto rm2 = std::make_shared<HeuristicPluginResourceManager>(pm);
-    auto rm3 = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto rm1 = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto rm2 = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto rm3 = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     // All should be independent and usable
     EXPECT_NE(rm1, nullptr);
@@ -298,10 +298,10 @@ TEST_F(TestHeuristicPluginResourceManager, CopyAssignmentIsDeleted)
 
 TEST_F(TestHeuristicPluginResourceManager, DestructorCleansUpResources)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto pm = std::make_shared<HeuristicPluginManager>();
 
     {
-        auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+        const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
         // Use rm
         rm->getHeuristicPolicyInfos();
     } // rm destroyed here
@@ -309,11 +309,11 @@ TEST_F(TestHeuristicPluginResourceManager, DestructorCleansUpResources)
 
 TEST_F(TestHeuristicPluginResourceManager, MultipleDestructionsSucceed)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto pm = std::make_shared<HeuristicPluginManager>();
 
     for(int i = 0; i < 10; ++i)
     {
-        auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+        const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
         rm->getHeuristicPolicyInfos();
         // Destroyed at end of loop
     }
@@ -328,7 +328,7 @@ TEST_F(TestHeuristicPluginResourceManager, ConstructorWithNullPluginManagerAccep
     EXPECT_NO_THROW({ auto rm = std::make_shared<HeuristicPluginResourceManager>(nullptr); });
 
     // Verify the resource manager works with null manager
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(nullptr);
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(nullptr);
     EXPECT_EQ(rm->getHeuristicHandleForPolicyId(1), nullptr);
     EXPECT_EQ(rm->getPluginForPolicyId(1), nullptr);
 }
@@ -337,8 +337,8 @@ TEST_F(TestHeuristicPluginResourceManager, ConstructorWithNullPluginManagerAccep
 
 TEST_F(TestHeuristicPluginResourceManager, PolicyInfosAreCachedAcrossMultipleCalls)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     // Multiple calls should use cache
     const auto infos1 = rm->getHeuristicPolicyInfos();
@@ -354,8 +354,8 @@ TEST_F(TestHeuristicPluginResourceManager, PolicyInfosAreCachedAcrossMultipleCal
 
 TEST_F(TestHeuristicPluginResourceManager, ToStringFormatContainsKeyElements)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     const std::string str = rm->toString();
 
@@ -399,8 +399,8 @@ TEST_F(TestHeuristicPluginResourceManager, SetPluginLogLevelWithErrorLevel)
 
 TEST_F(TestHeuristicPluginResourceManager, GetLoadedPluginFilesWithNonNullPathsSucceeds)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     size_t numPlugins = 0;
     std::array<char*, 10> paths{};
@@ -411,8 +411,8 @@ TEST_F(TestHeuristicPluginResourceManager, GetLoadedPluginFilesWithNonNullPathsS
 
 TEST_F(TestHeuristicPluginResourceManager, GetLoadedPluginFilesQueriesCountOnly)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     size_t numPlugins = 999; // Should be overwritten
 
@@ -425,8 +425,8 @@ TEST_F(TestHeuristicPluginResourceManager, GetLoadedPluginFilesQueriesCountOnly)
 
 TEST_F(TestHeuristicPluginResourceManager, SetDevicePropertiesWithValidDataSucceeds)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     const std::array<uint8_t, 4> fakeData = {1, 2, 3, 4};
     hipdnnPluginConstData_t deviceProps;
@@ -467,8 +467,8 @@ TEST_F(TestHeuristicPluginResourceManager, MultiplePathConfigurationsSucceed)
 
 TEST_F(TestHeuristicPluginResourceManager, GetHandleForMultiplePolicyIdsAllReturnNull)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     // Try multiple non-existent policy IDs
     EXPECT_EQ(rm->getHeuristicHandleForPolicyId(1), nullptr);
@@ -479,8 +479,8 @@ TEST_F(TestHeuristicPluginResourceManager, GetHandleForMultiplePolicyIdsAllRetur
 
 TEST_F(TestHeuristicPluginResourceManager, GetPluginForMultiplePolicyIdsAllReturnNull)
 {
-    auto pm = std::make_shared<HeuristicPluginManager>();
-    auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
+    const auto pm = std::make_shared<HeuristicPluginManager>();
+    const auto rm = std::make_shared<HeuristicPluginResourceManager>(pm);
 
     // Try multiple non-existent policy IDs
     EXPECT_EQ(rm->getPluginForPolicyId(1), nullptr);

@@ -239,7 +239,7 @@ inline std::string allMessages(const ::testing::TestPartResultArray& results)
     for(int i = 0; i < results.size(); ++i)
     {
         joined += results.GetTestPartResult(i).message();
-        joined += "\n";
+        joined += '\n';
     }
     return joined;
 }

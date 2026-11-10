@@ -137,7 +137,7 @@ inline Error setDescriptorAttrTensorRef(
     const std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
     const std::string& errorContext)
 {
-    auto it = tensorDescs.find(tensorUid);
+    const auto it = tensorDescs.find(tensorUid);
     if(it == tensorDescs.end())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -166,7 +166,7 @@ inline Error
     createOrFindTensorDesc(std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
                            const std::shared_ptr<graph::TensorAttributes>& tensor)
 {
-    auto uid = tensor->get_uid();
+    const auto uid = tensor->get_uid();
     if(tensorDescs.find(uid) != tensorDescs.end())
     {
         return {};

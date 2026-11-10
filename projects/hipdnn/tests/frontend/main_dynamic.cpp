@@ -19,7 +19,7 @@ int main(int argc, char** argv)
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
 
-    auto backend = hipdnn_frontend::detail::hipdnnBackend();
+    const auto backend = hipdnn_frontend::detail::hipdnnBackend();
     if(backend->versionString()[0] != '\0')
     {
         const std::array<std::string, 1> heuristicPaths

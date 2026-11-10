@@ -67,7 +67,7 @@ TEST_F(IntegrationPluginLogLevel, PluginCreatesInfoLogs)
 
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     loadTestGoodPlugin();
@@ -81,7 +81,7 @@ TEST_F(IntegrationPluginLogLevel, PluginReceivesWarnLevelNotification)
 {
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     loadTestGoodPlugin();
@@ -106,7 +106,7 @@ TEST_F(IntegrationPluginLogLevel, PluginDoesNotCreateLogsWhenLogLevelOff)
 
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_OFF), HIPDNN_STATUS_SUCCESS);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     loadTestGoodPlugin();
@@ -122,7 +122,7 @@ TEST_F(IntegrationPluginLogLevel, WarnThenInfoProducesLogs)
 
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_WARN), HIPDNN_STATUS_SUCCESS);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     loadTestGoodPlugin();

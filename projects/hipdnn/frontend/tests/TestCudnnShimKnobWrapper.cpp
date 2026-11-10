@@ -87,9 +87,10 @@ const hipdnn_frontend::KnobSetting*
     findSetting(const std::vector<hipdnn_frontend::KnobSetting>& settings,
                 const std::string& knobId)
 {
-    auto found = std::find_if(settings.begin(), settings.end(), [&knobId](const auto& setting) {
-        return setting.knobId() == knobId;
-    });
+    const auto found
+        = std::find_if(settings.begin(), settings.end(), [&knobId](const auto& setting) {
+              return setting.knobId() == knobId;
+          });
     return found == settings.end() ? nullptr : &(*found);
 }
 

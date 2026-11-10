@@ -102,8 +102,8 @@ TEST(TestGpuResampleFwdSignatureKey, Copy)
 
 TEST(TestGpuResampleFwdSignatureKey, CreateFromNodeAndTensorMap)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleFwdSignatureKey keyFromNode(
@@ -116,8 +116,8 @@ TEST(TestGpuResampleFwdSignatureKey, CreateFromNodeAndTensorMap)
 
 TEST(TestGpuResampleFwdSignatureKey, ThrowsForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THROW(GpuResampleFwdSignatureKey(
@@ -127,8 +127,8 @@ TEST(TestGpuResampleFwdSignatureKey, ThrowsForWrongAttributesType)
 
 TEST(TestGpuResampleFwdSignatureKey, ThrowsForMissingTensor)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     auto tensorMapCopy = graph.getTensorMap();
@@ -231,8 +231,8 @@ TEST(TestGpuResampleBwdSignatureKey, Copy)
 
 TEST(TestGpuResampleBwdSignatureKey, CreateFromNodeAndTensorMap)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuResampleBwdSignatureKey keyFromNode(
@@ -245,8 +245,8 @@ TEST(TestGpuResampleBwdSignatureKey, CreateFromNodeAndTensorMap)
 
 TEST(TestGpuResampleBwdSignatureKey, ThrowsForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THROW(GpuResampleBwdSignatureKey(
@@ -256,8 +256,8 @@ TEST(TestGpuResampleBwdSignatureKey, ThrowsForWrongAttributesType)
 
 TEST(TestGpuResampleBwdSignatureKey, ThrowsForMissingTensor)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     auto tensorMapCopy = graph.getTensorMap();

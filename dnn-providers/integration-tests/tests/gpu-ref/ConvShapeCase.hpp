@@ -43,11 +43,11 @@ struct ConvShapeCase
     std::vector<int64_t> computeOutputDims() const
     {
         assert(xDims.size() >= 3 && "ConvShapeCase requires at least 3 dims (N, C, spatial)");
-        auto numSpatialDims = xDims.size() - 2;
+        const auto numSpatialDims = xDims.size() - 2;
         std::vector<int64_t> yDims = {xDims[0], wDims[0]};
         for(size_t i = 0; i < numSpatialDims; ++i)
         {
-            auto outputSize
+            const auto outputSize
                 = (xDims[2 + i] + 2 * padding[i] - dilations[i] * (wDims[2 + i] - 1) - 1)
                       / strides[i]
                   + 1;
@@ -77,7 +77,7 @@ void assertAllClose(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
                     hipdnn_data_sdk::utilities::TensorBase<T>& actual,
                     float tolerance)
 {
-    auto validator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<T>(tolerance, 0.0f);
+    const auto validator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<T>(tolerance, 0.0f);
     ASSERT_TRUE(validator.allClose(expected, actual));
 }
 

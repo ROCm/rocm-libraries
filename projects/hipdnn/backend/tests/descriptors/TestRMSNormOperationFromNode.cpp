@@ -152,8 +152,8 @@ protected:
 
 TEST_F(TestRMSNormOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -163,11 +163,11 @@ TEST_F(TestRMSNormOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestRMSNormOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -176,7 +176,7 @@ TEST_F(TestRMSNormOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::RMSNormAttributes);
-    auto desc = std::static_pointer_cast<RMSNormOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<RMSNormOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -198,8 +198,8 @@ TEST_F(TestRMSNormOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestRMSNormOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
@@ -210,15 +210,15 @@ TEST_F(TestRMSNormOperationFromNode, PreservesNormFwdPhase)
     auto attrs = createStandardRMSNormAttrs();
     attrs.forward_phase = NormFwdPhase::INFERENCE;
     node.attributes.Set(attrs);
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().forward_phase, NormFwdPhase::INFERENCE);
 }
 
 TEST_F(TestRMSNormOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_RMSNORM_TENSOR_X_UID);
@@ -236,8 +236,8 @@ TEST_F(TestRMSNormOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestRMSNormOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getXDesc(), _tensorMap[K_RMSNORM_TENSOR_X_UID]);
     EXPECT_EQ(desc->getScaleDesc(), _tensorMap[K_RMSNORM_TENSOR_SCALE_UID]);
@@ -249,8 +249,8 @@ TEST_F(TestRMSNormOperationFromNode, TensorReferencesMatchTensorMap)
 
 TEST_F(TestRMSNormOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_RMSNORM_TENSOR_X_UID);
@@ -292,7 +292,7 @@ TEST_F(TestRMSNormOperationFromNode, SetsTensorReferencesWithFullValues)
 TEST_F(TestRMSNormOperationFromNode, FailsWithMissingXTensor)
 {
     _tensorMap.erase(K_RMSNORM_TENSOR_X_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -301,7 +301,7 @@ TEST_F(TestRMSNormOperationFromNode, FailsWithMissingXTensor)
 TEST_F(TestRMSNormOperationFromNode, FailsWithMissingScaleTensor)
 {
     _tensorMap.erase(K_RMSNORM_TENSOR_SCALE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -310,7 +310,7 @@ TEST_F(TestRMSNormOperationFromNode, FailsWithMissingScaleTensor)
 TEST_F(TestRMSNormOperationFromNode, FailsWithMissingEpsilonTensor)
 {
     _tensorMap.erase(K_RMSNORM_TENSOR_EPSILON_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -319,7 +319,7 @@ TEST_F(TestRMSNormOperationFromNode, FailsWithMissingEpsilonTensor)
 TEST_F(TestRMSNormOperationFromNode, FailsWithMissingYTensor)
 {
     _tensorMap.erase(K_RMSNORM_TENSOR_Y_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -335,7 +335,7 @@ TEST_F(TestRMSNormOperationFromNode, SucceedsWithOnlyRequiredTensors)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
@@ -352,7 +352,7 @@ TEST_F(TestRMSNormOperationFromNode, SucceedsWithOnlyRequiredTensors)
 TEST_F(TestRMSNormOperationFromNode, FailsWhenOptionalBiasUidSetButTensorMissing)
 {
     _tensorMap.erase(K_RMSNORM_TENSOR_BIAS_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -361,7 +361,7 @@ TEST_F(TestRMSNormOperationFromNode, FailsWhenOptionalBiasUidSetButTensorMissing
 TEST_F(TestRMSNormOperationFromNode, FailsWhenOptionalInvRmsUidSetButTensorMissing)
 {
     _tensorMap.erase(K_RMSNORM_TENSOR_INV_RMS_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(RMSNormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -369,8 +369,8 @@ TEST_F(TestRMSNormOperationFromNode, FailsWhenOptionalInvRmsUidSetButTensorMissi
 
 TEST_F(TestRMSNormOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 6);
@@ -384,8 +384,8 @@ TEST_F(TestRMSNormOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 
 TEST_F(TestRMSNormOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -405,8 +405,8 @@ TEST_F(TestRMSNormOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -535,7 +535,7 @@ TEST_F(TestRMSNormOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_rmsnorm_1";
 
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -550,8 +550,8 @@ TEST_F(TestRMSNormOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestRMSNormOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -563,7 +563,7 @@ TEST_F(TestRMSNormOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = RMSNormOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);

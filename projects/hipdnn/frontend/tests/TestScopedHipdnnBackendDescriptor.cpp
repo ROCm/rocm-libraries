@@ -38,7 +38,7 @@ protected:
 
 TEST_F(TestScopedHipdnnBackendDescriptor, DefaultConstructorIsInvalid)
 {
-    auto desc = ScopedHipdnnBackendDescriptor();
+    const auto desc = ScopedHipdnnBackendDescriptor();
     EXPECT_FALSE(desc.valid());
     EXPECT_EQ(desc.get(), nullptr);
 }
@@ -46,7 +46,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, DefaultConstructorIsInvalid)
 TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithRawDescriptorIsValid)
 {
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
-    auto desc = ScopedHipdnnBackendDescriptor(fakeDesc);
+    const auto desc = ScopedHipdnnBackendDescriptor(fakeDesc);
 
     EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(fakeDesc))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
@@ -57,7 +57,8 @@ TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithRawDescriptorIsValid)
 
 TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithNullRawDescriptorIsInvalid)
 {
-    auto desc = ScopedHipdnnBackendDescriptor(static_cast<hipdnnBackendDescriptor_t>(nullptr));
+    const auto desc
+        = ScopedHipdnnBackendDescriptor(static_cast<hipdnnBackendDescriptor_t>(nullptr));
     EXPECT_FALSE(desc.valid());
     EXPECT_EQ(desc.get(), nullptr);
 }
@@ -73,7 +74,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithTypeSuccess)
     EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(fakeDesc))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto desc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
+    const auto desc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
     EXPECT_TRUE(desc.valid());
     EXPECT_EQ(desc.get(), fakeDesc);
 }
@@ -86,7 +87,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithTypeFailure)
         });
     EXPECT_CALL(*_mockBackend, getLastErrorString).Times(AnyNumber()); // Uninteresting call
 
-    auto desc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
+    const auto desc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
     EXPECT_FALSE(desc.valid());
     EXPECT_EQ(desc.get(), nullptr);
 }
@@ -103,7 +104,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithSerializedGraphSuccess)
     EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(fakeDesc))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto desc = ScopedHipdnnBackendDescriptor(fakeGraph.data(), fakeGraph.size());
+    const auto desc = ScopedHipdnnBackendDescriptor(fakeGraph.data(), fakeGraph.size());
     EXPECT_TRUE(desc.valid());
     EXPECT_EQ(desc.get(), fakeDesc);
 }
@@ -117,7 +118,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithSerializedGraphFailure)
         });
     EXPECT_CALL(*_mockBackend, getLastErrorString).Times(AnyNumber()); // Uninteresting call
 
-    auto desc = ScopedHipdnnBackendDescriptor(fakeGraph.data(), fakeGraph.size());
+    const auto desc = ScopedHipdnnBackendDescriptor(fakeGraph.data(), fakeGraph.size());
     EXPECT_FALSE(desc.valid());
     EXPECT_EQ(desc.get(), nullptr);
 }
@@ -134,7 +135,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithJsonGraphSuccess)
     EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(fakeDesc))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto desc = ScopedHipdnnBackendDescriptor(fakeJson.c_str(), fakeJson.size());
+    const auto desc = ScopedHipdnnBackendDescriptor(fakeJson.c_str(), fakeJson.size());
     EXPECT_TRUE(desc.valid());
     EXPECT_EQ(desc.get(), fakeDesc);
 }
@@ -148,7 +149,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithJsonGraphFailure)
         });
     EXPECT_CALL(*_mockBackend, getLastErrorString).Times(AnyNumber()); // Uninteresting call
 
-    auto desc = ScopedHipdnnBackendDescriptor(fakeJson.c_str(), fakeJson.size());
+    const auto desc = ScopedHipdnnBackendDescriptor(fakeJson.c_str(), fakeJson.size());
     EXPECT_FALSE(desc.valid());
     EXPECT_EQ(desc.get(), nullptr);
 }
@@ -165,7 +166,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, DestructorDestroysDescriptorIfValid)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     {
-        auto desc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
+        const auto desc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
         EXPECT_TRUE(desc.valid());
     }
 }
@@ -183,7 +184,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, DestructorHandlesDestroyFailure)
     EXPECT_CALL(*_mockBackend, getLastErrorString).Times(AnyNumber()); // Uninteresting call
 
     {
-        auto desc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
+        const auto desc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
         EXPECT_TRUE(desc.valid());
     }
 }
@@ -203,7 +204,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, MoveConstructorTransfersOwnership)
     EXPECT_TRUE(desc1.valid());
     auto raw = desc1.get();
 
-    auto desc2 = ScopedHipdnnBackendDescriptor(std::move(desc1));
+    const auto desc2 = ScopedHipdnnBackendDescriptor(std::move(desc1));
     EXPECT_TRUE(desc2.valid());
     EXPECT_EQ(desc2.get(), raw);
     EXPECT_FALSE(desc1.valid()); // NOLINT(bugprone-use-after-move)
@@ -244,7 +245,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, MoveAssignmentTransfersOwnership)
 TEST_F(TestScopedHipdnnBackendDescriptor, MoveFromInvalidDescriptor)
 {
     auto desc1 = ScopedHipdnnBackendDescriptor();
-    auto desc2 = ScopedHipdnnBackendDescriptor(std::move(desc1));
+    const auto desc2 = ScopedHipdnnBackendDescriptor(std::move(desc1));
     EXPECT_FALSE(desc2.valid());
     EXPECT_EQ(desc2.get(), nullptr);
 }

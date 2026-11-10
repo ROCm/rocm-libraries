@@ -38,7 +38,7 @@ public:
 
     void setTensors() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
         desc->setAttribute(
@@ -51,7 +51,7 @@ public:
 
     void setResampleParams() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         auto prePadding = toVec(K_PRE_PADDING);
         auto postPadding = toVec(K_POST_PADDING);
         auto stride = toVec(K_STRIDE);
@@ -121,7 +121,7 @@ protected:
 
 TEST_F(TestResampleBwdOperationDescriptor, CreateDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR);
@@ -136,7 +136,7 @@ TEST_F(TestResampleBwdOperationDescriptor, FinalizeWithRequiredAttributes)
 
 TEST_F(TestResampleBwdOperationDescriptor, FinalizeSucceedsWithoutOptionalTensors)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     // Set only DY and DX (no Index)
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
@@ -155,7 +155,7 @@ TEST_F(TestResampleBwdOperationDescriptor, FinalizeSucceedsWithoutOptionalTensor
 
 TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutIndexForMaxpool)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
     desc->setAttribute(
@@ -171,7 +171,7 @@ TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutIndexForMaxpool)
 
 TEST_F(TestResampleBwdOperationDescriptor, GetTensorDescriptorsWithoutOptional)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
     desc->setAttribute(
@@ -194,7 +194,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetTensorDescriptorsWithoutOptional)
 
 TEST_F(TestResampleBwdOperationDescriptor, BuildNodeWithoutOptionalTensors)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
     desc->setAttribute(
@@ -221,7 +221,7 @@ TEST_F(TestResampleBwdOperationDescriptor, BuildNodeWithoutOptionalTensors)
 
 TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutDyTensor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc);
     desc->setAttribute(
@@ -233,7 +233,7 @@ TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutDyTensor)
 
 TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutDxTensor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
     desc->setAttribute(
@@ -245,7 +245,7 @@ TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutDxTensor)
 
 TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutPrePadding)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setTensors();
     auto postPadding = toVec(K_POST_PADDING);
     auto stride = toVec(K_STRIDE);
@@ -261,7 +261,7 @@ TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutPrePadding)
 
 TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutPostPadding)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setTensors();
     auto prePadding = toVec(K_PRE_PADDING);
     auto stride = toVec(K_STRIDE);
@@ -276,7 +276,7 @@ TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutPostPadding)
 
 TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutStride)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setTensors();
     auto prePadding = toVec(K_PRE_PADDING);
     auto postPadding = toVec(K_POST_PADDING);
@@ -292,7 +292,7 @@ TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutStride)
 
 TEST_F(TestResampleBwdOperationDescriptor, FinalizeFailsWithoutWindow)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setTensors();
     auto prePadding = toVec(K_PRE_PADDING);
     auto postPadding = toVec(K_POST_PADDING);
@@ -348,7 +348,7 @@ TEST_F(TestResampleBwdOperationDescriptor, FinalizeSucceedsWithoutPaddingMode)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetTensorDescriptorDy)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc));
 
@@ -359,7 +359,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetTensorDescriptorDy)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetTensorDescriptorDx)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc));
 
@@ -369,7 +369,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetTensorDescriptorDx)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetTensorDescriptorIndex)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -381,7 +381,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetTensorDescriptorIndex)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetTensorFailsNotFinalized)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
@@ -391,7 +391,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetTensorFailsNotFinalized)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetTensorFailsWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, HIPDNN_TYPE_INT64, 1, &_dyDesc),
@@ -400,7 +400,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetTensorFailsWrongType)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetTensorFailsWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, &_dyDesc),
@@ -409,7 +409,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetTensorFailsWrongElementCount)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetTensorFailsNullPointer)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
             HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr),
@@ -422,7 +422,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetTensorFailsNullPointer)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetResamplePrePadding)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::vector<int64_t> prePadding = {1, 1};
 
     ASSERT_NO_THROW(desc->setAttribute(
@@ -436,7 +436,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetResamplePrePadding)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetResamplePostPadding)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::vector<int64_t> postPadding = {1, 1};
 
     ASSERT_NO_THROW(desc->setAttribute(
@@ -450,7 +450,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetResamplePostPadding)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetResampleStride)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::vector<int64_t> stride = {2, 2};
 
     ASSERT_NO_THROW(
@@ -464,7 +464,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetResampleStride)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetResampleWindow)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     std::vector<int64_t> window = {3, 3};
 
     ASSERT_NO_THROW(
@@ -478,7 +478,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetResampleWindow)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetResampleMode)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto resampleMode = HIPDNN_RESAMPLE_MAXPOOL;
 
     ASSERT_NO_THROW(
@@ -489,7 +489,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetResampleMode)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetResampleModeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto resampleMode = HIPDNN_RESAMPLE_MAXPOOL;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -499,7 +499,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetResampleModeWrongElementCount)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetPaddingMode)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto paddingMode = HIPDNN_PADDING_ZERO_PAD;
 
     ASSERT_NO_THROW(desc->setAttribute(
@@ -510,7 +510,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetPaddingMode)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetPaddingModeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto paddingMode = HIPDNN_PADDING_ZERO_PAD;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -521,7 +521,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetPaddingModeWrongElementCount)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetComputeDataType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(
@@ -532,7 +532,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetComputeDataType)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetComputeDataTypeWrongElementCount)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -542,7 +542,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetComputeDataTypeWrongElementCount)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetResampleParamsWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto padding = toVec(K_PRE_PADDING);
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -557,7 +557,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetResampleParamsWrongType)
 TEST_F(TestResampleBwdOperationDescriptor, SetAttributeFailsAfterFinalize)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -567,7 +567,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetAttributeFailsAfterFinalize)
 
 TEST_F(TestResampleBwdOperationDescriptor, SetAttributeUnsupported)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -582,7 +582,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetAttributeUnsupported)
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeTensorDescriptor)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     HipdnnBackendDescriptor* retrievedDy = nullptr;
     int64_t elementCount = 0;
@@ -604,7 +604,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeTensorDescriptor)
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeResampleParams)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // pre_padding
     std::vector<int64_t> prePadding(2);
@@ -670,7 +670,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeResampleParams)
 
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeComputeType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_RESAMPLE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -691,7 +691,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeComputeType)
 
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeFailsBeforeFinalize)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setRequiredAttributes();
 
     HipdnnBackendDescriptor* dummy = nullptr;
@@ -706,7 +706,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeFailsBeforeFinalize)
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeFailsNullPointer)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -719,7 +719,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeFailsNullPointer)
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeUnsupported)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     int64_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -734,7 +734,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeUnsupported)
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeTensorDyQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC,
@@ -748,7 +748,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeTensorDyQueryReturnsOne)
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeTensorDxQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC,
@@ -762,7 +762,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeTensorDxQueryReturnsOne)
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeTensorIndexQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC,
@@ -776,7 +776,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeTensorIndexQueryReturnsOn
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeResampleModeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -787,7 +787,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeResampleModeQueryReturnsO
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributePaddingModeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -798,7 +798,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributePaddingModeQueryReturnsOn
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributePrePaddingQueryReturnsSize)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -809,7 +809,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributePrePaddingQueryReturnsSiz
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -820,7 +820,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeComputeTypeQueryReturnsOn
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributePrePaddingQueryThenRetrieve)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // Query: get the element count
     int64_t elementCount = 0;
@@ -843,7 +843,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributePrePaddingQueryThenRetrie
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeTensorQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -856,7 +856,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeTensorQueryFailsNullEleme
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeResampleModeQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(
@@ -867,7 +867,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeResampleModeQueryFailsNul
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributePaddingModeQueryFailsNullElementCount)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(
@@ -882,7 +882,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributePaddingModeQueryFailsNull
 TEST_F(TestResampleBwdOperationDescriptor, FinalizePreservesTensorReferences)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // Verify the tensor descriptors are preserved
     ASSERT_NE(desc->getDyDesc(), nullptr);
@@ -902,7 +902,7 @@ TEST_F(TestResampleBwdOperationDescriptor, FinalizePreservesTensorReferences)
 TEST_F(TestResampleBwdOperationDescriptor, ToStringContainsExpectedInfo)
 {
     setRequiredAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("ResampleBwdOperationDescriptor"), std::string::npos);
@@ -919,7 +919,7 @@ TEST_F(TestResampleBwdOperationDescriptor, ToStringContainsExpectedInfo)
 TEST_F(TestResampleBwdOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
@@ -932,7 +932,7 @@ TEST_F(TestResampleBwdOperationDescriptor, BuildNodeProducesCorrectNodeT)
 {
     setRequiredAttributes();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(HIPDNN_ATTR_RESAMPLE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
@@ -958,7 +958,7 @@ TEST_F(TestResampleBwdOperationDescriptor, BuildNodeWithHalfComputeType)
 {
     setRequiredAttributes();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_RESAMPLE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
@@ -971,7 +971,7 @@ TEST_F(TestResampleBwdOperationDescriptor, BuildNodeWithHalfComputeType)
 TEST_F(TestResampleBwdOperationDescriptor, GetTensorDescriptorsOrderIsDyDxIndex)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
@@ -985,7 +985,7 @@ TEST_F(TestResampleBwdOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsGraphOperation();
+    const auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -997,7 +997,7 @@ TEST_F(TestResampleBwdOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 TEST_F(TestResampleBwdOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _dyDesc->tryAsGraphOperation();
+    const auto graphOp = _dyDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 
@@ -1007,7 +1007,7 @@ TEST_F(TestResampleBwdOperationDescriptor, TryAsInterfaceReturnsNullForWrongType
 
 TEST_F(TestResampleBwdOperationDescriptor, SetAttributeNameSuccess)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const std::string name = "test_resamplebwd_op";
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
@@ -1032,7 +1032,7 @@ TEST_F(TestResampleBwdOperationDescriptor, SetAttributeNameSuccess)
 
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeNameQueryReturnsSizeInclNull)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     const std::string name = "my_op";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
@@ -1053,7 +1053,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeNameQueryReturnsSizeInclN
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeOperationTypeReturnsCorrectType)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t elementCount = 0;
@@ -1067,7 +1067,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeOperationTypeReturnsCorre
 TEST_F(TestResampleBwdOperationDescriptor, GetAttributeOperationTypeQueryReturnsOne)
 {
     makeFinalized();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
@@ -1078,7 +1078,7 @@ TEST_F(TestResampleBwdOperationDescriptor, GetAttributeOperationTypeQueryReturns
 TEST_F(TestResampleBwdOperationDescriptor, BuildNodePreservesName)
 {
     setRequiredAttributes();
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     const std::string opName = "test_resamplebwd";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,

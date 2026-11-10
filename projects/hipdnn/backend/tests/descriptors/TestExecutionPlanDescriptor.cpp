@@ -141,19 +141,19 @@ public:
         }
         if(includePluginPayload)
         {
-            auto pluginPayloadBytes
+            const auto pluginPayloadBytes
                 = emptyPluginPayload ? std::vector<uint8_t>{} : std::vector<uint8_t>{4, 5, 6};
             pluginPayload = builder.CreateVector(pluginPayloadBytes);
         }
         if(includeTensorAlignments)
         {
             // A deliberately short vector exercises the size-mismatch guard.
-            auto alignments
+            const auto alignments
                 = mismatchTensorAlignments ? std::vector<int64_t>{16} : _tensorAlignments;
             tensorAlignments = builder.CreateVector(alignments);
         }
 
-        auto plan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
+        const auto plan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
             builder,
             version,
             ENGINE_ID,
@@ -214,7 +214,7 @@ protected:
 
 TEST_F(TestExecutionPlanDescriptor, CreateExecutionPlanDescriptor)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     ASSERT_NE(plan, nullptr);
     ASSERT_FALSE(plan->isFinalized());
     ASSERT_EQ(plan->getType(), HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
@@ -222,7 +222,7 @@ TEST_F(TestExecutionPlanDescriptor, CreateExecutionPlanDescriptor)
 
 TEST_F(TestExecutionPlanDescriptor, SetAttrWhenNotFinalized)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     uint64_t dummyWorkspaceSize = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -240,7 +240,7 @@ TEST_F(TestExecutionPlanDescriptor, SetAttrWhenNotFinalized)
 
 TEST_F(TestExecutionPlanDescriptor, SetHandle)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     hipdnnHandle_t handle = nullptr;
 
     ASSERT_THROW_HIPDNN_STATUS(plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
@@ -274,8 +274,8 @@ TEST_F(TestExecutionPlanDescriptor, SetHandle)
 
 TEST_F(TestExecutionPlanDescriptor, SetEngineConfig)
 {
-    auto plan = getExecutionPlanDescriptor();
-    auto mockEngineConfig = getMockEngineConfig();
+    const auto plan = getExecutionPlanDescriptor();
+    const auto mockEngineConfig = getMockEngineConfig();
 
     EXPECT_CALL(*getMockEngineConfigBadType(), isFinalized()).Times(1);
     EXPECT_CALL(*mockEngineConfig, isFinalized()).WillOnce(Return(false)).WillOnce(Return(true));
@@ -332,7 +332,7 @@ TEST_F(TestExecutionPlanDescriptor, SetEngineConfig)
 
 TEST_F(TestExecutionPlanDescriptor, Finalize)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(plan->finalize(), HIPDNN_STATUS_BAD_PARAM);
 
     setHandle();
@@ -345,7 +345,7 @@ TEST_F(TestExecutionPlanDescriptor, Finalize)
 
 TEST_F(TestExecutionPlanDescriptor, GetAttrWhenNotFinalized)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     uint64_t dummyWorkspaceSize = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(plan->getAttribute(HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
@@ -358,8 +358,8 @@ TEST_F(TestExecutionPlanDescriptor, GetAttrWhenNotFinalized)
 
 TEST_F(TestExecutionPlanDescriptor, GetWorkspaceSize)
 {
-    auto plan = getExecutionPlanDescriptor();
-    auto mockEngineConfig = getMockEngineConfig();
+    const auto plan = getExecutionPlanDescriptor();
+    const auto mockEngineConfig = getMockEngineConfig();
     int64_t workspaceSize = 0;
 
     makeExecutionPlanFinalized();
@@ -370,7 +370,7 @@ TEST_F(TestExecutionPlanDescriptor, GetWorkspaceSize)
 
 TEST_F(TestExecutionPlanDescriptor, GetEngineGlobalIndexExtReturnsEngineId)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     int64_t engineGlobalIndex = 0;
     int64_t count = 0;
 
@@ -386,7 +386,7 @@ TEST_F(TestExecutionPlanDescriptor, GetEngineGlobalIndexExtReturnsEngineId)
 
 TEST_F(TestExecutionPlanDescriptor, GetTensorUids)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
 
     makeExecutionPlanFinalized();
 
@@ -407,7 +407,7 @@ TEST_F(TestExecutionPlanDescriptor, GetTensorUids)
 
 TEST_F(TestExecutionPlanDescriptor, FinalizeCollectsTensorAlignments)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(plan->getTensorAlignments(), HIPDNN_STATUS_INTERNAL_ERROR);
 
@@ -420,7 +420,7 @@ TEST_F(TestExecutionPlanDescriptor, FinalizeCollectsTensorAlignments)
 
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsInvalidFlatBuffer)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     std::array<uint8_t, 8> invalidPlan{0, 1, 2, 3, 4, 5, 6, 7};
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
@@ -431,7 +431,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsInvalidFlatBuffer)
 
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsUnsupportedVersion)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan(99);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
@@ -442,7 +442,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsUnsupportedVersion)
 
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingTensorUids)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan(2, 1024, false);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
@@ -453,7 +453,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingTensorUids)
 
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyTensorUids)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan(2, 1024, true, true, true);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
@@ -464,7 +464,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyTensorUids)
 
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingPluginPayload)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan(2, 1024, true, false);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
@@ -475,7 +475,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingPluginPayload)
 
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyPluginPayload)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan(2, 1024, true, true, false, true);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
@@ -486,7 +486,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyPluginPayload)
 
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsNegativeWorkspaceSize)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan(2, -1);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
@@ -497,7 +497,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsNegativeWorkspaceSize)
 
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingTensorAlignments)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan(2,
                                              1024,
                                              /*includeTensorUids=*/true,
@@ -515,7 +515,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingTensorAlignments)
 
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMismatchedTensorAlignments)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan(2,
                                              1024,
                                              /*includeTensorUids=*/true,
@@ -534,7 +534,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMismatchedTensorAlignments
 
 TEST_F(TestExecutionPlanDescriptor, DeserializeRestoresSerializedExecutionPlan)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan();
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
@@ -562,7 +562,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRestoresSerializedExecutionPlan)
 
 TEST_F(TestExecutionPlanDescriptor, GetEngineGlobalIndexExtReturnsDeserializedEngineId)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan();
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
@@ -586,7 +586,7 @@ TEST_F(TestExecutionPlanDescriptor, GetEngineGlobalIndexExtReturnsDeserializedEn
 
 TEST_F(TestExecutionPlanDescriptor, GetIsOverrideShapeEnabledExtReturnsDeserializedFlagFalse)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan(1, 1024, true, true, false, false, false);
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
@@ -610,7 +610,7 @@ TEST_F(TestExecutionPlanDescriptor, GetIsOverrideShapeEnabledExtReturnsDeseriali
 
 TEST_F(TestExecutionPlanDescriptor, GetIsOverrideShapeEnabledExtReturnsDeserializedFlagTrue)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan(1, 1024, true, true, false, false, true);
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
@@ -634,7 +634,7 @@ TEST_F(TestExecutionPlanDescriptor, GetIsOverrideShapeEnabledExtReturnsDeseriali
 
 TEST_F(TestExecutionPlanDescriptor, SerializeRejectsUnfinalizedPlan)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     size_t planByteSize = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(plan->serializeBackendPlan(0, &planByteSize, nullptr),
@@ -643,7 +643,7 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRejectsUnfinalizedPlan)
 
 TEST_F(TestExecutionPlanDescriptor, SerializeRejectsNullSizePointer)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     makeExecutionPlanFinalized();
 
     ASSERT_THROW_HIPDNN_STATUS(plan->serializeBackendPlan(0, nullptr, nullptr),
@@ -652,7 +652,7 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRejectsNullSizePointer)
 
 TEST_F(TestExecutionPlanDescriptor, LoadedPlanSerializesToItsOriginalBytesWithoutCallingPlugin)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     // A non-default override-shape flag and distinct payload make a rebuilt envelope differ from
     // the loaded one.
     auto serializedPlan
@@ -687,7 +687,7 @@ TEST_F(TestExecutionPlanDescriptor, LoadedVersionOnePlanReSavesIdenticalBytesTha
 {
     // A version 1 envelope has no tensor_alignments. Re-saving it must not rewrite it as
     // version 2 with an empty alignment vector, which the version 2 reader rejects.
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan(1,
                                              1024,
                                              true,
@@ -715,7 +715,7 @@ TEST_F(TestExecutionPlanDescriptor, LoadedVersionOnePlanReSavesIdenticalBytesTha
     ASSERT_EQ(reSaved, loadedBytes);
 
     auto freshWrapper = createDescriptor<ExecutionPlanDescriptor>();
-    auto fresh = freshWrapper->asDescriptor<ExecutionPlanDescriptor>();
+    const auto fresh = freshWrapper->asDescriptor<ExecutionPlanDescriptor>();
     ASSERT_NO_THROW(fresh->deserializeBackendPlan(
         _mockEnginePluginResourceManager, reSaved.data(), reSaved.size()));
     EXPECT_TRUE(fresh->isFinalized());
@@ -724,7 +724,7 @@ TEST_F(TestExecutionPlanDescriptor, LoadedVersionOnePlanReSavesIdenticalBytesTha
 
 TEST_F(TestExecutionPlanDescriptor, FailedRestoreLeavesPlanUnfinalizedAndUnserializable)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan();
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
@@ -748,7 +748,7 @@ TEST_F(TestExecutionPlanDescriptor, FailedRestoreLeavesPlanUnfinalizedAndUnseria
 
 TEST_F(TestExecutionPlanDescriptor, SerializeRejectsInsufficientBuffer)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan();
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
@@ -767,7 +767,7 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRejectsInsufficientBuffer)
 
 TEST_F(TestExecutionPlanDescriptor, BuiltPlanSerializesEnvelopeFromPluginPayload)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     makeExecutionPlanFinalized();
     const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
@@ -810,7 +810,7 @@ TEST_F(TestExecutionPlanDescriptor, BuiltPlanSerializesEnvelopeFromPluginPayload
 
 TEST_F(TestExecutionPlanDescriptor, BuiltPlanCachesSerializedBytesAndCallsPluginOnce)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     makeExecutionPlanFinalized();
     const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
@@ -840,7 +840,7 @@ TEST_F(TestExecutionPlanDescriptor, BuiltPlanCachesSerializedBytesAndCallsPlugin
 
 TEST_F(TestExecutionPlanDescriptor, BuiltPlanSerializesOverrideShapeEnabledFlag)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     makeExecutionPlanFinalized(/*isOverrideShapeEnabled=*/true);
     ASSERT_TRUE(plan->isOverrideShapeEnabled());
 
@@ -938,7 +938,7 @@ TEST_F(TestExecutionPlanDescriptor, SerializeBackendPlanIsSafeFromManyThreads)
 
 TEST_F(TestExecutionPlanDescriptor, SerializeBackendPlanRetriesAfterAFailedFill)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     makeExecutionPlanFinalized();
     const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
@@ -980,7 +980,7 @@ TEST_F(TestExecutionPlanDescriptor, SerializeBackendPlanRetriesAfterAFailedFill)
 
 TEST_F(TestExecutionPlanDescriptor, GetEngineConfig)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
 
     ScopedDescriptor returnedEngineConfig;
     ScopedDescriptor nullCountEngineConfig;
@@ -1008,7 +1008,7 @@ TEST_F(TestExecutionPlanDescriptor, GetEngineConfig)
 
 TEST_F(TestExecutionPlanDescriptor, GetEngineConfigErrors)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     hipdnnBackendDescriptor_t returnedEngineConfig = nullptr;
     int64_t count = 0;
     void* dummy = static_cast<void*>(&returnedEngineConfig);
@@ -1030,7 +1030,7 @@ TEST_F(TestExecutionPlanDescriptor, GetEngineConfigErrors)
 
 TEST_F(TestExecutionPlanDescriptor, GetUnsupportedAttr)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     int64_t count = 0;
     std::array<char, 256> dummyBuffer{};
 
@@ -1046,15 +1046,15 @@ TEST_F(TestExecutionPlanDescriptor, GetUnsupportedAttr)
 
 TEST_F(TestExecutionPlanDescriptor, GetEngineConfigThrowsIfNotFinalized)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(plan->getEngineConfig(), HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
 TEST_F(TestExecutionPlanDescriptor, GetEngineConfigReturnsPointerIfFinalized)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     makeExecutionPlanFinalized();
-    auto engineConfigPtr = plan->getEngineConfig();
+    const auto engineConfigPtr = plan->getEngineConfig();
     ASSERT_NE(engineConfigPtr, nullptr);
     ASSERT_EQ(static_cast<const IBackendDescriptor*>(engineConfigPtr.get()),
               static_cast<const IBackendDescriptor*>(getMockEngineConfig().get()));
@@ -1062,7 +1062,7 @@ TEST_F(TestExecutionPlanDescriptor, GetEngineConfigReturnsPointerIfFinalized)
 
 TEST_F(TestExecutionPlanDescriptor, GetExecutionContext)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     makeExecutionPlanFinalized();
     auto context = plan->getExecutionContext();
     ASSERT_NE(context, nullptr);
@@ -1071,7 +1071,7 @@ TEST_F(TestExecutionPlanDescriptor, GetExecutionContext)
 
 TEST_F(TestExecutionPlanDescriptor, RecordExecutionCountsPerPlan)
 {
-    auto plan = getExecutionPlanDescriptor();
+    const auto plan = getExecutionPlanDescriptor();
     ExecutionPlanDescriptor otherPlan;
 
     EXPECT_EQ(plan->recordExecution(), 1u);

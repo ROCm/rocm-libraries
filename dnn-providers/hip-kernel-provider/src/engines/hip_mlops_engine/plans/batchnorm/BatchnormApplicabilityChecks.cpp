@@ -316,9 +316,9 @@ void BatchnormValidator::checkInferenceTensorConfigSupported(
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, false);
 
-    auto xDataType
+    auto const xDataType
         = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
-    auto yDataType
+    auto const yDataType
         = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.y_tensor_uid()).data_type();
     if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
     {
@@ -340,9 +340,9 @@ void BatchnormValidator::checkInferenceVarianceExtTensorConfigSupported(
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, false);
 
-    auto xDataType
+    auto const xDataType
         = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
-    auto yDataType
+    auto const yDataType
         = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.y_tensor_uid()).data_type();
     if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
     {
@@ -370,9 +370,9 @@ void BatchnormValidator::checkInferenceActivationTensorConfigSupported(
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, false);
 
-    auto xDataType
+    auto const xDataType
         = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
-    auto yDataType
+    auto const yDataType
         = core::utils::findTensorAttributes(_tensorMap, actAttr.out_0_tensor_uid()).data_type();
     if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
     {
@@ -400,9 +400,9 @@ void BatchnormValidator::checkInferenceVarianceExtActivationTensorConfigSupporte
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, false);
 
-    auto xDataType
+    auto const xDataType
         = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
-    auto yDataType
+    auto const yDataType
         = core::utils::findTensorAttributes(_tensorMap, actAttr.out_0_tensor_uid()).data_type();
     if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
     {
@@ -438,9 +438,9 @@ void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
 
-    auto xDataType
+    auto const xDataType
         = core::utils::findTensorAttributes(_tensorMap, bnAttr.x_tensor_uid()).data_type();
-    auto yDataType
+    auto const yDataType
         = core::utils::findTensorAttributes(_tensorMap, bnAttr.y_tensor_uid()).data_type();
     if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
     {
@@ -482,9 +482,9 @@ void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);
 
-    auto xDataType
+    auto const xDataType
         = core::utils::findTensorAttributes(_tensorMap, bnAttr.x_tensor_uid()).data_type();
-    auto yDataType
+    auto const yDataType
         = core::utils::findTensorAttributes(_tensorMap, actAttr.out_0_tensor_uid()).data_type();
     if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
     {
@@ -520,11 +520,11 @@ void BatchnormValidator::checkBwdTensorConfigSupported(
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
 
-    auto xDataType
+    auto const xDataType
         = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.x_tensor_uid()).data_type();
-    auto dyDataType
+    auto const dyDataType
         = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dy_tensor_uid()).data_type();
-    auto dxDataType
+    auto const dxDataType
         = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dx_tensor_uid()).data_type();
     if(xDataType != dxDataType)
     {
@@ -587,11 +587,11 @@ void BatchnormValidator::checkBwdActivationTensorConfigSupported(
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);
 
-    auto xDataType
+    auto const xDataType
         = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.x_tensor_uid()).data_type();
-    auto dyDataType
+    auto const dyDataType
         = core::utils::findTensorAttributes(_tensorMap, actAttr.in_0_tensor_uid()).data_type();
-    auto dxDataType
+    auto const dxDataType
         = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dx_tensor_uid()).data_type();
     if(xDataType != dxDataType)
     {

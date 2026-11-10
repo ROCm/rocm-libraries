@@ -67,7 +67,7 @@ protected:
             }
         });
 
-        for(auto& tensorPair : bundle.tensors)
+        for(auto const& tensorPair : bundle.tensors)
         {
             const auto nameIt = uidToName.find(tensorPair.first);
             const bool hasName = (nameIt != uidToName.end());
@@ -92,7 +92,7 @@ protected:
 
     void runGraphTest(float tolerance)
     {
-        auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
+        auto const deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
         const GraphTestCase& testCase = this->GetParam();
 
         // Skip if device is not supported
@@ -106,14 +106,14 @@ protected:
         const auto& graph = built.graph;
         const auto& stats = built.stats;
 
-        auto validationResult = graph->validate();
+        auto const validationResult = graph->validate();
 
         ASSERT_TRUE(validationResult.is_good())
             << "Graph validation failed for config: " << testCase.name << " - "
             << validationResult.get_message();
 
         {
-            auto supportStatus = graph->is_supported_ext(this->_handle);
+            auto const supportStatus = graph->is_supported_ext(this->_handle);
             ASSERT_EQ(supportStatus.code, ErrorCode::OK)
                 << "No engines applicable for config: " << testCase.name << " - "
                 << supportStatus.get_message();
@@ -154,7 +154,7 @@ protected:
 
         // Build the graph; skip if no engine supports this configuration
         // (e.g. causal mask + stats is not yet supported by the ASM kernels).
-        auto buildResult = graph->build(this->_handle);
+        auto const buildResult = graph->build(this->_handle);
         if(buildResult.code == ErrorCode::GRAPH_NOT_SUPPORTED)
         {
             GTEST_SKIP() << "No engine supports this graph: " << buildResult.err_msg;
@@ -185,7 +185,7 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        for(auto& tensorPair : bundle.tensors)
+        for(auto const& tensorPair : bundle.tensors)
         {
             bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
         }
@@ -197,7 +197,7 @@ protected:
         // but load different .co files (MI300/ vs MI308/ subdirectory in getKernelCoPath()).
         // Integration tests exercise whichever device the CI agent has. Full coverage
         // requires CI agents with both MI300 and MI308 hardware.
-        auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
+        auto const deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
         const SdpaFwdTestCase& testCase = this->GetParam();
 
         if(testCase.arch != deviceString)
@@ -213,17 +213,17 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        auto q = std::make_shared<TensorAttributes>();
+        auto const q = std::make_shared<TensorAttributes>();
         q->set_dim(testCase.qDims)
             .set_stride(generateStrides(testCase.qDims))
             .set_data_type(dataType);
 
-        auto k = std::make_shared<TensorAttributes>();
+        auto const k = std::make_shared<TensorAttributes>();
         k->set_dim(testCase.kDims)
             .set_stride(generateStrides(testCase.kDims))
             .set_data_type(dataType);
 
-        auto v = std::make_shared<TensorAttributes>();
+        auto const v = std::make_shared<TensorAttributes>();
         v->set_dim(testCase.vDims)
             .set_stride(generateStrides(testCase.vDims))
             .set_data_type(dataType);
@@ -246,7 +246,7 @@ protected:
 
         o->set_output(true).set_data_type(dataType);
 
-        auto validationResult = graph.validate();
+        auto const validationResult = graph.validate();
         ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
         GraphVerificationContext context(graph);
@@ -500,7 +500,7 @@ INSTANTIATE_TEST_SUITE_P(SmokeStats,
 
 TEST_P(IntegrationGpuSdpaFwdShapeSweepBf16, Correctness)
 {
-    auto tolerance = 1e-2f;
+    auto const tolerance = 1e-2f;
     runGraphTest(tolerance);
 }
 

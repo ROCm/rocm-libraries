@@ -68,10 +68,10 @@ TEST(TestGpuBatchnormFwdTrainSignatureKey, HashFunction)
     const GpuBatchnormFwdTrainSignatureKey key6{
         DataType::FLOAT, DataType::HALF, DataType::BFLOAT16, DataType::FLOAT, DataType::DOUBLE};
 
-    auto hash3 = key3.hashSelf();
-    auto hash4 = key4.hashSelf();
-    auto hash5 = key5.hashSelf();
-    auto hash6 = key6.hashSelf();
+    const auto hash3 = key3.hashSelf();
+    const auto hash4 = key4.hashSelf();
+    const auto hash5 = key5.hashSelf();
+    const auto hash6 = key6.hashSelf();
 
     EXPECT_TRUE(hash3 != hash4 && hash3 != hash5 && hash3 != hash6 && hash4 != hash5
                 && hash4 != hash6 && hash5 != hash6);
@@ -93,8 +93,8 @@ TEST(TestGpuBatchnormFwdTrainSignatureKey, Copy)
 
 TEST(TestGpuBatchnormFwdTrainSignatureKey, CreateFromNodeAndTensorMap)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdTrainSignatureKey keyFromNode(

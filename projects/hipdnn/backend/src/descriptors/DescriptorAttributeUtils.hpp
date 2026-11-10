@@ -121,7 +121,8 @@ void getScalarVector(const std::vector<T>& source,
                 HIPDNN_STATUS_BAD_PARAM,
                 std::string(errorPrefix) + ": requestedElementCount is negative");
 
-    auto copyCount = std::min<size_t>(static_cast<size_t>(requestedElementCount), source.size());
+    const auto copyCount
+        = std::min<size_t>(static_cast<size_t>(requestedElementCount), source.size());
     if(elementCount != nullptr)
     {
         *elementCount = static_cast<int64_t>(copyCount);
@@ -431,7 +432,7 @@ inline std::shared_ptr<TensorDescriptor> findOptionalTensor(
     {
         return nullptr;
     }
-    auto it = tensorMap.find(uid.value());
+    const auto it = tensorMap.find(uid.value());
     return (it != tensorMap.end()) ? it->second : nullptr;
 }
 

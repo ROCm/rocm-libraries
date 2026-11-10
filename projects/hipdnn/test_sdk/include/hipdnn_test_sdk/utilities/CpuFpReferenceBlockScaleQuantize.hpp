@@ -143,7 +143,7 @@ public:
                 }
             });
 
-        auto quantizeFunc = [&](const std::vector<int64_t>& scaleIndices) {
+        const auto quantizeFunc = [&](const std::vector<int64_t>& scaleIndices) {
             const auto blockStart = scaleIndices[targetAxis] * blockSize;
             const auto blockEnd = std::min(blockStart + blockSize, xDims[targetAxis]);
 
@@ -205,7 +205,7 @@ public:
             }
         };
 
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(quantizeFunc, scale.dims());
         parallelFunc(std::thread::hardware_concurrency());
 

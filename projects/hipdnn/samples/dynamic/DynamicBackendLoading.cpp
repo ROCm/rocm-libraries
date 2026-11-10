@@ -46,8 +46,8 @@ int main()
         graph::Graph graph;
         graph.set_io_data_type(DataType::FLOAT).set_compute_data_type(DataType::FLOAT);
 
-        auto xAttr = createTensor({N, C, H, W}, DataType::FLOAT, layout);
-        auto wAttr = createTensor({K, C, R, S}, DataType::FLOAT, layout);
+        const auto xAttr = createTensor({N, C, H, W}, DataType::FLOAT, layout);
+        const auto wAttr = createTensor({K, C, R, S}, DataType::FLOAT, layout);
 
         graph::ConvFpropAttributes convAttributes;
         convAttributes.set_name("dynamic_backend_loading");
@@ -55,7 +55,7 @@ int main()
         convAttributes.set_stride({1, 1});
         convAttributes.set_dilation({1, 1});
 
-        auto yAttr = graph.conv_fprop(xAttr, wAttr, convAttributes);
+        const auto yAttr = graph.conv_fprop(xAttr, wAttr, convAttributes);
         yAttr->set_output(true);
 
         const auto buildStatus = graph.build(*handle);
@@ -97,7 +97,7 @@ int main()
         constexpr auto EXPECTED = static_cast<float>(C);
         constexpr float TOLERANCE = 1e-3F;
         int64_t elementCount = 1;
-        for(auto dim : yAttr->get_dim())
+        for(const auto dim : yAttr->get_dim())
         {
             elementCount *= dim;
         }

@@ -54,8 +54,8 @@ constexpr void validateComputeType()
 template <typename InputType, typename ComputeType>
 double computeInputCastingError(double signalBound, int numDistinctInputs = 2)
 {
-    auto inputEpsilon = static_cast<double>(std::numeric_limits<InputType>::epsilon());
-    auto computeEpsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const auto inputEpsilon = static_cast<double>(std::numeric_limits<InputType>::epsilon());
+    const auto computeEpsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
     if(inputEpsilon < computeEpsilon)
     {
@@ -79,8 +79,8 @@ double computeInputCastingError(double signalBound, int numDistinctInputs = 2)
 template <typename OutputType, typename ComputeType>
 double computeOutputCastingError(double maxOutputMagnitude)
 {
-    auto outputEpsilon = static_cast<double>(std::numeric_limits<OutputType>::epsilon());
-    auto computeEpsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const auto outputEpsilon = static_cast<double>(std::numeric_limits<OutputType>::epsilon());
+    const auto computeEpsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
     if(outputEpsilon > computeEpsilon)
     {
@@ -193,10 +193,10 @@ double computeMatrixInfNorm(hipdnn_data_sdk::utilities::ITensor& tensor)
     const auto& dims = tensor.dims();
     const TensorView<T> view(tensor);
 
-    auto cols = dims.back();
+    const auto cols = dims.back();
 
     // outerDims = [batch..., rows] — everything except the last dim (cols)
-    auto outerDims = std::vector<int64_t>(dims.begin(), dims.end() - 1);
+    const auto outerDims = std::vector<int64_t>(dims.begin(), dims.end() - 1);
 
     double maxRowSum = 0.0;
 

@@ -113,7 +113,7 @@ protected:
 
 TEST_F(IntegrationHeuristicPlugin, CompleteHandleLifecycleWithGoodPlugin)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     // Should have loaded test plugins
@@ -141,7 +141,7 @@ TEST_F(IntegrationHeuristicPlugin, CompleteHandleLifecycleWithGoodPlugin)
 
 TEST_F(IntegrationHeuristicPlugin, SetDevicePropertiesOnHandle)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     const auto policyInfos = rm->getHeuristicPolicyInfos();
@@ -173,7 +173,7 @@ TEST_F(IntegrationHeuristicPlugin, SetDevicePropertiesOnHandle)
 
 TEST_F(IntegrationHeuristicPlugin, SetDevicePropertiesOnAllHandles)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     // Create device properties
@@ -192,7 +192,7 @@ TEST_F(IntegrationHeuristicPlugin, SetDevicePropertiesOnAllHandles)
 
 TEST_F(IntegrationHeuristicPlugin, CompleteWorkflowWithDevicePropertiesAndFinalize)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     const auto policyInfos = rm->getHeuristicPolicyInfos();
@@ -247,7 +247,7 @@ TEST_F(IntegrationHeuristicPlugin, CompleteWorkflowWithDevicePropertiesAndFinali
 
 TEST_F(IntegrationHeuristicPlugin, GetPluginTypeFromLoadedPlugin)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     const auto policyInfos = rm->getHeuristicPolicyInfos();
@@ -268,7 +268,7 @@ TEST_F(IntegrationHeuristicPlugin, GetPluginTypeFromLoadedPlugin)
 
 TEST_F(IntegrationHeuristicPlugin, GetLoadedPluginFilesReturnsCorrectCount)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     size_t numPlugins = 0;
@@ -282,7 +282,7 @@ TEST_F(IntegrationHeuristicPlugin, GetLoadedPluginFilesReturnsCorrectCount)
 
 TEST_F(IntegrationHeuristicPlugin, ToStringContainsPluginInformation)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     const auto str = rm->toString();
@@ -295,7 +295,7 @@ TEST_F(IntegrationHeuristicPlugin, ToStringContainsPluginInformation)
 
 TEST_F(IntegrationHeuristicPlugin, MultipleDescriptorsFromSameHandle)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     const auto policyInfos = rm->getHeuristicPolicyInfos();
@@ -334,7 +334,7 @@ TEST_F(IntegrationHeuristicPlugin, MultipleDescriptorsFromSameHandle)
 
 TEST_F(IntegrationHeuristicPlugin, SetDevicePropertiesHandlesPluginFailures)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     // Create invalid device properties (empty buffer)
@@ -350,7 +350,7 @@ TEST_F(IntegrationHeuristicPlugin, SetDevicePropertiesHandlesPluginFailures)
 
 TEST_F(IntegrationHeuristicPlugin, SetPluginLogLevelHandlesMissingOptionalFunction)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     const auto policyInfos = rm->getHeuristicPolicyInfos();
@@ -364,7 +364,7 @@ TEST_F(IntegrationHeuristicPlugin, SetPluginLogLevelHandlesMissingOptionalFuncti
 
 TEST_F(IntegrationHeuristicPlugin, FinalizeWithEmptyEngineIdsSucceeds)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     const auto policyInfos = rm->getHeuristicPolicyInfos();
@@ -395,7 +395,7 @@ TEST_F(IntegrationHeuristicPlugin, FinalizeWithEmptyEngineIdsSucceeds)
 
 TEST_F(IntegrationHeuristicPlugin, MultipleGetHandleCallsReturnSameHandle)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     const auto policyInfos = rm->getHeuristicPolicyInfos();
@@ -415,7 +415,7 @@ TEST_F(IntegrationHeuristicPlugin, MultipleGetHandleCallsReturnSameHandle)
 
 TEST_F(IntegrationHeuristicPlugin, MultipleGetPluginCallsReturnSamePlugin)
 {
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     const auto policyInfos = rm->getHeuristicPolicyInfos();
@@ -440,7 +440,7 @@ TEST_F(IntegrationHeuristicPlugin, SetDevicePropertiesWithNoPluginsLoaded)
     // Create RM with no plugins
     HeuristicPluginResourceManager::setHeuristicPluginPaths({}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    auto rm = HeuristicPluginResourceManager::create();
+    const auto rm = HeuristicPluginResourceManager::create();
     ASSERT_NE(rm, nullptr);
 
     hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT props;

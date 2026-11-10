@@ -76,7 +76,7 @@ void EngineDescriptor::initializeHeuristicResult(std::shared_ptr<const GraphDesc
 void EngineDescriptor::ensureDetailsLoaded() const
 {
     std::call_once(_detailsOnce, [this]() {
-        auto resourceManager = _graph->getHandle()->getPluginResourceManager();
+        const auto resourceManager = _graph->getHandle()->getPluginResourceManager();
         auto details = plugin::EnginePluginResourceManager::getEngineDetails(
             resourceManager, _engineId, _graph.get());
         std::optional<std::string> detailsName;
@@ -90,7 +90,7 @@ void EngineDescriptor::ensureDetailsLoaded() const
             detailsName = wrapper.name();
             const auto rawNotes = wrapper.behaviorNotes();
             behaviorNotes.reserve(rawNotes.size());
-            for(auto note : rawNotes)
+            for(const auto note : rawNotes)
             {
                 THROW_IF_TRUE(note < 0,
                               HIPDNN_STATUS_BAD_PARAM,
@@ -303,7 +303,7 @@ void EngineDescriptor::setGraph(hipdnnBackendAttributeType_t attributeType,
                 HIPDNN_STATUS_BAD_PARAM,
                 "EngineDescriptor failed to set graph: Invalid element count.");
 
-    auto graph = HipdnnBackendDescriptor::unpackDescriptor<const GraphDescriptor>(
+    const auto graph = HipdnnBackendDescriptor::unpackDescriptor<const GraphDescriptor>(
         arrayOfElements,
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
         "EngineDescriptor failed to set graph: Graph is null.");
@@ -371,7 +371,7 @@ void EngineDescriptor::getKnobInfo(hipdnnBackendAttributeType_t attributeType,
                 "EngineDescriptor failed to get knob info: Invalid attribute type.");
     ensureDetailsLoaded();
 
-    auto knobCount = static_cast<int64_t>(_knobSerializedBuffers.size());
+    const auto knobCount = static_cast<int64_t>(_knobSerializedBuffers.size());
 
     // If requestedElementCount is 0, just return the count
     if(requestedElementCount == 0)
@@ -389,7 +389,7 @@ void EngineDescriptor::getKnobInfo(hipdnnBackendAttributeType_t attributeType,
 
     // Fill the output array with hipdnnBackendFlatbufferData_t structs
     auto* outputArray = static_cast<hipdnnBackendFlatbufferData_t*>(arrayOfElements);
-    auto elementsToReturn = std::min(requestedElementCount, knobCount);
+    const auto elementsToReturn = std::min(requestedElementCount, knobCount);
 
     for(int64_t i = 0; i < elementsToReturn; ++i)
     {
@@ -413,7 +413,7 @@ void EngineDescriptor::getKnobInfoDescriptors(hipdnnBackendAttributeType_t attri
                  "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_INFO)");
     ensureDetailsLoaded();
 
-    auto count = static_cast<int64_t>(_knobDescriptors.size());
+    const auto count = static_cast<int64_t>(_knobDescriptors.size());
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -450,7 +450,7 @@ void EngineDescriptor::getBehaviorNotes(hipdnnBackendAttributeType_t attributeTy
                 "EngineDescriptor failed to get behavior notes: Invalid attribute type.");
     ensureDetailsLoaded();
 
-    auto count = static_cast<int64_t>(_behaviorNotes.size());
+    const auto count = static_cast<int64_t>(_behaviorNotes.size());
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
         THROW_IF_NULL(elementCount,

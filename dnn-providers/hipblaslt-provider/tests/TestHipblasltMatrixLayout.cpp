@@ -12,7 +12,7 @@ using namespace hipblaslt_plugin;
 
 TEST(TestHipblasltMatrixLayout, CanCreateAndDestroy)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper const graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -32,7 +32,7 @@ TEST(TestHipblasltMatrixLayout, CanCreateAndDestroy)
 
 TEST(TestHipblasltMatrixLayout, TensorDescriptorIsValid)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper const graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -71,7 +71,7 @@ TEST(TestHipblasltMatrixLayout, TensorWithEmptyShape)
     std::vector<int64_t> const strides = {1};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+    auto const attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "", hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET, &strides, nullptr);
     builder.Finish(attrOffset);
 
@@ -88,7 +88,7 @@ TEST(TestHipblasltMatrixLayout, TensorWithEmptyStride)
     std::vector<int64_t> const dims = {10, 16};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+    auto const attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "", hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET, nullptr, &dims);
     builder.Finish(attrOffset);
 
@@ -106,7 +106,7 @@ TEST(TestHipblasltMatrixLayout, TensorWithInvalidShapeRank)
     std::vector<int64_t> const strides = {1};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+    auto const attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "", hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET, &strides, &dims);
     builder.Finish(attrOffset);
 
@@ -125,7 +125,7 @@ TEST(TestHipblasltMatrixLayout, TensorWithInvalidMatrixType)
     std::vector<int64_t> const strides = {1, 8, 16};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+    auto const attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "", hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET, &strides, &dims);
     builder.Finish(attrOffset);
 
@@ -140,7 +140,7 @@ TEST(TestHipblasltMatrixLayout, TensorWithInvalidMatrixType)
 
 TEST(TestHipblasltMatrixLayout, SetBatchCount)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper const graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -158,7 +158,7 @@ TEST(TestHipblasltMatrixLayout, SetBatchCount)
 
 TEST(TestHipblasltMatrixLayout, setStridedBatchOffset)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper const graph(
         builder.GetBufferPointer(), builder.GetSize());
 

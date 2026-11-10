@@ -250,8 +250,8 @@ protected:
 
 TEST_F(TestBatchnormOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -261,11 +261,11 @@ TEST_F(TestBatchnormOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestBatchnormOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -274,7 +274,7 @@ TEST_F(TestBatchnormOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::BatchnormAttributes);
-    auto desc = std::static_pointer_cast<BatchnormOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<BatchnormOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -304,16 +304,16 @@ TEST_F(TestBatchnormOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestBatchnormOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
 
 TEST_F(TestBatchnormOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_BATCHNORM_TENSOR_X_UID);
@@ -329,8 +329,8 @@ TEST_F(TestBatchnormOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestBatchnormOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getXDesc(), _tensorMap[K_BATCHNORM_TENSOR_X_UID]);
     EXPECT_EQ(desc->getScaleDesc(), _tensorMap[K_BATCHNORM_TENSOR_SCALE_UID]);
@@ -342,7 +342,7 @@ TEST_F(TestBatchnormOperationFromNode, TensorReferencesMatchTensorMap)
 TEST_F(TestBatchnormOperationFromNode, FailsWithMissingXTensor)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_X_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -351,7 +351,7 @@ TEST_F(TestBatchnormOperationFromNode, FailsWithMissingXTensor)
 TEST_F(TestBatchnormOperationFromNode, FailsWithMissingScaleTensor)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_SCALE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -360,7 +360,7 @@ TEST_F(TestBatchnormOperationFromNode, FailsWithMissingScaleTensor)
 TEST_F(TestBatchnormOperationFromNode, FailsWithMissingBiasTensor)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_BIAS_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -369,7 +369,7 @@ TEST_F(TestBatchnormOperationFromNode, FailsWithMissingBiasTensor)
 TEST_F(TestBatchnormOperationFromNode, FailsWithMissingEpsilonTensor)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_EPSILON_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -378,7 +378,7 @@ TEST_F(TestBatchnormOperationFromNode, FailsWithMissingEpsilonTensor)
 TEST_F(TestBatchnormOperationFromNode, FailsWithMissingYTensor)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_Y_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -399,7 +399,7 @@ TEST_F(TestBatchnormOperationFromNode, SucceedsWithOnlyRequiredTensors)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
@@ -422,7 +422,7 @@ TEST_F(TestBatchnormOperationFromNode, SucceedsWithOnlyRequiredTensors)
 TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalPrevRunningMeanUidSetButTensorMissing)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -431,7 +431,7 @@ TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalPrevRunningMeanUidSetBut
 TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalPrevRunningVarianceUidSetButTensorMissing)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -440,7 +440,7 @@ TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalPrevRunningVarianceUidSe
 TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalMomentumUidSetButTensorMissing)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_MOMENTUM_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -449,7 +449,7 @@ TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalMomentumUidSetButTensorM
 TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalMeanUidSetButTensorMissing)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_MEAN_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -458,7 +458,7 @@ TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalMeanUidSetButTensorMissi
 TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalInvVarianceUidSetButTensorMissing)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_INV_VARIANCE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -467,7 +467,7 @@ TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalInvVarianceUidSetButTens
 TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalNextRunningMeanUidSetButTensorMissing)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -476,7 +476,7 @@ TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalNextRunningMeanUidSetBut
 TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalNextRunningVarianceUidSetButTensorMissing)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -484,8 +484,8 @@ TEST_F(TestBatchnormOperationFromNode, FailsWhenOptionalNextRunningVarianceUidSe
 
 TEST_F(TestBatchnormOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     // 5 required + 7 optional + 2 peer_stats = 14 total
@@ -499,8 +499,8 @@ TEST_F(TestBatchnormOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 
 TEST_F(TestBatchnormOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -546,7 +546,7 @@ TEST_F(TestBatchnormOperationFromNode, BuildNodeRoundTripWithOnlyRequiredTensors
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsBatchnormAttributes();
@@ -577,7 +577,7 @@ TEST_F(TestBatchnormOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_batchnorm_1";
 
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -592,8 +592,8 @@ TEST_F(TestBatchnormOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestBatchnormOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -605,7 +605,7 @@ TEST_F(TestBatchnormOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
@@ -614,8 +614,8 @@ TEST_F(TestBatchnormOperationFromNode, BuildNodePreservesName)
 
 TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type via getAttribute
     hipdnnDataType_t computeType = {};
@@ -895,8 +895,8 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
 
 TEST_F(TestBatchnormOperationFromNode, OperationTypeAttributeReturnsCorrectValue)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
@@ -908,8 +908,8 @@ TEST_F(TestBatchnormOperationFromNode, OperationTypeAttributeReturnsCorrectValue
 
 TEST_F(TestBatchnormOperationFromNode, OptionalTensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getPrevRunningMeanDesc(), _tensorMap[K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID]);
     EXPECT_EQ(desc->getPrevRunningVarianceDesc(),
@@ -924,8 +924,8 @@ TEST_F(TestBatchnormOperationFromNode, OptionalTensorReferencesMatchTensorMap)
 
 TEST_F(TestBatchnormOperationFromNode, PeerStatsTensorReferencesPopulated)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     // 5 required + 2 (mean, inv_var) + 5 (running stats) + 2 peer_stats = 14 total
@@ -942,8 +942,8 @@ TEST_F(TestBatchnormOperationFromNode, PeerStatsTensorReferencesPopulated)
 
 TEST_F(TestBatchnormOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
     // Required: X
     ASSERT_NE(desc->getXDesc(), nullptr);
@@ -1085,7 +1085,7 @@ TEST_F(TestBatchnormOperationFromNode, SetsTensorReferencesWithFullValues)
 TEST_F(TestBatchnormOperationFromNode, FailsWhenPeerStatsUidSetButTensorMissing)
 {
     _tensorMap.erase(K_BATCHNORM_TENSOR_PEER_STAT_0_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);

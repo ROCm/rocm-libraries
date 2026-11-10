@@ -103,7 +103,7 @@ TEST(TestHipblasltEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph const mockGraph;
-    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    auto const graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
     HipdnnEnginePluginHandle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
@@ -123,7 +123,7 @@ TEST(TestHipblasltEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     MockGraph const mockGraph;
-    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    auto const graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
     HipdnnEnginePluginHandle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
@@ -134,7 +134,7 @@ TEST(TestHipblasltEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
     HipblasltEngine const engine(0);
 
     MockGraph const mockGraph;
-    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    auto const graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
     HipdnnEnginePluginHandle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
@@ -150,7 +150,7 @@ TEST(TestHipblasltEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph const mockGraph;
-    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    auto const graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
     HipdnnEnginePluginHandle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));

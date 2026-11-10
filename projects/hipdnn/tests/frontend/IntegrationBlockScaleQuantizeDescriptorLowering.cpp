@@ -46,13 +46,13 @@ class IntegrationBlockScaleQuantizeDescriptorLowering : public IntegrationTestFi
 // in the frontend.
 TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, BlockScaleQuantizeGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestBlockScaleQuantizeGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_BSQ_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_BSQ_TENSOR_X_DIMS)).set_stride(toVec(K_BSQ_TENSOR_X_STRIDES));
 
@@ -123,7 +123,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, BlockScaleQuantizeGraphR
 TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering,
        BlockScaleQuantizeGraphRoundTripWithAxisAndTranspose)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestBsqAxisTransposeGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -137,7 +137,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering,
     constexpr int64_t Y_UID = 51;
     constexpr int64_t SCALE_UID = 52;
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(xDims).set_stride(xStrides);
 
@@ -181,13 +181,13 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering,
 // through the lowering round-trip.
 TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidBsqGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_BSQ_TENSOR_X_DIMS)).set_stride(toVec(K_BSQ_TENSOR_X_STRIDES));
 

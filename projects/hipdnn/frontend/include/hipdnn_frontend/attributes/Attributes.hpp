@@ -270,7 +270,7 @@ protected:
     template <typename InputNameT>
     std::shared_ptr<TensorAttributes> getInput(InputNameT inputName) const
     {
-        auto it = self().inputs.find(inputName);
+        const auto it = self().inputs.find(inputName);
         if(it != self().inputs.end())
         {
             return it->second;
@@ -287,7 +287,7 @@ protected:
     template <typename OutputNameT>
     std::shared_ptr<TensorAttributes> getOutput(OutputNameT outputName) const
     {
-        auto it = self().outputs.find(outputName);
+        const auto it = self().outputs.find(outputName);
         if(it != self().outputs.end())
         {
             return it->second;
@@ -391,7 +391,7 @@ private:
         // NOLINTNEXTLINE(readability-identifier-naming)
         for(const auto& [key, t1] : m1)
         {
-            auto it = m2.find(key);
+            const auto it = m2.find(key);
             if(it == m2.end())
             {
                 return false;
@@ -432,7 +432,7 @@ private:
 
         for(const auto& [key, t1] : m1)
         {
-            auto it = m2.find(key);
+            const auto it = m2.find(key);
             if(it == m2.end())
             {
                 return false;

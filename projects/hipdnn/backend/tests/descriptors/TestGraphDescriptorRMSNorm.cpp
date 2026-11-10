@@ -43,7 +43,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                              const std::string& name = "")
 {
     auto wrapper = createDescriptor<RMSNormOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<RMSNormOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<RMSNormOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_X_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -130,7 +130,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -155,31 +155,31 @@ protected:
 
 TEST_F(TestGraphDescriptorRMSNorm, BuildFromSingleRMSNormOperation)
 {
-    auto xDesc = createFinalizedTensor(
+    const auto xDesc = createFinalizedTensor(
         K_RMSNORM_TENSOR_X_UID, toVec(K_RMSNORM_TENSOR_X_DIMS), toVec(K_RMSNORM_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_RMSNORM_TENSOR_SCALE_UID,
-                                           toVec(K_RMSNORM_TENSOR_SCALE_DIMS),
-                                           toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_RMSNORM_TENSOR_EPSILON_UID,
-                                             toVec(K_RMSNORM_TENSOR_EPSILON_DIMS),
-                                             toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES));
-    auto yDesc = createFinalizedTensor(
+    const auto scaleDesc = createFinalizedTensor(K_RMSNORM_TENSOR_SCALE_UID,
+                                                 toVec(K_RMSNORM_TENSOR_SCALE_DIMS),
+                                                 toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
+    const auto epsilonDesc = createFinalizedTensor(K_RMSNORM_TENSOR_EPSILON_UID,
+                                                   toVec(K_RMSNORM_TENSOR_EPSILON_DIMS),
+                                                   toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES));
+    const auto yDesc = createFinalizedTensor(
         K_RMSNORM_TENSOR_Y_UID, toVec(K_RMSNORM_TENSOR_Y_DIMS), toVec(K_RMSNORM_TENSOR_Y_STRIDES));
-    auto biasDesc = createFinalizedTensor(K_RMSNORM_TENSOR_BIAS_UID,
-                                          toVec(K_RMSNORM_TENSOR_BIAS_DIMS),
-                                          toVec(K_RMSNORM_TENSOR_BIAS_STRIDES));
-    auto invRmsDesc = createFinalizedTensor(K_RMSNORM_TENSOR_INV_RMS_UID,
-                                            toVec(K_RMSNORM_TENSOR_INV_RMS_DIMS),
-                                            toVec(K_RMSNORM_TENSOR_INV_RMS_STRIDES));
+    const auto biasDesc = createFinalizedTensor(K_RMSNORM_TENSOR_BIAS_UID,
+                                                toVec(K_RMSNORM_TENSOR_BIAS_DIMS),
+                                                toVec(K_RMSNORM_TENSOR_BIAS_STRIDES));
+    const auto invRmsDesc = createFinalizedTensor(K_RMSNORM_TENSOR_INV_RMS_UID,
+                                                  toVec(K_RMSNORM_TENSOR_INV_RMS_DIMS),
+                                                  toVec(K_RMSNORM_TENSOR_INV_RMS_STRIDES));
 
-    auto rmsnormOp = createFinalizedRMSNormOp(xDesc.get(),
-                                              scaleDesc.get(),
-                                              epsilonDesc.get(),
-                                              yDesc.get(),
-                                              biasDesc.get(),
-                                              invRmsDesc.get());
+    const auto rmsnormOp = createFinalizedRMSNormOp(xDesc.get(),
+                                                    scaleDesc.get(),
+                                                    epsilonDesc.get(),
+                                                    yDesc.get(),
+                                                    biasDesc.get(),
+                                                    invRmsDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {rmsnormOp.get()};
@@ -189,7 +189,7 @@ TEST_F(TestGraphDescriptorRMSNorm, BuildFromSingleRMSNormOperation)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -236,40 +236,40 @@ TEST_F(TestGraphDescriptorRMSNorm, BuildFromSingleRMSNormOperation)
 
 TEST_F(TestGraphDescriptorRMSNorm, ComputeDataTypePreserved)
 {
-    auto xDesc = createFinalizedTensor(K_RMSNORM_TENSOR_X_UID,
-                                       toVec(K_RMSNORM_TENSOR_X_DIMS),
-                                       toVec(K_RMSNORM_TENSOR_X_STRIDES),
-                                       HIPDNN_DATA_HALF);
-    auto scaleDesc = createFinalizedTensor(K_RMSNORM_TENSOR_SCALE_UID,
-                                           toVec(K_RMSNORM_TENSOR_SCALE_DIMS),
-                                           toVec(K_RMSNORM_TENSOR_SCALE_STRIDES),
-                                           HIPDNN_DATA_HALF);
-    auto epsilonDesc = createFinalizedTensor(K_RMSNORM_TENSOR_EPSILON_UID,
-                                             toVec(K_RMSNORM_TENSOR_EPSILON_DIMS),
-                                             toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES),
+    const auto xDesc = createFinalizedTensor(K_RMSNORM_TENSOR_X_UID,
+                                             toVec(K_RMSNORM_TENSOR_X_DIMS),
+                                             toVec(K_RMSNORM_TENSOR_X_STRIDES),
                                              HIPDNN_DATA_HALF);
-    auto yDesc = createFinalizedTensor(K_RMSNORM_TENSOR_Y_UID,
-                                       toVec(K_RMSNORM_TENSOR_Y_DIMS),
-                                       toVec(K_RMSNORM_TENSOR_Y_STRIDES),
-                                       HIPDNN_DATA_HALF);
-    auto biasDesc = createFinalizedTensor(K_RMSNORM_TENSOR_BIAS_UID,
-                                          toVec(K_RMSNORM_TENSOR_BIAS_DIMS),
-                                          toVec(K_RMSNORM_TENSOR_BIAS_STRIDES),
-                                          HIPDNN_DATA_HALF);
-    auto invRmsDesc = createFinalizedTensor(K_RMSNORM_TENSOR_INV_RMS_UID,
-                                            toVec(K_RMSNORM_TENSOR_INV_RMS_DIMS),
-                                            toVec(K_RMSNORM_TENSOR_INV_RMS_STRIDES),
-                                            HIPDNN_DATA_HALF);
+    const auto scaleDesc = createFinalizedTensor(K_RMSNORM_TENSOR_SCALE_UID,
+                                                 toVec(K_RMSNORM_TENSOR_SCALE_DIMS),
+                                                 toVec(K_RMSNORM_TENSOR_SCALE_STRIDES),
+                                                 HIPDNN_DATA_HALF);
+    const auto epsilonDesc = createFinalizedTensor(K_RMSNORM_TENSOR_EPSILON_UID,
+                                                   toVec(K_RMSNORM_TENSOR_EPSILON_DIMS),
+                                                   toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES),
+                                                   HIPDNN_DATA_HALF);
+    const auto yDesc = createFinalizedTensor(K_RMSNORM_TENSOR_Y_UID,
+                                             toVec(K_RMSNORM_TENSOR_Y_DIMS),
+                                             toVec(K_RMSNORM_TENSOR_Y_STRIDES),
+                                             HIPDNN_DATA_HALF);
+    const auto biasDesc = createFinalizedTensor(K_RMSNORM_TENSOR_BIAS_UID,
+                                                toVec(K_RMSNORM_TENSOR_BIAS_DIMS),
+                                                toVec(K_RMSNORM_TENSOR_BIAS_STRIDES),
+                                                HIPDNN_DATA_HALF);
+    const auto invRmsDesc = createFinalizedTensor(K_RMSNORM_TENSOR_INV_RMS_UID,
+                                                  toVec(K_RMSNORM_TENSOR_INV_RMS_DIMS),
+                                                  toVec(K_RMSNORM_TENSOR_INV_RMS_STRIDES),
+                                                  HIPDNN_DATA_HALF);
 
-    auto rmsnormOp = createFinalizedRMSNormOp(xDesc.get(),
-                                              scaleDesc.get(),
-                                              epsilonDesc.get(),
-                                              yDesc.get(),
-                                              biasDesc.get(),
-                                              invRmsDesc.get(),
-                                              HIPDNN_DATA_HALF);
+    const auto rmsnormOp = createFinalizedRMSNormOp(xDesc.get(),
+                                                    scaleDesc.get(),
+                                                    epsilonDesc.get(),
+                                                    yDesc.get(),
+                                                    biasDesc.get(),
+                                                    invRmsDesc.get(),
+                                                    HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {rmsnormOp.get()};
@@ -279,7 +279,7 @@ TEST_F(TestGraphDescriptorRMSNorm, ComputeDataTypePreserved)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -300,28 +300,28 @@ TEST_F(TestGraphDescriptorRMSNorm, ComputeDataTypePreserved)
 // correctly with only 4 tensors and no optional uid fields set.
 TEST_F(TestGraphDescriptorRMSNorm, BuildFromOperationWithoutOptionalTensors)
 {
-    auto xDesc = createFinalizedTensor(
+    const auto xDesc = createFinalizedTensor(
         K_RMSNORM_TENSOR_X_UID, toVec(K_RMSNORM_TENSOR_X_DIMS), toVec(K_RMSNORM_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_RMSNORM_TENSOR_SCALE_UID,
-                                           toVec(K_RMSNORM_TENSOR_SCALE_DIMS),
-                                           toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_RMSNORM_TENSOR_EPSILON_UID,
-                                             toVec(K_RMSNORM_TENSOR_EPSILON_DIMS),
-                                             toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES));
-    auto yDesc = createFinalizedTensor(
+    const auto scaleDesc = createFinalizedTensor(K_RMSNORM_TENSOR_SCALE_UID,
+                                                 toVec(K_RMSNORM_TENSOR_SCALE_DIMS),
+                                                 toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
+    const auto epsilonDesc = createFinalizedTensor(K_RMSNORM_TENSOR_EPSILON_UID,
+                                                   toVec(K_RMSNORM_TENSOR_EPSILON_DIMS),
+                                                   toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES));
+    const auto yDesc = createFinalizedTensor(
         K_RMSNORM_TENSOR_Y_UID, toVec(K_RMSNORM_TENSOR_Y_DIMS), toVec(K_RMSNORM_TENSOR_Y_STRIDES));
 
     // Pass nullptr for optional bias and inv_rms (INFERENCE mode)
-    auto rmsnormOp = createFinalizedRMSNormOp(xDesc.get(),
-                                              scaleDesc.get(),
-                                              epsilonDesc.get(),
-                                              yDesc.get(),
-                                              nullptr,
-                                              nullptr,
-                                              HIPDNN_DATA_FLOAT,
-                                              HIPDNN_NORM_FWD_INFERENCE);
+    const auto rmsnormOp = createFinalizedRMSNormOp(xDesc.get(),
+                                                    scaleDesc.get(),
+                                                    epsilonDesc.get(),
+                                                    yDesc.get(),
+                                                    nullptr,
+                                                    nullptr,
+                                                    HIPDNN_DATA_FLOAT,
+                                                    HIPDNN_NORM_FWD_INFERENCE);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {rmsnormOp.get()};
@@ -331,7 +331,7 @@ TEST_F(TestGraphDescriptorRMSNorm, BuildFromOperationWithoutOptionalTensors)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -356,32 +356,32 @@ TEST_F(TestGraphDescriptorRMSNorm, BuildFromOperationWithoutOptionalTensors)
 // preserved in the serialized FlatBuffer graph node.
 TEST_F(TestGraphDescriptorRMSNorm, NamePreservedInFlatBuffer)
 {
-    auto xDesc = createFinalizedTensor(
+    const auto xDesc = createFinalizedTensor(
         K_RMSNORM_TENSOR_X_UID, toVec(K_RMSNORM_TENSOR_X_DIMS), toVec(K_RMSNORM_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_RMSNORM_TENSOR_SCALE_UID,
-                                           toVec(K_RMSNORM_TENSOR_SCALE_DIMS),
-                                           toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_RMSNORM_TENSOR_EPSILON_UID,
-                                             toVec(K_RMSNORM_TENSOR_EPSILON_DIMS),
-                                             toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES));
-    auto yDesc = createFinalizedTensor(
+    const auto scaleDesc = createFinalizedTensor(K_RMSNORM_TENSOR_SCALE_UID,
+                                                 toVec(K_RMSNORM_TENSOR_SCALE_DIMS),
+                                                 toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
+    const auto epsilonDesc = createFinalizedTensor(K_RMSNORM_TENSOR_EPSILON_UID,
+                                                   toVec(K_RMSNORM_TENSOR_EPSILON_DIMS),
+                                                   toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES));
+    const auto yDesc = createFinalizedTensor(
         K_RMSNORM_TENSOR_Y_UID, toVec(K_RMSNORM_TENSOR_Y_DIMS), toVec(K_RMSNORM_TENSOR_Y_STRIDES));
-    auto invRmsDesc = createFinalizedTensor(K_RMSNORM_TENSOR_INV_RMS_UID,
-                                            toVec(K_RMSNORM_TENSOR_INV_RMS_DIMS),
-                                            toVec(K_RMSNORM_TENSOR_INV_RMS_STRIDES));
+    const auto invRmsDesc = createFinalizedTensor(K_RMSNORM_TENSOR_INV_RMS_UID,
+                                                  toVec(K_RMSNORM_TENSOR_INV_RMS_DIMS),
+                                                  toVec(K_RMSNORM_TENSOR_INV_RMS_STRIDES));
 
     const std::string opName = "my_rmsnorm_op";
-    auto rmsnormOp = createFinalizedRMSNormOp(xDesc.get(),
-                                              scaleDesc.get(),
-                                              epsilonDesc.get(),
-                                              yDesc.get(),
-                                              nullptr,
-                                              invRmsDesc.get(),
-                                              HIPDNN_DATA_FLOAT,
-                                              HIPDNN_NORM_FWD_TRAINING,
-                                              opName);
+    const auto rmsnormOp = createFinalizedRMSNormOp(xDesc.get(),
+                                                    scaleDesc.get(),
+                                                    epsilonDesc.get(),
+                                                    yDesc.get(),
+                                                    nullptr,
+                                                    invRmsDesc.get(),
+                                                    HIPDNN_DATA_FLOAT,
+                                                    HIPDNN_NORM_FWD_TRAINING,
+                                                    opName);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {rmsnormOp.get()};
@@ -391,7 +391,7 @@ TEST_F(TestGraphDescriptorRMSNorm, NamePreservedInFlatBuffer)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);

@@ -34,26 +34,27 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
     // Tensor ranges from BatchnormFwdWithVarianceTensorBundle:
     // x=[0,1], scale=[0,1], bias=[0,1], mean=[0,1], var=[0.1,1.0]
     // epsilon = BATCHNORM_DEFAULT_EPSILON = 1e-5
-    auto tolerance = batchnorm::calculateBatchnormInferenceWithVarianceTolerance<float, float>(
-        0.0,
-        1.0,
-        0.0,
-        1.0,
-        0.1,
-        1.0,
-        0.0,
-        1.0,
-        0.0,
-        1.0,
-        hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON);
+    const auto tolerance
+        = batchnorm::calculateBatchnormInferenceWithVarianceTolerance<float, float>(
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            0.1,
+            1.0,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON);
     const std::vector<int64_t> dims = {6, 3, 32, 32};
     const unsigned int seed = getGlobalTestSeed();
-    auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
-                                                             DataType::FLOAT,
-                                                             DataType::FLOAT,
-                                                             DataType::FLOAT,
-                                                             dims,
-                                                             TensorLayout::NHWC);
+    const auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
+                                                                   DataType::FLOAT,
+                                                                   DataType::FLOAT,
+                                                                   DataType::FLOAT,
+                                                                   dims,
+                                                                   TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
@@ -75,16 +76,16 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
 
     const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
-    auto shallowXTensor = createShallowTensor<float>(
+    const auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
-    auto shallowScaleTensor = createShallowTensor<float>(
+    const auto shallowScaleTensor = createShallowTensor<float>(
         params.scaleTensor,
         directTensorBundle.tensors[attributes.scale_tensor_uid()]->rawHostData());
-    auto shallowBiasTensor = createShallowTensor<float>(
+    const auto shallowBiasTensor = createShallowTensor<float>(
         params.biasTensor, directTensorBundle.tensors[attributes.bias_tensor_uid()]->rawHostData());
-    auto shallowMeanTensor = createShallowTensor<float>(
+    const auto shallowMeanTensor = createShallowTensor<float>(
         params.meanTensor, directTensorBundle.tensors[attributes.mean_tensor_uid()]->rawHostData());
-    auto shallowVarianceTensor = createShallowTensor<float>(
+    const auto shallowVarianceTensor = createShallowTensor<float>(
         params.varianceTensor,
         directTensorBundle.tensors[attributes.variance_tensor_uid()]->rawHostData());
     auto shallowYTensor = createShallowTensor<float>(
@@ -117,14 +118,14 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlanWithRuntimeEpsilonFromPack)
     const unsigned int seed = getGlobalTestSeed();
 
     // Pure runtime pass-by-value epsilon delivered through the variant pack.
-    auto runtimeGraph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
-                                                                    DataType::FLOAT,
-                                                                    DataType::FLOAT,
-                                                                    DataType::FLOAT,
-                                                                    dims,
-                                                                    TensorLayout::NHWC,
-                                                                    /*isOutputVirtual=*/false,
-                                                                    /*runtimeEpsilon=*/true);
+    const auto runtimeGraph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
+                                                                          DataType::FLOAT,
+                                                                          DataType::FLOAT,
+                                                                          DataType::FLOAT,
+                                                                          dims,
+                                                                          TensorLayout::NHWC,
+                                                                          /*isOutputVirtual=*/false,
+                                                                          /*runtimeEpsilon=*/true);
     auto [runtimeSerialized, runtimeSerErr] = runtimeGraph->to_binary();
     ASSERT_TRUE(runtimeSerErr.is_good()) << runtimeSerErr.get_message();
     const GraphWrapper runtimeWrapper(runtimeSerialized.data(), runtimeSerialized.size());
@@ -153,12 +154,12 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlanWithRuntimeEpsilonFromPack)
     runtimePlan.execute(runtimeVariantPack);
 
     // Baked-epsilon reference graph with the same seed and equal epsilon value.
-    auto bakedGraph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
-                                                                  DataType::FLOAT,
-                                                                  DataType::FLOAT,
-                                                                  DataType::FLOAT,
-                                                                  dims,
-                                                                  TensorLayout::NHWC);
+    const auto bakedGraph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
+                                                                        DataType::FLOAT,
+                                                                        DataType::FLOAT,
+                                                                        DataType::FLOAT,
+                                                                        dims,
+                                                                        TensorLayout::NHWC);
     auto [bakedSerialized, bakedSerErr] = bakedGraph->to_binary();
     ASSERT_TRUE(bakedSerErr.is_good()) << bakedSerErr.get_message();
     const GraphWrapper bakedWrapper(bakedSerialized.data(), bakedSerialized.size());
@@ -180,8 +181,9 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlanWithRuntimeEpsilonFromPack)
         std::move(bakedParams));
     bakedPlan.execute(bakedVariantPack);
 
-    auto tolerance = batchnorm::calculateBatchnormInferenceWithVarianceTolerance<float, float>(
-        0.0, 1.0, 0.0, 1.0, 0.1, 1.0, 0.0, 1.0, 0.0, 1.0, BATCHNORM_DEFAULT_EPSILON);
+    const auto tolerance
+        = batchnorm::calculateBatchnormInferenceWithVarianceTolerance<float, float>(
+            0.0, 1.0, 0.0, 1.0, 0.1, 1.0, 0.0, 1.0, 0.0, 1.0, BATCHNORM_DEFAULT_EPSILON);
     const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(*bakedBundle.tensors[bakedAttrs.y_tensor_uid()].get(),
@@ -191,12 +193,12 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlanWithRuntimeEpsilonFromPack)
 TEST(TestBatchnormFwdWithVariancePlanBuilder, PlanConstruction)
 {
     const std::vector<int64_t> dims = {1, 1, 1, 1};
-    auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
-                                                             DataType::FLOAT,
-                                                             DataType::FLOAT,
-                                                             DataType::FLOAT,
-                                                             dims,
-                                                             TensorLayout::NHWC);
+    const auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
+                                                                   DataType::FLOAT,
+                                                                   DataType::FLOAT,
+                                                                   DataType::FLOAT,
+                                                                   dims,
+                                                                   TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
@@ -208,7 +210,7 @@ TEST(TestBatchnormFwdWithVariancePlanBuilder, PlanConstruction)
                                                        DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     const bool result
         = dynamic_cast<BatchnormFwdInferenceWithVariancePlan<float, float, float, float, float>*>(
@@ -220,12 +222,12 @@ TEST(TestBatchnormFwdWithVariancePlanBuilder, PlanConstruction)
 TEST(TestBatchnormFwdWithVariancePlanBuilder, IsApplicable)
 {
     const std::vector<int64_t> dims = {1, 1, 1, 1};
-    auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
-                                                             DataType::FLOAT,
-                                                             DataType::FLOAT,
-                                                             DataType::FLOAT,
-                                                             dims,
-                                                             TensorLayout::NHWC);
+    const auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
+                                                                   DataType::FLOAT,
+                                                                   DataType::FLOAT,
+                                                                   DataType::FLOAT,
+                                                                   dims,
+                                                                   TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());

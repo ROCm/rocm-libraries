@@ -21,7 +21,7 @@ inline flatbuffers::FlatBufferBuilder createEmptyGraph()
         tensorAttributes;
     const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     flatbuffers::FlatBufferBuilder builder;
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -84,13 +84,13 @@ inline flatbuffers::FlatBufferBuilder createValidGraph()
     nodeOffsets.push_back(Node::Pack(builder, &nodeT));
 
     // Build graph
-    auto graphOffset = CreateGraphDirect(builder,
-                                         "test",
-                                         DataType::FLOAT,
-                                         DataType::HALF,
-                                         DataType::BFLOAT16,
-                                         &tensorOffsets,
-                                         &nodeOffsets);
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::BFLOAT16,
+                                               &tensorOffsets,
+                                               &nodeOffsets);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -171,13 +171,13 @@ inline flatbuffers::FlatBufferBuilder createValidGraphWithRaggedTensor(bool incl
     std::vector<flatbuffers::Offset<Node>> nodeOffsets;
     nodeOffsets.push_back(Node::Pack(builder, &nodeT));
 
-    auto graphOffset = CreateGraphDirect(builder,
-                                         "test",
-                                         DataType::FLOAT,
-                                         DataType::HALF,
-                                         DataType::BFLOAT16,
-                                         &tensorOffsets,
-                                         &nodeOffsets);
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::BFLOAT16,
+                                               &tensorOffsets,
+                                               &nodeOffsets);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -185,7 +185,7 @@ inline flatbuffers::FlatBufferBuilder createValidGraphWithRaggedTensor(bool incl
 inline flatbuffers::FlatBufferBuilder createValidEngineDetails(int64_t engineId)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineDetailsOffset
+    const auto engineDetailsOffset
         = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, engineId);
     builder.Finish(engineDetailsOffset);
     return builder;

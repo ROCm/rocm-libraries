@@ -434,7 +434,7 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DGrouped)
     for(int c = 0; c < 4; ++c)
     {
         // f(0) = 10, f(1) = 20, ..., f(3) = 40 for channel 0
-        auto baseValue = static_cast<float>((c + 1) * 10);
+        const auto baseValue = static_cast<float>((c + 1) * 10);
         for(int i = 0; i < 8; ++i)
         {
             // g(f(0), 0) = 10, g(f(0), 1) = 11, ..., g(f(0), 7) = 17

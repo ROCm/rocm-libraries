@@ -39,21 +39,21 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(rms_constants::K_RMSNORM_TENSOR_X_UID)
             .set_name("X")
             .set_data_type(DataType::FLOAT)
             .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_X_DIMS))
             .set_stride(toVec(rms_constants::K_RMSNORM_TENSOR_X_STRIDES));
 
-        auto scale = std::make_shared<TensorAttributes>();
+        const auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(rms_constants::K_RMSNORM_TENSOR_SCALE_UID)
             .set_name("SCALE")
             .set_data_type(DataType::FLOAT)
             .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_DIMS))
             .set_stride(toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_STRIDES));
 
-        auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+        const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
         epsilon->set_uid(rms_constants::K_RMSNORM_TENSOR_EPSILON_UID)
             .set_name("EPSILON")
             .set_data_type(DataType::FLOAT)
@@ -80,9 +80,9 @@ protected:
 // and verifies all operation attributes and tensors.
 TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormTrainingRoundTripViaCApi)
 {
-    auto graph = buildTrainingGraph();
+    const auto graph = buildTrainingGraph();
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -110,7 +110,7 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormTrainingRoundTripViaCApi)
               toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_STRIDES));
 
     ASSERT_NE(tensorMap.count(rms_constants::K_RMSNORM_TENSOR_EPSILON_UID), 0u);
-    auto liftedEpsilon = tensorMap[rms_constants::K_RMSNORM_TENSOR_EPSILON_UID];
+    const auto liftedEpsilon = tensorMap[rms_constants::K_RMSNORM_TENSOR_EPSILON_UID];
     EXPECT_EQ(liftedEpsilon->get_name(), "EPSILON");
     EXPECT_EQ(liftedEpsilon->get_dim(), toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_DIMS));
     EXPECT_EQ(liftedEpsilon->get_stride(), toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_STRIDES));
@@ -159,27 +159,27 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormTrainingRoundTripViaCApi)
 // and verifies all operation attributes and that optional tensors are absent.
 TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormInferenceRoundTripViaCApi)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("RMSNormInferenceLiftingTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(rms_constants::K_RMSNORM_TENSOR_X_UID)
         .set_name("X")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_X_DIMS))
         .set_stride(toVec(rms_constants::K_RMSNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(rms_constants::K_RMSNORM_TENSOR_SCALE_UID)
         .set_name("SCALE")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_uid(rms_constants::K_RMSNORM_TENSOR_EPSILON_UID)
         .set_name("EPSILON")
         .set_data_type(DataType::FLOAT)
@@ -196,11 +196,11 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormInferenceRoundTripViaCApi)
     // invRms should be nullptr in INFERENCE mode
     EXPECT_EQ(invRms, nullptr);
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify tensors by UID (4 tensors: x, scale, epsilon, y -- no inv_rms)
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 4u);
 
     ASSERT_NE(tensorMap.count(rms_constants::K_RMSNORM_TENSOR_X_UID), 0u);
@@ -229,10 +229,10 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormInferenceRoundTripViaCApi)
 // rmsnorm node attributes after lifting.
 TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormTensorSharingPreserved)
 {
-    auto graph = buildTrainingGraph();
+    const auto graph = buildTrainingGraph();
     graph->set_name("RMSNormTensorSharingTest");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -260,10 +260,10 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormTensorSharingPreserved)
 // the rmsnorm operation survives the FlatBuffer-direct deserialization path.
 TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormLiftWithoutFinalization)
 {
-    auto graph = buildTrainingGraph();
+    const auto graph = buildTrainingGraph();
     graph->set_name("RMSNormFlatBufferLiftTest");
 
-    auto liftedGraph = liftGraphWithoutFinalization(*graph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*graph);
     ASSERT_NE(liftedGraph, nullptr);
 
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -299,7 +299,7 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormLiftWithoutFinalization)
               toVec(rms_constants::K_RMSNORM_TENSOR_Y_STRIDES));
 
     // Verify epsilon pass-by-value preserved through FlatBuffer path
-    auto liftedEpsilon = tensorMap[rms_constants::K_RMSNORM_TENSOR_EPSILON_UID];
+    const auto liftedEpsilon = tensorMap[rms_constants::K_RMSNORM_TENSOR_EPSILON_UID];
     EXPECT_EQ(liftedEpsilon->get_dim(), toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_DIMS));
     EXPECT_EQ(liftedEpsilon->get_stride(), toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_STRIDES));
     EXPECT_TRUE(liftedEpsilon->get_is_pass_by_value());
@@ -310,7 +310,7 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormLiftWithoutFinalization)
 // Exercises the deserialize() path with a handle for an rmsnorm graph.
 TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormDeserializeViaBackendWithHandle)
 {
-    auto graph = buildTrainingGraph();
+    const auto graph = buildTrainingGraph();
     graph->set_name("RMSNormDeserializeTest");
 
     auto result = graph->validate();
@@ -320,7 +320,7 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormDeserializeViaBackendWithHand
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
     // Create a new graph and use deserialize with handle
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -351,34 +351,34 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormDeserializeViaBackendWithHand
 // Roundtrip with optional bias tensor set.
 TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormWithBiasRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("BiasRMSNormLiftingTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(rms_constants::K_RMSNORM_TENSOR_X_UID)
         .set_name("X")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_X_DIMS))
         .set_stride(toVec(rms_constants::K_RMSNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(rms_constants::K_RMSNORM_TENSOR_SCALE_UID)
         .set_name("SCALE")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_uid(rms_constants::K_RMSNORM_TENSOR_EPSILON_UID)
         .set_name("EPSILON")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_DIMS))
         .set_stride(toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(rms_constants::K_RMSNORM_TENSOR_BIAS_UID)
         .set_name("BIAS")
         .set_data_type(DataType::FLOAT)
@@ -398,7 +398,7 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormWithBiasRoundTrip)
         .set_output(true)
         .set_name("INV_RMS");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // 6 tensors: x, scale, epsilon, bias, y, inv_rms
@@ -427,26 +427,26 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormWithBiasRoundTrip)
 // lifts back, and verifies that auto-assigned UIDs are preserved and unique.
 TEST_F(IntegrationRMSNormDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AutoUidRMSNormLiftingTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
     // Create tensors WITHOUT setting UIDs
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_X_DIMS))
         .set_stride(toVec(rms_constants::K_RMSNORM_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("SCALE")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_name("EPSILON")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_DIMS))
@@ -462,11 +462,11 @@ TEST_F(IntegrationRMSNormDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip
     ASSERT_NE(invRms, nullptr);
     invRms->set_output(true).set_name("INV_RMS");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify all auto-assigned UIDs are unique
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 5u); // x, scale, epsilon, y, inv_rms
 
     std::unordered_set<int64_t> uids;

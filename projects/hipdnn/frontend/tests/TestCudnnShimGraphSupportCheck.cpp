@@ -28,9 +28,9 @@ void addPointwiseGraph(fe::graph::Graph& graph)
     const int64_t n = 4;
     graph.set_io_data_type(fe::DataType_t::FLOAT).set_compute_data_type(fe::DataType_t::FLOAT);
 
-    auto a = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 1);
-    auto b = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 2);
-    auto c = graph.pointwise(
+    const auto a = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 1);
+    const auto b = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 2);
+    const auto c = graph.pointwise(
         a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD));
     ASSERT_NE(c, nullptr);
     c->set_output(true).set_uid(3);
@@ -98,7 +98,7 @@ TEST_F(TestCudnnShimGraphSupportCheck, AcceptsNonFallbackHeuristicModes)
 
 TEST_F(TestCudnnShimGraphSupportCheck, OpensourceModeWarnsOncePerProcess)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     fe::detail::openSourceModeWarned().store(false);
 

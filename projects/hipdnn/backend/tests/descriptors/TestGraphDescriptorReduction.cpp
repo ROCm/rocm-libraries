@@ -43,7 +43,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                bool isDeterministic = false)
 {
     auto wrapper = createDescriptor<ReductionOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<ReductionOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<ReductionOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -88,7 +88,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -159,15 +159,15 @@ protected:
 
 TEST_F(TestGraphDescriptorReduction, BuildFromSingleOperation)
 {
-    auto xDesc = createFinalizedTensor(K_REDUCTION_TENSOR_X_UID,
-                                       toVec(K_REDUCTION_TENSOR_X_DIMS),
-                                       toVec(K_REDUCTION_TENSOR_X_STRIDES));
-    auto yDesc = createFinalizedTensor(K_REDUCTION_TENSOR_Y_UID,
-                                       toVec(K_REDUCTION_TENSOR_Y_DIMS),
-                                       toVec(K_REDUCTION_TENSOR_Y_STRIDES));
-    auto opDesc = createFinalizedReductionOp(xDesc.get(), yDesc.get());
+    const auto xDesc = createFinalizedTensor(K_REDUCTION_TENSOR_X_UID,
+                                             toVec(K_REDUCTION_TENSOR_X_DIMS),
+                                             toVec(K_REDUCTION_TENSOR_X_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_REDUCTION_TENSOR_Y_UID,
+                                             toVec(K_REDUCTION_TENSOR_Y_DIMS),
+                                             toVec(K_REDUCTION_TENSOR_Y_STRIDES));
+    const auto opDesc = createFinalizedReductionOp(xDesc.get(), yDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -178,7 +178,7 @@ TEST_F(TestGraphDescriptorReduction, BuildFromSingleOperation)
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -215,15 +215,15 @@ TEST_F(TestGraphDescriptorReduction, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorReduction, ComputeDataTypePreserved)
 {
-    auto xDesc = createFinalizedTensor(K_REDUCTION_TENSOR_X_UID,
-                                       toVec(K_REDUCTION_TENSOR_X_DIMS),
-                                       toVec(K_REDUCTION_TENSOR_X_STRIDES));
-    auto yDesc = createFinalizedTensor(K_REDUCTION_TENSOR_Y_UID,
-                                       toVec(K_REDUCTION_TENSOR_Y_DIMS),
-                                       toVec(K_REDUCTION_TENSOR_Y_STRIDES));
-    auto opDesc = createFinalizedReductionOp(xDesc.get(), yDesc.get(), HIPDNN_DATA_HALF);
+    const auto xDesc = createFinalizedTensor(K_REDUCTION_TENSOR_X_UID,
+                                             toVec(K_REDUCTION_TENSOR_X_DIMS),
+                                             toVec(K_REDUCTION_TENSOR_X_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_REDUCTION_TENSOR_Y_UID,
+                                             toVec(K_REDUCTION_TENSOR_Y_DIMS),
+                                             toVec(K_REDUCTION_TENSOR_Y_STRIDES));
+    const auto opDesc = createFinalizedReductionOp(xDesc.get(), yDesc.get(), HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -233,7 +233,7 @@ TEST_F(TestGraphDescriptorReduction, ComputeDataTypePreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -242,16 +242,16 @@ TEST_F(TestGraphDescriptorReduction, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorReduction, ReductionAttributesPreserved)
 {
-    auto xDesc = createFinalizedTensor(K_REDUCTION_TENSOR_X_UID,
-                                       toVec(K_REDUCTION_TENSOR_X_DIMS),
-                                       toVec(K_REDUCTION_TENSOR_X_STRIDES));
-    auto yDesc = createFinalizedTensor(K_REDUCTION_TENSOR_Y_UID,
-                                       toVec(K_REDUCTION_TENSOR_Y_DIMS),
-                                       toVec(K_REDUCTION_TENSOR_Y_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_REDUCTION_TENSOR_X_UID,
+                                             toVec(K_REDUCTION_TENSOR_X_DIMS),
+                                             toVec(K_REDUCTION_TENSOR_X_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_REDUCTION_TENSOR_Y_UID,
+                                             toVec(K_REDUCTION_TENSOR_Y_DIMS),
+                                             toVec(K_REDUCTION_TENSOR_Y_STRIDES));
 
     // Create op with non-default parameters to test graph roundtrip
     auto wrapper = createDescriptor<ReductionOperationDescriptor>();
-    auto opDesc = wrapper->asDescriptor<ReductionOperationDescriptor>();
+    const auto opDesc = wrapper->asDescriptor<ReductionOperationDescriptor>();
 
     HipdnnBackendDescriptor* xPtr = xDesc.get();
     opDesc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
@@ -279,7 +279,7 @@ TEST_F(TestGraphDescriptorReduction, ReductionAttributesPreserved)
                          opName.c_str());
     opDesc->finalize();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {wrapper.get()};
@@ -289,7 +289,7 @@ TEST_F(TestGraphDescriptorReduction, ReductionAttributesPreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -320,16 +320,16 @@ TEST_F(TestGraphDescriptorReduction, ReductionAttributesPreserved)
 
 TEST_F(TestGraphDescriptorReduction, OperationNamePreservedInSerialization)
 {
-    auto xDesc = createFinalizedTensor(K_REDUCTION_TENSOR_X_UID,
-                                       toVec(K_REDUCTION_TENSOR_X_DIMS),
-                                       toVec(K_REDUCTION_TENSOR_X_STRIDES));
-    auto yDesc = createFinalizedTensor(K_REDUCTION_TENSOR_Y_UID,
-                                       toVec(K_REDUCTION_TENSOR_Y_DIMS),
-                                       toVec(K_REDUCTION_TENSOR_Y_STRIDES));
-    auto opDesc = createFinalizedReductionOp(
+    const auto xDesc = createFinalizedTensor(K_REDUCTION_TENSOR_X_UID,
+                                             toVec(K_REDUCTION_TENSOR_X_DIMS),
+                                             toVec(K_REDUCTION_TENSOR_X_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_REDUCTION_TENSOR_Y_UID,
+                                             toVec(K_REDUCTION_TENSOR_Y_DIMS),
+                                             toVec(K_REDUCTION_TENSOR_Y_STRIDES));
+    const auto opDesc = createFinalizedReductionOp(
         xDesc.get(), yDesc.get(), HIPDNN_DATA_FLOAT, "test_reduction_name");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -339,7 +339,7 @@ TEST_F(TestGraphDescriptorReduction, OperationNamePreservedInSerialization)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
@@ -348,16 +348,16 @@ TEST_F(TestGraphDescriptorReduction, OperationNamePreservedInSerialization)
 
 TEST_F(TestGraphDescriptorReduction, OperationNameRoundTripThroughLifting)
 {
-    auto xDesc = createFinalizedTensor(K_REDUCTION_TENSOR_X_UID,
-                                       toVec(K_REDUCTION_TENSOR_X_DIMS),
-                                       toVec(K_REDUCTION_TENSOR_X_STRIDES));
-    auto yDesc = createFinalizedTensor(K_REDUCTION_TENSOR_Y_UID,
-                                       toVec(K_REDUCTION_TENSOR_Y_DIMS),
-                                       toVec(K_REDUCTION_TENSOR_Y_STRIDES));
-    auto opDesc = createFinalizedReductionOp(
+    const auto xDesc = createFinalizedTensor(K_REDUCTION_TENSOR_X_UID,
+                                             toVec(K_REDUCTION_TENSOR_X_DIMS),
+                                             toVec(K_REDUCTION_TENSOR_X_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_REDUCTION_TENSOR_Y_UID,
+                                             toVec(K_REDUCTION_TENSOR_Y_DIMS),
+                                             toVec(K_REDUCTION_TENSOR_Y_STRIDES));
+    const auto opDesc = createFinalizedReductionOp(
         xDesc.get(), yDesc.get(), HIPDNN_DATA_FLOAT, "test_reduction_lifting");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -368,13 +368,13 @@ TEST_F(TestGraphDescriptorReduction, OperationNameRoundTripThroughLifting)
     desc->finalize();
 
     // Serialize the graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
     auto liftedWrapper = createDescriptor<GraphDescriptor>();
-    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
+    const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
     hipdnnHandle_t handle = &_mockHandle;
@@ -385,7 +385,7 @@ TEST_F(TestGraphDescriptorReduction, OperationNameRoundTripThroughLifting)
     liftedDesc->finalize();
 
     // Re-serialize and verify name survived the round-trip
-    auto reSerialized = liftedDesc->getSerializedGraph();
+    const auto reSerialized = liftedDesc->getSerializedGraph();
     auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
@@ -394,15 +394,16 @@ TEST_F(TestGraphDescriptorReduction, OperationNameRoundTripThroughLifting)
 
 TEST_F(TestGraphDescriptorReduction, IsDeterministicPreservedInSerialization)
 {
-    auto xDesc = createFinalizedTensor(K_REDUCTION_TENSOR_X_UID,
-                                       toVec(K_REDUCTION_TENSOR_X_DIMS),
-                                       toVec(K_REDUCTION_TENSOR_X_STRIDES));
-    auto yDesc = createFinalizedTensor(K_REDUCTION_TENSOR_Y_UID,
-                                       toVec(K_REDUCTION_TENSOR_Y_DIMS),
-                                       toVec(K_REDUCTION_TENSOR_Y_STRIDES));
-    auto opDesc = createFinalizedReductionOp(xDesc.get(), yDesc.get(), HIPDNN_DATA_FLOAT, "", true);
+    const auto xDesc = createFinalizedTensor(K_REDUCTION_TENSOR_X_UID,
+                                             toVec(K_REDUCTION_TENSOR_X_DIMS),
+                                             toVec(K_REDUCTION_TENSOR_X_STRIDES));
+    const auto yDesc = createFinalizedTensor(K_REDUCTION_TENSOR_Y_UID,
+                                             toVec(K_REDUCTION_TENSOR_Y_DIMS),
+                                             toVec(K_REDUCTION_TENSOR_Y_STRIDES));
+    const auto opDesc
+        = createFinalizedReductionOp(xDesc.get(), yDesc.get(), HIPDNN_DATA_FLOAT, "", true);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -413,13 +414,13 @@ TEST_F(TestGraphDescriptorReduction, IsDeterministicPreservedInSerialization)
     desc->finalize();
 
     // Serialize the graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
     auto liftedWrapper = createDescriptor<GraphDescriptor>();
-    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
+    const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
     hipdnnHandle_t handle = &_mockHandle;
@@ -429,7 +430,7 @@ TEST_F(TestGraphDescriptorReduction, IsDeterministicPreservedInSerialization)
                              static_cast<const void*>(&handle));
     liftedDesc->finalize();
 
-    auto reSerialized = liftedDesc->getSerializedGraph();
+    const auto reSerialized = liftedDesc->getSerializedGraph();
     auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);

@@ -62,7 +62,7 @@ TEST(TestAttributes, FillFromContextSetNodeComputeTypeNotOverriden)
     GraphAttributes graphAttributes;
     graphAttributes.set_compute_data_type(DataType::INT32);
 
-    auto nodeDataType = hipdnn_frontend::DataType::INT32;
+    const auto nodeDataType = hipdnn_frontend::DataType::INT32;
 
     Dummy attributes;
     attributes.set_compute_data_type(nodeDataType);
@@ -77,7 +77,7 @@ TEST(TestAttributes, FillFromContextSetNodeComputeTypeDoesNotUnset)
     GraphAttributes graphAttributes;
     graphAttributes.set_compute_data_type(DataType::NOT_SET);
 
-    auto nodeDataType = hipdnn_frontend::DataType::INT32;
+    const auto nodeDataType = hipdnn_frontend::DataType::INT32;
 
     Dummy attributes;
     attributes.set_compute_data_type(nodeDataType);

@@ -39,7 +39,7 @@ protected:
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaBwdGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
@@ -75,13 +75,14 @@ auto createSdpaBwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
 {
-    auto builder = createSdpaBwdGraph({4, 8, 256, 128},
-                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      /*overrideShapeEnabled=*/true);
+    auto const builder
+        = createSdpaBwdGraph({4, 8, 256, 128},
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                             false,
+                             false,
+                             false,
+                             false,
+                             /*overrideShapeEnabled=*/true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -92,7 +93,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForRaggedGraph)
 {
     // The backward engine does not support group mode; any ragged tensor must be
     // rejected.
-    auto builder = sdpa::withRaggedTensors(createSdpaBwdGraph(), {"q", "k", "v", "o"});
+    auto const builder = sdpa::withRaggedTensors(createSdpaBwdGraph(), {"q", "k", "v", "o"});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -108,7 +109,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsTrueForMultipleOf16ByteAlignme
         GTEST_SKIP();
     }
 
-    auto builder
+    auto const builder
         = hipdnn_test_sdk::utilities::makeGraphWithTensorAlignment(createSdpaBwdGraph(), 32);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
@@ -126,7 +127,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForNon16ByteAlignment)
         GTEST_SKIP();
     }
 
-    auto builder
+    auto const builder
         = hipdnn_test_sdk::utilities::makeGraphWithTensorAlignment(createSdpaBwdGraph(), 8);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
@@ -375,7 +376,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsRuntimePassByValueScale)
         GTEST_SKIP();
     }
 
-    auto builder = createSdpaBwdGraphWithRuntimePbvScale();
+    auto const builder = createSdpaBwdGraphWithRuntimePbvScale();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -391,7 +392,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsNonPassByValueScaleTensor)
         GTEST_SKIP();
     }
 
-    auto builder = createSdpaBwdGraphWithNonPbvScaleTensor();
+    auto const builder = createSdpaBwdGraphWithNonPbvScaleTensor();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -409,9 +410,10 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor
         GTEST_SKIP();
     }
 
-    auto builder = createSdpaBwdGraph({4, 8, 256, 128},
-                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                                      /*withScale=*/true);
+    auto const builder
+        = createSdpaBwdGraph({4, 8, 256, 128},
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                             /*withScale=*/true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -422,7 +424,7 @@ TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeSmallUnaligned)
 {
     // B=1, H=3, S=255, D=128 — chosen so D buffer raw size (3060) is NOT a multiple of 64,
     // exercising the alignUp() rounding: 3060 → 3072
-    auto builder = createSdpaBwdGraph({1, 3, 255, 128});
+    auto const builder = createSdpaBwdGraph({1, 3, 255, 128});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     const Settings settings;
@@ -436,7 +438,7 @@ TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeSmallUnaligned)
 TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeMedium)
 {
     // B=2, H=8, S=512, D=128
-    auto builder = createSdpaBwdGraph({2, 8, 512, 128});
+    auto const builder = createSdpaBwdGraph({2, 8, 512, 128});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     const Settings settings;
@@ -450,7 +452,7 @@ TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeMedium)
 TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeLarge)
 {
     // B=4, H=16, S=1024, D=128
-    auto builder = createSdpaBwdGraph({4, 16, 1024, 128});
+    auto const builder = createSdpaBwdGraph({4, 16, 1024, 128});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     const Settings settings;
@@ -485,33 +487,7 @@ TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16NoMaskBatch)
 {
     using namespace bwd_dispatch;
 
-    auto odoKey = lookupKernelNameKey(PipelineStage::ODO,
-                                      "gfx942",
-                                      "bf16",
-                                      /*hdimQ=*/128,
-                                      /*hdimV=*/128,
-                                      MASK_NONE,
-                                      ATOMIC_NONE,
-                                      PSSK_OFF,
-                                      PDDV_OFF,
-                                      MODE_BATCH,
-                                      BF16_CVT_FP16_SENTINEL);
-    EXPECT_FALSE(odoKey.empty()) << "odo lookup should resolve";
-
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "bf16",
-                                         /*hdimQ=*/128,
-                                         /*hdimV=*/128,
-                                         MASK_NONE,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_RTNE);
-    EXPECT_FALSE(dqdkdvKey.empty()) << "dqdkdv lookup should resolve";
-
-    auto dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
+    auto const odoKey = lookupKernelNameKey(PipelineStage::ODO,
                                             "gfx942",
                                             "bf16",
                                             /*hdimQ=*/128,
@@ -521,7 +497,33 @@ TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16NoMaskBatch)
                                             PSSK_OFF,
                                             PDDV_OFF,
                                             MODE_BATCH,
-                                            BF16_CVT_RTNE);
+                                            BF16_CVT_FP16_SENTINEL);
+    EXPECT_FALSE(odoKey.empty()) << "odo lookup should resolve";
+
+    auto const dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                               "gfx942",
+                                               "bf16",
+                                               /*hdimQ=*/128,
+                                               /*hdimV=*/128,
+                                               MASK_NONE,
+                                               ATOMIC_A32,
+                                               PSSK_ON,
+                                               PDDV_ON,
+                                               MODE_BATCH,
+                                               BF16_CVT_RTNE);
+    EXPECT_FALSE(dqdkdvKey.empty()) << "dqdkdv lookup should resolve";
+
+    auto const dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
+                                                  "gfx942",
+                                                  "bf16",
+                                                  /*hdimQ=*/128,
+                                                  /*hdimV=*/128,
+                                                  MASK_NONE,
+                                                  ATOMIC_NONE,
+                                                  PSSK_OFF,
+                                                  PDDV_OFF,
+                                                  MODE_BATCH,
+                                                  BF16_CVT_RTNE);
     EXPECT_FALSE(dqConvertKey.empty()) << "dq_convert lookup should resolve";
 }
 
@@ -533,34 +535,7 @@ TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd64NoMaskBatch)
 {
     using namespace bwd_dispatch;
 
-    auto odoKey = lookupKernelNameKey(PipelineStage::ODO,
-                                      "gfx942",
-                                      "fp16",
-                                      /*hdimQ=*/64,
-                                      /*hdimV=*/64,
-                                      MASK_NONE,
-                                      ATOMIC_NONE,
-                                      PSSK_OFF,
-                                      PDDV_OFF,
-                                      MODE_BATCH,
-                                      BF16_CVT_FP16_SENTINEL);
-    EXPECT_FALSE(odoKey.empty());
-
-    // hd64 dqdkdv is registered with pssk=1, pddv=0 (no padded-D variant).
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "fp16",
-                                         /*hdimQ=*/64,
-                                         /*hdimV=*/64,
-                                         MASK_NONE,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_OFF,
-                                         MODE_BATCH,
-                                         BF16_CVT_FP16_SENTINEL);
-    EXPECT_FALSE(dqdkdvKey.empty());
-
-    auto dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
+    auto const odoKey = lookupKernelNameKey(PipelineStage::ODO,
                                             "gfx942",
                                             "fp16",
                                             /*hdimQ=*/64,
@@ -571,6 +546,33 @@ TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd64NoMaskBatch)
                                             PDDV_OFF,
                                             MODE_BATCH,
                                             BF16_CVT_FP16_SENTINEL);
+    EXPECT_FALSE(odoKey.empty());
+
+    // hd64 dqdkdv is registered with pssk=1, pddv=0 (no padded-D variant).
+    auto const dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                               "gfx942",
+                                               "fp16",
+                                               /*hdimQ=*/64,
+                                               /*hdimV=*/64,
+                                               MASK_NONE,
+                                               ATOMIC_A32,
+                                               PSSK_ON,
+                                               PDDV_OFF,
+                                               MODE_BATCH,
+                                               BF16_CVT_FP16_SENTINEL);
+    EXPECT_FALSE(dqdkdvKey.empty());
+
+    auto const dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
+                                                  "gfx942",
+                                                  "fp16",
+                                                  /*hdimQ=*/64,
+                                                  /*hdimV=*/64,
+                                                  MASK_NONE,
+                                                  ATOMIC_NONE,
+                                                  PSSK_OFF,
+                                                  PDDV_OFF,
+                                                  MODE_BATCH,
+                                                  BF16_CVT_FP16_SENTINEL);
     EXPECT_FALSE(dqConvertKey.empty());
 }
 
@@ -581,31 +583,31 @@ TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd192Bf16CausalBatch)
     using namespace bwd_dispatch;
 
     // Causal hd192/bf16 dqdkdv batch kernels are pssk=1, pddv=1 in the registry.
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "bf16",
-                                         /*hdimQ=*/192,
-                                         /*hdimV=*/192,
-                                         MASK_TOP_LEFT_CAUSAL,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_RTNE);
+    auto const dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                               "gfx942",
+                                               "bf16",
+                                               /*hdimQ=*/192,
+                                               /*hdimV=*/192,
+                                               MASK_TOP_LEFT_CAUSAL,
+                                               ATOMIC_A32,
+                                               PSSK_ON,
+                                               PDDV_ON,
+                                               MODE_BATCH,
+                                               BF16_CVT_RTNE);
     EXPECT_FALSE(dqdkdvKey.empty()) << "hd192 bf16 causal_tl dqdkdv lookup should resolve";
 
     // odo is mask-agnostic.
-    auto odoKey = lookupKernelNameKey(PipelineStage::ODO,
-                                      "gfx942",
-                                      "bf16",
-                                      /*hdimQ=*/192,
-                                      /*hdimV=*/192,
-                                      MASK_NONE,
-                                      ATOMIC_NONE,
-                                      PSSK_OFF,
-                                      PDDV_OFF,
-                                      MODE_BATCH,
-                                      BF16_CVT_FP16_SENTINEL);
+    auto const odoKey = lookupKernelNameKey(PipelineStage::ODO,
+                                            "gfx942",
+                                            "bf16",
+                                            /*hdimQ=*/192,
+                                            /*hdimV=*/192,
+                                            MASK_NONE,
+                                            ATOMIC_NONE,
+                                            PSSK_OFF,
+                                            PDDV_OFF,
+                                            MODE_BATCH,
+                                            BF16_CVT_FP16_SENTINEL);
     EXPECT_FALSE(odoKey.empty()) << "hd192 bf16 odo lookup should resolve";
 }
 
@@ -620,21 +622,35 @@ TEST(TestSdpaBwdRegistryLookup, RegistryLookupGfx950Hd128Bf16NoMaskBatch)
 {
     using namespace bwd_dispatch;
 
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx950",
-                                         "bf16",
-                                         /*hdimQ=*/128,
-                                         /*hdimV=*/128,
-                                         MASK_NONE,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_RTNE);
+    auto const dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                               "gfx950",
+                                               "bf16",
+                                               /*hdimQ=*/128,
+                                               /*hdimV=*/128,
+                                               MASK_NONE,
+                                               ATOMIC_A32,
+                                               PSSK_ON,
+                                               PDDV_ON,
+                                               MODE_BATCH,
+                                               BF16_CVT_RTNE);
     EXPECT_FALSE(dqdkdvKey.empty())
         << "gfx950 bf16 hd128 a32 dqdkdv lookup should resolve despite bf16_cvt mismatch";
 
-    auto dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
+    auto const dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
+                                                  "gfx950",
+                                                  "bf16",
+                                                  /*hdimQ=*/128,
+                                                  /*hdimV=*/128,
+                                                  MASK_NONE,
+                                                  ATOMIC_NONE,
+                                                  PSSK_OFF,
+                                                  PDDV_OFF,
+                                                  MODE_BATCH,
+                                                  BF16_CVT_RTNE);
+    EXPECT_FALSE(dqConvertKey.empty())
+        << "gfx950 bf16 hd128 dq_convert lookup should resolve despite bf16_cvt mismatch";
+
+    auto const odoKey = lookupKernelNameKey(PipelineStage::ODO,
                                             "gfx950",
                                             "bf16",
                                             /*hdimQ=*/128,
@@ -644,21 +660,7 @@ TEST(TestSdpaBwdRegistryLookup, RegistryLookupGfx950Hd128Bf16NoMaskBatch)
                                             PSSK_OFF,
                                             PDDV_OFF,
                                             MODE_BATCH,
-                                            BF16_CVT_RTNE);
-    EXPECT_FALSE(dqConvertKey.empty())
-        << "gfx950 bf16 hd128 dq_convert lookup should resolve despite bf16_cvt mismatch";
-
-    auto odoKey = lookupKernelNameKey(PipelineStage::ODO,
-                                      "gfx950",
-                                      "bf16",
-                                      /*hdimQ=*/128,
-                                      /*hdimV=*/128,
-                                      MASK_NONE,
-                                      ATOMIC_NONE,
-                                      PSSK_OFF,
-                                      PDDV_OFF,
-                                      MODE_BATCH,
-                                      BF16_CVT_FP16_SENTINEL);
+                                            BF16_CVT_FP16_SENTINEL);
     EXPECT_FALSE(odoKey.empty()) << "gfx950 bf16 hd128 odo lookup should resolve";
 }
 
@@ -668,35 +670,21 @@ TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16CausalBatch)
 {
     using namespace bwd_dispatch;
 
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "bf16",
-                                         /*hdimQ=*/128,
-                                         /*hdimV=*/128,
-                                         MASK_TOP_LEFT_CAUSAL,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_RTNE);
+    auto const dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                               "gfx942",
+                                               "bf16",
+                                               /*hdimQ=*/128,
+                                               /*hdimV=*/128,
+                                               MASK_TOP_LEFT_CAUSAL,
+                                               ATOMIC_A32,
+                                               PSSK_ON,
+                                               PDDV_ON,
+                                               MODE_BATCH,
+                                               BF16_CVT_RTNE);
     EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 causal_tl dqdkdv lookup should resolve";
 
     // ODO is mask-agnostic (always mask=0).
-    auto odoKey = lookupKernelNameKey(PipelineStage::ODO,
-                                      "gfx942",
-                                      "bf16",
-                                      /*hdimQ=*/128,
-                                      /*hdimV=*/128,
-                                      MASK_NONE,
-                                      ATOMIC_NONE,
-                                      PSSK_OFF,
-                                      PDDV_OFF,
-                                      MODE_BATCH,
-                                      BF16_CVT_FP16_SENTINEL);
-    EXPECT_FALSE(odoKey.empty()) << "hd128 bf16 odo lookup should resolve for causal dispatch";
-
-    // DQ_CONVERT is mask-agnostic (always mask=0).
-    auto dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
+    auto const odoKey = lookupKernelNameKey(PipelineStage::ODO,
                                             "gfx942",
                                             "bf16",
                                             /*hdimQ=*/128,
@@ -706,7 +694,21 @@ TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16CausalBatch)
                                             PSSK_OFF,
                                             PDDV_OFF,
                                             MODE_BATCH,
-                                            BF16_CVT_RTNE);
+                                            BF16_CVT_FP16_SENTINEL);
+    EXPECT_FALSE(odoKey.empty()) << "hd128 bf16 odo lookup should resolve for causal dispatch";
+
+    // DQ_CONVERT is mask-agnostic (always mask=0).
+    auto const dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
+                                                  "gfx942",
+                                                  "bf16",
+                                                  /*hdimQ=*/128,
+                                                  /*hdimV=*/128,
+                                                  MASK_NONE,
+                                                  ATOMIC_NONE,
+                                                  PSSK_OFF,
+                                                  PDDV_OFF,
+                                                  MODE_BATCH,
+                                                  BF16_CVT_RTNE);
     EXPECT_FALSE(dqConvertKey.empty())
         << "hd128 bf16 dq_convert lookup should resolve for causal dispatch";
 }
@@ -716,17 +718,17 @@ TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16CausalBrBatch)
 {
     using namespace bwd_dispatch;
 
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "bf16",
-                                         /*hdimQ=*/128,
-                                         /*hdimV=*/128,
-                                         MASK_BOTTOM_RIGHT_CAUSAL,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_RTNE);
+    auto const dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                               "gfx942",
+                                               "bf16",
+                                               /*hdimQ=*/128,
+                                               /*hdimV=*/128,
+                                               MASK_BOTTOM_RIGHT_CAUSAL,
+                                               ATOMIC_A32,
+                                               PSSK_ON,
+                                               PDDV_ON,
+                                               MODE_BATCH,
+                                               BF16_CVT_RTNE);
     EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 causal_br dqdkdv lookup should resolve";
 }
 
@@ -735,17 +737,17 @@ TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16SwaBatch)
 {
     using namespace bwd_dispatch;
 
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "bf16",
-                                         /*hdimQ=*/128,
-                                         /*hdimV=*/128,
-                                         MASK_SLIDING_WINDOW,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_RTNE);
+    auto const dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                               "gfx942",
+                                               "bf16",
+                                               /*hdimQ=*/128,
+                                               /*hdimV=*/128,
+                                               MASK_SLIDING_WINDOW,
+                                               ATOMIC_A32,
+                                               PSSK_ON,
+                                               PDDV_ON,
+                                               MODE_BATCH,
+                                               BF16_CVT_RTNE);
     EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 swa dqdkdv lookup should resolve";
 }
 
@@ -754,17 +756,17 @@ TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd128CausalBatch)
 {
     using namespace bwd_dispatch;
 
-    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
-                                         "gfx942",
-                                         "fp16",
-                                         /*hdimQ=*/128,
-                                         /*hdimV=*/128,
-                                         MASK_TOP_LEFT_CAUSAL,
-                                         ATOMIC_A32,
-                                         PSSK_ON,
-                                         PDDV_ON,
-                                         MODE_BATCH,
-                                         BF16_CVT_FP16_SENTINEL);
+    auto const dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                               "gfx942",
+                                               "fp16",
+                                               /*hdimQ=*/128,
+                                               /*hdimV=*/128,
+                                               MASK_TOP_LEFT_CAUSAL,
+                                               ATOMIC_A32,
+                                               PSSK_ON,
+                                               PDDV_ON,
+                                               MODE_BATCH,
+                                               BF16_CVT_FP16_SENTINEL);
     EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 fp16 causal_tl dqdkdv lookup should resolve";
 }
 
@@ -777,7 +779,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)
         GTEST_SKIP();
     }
 
-    auto builder = createSdpaBwdGraph({2, 8, 256, 96});
+    auto const builder = createSdpaBwdGraph({2, 8, 256, 96});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -795,7 +797,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFp8)
         GTEST_SKIP();
     }
 
-    auto builder = createSdpaBwdGraph({2, 8, 256, 128}, DataType::FP8_E4M3);
+    auto const builder = createSdpaBwdGraph({2, 8, 256, 128}, DataType::FP8_E4M3);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -809,13 +811,13 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsGfx950)
     // is skipped (the positive case is covered by IsApplicableSdpaBwdVariations).
     SKIP_IF_NO_DEVICES();
 
-    auto deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    auto const deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
     if(deviceString == "gfx942")
     {
         GTEST_SKIP() << "Test requires non-gfx942 device to assert rejection";
     }
 
-    auto builder = createSdpaBwdGraph();
+    auto const builder = createSdpaBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -841,7 +843,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
     const std::vector<int64_t> vDims = {2, 4, 256, 128};
     const std::vector<int64_t> oDims = {2, 6, 256, 128};
 
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+    auto const builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
         qDims,
         hipdnn_data_sdk::utilities::generateStrides(qDims),
         kDims,
@@ -879,7 +881,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsIntegralGqaRatio)
     const std::vector<int64_t> vDims = {1, 8, 256, 128};
     const std::vector<int64_t> oDims = {1, 32, 256, 128};
 
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+    auto const builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
         qDims,
         hipdnn_data_sdk::utilities::generateStrides(qDims),
         kDims,
@@ -916,7 +918,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
     const std::vector<int64_t> vDims = {2, 8, 256, 64};
     const std::vector<int64_t> oDims = {2, 8, 256, 64};
 
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+    auto const builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
         qDims,
         hipdnn_data_sdk::utilities::generateStrides(qDims),
         kDims,
@@ -1064,7 +1066,7 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
 // cuDNN's default: no attn_scale_value and no scale tensor means no scaling.
 TEST_F(TestSdpaBwdPlanBuilder, AbsentAttnScaleValueIsOne)
 {
-    auto builder = createSdpaBwdGraphWithMask(
+    auto const builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/false,
         flatbuffers::nullopt,
@@ -1087,11 +1089,11 @@ class TestSdpaBwdDeprecatedCausalMask : public ::testing::TestWithParam<Deprecat
 TEST_P(TestSdpaBwdDeprecatedCausalMask, Classifies)
 {
     const auto& param = GetParam();
-    auto builder = createSdpaBwdGraphWithMask(param.causalMask,
-                                              param.causalMaskBottomRight,
-                                              param.leftBound,
-                                              param.rightBound,
-                                              param.alignment);
+    auto const builder = createSdpaBwdGraphWithMask(param.causalMask,
+                                                    param.causalMaskBottomRight,
+                                                    param.leftBound,
+                                                    param.rightBound,
+                                                    param.alignment);
 
     if(!param.expected.has_value())
     {
@@ -1235,7 +1237,7 @@ TEST(TestSdpaBwdMakeCoveringBoundsUnbound, SingleTokenSequenceDropsCausalMaskOnI
 // deprecated boolean must contribute its causal right bound to the window.
 TEST(TestSdpaBwdDeprecatedCausalMaskBand, CausalWithLeftBoundResolvesToCausalWindow)
 {
-    auto builder = createSdpaBwdGraphWithMask(true, false, 64, NO_BOUND, ALIGN_BOTTOM_RIGHT);
+    auto const builder = createSdpaBwdGraphWithMask(true, false, 64, NO_BOUND, ALIGN_BOTTOM_RIGHT);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& attrs
@@ -1273,7 +1275,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioRightZeroLeftUnsetDerivesTopLeftCau
 
     // The canonical causal request: left unbounded (unset) with right_bound=0.
     // An unset left bound must be read as unbounded, not as "no mask".
-    auto builder = createSdpaBwdGraphWithMask(
+    auto const builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/false,
         flatbuffers::nullopt,
@@ -1290,7 +1292,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioRightZeroBottomRightDerivesBottomRi
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     // Same causal request with bottom-right diagonal alignment.
-    auto builder = createSdpaBwdGraphWithMask(
+    auto const builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/false,
         flatbuffers::nullopt,
@@ -1307,7 +1309,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioExplicitCausalBoundsDeriveTopLeftCa
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     // Explicit unbounded-left (left=-1) with right_bound=0 matches the unset case.
-    auto builder = createSdpaBwdGraphWithMask(
+    auto const builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/false,
         flatbuffers::Optional<int64_t>(-1),
@@ -1323,7 +1325,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioBothUnsetDerivesNoMask)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    auto builder = createSdpaBwdGraphWithMask(
+    auto const builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/false,
         flatbuffers::nullopt,
@@ -1339,7 +1341,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioBothUnboundedDerivesNoMask)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    auto builder = createSdpaBwdGraphWithMask(
+    auto const builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/false,
         flatbuffers::Optional<int64_t>(-1),
@@ -1355,7 +1357,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioSymmetricWindowDerivesSlidingWindow
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    auto builder = createSdpaBwdGraphWithMask(
+    auto const builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/false,
         flatbuffers::Optional<int64_t>(64),
@@ -1372,7 +1374,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioLeftOnlyDerivesSlidingWindow)
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     // A bounded left with an unset (unbounded) right is a one-sided window.
-    auto builder = createSdpaBwdGraphWithMask(
+    auto const builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/false,
         flatbuffers::Optional<int64_t>(64),
@@ -1401,7 +1403,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsCausalMaskBottomRight)
         GTEST_SKIP();
     }
 
-    auto builder = createSdpaBwdGraphWithMask(
+    auto const builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/true,
         flatbuffers::nullopt,
@@ -1426,7 +1428,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsWindowMask)
     }
 
     // Symmetric sliding window with left=64, right=64
-    auto builder = createSdpaBwdGraphWithMask(
+    auto const builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/false,
         flatbuffers::Optional<int64_t>(64),
@@ -1509,7 +1511,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsDimensionsAtTheir32BitLimits)
     for(const auto& testCase : cases)
     {
         SCOPED_TRACE(testCase.label);
-        auto builder = createSdpaBwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        auto const builder
+            = createSdpaBwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
             builder.GetBufferPointer(), builder.GetSize());
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, gw));
@@ -1547,7 +1550,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesDimensionsPastTheir32BitLimit
     for(const auto& testCase : cases)
     {
         SCOPED_TRACE(testCase.label);
-        auto builder = createSdpaBwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        auto const builder
+            = createSdpaBwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
             builder.GetBufferPointer(), builder.GetSize());
         EXPECT_FALSE(_planBuilder.isApplicable(_handle, gw));
@@ -1585,7 +1589,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesHeadDimsThatTruncateToASuppor
     for(const auto& testCase : cases)
     {
         SCOPED_TRACE(testCase.label);
-        auto builder = createSdpaBwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        auto const builder
+            = createSdpaBwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
             builder.GetBufferPointer(), builder.GetSize());
         const bool isControl = testCase.label == std::string("supported head dims (control)");
@@ -1634,7 +1639,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSi
     const std::vector<int64_t> dims = {4, 8, 256, 128};
     const std::vector<int64_t> normalStrides = hipdnn_data_sdk::utilities::generateStrides(dims);
 
-    auto buildWithKSeqStride = [&](int64_t kSeqStride) {
+    auto const buildWithKSeqStride = [&](int64_t kSeqStride) {
         const std::vector<int64_t> kStrides = {kSeqStride, kSeqStride, kSeqStride, 1};
         return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
             dims,
@@ -1648,12 +1653,12 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSi
             hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
     };
 
-    auto builderAtLimit = buildWithKSeqStride(limit);
+    auto const builderAtLimit = buildWithKSeqStride(limit);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwAtLimit(
         builderAtLimit.GetBufferPointer(), builderAtLimit.GetSize());
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwAtLimit));
 
-    auto builderPastLimit = buildWithKSeqStride(limit + 1);
+    auto const builderPastLimit = buildWithKSeqStride(limit + 1);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwPastLimit(
         builderPastLimit.GetBufferPointer(), builderPastLimit.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwPastLimit));
@@ -1721,7 +1726,7 @@ TEST(TestSdpaBwdWorkspaceSize, A16UnalignedDimensions)
 
 TEST_F(TestSdpaBwdPlanBuilder, NonApplicableGraphReturnsNoKnobs)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -1741,7 +1746,7 @@ TEST_F(TestSdpaBwdPlanBuilder, GetCustomKnobsReturnsAccumulatorKnob)
         GTEST_SKIP();
     }
 
-    auto graphBuilder = createSdpaBwdGraph();
+    auto const graphBuilder = createSdpaBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
@@ -1769,7 +1774,7 @@ TEST_F(TestSdpaBwdPlanBuilder, GetCustomKnobsReturnsAccumulatorKnob)
 TEST_F(TestSdpaBwdPlanBuilder, WorkspaceSizeDefaultSettingsIsA32)
 {
     // Default Settings (nullopt) should produce same result as explicit A32
-    auto graphBuilder = createSdpaBwdGraph({2, 8, 512, 128});
+    auto const graphBuilder = createSdpaBwdGraph({2, 8, 512, 128});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 

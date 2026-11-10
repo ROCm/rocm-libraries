@@ -101,13 +101,13 @@ GraphResult buildConvFwdGraph()
     tensors.push_back(CreateTensorAttributesDirect(b, 2, "w", DataType::FLOAT, &kStrides, &kDims));
     tensors.push_back(CreateTensorAttributesDirect(b, 3, "y", DataType::FLOAT, &kStrides, &kDims));
 
-    auto conv = CreateConvolutionFwdAttributesDirect(b, 1, 2, 3);
+    const auto conv = CreateConvolutionFwdAttributesDirect(b, 1, 2, 3);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(
         b, "conv", DataType::FLOAT, NodeAttributes::ConvolutionFwdAttributes, conv.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -133,17 +133,17 @@ GraphResult buildConvBiasGraph()
     tensors.push_back(
         CreateTensorAttributesDirect(b, 5, "out", DataType::FLOAT, &kStrides, &kDims));
 
-    auto conv = CreateConvolutionFwdAttributesDirect(b, 1, 2, 10);
-    auto add = CreatePointwiseAttributes(b,
-                                         PointwiseMode::ADD,
-                                         flatbuffers::nullopt,
-                                         flatbuffers::nullopt,
-                                         flatbuffers::nullopt,
-                                         flatbuffers::nullopt,
-                                         10,
-                                         4,
-                                         flatbuffers::nullopt,
-                                         5);
+    const auto conv = CreateConvolutionFwdAttributesDirect(b, 1, 2, 10);
+    const auto add = CreatePointwiseAttributes(b,
+                                               PointwiseMode::ADD,
+                                               flatbuffers::nullopt,
+                                               flatbuffers::nullopt,
+                                               flatbuffers::nullopt,
+                                               flatbuffers::nullopt,
+                                               10,
+                                               4,
+                                               flatbuffers::nullopt,
+                                               5);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(
@@ -151,7 +151,7 @@ GraphResult buildConvBiasGraph()
     nodes.push_back(CreateNodeDirect(
         b, "bias_add", DataType::FLOAT, NodeAttributes::PointwiseAttributes, add.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -179,27 +179,27 @@ GraphResult buildConvBiasReluGraph()
     tensors.push_back(
         CreateTensorAttributesDirect(b, 6, "out", DataType::FLOAT, &kStrides, &kDims));
 
-    auto conv = CreateConvolutionFwdAttributesDirect(b, 1, 2, 10);
-    auto add = CreatePointwiseAttributes(b,
-                                         PointwiseMode::ADD,
-                                         flatbuffers::nullopt,
-                                         flatbuffers::nullopt,
-                                         flatbuffers::nullopt,
-                                         flatbuffers::nullopt,
-                                         10,
-                                         4,
-                                         flatbuffers::nullopt,
-                                         11);
-    auto relu = CreatePointwiseAttributes(b,
-                                          PointwiseMode::RELU_FWD,
-                                          flatbuffers::nullopt,
-                                          flatbuffers::nullopt,
-                                          flatbuffers::nullopt,
-                                          flatbuffers::nullopt,
-                                          11,
-                                          flatbuffers::nullopt,
-                                          flatbuffers::nullopt,
-                                          6);
+    const auto conv = CreateConvolutionFwdAttributesDirect(b, 1, 2, 10);
+    const auto add = CreatePointwiseAttributes(b,
+                                               PointwiseMode::ADD,
+                                               flatbuffers::nullopt,
+                                               flatbuffers::nullopt,
+                                               flatbuffers::nullopt,
+                                               flatbuffers::nullopt,
+                                               10,
+                                               4,
+                                               flatbuffers::nullopt,
+                                               11);
+    const auto relu = CreatePointwiseAttributes(b,
+                                                PointwiseMode::RELU_FWD,
+                                                flatbuffers::nullopt,
+                                                flatbuffers::nullopt,
+                                                flatbuffers::nullopt,
+                                                flatbuffers::nullopt,
+                                                11,
+                                                flatbuffers::nullopt,
+                                                flatbuffers::nullopt,
+                                                6);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(
@@ -209,7 +209,7 @@ GraphResult buildConvBiasReluGraph()
     nodes.push_back(CreateNodeDirect(
         b, "relu", DataType::FLOAT, NodeAttributes::PointwiseAttributes, relu.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -269,13 +269,13 @@ GraphResult buildSdpaFwdGraph()
     tensors.push_back(CreateTensorAttributesDirect(b, 3, "v", DataType::FLOAT, &kStrides, &kDims));
     tensors.push_back(CreateTensorAttributesDirect(b, 4, "o", DataType::FLOAT, &kStrides, &kDims));
 
-    auto sdpa = CreateSdpaAttributes(b, 1, 2, 3, 4);
+    const auto sdpa = CreateSdpaAttributes(b, 1, 2, 3, 4);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(
         b, "sdpa_fwd", DataType::FLOAT, NodeAttributes::SdpaAttributes, sdpa.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -298,20 +298,20 @@ GraphResult buildSdpaFwdWithSeqLenQGraph()
     tensors.push_back(
         CreateTensorAttributesDirect(b, 5, "seq_len_q", DataType::FLOAT, &kStrides, &kDims));
 
-    auto sdpa = CreateSdpaAttributes(b,
-                                     1,
-                                     2,
-                                     3,
-                                     4,
-                                     flatbuffers::nullopt, // attn_mask
-                                     flatbuffers::nullopt, // scale
-                                     5); // seq_len_q
+    const auto sdpa = CreateSdpaAttributes(b,
+                                           1,
+                                           2,
+                                           3,
+                                           4,
+                                           flatbuffers::nullopt, // attn_mask
+                                           flatbuffers::nullopt, // scale
+                                           5); // seq_len_q
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(
         b, "sdpa_fwd", DataType::FLOAT, NodeAttributes::SdpaAttributes, sdpa.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -339,13 +339,13 @@ GraphResult buildSdpaBwdStandaloneGraph()
     tensors.push_back(CreateTensorAttributesDirect(b, 8, "dk", DataType::FLOAT, &kStrides, &kDims));
     tensors.push_back(CreateTensorAttributesDirect(b, 9, "dv", DataType::FLOAT, &kStrides, &kDims));
 
-    auto bwd = CreateSdpaBackwardAttributes(b, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+    const auto bwd = CreateSdpaBackwardAttributes(b, 1, 2, 3, 4, 5, 6, 7, 8, 9);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(
         b, "sdpa_bwd", DataType::FLOAT, NodeAttributes::SdpaBackwardAttributes, bwd.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -376,32 +376,32 @@ GraphResult buildSdpaFwdBwdFusedGraph()
     tensors.push_back(CreateTensorAttributesDirect(b, 8, "dk", DataType::FLOAT, &kStrides, &kDims));
     tensors.push_back(CreateTensorAttributesDirect(b, 9, "dv", DataType::FLOAT, &kStrides, &kDims));
 
-    auto fwd = CreateSdpaAttributes(b,
-                                    1,
-                                    2,
-                                    3,
-                                    10,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    11); // stats_tensor_uid
+    const auto fwd = CreateSdpaAttributes(b,
+                                          1,
+                                          2,
+                                          3,
+                                          10,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          flatbuffers::nullopt,
+                                          11); // stats_tensor_uid
 
-    auto bwd = CreateSdpaBackwardAttributes(b, 1, 2, 3, 10, 5, 11, 7, 8, 9);
+    const auto bwd = CreateSdpaBackwardAttributes(b, 1, 2, 3, 10, 5, 11, 7, 8, 9);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(
@@ -409,7 +409,7 @@ GraphResult buildSdpaFwdBwdFusedGraph()
     nodes.push_back(CreateNodeDirect(
         b, "sdpa_bwd", DataType::FLOAT, NodeAttributes::SdpaBackwardAttributes, bwd.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -437,7 +437,7 @@ GraphResult buildMoeGroupedMatmulGraph()
     tensors.push_back(
         CreateTensorAttributesDirect(b, 4, "output", DataType::FLOAT, &kStrides, &kDims));
 
-    auto moe = CreateMoeGroupedMatmulAttributes(
+    const auto moe = CreateMoeGroupedMatmulAttributes(
         b, 1, 2, 3, flatbuffers::nullopt, flatbuffers::nullopt, 4);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
@@ -447,7 +447,7 @@ GraphResult buildMoeGroupedMatmulGraph()
                                      NodeAttributes::MoeGroupedMatmulAttributes,
                                      moe.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -475,7 +475,7 @@ GraphResult buildMoeGroupedMatmulBwdGraph()
     tensors.push_back(
         CreateTensorAttributesDirect(b, 4, "dweight", DataType::FLOAT, &kStrides, &kDims));
 
-    auto moeBwd = CreateMoeGroupedMatmulBwdAttributes(b, 1, 2, 3, 4);
+    const auto moeBwd = CreateMoeGroupedMatmulBwdAttributes(b, 1, 2, 3, 4);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(b,
@@ -484,7 +484,7 @@ GraphResult buildMoeGroupedMatmulBwdGraph()
                                      NodeAttributes::MoeGroupedMatmulBwdAttributes,
                                      moeBwd.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -508,13 +508,13 @@ GraphResult buildMatmulGraph(DataType aType,
     tensors.push_back(CreateTensorAttributesDirect(b, 2, "b", DataType::FLOAT, &kStrides, &kDims));
     tensors.push_back(CreateTensorAttributesDirect(b, 3, "c", DataType::FLOAT, &kStrides, &kDims));
 
-    auto matmul = CreateMatmulAttributes(b, 1, 2, 3);
+    const auto matmul = CreateMatmulAttributes(b, 1, 2, 3);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(
         b, "matmul", DataType::FLOAT, NodeAttributes::MatmulAttributes, matmul.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -539,8 +539,8 @@ GraphResult buildBlockScaleDequantizeMatmulGraph(DataType xType)
     tensors.push_back(CreateTensorAttributesDirect(b, 3, "b", DataType::FLOAT, &kStrides, &kDims));
     tensors.push_back(CreateTensorAttributesDirect(b, 4, "c", DataType::FLOAT, &kStrides, &kDims));
 
-    auto dequant = CreateBlockScaleDequantizeAttributesDirect(b, 1, 2, 10);
-    auto matmul = CreateMatmulAttributes(b, 10, 3, 4);
+    const auto dequant = CreateBlockScaleDequantizeAttributesDirect(b, 1, 2, 10);
+    const auto matmul = CreateMatmulAttributes(b, 10, 3, 4);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(b,
@@ -551,7 +551,7 @@ GraphResult buildBlockScaleDequantizeMatmulGraph(DataType xType)
     nodes.push_back(CreateNodeDirect(
         b, "matmul", DataType::FLOAT, NodeAttributes::MatmulAttributes, matmul.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -632,17 +632,17 @@ GraphResult buildMixedSizeConvBiasGraph()
     tensors.push_back(
         CreateTensorAttributesDirect(b, 5, "out", DataType::FLOAT, &largeStrides, &largeDims));
 
-    auto conv = CreateConvolutionFwdAttributesDirect(b, 1, 2, 10);
-    auto add = CreatePointwiseAttributes(b,
-                                         PointwiseMode::ADD,
-                                         flatbuffers::nullopt,
-                                         flatbuffers::nullopt,
-                                         flatbuffers::nullopt,
-                                         flatbuffers::nullopt,
-                                         10,
-                                         4,
-                                         flatbuffers::nullopt,
-                                         5);
+    const auto conv = CreateConvolutionFwdAttributesDirect(b, 1, 2, 10);
+    const auto add = CreatePointwiseAttributes(b,
+                                               PointwiseMode::ADD,
+                                               flatbuffers::nullopt,
+                                               flatbuffers::nullopt,
+                                               flatbuffers::nullopt,
+                                               flatbuffers::nullopt,
+                                               10,
+                                               4,
+                                               flatbuffers::nullopt,
+                                               5);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(
@@ -650,7 +650,7 @@ GraphResult buildMixedSizeConvBiasGraph()
     nodes.push_back(CreateNodeDirect(
         b, "bias_add", DataType::FLOAT, NodeAttributes::PointwiseAttributes, add.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -763,13 +763,13 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
     {
         attrs.add_dropout_probability(*opts.dropoutProbability);
     }
-    auto bwd = attrs.Finish();
+    const auto bwd = attrs.Finish();
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(
         CreateNodeDirect(b, "sdpa_bwd", io, NodeAttributes::SdpaBackwardAttributes, bwd.Union()));
 
-    auto graph
+    const auto graph
         = CreateGraphDirect(b, "test", io, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -1378,22 +1378,22 @@ GraphResult buildResampleBwdGraph(const ResampleBwdOptions& opts)
     tensors.push_back(
         CreateTensorAttributesDirect(b, 3, "dx", DataType::FLOAT, &dxStrides, &opts.dxDims));
 
-    auto bwd = CreateResampleBwdAttributesDirect(b,
-                                                 1,
-                                                 3,
-                                                 2,
-                                                 &opts.prePadding,
-                                                 &opts.postPadding,
-                                                 &opts.stride,
-                                                 &opts.window,
-                                                 opts.mode,
-                                                 opts.paddingMode);
+    const auto bwd = CreateResampleBwdAttributesDirect(b,
+                                                       1,
+                                                       3,
+                                                       2,
+                                                       &opts.prePadding,
+                                                       &opts.postPadding,
+                                                       &opts.stride,
+                                                       &opts.window,
+                                                       opts.mode,
+                                                       opts.paddingMode);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(
         b, "resample_bwd", DataType::FLOAT, NodeAttributes::ResampleBwdAttributes, bwd.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -1543,7 +1543,7 @@ TEST(TestFillInputs, ResampleBwdIndexIsDeterministicAcrossFills)
     const auto gr = buildResampleBwdGraph(opts);
     const auto leafUids = gr.leafInputUids({3});
 
-    auto fillOnce = [&]() {
+    const auto fillOnce = [&]() {
         auto inputs = makeTensorsFromGraph(gr, leafUids);
         InputFillRecipes recipes;
         recipes.setGlobalSeed(42);

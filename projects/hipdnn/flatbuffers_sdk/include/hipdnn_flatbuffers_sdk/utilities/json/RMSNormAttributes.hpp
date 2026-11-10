@@ -80,7 +80,7 @@ inline auto to<data_objects::RMSNormAttributes>(flatbuffers::FlatBufferBuilder& 
     auto forwardPhase = data_objects::NormFwdPhase::NOT_SET;
     if(entry.contains(keys::FORWARD_PHASE))
     {
-        auto phaseStr = entry[keys::FORWARD_PHASE].get<std::string>();
+        const auto phaseStr = entry[keys::FORWARD_PHASE].get<std::string>();
         if(phaseStr == "INFERENCE")
         {
             forwardPhase = data_objects::NormFwdPhase::INFERENCE;

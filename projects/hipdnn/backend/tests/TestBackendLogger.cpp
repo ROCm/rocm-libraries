@@ -241,7 +241,7 @@ TEST_F(TestBackendLogger, LogFileCanBeSpecifiedByEnvVar)
 
     hipdnn_backend::logging::loggerShutdown();
 
-    auto stdErrContent = getStderrContent();
+    const auto stdErrContent = getStderrContent();
 
     std::string logFileContent;
     std::ifstream logFileStream(_logFile);
@@ -272,7 +272,7 @@ TEST_F(TestBackendLogger, ParamsAreNotExpandedIfLogLevelIsDisabled)
     const std::string warnMessage("warn log message");
     const std::string errorMessage("error log message");
     const std::string fatalMessage("fatal log message");
-    auto trackingLambda = [](bool& wasCalled, std::string message) {
+    const auto trackingLambda = [](bool& wasCalled, std::string message) {
         wasCalled = true;
         return message;
     };

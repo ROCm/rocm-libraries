@@ -81,8 +81,8 @@ protected:
 
 TEST_F(TestCustomOpOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -92,16 +92,16 @@ TEST_F(TestCustomOpOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestCustomOpOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::CustomOpAttributes);
-    auto desc = std::static_pointer_cast<CustomOpOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<CustomOpOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     EXPECT_EQ(desc->getData().custom_op_id, K_CUSTOM_OP_ID);
@@ -116,16 +116,16 @@ TEST_F(TestCustomOpOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestCustomOpOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
 
 TEST_F(TestCustomOpOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getInputDescs().size(), 2);
     EXPECT_EQ(desc->getInputDescs()[0]->getData().uid, K_CUSTOM_OP_INPUT_UID_0);
@@ -136,8 +136,8 @@ TEST_F(TestCustomOpOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestCustomOpOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
 
     const std::vector<int64_t> expectedDims(K_CUSTOM_OP_TENSOR_DIMS.begin(),
                                             K_CUSTOM_OP_TENSOR_DIMS.end());
@@ -169,8 +169,8 @@ TEST_F(TestCustomOpOperationFromNode, SetsTensorReferencesWithFullValues)
 
 TEST_F(TestCustomOpOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getInputDescs()[0], _tensorMap[K_CUSTOM_OP_INPUT_UID_0]);
     EXPECT_EQ(desc->getInputDescs()[1], _tensorMap[K_CUSTOM_OP_INPUT_UID_1]);
@@ -180,7 +180,7 @@ TEST_F(TestCustomOpOperationFromNode, TensorReferencesMatchTensorMap)
 TEST_F(TestCustomOpOperationFromNode, FailsWithMissingInputTensor)
 {
     _tensorMap.erase(K_CUSTOM_OP_INPUT_UID_0);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(CustomOpOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -189,7 +189,7 @@ TEST_F(TestCustomOpOperationFromNode, FailsWithMissingInputTensor)
 TEST_F(TestCustomOpOperationFromNode, FailsWithMissingOutputTensor)
 {
     _tensorMap.erase(K_CUSTOM_OP_OUTPUT_UID_0);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(CustomOpOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -197,8 +197,8 @@ TEST_F(TestCustomOpOperationFromNode, FailsWithMissingOutputTensor)
 
 TEST_F(TestCustomOpOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     // 2 inputs + 1 output = 3
@@ -210,8 +210,8 @@ TEST_F(TestCustomOpOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 
 TEST_F(TestCustomOpOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -231,8 +231,8 @@ TEST_F(TestCustomOpOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestCustomOpOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -348,7 +348,7 @@ TEST_F(TestCustomOpOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_custom_op_1";
 
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -363,8 +363,8 @@ TEST_F(TestCustomOpOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestCustomOpOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -376,7 +376,7 @@ TEST_F(TestCustomOpOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
@@ -395,7 +395,7 @@ TEST_F(TestCustomOpOperationFromNode, FromNodeWithSingleInputAndOutput)
     attrs.data = {K_CUSTOM_OP_OPAQUE_DATA.begin(), K_CUSTOM_OP_OPAQUE_DATA.end()};
     node.attributes.Set(attrs);
 
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
@@ -426,7 +426,7 @@ TEST_F(TestCustomOpOperationFromNode, FromNodeWithZeroInputs)
     attrs.data = {K_CUSTOM_OP_OPAQUE_DATA.begin(), K_CUSTOM_OP_OPAQUE_DATA.end()};
     node.attributes.Set(attrs);
 
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
@@ -455,7 +455,7 @@ TEST_F(TestCustomOpOperationFromNode, FromNodeWithZeroOutputs)
     attrs.data = {K_CUSTOM_OP_OPAQUE_DATA.begin(), K_CUSTOM_OP_OPAQUE_DATA.end()};
     node.attributes.Set(attrs);
 
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
@@ -492,7 +492,7 @@ TEST_F(TestCustomOpOperationFromNode, FromNodeWithTwoOutputs)
     attrs.data = {K_CUSTOM_OP_OPAQUE_DATA.begin(), K_CUSTOM_OP_OPAQUE_DATA.end()};
     node.attributes.Set(attrs);
 
-    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 

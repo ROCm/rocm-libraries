@@ -46,24 +46,24 @@ class IntegrationMatmulDescriptorLowering : public IntegrationTestFixture
 // in the frontend.
 TEST_F(IntegrationMatmulDescriptorLowering, MatmulGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestMatmulGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_uid(K_MATMUL_TENSOR_A_UID).set_name("A").set_data_type(DataType::FLOAT);
     a->set_dim(toVec(K_MATMUL_TENSOR_A_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_A_STRIDES));
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_uid(K_MATMUL_TENSOR_B_UID).set_name("B").set_data_type(DataType::FLOAT);
     b->set_dim(toVec(K_MATMUL_TENSOR_B_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_B_STRIDES));
 
     MatmulAttributes matmulAttrs;
     matmulAttrs.set_name("matmul_op");
 
-    auto c = graph->matmul(a, b, matmulAttrs);
+    const auto c = graph->matmul(a, b, matmulAttrs);
     c->set_uid(K_MATMUL_TENSOR_C_UID).set_output(true).set_name("C");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -123,23 +123,23 @@ TEST_F(IntegrationMatmulDescriptorLowering, MatmulGraphRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationMatmulDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidMatmulGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_name("A").set_data_type(DataType::FLOAT);
     a->set_dim(toVec(K_MATMUL_TENSOR_A_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_A_STRIDES));
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_name("B").set_data_type(DataType::FLOAT);
     b->set_dim(toVec(K_MATMUL_TENSOR_B_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_B_STRIDES));
 
     const MatmulAttributes matmulAttrs;
 
-    auto c = graph->matmul(a, b, matmulAttrs);
+    const auto c = graph->matmul(a, b, matmulAttrs);
     c->set_output(true);
 
     auto graphT = lowerAndDeserialize(*graph, _handle);

@@ -48,7 +48,7 @@ TEST(TestSdpaFwdCase, GetNameNoMask)
     const SdpaFwdTestCase tc({1, 4, 256, 128}, {1, 1, 256, 128}, "gfx942");
     const testing::TestParamInfo<SdpaFwdTestCase> info(tc, 0);
 
-    auto name = SdpaFwdTestCase::getName(info);
+    auto const name = SdpaFwdTestCase::getName(info);
     EXPECT_EQ(name, "gfx942_B1_Hq4_Hkv1_Sq256_Skv256_Dqk128_Dv128_NoMask");
 }
 
@@ -57,7 +57,7 @@ TEST(TestSdpaFwdCase, GetNameBottomRightCausal)
     const SdpaFwdTestCase tc({2, 4, 256, 128}, {2, 4, 256, 128}, "gfx950", -1, 0, false);
     const testing::TestParamInfo<SdpaFwdTestCase> info(tc, 0);
 
-    auto name = SdpaFwdTestCase::getName(info);
+    auto const name = SdpaFwdTestCase::getName(info);
     EXPECT_EQ(name, "gfx950_B2_Hq4_Hkv4_Sq256_Skv256_Dqk128_Dv128_BottomRightCausal");
 }
 
@@ -66,7 +66,7 @@ TEST(TestSdpaFwdCase, GetNameTopLeftCausal)
     const SdpaFwdTestCase tc({1, 2, 128, 192}, {1, 2, 128, 128}, "gfx942", 0, 0, true);
     const testing::TestParamInfo<SdpaFwdTestCase> info(tc, 0);
 
-    auto name = SdpaFwdTestCase::getName(info);
+    auto const name = SdpaFwdTestCase::getName(info);
     EXPECT_EQ(name, "gfx942_B1_Hq2_Hkv2_Sq128_Skv128_Dqk192_Dv128_TopLeftCausal");
 }
 

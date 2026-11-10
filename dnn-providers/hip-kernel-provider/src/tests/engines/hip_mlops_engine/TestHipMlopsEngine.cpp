@@ -135,7 +135,7 @@ TEST(TestHipMlopsEngine, RaggedTensorFlipsApplicableGraphToRejected)
     // tensor: the flip to rejected must come from the engine's ragged guard, not the
     // plan builder. The baseline proves the graph is otherwise accepted; the ragged
     // case asserts the plan builder is never consulted (Times(0)).
-    auto baseBuilder = createValidMatmulGraph();
+    auto const baseBuilder = createValidMatmulGraph();
     const GraphWrapper baseGraph(baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
 
     {
@@ -149,7 +149,7 @@ TEST(TestHipMlopsEngine, RaggedTensorFlipsApplicableGraphToRejected)
         EXPECT_TRUE(engine.isApplicable(dummyHandle, baseGraph));
     }
 
-    auto raggedBuilder = makeGraphWithRaggedTensor(createValidMatmulGraph());
+    auto const raggedBuilder = makeGraphWithRaggedTensor(createValidMatmulGraph());
     const GraphWrapper raggedGraph(raggedBuilder.GetBufferPointer(), raggedBuilder.GetSize());
 
     {
@@ -165,7 +165,7 @@ TEST(TestHipMlopsEngine, RaggedTensorFlipsApplicableGraphToRejected)
 
 TEST(TestHipMlopsEngine, Non16ByteAlignmentFlipsApplicableGraphToRejected)
 {
-    auto baseBuilder = createValidMatmulGraph();
+    auto const baseBuilder = createValidMatmulGraph();
     const GraphWrapper baseGraph(baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
 
     {
@@ -179,7 +179,7 @@ TEST(TestHipMlopsEngine, Non16ByteAlignmentFlipsApplicableGraphToRejected)
         EXPECT_TRUE(engine.isApplicable(dummyHandle, baseGraph));
     }
 
-    auto misalignedBuilder = makeGraphWithTensorAlignment(createValidMatmulGraph(), 8);
+    auto const misalignedBuilder = makeGraphWithTensorAlignment(createValidMatmulGraph(), 8);
     const GraphWrapper misalignedGraph(misalignedBuilder.GetBufferPointer(),
                                        misalignedBuilder.GetSize());
 

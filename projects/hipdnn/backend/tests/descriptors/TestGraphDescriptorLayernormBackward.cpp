@@ -45,7 +45,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                        const std::string& name = "")
 {
     auto wrapper = createDescriptor<LayernormBackwardOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<LayernormBackwardOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<LayernormBackwardOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -108,7 +108,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -190,45 +190,46 @@ protected:
 
 TEST_F(TestGraphDescriptorLayernormBackward, BuildFromSingleOperation)
 {
-    auto dyDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DY_UID,
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS),
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_X_UID,
-                                       toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS),
-                                       toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID,
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS),
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID,
-                                          toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS),
-                                          toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
-    auto invVarianceDesc
+    const auto dyDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DY_UID,
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS),
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_X_UID,
+                                             toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS),
+                                             toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID,
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
+    const auto meanDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID,
+                                                toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS),
+                                                toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
+    const auto invVarianceDesc
         = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID,
                                 toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_DIMS),
                                 toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_EPSILON_UID,
-                                             toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_DIMS),
-                                             toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DX_UID,
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DX_DIMS),
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID,
-                                            toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID,
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
-    auto opDesc = createFinalizedLayernormBackwardOp(dyDesc.get(),
-                                                     xDesc.get(),
-                                                     scaleDesc.get(),
-                                                     meanDesc.get(),
-                                                     invVarianceDesc.get(),
-                                                     epsilonDesc.get(),
-                                                     dxDesc.get(),
-                                                     dscaleDesc.get(),
-                                                     dbiasDesc.get());
+    const auto epsilonDesc
+        = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_EPSILON_UID,
+                                toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_DIMS),
+                                toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DX_UID,
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DX_DIMS),
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DX_STRIDES));
+    const auto dscaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID,
+                                                  toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID,
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+    const auto opDesc = createFinalizedLayernormBackwardOp(dyDesc.get(),
+                                                           xDesc.get(),
+                                                           scaleDesc.get(),
+                                                           meanDesc.get(),
+                                                           invVarianceDesc.get(),
+                                                           epsilonDesc.get(),
+                                                           dxDesc.get(),
+                                                           dscaleDesc.get(),
+                                                           dbiasDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -239,7 +240,7 @@ TEST_F(TestGraphDescriptorLayernormBackward, BuildFromSingleOperation)
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -322,46 +323,47 @@ TEST_F(TestGraphDescriptorLayernormBackward, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorLayernormBackward, ComputeDataTypePreserved)
 {
-    auto dyDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DY_UID,
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS),
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_X_UID,
-                                       toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS),
-                                       toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID,
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS),
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID,
-                                          toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS),
-                                          toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
-    auto invVarianceDesc
+    const auto dyDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DY_UID,
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS),
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_X_UID,
+                                             toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS),
+                                             toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID,
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
+    const auto meanDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID,
+                                                toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS),
+                                                toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
+    const auto invVarianceDesc
         = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID,
                                 toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_DIMS),
                                 toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_EPSILON_UID,
-                                             toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_DIMS),
-                                             toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DX_UID,
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DX_DIMS),
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID,
-                                            toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID,
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
-    auto opDesc = createFinalizedLayernormBackwardOp(dyDesc.get(),
-                                                     xDesc.get(),
-                                                     scaleDesc.get(),
-                                                     meanDesc.get(),
-                                                     invVarianceDesc.get(),
-                                                     epsilonDesc.get(),
-                                                     dxDesc.get(),
-                                                     dscaleDesc.get(),
-                                                     dbiasDesc.get(),
-                                                     HIPDNN_DATA_HALF);
+    const auto epsilonDesc
+        = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_EPSILON_UID,
+                                toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_DIMS),
+                                toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DX_UID,
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DX_DIMS),
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DX_STRIDES));
+    const auto dscaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID,
+                                                  toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID,
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+    const auto opDesc = createFinalizedLayernormBackwardOp(dyDesc.get(),
+                                                           xDesc.get(),
+                                                           scaleDesc.get(),
+                                                           meanDesc.get(),
+                                                           invVarianceDesc.get(),
+                                                           epsilonDesc.get(),
+                                                           dxDesc.get(),
+                                                           dscaleDesc.get(),
+                                                           dbiasDesc.get(),
+                                                           HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -371,7 +373,7 @@ TEST_F(TestGraphDescriptorLayernormBackward, ComputeDataTypePreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -380,38 +382,39 @@ TEST_F(TestGraphDescriptorLayernormBackward, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorLayernormBackward, LayernormBackwardAttributesPreserved)
 {
-    auto dyDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DY_UID,
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS),
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_X_UID,
-                                       toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS),
-                                       toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID,
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS),
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID,
-                                          toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS),
-                                          toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
-    auto invVarianceDesc
+    const auto dyDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DY_UID,
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS),
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_X_UID,
+                                             toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS),
+                                             toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID,
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
+    const auto meanDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID,
+                                                toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS),
+                                                toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
+    const auto invVarianceDesc
         = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID,
                                 toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_DIMS),
                                 toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_EPSILON_UID,
-                                             toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_DIMS),
-                                             toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DX_UID,
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DX_DIMS),
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID,
-                                            toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID,
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+    const auto epsilonDesc
+        = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_EPSILON_UID,
+                                toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_DIMS),
+                                toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DX_UID,
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DX_DIMS),
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DX_STRIDES));
+    const auto dscaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID,
+                                                  toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID,
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
 
     // Create op with non-default parameters to test graph roundtrip
     auto wrapper = createDescriptor<LayernormBackwardOperationDescriptor>();
-    auto opDesc = wrapper->asDescriptor<LayernormBackwardOperationDescriptor>();
+    const auto opDesc = wrapper->asDescriptor<LayernormBackwardOperationDescriptor>();
 
     HipdnnBackendDescriptor* dyPtr = dyDesc.get();
     opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
@@ -471,7 +474,7 @@ TEST_F(TestGraphDescriptorLayernormBackward, LayernormBackwardAttributesPreserve
                          opName.c_str());
     opDesc->finalize();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {wrapper.get()};
@@ -481,7 +484,7 @@ TEST_F(TestGraphDescriptorLayernormBackward, LayernormBackwardAttributesPreserve
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -553,47 +556,48 @@ TEST_F(TestGraphDescriptorLayernormBackward, LayernormBackwardAttributesPreserve
 
 TEST_F(TestGraphDescriptorLayernormBackward, OperationNamePreservedInSerialization)
 {
-    auto dyDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DY_UID,
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS),
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_X_UID,
-                                       toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS),
-                                       toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID,
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS),
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID,
-                                          toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS),
-                                          toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
-    auto invVarianceDesc
+    const auto dyDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DY_UID,
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS),
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_X_UID,
+                                             toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS),
+                                             toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID,
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
+    const auto meanDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID,
+                                                toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS),
+                                                toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
+    const auto invVarianceDesc
         = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID,
                                 toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_DIMS),
                                 toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_EPSILON_UID,
-                                             toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_DIMS),
-                                             toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DX_UID,
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DX_DIMS),
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID,
-                                            toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID,
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
-    auto opDesc = createFinalizedLayernormBackwardOp(dyDesc.get(),
-                                                     xDesc.get(),
-                                                     scaleDesc.get(),
-                                                     meanDesc.get(),
-                                                     invVarianceDesc.get(),
-                                                     epsilonDesc.get(),
-                                                     dxDesc.get(),
-                                                     dscaleDesc.get(),
-                                                     dbiasDesc.get(),
-                                                     HIPDNN_DATA_FLOAT,
-                                                     "test_layernormbackward_name");
+    const auto epsilonDesc
+        = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_EPSILON_UID,
+                                toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_DIMS),
+                                toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DX_UID,
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DX_DIMS),
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DX_STRIDES));
+    const auto dscaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID,
+                                                  toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID,
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+    const auto opDesc = createFinalizedLayernormBackwardOp(dyDesc.get(),
+                                                           xDesc.get(),
+                                                           scaleDesc.get(),
+                                                           meanDesc.get(),
+                                                           invVarianceDesc.get(),
+                                                           epsilonDesc.get(),
+                                                           dxDesc.get(),
+                                                           dscaleDesc.get(),
+                                                           dbiasDesc.get(),
+                                                           HIPDNN_DATA_FLOAT,
+                                                           "test_layernormbackward_name");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -603,7 +607,7 @@ TEST_F(TestGraphDescriptorLayernormBackward, OperationNamePreservedInSerializati
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
@@ -612,47 +616,48 @@ TEST_F(TestGraphDescriptorLayernormBackward, OperationNamePreservedInSerializati
 
 TEST_F(TestGraphDescriptorLayernormBackward, OperationNameRoundTripThroughLifting)
 {
-    auto dyDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DY_UID,
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS),
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
-    auto xDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_X_UID,
-                                       toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS),
-                                       toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID,
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS),
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID,
-                                          toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS),
-                                          toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
-    auto invVarianceDesc
+    const auto dyDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DY_UID,
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DY_DIMS),
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DY_STRIDES));
+    const auto xDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_X_UID,
+                                             toVec(K_LAYERNORMBACKWARD_TENSOR_X_DIMS),
+                                             toVec(K_LAYERNORMBACKWARD_TENSOR_X_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_SCALE_UID,
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS),
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
+    const auto meanDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID,
+                                                toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS),
+                                                toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
+    const auto invVarianceDesc
         = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID,
                                 toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_DIMS),
                                 toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_EPSILON_UID,
-                                             toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_DIMS),
-                                             toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_STRIDES));
-    auto dxDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DX_UID,
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DX_DIMS),
-                                        toVec(K_LAYERNORMBACKWARD_TENSOR_DX_STRIDES));
-    auto dscaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID,
-                                            toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_DIMS),
-                                            toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_STRIDES));
-    auto dbiasDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID,
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_DIMS),
-                                           toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
-    auto opDesc = createFinalizedLayernormBackwardOp(dyDesc.get(),
-                                                     xDesc.get(),
-                                                     scaleDesc.get(),
-                                                     meanDesc.get(),
-                                                     invVarianceDesc.get(),
-                                                     epsilonDesc.get(),
-                                                     dxDesc.get(),
-                                                     dscaleDesc.get(),
-                                                     dbiasDesc.get(),
-                                                     HIPDNN_DATA_FLOAT,
-                                                     "test_layernormbackward_lifting");
+    const auto epsilonDesc
+        = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_EPSILON_UID,
+                                toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_DIMS),
+                                toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_STRIDES));
+    const auto dxDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DX_UID,
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DX_DIMS),
+                                              toVec(K_LAYERNORMBACKWARD_TENSOR_DX_STRIDES));
+    const auto dscaleDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID,
+                                                  toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_DIMS),
+                                                  toVec(K_LAYERNORMBACKWARD_TENSOR_DSCALE_STRIDES));
+    const auto dbiasDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID,
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_DIMS),
+                                                 toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+    const auto opDesc = createFinalizedLayernormBackwardOp(dyDesc.get(),
+                                                           xDesc.get(),
+                                                           scaleDesc.get(),
+                                                           meanDesc.get(),
+                                                           invVarianceDesc.get(),
+                                                           epsilonDesc.get(),
+                                                           dxDesc.get(),
+                                                           dscaleDesc.get(),
+                                                           dbiasDesc.get(),
+                                                           HIPDNN_DATA_FLOAT,
+                                                           "test_layernormbackward_lifting");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -663,13 +668,13 @@ TEST_F(TestGraphDescriptorLayernormBackward, OperationNameRoundTripThroughLiftin
     desc->finalize();
 
     // Serialize the graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
     auto liftedWrapper = createDescriptor<GraphDescriptor>();
-    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
+    const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
     hipdnnHandle_t handle = &_mockHandle;
@@ -680,7 +685,7 @@ TEST_F(TestGraphDescriptorLayernormBackward, OperationNameRoundTripThroughLiftin
     liftedDesc->finalize();
 
     // Re-serialize and verify name survived the round-trip
-    auto reSerialized = liftedDesc->getSerializedGraph();
+    const auto reSerialized = liftedDesc->getSerializedGraph();
     auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);

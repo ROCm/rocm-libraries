@@ -48,7 +48,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                                    const std::string& name = "")
 {
     auto wrapper = createDescriptor<BatchnormInferenceVarianceExtOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<BatchnormInferenceVarianceExtOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<BatchnormInferenceVarianceExtOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_X_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -103,7 +103,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -128,34 +128,34 @@ protected:
 
 TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, BuildFromSingleOperation)
 {
-    auto xDesc = createFinalizedTensor(
+    const auto xDesc = createFinalizedTensor(
         K_BN_INF_VAR_EXT_X_UID, toVec(K_BN_INF_VAR_EXT_X_DIMS), toVec(K_BN_INF_VAR_EXT_X_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_MEAN_UID,
-                                          toVec(K_BN_INF_VAR_EXT_MEAN_DIMS),
-                                          toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
-    auto varianceDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_VARIANCE_UID,
-                                              toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS),
-                                              toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_SCALE_UID,
-                                           toVec(K_BN_INF_VAR_EXT_SCALE_DIMS),
-                                           toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
-    auto biasDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_BIAS_UID,
-                                          toVec(K_BN_INF_VAR_EXT_BIAS_DIMS),
-                                          toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
-    auto yDesc = createFinalizedTensor(
+    const auto meanDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_MEAN_UID,
+                                                toVec(K_BN_INF_VAR_EXT_MEAN_DIMS),
+                                                toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
+    const auto varianceDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_VARIANCE_UID,
+                                                    toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS),
+                                                    toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_SCALE_UID,
+                                                 toVec(K_BN_INF_VAR_EXT_SCALE_DIMS),
+                                                 toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
+    const auto biasDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_BIAS_UID,
+                                                toVec(K_BN_INF_VAR_EXT_BIAS_DIMS),
+                                                toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
+    const auto yDesc = createFinalizedTensor(
         K_BN_INF_VAR_EXT_Y_UID, toVec(K_BN_INF_VAR_EXT_Y_DIMS), toVec(K_BN_INF_VAR_EXT_Y_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_EPSILON_UID,
-                                             toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS),
-                                             toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
-    auto opDesc = createFinalizedBatchnormInferenceVarianceExtOp(xDesc.get(),
-                                                                 meanDesc.get(),
-                                                                 varianceDesc.get(),
-                                                                 scaleDesc.get(),
-                                                                 biasDesc.get(),
-                                                                 yDesc.get(),
-                                                                 epsilonDesc.get());
+    const auto epsilonDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_EPSILON_UID,
+                                                   toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS),
+                                                   toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
+    const auto opDesc = createFinalizedBatchnormInferenceVarianceExtOp(xDesc.get(),
+                                                                       meanDesc.get(),
+                                                                       varianceDesc.get(),
+                                                                       scaleDesc.get(),
+                                                                       biasDesc.get(),
+                                                                       yDesc.get(),
+                                                                       epsilonDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -166,7 +166,7 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, BuildFromSingleOperatio
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
@@ -197,35 +197,35 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, BuildFromSingleOperatio
 
 TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, ComputeDataTypePreserved)
 {
-    auto xDesc = createFinalizedTensor(
+    const auto xDesc = createFinalizedTensor(
         K_BN_INF_VAR_EXT_X_UID, toVec(K_BN_INF_VAR_EXT_X_DIMS), toVec(K_BN_INF_VAR_EXT_X_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_MEAN_UID,
-                                          toVec(K_BN_INF_VAR_EXT_MEAN_DIMS),
-                                          toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
-    auto varianceDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_VARIANCE_UID,
-                                              toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS),
-                                              toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_SCALE_UID,
-                                           toVec(K_BN_INF_VAR_EXT_SCALE_DIMS),
-                                           toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
-    auto biasDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_BIAS_UID,
-                                          toVec(K_BN_INF_VAR_EXT_BIAS_DIMS),
-                                          toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
-    auto yDesc = createFinalizedTensor(
+    const auto meanDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_MEAN_UID,
+                                                toVec(K_BN_INF_VAR_EXT_MEAN_DIMS),
+                                                toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
+    const auto varianceDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_VARIANCE_UID,
+                                                    toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS),
+                                                    toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_SCALE_UID,
+                                                 toVec(K_BN_INF_VAR_EXT_SCALE_DIMS),
+                                                 toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
+    const auto biasDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_BIAS_UID,
+                                                toVec(K_BN_INF_VAR_EXT_BIAS_DIMS),
+                                                toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
+    const auto yDesc = createFinalizedTensor(
         K_BN_INF_VAR_EXT_Y_UID, toVec(K_BN_INF_VAR_EXT_Y_DIMS), toVec(K_BN_INF_VAR_EXT_Y_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_EPSILON_UID,
-                                             toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS),
-                                             toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
-    auto opDesc = createFinalizedBatchnormInferenceVarianceExtOp(xDesc.get(),
-                                                                 meanDesc.get(),
-                                                                 varianceDesc.get(),
-                                                                 scaleDesc.get(),
-                                                                 biasDesc.get(),
-                                                                 yDesc.get(),
-                                                                 epsilonDesc.get(),
-                                                                 HIPDNN_DATA_HALF);
+    const auto epsilonDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_EPSILON_UID,
+                                                   toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS),
+                                                   toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
+    const auto opDesc = createFinalizedBatchnormInferenceVarianceExtOp(xDesc.get(),
+                                                                       meanDesc.get(),
+                                                                       varianceDesc.get(),
+                                                                       scaleDesc.get(),
+                                                                       biasDesc.get(),
+                                                                       yDesc.get(),
+                                                                       epsilonDesc.get(),
+                                                                       HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -235,7 +235,7 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, ComputeDataTypePreserve
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -244,36 +244,36 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, ComputeDataTypePreserve
 
 TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, OperationNamePreservedInSerialization)
 {
-    auto xDesc = createFinalizedTensor(
+    const auto xDesc = createFinalizedTensor(
         K_BN_INF_VAR_EXT_X_UID, toVec(K_BN_INF_VAR_EXT_X_DIMS), toVec(K_BN_INF_VAR_EXT_X_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_MEAN_UID,
-                                          toVec(K_BN_INF_VAR_EXT_MEAN_DIMS),
-                                          toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
-    auto varianceDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_VARIANCE_UID,
-                                              toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS),
-                                              toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_SCALE_UID,
-                                           toVec(K_BN_INF_VAR_EXT_SCALE_DIMS),
-                                           toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
-    auto biasDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_BIAS_UID,
-                                          toVec(K_BN_INF_VAR_EXT_BIAS_DIMS),
-                                          toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
-    auto yDesc = createFinalizedTensor(
+    const auto meanDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_MEAN_UID,
+                                                toVec(K_BN_INF_VAR_EXT_MEAN_DIMS),
+                                                toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
+    const auto varianceDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_VARIANCE_UID,
+                                                    toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS),
+                                                    toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_SCALE_UID,
+                                                 toVec(K_BN_INF_VAR_EXT_SCALE_DIMS),
+                                                 toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
+    const auto biasDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_BIAS_UID,
+                                                toVec(K_BN_INF_VAR_EXT_BIAS_DIMS),
+                                                toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
+    const auto yDesc = createFinalizedTensor(
         K_BN_INF_VAR_EXT_Y_UID, toVec(K_BN_INF_VAR_EXT_Y_DIMS), toVec(K_BN_INF_VAR_EXT_Y_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_EPSILON_UID,
-                                             toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS),
-                                             toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
-    auto opDesc = createFinalizedBatchnormInferenceVarianceExtOp(xDesc.get(),
-                                                                 meanDesc.get(),
-                                                                 varianceDesc.get(),
-                                                                 scaleDesc.get(),
-                                                                 biasDesc.get(),
-                                                                 yDesc.get(),
-                                                                 epsilonDesc.get(),
-                                                                 HIPDNN_DATA_FLOAT,
-                                                                 "test_bn_inf_var_ext_op");
+    const auto epsilonDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_EPSILON_UID,
+                                                   toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS),
+                                                   toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
+    const auto opDesc = createFinalizedBatchnormInferenceVarianceExtOp(xDesc.get(),
+                                                                       meanDesc.get(),
+                                                                       varianceDesc.get(),
+                                                                       scaleDesc.get(),
+                                                                       biasDesc.get(),
+                                                                       yDesc.get(),
+                                                                       epsilonDesc.get(),
+                                                                       HIPDNN_DATA_FLOAT,
+                                                                       "test_bn_inf_var_ext_op");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -283,7 +283,7 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, OperationNamePreservedI
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -292,36 +292,36 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, OperationNamePreservedI
 
 TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, OperationNameRoundTripThroughLifting)
 {
-    auto xDesc = createFinalizedTensor(
+    const auto xDesc = createFinalizedTensor(
         K_BN_INF_VAR_EXT_X_UID, toVec(K_BN_INF_VAR_EXT_X_DIMS), toVec(K_BN_INF_VAR_EXT_X_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_MEAN_UID,
-                                          toVec(K_BN_INF_VAR_EXT_MEAN_DIMS),
-                                          toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
-    auto varianceDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_VARIANCE_UID,
-                                              toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS),
-                                              toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_SCALE_UID,
-                                           toVec(K_BN_INF_VAR_EXT_SCALE_DIMS),
-                                           toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
-    auto biasDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_BIAS_UID,
-                                          toVec(K_BN_INF_VAR_EXT_BIAS_DIMS),
-                                          toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
-    auto yDesc = createFinalizedTensor(
+    const auto meanDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_MEAN_UID,
+                                                toVec(K_BN_INF_VAR_EXT_MEAN_DIMS),
+                                                toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
+    const auto varianceDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_VARIANCE_UID,
+                                                    toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS),
+                                                    toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
+    const auto scaleDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_SCALE_UID,
+                                                 toVec(K_BN_INF_VAR_EXT_SCALE_DIMS),
+                                                 toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
+    const auto biasDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_BIAS_UID,
+                                                toVec(K_BN_INF_VAR_EXT_BIAS_DIMS),
+                                                toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
+    const auto yDesc = createFinalizedTensor(
         K_BN_INF_VAR_EXT_Y_UID, toVec(K_BN_INF_VAR_EXT_Y_DIMS), toVec(K_BN_INF_VAR_EXT_Y_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_EPSILON_UID,
-                                             toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS),
-                                             toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
-    auto opDesc = createFinalizedBatchnormInferenceVarianceExtOp(xDesc.get(),
-                                                                 meanDesc.get(),
-                                                                 varianceDesc.get(),
-                                                                 scaleDesc.get(),
-                                                                 biasDesc.get(),
-                                                                 yDesc.get(),
-                                                                 epsilonDesc.get(),
-                                                                 HIPDNN_DATA_FLOAT,
-                                                                 "test_lifting_name");
+    const auto epsilonDesc = createFinalizedTensor(K_BN_INF_VAR_EXT_EPSILON_UID,
+                                                   toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS),
+                                                   toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
+    const auto opDesc = createFinalizedBatchnormInferenceVarianceExtOp(xDesc.get(),
+                                                                       meanDesc.get(),
+                                                                       varianceDesc.get(),
+                                                                       scaleDesc.get(),
+                                                                       biasDesc.get(),
+                                                                       yDesc.get(),
+                                                                       epsilonDesc.get(),
+                                                                       HIPDNN_DATA_FLOAT,
+                                                                       "test_lifting_name");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
@@ -331,7 +331,7 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, OperationNameRoundTripT
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -343,7 +343,7 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, OperationNameRoundTripT
         tensorMap[t->uid] = TensorDescriptor::fromFlatBuffer(*t);
     }
 
-    auto liftedOp = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
+    const auto liftedOp = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
     ASSERT_NE(liftedOp, nullptr);
 
     // Re-serialize

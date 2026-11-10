@@ -58,7 +58,7 @@ BuildFailure failureOf(Action&& action)
 template <typename Builder>
 BuildFailure buildFailure(Builder& builder)
 {
-    return failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+    return failureOf([&builder] { [[maybe_unused]] const auto built = builder.build(); });
 }
 
 struct TensorSpec

@@ -81,11 +81,12 @@ TEST_F(TestConvolutionBwdPlan, ExecutePlan)
 
     // Calculate dynamic tolerance for conv dgrad
     // ConvolutionBwdTensorBundle initializes dy and w with range [-1.0, 1.0]
-    auto tolerance = conv::calculateConvDgradTolerance<float, float, float>(-1.0,
-                                                                            1.0, // dyMin, dyMax
-                                                                            -1.0,
-                                                                            1.0, // wMin, wMax
-                                                                            wDims); // wDims
+    const auto tolerance
+        = conv::calculateConvDgradTolerance<float, float, float>(-1.0,
+                                                                 1.0, // dyMin, dyMax
+                                                                 -1.0,
+                                                                 1.0, // wMin, wMax
+                                                                 wDims); // wDims
 
     const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
@@ -103,11 +104,11 @@ TEST(TestConvolutionBwdPlanBuilder, PlanConstruction)
 
     auto graphTuple = buildConvolutionBwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const ConvolutionBwdPlanBuilder<DataType::FLOAT,
@@ -116,7 +117,7 @@ TEST(TestConvolutionBwdPlanBuilder, PlanConstruction)
                                     DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<ConvolutionBwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
@@ -133,11 +134,11 @@ TEST(TestConvolutionBwdPlanBuilder, IsApplicable)
 
     auto graphTuple = buildConvolutionBwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const ConvolutionBwdPlanBuilder<DataType::FLOAT,

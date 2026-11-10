@@ -126,11 +126,11 @@ void ConvBwdPlan::execute(const HipdnnMiopenHandle& handle,
                           uint32_t numDeviceBuffers,
                           void* workspace) const
 {
-    auto xBuffer
+    const auto xBuffer
         = hipdnn_plugin_sdk::findDeviceBuffer(_params.dx().uid(), deviceBuffers, numDeviceBuffers);
-    auto wBuffer
+    const auto wBuffer
         = hipdnn_plugin_sdk::findDeviceBuffer(_params.w().uid(), deviceBuffers, numDeviceBuffers);
-    auto yBuffer
+    const auto yBuffer
         = hipdnn_plugin_sdk::findDeviceBuffer(_params.dy().uid(), deviceBuffers, numDeviceBuffers);
 
     size_t workspaceSize = 0;

@@ -47,7 +47,7 @@ public:
                 "ResampleFwd reference spatial parameter ranks must match tensor rank.");
         }
 
-        auto resampleFwdFunc = [&](const std::vector<int64_t>& yIndices) {
+        const auto resampleFwdFunc = [&](const std::vector<int64_t>& yIndices) {
             auto result = mode == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL
                               ? std::numeric_limits<ComputeDataType>::lowest()
                               : static_cast<ComputeDataType>(0);
@@ -124,7 +124,7 @@ public:
             }
         };
 
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(resampleFwdFunc, yDims);
         parallelFunc(std::thread::hardware_concurrency());
 

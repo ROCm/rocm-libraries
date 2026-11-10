@@ -75,11 +75,11 @@ TEST(TestLayernormFpropSignatureKey, HashFunction)
     const LayernormFpropSignatureKey key7{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
-    auto hash3 = key3.hashSelf();
-    auto hash4 = key4.hashSelf();
-    auto hash5 = key5.hashSelf();
-    auto hash6 = key6.hashSelf();
-    auto hash7 = key7.hashSelf();
+    const auto hash3 = key3.hashSelf();
+    const auto hash4 = key4.hashSelf();
+    const auto hash5 = key5.hashSelf();
+    const auto hash6 = key6.hashSelf();
+    const auto hash7 = key7.hashSelf();
 
     EXPECT_TRUE(hash3 != hash4 && hash3 != hash5 && hash4 != hash5 && hash3 != hash6
                 && hash4 != hash6 && hash5 != hash6 && hash3 != hash7 && hash4 != hash7
@@ -106,16 +106,16 @@ TEST(TestLayernormFpropSignatureKey, CreateFromNodeAndTensorMap)
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     const std::vector<int64_t> dims = {1, 1, 1, 1};
     const int64_t normalizedDimCount = 3;
-    auto graph = buildLayernormFpropGraph(DataType::FLOAT,
-                                          DataType::FLOAT,
-                                          DataType::FLOAT,
-                                          DataType::FLOAT,
-                                          dims,
-                                          normalizedDimCount,
-                                          TensorLayout::NHWC);
+    const auto graph = buildLayernormFpropGraph(DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                dims,
+                                                normalizedDimCount,
+                                                TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const LayernormFpropSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());

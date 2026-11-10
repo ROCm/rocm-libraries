@@ -87,7 +87,7 @@ inline std::vector<int64_t> generateStrides(const std::vector<int64_t>& dim,
     });
 
     int64_t accumulator = 1;
-    for(auto idx : indices)
+    for(const auto idx : indices)
     {
         stride[idx] = accumulator;
         accumulator *= dim[idx];
@@ -157,9 +157,9 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
     }
 
     // Attempt to determine between N...C layouts and N...W layouts.
-    auto posFirstMax = static_cast<size_t>(
+    const auto posFirstMax = static_cast<size_t>(
         std::distance(strides.begin(), std::max_element(strides.begin(), strides.end())));
-    auto posFirstMin = static_cast<size_t>(
+    const auto posFirstMin = static_cast<size_t>(
         std::distance(strides.begin(), std::min_element(strides.begin(), strides.end())));
 
     if(posFirstMax == 0 && posFirstMin == 1)
@@ -272,8 +272,8 @@ inline std::vector<int64_t>
     // If axis is set, rotate so the axis dimension becomes most packed
     if(axis.has_value())
     {
-        auto axisVal = static_cast<size_t>(axis.value());
-        auto it = std::find(sortedIndices.begin(), sortedIndices.end(), axisVal);
+        const auto axisVal = static_cast<size_t>(axis.value());
+        const auto it = std::find(sortedIndices.begin(), sortedIndices.end(), axisVal);
         if(it != sortedIndices.end())
         {
             std::rotate(sortedIndices.begin(), it, sortedIndices.end());
@@ -372,7 +372,7 @@ void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
     }
 
     int64_t totalElements = 1;
-    for(auto dim : dims)
+    for(const auto dim : dims)
     {
         totalElements *= dim;
     }
@@ -396,7 +396,7 @@ void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
 
         for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
         {
-            auto dimIdx = static_cast<size_t>(dim);
+            const auto dimIdx = static_cast<size_t>(dim);
             indices[dimIdx]++;
 
             if(indices[dimIdx] < dims[dimIdx])
@@ -469,8 +469,8 @@ inline int64_t calculateGroupCount(const std::vector<int64_t>& inputDims,
                                     + std::to_string(weightDims.size()));
     }
 
-    auto inChannels = inputDims[1];
-    auto wChannels = weightDims[1];
+    const auto inChannels = inputDims[1];
+    const auto wChannels = weightDims[1];
 
     if(inChannels <= 0)
     {

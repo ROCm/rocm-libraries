@@ -80,12 +80,12 @@ public:
         HIPDNN_CHECK_ERROR(detail::validateScalarParameter(attributes.get_epsilon(), "Epsilon"));
 
         // Get tensor references
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
-        auto scale = attributes.get_scale();
-        auto bias = attributes.get_bias();
-        auto mean = attributes.get_mean();
-        auto variance = attributes.get_variance();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
+        const auto scale = attributes.get_scale();
+        const auto bias = attributes.get_bias();
+        const auto mean = attributes.get_mean();
+        const auto variance = attributes.get_variance();
 
         // SECTION 2: Validate Required Tensor Dimensions
         // Why: All required tensors must have dimensions set by user - they are never inferred.
@@ -134,8 +134,8 @@ public:
 
     Error infer_properties_node() override
     {
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
 
         if(!x)
         {

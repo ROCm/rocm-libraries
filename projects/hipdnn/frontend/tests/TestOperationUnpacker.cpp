@@ -79,7 +79,7 @@ TEST(TestOperationUnpacker, DefaultUnpackFromDescriptorReturnsError)
     FakeNodeNoUnpack node;
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
 
-    auto err = node.unpack_from_descriptor(nullptr, tensorMap);
+    const auto err = node.unpack_from_descriptor(nullptr, tensorMap);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(err.get_message().find("not implemented") != std::string::npos);
@@ -91,7 +91,7 @@ TEST(TestOperationUnpacker, DefaultUnpackFromDescriptorIncludesNodeName)
     FakeNodeNoUnpack node;
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
 
-    auto err = node.unpack_from_descriptor(nullptr, tensorMap);
+    const auto err = node.unpack_from_descriptor(nullptr, tensorMap);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(err.get_message().find("FakeNodeNoUnpack") != std::string::npos);
@@ -282,7 +282,7 @@ TEST(TestCreateNodeForType, CreatesBatchnormNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<BatchnormNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<BatchnormNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -292,7 +292,7 @@ TEST(TestCreateNodeForType, CreatesBatchnormBackwardNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<BatchnormBackwardNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<BatchnormBackwardNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -302,7 +302,7 @@ TEST(TestCreateNodeForType, CreatesBatchnormInferenceNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<BatchnormInferenceNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<BatchnormInferenceNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -313,7 +313,7 @@ TEST(TestCreateNodeForType, CreatesBatchnormInferenceNodeVarianceExt)
         = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<BatchnormInferenceNodeVarianceExt>(node);
+    const auto typedNode = std::dynamic_pointer_cast<BatchnormInferenceNodeVarianceExt>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -356,7 +356,7 @@ TEST(TestCreateNodeForType, CreatesConvFpropNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto convNode = std::dynamic_pointer_cast<ConvolutionFpropNode>(node);
+    const auto convNode = std::dynamic_pointer_cast<ConvolutionFpropNode>(node);
     EXPECT_NE(convNode, nullptr);
 }
 
@@ -367,7 +367,7 @@ TEST(TestCreateNodeForType, CreatesBlockScaleQuantizeNode)
         = createNodeForType(HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto bsqNode = std::dynamic_pointer_cast<BlockScaleQuantizeNode>(node);
+    const auto bsqNode = std::dynamic_pointer_cast<BlockScaleQuantizeNode>(node);
     EXPECT_NE(bsqNode, nullptr);
 }
 
@@ -378,7 +378,7 @@ TEST(TestCreateNodeForType, CreatesConvWgradNode)
         = createNodeForType(HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto wgradNode = std::dynamic_pointer_cast<ConvolutionWgradNode>(node);
+    const auto wgradNode = std::dynamic_pointer_cast<ConvolutionWgradNode>(node);
     EXPECT_NE(wgradNode, nullptr);
 }
 
@@ -388,7 +388,7 @@ TEST(TestCreateNodeForType, CreatesCustomOpNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_CUSTOM_OP_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<CustomOpNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<CustomOpNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -398,7 +398,7 @@ TEST(TestCreateNodeForType, CreatesLayerNormNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_LAYERNORM_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<LayerNormNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<LayerNormNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -408,7 +408,7 @@ TEST(TestCreateNodeForType, CreatesMatmulNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_MATMUL_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<MatmulNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<MatmulNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -418,7 +418,7 @@ TEST(TestCreateNodeForType, CreatesPointwiseNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_POINTWISE_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<PointwiseNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<PointwiseNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -428,7 +428,7 @@ TEST(TestCreateNodeForType, CreatesRMSNormNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_RMSNORM_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<RMSNormNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<RMSNormNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -438,7 +438,7 @@ TEST(TestCreateNodeForType, CreatesRMSNormBackwardNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_RMSNORM_BACKWARD_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<RMSNormBackwardNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<RMSNormBackwardNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -448,7 +448,7 @@ TEST(TestCreateNodeForType, CreatesSdpaBwdNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_SDPA_BACKWARD_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto sdpaNode = std::dynamic_pointer_cast<SdpaBwdNode>(node);
+    const auto sdpaNode = std::dynamic_pointer_cast<SdpaBwdNode>(node);
     EXPECT_NE(sdpaNode, nullptr);
 }
 
@@ -458,7 +458,7 @@ TEST(TestCreateNodeForType, CreatesSdpaFwdNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_SDPA_FORWARD_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<SdpaFwdNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<SdpaFwdNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -469,7 +469,7 @@ TEST(TestCreateNodeForType, CreatesBlockScaleDequantizeNode)
         = createNodeForType(HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto bsdNode = std::dynamic_pointer_cast<BlockScaleDequantizeNode>(node);
+    const auto bsdNode = std::dynamic_pointer_cast<BlockScaleDequantizeNode>(node);
     EXPECT_NE(bsdNode, nullptr);
 }
 
@@ -479,7 +479,7 @@ TEST(TestCreateNodeForType, CreatesReductionNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_REDUCTION_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<ReductionNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<ReductionNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -489,7 +489,7 @@ TEST(TestCreateNodeForType, CreatesLayernormBackwardNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_LAYERNORM_BACKWARD_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<LayernormBackwardNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<LayernormBackwardNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -499,7 +499,7 @@ TEST(TestCreateNodeForType, CreatesResampleFwdNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_RESAMPLE_FWD, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<ResampleFwdNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<ResampleFwdNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
@@ -509,14 +509,14 @@ TEST(TestCreateNodeForType, CreatesResampleBwdNode)
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_RESAMPLE_BWD_EXT, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
-    auto typedNode = std::dynamic_pointer_cast<ResampleBwdNode>(node);
+    const auto typedNode = std::dynamic_pointer_cast<ResampleBwdNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 
 TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
 {
     const GraphAttributes graphAttrs;
-    auto unknownType = static_cast<hipdnnOperationType_ext_t>(999);
+    const auto unknownType = static_cast<hipdnnOperationType_ext_t>(999);
     auto [node, err] = createNodeForType(unknownType, graphAttrs);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);

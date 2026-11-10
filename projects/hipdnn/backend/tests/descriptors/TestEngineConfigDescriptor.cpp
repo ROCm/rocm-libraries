@@ -125,7 +125,7 @@ TEST_F(TestEngineConfigDescriptor, HeuristicResultDefersSelectionUntilWorkspaceI
     setEngine();
     hipdnn_flatbuffers_sdk::data_objects::EngineConfigT scored;
     scored.engine_id = 1;
-    auto config = getEngineConfigDescriptor();
+    const auto config = getEngineConfigDescriptor();
     config->setEngineConfig(scored, true);
     config->finalize();
     EXPECT_EQ(selections, 0u);
@@ -219,7 +219,7 @@ TEST_F(TestEngineConfigDescriptor, ScoredKnobsSurviveConfigSerializationRoundTri
 
     // Deserialization must restore the exact scored knobs, not synthesize
     // an engine-only config that would run the selector again.
-    auto second = std::make_shared<EngineConfigDescriptor>();
+    const auto second = std::make_shared<EngineConfigDescriptor>();
     EXPECT_CALL(*getMockEngine(), isFinalized()).WillOnce(Return(true));
     second->setAttribute(
         HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper);
@@ -266,7 +266,7 @@ TEST_F(TestEngineConfigDescriptor, RankingMetricRoundTripsIntoTheSerializedConfi
 {
     EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
     setEngine();
-    auto config = getEngineConfigDescriptor();
+    const auto config = getEngineConfigDescriptor();
 
     std::array<char, 16> readBack{};
     int64_t count = 0;
@@ -304,7 +304,7 @@ TEST_F(TestEngineConfigDescriptor, RankingMetricRoundTripsIntoTheSerializedConfi
 TEST_F(TestEngineConfigDescriptor, EngineConfigRejectsEngineCatalogInspectionAttributes)
 {
     // Catalog enumeration belongs to the engine descriptor, never an engine config (RFC 0017 §3).
-    auto config = getEngineConfigDescriptor();
+    const auto config = getEngineConfigDescriptor();
     const int64_t value = 1;
     for(const auto attribute : {HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT,
                                 HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT,
@@ -317,7 +317,7 @@ TEST_F(TestEngineConfigDescriptor, EngineConfigRejectsEngineCatalogInspectionAtt
 
 TEST_F(TestEngineConfigDescriptor, PredictionEvaluateFlagRejectsValuesOutsideZeroOrOne)
 {
-    auto config = getEngineConfigDescriptor();
+    const auto config = getEngineConfigDescriptor();
     const int64_t evaluate = 2;
     ASSERT_THROW_HIPDNN_STATUS(
         config->setAttribute(
@@ -327,7 +327,7 @@ TEST_F(TestEngineConfigDescriptor, PredictionEvaluateFlagRejectsValuesOutsideZer
 
 TEST_F(TestEngineConfigDescriptor, CreateEngineConfigDescriptor)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
     ASSERT_NE(engineConfig, nullptr);
     ASSERT_FALSE(engineConfig->isFinalized());
     ASSERT_EQ(engineConfig->getType(), HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
@@ -335,7 +335,7 @@ TEST_F(TestEngineConfigDescriptor, CreateEngineConfigDescriptor)
 
 TEST_F(TestEngineConfigDescriptor, SetEngineConfigDescriptorEngine)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
     EXPECT_CALL(*getMockEngineBadType(), isFinalized()).Times(1);
     EXPECT_CALL(*getMockEngine(), getEngineId()).Times(AnyNumber());
@@ -385,7 +385,7 @@ TEST_F(TestEngineConfigDescriptor, SetEngineConfigDescriptorEngine)
 
 TEST_F(TestEngineConfigDescriptor, SetAttrOnFinalizedEngineConfigDescriptor)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
     makeEngineConfigFinalized();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -396,7 +396,7 @@ TEST_F(TestEngineConfigDescriptor, SetAttrOnFinalizedEngineConfigDescriptor)
 
 TEST_F(TestEngineConfigDescriptor, FinalizeEngineConfigDescriptor)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(engineConfig->finalize(), HIPDNN_STATUS_BAD_PARAM);
 
     makeEngineConfigFinalized();
@@ -404,7 +404,7 @@ TEST_F(TestEngineConfigDescriptor, FinalizeEngineConfigDescriptor)
 
 TEST_F(TestEngineConfigDescriptor, GetAttrOnUnfinalizedEngineConfigDescriptor)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
     hipdnnBackendDescriptor_t dummyEngine = nullptr;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -415,7 +415,7 @@ TEST_F(TestEngineConfigDescriptor, GetAttrOnUnfinalizedEngineConfigDescriptor)
 
 TEST_F(TestEngineConfigDescriptor, GetEngineConfigDescriptorUnsupportedAttr)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
     hipdnnBackendDescriptor_t dummy = nullptr;
 
     makeEngineConfigFinalized();
@@ -430,7 +430,7 @@ TEST_F(TestEngineConfigDescriptor, GetEngineConfigDescriptorUnsupportedAttr)
 
 TEST_F(TestEngineConfigDescriptor, GetEngineConfigDescriptorEngine)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
     ScopedDescriptor engine;
     ScopedDescriptor engine2;
     makeEngineConfigFinalized();
@@ -470,15 +470,15 @@ TEST_F(TestEngineConfigDescriptor, GetEngineConfigDescriptorEngine)
 
 TEST_F(TestEngineConfigDescriptor, GetEngineThrowsIfNotFinalized)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(engineConfig->getEngine(), HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
 TEST_F(TestEngineConfigDescriptor, GetEngineReturnsPointerIfFinalized)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
     makeEngineConfigFinalized();
-    auto enginePtr = engineConfig->getEngine();
+    const auto enginePtr = engineConfig->getEngine();
     ASSERT_NE(enginePtr, nullptr);
     ASSERT_EQ(static_cast<const IBackendDescriptor*>(enginePtr.get()),
               static_cast<const IBackendDescriptor*>(getMockEngine().get()));
@@ -486,7 +486,7 @@ TEST_F(TestEngineConfigDescriptor, GetEngineReturnsPointerIfFinalized)
 
 TEST_F(TestEngineConfigDescriptor, GetEngineDescriptorMaxWorkspaceSize)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
     int64_t workspaceSize = 0;
 
     makeEngineConfigFinalized();
@@ -523,9 +523,9 @@ static flatbuffers::DetachedBuffer createSerializedKnobSetting(const std::string
                                                                int64_t value)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto knobIdOffset = builder.CreateString(knobId);
-    auto intValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, value);
-    auto knobSetting = hipdnn_flatbuffers_sdk::data_objects::CreateKnobSetting(
+    const auto knobIdOffset = builder.CreateString(knobId);
+    const auto intValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, value);
+    const auto knobSetting = hipdnn_flatbuffers_sdk::data_objects::CreateKnobSetting(
         builder,
         knobIdOffset,
         hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue,
@@ -536,7 +536,7 @@ static flatbuffers::DetachedBuffer createSerializedKnobSetting(const std::string
 
 TEST_F(TestEngineConfigDescriptor, PredictionConstraintsDoNotRequireEngineMaterialization)
 {
-    auto config = getEngineConfigDescriptor();
+    const auto config = getEngineConfigDescriptor();
     auto knobBuffer = createSerializedKnobSetting("tile", 128);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
     config->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
@@ -554,7 +554,7 @@ TEST_F(TestEngineConfigDescriptor, PredictionConstraintsDoNotRequireEngineMateri
 
 TEST_F(TestEngineConfigDescriptor, PredictionAttributeValidatesTheRequestBeforeAnyPluginQuery)
 {
-    auto config = getEngineConfigDescriptor();
+    const auto config = getEngineConfigDescriptor();
     EXPECT_CALL(*_mockEnginePluginResourceManager, getEnginePrediction(_, _, _, _)).Times(0);
     hipdnnBackendFlatbufferData_t data{};
     int64_t count = 0;
@@ -605,7 +605,7 @@ TEST_F(TestEngineConfigDescriptor, PredictionAsksForTheConfigurationLayerOnceAnd
     EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
     EXPECT_CALL(*getMockEngine(), getGraph()).WillRepeatedly(Return(getMockGraphDescriptor()));
     setEngine();
-    auto config = getEngineConfigDescriptor();
+    const auto config = getEngineConfigDescriptor();
     auto knobBuffer = createSerializedKnobSetting("tile", 128);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
     config->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
@@ -743,7 +743,7 @@ TEST_F(TestEngineConfigDescriptor, PredictionConfigMustBelongToItsEngineAndGraph
     EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
     EXPECT_CALL(*getMockEngine(), getGraph()).WillRepeatedly(Return(getMockGraphDescriptor()));
     setEngine();
-    auto config = getEngineConfigDescriptor();
+    const auto config = getEngineConfigDescriptor();
     const auto* graph = getMockGraphDescriptor().get();
 
     ASSERT_THROW_HIPDNN_STATUS(std::ignore = config->getEngineConfigForPrediction(2, graph),
@@ -758,7 +758,7 @@ TEST_F(TestEngineConfigDescriptor, ScoredConfigRejectsNonFiniteFloatKnobs)
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
     EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
     setEngine();
-    auto config = getEngineConfigDescriptor();
+    const auto config = getEngineConfigDescriptor();
     const auto withFloatKnob = [](double value) {
         fb::EngineConfigT scored;
         scored.engine_id = 1;
@@ -788,7 +788,7 @@ TEST_F(TestEngineConfigDescriptor, ScoredConfigRejectsNonFiniteFloatKnobs)
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceInvalidType)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
     auto knobBuffer = createSerializedKnobSetting("test_knob_100", 42);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
@@ -802,7 +802,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceInvalidType)
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceInvalidCount)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
     auto knobBuffer = createSerializedKnobSetting("test_knob_100", 42);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
@@ -817,7 +817,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceInvalidCount)
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceNullPointer)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                                           HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
@@ -828,7 +828,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceNullPointer)
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceNullFlatbufferPointer)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
     hipdnnBackendFlatbufferData_t knobData = {nullptr, 100};
 
@@ -841,7 +841,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceNullFlatbufferPointer)
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceZeroSize)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
     auto knobBuffer = createSerializedKnobSetting("test_knob_100", 42);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), 0};
@@ -855,7 +855,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceZeroSize)
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceSuccess)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
     EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
     EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
@@ -876,7 +876,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceSuccess)
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceMultipleKnobs)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
     EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
     EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
@@ -900,7 +900,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceMultipleKnobs)
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceOnFinalizedDescriptor)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
     makeEngineConfigFinalized();
 
     auto knobBuffer = createSerializedKnobSetting("test_knob_100", 42);
@@ -918,7 +918,7 @@ static std::unique_ptr<HipdnnBackendDescriptor>
     createFinalizedKnobSettingDescriptor(const std::string& knobId, int64_t value)
 {
     auto wrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
-    auto desc = wrapper->asDescriptor<KnobSettingDescriptor>();
+    const auto desc = wrapper->asDescriptor<KnobSettingDescriptor>();
     desc->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
                        HIPDNN_TYPE_CHAR,
                        static_cast<int64_t>(knobId.size()),
@@ -930,7 +930,7 @@ static std::unique_ptr<HipdnnBackendDescriptor>
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorSuccess)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
     EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
     EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
@@ -938,7 +938,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorSuccess)
     ASSERT_NO_THROW(engineConfig->setAttribute(
         HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper));
 
-    auto knobWrapper = createFinalizedKnobSettingDescriptor("test_knob_100", 42);
+    const auto knobWrapper = createFinalizedKnobSettingDescriptor("test_knob_100", 42);
     auto* knobPtr = knobWrapper.get();
 
     ASSERT_NO_THROW(engineConfig->setAttribute(HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES,
@@ -949,7 +949,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorSuccess)
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorMultiple)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
     EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
     EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
@@ -957,8 +957,8 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorMultiple)
     ASSERT_NO_THROW(engineConfig->setAttribute(
         HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper));
 
-    auto knobWrapper1 = createFinalizedKnobSettingDescriptor("knob_1", 10);
-    auto knobWrapper2 = createFinalizedKnobSettingDescriptor("knob_2", 20);
+    const auto knobWrapper1 = createFinalizedKnobSettingDescriptor("knob_1", 10);
+    const auto knobWrapper2 = createFinalizedKnobSettingDescriptor("knob_2", 20);
     std::array<HipdnnBackendDescriptor*, 2> knobPtrs = {knobWrapper1.get(), knobWrapper2.get()};
 
     ASSERT_NO_THROW(engineConfig->setAttribute(HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES,
@@ -969,7 +969,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorMultiple)
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorRejectNotFinalized)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
     EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
     EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
@@ -978,7 +978,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorRejectNotFinalized)
         HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper));
 
     // Create a non-finalized knob descriptor
-    auto knobWrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
+    const auto knobWrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
     auto* knobPtr = knobWrapper.get();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -989,9 +989,9 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorRejectNotFinalized)
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorRejectWrongType)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
-    auto knobWrapper = createFinalizedKnobSettingDescriptor("test_knob", 42);
+    const auto knobWrapper = createFinalizedKnobSettingDescriptor("test_knob", 42);
     auto* knobPtr = knobWrapper.get();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -1002,7 +1002,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorRejectWrongType)
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorRejectExceedsMaxCount)
 {
-    auto engineConfig = getEngineConfigDescriptor();
+    const auto engineConfig = getEngineConfigDescriptor();
 
     EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
     EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
@@ -1010,7 +1010,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorRejectExceedsMaxCou
     ASSERT_NO_THROW(engineConfig->setAttribute(
         HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper));
 
-    auto knobWrapper = createFinalizedKnobSettingDescriptor("test_knob", 42);
+    const auto knobWrapper = createFinalizedKnobSettingDescriptor("test_knob", 42);
     auto* knobPtr = knobWrapper.get();
 
     ASSERT_THROW_HIPDNN_STATUS(

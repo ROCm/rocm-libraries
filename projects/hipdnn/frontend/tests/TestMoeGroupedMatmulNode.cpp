@@ -26,26 +26,26 @@ MoeGroupedMatmulAttributes createValidAttributes()
 {
     MoeGroupedMatmulAttributes attrs;
 
-    auto token = std::make_shared<TensorAttributes>();
+    const auto token = std::make_shared<TensorAttributes>();
     token->set_uid(1900)
         .set_dim({1, 8, 16})
         .set_stride({128, 16, 1})
         .set_data_type(DataType::FLOAT);
     attrs.set_token(token);
 
-    auto weight = std::make_shared<TensorAttributes>();
+    const auto weight = std::make_shared<TensorAttributes>();
     weight->set_uid(1901)
         .set_dim({2, 16, 32})
         .set_stride({512, 32, 1})
         .set_data_type(DataType::FLOAT);
     attrs.set_weight(weight);
 
-    auto firstTokenOffset = std::make_shared<TensorAttributes>();
+    const auto firstTokenOffset = std::make_shared<TensorAttributes>();
     firstTokenOffset->set_uid(1902).set_dim({2, 1, 1}).set_stride({1, 1, 1}).set_data_type(
         DataType::INT32);
     attrs.set_first_token_offset(firstTokenOffset);
 
-    auto output = std::make_shared<TensorAttributes>();
+    const auto output = std::make_shared<TensorAttributes>();
     output->set_uid(1905)
         .set_dim({1, 8, 32})
         .set_stride({256, 32, 1})
@@ -245,7 +245,7 @@ TEST(TestMoeGroupedMatmulNode, ScatterRequiresValidRoutingAndBoundedTopK)
 TEST(TestMoeGroupedMatmulNode, GatherInfersOutputDimensionsAndStrides)
 {
     auto attrs = createValidAttributes();
-    auto output = std::make_shared<TensorAttributes>();
+    const auto output = std::make_shared<TensorAttributes>();
     attrs.set_mode(MoeGroupedMatmulMode::GATHER)
         .set_token_index(makeRoutingTensor(6))
         .set_output(output);
@@ -262,8 +262,8 @@ TEST(TestMoeGroupedMatmulNode, GatherInfersOutputDimensionsAndStrides)
 TEST(TestMoeGroupedMatmulNode, ScatterInfersSourceTokenOutputDimensionsAndStrides)
 {
     auto attrs = createValidAttributes();
-    auto output = std::make_shared<TensorAttributes>();
-    auto tokenKs = makeRoutingTensor(6);
+    const auto output = std::make_shared<TensorAttributes>();
+    const auto tokenKs = makeRoutingTensor(6);
     tokenKs->set_uid(1904);
     attrs.set_mode(MoeGroupedMatmulMode::SCATTER)
         .set_token_index(makeRoutingTensor(6))
@@ -283,7 +283,7 @@ TEST(TestMoeGroupedMatmulNode, ScatterInfersSourceTokenOutputDimensionsAndStride
 TEST(TestMoeGroupedMatmulNode, NoneInfersOutputDimensionsAndRejectsMismatch)
 {
     auto attrs = createValidAttributes();
-    auto output = std::make_shared<TensorAttributes>();
+    const auto output = std::make_shared<TensorAttributes>();
     attrs.set_output(output);
 
     const GraphAttributes graphAttrs;
@@ -306,7 +306,7 @@ TEST_F(TestMoeGroupedMatmulNodeCreateOperation, PropagatesBackendError)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
-    auto node = makeNode();
+    const auto node = makeNode();
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
     std::vector<ScopedHipdnnBackendDescriptor> operations;
     const auto error = node.create_operation(tensorDescs, operations);
@@ -333,7 +333,7 @@ TEST_F(TestMoeGroupedMatmulNodeCreateOperation, SuccessCreatesFourTensorsAndOneO
         .Times(5)
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto node = makeNode();
+    const auto node = makeNode();
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
     std::vector<ScopedHipdnnBackendDescriptor> operations;
     const auto error = node.create_operation(tensorDescs, operations);

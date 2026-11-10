@@ -102,20 +102,20 @@ flatbuffers::FlatBufferBuilder makePagedGraph(const PagedLayout& layout = {})
         add(9, "PageTableV", DataType::INT32, vTableStrides, layout.vTableDims);
     }
 
-    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    const auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_fwd_node",
                                      DataType::FLOAT,
                                      NodeAttributes::SdpaAttributes,
                                      sdpaAttrs.Union()));
-    auto graph = CreateGraphDirect(builder,
-                                   "SdpaFwdPagedGraph",
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   &tensors,
-                                   &nodes);
+    const auto graph = CreateGraphDirect(builder,
+                                         "SdpaFwdPagedGraph",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensors,
+                                         &nodes);
     builder.Finish(graph);
     return builder;
 }
@@ -135,7 +135,7 @@ void expectExecutorMatchesCpuExecutor(const PagedLayout& layout,
                                       const std::vector<int32_t>& kBlocks,
                                       const std::vector<int32_t>& vBlocks)
 {
-    auto graph = makePagedGraph(layout);
+    const auto graph = makePagedGraph(layout);
 
     hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
     ASSERT_TRUE(cpuExecutor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
@@ -206,7 +206,7 @@ const std::vector<int32_t> V_BLOCKS = {2, 0, 1, 0};
 TEST(TestGpuSdpaPagedFwdPlan, ExecutorMatchesCpuExecutor)
 {
     SKIP_IF_NO_DEVICES();
-    auto graph = makePagedGraph();
+    const auto graph = makePagedGraph();
 
     hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor gpuExecutor;
     ASSERT_TRUE(gpuExecutor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));

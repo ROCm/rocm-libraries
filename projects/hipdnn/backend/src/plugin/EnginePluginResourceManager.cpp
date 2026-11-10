@@ -207,9 +207,9 @@ const std::vector<EngineInfo>& EnginePluginResourceManager::buildEngineIndex() c
     const auto& plugins = _pm->getPlugins();
     for(const auto& plugin : plugins)
     {
-        auto pluginVersion = std::string(plugin->version());
-        auto pluginType = std::string(::toString(plugin->type()));
-        auto pluginName = std::string(plugin->name());
+        const auto pluginVersion = std::string(plugin->version());
+        const auto pluginType = std::string(::toString(plugin->type()));
+        const auto pluginName = std::string(plugin->name());
 
         // The accepted set omits engines dropped at load time, so they reach
         // neither the enumeration nor the reverse index.
@@ -305,7 +305,7 @@ std::string EnginePluginResourceManager::resolveEngineName(
 
 std::shared_ptr<EnginePluginResourceManager> EnginePluginResourceManager::create()
 {
-    auto pm = getOrCreatePluginManager();
+    const auto pm = getOrCreatePluginManager();
     return std::make_shared<EnginePluginResourceManager>(pm);
 }
 
@@ -318,7 +318,8 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
     : PluginResourceManagerBase(std::move(pm))
 {
     // Helper to safely destroy a handle during error cleanup, logging any failures
-    auto safeDestroyHandle = [](const EnginePlugin* plugin, hipdnnEnginePluginHandle_t handle) {
+    const auto safeDestroyHandle = [](const EnginePlugin* plugin,
+                                      hipdnnEnginePluginHandle_t handle) {
         try
         {
             plugin->destroyHandle(handle);
@@ -386,7 +387,8 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
 EnginePluginResourceManager::~EnginePluginResourceManager()
 {
     // Lambda to safely destroy a handle, catching all errors
-    auto safeDestroyHandle = [](const EnginePlugin* plugin, hipdnnEnginePluginHandle_t handle) {
+    const auto safeDestroyHandle = [](const EnginePlugin* plugin,
+                                      hipdnnEnginePluginHandle_t handle) {
         try
         {
             plugin->destroyHandle(handle);
@@ -477,7 +479,7 @@ std::vector<int64_t> EnginePluginResourceManager::queryApplicableEngineIds(
         ownerHandle = ownerIt->second;
     }
 
-    auto serializedGraphData = graphDesc->getSerializedGraph();
+    const auto serializedGraphData = graphDesc->getSerializedGraph();
 
     // Applicability filter: all graphs require the baseline engine plugin API,
     // and graphs that opt in to overridable tensor shapes require the extended
@@ -598,14 +600,14 @@ void EnginePluginResourceManager::getEngineDetails(int64_t engineId,
     THROW_IF_NULL(graphDesc, HIPDNN_STATUS_INTERNAL_ERROR, "Graph descriptor cannot be null");
     THROW_IF_NULL(engineDetails, HIPDNN_STATUS_INTERNAL_ERROR, "Engine details cannot be null");
 
-    auto it = _engineIdToHandle.find(engineId);
+    const auto it = _engineIdToHandle.find(engineId);
     if(it == _engineIdToHandle.end())
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
                               "Invalid engine ID: " + std::to_string(engineId));
     }
 
-    auto serializedGraphData = graphDesc->getSerializedGraph();
+    const auto serializedGraphData = graphDesc->getSerializedGraph();
 
     auto handle = it->second;
     auto plugin = _handleToPlugin.at(handle);
@@ -901,14 +903,14 @@ size_t EnginePluginResourceManager::getWorkspaceSize(int64_t engineId,
     THROW_IF_NULL(engineConfig, HIPDNN_STATUS_INTERNAL_ERROR, "Engine config cannot be null");
     THROW_IF_NULL(graphDesc, HIPDNN_STATUS_INTERNAL_ERROR, "Graph descriptor cannot be null");
 
-    auto it = _engineIdToHandle.find(engineId);
+    const auto it = _engineIdToHandle.find(engineId);
     if(it == _engineIdToHandle.end())
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
                               "Invalid engine ID: " + std::to_string(engineId));
     }
 
-    auto serializedGraphData = graphDesc->getSerializedGraph();
+    const auto serializedGraphData = graphDesc->getSerializedGraph();
 
     auto handle = it->second;
     auto plugin = _handleToPlugin.at(handle);
@@ -926,14 +928,14 @@ hipdnnEnginePluginExecutionContext_t
     THROW_IF_NULL(engineConfig, HIPDNN_STATUS_BAD_PARAM, "Engine config cannot be null");
     THROW_IF_NULL(graphDesc, HIPDNN_STATUS_BAD_PARAM, "Graph descriptor cannot be null");
 
-    auto it = _engineIdToHandle.find(engineId);
+    const auto it = _engineIdToHandle.find(engineId);
     if(it == _engineIdToHandle.end())
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
                               "Invalid engine ID: " + std::to_string(engineId));
     }
 
-    auto serializedGraphData = graphDesc->getSerializedGraph();
+    const auto serializedGraphData = graphDesc->getSerializedGraph();
 
     auto handle = it->second;
     auto plugin = _handleToPlugin.at(handle);
@@ -948,7 +950,7 @@ hipdnnEnginePluginExecutionContext_t
     THROW_IF_NULL(
         serializedContext, HIPDNN_STATUS_BAD_PARAM, "Serialized execution context cannot be null");
 
-    auto it = _engineIdToHandle.find(engineId);
+    const auto it = _engineIdToHandle.find(engineId);
     if(it == _engineIdToHandle.end())
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
@@ -995,7 +997,7 @@ size_t EnginePluginResourceManager::getWorkspaceSize(
     THROW_IF_NULL(
         executionContext, HIPDNN_STATUS_INTERNAL_ERROR, "Execution context cannot be null");
 
-    auto it = _engineIdToHandle.find(engineId);
+    const auto it = _engineIdToHandle.find(engineId);
     if(it == _engineIdToHandle.end())
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
@@ -1015,7 +1017,7 @@ void EnginePluginResourceManager::serializeExecutionContext(
 {
     THROW_IF_NULL(executionContext, HIPDNN_STATUS_BAD_PARAM, "Execution context cannot be null");
 
-    auto it = _engineIdToHandle.find(engineId);
+    const auto it = _engineIdToHandle.find(engineId);
     if(it == _engineIdToHandle.end())
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
@@ -1065,8 +1067,8 @@ void EnginePluginResourceManager::executeOpGraph(
 void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t executionPlan,
                                                  hipdnnBackendDescriptor_t variantPack) const
 {
-    auto executionPlanDesc = executionPlan->asDescriptor<ExecutionPlanDescriptor>();
-    auto variantPackDesc = variantPack->asDescriptor<VariantDescriptor>();
+    const auto executionPlanDesc = executionPlan->asDescriptor<ExecutionPlanDescriptor>();
+    const auto variantPackDesc = variantPack->asDescriptor<VariantDescriptor>();
 
     THROW_IF_FALSE(executionPlanDesc->isFinalized(),
                    HIPDNN_STATUS_BAD_PARAM,
@@ -1078,7 +1080,7 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                    "Engine_plugin_resource_manager::execute_op_graph failed: variantPackDesc is "
                    "not finalized");
 
-    auto engineId = executionPlanDesc->getEngineId();
+    const auto engineId = executionPlanDesc->getEngineId();
     void* workspace = variantPackDesc->getWorkspace();
 
     auto& tensorIds = variantPackDesc->getTensorIds();
@@ -1159,7 +1161,7 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                     "Override variant pack: OVERRIDE_UNIQUE_IDS and OVERRIDE_LENGTHS must have "
                     "the same size");
 
-        auto handleIt = _engineIdToHandle.find(engineId);
+        const auto handleIt = _engineIdToHandle.find(engineId);
         THROW_IF_FALSE(
             handleIt != _engineIdToHandle.end(),
             HIPDNN_STATUS_INTERNAL_ERROR,
@@ -1478,7 +1480,7 @@ std::string EnginePluginResourceManager::toString() const
         return "EnginePluginResourceManager: {loadedPlugins=0}";
     }
 
-    auto loadedPlugins = _pm->getLoadedPluginFiles();
+    const auto loadedPlugins = _pm->getLoadedPluginFiles();
 
     std::vector<std::string> pluginPathStrings;
     pluginPathStrings.reserve(loadedPlugins.size());

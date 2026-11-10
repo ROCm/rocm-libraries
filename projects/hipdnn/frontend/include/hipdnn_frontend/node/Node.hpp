@@ -72,7 +72,7 @@ public:
         [[maybe_unused]] hipdnnBackendDescriptor_t opDesc,
         [[maybe_unused]] std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        auto nodeName = getNodeName();
+        const auto nodeName = getNodeName();
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
                 "unpack_from_descriptor not implemented for node"
                     + (nodeName.empty() ? std::string{} : ": " + nodeName)};
@@ -214,7 +214,7 @@ public:
         // Collect a tensor and any auxiliary tensors it references (e.g. its
         // ragged-offset tensor), so auxiliaries also receive UIDs and take part
         // in variant-pack validation and lowering.
-        auto insertWithAux = [&](const std::shared_ptr<TensorAttributes>& tensor) {
+        const auto insertWithAux = [&](const std::shared_ptr<TensorAttributes>& tensor) {
             if(!tensor)
             {
                 return;

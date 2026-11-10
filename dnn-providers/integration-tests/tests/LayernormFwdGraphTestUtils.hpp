@@ -81,7 +81,7 @@ inline flatbuffers::FlatBufferBuilder
                                                        &invVarianceDims.value()));
     }
 
-    auto layernormAttrs = CreateLayernormAttributes(
+    const auto layernormAttrs = CreateLayernormAttributes(
         builder,
         xUid,
         scaleUid,
@@ -101,13 +101,13 @@ inline flatbuffers::FlatBufferBuilder
                                      NodeAttributes::LayernormAttributes,
                                      layernormAttrs.Union()));
 
-    auto graph = CreateGraphDirect(builder,
-                                   "LayernormFwdTestGraph",
-                                   computeDataType,
-                                   scaleBiasDataType,
-                                   xDataType,
-                                   &tensors,
-                                   &nodes);
+    const auto graph = CreateGraphDirect(builder,
+                                         "LayernormFwdTestGraph",
+                                         computeDataType,
+                                         scaleBiasDataType,
+                                         xDataType,
+                                         &tensors,
+                                         &nodes);
 
     builder.Finish(graph);
     return builder;

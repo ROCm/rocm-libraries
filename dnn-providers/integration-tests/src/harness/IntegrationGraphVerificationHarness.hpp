@@ -66,7 +66,7 @@ inline void checkEngineSupportOrSkip(hipdnn_frontend::graph::Graph& graph,
                                      const std::string& testCaseLayout = "")
 {
     std::vector<int64_t> engineIds;
-    auto status = graph.get_ranked_engine_ids(engineIds);
+    const auto status = graph.get_ranked_engine_ids(engineIds);
 
     // Record support information for the support matrix output
     if(SupportMatrixCollector::get().isEnabled())

@@ -51,18 +51,18 @@ TEST(TestCudnnShimGraphNodes, ConvFpropValidGraphValidates)
     fe::graph::Graph graph;
     graph.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
 
-    auto x = graph.tensor(fe::graph::Tensor_attributes{}
-                              .set_name("image")
-                              .set_dim({n, c, h, w})
-                              .set_stride({c * h * w, 1, c * w, c})
-                              .set_uid(1));
-    auto weight = graph.tensor(fe::graph::Tensor_attributes{}
-                                   .set_name("filter")
-                                   .set_dim({k, c, r, s})
-                                   .set_stride({c * r * s, 1, c * s, c})
-                                   .set_uid(2));
+    const auto x = graph.tensor(fe::graph::Tensor_attributes{}
+                                    .set_name("image")
+                                    .set_dim({n, c, h, w})
+                                    .set_stride({c * h * w, 1, c * w, c})
+                                    .set_uid(1));
+    const auto weight = graph.tensor(fe::graph::Tensor_attributes{}
+                                         .set_name("filter")
+                                         .set_dim({k, c, r, s})
+                                         .set_stride({c * r * s, 1, c * s, c})
+                                         .set_uid(2));
 
-    auto y = graph.conv_fprop(
+    const auto y = graph.conv_fprop(
         x,
         weight,
         fe::graph::Conv_fprop_attributes{}.set_padding({0, 0}).set_stride({1, 1}).set_dilation(
@@ -84,18 +84,18 @@ TEST(TestCudnnShimGraphNodes, MatmulValidGraphValidates)
     fe::graph::Graph graph;
     graph.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
 
-    auto a = graph.tensor(fe::graph::Tensor_attributes{}
-                              .set_name("A")
-                              .set_dim({b, m, k})
-                              .set_stride({m * k, k, 1})
-                              .set_uid(1));
-    auto bMat = graph.tensor(fe::graph::Tensor_attributes{}
-                                 .set_name("B")
-                                 .set_dim({b, k, n})
-                                 .set_stride({k * n, n, 1})
-                                 .set_uid(2));
+    const auto a = graph.tensor(fe::graph::Tensor_attributes{}
+                                    .set_name("A")
+                                    .set_dim({b, m, k})
+                                    .set_stride({m * k, k, 1})
+                                    .set_uid(1));
+    const auto bMat = graph.tensor(fe::graph::Tensor_attributes{}
+                                       .set_name("B")
+                                       .set_dim({b, k, n})
+                                       .set_stride({k * n, n, 1})
+                                       .set_uid(2));
 
-    auto c = graph.matmul(a, bMat, fe::graph::Matmul_attributes{}.set_name("matmul"));
+    const auto c = graph.matmul(a, bMat, fe::graph::Matmul_attributes{}.set_name("matmul"));
     ASSERT_NE(c, nullptr);
     c->set_output(true).set_uid(3);
 
@@ -114,24 +114,24 @@ TEST(TestCudnnShimGraphNodes, LayernormValidGraphValidates)
         .set_intermediate_data_type(fe::DataType_t::FLOAT)
         .set_compute_data_type(fe::DataType_t::FLOAT);
 
-    auto x = graph.tensor(fe::graph::Tensor_attributes{}
-                              .set_name("X")
-                              .set_dim({b * s, d, 1, 1})
-                              .set_stride({d, 1, d, d})
-                              .set_uid(1));
-    auto scale = graph.tensor(fe::graph::Tensor_attributes{}
-                                  .set_name("scale")
-                                  .set_dim({1, d, 1, 1})
-                                  .set_stride({d, 1, d, d})
-                                  .set_data_type(fe::DataType_t::FLOAT)
-                                  .set_uid(2));
-    auto bias = graph.tensor(fe::graph::Tensor_attributes{}
-                                 .set_name("bias")
-                                 .set_dim({1, d, 1, 1})
-                                 .set_stride({d, 1, d, d})
-                                 .set_data_type(fe::DataType_t::FLOAT)
-                                 .set_uid(3));
-    auto epsilon = graph.tensor(1e-05F, fe::graph::ScalarType::COMPILE_TIME_CONST);
+    const auto x = graph.tensor(fe::graph::Tensor_attributes{}
+                                    .set_name("X")
+                                    .set_dim({b * s, d, 1, 1})
+                                    .set_stride({d, 1, d, d})
+                                    .set_uid(1));
+    const auto scale = graph.tensor(fe::graph::Tensor_attributes{}
+                                        .set_name("scale")
+                                        .set_dim({1, d, 1, 1})
+                                        .set_stride({d, 1, d, d})
+                                        .set_data_type(fe::DataType_t::FLOAT)
+                                        .set_uid(2));
+    const auto bias = graph.tensor(fe::graph::Tensor_attributes{}
+                                       .set_name("bias")
+                                       .set_dim({1, d, 1, 1})
+                                       .set_stride({d, 1, d, d})
+                                       .set_data_type(fe::DataType_t::FLOAT)
+                                       .set_uid(3));
+    const auto epsilon = graph.tensor(1e-05F, fe::graph::ScalarType::COMPILE_TIME_CONST);
 
     auto [y, mean, invVariance]
         = graph.layernorm(x,
@@ -158,22 +158,22 @@ TEST(TestCudnnShimGraphNodes, PointwiseValidGraphValidates)
     fe::graph::Graph graph;
     graph.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
 
-    auto a = graph.tensor(fe::graph::Tensor_attributes{}
-                              .set_name("A")
-                              .set_dim({n, n, n, n})
-                              .set_stride({n * n * n, n * n, n, 1})
-                              .set_uid(1));
-    auto b = graph.tensor(fe::graph::Tensor_attributes{}
-                              .set_name("B")
-                              .set_dim({n, n, n, n})
-                              .set_stride({n * n * n, n * n, n, 1})
-                              .set_uid(2));
+    const auto a = graph.tensor(fe::graph::Tensor_attributes{}
+                                    .set_name("A")
+                                    .set_dim({n, n, n, n})
+                                    .set_stride({n * n * n, n * n, n, 1})
+                                    .set_uid(1));
+    const auto b = graph.tensor(fe::graph::Tensor_attributes{}
+                                    .set_name("B")
+                                    .set_dim({n, n, n, n})
+                                    .set_stride({n * n * n, n * n, n, 1})
+                                    .set_uid(2));
 
-    auto c = graph.pointwise(a,
-                             b,
-                             fe::graph::Pointwise_attributes{}
-                                 .set_mode(fe::PointwiseMode_t::ADD)
-                                 .set_compute_data_type(fe::DataType_t::FLOAT));
+    const auto c = graph.pointwise(a,
+                                   b,
+                                   fe::graph::Pointwise_attributes{}
+                                       .set_mode(fe::PointwiseMode_t::ADD)
+                                       .set_compute_data_type(fe::DataType_t::FLOAT));
     ASSERT_NE(c, nullptr);
     c->set_output(true).set_uid(3);
 
@@ -188,13 +188,13 @@ TEST(TestCudnnShimGraphNodes, ReductionValidGraphValidates)
     fe::graph::Graph graph;
     graph.set_io_data_type(fe::DataType_t::FLOAT).set_compute_data_type(fe::DataType_t::FLOAT);
 
-    auto x = graph.tensor(fe::graph::Tensor_attributes{}
-                              .set_name("X")
-                              .set_dim({2, 8, 16, 64})
-                              .set_stride({8192, 1024, 64, 1})
-                              .set_uid(1));
+    const auto x = graph.tensor(fe::graph::Tensor_attributes{}
+                                    .set_name("X")
+                                    .set_dim({2, 8, 16, 64})
+                                    .set_stride({8192, 1024, 64, 1})
+                                    .set_uid(1));
 
-    auto y
+    const auto y
         = graph.reduction(x, fe::graph::Reduction_attributes{}.set_mode(fe::ReductionMode_t::ADD));
     ASSERT_NE(y, nullptr);
     y->set_output(true)
@@ -221,10 +221,10 @@ TEST(TestCudnnShimGraphNodes, BatchnormValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto x = hipdnn_shim_test::makeTensor(graph, {1, 2, 3, 4}, {24, 12, 4, 1}, 1);
-    auto scale = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 2);
-    auto bias = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 3);
-    auto epsilon = graph.tensor(0.001F, fe::graph::ScalarType::COMPILE_TIME_CONST);
+    const auto x = hipdnn_shim_test::makeTensor(graph, {1, 2, 3, 4}, {24, 12, 4, 1}, 1);
+    const auto scale = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 2);
+    const auto bias = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 3);
+    const auto epsilon = graph.tensor(0.001F, fe::graph::ScalarType::COMPILE_TIME_CONST);
 
     auto [y, mean, invVariance, nextRunningMean, nextRunningVariance]
         = graph.batchnorm(x, scale, bias, fe::graph::Batchnorm_attributes{}.set_epsilon(epsilon));
@@ -244,9 +244,9 @@ TEST(TestCudnnShimGraphNodes, BatchnormBackwardValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto dy = hipdnn_shim_test::makeTensor(graph, {1, 2, 3, 4}, {24, 12, 4, 1}, 1);
-    auto x = hipdnn_shim_test::makeTensor(graph, {1, 2, 3, 4}, {24, 12, 4, 1}, 2);
-    auto scale = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 3);
+    const auto dy = hipdnn_shim_test::makeTensor(graph, {1, 2, 3, 4}, {24, 12, 4, 1}, 1);
+    const auto x = hipdnn_shim_test::makeTensor(graph, {1, 2, 3, 4}, {24, 12, 4, 1}, 2);
+    const auto scale = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 3);
 
     auto [dx, dscale, dbias]
         = graph.batchnorm_backward(dy, x, scale, fe::graph::Batchnorm_backward_attributes{});
@@ -264,13 +264,13 @@ TEST(TestCudnnShimGraphNodes, BatchnormInferenceValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto x = hipdnn_shim_test::makeTensor(graph, {1, 2, 3, 4}, {24, 12, 4, 1}, 1);
-    auto mean = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 2);
-    auto invVariance = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 3);
-    auto scale = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 4);
-    auto bias = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 5);
+    const auto x = hipdnn_shim_test::makeTensor(graph, {1, 2, 3, 4}, {24, 12, 4, 1}, 1);
+    const auto mean = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 2);
+    const auto invVariance = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 3);
+    const auto scale = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 4);
+    const auto bias = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 5);
 
-    auto y = graph.batchnorm_inference(
+    const auto y = graph.batchnorm_inference(
         x, mean, invVariance, scale, bias, fe::graph::Batchnorm_inference_attributes{});
     ASSERT_NE(y, nullptr);
     y->set_output(true).set_uid(6);
@@ -284,12 +284,13 @@ TEST(TestCudnnShimGraphNodes, LayernormBackwardValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto dy = hipdnn_shim_test::makeTensor(graph, {16, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
-    auto x = hipdnn_shim_test::makeTensor(graph, {16, 64, 32, 32}, {65536, 1024, 32, 1}, 2);
-    auto scale = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 3);
-    auto mean = hipdnn_shim_test::makeTensor(graph, {16, 1, 1, 1}, {1, 1, 1, 1}, 4);
-    auto invVariance = hipdnn_shim_test::makeTensor(graph, {16, 1, 1, 1}, {1, 1, 1, 1}, 5);
-    auto epsilon = hipdnn_shim_test::makeTensor(graph, {1}, {1}, 6);
+    const auto dy = hipdnn_shim_test::makeTensor(graph, {16, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    const auto x = hipdnn_shim_test::makeTensor(graph, {16, 64, 32, 32}, {65536, 1024, 32, 1}, 2);
+    const auto scale
+        = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 3);
+    const auto mean = hipdnn_shim_test::makeTensor(graph, {16, 1, 1, 1}, {1, 1, 1, 1}, 4);
+    const auto invVariance = hipdnn_shim_test::makeTensor(graph, {16, 1, 1, 1}, {1, 1, 1, 1}, 5);
+    const auto epsilon = hipdnn_shim_test::makeTensor(graph, {1}, {1}, 6);
 
     auto [dx, dscale, dbias] = graph.layernorm_backward(dy,
                                                         x,
@@ -312,9 +313,10 @@ TEST(TestCudnnShimGraphNodes, RmsnormValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto x = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
-    auto scale = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 2);
-    auto epsilon = graph.tensor(1e-5F, fe::graph::ScalarType::COMPILE_TIME_CONST);
+    const auto x = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    const auto scale
+        = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 2);
+    const auto epsilon = graph.tensor(1e-5F, fe::graph::ScalarType::COMPILE_TIME_CONST);
 
     auto [y, invRms]
         = graph.rmsnorm(x,
@@ -334,10 +336,11 @@ TEST(TestCudnnShimGraphNodes, RmsnormBackwardValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto dy = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
-    auto x = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 2);
-    auto scale = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 3);
-    auto invRms = hipdnn_shim_test::makeTensor(graph, {1, 1, 1, 1}, {1, 1, 1, 1}, 4);
+    const auto dy = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    const auto x = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 2);
+    const auto scale
+        = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 3);
+    const auto invRms = hipdnn_shim_test::makeTensor(graph, {1, 1, 1, 1}, {1, 1, 1, 1}, 4);
 
     auto [dx, dscale, dbias]
         = graph.rmsnorm_backward(dy, x, scale, invRms, fe::graph::Rmsnorm_backward_attributes{});
@@ -356,10 +359,10 @@ TEST(TestCudnnShimGraphNodes, ConvDgradValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto dy = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
-    auto w = hipdnn_shim_test::makeTensor(graph, {64, 3, 3, 3}, {27, 9, 3, 1}, 2);
+    const auto dy = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    const auto w = hipdnn_shim_test::makeTensor(graph, {64, 3, 3, 3}, {27, 9, 3, 1}, 2);
 
-    auto dx = graph.conv_dgrad(
+    const auto dx = graph.conv_dgrad(
         dy,
         w,
         fe::graph::Conv_dgrad_attributes{}.set_padding({1, 1}).set_stride({1, 1}).set_dilation(
@@ -378,10 +381,10 @@ TEST(TestCudnnShimGraphNodes, ConvWgradValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto dy = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
-    auto x = hipdnn_shim_test::makeTensor(graph, {1, 3, 32, 32}, {3072, 1024, 32, 1}, 2);
+    const auto dy = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    const auto x = hipdnn_shim_test::makeTensor(graph, {1, 3, 32, 32}, {3072, 1024, 32, 1}, 2);
 
-    auto dw = graph.conv_wgrad(
+    const auto dw = graph.conv_wgrad(
         dy,
         x,
         fe::graph::Conv_wgrad_attributes{}.set_padding({1, 1}).set_stride({1, 1}).set_dilation(
@@ -399,7 +402,7 @@ TEST(TestCudnnShimGraphNodes, ResampleValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto x = hipdnn_shim_test::makeTensor(graph, {1, 3, 4, 4}, {48, 16, 4, 1}, 1);
+    const auto x = hipdnn_shim_test::makeTensor(graph, {1, 3, 4, 4}, {48, 16, 4, 1}, 1);
 
     auto [y, index] = graph.resample(x,
                                      fe::graph::Resample_attributes{}
@@ -422,7 +425,7 @@ TEST(TestCudnnShimGraphNodes, BlockScaleQuantizeValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto x = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    const auto x = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
 
     auto [y, scale] = graph.block_scale_quantize(
         x, fe::graph::Block_scale_quantize_attributes{}.set_block_size(32));
@@ -441,10 +444,10 @@ TEST(TestCudnnShimGraphNodes, BlockScaleDequantizeValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto x = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
-    auto scale = hipdnn_shim_test::makeTensor(graph, {2, 2, 32, 32}, {2048, 1024, 32, 1}, 2);
+    const auto x = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    const auto scale = hipdnn_shim_test::makeTensor(graph, {2, 2, 32, 32}, {2048, 1024, 32, 1}, 2);
 
-    auto y = graph.block_scale_dequantize(
+    const auto y = graph.block_scale_dequantize(
         x,
         scale,
         fe::graph::Block_scale_dequantize_attributes{}.set_block_size(std::vector<int32_t>{32}));
@@ -461,33 +464,33 @@ TEST(TestCudnnShimGraphNodes, MoeGroupedMatmulValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto token = hipdnn_shim_test::makeTensor(graph, {1, 8, 16}, {128, 16, 1}, 1);
-    auto weight = hipdnn_shim_test::makeTensor(graph, {2, 16, 32}, {512, 32, 1}, 2);
-    auto firstTokenOffset = graph.tensor(fe::graph::Tensor_attributes{}
-                                             .set_dim({2, 1, 1})
-                                             .set_stride({1, 1, 1})
+    const auto token = hipdnn_shim_test::makeTensor(graph, {1, 8, 16}, {128, 16, 1}, 1);
+    const auto weight = hipdnn_shim_test::makeTensor(graph, {2, 16, 32}, {512, 32, 1}, 2);
+    const auto firstTokenOffset = graph.tensor(fe::graph::Tensor_attributes{}
+                                                   .set_dim({2, 1, 1})
+                                                   .set_stride({1, 1, 1})
+                                                   .set_data_type(fe::DataType_t::INT32)
+                                                   .set_uid(3));
+    const auto tokenIndex = graph.tensor(fe::graph::Tensor_attributes{}
+                                             .set_dim({1, 8, 1})
+                                             .set_stride({8, 1, 1})
                                              .set_data_type(fe::DataType_t::INT32)
-                                             .set_uid(3));
-    auto tokenIndex = graph.tensor(fe::graph::Tensor_attributes{}
-                                       .set_dim({1, 8, 1})
-                                       .set_stride({8, 1, 1})
-                                       .set_data_type(fe::DataType_t::INT32)
-                                       .set_uid(4));
-    auto tokenKs = graph.tensor(fe::graph::Tensor_attributes{}
-                                    .set_dim({1, 8, 1})
-                                    .set_stride({8, 1, 1})
-                                    .set_data_type(fe::DataType_t::INT32)
-                                    .set_uid(5));
+                                             .set_uid(4));
+    const auto tokenKs = graph.tensor(fe::graph::Tensor_attributes{}
+                                          .set_dim({1, 8, 1})
+                                          .set_stride({8, 1, 1})
+                                          .set_data_type(fe::DataType_t::INT32)
+                                          .set_uid(5));
 
-    auto output = graph.moe_grouped_matmul(token,
-                                           weight,
-                                           firstTokenOffset,
-                                           tokenIndex,
-                                           tokenKs,
-                                           fe::graph::Moe_grouped_matmul_attributes{}
-                                               .set_name("MoeGroupedMatmulNode")
-                                               .set_mode(fe::MoeGroupedMatmulMode_t::SCATTER)
-                                               .set_top_k(2));
+    const auto output = graph.moe_grouped_matmul(token,
+                                                 weight,
+                                                 firstTokenOffset,
+                                                 tokenIndex,
+                                                 tokenKs,
+                                                 fe::graph::Moe_grouped_matmul_attributes{}
+                                                     .set_name("MoeGroupedMatmulNode")
+                                                     .set_mode(fe::MoeGroupedMatmulMode_t::SCATTER)
+                                                     .set_top_k(2));
     ASSERT_NE(output, nullptr);
     EXPECT_EQ(output->get_name(), "MoeGroupedMatmulNode::OUTPUT");
 
@@ -501,15 +504,15 @@ TEST(TestCudnnShimGraphNodes, MoeGroupedMatmulBwdValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto dOutput = hipdnn_shim_test::makeTensor(graph, {1, 8, 32}, {256, 32, 1}, 1);
-    auto token = hipdnn_shim_test::makeTensor(graph, {1, 8, 16}, {128, 16, 1}, 2);
-    auto firstTokenOffset = graph.tensor(fe::graph::Tensor_attributes{}
-                                             .set_dim({2, 1, 1})
-                                             .set_stride({1, 1, 1})
-                                             .set_data_type(fe::DataType_t::INT32)
-                                             .set_uid(3));
+    const auto dOutput = hipdnn_shim_test::makeTensor(graph, {1, 8, 32}, {256, 32, 1}, 1);
+    const auto token = hipdnn_shim_test::makeTensor(graph, {1, 8, 16}, {128, 16, 1}, 2);
+    const auto firstTokenOffset = graph.tensor(fe::graph::Tensor_attributes{}
+                                                   .set_dim({2, 1, 1})
+                                                   .set_stride({1, 1, 1})
+                                                   .set_data_type(fe::DataType_t::INT32)
+                                                   .set_uid(3));
 
-    auto dweight = graph.moe_grouped_matmul_bwd(
+    const auto dweight = graph.moe_grouped_matmul_bwd(
         dOutput,
         token,
         firstTokenOffset,
@@ -543,10 +546,11 @@ TEST(TestCudnnShimGraphNodes, ConvFpropMissingParamsFailsValidation)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto x = hipdnn_shim_test::makeTensor(graph, {16, 128, 64, 64}, {524288, 1, 8192, 128}, 1);
-    auto w = hipdnn_shim_test::makeTensor(graph, {256, 128, 1, 1}, {128, 1, 128, 128}, 2);
+    const auto x
+        = hipdnn_shim_test::makeTensor(graph, {16, 128, 64, 64}, {524288, 1, 8192, 128}, 1);
+    const auto w = hipdnn_shim_test::makeTensor(graph, {256, 128, 1, 1}, {128, 1, 128, 128}, 2);
 
-    auto y = graph.conv_fprop(x, w, fe::graph::Conv_fprop_attributes{});
+    const auto y = graph.conv_fprop(x, w, fe::graph::Conv_fprop_attributes{});
     ASSERT_NE(y, nullptr);
     y->set_output(true).set_uid(3);
 
@@ -561,10 +565,10 @@ TEST(TestCudnnShimGraphNodes, ConvDgradMissingOutputDimFailsValidation)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto dy = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
-    auto w = hipdnn_shim_test::makeTensor(graph, {64, 3, 3, 3}, {27, 9, 3, 1}, 2);
+    const auto dy = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    const auto w = hipdnn_shim_test::makeTensor(graph, {64, 3, 3, 3}, {27, 9, 3, 1}, 2);
 
-    auto dx = graph.conv_dgrad(
+    const auto dx = graph.conv_dgrad(
         dy,
         w,
         fe::graph::Conv_dgrad_attributes{}.set_padding({1, 1}).set_stride({1, 1}).set_dilation(
@@ -584,10 +588,10 @@ TEST(TestCudnnShimGraphNodes, DuplicateTensorUidFailsValidation)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto a = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 1);
-    auto b = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 1);
+    const auto a = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 1);
+    const auto b = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 1);
 
-    auto c = graph.pointwise(
+    const auto c = graph.pointwise(
         a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD));
     ASSERT_NE(c, nullptr);
     c->set_output(true).set_uid(2);
@@ -603,10 +607,10 @@ TEST(TestCudnnShimGraphNodes, NonPositiveDimFailsValidation)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto a = hipdnn_shim_test::makeTensor(graph, {n, 0, n, n}, {n * n * n, n * n, n, 1}, 1);
-    auto b = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 2);
+    const auto a = hipdnn_shim_test::makeTensor(graph, {n, 0, n, n}, {n * n * n, n * n, n, 1}, 1);
+    const auto b = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 2);
 
-    auto c = graph.pointwise(
+    const auto c = graph.pointwise(
         a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD));
     ASSERT_NE(c, nullptr);
     c->set_output(true).set_uid(3);
@@ -691,25 +695,25 @@ TEST(TestCudnnShimGraphNodes, SdpaFp8Mxfp8RecordsGraphNotSupported)
 TEST(TestCudnnShimGraphNodes, SdpaFp8BackwardFp8RecordsGraphNotSupported)
 {
     fe::graph::Graph graph;
-    auto outputs = graph.sdpa_fp8_backward(nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           fe::graph::SDPA_fp8_backward_attributes{});
+    const auto outputs = graph.sdpa_fp8_backward(nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 fe::graph::SDPA_fp8_backward_attributes{});
     EXPECT_EQ(outputs.size(), 7U);
     expectGraphNotSupported(graph);
 }
@@ -717,24 +721,24 @@ TEST(TestCudnnShimGraphNodes, SdpaFp8BackwardFp8RecordsGraphNotSupported)
 TEST(TestCudnnShimGraphNodes, SdpaFp8BackwardMxfp8RecordsGraphNotSupported)
 {
     fe::graph::Graph graph;
-    auto outputs = graph.sdpa_fp8_backward(nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr,
-                                           fe::graph::SDPA_fp8_backward_attributes{});
+    const auto outputs = graph.sdpa_fp8_backward(nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 fe::graph::SDPA_fp8_backward_attributes{});
     EXPECT_EQ(outputs.size(), 6U);
     expectGraphNotSupported(graph);
 }
@@ -748,15 +752,15 @@ TEST(TestCudnnShimGraphNodes, FailStubPoisonsAnOtherwiseValidGraph)
     fe::graph::Graph graph;
     graph.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
 
-    auto a = graph.tensor(fe::graph::Tensor_attributes{}
-                              .set_dim({n, n, n, n})
-                              .set_stride({n * n * n, n * n, n, 1})
-                              .set_uid(1));
-    auto b = graph.tensor(fe::graph::Tensor_attributes{}
-                              .set_dim({n, n, n, n})
-                              .set_stride({n * n * n, n * n, n, 1})
-                              .set_uid(2));
-    auto c = graph.pointwise(
+    const auto a = graph.tensor(fe::graph::Tensor_attributes{}
+                                    .set_dim({n, n, n, n})
+                                    .set_stride({n * n * n, n * n, n, 1})
+                                    .set_uid(1));
+    const auto b = graph.tensor(fe::graph::Tensor_attributes{}
+                                    .set_dim({n, n, n, n})
+                                    .set_stride({n * n * n, n * n, n, 1})
+                                    .set_uid(2));
+    const auto c = graph.pointwise(
         a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD));
     ASSERT_NE(c, nullptr);
     c->set_output(true).set_uid(3);
@@ -776,12 +780,12 @@ TEST(TestCudnnShimGraphNodes, ReshapeReturnsChainablePlaceholder)
     fe::graph::Graph graph;
     graph.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
 
-    auto input = graph.tensor(fe::graph::Tensor_attributes{}
-                                  .set_dim({n, n, n, n})
-                                  .set_stride({n * n * n, n * n, n, 1})
-                                  .set_uid(1));
+    const auto input = graph.tensor(fe::graph::Tensor_attributes{}
+                                        .set_dim({n, n, n, n})
+                                        .set_stride({n * n * n, n * n, n, 1})
+                                        .set_uid(1));
 
-    auto out = graph.reshape(input, fe::graph::Reshape_attributes{});
+    const auto out = graph.reshape(input, fe::graph::Reshape_attributes{});
     ASSERT_NE(out, nullptr);
     out->set_output(true).set_uid(2);
 
@@ -797,14 +801,14 @@ TEST(TestCudnnShimGraphNodes, GenstatsReturnsChainablePlaceholders)
     fe::graph::Graph graph;
     graph.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
 
-    auto input = graph.tensor(fe::graph::Tensor_attributes{}
-                                  .set_dim({n, n, n, n})
-                                  .set_stride({n * n * n, n * n, n, 1})
-                                  .set_uid(1));
+    const auto input = graph.tensor(fe::graph::Tensor_attributes{}
+                                        .set_dim({n, n, n, n})
+                                        .set_stride({n * n * n, n * n, n, 1})
+                                        .set_uid(1));
 
-    auto outs = graph.genstats(input, fe::graph::Genstats_attributes{});
+    const auto outs = graph.genstats(input, fe::graph::Genstats_attributes{});
     int64_t uid = 2;
-    for(auto& out : outs)
+    for(const auto& out : outs)
     {
         ASSERT_NE(out, nullptr);
         out->set_output(true).set_uid(uid++);
@@ -819,18 +823,18 @@ TEST(TestCudnnShimGraphNodes, SdpaFp8ReturnsChainablePlaceholders)
 {
     fe::graph::Graph graph;
 
-    auto outs = graph.sdpa_fp8(nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               fe::graph::SDPA_fp8_attributes{});
+    const auto outs = graph.sdpa_fp8(nullptr,
+                                     nullptr,
+                                     nullptr,
+                                     nullptr,
+                                     nullptr,
+                                     nullptr,
+                                     nullptr,
+                                     nullptr,
+                                     nullptr,
+                                     fe::graph::SDPA_fp8_attributes{});
     int64_t uid = 1;
-    for(auto& out : outs)
+    for(const auto& out : outs)
     {
         ASSERT_NE(out, nullptr);
         out->set_output(true).set_uid(uid++);

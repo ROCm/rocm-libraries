@@ -52,7 +52,7 @@ public:
 
     Error infer_properties_node() override
     {
-        auto out = attributes.get_output_0();
+        const auto out = attributes.get_output_0();
         if(!out)
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET,
@@ -166,7 +166,7 @@ private:
 
     Error checkInputsAndOutputsAreBroadcastCompatible() const
     {
-        auto output = attributes.get_output_0();
+        const auto output = attributes.get_output_0();
         if(output && !output->get_dim().empty())
         {
             const auto& outputDims = output->get_dim();

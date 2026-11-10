@@ -88,8 +88,8 @@ protected:
 
 TEST_F(TestPointwiseOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -98,11 +98,11 @@ TEST_F(TestPointwiseOperationFromNode, CreatesValidFinalizedDescriptor)
 }
 TEST_F(TestPointwiseOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -111,7 +111,7 @@ TEST_F(TestPointwiseOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::PointwiseAttributes);
-    auto desc = std::static_pointer_cast<PointwiseOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<PointwiseOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -131,8 +131,8 @@ TEST_F(TestPointwiseOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestPointwiseOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
@@ -143,15 +143,15 @@ TEST_F(TestPointwiseOperationFromNode, PreservesPointwiseMode)
     auto attrs = createStandardPointwiseAttrs();
     attrs.operation = PointwiseMode::MUL;
     node.attributes.Set(attrs);
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().operation, PointwiseMode::MUL);
 }
 
 TEST_F(TestPointwiseOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getIn0Desc(), nullptr);
     EXPECT_EQ(desc->getIn0Desc()->getData().uid, K_PW_TENSOR_IN0_UID);
@@ -165,8 +165,8 @@ TEST_F(TestPointwiseOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestPointwiseOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getIn0Desc(), _tensorMap[K_PW_TENSOR_IN0_UID]);
     EXPECT_EQ(desc->getOut0Desc(), _tensorMap[K_PW_TENSOR_OUT0_UID]);
@@ -177,7 +177,7 @@ TEST_F(TestPointwiseOperationFromNode, TensorReferencesMatchTensorMap)
 TEST_F(TestPointwiseOperationFromNode, FailsWithMissingIn0Tensor)
 {
     _tensorMap.erase(K_PW_TENSOR_IN0_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(PointwiseOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -186,7 +186,7 @@ TEST_F(TestPointwiseOperationFromNode, FailsWithMissingIn0Tensor)
 TEST_F(TestPointwiseOperationFromNode, FailsWithMissingOut0Tensor)
 {
     _tensorMap.erase(K_PW_TENSOR_OUT0_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(PointwiseOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -194,8 +194,8 @@ TEST_F(TestPointwiseOperationFromNode, FailsWithMissingOut0Tensor)
 
 TEST_F(TestPointwiseOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 4);
@@ -207,8 +207,8 @@ TEST_F(TestPointwiseOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 
 TEST_F(TestPointwiseOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -226,8 +226,8 @@ TEST_F(TestPointwiseOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestPointwiseOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -321,7 +321,7 @@ TEST_F(TestPointwiseOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_pointwise_1";
 
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -336,8 +336,8 @@ TEST_F(TestPointwiseOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestPointwiseOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -349,7 +349,7 @@ TEST_F(TestPointwiseOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
@@ -366,7 +366,7 @@ TEST_F(TestPointwiseOperationFromNode, SucceedsWithOnlyRequiredTensors)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -381,7 +381,7 @@ TEST_F(TestPointwiseOperationFromNode, SucceedsWithOnlyRequiredTensors)
 TEST_F(TestPointwiseOperationFromNode, FailsWhenOptionalIn1UidSetButTensorMissing)
 {
     _tensorMap.erase(K_PW_TENSOR_IN1_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(PointwiseOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -390,7 +390,7 @@ TEST_F(TestPointwiseOperationFromNode, FailsWhenOptionalIn1UidSetButTensorMissin
 TEST_F(TestPointwiseOperationFromNode, FailsWhenOptionalIn2UidSetButTensorMissing)
 {
     _tensorMap.erase(K_PW_TENSOR_IN2_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(PointwiseOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -408,7 +408,7 @@ TEST_F(TestPointwiseOperationFromNode, FromNodePreservesReluScalars)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     // Verify via getData()
@@ -443,7 +443,7 @@ TEST_F(TestPointwiseOperationFromNode, FromNodePreservesSwishEluSoftplusScalars)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().swish_beta.has_value());
@@ -474,7 +474,7 @@ TEST_F(TestPointwiseOperationFromNode, FromNodePreservesAxis)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().axis_tensor_uid.has_value());
@@ -489,8 +489,8 @@ TEST_F(TestPointwiseOperationFromNode, FromNodePreservesAxis)
 
 TEST_F(TestPointwiseOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
 {
-    auto node = createStandardNode();
-    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsPointwiseAttributes();

@@ -81,7 +81,7 @@ public:
             });
 
         // Compute the backward pass
-        auto resampleBwdFunc = [&](const std::vector<int64_t>& dxIndices) {
+        const auto resampleBwdFunc = [&](const std::vector<int64_t>& dxIndices) {
             auto result = static_cast<ComputeDataType>(0);
             const auto currentFlattenedIndex = flattenDxSpatialIndex(dxDims, dxIndices);
 
@@ -149,7 +149,7 @@ public:
             dx.setHostValue(static_cast<DxDataType>(result), dxIndices);
         };
 
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(resampleBwdFunc, dxDims);
         parallelFunc(std::thread::hardware_concurrency());
 

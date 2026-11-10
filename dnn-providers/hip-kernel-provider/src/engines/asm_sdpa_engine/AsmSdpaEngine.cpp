@@ -46,7 +46,7 @@ void AsmSdpaEngine::getDetails(
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    auto engineDetails
+    auto const engineDetails
         = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(builder, id(), nullptr);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());

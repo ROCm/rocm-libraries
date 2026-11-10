@@ -47,12 +47,12 @@ namespace hipdnn_frontend::detail
 {
     hipdnnOperationType_ext_t typeValue = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t actualCount = 0;
-    auto status = hipdnnBackend()->backendGetAttribute(opDesc,
-                                                       HIPDNN_ATTR_OPERATION_TYPE_EXT,
-                                                       HIPDNN_TYPE_OPERATION_TYPE_EXT,
-                                                       1,
-                                                       &actualCount,
-                                                       &typeValue);
+    const auto status = hipdnnBackend()->backendGetAttribute(opDesc,
+                                                             HIPDNN_ATTR_OPERATION_TYPE_EXT,
+                                                             HIPDNN_TYPE_OPERATION_TYPE_EXT,
+                                                             1,
+                                                             &actualCount,
+                                                             &typeValue);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
@@ -194,7 +194,7 @@ namespace hipdnn_frontend::detail
         return {nullptr, nodeErr};
     }
 
-    auto err = node->unpack_from_descriptor(opDesc, tensorMap);
+    const auto err = node->unpack_from_descriptor(opDesc, tensorMap);
     if(err.is_bad())
     {
         return {nullptr, err};

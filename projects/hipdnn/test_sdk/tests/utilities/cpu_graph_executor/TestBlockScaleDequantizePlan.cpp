@@ -23,7 +23,7 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 
 TEST(TestBlockScaleDequantizePlan, ExecutePlan)
 {
-    auto builder = createValidBlockScaleDequantizeGraph();
+    const auto builder = createValidBlockScaleDequantizeGraph();
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graphWrapper.getNode(0);
@@ -58,9 +58,9 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlan)
                                       nodeAttributes->is_negative_scale());
 
     // Direct execution for reference
-    auto directXTensor
+    const auto directXTensor
         = createShallowTensor<float>(params.xTensor, directBundle.getTensor(1).rawHostData());
-    auto directScaleTensor
+    const auto directScaleTensor
         = createShallowTensor<float>(params.scaleTensor, directBundle.getTensor(2).rawHostData());
     auto directYTensor
         = createShallowTensor<float>(params.yTensor, directBundle.getTensor(3).rawHostData());
@@ -72,7 +72,7 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlan)
                                                    nodeAttributes->is_negative_scale());
 
     // Plan execution
-    auto variantPack = planBundle.toHostVariantPack();
+    const auto variantPack = planBundle.toHostVariantPack();
     BlockScaleDequantizePlan<float, float, float, float> plan(std::move(params));
     plan.execute(variantPack);
 
@@ -84,7 +84,7 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlan)
 
 TEST(TestBlockScaleDequantizePlan, ExecutePlanNegativeScale)
 {
-    auto builder = createValidBlockScaleDequantizeGraph(
+    const auto builder = createValidBlockScaleDequantizeGraph(
         {65536, 2048, 64, 1}, {2, 32, 32, 64}, DataType::FLOAT, DataType::FLOAT, true);
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
@@ -117,9 +117,9 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlanNegativeScale)
                                       blockSize,
                                       nodeAttributes->is_negative_scale());
 
-    auto directXTensor
+    const auto directXTensor
         = createShallowTensor<float>(params.xTensor, directBundle.getTensor(1).rawHostData());
-    auto directScaleTensor
+    const auto directScaleTensor
         = createShallowTensor<float>(params.scaleTensor, directBundle.getTensor(2).rawHostData());
     auto directYTensor
         = createShallowTensor<float>(params.yTensor, directBundle.getTensor(3).rawHostData());
@@ -127,7 +127,7 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlanNegativeScale)
     CpuFpReferenceBlockScaleDequantize::dequantize(
         *directXTensor, *directScaleTensor, *directYTensor, blockSize, true);
 
-    auto variantPack = planBundle.toHostVariantPack();
+    const auto variantPack = planBundle.toHostVariantPack();
     BlockScaleDequantizePlan<float, float, float, float> plan(std::move(params));
     plan.execute(variantPack);
 
@@ -139,7 +139,7 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlanNegativeScale)
 
 TEST(TestBlockScaleDequantizePlanBuilder, PlanConstruction)
 {
-    auto builder = createValidBlockScaleDequantizeGraph();
+    const auto builder = createValidBlockScaleDequantizeGraph();
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const BlockScaleDequantizePlanBuilder<DataType::FLOAT,
@@ -148,7 +148,7 @@ TEST(TestBlockScaleDequantizePlanBuilder, PlanConstruction)
                                           DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     const bool result
         = dynamic_cast<BlockScaleDequantizePlan<float, float, float, float>*>(builtPlan.get())
@@ -158,7 +158,7 @@ TEST(TestBlockScaleDequantizePlanBuilder, PlanConstruction)
 
 TEST(TestBlockScaleDequantizePlanBuilder, IsApplicable)
 {
-    auto builder = createValidBlockScaleDequantizeGraph();
+    const auto builder = createValidBlockScaleDequantizeGraph();
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const BlockScaleDequantizePlanBuilder<DataType::FLOAT,
@@ -179,7 +179,7 @@ TEST(TestBlockScaleDequantizePlanBuilder, IsApplicable)
         badTypesPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
     // MX combinations: FP8 input with E8M0 scale
-    auto mxBuilder = createValidBlockScaleDequantizeMxGraph(
+    const auto mxBuilder = createValidBlockScaleDequantizeMxGraph(
         DataType::FP8_E4M3, DataType::FP8_E8M0, DataType::FLOAT);
     const GraphWrapper mxGraphWrapper(mxBuilder.GetBufferPointer(), mxBuilder.GetSize());
 
@@ -242,7 +242,7 @@ TYPED_TEST(BlockScaleDequantizeMxPlan, ExecutePlan)
     using ScaleType = typename Config::ScaleType;
     using OutputType = typename Config::OutputType;
 
-    auto builder = createValidBlockScaleDequantizeMxGraph(
+    const auto builder = createValidBlockScaleDequantizeMxGraph(
         Config::X_DATA_TYPE, Config::SCALE_DATA_TYPE, Config::OUTPUT_DATA_TYPE);
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
@@ -290,9 +290,9 @@ TYPED_TEST(BlockScaleDequantizeMxPlan, ExecutePlan)
                                       nodeAttributes->is_negative_scale());
 
     // Direct reference execution
-    auto directXTensor
+    const auto directXTensor
         = createShallowTensor<XType>(params.xTensor, directBundle.getTensor(1).rawHostData());
-    auto directScaleTensor = createShallowTensor<ScaleType>(
+    const auto directScaleTensor = createShallowTensor<ScaleType>(
         params.scaleTensor, directBundle.getTensor(2).rawHostData());
     auto directYTensor
         = createShallowTensor<OutputType>(params.yTensor, directBundle.getTensor(3).rawHostData());
@@ -301,7 +301,7 @@ TYPED_TEST(BlockScaleDequantizeMxPlan, ExecutePlan)
         *directXTensor, *directScaleTensor, *directYTensor, blockSize, false);
 
     // Plan execution
-    auto variantPack = planBundle.toHostVariantPack();
+    const auto variantPack = planBundle.toHostVariantPack();
     BlockScaleDequantizePlan<XType, ScaleType, OutputType, float> plan(std::move(params));
     plan.execute(variantPack);
 
@@ -336,7 +336,7 @@ TYPED_TEST(BlockScaleDequantizeNonFloatInputPlan, ExecutePlan)
     using ScaleType = typename Config::ScaleType;
     using OutputType = typename Config::OutputType;
 
-    auto builder = createValidBlockScaleDequantizeMxGraph(
+    const auto builder = createValidBlockScaleDequantizeMxGraph(
         Config::X_DATA_TYPE, Config::SCALE_DATA_TYPE, Config::OUTPUT_DATA_TYPE);
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
@@ -383,9 +383,9 @@ TYPED_TEST(BlockScaleDequantizeNonFloatInputPlan, ExecutePlan)
                                       blockSize,
                                       nodeAttributes->is_negative_scale());
 
-    auto directXTensor
+    const auto directXTensor
         = createShallowTensor<XType>(params.xTensor, directBundle.getTensor(1).rawHostData());
-    auto directScaleTensor = createShallowTensor<ScaleType>(
+    const auto directScaleTensor = createShallowTensor<ScaleType>(
         params.scaleTensor, directBundle.getTensor(2).rawHostData());
     auto directYTensor
         = createShallowTensor<OutputType>(params.yTensor, directBundle.getTensor(3).rawHostData());
@@ -393,7 +393,7 @@ TYPED_TEST(BlockScaleDequantizeNonFloatInputPlan, ExecutePlan)
     CpuFpReferenceBlockScaleDequantize::dequantize(
         *directXTensor, *directScaleTensor, *directYTensor, blockSize, false);
 
-    auto variantPack = planBundle.toHostVariantPack();
+    const auto variantPack = planBundle.toHostVariantPack();
     BlockScaleDequantizePlan<XType, ScaleType, OutputType, float> plan(std::move(params));
     plan.execute(variantPack);
 
@@ -430,7 +430,7 @@ TYPED_TEST(BlockScaleDequantizeMxIsApplicable, MatchingTypeIsApplicable)
 {
     using Config = TypeParam;
 
-    auto mxBuilder = createValidBlockScaleDequantizeMxGraph(
+    const auto mxBuilder = createValidBlockScaleDequantizeMxGraph(
         Config::CORRECT_DATA_TYPE, DataType::FP8_E8M0, DataType::FLOAT);
     const GraphWrapper mxGraphWrapper(mxBuilder.GetBufferPointer(), mxBuilder.GetSize());
 

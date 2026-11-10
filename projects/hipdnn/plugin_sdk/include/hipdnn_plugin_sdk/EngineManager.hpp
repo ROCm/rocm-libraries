@@ -66,7 +66,7 @@ public:
      */
     void addEngine(std::unique_ptr<Engine> engine, std::string_view name = {})
     {
-        auto id = engine->id();
+        const auto id = engine->id();
         if(!_engines.emplace(id, std::move(engine)).second)
         {
             HIPDNN_PLUGIN_LOG_ERROR("engine manager: an engine with id "
@@ -117,7 +117,7 @@ public:
                           int64_t engineId,
                           hipdnnPluginConstData_t& engineDetailsOut)
     {
-        auto& engine = getEngine(engineId);
+        const auto& engine = getEngine(engineId);
         engine.getDetails(handle, opGraph, engineDetailsOut);
     }
 
@@ -168,7 +168,7 @@ public:
                                const IGraph& opGraph,
                                const IEngineConfig& engineConfig) const
     {
-        auto& engine = getEngine(engineConfig.engineId());
+        const auto& engine = getEngine(engineConfig.engineId());
         return engine.getMaxWorkspaceSize(handle, opGraph, engineConfig);
     }
 
@@ -178,7 +178,7 @@ public:
                                     const IEngineConfig& engineConfig,
                                     TContext& executionContext) const
     {
-        auto& engine = getEngine(engineConfig.engineId());
+        const auto& engine = getEngine(engineConfig.engineId());
         engine.initializeExecutionContext(handle, opGraph, engineConfig, executionContext);
     }
 
@@ -186,7 +186,7 @@ protected:
     /// @throws HipdnnPluginException if @p engineId is not registered.
     Engine& getEngine(int64_t engineId) const
     {
-        auto it = _engines.find(engineId);
+        const auto it = _engines.find(engineId);
         if(it == _engines.end())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
@@ -220,7 +220,7 @@ private:
         {
             label += " (";
             label += name;
-            label += ")";
+            label += ')';
         }
         return label;
     }

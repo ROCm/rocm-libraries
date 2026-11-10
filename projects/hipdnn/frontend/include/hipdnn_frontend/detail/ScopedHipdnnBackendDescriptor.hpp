@@ -41,7 +41,7 @@ public:
 
     explicit ScopedHipdnnBackendDescriptor(hipdnnBackendDescriptorType_t descriptorType)
     {
-        auto status = hipdnnBackend()->backendCreateDescriptor(descriptorType, &_descriptor);
+        const auto status = hipdnnBackend()->backendCreateDescriptor(descriptorType, &_descriptor);
 
         _valid = (status == HIPDNN_STATUS_SUCCESS);
 
@@ -54,7 +54,7 @@ public:
 
     explicit ScopedHipdnnBackendDescriptor(const uint8_t* serializedGraph, size_t graphByteSize)
     {
-        auto status = hipdnnBackend()->backendCreateAndDeserializeGraphExt(
+        const auto status = hipdnnBackend()->backendCreateAndDeserializeGraphExt(
             &_descriptor, serializedGraph, graphByteSize);
 
         _valid = (status == HIPDNN_STATUS_SUCCESS);
@@ -68,7 +68,7 @@ public:
 
     explicit ScopedHipdnnBackendDescriptor(const char* jsonGraph, size_t jsonByteSize)
     {
-        auto status = hipdnnBackend()->backendCreateAndDeserializeJsonGraphExt(
+        const auto status = hipdnnBackend()->backendCreateAndDeserializeJsonGraphExt(
             &_descriptor, jsonGraph, jsonByteSize);
 
         _valid = (status == HIPDNN_STATUS_SUCCESS);
@@ -84,7 +84,7 @@ public:
     {
         if(_valid && _descriptor != nullptr)
         {
-            auto status = hipdnnBackend()->backendDestroyDescriptor(_descriptor);
+            const auto status = hipdnnBackend()->backendDestroyDescriptor(_descriptor);
 
             if(status != HIPDNN_STATUS_SUCCESS)
             {
@@ -110,7 +110,7 @@ public:
         {
             if(_valid && _descriptor != nullptr)
             {
-                auto status = hipdnnBackend()->backendDestroyDescriptor(_descriptor);
+                const auto status = hipdnnBackend()->backendDestroyDescriptor(_descriptor);
                 if(status != HIPDNN_STATUS_SUCCESS)
                 {
                     logBackendError("Failed to destroy backend descriptor during move assignment",

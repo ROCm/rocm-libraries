@@ -384,7 +384,7 @@ RunResult runPlanAndDirect(const RaggedShape& shape,
     const bool hasLse = options.statsUid.has_value();
     const bool packedLse = hasLse && options.statsLayout == RaggedStatsLayout::PACKED;
 
-    auto graph = makeGraph(shape, inputDataType, options);
+    const auto graph = makeGraph(shape, inputDataType, options);
 
     auto q = makeFilledBuffer<QType>(volume(qDims), 11);
     auto k = makeFilledBuffer<KType>(volume(kDims), 22);
@@ -773,7 +773,7 @@ TEST(TestSdpaRaggedFwdPlan, ExecutorRunsFp8RaggedGraph)
 // Only Q is ragged. The node must be declined, never run as dense SDPA.
 TEST(TestSdpaRaggedFwdPlan, ExecutorDeclinesPartlyRaggedGraph)
 {
-    auto raggedGraph = makeBf16GateGraph();
+    const auto raggedGraph = makeBf16GateGraph();
     CpuReferenceGraphExecutor executor;
     ASSERT_TRUE(executor.isApplicable(raggedGraph.GetBufferPointer(), raggedGraph.GetSize()));
 
@@ -789,7 +789,7 @@ TEST(TestSdpaRaggedFwdPlan, ExecutorDeclinesPartlyRaggedGraph)
 // run through the dense rewrite (RaggedSdpaDensify.hpp), which the dense plans cover.
 TEST(TestSdpaRaggedFwdPlan, ExecutorRunsUnregisteredRaggedDtypeThroughDenseRewrite)
 {
-    auto graph = makeGraph(GATE_SHAPE, DataType::FLOAT);
+    const auto graph = makeGraph(GATE_SHAPE, DataType::FLOAT);
     ASSERT_TRUE(accepts<Fp32Builder>(graph));
 
     CpuReferenceGraphExecutor executor;
@@ -812,13 +812,13 @@ TEST(TestSdpaRaggedFwdPlanBuilder, DenseBuilderDeclinesRaggedGraph)
 
 TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForDenseGraph)
 {
-    auto dense = withoutRaggedOffsets(makeBf16GateGraph(), {Q_UID, K_UID, V_UID, O_UID});
+    const auto dense = withoutRaggedOffsets(makeBf16GateGraph(), {Q_UID, K_UID, V_UID, O_UID});
     EXPECT_FALSE(accepts<Bf16Builder>(dense));
 }
 
 TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForPartlyRaggedGraph)
 {
-    auto partlyRagged = withoutRaggedOffsets(makeBf16GateGraph(), {K_UID, V_UID, O_UID});
+    const auto partlyRagged = withoutRaggedOffsets(makeBf16GateGraph(), {K_UID, V_UID, O_UID});
     EXPECT_FALSE(accepts<Bf16Builder>(partlyRagged));
 }
 
@@ -867,7 +867,7 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForUnsupportedAttributes)
 
 TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonInt32Offset)
 {
-    auto graph = rewriteTensors(makeBf16GateGraph(), [](TensorAttributesT& tensor) {
+    const auto graph = rewriteTensors(makeBf16GateGraph(), [](TensorAttributesT& tensor) {
         if(tensor.uid == RAGGED_OFFSET_KV_UID)
         {
             tensor.data_type = DataType::INT64;
@@ -879,7 +879,7 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonInt32Offset)
 // RFC-0014 requires ragged_offset_multiplier >= 1.
 TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForZeroOffsetMultiplier)
 {
-    auto graph = rewriteTensors(makeBf16GateGraph(), [](TensorAttributesT& tensor) {
+    const auto graph = rewriteTensors(makeBf16GateGraph(), [](TensorAttributesT& tensor) {
         if(tensor.uid == K_UID)
         {
             tensor.ragged_offset_multiplier = 0;
@@ -891,7 +891,7 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForZeroOffsetMultiplier)
 // Contiguous [B, H, S, D] strides are the head-major layout (L6): a ragged tensor can address it.
 TEST(TestSdpaRaggedFwdPlanBuilder, IsApplicableForHeadMajorLayout)
 {
-    auto graph = rewriteTensors(makeBf16GateGraph(), [](TensorAttributesT& tensor) {
+    const auto graph = rewriteTensors(makeBf16GateGraph(), [](TensorAttributesT& tensor) {
         if(tensor.uid == Q_UID)
         {
             tensor.strides = generateStrides(tensor.dims);
@@ -905,20 +905,23 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForAliasingStrides)
 {
     for(const auto uid : {Q_UID, K_UID, V_UID, O_UID})
     {
-        auto aliasingHeads = rewriteTensors(makeBf16GateGraph(), [uid](TensorAttributesT& tensor) {
-            if(tensor.uid == uid)
-            {
-                tensor.strides = {64, 4, 16, 1}; // [B, H, S, D] = [1, 2, 4, 8]: H stride 4 < 8
-            }
-        });
+        const auto aliasingHeads
+            = rewriteTensors(makeBf16GateGraph(), [uid](TensorAttributesT& tensor) {
+                  if(tensor.uid == uid)
+                  {
+                      tensor.strides
+                          = {64, 4, 16, 1}; // [B, H, S, D] = [1, 2, 4, 8]: H stride 4 < 8
+                  }
+              });
         EXPECT_FALSE(accepts<Bf16Builder>(aliasingHeads)) << "aliasing heads on uid " << uid;
 
-        auto negativeStride = rewriteTensors(makeBf16GateGraph(), [uid](TensorAttributesT& tensor) {
-            if(tensor.uid == uid)
-            {
-                tensor.strides = {64, 8, -16, 1};
-            }
-        });
+        const auto negativeStride
+            = rewriteTensors(makeBf16GateGraph(), [uid](TensorAttributesT& tensor) {
+                  if(tensor.uid == uid)
+                  {
+                      tensor.strides = {64, 8, -16, 1};
+                  }
+              });
         EXPECT_FALSE(accepts<Bf16Builder>(negativeStride)) << "negative stride on uid " << uid;
     }
 }
@@ -936,13 +939,13 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonScalarHostDescale)
 
 TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonFloatStats)
 {
-    auto graph = rewriteTensors(makeBf16GateGraph(lseOptions(RaggedStatsLayout::DENSE)),
-                                [](TensorAttributesT& tensor) {
-                                    if(tensor.uid == STATS_UID)
-                                    {
-                                        tensor.data_type = DataType::HALF;
-                                    }
-                                });
+    const auto graph = rewriteTensors(makeBf16GateGraph(lseOptions(RaggedStatsLayout::DENSE)),
+                                      [](TensorAttributesT& tensor) {
+                                          if(tensor.uid == STATS_UID)
+                                          {
+                                              tensor.data_type = DataType::HALF;
+                                          }
+                                      });
     EXPECT_FALSE(accepts<Bf16Builder>(graph));
 }
 
@@ -1004,13 +1007,13 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonFiniteBakedScale)
 // An ordinary scale tensor is read back as one float, so it must be FLOAT.
 TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonFloatOrdinaryScale)
 {
-    auto graph = rewriteTensors(makeBf16GateGraph(scaleOptions(OperandStorage::TENSOR)),
-                                [](TensorAttributesT& tensor) {
-                                    if(tensor.uid == SCALE_UID)
-                                    {
-                                        tensor.data_type = DataType::HALF;
-                                    }
-                                });
+    const auto graph = rewriteTensors(makeBf16GateGraph(scaleOptions(OperandStorage::TENSOR)),
+                                      [](TensorAttributesT& tensor) {
+                                          if(tensor.uid == SCALE_UID)
+                                          {
+                                              tensor.data_type = DataType::HALF;
+                                          }
+                                      });
     EXPECT_FALSE(accepts<Bf16Builder>(graph));
 }
 
@@ -1034,7 +1037,7 @@ TEST(TestSdpaRaggedFwdPlanBuilder, BuildNodePlanRejectsBoundBelowMinusOne)
 {
     SdpaAttributesT attrs;
     attrs.left_bound = -2;
-    auto graph = makeBf16GateGraph(withAttrs(attrs));
+    const auto graph = makeBf16GateGraph(withAttrs(attrs));
     const GraphWrapper graphWrapper(graph.GetBufferPointer(), graph.GetSize());
     const Bf16Builder builder;
     EXPECT_THROW(builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0)),
@@ -1046,7 +1049,7 @@ TEST(TestSdpaRaggedFwdPlanBuilder, BuildNodePlanRejectsBothCausalFlags)
     SdpaAttributesT attrs;
     attrs.causal_mask = true;
     attrs.causal_mask_bottom_right = true;
-    auto graph = makeBf16GateGraph(withAttrs(attrs));
+    const auto graph = makeBf16GateGraph(withAttrs(attrs));
     const GraphWrapper graphWrapper(graph.GetBufferPointer(), graph.GetSize());
     const Bf16Builder builder;
     EXPECT_THROW(builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0)),

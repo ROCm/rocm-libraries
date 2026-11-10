@@ -130,7 +130,7 @@ void HeuristicPlugin::validateFunctionTable() const
     // Every required entry point must be populated. This mirrors the dlsym
     // checks in resolveSymbols and catches built-ins that forget to wire
     // something up. setLogLevel is optional and may remain null.
-    auto require = [&](const void* ptr, const char* name) {
+    const auto require = [&](const void* ptr, const char* name) {
         if(ptr == nullptr)
         {
             throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
@@ -170,7 +170,7 @@ void HeuristicPlugin::validateFunctionTable() const
 
 void HeuristicPlugin::validatePluginMetadata(const HeuristicPlugin& plugin)
 {
-    auto pluginType = plugin.type();
+    const auto pluginType = plugin.type();
     if(pluginType != HIPDNN_PLUGIN_TYPE_HEURISTIC)
     {
         throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,

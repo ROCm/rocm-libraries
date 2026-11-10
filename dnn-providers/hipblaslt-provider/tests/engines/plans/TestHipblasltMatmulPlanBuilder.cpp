@@ -49,7 +49,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Unsupported Graph with batchnorm
     {
-        auto builder = createValidBatchnormInferenceGraph();
+        auto const builder = createValidBatchnormInferenceGraph();
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
@@ -64,7 +64,8 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
         std::vector<int64_t> const cDims = {2, 4, 5};
         std::vector<int64_t> const cStrides = {20, 5, 1};
 
-        auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
+        auto const builder
+            = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -79,7 +80,8 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
         std::vector<int64_t> const cDims = {2, 4, 5};
         std::vector<int64_t> const cStrides = {20, 5, 1};
 
-        auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
+        auto const builder
+            = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
@@ -94,7 +96,8 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
         std::vector<int64_t> const cDims = {6, 4, 5};
         std::vector<int64_t> const cStrides = {20, 5, 1};
 
-        auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
+        auto const builder
+            = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
@@ -109,7 +112,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
         std::vector<int64_t> const cDims = {2, 4, 5};
         std::vector<int64_t> const cStrides = {20, 5, 1};
 
-        auto builder
+        auto const builder
             = createValidMatmulGraph(aDims,
                                      aStrides,
                                      bDims,
@@ -138,7 +141,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul
     {
-        auto builder = createValidMatmulGraph();
+        auto const builder = createValidMatmulGraph();
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -146,7 +149,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias only (no activation)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -162,7 +165,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias + activation (GELU)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -178,7 +181,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + activation only (no bias, standard ReLU)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -195,7 +198,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias + activation (Swish)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -214,7 +217,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias + activation (clamp)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -232,7 +235,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + activation (ReLU with no clip or slope set)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -248,7 +251,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias + activation (ReLU6: upper clip only)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -266,7 +269,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Unsupported leaky ReLU (no hipBLASLt epilogue), even with an explicit zero lower clip
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -287,7 +290,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Unsupported compute data type on activation node
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -319,7 +322,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
 
     // Unsupported Graph with batchnorm
     {
-        auto builder = createValidBatchnormInferenceGraph();
+        auto const builder = createValidBatchnormInferenceGraph();
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_THROW(_planBuilder.getWorkspaceSize(_handle, graph), HipdnnPluginException);
@@ -327,7 +330,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
 
     // Supported Graph with matmul only
     {
-        auto builder = createValidMatmulGraph();
+        auto const builder = createValidMatmulGraph();
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_NO_THROW(_planBuilder.getWorkspaceSize(_handle, graph));
@@ -335,7 +338,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
 
     // Supported Graph with matmul + bias only (no activation)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -351,7 +354,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
 
     // Supported Graph with matmul + bias + activation
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -367,7 +370,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
 
     // Supported Graph with matmul + activation only (no bias)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -397,7 +400,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, BuildPlan)
 
     // Unsupported Graph with batchnorm
     {
-        auto builder = createValidBatchnormInferenceGraph();
+        auto const builder = createValidBatchnormInferenceGraph();
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
         HipdnnEnginePluginExecutionContext ctx;
 
@@ -407,7 +410,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, BuildPlan)
 
     // Supported Graph with matmul
     {
-        auto builder = createValidMatmulGraph();
+        auto const builder = createValidMatmulGraph();
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
         HipdnnEnginePluginExecutionContext ctx;
 
@@ -417,7 +420,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, BuildPlan)
 
     // Supported Graph with matmul + bias only (no activation)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -435,7 +438,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, BuildPlan)
 
     // Supported Graph with matmul + bias + activation
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -453,7 +456,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, BuildPlan)
 
     // Supported Graph with matmul + activation only (no bias)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto const builder = createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},

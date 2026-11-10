@@ -68,7 +68,7 @@ flatbuffers::DetachedBuffer makeGraphAndPlanContainer(const std::vector<uint8_t>
                                                       const std::vector<uint8_t>* planBytes)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto root = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedGraphAndPlanDirect(
+    const auto root = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedGraphAndPlanDirect(
         builder, graphBytes, planBytes);
     hipdnn_flatbuffers_sdk::data_objects::FinishSerializedGraphAndPlanBuffer(builder, root);
     return builder.Release();
@@ -88,15 +88,15 @@ public:
         const unsigned int seed = getGlobalTestSeed();
 
         const std::vector<int64_t> dims = {1, 3, 14, 14};
-        auto graph = buildBatchnormFwdInferenceGraph(inputDataType,
-                                                     scaleBiasDataType,
-                                                     meanVarianceDataType,
-                                                     computeDataType,
-                                                     dims,
-                                                     TensorLayout::NCHW,
-                                                     true);
+        const auto graph = buildBatchnormFwdInferenceGraph(inputDataType,
+                                                           scaleBiasDataType,
+                                                           meanVarianceDataType,
+                                                           computeDataType,
+                                                           dims,
+                                                           TensorLayout::NCHW,
+                                                           true);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -106,7 +106,7 @@ public:
         BatchnormFwdTensorBundle tensorBundle(
             graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
 
-        auto variantPack = tensorBundle.toHostVariantPack();
+        const auto variantPack = tensorBundle.toHostVariantPack();
 
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -118,10 +118,10 @@ public:
               typename ComputeType>
     static void runBatchnormBwdTest()
     {
-        auto inputDataType = nativeTypeToDataType<InputType>();
-        auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
-        auto meanVarianceDataType = nativeTypeToDataType<MeanVarianceType>();
-        auto computeDataType = nativeTypeToDataType<ComputeType>();
+        const auto inputDataType = nativeTypeToDataType<InputType>();
+        const auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
+        const auto meanVarianceDataType = nativeTypeToDataType<MeanVarianceType>();
+        const auto computeDataType = nativeTypeToDataType<ComputeType>();
 
         const std::vector<int64_t> dims = {1, 3, 14, 14};
         BatchnormBwdTensorBundle<InputType, ScaleBiasType, MeanVarianceType> tensorBundle(
@@ -130,10 +130,10 @@ public:
         auto graphTuple = buildBatchnormBwdGraph(
             tensorBundle, inputDataType, scaleBiasDataType, meanVarianceDataType, computeDataType);
 
-        auto& graph = std::get<0>(graphTuple);
-        auto& variantPack = std::get<1>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
+        const auto& variantPack = std::get<1>(graphTuple);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -149,10 +149,10 @@ public:
               typename ComputeType>
     static void runBatchnormTrainTest(bool useOptionalTensors = false)
     {
-        auto inputDataType = nativeTypeToDataType<InputType>();
-        auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
-        auto meanVarianceDataType = nativeTypeToDataType<MeanVarianceType>();
-        auto computeDataType = nativeTypeToDataType<ComputeType>();
+        const auto inputDataType = nativeTypeToDataType<InputType>();
+        const auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
+        const auto meanVarianceDataType = nativeTypeToDataType<MeanVarianceType>();
+        const auto computeDataType = nativeTypeToDataType<ComputeType>();
 
         const std::vector<int64_t> dims = {1, 3, 14, 14};
         BatchnormTrainTensorBundle<InputType, ScaleBiasType, MeanVarianceType> tensorBundle(
@@ -165,10 +165,10 @@ public:
                                                    computeDataType,
                                                    useOptionalTensors);
 
-        auto& graph = std::get<0>(graphTuple);
-        auto& variantPack = std::get<1>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
+        const auto& variantPack = std::get<1>(graphTuple);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -192,10 +192,10 @@ public:
         auto graphTuple
             = buildConvolutionFwdGraph(tensorBundle, inputDataType, accumulatorDataType);
 
-        auto& graph = std::get<0>(graphTuple);
-        auto& variantPack = std::get<1>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
+        const auto& variantPack = std::get<1>(graphTuple);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -219,10 +219,10 @@ public:
         auto graphTuple
             = buildConvolutionBwdGraph(tensorBundle, inputDataType, accumulatorDataType);
 
-        auto& graph = std::get<0>(graphTuple);
-        auto& variantPack = std::get<1>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
+        const auto& variantPack = std::get<1>(graphTuple);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -246,10 +246,10 @@ public:
         auto graphTuple
             = buildConvolutionWrwGraph(tensorBundle, inputDataType, accumulatorDataType);
 
-        auto& graph = std::get<0>(graphTuple);
-        auto& variantPack = std::get<1>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
+        const auto& variantPack = std::get<1>(graphTuple);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -270,10 +270,10 @@ public:
 
         auto graphTuple = buildMatmulGraph(tensorBundle, inputDataType, computeDataType);
 
-        auto& graph = std::get<0>(graphTuple);
-        auto& variantPack = std::get<1>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
+        const auto& variantPack = std::get<1>(graphTuple);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -307,7 +307,7 @@ public:
 
         auto graphTuple = buildMoeGroupedMatmulGraph(
             execBundle, inputDataType, outputDataType, computeDataType);
-        auto& graph = std::get<0>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
         auto& variantPack = std::get<1>(graphTuple);
 
         // The bundle's own output buffer is always InputType; when OutputType
@@ -317,7 +317,7 @@ public:
                                       execBundle.outputTensor.strides());
         variantPack[6] = execOutput.memory().hostData();
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -375,10 +375,10 @@ public:
 
         auto graphTuple = buildMoeGroupedMatmulBwdGraph(execBundle, inputDataType, computeDataType);
 
-        auto& graph = std::get<0>(graphTuple);
-        auto& variantPack = std::get<1>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
+        const auto& variantPack = std::get<1>(graphTuple);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -409,15 +409,15 @@ public:
         const unsigned int seed = getGlobalTestSeed();
         const std::vector<int64_t> dims = {1, 3, 14, 14};
 
-        auto graph = buildLayernormFpropGraph(inputDataType,
-                                              scaleBiasDataType,
-                                              meanInvVarianceDataType,
-                                              computeDataType,
-                                              dims,
-                                              2, // normalize over last 2 dims
-                                              TensorLayout::NCHW);
+        const auto graph = buildLayernormFpropGraph(inputDataType,
+                                                    scaleBiasDataType,
+                                                    meanInvVarianceDataType,
+                                                    computeDataType,
+                                                    dims,
+                                                    2, // normalize over last 2 dims
+                                                    TensorLayout::NCHW);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -427,7 +427,7 @@ public:
         LayernormFpropTensorBundle tensorBundle(
             graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
 
-        auto variantPack = tensorBundle.toHostVariantPack();
+        const auto variantPack = tensorBundle.toHostVariantPack();
 
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -443,16 +443,16 @@ public:
         const unsigned int seed = getGlobalTestSeed();
         const std::vector<int64_t> dims = {1, 3, 14, 14};
 
-        auto graph = buildLayernormBpropGraph(dyDataType,
-                                              dxDataType,
-                                              scaleBiasDataType,
-                                              meanInvVarianceDataType,
-                                              computeDataType,
-                                              dims,
-                                              2, // normalize over last 2 dims
-                                              TensorLayout::NCHW);
+        const auto graph = buildLayernormBpropGraph(dyDataType,
+                                                    dxDataType,
+                                                    scaleBiasDataType,
+                                                    meanInvVarianceDataType,
+                                                    computeDataType,
+                                                    dims,
+                                                    2, // normalize over last 2 dims
+                                                    TensorLayout::NCHW);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -462,7 +462,7 @@ public:
         LayernormBpropTensorBundle tensorBundle(
             graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
 
-        auto variantPack = tensorBundle.toHostVariantPack();
+        const auto variantPack = tensorBundle.toHostVariantPack();
 
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -475,10 +475,10 @@ public:
         const unsigned int seed = getGlobalTestSeed();
         const std::vector<int64_t> dims = {1, 3, 14, 14};
 
-        auto graph = buildRMSNormFwdGraph(
+        const auto graph = buildRMSNormFwdGraph(
             inputDataType, scaleDataType, computeDataType, dims, TensorLayout::NCHW);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -488,7 +488,7 @@ public:
         RMSNormFwdTensorBundle tensorBundle(
             graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
 
-        auto variantPack = tensorBundle.toHostVariantPack();
+        const auto variantPack = tensorBundle.toHostVariantPack();
 
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -501,10 +501,10 @@ public:
         const unsigned int seed = getGlobalTestSeed();
         const std::vector<int64_t> dims = {1, 3, 14, 14};
 
-        auto graph = buildRMSNormBwdGraph(
+        const auto graph = buildRMSNormBwdGraph(
             inputDataType, scaleDataType, computeDataType, dims, TensorLayout::NCHW);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -514,7 +514,7 @@ public:
         RMSNormBwdTensorBundle tensorBundle(
             graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
 
-        auto variantPack = tensorBundle.toHostVariantPack();
+        const auto variantPack = tensorBundle.toHostVariantPack();
 
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -522,7 +522,7 @@ public:
 
     static void runResampleFwdTest(bool generateIndex)
     {
-        auto builder
+        const auto builder
             = createValidResampleFwdGraph(generateIndex ? std::optional<bool>(true) : std::nullopt);
         const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
@@ -574,7 +574,7 @@ public:
 
     static void runResampleBwdTest(hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode)
     {
-        auto builder = createValidResampleBwdGraph(true, resampleMode);
+        const auto builder = createValidResampleBwdGraph(true, resampleMode);
         const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
         Tensor<float> dyTensor({1, 1, 2, 2});
@@ -641,10 +641,10 @@ public:
 
         auto graphTuple = buildSdpaFwdGraph(tensorBundle, dataType);
 
-        auto& graph = std::get<0>(graphTuple);
-        auto& variantPack = std::get<1>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
+        const auto& variantPack = std::get<1>(graphTuple);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -673,7 +673,7 @@ public:
         const auto scaleDataType = nativeTypeToDataType<ScaleType>();
         const auto computeDataType = nativeTypeToDataType<ComputeType>();
 
-        auto builder
+        const auto builder
             = hipdnn_test_sdk::utilities::createValidBlockScaleQuantizeGraph(ioDims,
                                                                              ioStrides,
                                                                              scaleDims,
@@ -696,9 +696,10 @@ public:
         inputTensor.fillWithRandomValues(
             static_cast<InputType>(0.0f), static_cast<InputType>(1.0f), seed);
 
-        auto variantPack = std::unordered_map<int64_t, void*>{{1, inputTensor.memory().hostData()},
-                                                              {2, outputTensor.memory().hostData()},
-                                                              {3, scaleTensor.memory().hostData()}};
+        const auto variantPack
+            = std::unordered_map<int64_t, void*>{{1, inputTensor.memory().hostData()},
+                                                 {2, outputTensor.memory().hostData()},
+                                                 {3, scaleTensor.memory().hostData()}};
 
         CpuReferenceGraphExecutor().execute(
             builder.GetBufferPointer(), builder.GetSize(), variantPack);
@@ -729,10 +730,10 @@ public:
         auto graphTuple = buildBlockScaleDequantizeGraph(
             tensorBundle, xDataType, scaleDataType, yDataType, computeDataType, blockSize);
 
-        auto& graph = std::get<0>(graphTuple);
-        auto& variantPack = std::get<1>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
+        const auto& variantPack = std::get<1>(graphTuple);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph2, serErr2] = graph->to_binary();

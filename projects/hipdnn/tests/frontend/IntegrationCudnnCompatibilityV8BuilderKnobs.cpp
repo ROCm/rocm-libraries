@@ -44,7 +44,8 @@ protected:
     static cudnnStatus_t configStatus(const v8fe::Engine_v8& built)
     {
         return statusOf([&built] {
-            [[maybe_unused]] auto config = v8fe::EngineConfigBuilder_v8().setEngine(built).build();
+            [[maybe_unused]] const auto config
+                = v8fe::EngineConfigBuilder_v8().setEngine(built).build();
         });
     }
 };

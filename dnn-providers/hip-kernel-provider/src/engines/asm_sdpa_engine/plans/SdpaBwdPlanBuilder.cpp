@@ -256,7 +256,7 @@ bool wouldBwdByteStridesFitUint32(
     };
 
     // [B, H, S, D] tensors: Get(0)=batch, Get(1)=head, Get(2)=seq.
-    auto checkBwdTensor
+    auto const checkBwdTensor
         = [&](const char* prefix, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t) {
               const auto* s = t.strides();
               bool ok = true;
@@ -550,8 +550,8 @@ bool SdpaBwdPlanBuilder::isApplicable(
     const int64_t dkUid = attrs.dk_tensor_uid();
     const int64_t dvUid = attrs.dv_tensor_uid();
 
-    auto findTensor = [&](const char* name, int64_t uid) -> const TensorAttributes* {
-        auto it = tensorMap.find(uid);
+    auto const findTensor = [&](const char* name, int64_t uid) -> const TensorAttributes* {
+        auto const it = tensorMap.find(uid);
         if(it == tensorMap.end())
         {
             HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + name + " tensor UID "
@@ -611,8 +611,8 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // Reject GQA/MQA here rather than letting buildPlan succeed and execute a kernel
     // that corrupts memory.  Restore the weaker "nhead_q % nhead_k == 0" check once
     // the expansion and reduction are implemented.
-    auto numHeadsQ = qTensor->dims()->Get(1);
-    auto numHeadsKv = kTensor->dims()->Get(1);
+    auto const numHeadsQ = qTensor->dims()->Get(1);
+    auto const numHeadsKv = kTensor->dims()->Get(1);
     HIP_KERNEL_RETURN_FALSE_IF(numHeadsKv == 0 || numHeadsQ != numHeadsKv,
                                "GQA/MQA backward requires dK/dV head expansion, which is not "
                                "implemented (Actual: nhead_q="
@@ -691,23 +691,23 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // Applicability validates the default (A32) accumulator path: it is the
     // default knob value and the most demanding (dq_acc + DQ_CONVERT). The user
     // may still select A16 via the knob at buildPlan time.
-    auto dispatchTuples = computeDispatchTuples(
+    auto const dispatchTuples = computeDispatchTuples(
         dataTypeId, headDimQk, maskType, bf16CvtValue, AccumulatorMode::A32);
 
-    auto checkRegistry = [&](const char* registryName,
-                             bwd_dispatch::PipelineStage stage,
-                             const BwdDispatchTuple& tuple) {
-        auto key = bwd_dispatch::lookupKernelNameKey(stage,
-                                                     deviceString,
-                                                     dataTypeId,
-                                                     headDimQk,
-                                                     headDimV,
-                                                     tuple.mask,
-                                                     tuple.atomic32,
-                                                     tuple.pssk,
-                                                     tuple.pddv,
-                                                     static_cast<int>(BatchMode::BATCH),
-                                                     tuple.bf16Cvt);
+    auto const checkRegistry = [&](const char* registryName,
+                                   bwd_dispatch::PipelineStage stage,
+                                   const BwdDispatchTuple& tuple) {
+        auto const key = bwd_dispatch::lookupKernelNameKey(stage,
+                                                           deviceString,
+                                                           dataTypeId,
+                                                           headDimQk,
+                                                           headDimV,
+                                                           tuple.mask,
+                                                           tuple.atomic32,
+                                                           tuple.pssk,
+                                                           tuple.pddv,
+                                                           static_cast<int>(BatchMode::BATCH),
+                                                           tuple.bf16Cvt);
         if(key.empty())
         {
             HIPDNN_PLUGIN_LOG_INFO(
@@ -784,10 +784,10 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     const auto* qTensor = tensorMap.at(attrs.q_tensor_uid());
 
     // Q tensor layout is [B, H_q, S_q, D_qk]
-    auto batch = static_cast<size_t>(qTensor->dims()->Get(0));
-    auto headsQ = static_cast<size_t>(qTensor->dims()->Get(1));
-    auto seqLenQ = static_cast<size_t>(qTensor->dims()->Get(2));
-    auto headDimQk = static_cast<size_t>(qTensor->dims()->Get(3));
+    auto const batch = static_cast<size_t>(qTensor->dims()->Get(0));
+    auto const headsQ = static_cast<size_t>(qTensor->dims()->Get(1));
+    auto const seqLenQ = static_cast<size_t>(qTensor->dims()->Get(2));
+    auto const headDimQk = static_cast<size_t>(qTensor->dims()->Get(3));
 
     const AccumulatorType accType
         = executionSettings.accumulatorType.value_or(AccumulatorType::A32);
@@ -891,73 +891,73 @@ void SdpaBwdPlanBuilder::buildPlan(
 
     // Dimensions from Q: [B, H_q, S_q, D_qk]
     auto* qDims = qTensor->dims();
-    auto batchSize = static_cast<unsigned int>(qDims->Get(0));
-    auto numHeadsQ = static_cast<unsigned int>(qDims->Get(1));
-    auto seqLenQ = static_cast<unsigned int>(qDims->Get(2));
+    auto const batchSize = static_cast<unsigned int>(qDims->Get(0));
+    auto const numHeadsQ = static_cast<unsigned int>(qDims->Get(1));
+    auto const seqLenQ = static_cast<unsigned int>(qDims->Get(2));
     auto headDimQk = static_cast<unsigned int>(qDims->Get(3));
 
     // Dimensions from K: [B, H_kv, S_kv, D_qk]
-    auto numHeadsKv = static_cast<unsigned int>(kTensor->dims()->Get(1));
-    auto seqLenKv = static_cast<unsigned int>(kTensor->dims()->Get(2));
+    auto const numHeadsKv = static_cast<unsigned int>(kTensor->dims()->Get(1));
+    auto const seqLenKv = static_cast<unsigned int>(kTensor->dims()->Get(2));
 
     // Dimensions from V: [B, H_kv, S_kv, D_v]
-    auto headDimV = static_cast<unsigned int>(vTensor->dims()->Get(3));
+    auto const headDimV = static_cast<unsigned int>(vTensor->dims()->Get(3));
 
     // -------------------------------------------------------------------------
     // 2. Extract strides (in elements) from tensor metadata
     // -------------------------------------------------------------------------
     // Q: [B, H_q, S_q, D_qk]
     auto* qStrides = qTensor->strides();
-    auto qStrideBatch = static_cast<unsigned int>(qStrides->Get(0));
-    auto qStrideHead = static_cast<unsigned int>(qStrides->Get(1));
-    auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(2));
+    auto const qStrideBatch = static_cast<unsigned int>(qStrides->Get(0));
+    auto const qStrideHead = static_cast<unsigned int>(qStrides->Get(1));
+    auto const qStrideSeq = static_cast<unsigned int>(qStrides->Get(2));
 
     // K: [B, H_kv, S_kv, D_qk]
     auto* kStrides = kTensor->strides();
-    auto kStrideBatch = static_cast<unsigned int>(kStrides->Get(0));
-    auto kStrideHead = static_cast<unsigned int>(kStrides->Get(1));
-    auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(2));
+    auto const kStrideBatch = static_cast<unsigned int>(kStrides->Get(0));
+    auto const kStrideHead = static_cast<unsigned int>(kStrides->Get(1));
+    auto const kStrideSeq = static_cast<unsigned int>(kStrides->Get(2));
 
     // V: [B, H_kv, S_kv, D_v]
     auto* vStrides = vTensor->strides();
-    auto vStrideBatch = static_cast<unsigned int>(vStrides->Get(0));
-    auto vStrideHead = static_cast<unsigned int>(vStrides->Get(1));
-    auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(2));
+    auto const vStrideBatch = static_cast<unsigned int>(vStrides->Get(0));
+    auto const vStrideHead = static_cast<unsigned int>(vStrides->Get(1));
+    auto const vStrideSeq = static_cast<unsigned int>(vStrides->Get(2));
 
     // O: [B, H_q, S_q, D_v]
     auto* oStrides = oTensor->strides();
-    auto oStrideBatch = static_cast<unsigned int>(oStrides->Get(0));
-    auto oStrideHead = static_cast<unsigned int>(oStrides->Get(1));
-    auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(2));
+    auto const oStrideBatch = static_cast<unsigned int>(oStrides->Get(0));
+    auto const oStrideHead = static_cast<unsigned int>(oStrides->Get(1));
+    auto const oStrideSeq = static_cast<unsigned int>(oStrides->Get(2));
 
     // dO: [B, H_q, S_q, D_v]
     auto* doStrides = doTensor->strides();
-    auto doStrideBatch = static_cast<unsigned int>(doStrides->Get(0));
-    auto doStrideHead = static_cast<unsigned int>(doStrides->Get(1));
-    auto doStrideSeq = static_cast<unsigned int>(doStrides->Get(2));
+    auto const doStrideBatch = static_cast<unsigned int>(doStrides->Get(0));
+    auto const doStrideHead = static_cast<unsigned int>(doStrides->Get(1));
+    auto const doStrideSeq = static_cast<unsigned int>(doStrides->Get(2));
 
     // dQ: [B, H_q, S_q, D_qk]
     auto* dqStrides = dqTensor->strides();
-    auto dqStrideBatch = static_cast<unsigned int>(dqStrides->Get(0));
-    auto dqStrideHead = static_cast<unsigned int>(dqStrides->Get(1));
-    auto dqStrideSeq = static_cast<unsigned int>(dqStrides->Get(2));
+    auto const dqStrideBatch = static_cast<unsigned int>(dqStrides->Get(0));
+    auto const dqStrideHead = static_cast<unsigned int>(dqStrides->Get(1));
+    auto const dqStrideSeq = static_cast<unsigned int>(dqStrides->Get(2));
 
     // dK: [B, H_kv, S_kv, D_qk]
     auto* dkStrides = dkTensor->strides();
-    auto dkStrideBatch = static_cast<unsigned int>(dkStrides->Get(0));
-    auto dkStrideHead = static_cast<unsigned int>(dkStrides->Get(1));
-    auto dkStrideSeq = static_cast<unsigned int>(dkStrides->Get(2));
+    auto const dkStrideBatch = static_cast<unsigned int>(dkStrides->Get(0));
+    auto const dkStrideHead = static_cast<unsigned int>(dkStrides->Get(1));
+    auto const dkStrideSeq = static_cast<unsigned int>(dkStrides->Get(2));
 
     // dV: [B, H_kv, S_kv, D_v]
     auto* dvStrides = dvTensor->strides();
-    auto dvStrideBatch = static_cast<unsigned int>(dvStrides->Get(0));
-    auto dvStrideHead = static_cast<unsigned int>(dvStrides->Get(1));
-    auto dvStrideSeq = static_cast<unsigned int>(dvStrides->Get(2));
+    auto const dvStrideBatch = static_cast<unsigned int>(dvStrides->Get(0));
+    auto const dvStrideHead = static_cast<unsigned int>(dvStrides->Get(1));
+    auto const dvStrideSeq = static_cast<unsigned int>(dvStrides->Get(2));
 
     // Stats (LSE): [B, H_q, S_q] — rank 3, FP32
     auto* statsStrides = statsTensor->strides();
-    auto statsStrideBatch = static_cast<unsigned int>(statsStrides->Get(0));
-    auto statsStrideHead = static_cast<unsigned int>(statsStrides->Get(1));
+    auto const statsStrideBatch = static_cast<unsigned int>(statsStrides->Get(0));
+    auto const statsStrideHead = static_cast<unsigned int>(statsStrides->Get(1));
 
     // -------------------------------------------------------------------------
     // 3. Attention scale — resolve as ScalarOperand (RFC 0016)
@@ -1043,7 +1043,7 @@ void SdpaBwdPlanBuilder::buildPlan(
             }
         });
 
-    auto resolveStage
+    auto const resolveStage
         = [&](const char* stageName, std::optional<fmha_v3_bwdConfig> cfgOpt) -> ResolvedKernel {
         if(!cfgOpt)
         {
@@ -1062,30 +1062,30 @@ void SdpaBwdPlanBuilder::buildPlan(
     const auto& dqdtuple = dispatchTuples.dqdkdv;
     const auto& dqctuple = dispatchTuples.dqConvert;
 
-    auto odoResolved = resolveStage("odo",
-                                    findConfig(cfg_fmha_bwd_odo,
-                                               deviceString,
-                                               dataTypeId,
-                                               static_cast<int>(headDimQk),
-                                               static_cast<int>(headDimV),
-                                               odtuple.mask,
-                                               odtuple.atomic32,
-                                               odtuple.pssk,
-                                               odtuple.pddv,
-                                               static_cast<int>(batchMode),
-                                               odtuple.bf16Cvt));
-    auto dqdkdvResolved = resolveStage("dqdkdv",
-                                       findConfig(cfg_fmha_bwd_dqdkdv,
-                                                  deviceString,
-                                                  dataTypeId,
-                                                  static_cast<int>(headDimQk),
-                                                  static_cast<int>(headDimV),
-                                                  dqdtuple.mask,
-                                                  dqdtuple.atomic32,
-                                                  dqdtuple.pssk,
-                                                  dqdtuple.pddv,
-                                                  static_cast<int>(batchMode),
-                                                  dqdtuple.bf16Cvt));
+    auto const odoResolved = resolveStage("odo",
+                                          findConfig(cfg_fmha_bwd_odo,
+                                                     deviceString,
+                                                     dataTypeId,
+                                                     static_cast<int>(headDimQk),
+                                                     static_cast<int>(headDimV),
+                                                     odtuple.mask,
+                                                     odtuple.atomic32,
+                                                     odtuple.pssk,
+                                                     odtuple.pddv,
+                                                     static_cast<int>(batchMode),
+                                                     odtuple.bf16Cvt));
+    auto const dqdkdvResolved = resolveStage("dqdkdv",
+                                             findConfig(cfg_fmha_bwd_dqdkdv,
+                                                        deviceString,
+                                                        dataTypeId,
+                                                        static_cast<int>(headDimQk),
+                                                        static_cast<int>(headDimV),
+                                                        dqdtuple.mask,
+                                                        dqdtuple.atomic32,
+                                                        dqdtuple.pssk,
+                                                        dqdtuple.pddv,
+                                                        static_cast<int>(batchMode),
+                                                        dqdtuple.bf16Cvt));
 
     // The DQ_CONVERT stage (FP32 dq_acc → BF16 cast) is only part of the A32
     // 3-kernel path. For A16 the DQDKDV kernel writes dQ directly in BF16, so

@@ -67,7 +67,7 @@ void HipMlopsEngine::getDetails(Handle& handle,
     // Collect custom knobs from plan builders
     for(const auto& planBuilder : _planBuilders)
     {
-        auto customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
+        auto const customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
 
         if(customKnobs.empty())
         {
@@ -76,7 +76,8 @@ void HipMlopsEngine::getDetails(Handle& handle,
 
         for(const auto& knobT : customKnobs)
         {
-            auto knobOffset = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobT);
+            auto const knobOffset
+                = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobT);
             knobsVector.push_back(knobOffset);
         }
 
@@ -85,9 +86,9 @@ void HipMlopsEngine::getDetails(Handle& handle,
         break;
     }
 
-    auto knobs = builder.CreateVector(knobsVector);
+    auto const knobs = builder.CreateVector(knobsVector);
 
-    auto engineDetails
+    auto const engineDetails
         = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());

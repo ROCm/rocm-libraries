@@ -73,7 +73,7 @@ inline auto makeScopedPolicyDescriptor(const HeuristicPlugin& plugin,
 std::filesystem::path getTestPluginDirectory()
 {
     // First, check for environment variable override
-    auto envPath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_HEURISTIC_PLUGIN_DIR");
+    const auto envPath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_HEURISTIC_PLUGIN_DIR");
     if(!envPath.empty())
     {
         return {envPath};
@@ -143,14 +143,14 @@ protected:
 TEST_F(IntegrationHeuristicPolicyPlugins, PluginManagerLoadsFromDefaultPath)
 {
     // Create manager and load plugins
-    auto manager = std::make_shared<HeuristicPluginManager>();
+    const auto manager = std::make_shared<HeuristicPluginManager>();
     // For tests, explicitly pass the plugin directory since getCurrentModuleDirectory
     // resolves to the test binary's location (bin/) not the backend library's (lib/)
     manager->loadPlugins({getTestPluginDirectory()}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     // Plugin handles are created by HeuristicPluginResourceManager, not by the bare
     // manager. The resource manager creates handles and can enumerate loaded plugins.
-    auto resourceMgr = std::make_shared<HeuristicPluginResourceManager>(manager);
+    const auto resourceMgr = std::make_shared<HeuristicPluginResourceManager>(manager);
 
     // Enumerate loaded policies via resource manager
     const auto& policyInfos = resourceMgr->getHeuristicPolicyInfos();
@@ -165,11 +165,11 @@ TEST_F(IntegrationHeuristicPolicyPlugins, PluginManagerRejectsInvalidPlugins)
     // Plugins with wrong ABI version should be rejected during validation
     // This is tested by HeuristicPluginManager::validateBeforeAdding()
 
-    auto manager = std::make_shared<HeuristicPluginManager>();
+    const auto manager = std::make_shared<HeuristicPluginManager>();
     manager->loadPlugins({getTestPluginDirectory()}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     // Create resource manager to access loaded plugins
-    auto resourceMgr = std::make_shared<HeuristicPluginResourceManager>(manager);
+    const auto resourceMgr = std::make_shared<HeuristicPluginResourceManager>(manager);
     const auto& policyInfos = resourceMgr->getHeuristicPolicyInfos();
 
     // All loaded plugins should have valid metadata
@@ -186,11 +186,11 @@ TEST_F(IntegrationHeuristicPolicyPlugins, PluginManagerRejectsDuplicatePolicyIds
     // HeuristicPluginManager should reject plugins with duplicate policy IDs
     // This is enforced by validateBeforeAdding()
 
-    auto manager = std::make_shared<HeuristicPluginManager>();
+    const auto manager = std::make_shared<HeuristicPluginManager>();
     manager->loadPlugins({getTestPluginDirectory()}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     // Create resource manager to enumerate loaded plugins
-    auto resourceMgr = std::make_shared<HeuristicPluginResourceManager>(manager);
+    const auto resourceMgr = std::make_shared<HeuristicPluginResourceManager>(manager);
     const auto& policyInfos = resourceMgr->getHeuristicPolicyInfos();
 
     // Collect all policy IDs
@@ -207,8 +207,8 @@ TEST_F(IntegrationHeuristicPolicyPlugins, PluginManagerRejectsDuplicatePolicyIds
 
 TEST_F(IntegrationHeuristicPolicyPlugins, LoadedPluginsHaveRequiredSymbols)
 {
-    auto heurRm = _handle->getHeuristicPluginResourceManager();
-    auto policyInfos = heurRm->getHeuristicPolicyInfos();
+    const auto heurRm = _handle->getHeuristicPluginResourceManager();
+    const auto policyInfos = heurRm->getHeuristicPolicyInfos();
 
     ASSERT_GT(policyInfos.size(), 0u);
 
@@ -227,10 +227,10 @@ TEST_F(IntegrationHeuristicPolicyPlugins, LoadedPluginsHaveRequiredSymbols)
 
 TEST_F(IntegrationHeuristicPolicyPlugins, ResourceManagerCreatesHandlesForAllPlugins)
 {
-    auto heurRm = _handle->getHeuristicPluginResourceManager();
+    const auto heurRm = _handle->getHeuristicPluginResourceManager();
     ASSERT_NE(heurRm, nullptr);
 
-    auto policyInfos = heurRm->getHeuristicPolicyInfos();
+    const auto policyInfos = heurRm->getHeuristicPolicyInfos();
 
     // Should have created a handle for each loaded plugin
     for(const auto& info : policyInfos)
@@ -248,10 +248,10 @@ TEST_F(IntegrationHeuristicPolicyPlugins, HandleDestructionCleansUpResources)
     // Create and destroy a handle
     hipdnnHandle_t tempHandle = nullptr;
     ASSERT_EQ(hipdnnCreate(&tempHandle), HIPDNN_STATUS_SUCCESS);
-    auto scopedHandle = makeScopedHipdnnHandle(tempHandle);
+    const auto scopedHandle = makeScopedHipdnnHandle(tempHandle);
 
     // Get resource manager (creates plugin handles)
-    auto heurRm = tempHandle->getHeuristicPluginResourceManager();
+    const auto heurRm = tempHandle->getHeuristicPluginResourceManager();
     ASSERT_NE(heurRm, nullptr);
 
     const size_t policyCount = heurRm->getHeuristicPolicyInfos().size();
@@ -262,8 +262,8 @@ TEST_F(IntegrationHeuristicPolicyPlugins, HandleDestructionCleansUpResources)
 
 TEST_F(IntegrationHeuristicPolicyPlugins, PolicyDescriptorCreationSucceeds)
 {
-    auto heurRm = _handle->getHeuristicPluginResourceManager();
-    auto policyInfos = heurRm->getHeuristicPolicyInfos();
+    const auto heurRm = _handle->getHeuristicPluginResourceManager();
+    const auto policyInfos = heurRm->getHeuristicPolicyInfos();
     ASSERT_GT(policyInfos.size(), 0u);
 
     // Pin to the StaticOrdering built-in: it is always registered, so the
@@ -278,7 +278,7 @@ TEST_F(IntegrationHeuristicPolicyPlugins, PolicyDescriptorCreationSucceeds)
     ASSERT_NE(plugin, nullptr);
 
     // Create policy descriptor
-    auto descriptor = makeScopedPolicyDescriptor(
+    const auto descriptor = makeScopedPolicyDescriptor(
         *plugin, plugin->createPolicyDescriptor(pluginHandle, policyId));
     EXPECT_NE(descriptor.get(), nullptr);
 }
@@ -290,7 +290,7 @@ TEST_F(IntegrationHeuristicPolicyPlugins, PluginsReceiveLoggingCallback)
     // Verify that setLoggingCallback was wired up during plugin initialization.
     // If the callback registration failed, resource manager construction would have
     // logged warnings; here we at least confirm the manager came up.
-    auto heurRm = _handle->getHeuristicPluginResourceManager();
+    const auto heurRm = _handle->getHeuristicPluginResourceManager();
     ASSERT_NE(heurRm, nullptr);
 }
 
@@ -298,7 +298,7 @@ TEST_F(IntegrationHeuristicPolicyPlugins, PluginsReceiveLoggingCallback)
 
 TEST_F(IntegrationHeuristicPolicyPlugins, DevicePropertiesAreSetOnAllHandles)
 {
-    auto heurRm = _handle->getHeuristicPluginResourceManager();
+    const auto heurRm = _handle->getHeuristicPluginResourceManager();
     ASSERT_NE(heurRm, nullptr);
 
     // Create serialized device properties using FlatBuffers
@@ -310,7 +310,8 @@ TEST_F(IntegrationHeuristicPolicyPlugins, DevicePropertiesAreSetOnAllHandles)
 
     // Serialize using FlatBuffers
     flatbuffers::FlatBufferBuilder builder(256);
-    auto offset = hipdnn_flatbuffers_sdk::data_objects::DeviceProperties::Pack(builder, &devProps);
+    const auto offset
+        = hipdnn_flatbuffers_sdk::data_objects::DeviceProperties::Pack(builder, &devProps);
     builder.Finish(offset, "HDDP");
 
     // Create wrapper
@@ -326,8 +327,8 @@ TEST_F(IntegrationHeuristicPolicyPlugins, DevicePropertiesAreSetOnAllHandles)
 
 TEST_F(IntegrationHeuristicPolicyPlugins, PolicyIdMatchesNameHash)
 {
-    auto heurRm = _handle->getHeuristicPluginResourceManager();
-    auto policyInfos = heurRm->getHeuristicPolicyInfos();
+    const auto heurRm = _handle->getHeuristicPluginResourceManager();
+    const auto policyInfos = heurRm->getHeuristicPolicyInfos();
 
     for(const auto& info : policyInfos)
     {
@@ -344,8 +345,8 @@ TEST_F(IntegrationHeuristicPolicyPlugins, PolicyIdMatchesNameHash)
 
 TEST_F(IntegrationHeuristicPolicyPlugins, AllPluginsHaveCompatibleApiVersion)
 {
-    auto heurRm = _handle->getHeuristicPluginResourceManager();
-    auto policyInfos = heurRm->getHeuristicPolicyInfos();
+    const auto heurRm = _handle->getHeuristicPluginResourceManager();
+    const auto policyInfos = heurRm->getHeuristicPolicyInfos();
 
     // All loaded plugins should have compatible API versions
     // (major version matches the heuristic API version)
@@ -366,8 +367,8 @@ TEST_F(IntegrationHeuristicPolicyPlugins, AllPluginsHaveCompatibleApiVersion)
 
 TEST_F(IntegrationHeuristicPolicyPlugins, EnumerationMatchesResourceManager)
 {
-    auto heurRm = _handle->getHeuristicPluginResourceManager();
-    auto rmInfos = heurRm->getHeuristicPolicyInfos();
+    const auto heurRm = _handle->getHeuristicPluginResourceManager();
+    const auto rmInfos = heurRm->getHeuristicPolicyInfos();
 
     // Get count via C API
     size_t apiCount = 0;
@@ -430,7 +431,7 @@ TEST_F(IntegrationHeuristicPolicyPlugins, MultipleResourceManagersCanCoexist)
         handles.push_back(makeScopedHipdnnHandle(h));
 
         // Access resource manager (triggers creation)
-        auto heurRm = h->getHeuristicPluginResourceManager();
+        const auto heurRm = h->getHeuristicPluginResourceManager();
         EXPECT_NE(heurRm, nullptr);
     }
 }
@@ -439,7 +440,7 @@ TEST_F(IntegrationHeuristicPolicyPlugins, MultipleResourceManagersCanCoexist)
 
 TEST_F(IntegrationHeuristicPolicyPlugins, MissingPolicyGracefullyHandled)
 {
-    auto heurRm = _handle->getHeuristicPluginResourceManager();
+    const auto heurRm = _handle->getHeuristicPluginResourceManager();
 
     // Query a non-existent policy ID
     const int64_t fakePolicyId = 0x1234567890ABCDEF;

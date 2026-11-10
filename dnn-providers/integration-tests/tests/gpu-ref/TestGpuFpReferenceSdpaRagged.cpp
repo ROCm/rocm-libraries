@@ -1113,8 +1113,8 @@ void checkTokenOffsets(const std::vector<int64_t>& seqQ,
     std::vector<float> oCpuBack(static_cast<size_t>(totalQ * mult.o), 0.0f);
     std::vector<float> lseCpuBack(static_cast<size_t>(totalQ * mult.lse), 0.0f);
     {
-        auto qoTable = makeRaggedOffsetAux(cumQ, 1);
-        auto kvTable = makeRaggedOffsetAux(cumKv, 1);
+        const auto qoTable = makeRaggedOffsetAux(cumQ, 1);
+        const auto kvTable = makeRaggedOffsetAux(cumKv, 1);
         const auto wrap = [](float* buf,
                              const std::vector<int64_t>& dims,
                              const std::shared_ptr<ITensor>& table,
@@ -1254,8 +1254,8 @@ TEST(TestGpuSdpaRaggedFwdFp32, ThrowsOnSeqLenOffTheBatchAxis)
             seqLen.get(),
             seqLen.get());
     };
-    auto offAxis = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{1, 2, 1, 1},
-                                                     std::vector<int64_t>{2, 1, 1, 1});
+    const auto offAxis = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{1, 2, 1, 1},
+                                                           std::vector<int64_t>{2, 1, 1, 1});
     offAxis->memory().hostData()[0] = 4;
     offAxis->memory().hostData()[1] = 4;
     offAxis->memory().markHostModified();

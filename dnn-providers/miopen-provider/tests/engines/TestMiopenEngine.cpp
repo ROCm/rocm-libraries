@@ -141,7 +141,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     const MockGraph mockGraph;
-    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    const auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
     HipdnnMiopenHandle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
@@ -163,7 +163,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     const MockGraph mockGraph;
-    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    const auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
     HipdnnMiopenHandle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
@@ -176,7 +176,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
     const MiopenEngine engine(0);
 
     const MockGraph mockGraph;
-    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    const auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
     HipdnnMiopenHandle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
@@ -194,7 +194,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     const MockGraph mockGraph;
-    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    const auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
     HipdnnMiopenHandle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
@@ -360,21 +360,22 @@ TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnInvalidBenchmarkingKnob
     MockHipdnnMiopenContext ctx;
 
     flatbuffers::FlatBufferBuilder builder;
-    auto knobIdOffset = builder.CreateString("global.benchmarking");
-    auto stringValueOffset = builder.CreateString("invalid_value");
-    auto knobValue
+    const auto knobIdOffset = builder.CreateString("global.benchmarking");
+    const auto stringValueOffset = builder.CreateString("invalid_value");
+    const auto knobValue
         = hipdnn_flatbuffers_sdk::data_objects::CreateStringValue(builder, stringValueOffset);
     hipdnn_flatbuffers_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
     knobSettingBuilder.add_knob_id(knobIdOffset);
     knobSettingBuilder.add_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue);
     knobSettingBuilder.add_value(knobValue.Union());
-    auto knobSetting = knobSettingBuilder.Finish();
+    const auto knobSetting = knobSettingBuilder.Finish();
 
     std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> knobsVector;
     knobsVector.push_back(knobSetting);
-    auto knobs = builder.CreateVector(knobsVector);
+    const auto knobs = builder.CreateVector(knobsVector);
 
-    auto engineConfig = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    const auto engineConfig
+        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
     builder.Finish(engineConfig);
 
     auto buffer = builder.Release();
@@ -434,18 +435,18 @@ protected:
     const IEngineConfig& configWithBenchmarkingKnob(int64_t value)
     {
         auto& builder = newBuilder();
-        auto knobIdOffset = builder.CreateString(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
-        auto knobValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, value);
+        const auto knobIdOffset = builder.CreateString(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
+        const auto knobValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, value);
         hipdnn_flatbuffers_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
         knobSettingBuilder.add_knob_id(knobIdOffset);
         knobSettingBuilder.add_value_type(
             hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
         knobSettingBuilder.add_value(knobValue.Union());
-        auto knobSetting = knobSettingBuilder.Finish();
+        const auto knobSetting = knobSettingBuilder.Finish();
 
         const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>>
             knobsVector{knobSetting};
-        auto knobs = builder.CreateVector(knobsVector);
+        const auto knobs = builder.CreateVector(knobsVector);
 
         builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, 1, knobs));
         return storeConfig(builder);

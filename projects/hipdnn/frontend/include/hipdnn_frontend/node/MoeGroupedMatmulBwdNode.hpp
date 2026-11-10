@@ -175,7 +175,7 @@ public:
                attributes.get_token()->get_dim()[2],
                attributes.get_doutput()->get_dim()[2]};
 
-        auto dweightTensor = attributes.get_dweight();
+        const auto dweightTensor = attributes.get_dweight();
         if(dweightTensor->get_dim().empty())
         {
             dweightTensor->set_dim(expectedDweightDims);

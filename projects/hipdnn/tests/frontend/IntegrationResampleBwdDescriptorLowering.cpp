@@ -43,17 +43,17 @@ protected:
     /// graph method, validates, lowers, serializes, and deserializes.
     hipdnn_flatbuffers_sdk::data_objects::GraphT buildAndDeserialize(ResampleBwdAttributes& attrs)
     {
-        auto graph = std::make_shared<TestableGraphLowering>();
+        const auto graph = std::make_shared<TestableGraphLowering>();
         graph->set_name("ResampleBwdIntegrationTest")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto dy = std::make_shared<TensorAttributes>();
+        const auto dy = std::make_shared<TensorAttributes>();
         dy->set_uid(K_TENSOR_DY_UID).set_name("dy").set_data_type(DataType::FLOAT);
         dy->set_dim(toVec(K_TENSOR_DY_DIMS)).set_stride(toVec(K_TENSOR_DY_STRIDES));
 
-        auto dx = graph->resample_bwd(dy, attrs);
+        const auto dx = graph->resample_bwd(dy, attrs);
         dx->set_uid(K_TENSOR_DX_UID).set_output(true).set_name("dx");
         dx->set_dim(toVec(K_TENSOR_DX_DIMS)).set_stride(toVec(K_TENSOR_DX_STRIDES));
 
@@ -63,21 +63,21 @@ protected:
     hipdnn_flatbuffers_sdk::data_objects::GraphT
         buildAndDeserializeWithIndex(ResampleBwdAttributes& attrs)
     {
-        auto graph = std::make_shared<TestableGraphLowering>();
+        const auto graph = std::make_shared<TestableGraphLowering>();
         graph->set_name("ResampleBwdIntegrationTest")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto dy = std::make_shared<TensorAttributes>();
+        const auto dy = std::make_shared<TensorAttributes>();
         dy->set_uid(K_TENSOR_DY_UID).set_name("dy").set_data_type(DataType::FLOAT);
         dy->set_dim(toVec(K_TENSOR_DY_DIMS)).set_stride(toVec(K_TENSOR_DY_STRIDES));
 
-        auto index = std::make_shared<TensorAttributes>();
+        const auto index = std::make_shared<TensorAttributes>();
         index->set_uid(K_TENSOR_INDEX_UID).set_name("index").set_data_type(DataType::INT32);
         index->set_dim(toVec(K_TENSOR_INDEX_DIMS)).set_stride(toVec(K_TENSOR_INDEX_STRIDES));
 
-        auto dx = graph->resample_bwd(dy, attrs, index);
+        const auto dx = graph->resample_bwd(dy, attrs, index);
         dx->set_uid(K_TENSOR_DX_UID).set_output(true).set_name("dx");
         dx->set_dim(toVec(K_TENSOR_DX_DIMS)).set_stride(toVec(K_TENSOR_DX_STRIDES));
 
@@ -174,13 +174,13 @@ TEST_F(IntegrationResampleBwdDescriptorLowering, IndexTensorPreservedInRoundTrip
 
 TEST_F(IntegrationResampleBwdDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
+    const auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
     graph->set_name("AutoUidResampleBwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_name("dy").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_TENSOR_DY_DIMS)).set_stride(toVec(K_TENSOR_DY_STRIDES));
 
@@ -192,7 +192,7 @@ TEST_F(IntegrationResampleBwdDescriptorLowering, AutoAssignedUidsPreservedInRoun
     attrs.set_stride(toVec(K_STRIDE));
     attrs.set_window(toVec(K_WINDOW));
 
-    auto dx = graph->resample_bwd(dy, attrs);
+    const auto dx = graph->resample_bwd(dy, attrs);
     dx->set_output(true);
     dx->set_dim(toVec(K_TENSOR_DX_DIMS)).set_stride(toVec(K_TENSOR_DX_STRIDES));
 

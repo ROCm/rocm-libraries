@@ -37,32 +37,32 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_name("X").set_uid(1).set_dim(dims).set_stride(strides).set_data_type(
             DataType::FLOAT);
 
-        auto mean = std::make_shared<TensorAttributes>();
+        const auto mean = std::make_shared<TensorAttributes>();
         mean->set_name("mean")
             .set_uid(2)
             .set_dim(channelDims)
             .set_stride(channelStrides)
             .set_data_type(DataType::FLOAT);
 
-        auto invVar = std::make_shared<TensorAttributes>();
+        const auto invVar = std::make_shared<TensorAttributes>();
         invVar->set_name("inv_variance")
             .set_uid(3)
             .set_dim(channelDims)
             .set_stride(channelStrides)
             .set_data_type(DataType::FLOAT);
 
-        auto scale = std::make_shared<TensorAttributes>();
+        const auto scale = std::make_shared<TensorAttributes>();
         scale->set_name("scale")
             .set_uid(4)
             .set_dim(channelDims)
             .set_stride(channelStrides)
             .set_data_type(DataType::FLOAT);
 
-        auto bias = std::make_shared<TensorAttributes>();
+        const auto bias = std::make_shared<TensorAttributes>();
         bias->set_name("bias")
             .set_uid(5)
             .set_dim(channelDims)
@@ -70,7 +70,7 @@ protected:
             .set_data_type(DataType::FLOAT);
 
         const BatchnormInferenceAttributes bnAttrs;
-        auto y = graph.batchnorm_inference(x, mean, invVar, scale, bias, bnAttrs);
+        const auto y = graph.batchnorm_inference(x, mean, invVar, scale, bias, bnAttrs);
         y->set_name("Y").set_uid(6).set_data_type(DataType::FLOAT).set_output(true);
 
         return graph;
@@ -87,9 +87,9 @@ TEST_F(IntegrationIsSupportedExtPerformance, ColdCallCompletesWithinThreshold)
     // graph purely to gate the test. This is not part of what's being timed.
     {
         Graph probeGraph = createSimpleBatchnormGraph();
-        auto validateResult = probeGraph.validate();
+        const auto validateResult = probeGraph.validate();
         ASSERT_TRUE(validateResult.is_good()) << validateResult.get_message();
-        auto buildResult = probeGraph.build_operation_graph(_handle);
+        const auto buildResult = probeGraph.build_operation_graph(_handle);
         ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
         ASSERT_NO_FATAL_FAILURE(hipdnn_integration_tests::checkEngineSupportOrSkip(probeGraph));
         if(::testing::Test::IsSkipped())
@@ -103,7 +103,7 @@ TEST_F(IntegrationIsSupportedExtPerformance, ColdCallCompletesWithinThreshold)
     for(int i = 0; i < K_ITERATIONS; ++i)
     {
         Graph graph = createSimpleBatchnormGraph();
-        auto result = graph.is_supported_ext(_handle);
+        const auto result = graph.is_supported_ext(_handle);
         ASSERT_TRUE(result.is_good()) << "Iteration " << i << ": " << result.get_message();
     }
 

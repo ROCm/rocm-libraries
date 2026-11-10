@@ -80,7 +80,7 @@ TEST_F(TestLogRecorder, WithOverrideLevelChangesLevel)
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
 
     {
-        auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
         EXPECT_EQ(hipdnn_data_sdk::logging::getLogLevel(), HIPDNN_SEV_ERROR);
     }
 }
@@ -90,7 +90,7 @@ TEST_F(TestLogRecorder, WithOverrideLevelRestoresOriginal)
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_WARN);
 
     {
-        auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
         EXPECT_EQ(hipdnn_data_sdk::logging::getLogLevel(), HIPDNN_SEV_ERROR);
     }
 
@@ -103,7 +103,7 @@ TEST_F(TestLogRecorder, WithCurrentLevelPreservesLevel)
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_WARN);
 
     {
-        auto recorder = SharedLogRecorder::withCurrentLevel();
+        const auto recorder = SharedLogRecorder::withCurrentLevel();
         EXPECT_EQ(hipdnn_data_sdk::logging::getLogLevel(), HIPDNN_SEV_WARN);
     }
 
@@ -116,7 +116,7 @@ TEST_F(TestLogRecorder, WithCurrentLevelRestoresOnDestroy)
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
 
     {
-        auto recorder = SharedLogRecorder::withCurrentLevel();
+        const auto recorder = SharedLogRecorder::withCurrentLevel();
         // Manually change level during recording
         hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_ERROR);
     }
@@ -129,7 +129,7 @@ TEST_F(TestLogRecorder, GetSavedLogLevelReturnsOriginal)
 {
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_WARN);
 
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     EXPECT_EQ(recorder.getSavedLogLevel(), HIPDNN_SEV_WARN);
 }
 
@@ -137,7 +137,7 @@ TEST_F(TestLogRecorder, GetSavedLogLevelReturnsOriginal)
 
 TEST_F(TestLogRecorder, HasLogContainingFindsSubstring)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     LogRecording::instance(LogRecording::Id::SHARED)
         .recordLog(HIPDNN_SEV_INFO, "This is a test message");
 
@@ -148,7 +148,7 @@ TEST_F(TestLogRecorder, HasLogContainingFindsSubstring)
 
 TEST_F(TestLogRecorder, HasLogContainingWithSeverityFilters)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "info message");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_WARN, "warn message");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_ERROR, "error message");
@@ -164,7 +164,7 @@ TEST_F(TestLogRecorder, HasLogContainingWithSeverityFilters)
 
 TEST_F(TestLogRecorder, CountLogsAtLevelReturnsAccurateCount)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "info 1");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "info 2");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_WARN, "warn 1");
@@ -179,7 +179,7 @@ TEST_F(TestLogRecorder, CountLogsAtLevelReturnsAccurateCount)
 
 TEST_F(TestLogRecorder, GetRecordedLogCountReturnsTotal)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     EXPECT_EQ(recorder.getRecordedLogCount(), 0);
 
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 1");
@@ -192,7 +192,7 @@ TEST_F(TestLogRecorder, GetRecordedLogCountReturnsTotal)
 
 TEST_F(TestLogRecorder, GetRecordedLogsReturnsVector)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "message 1");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_WARN, "message 2");
 
@@ -236,13 +236,13 @@ TEST_F(TestLogRecorder, SharedRecorderClearLogsAllowsNewRecording)
 TEST_F(TestLogRecorder, GetRecordedLogsAsStringShowsEmptyMessage)
 {
     // No logs recorded
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     EXPECT_EQ(recorder.getRecordedLogsAsString(), "(No logs captured.)\n");
 }
 
 TEST_F(TestLogRecorder, GetRecordedLogsAsStringFormatsLogs)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "info message");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_WARN, "warn message");
 
@@ -253,7 +253,7 @@ TEST_F(TestLogRecorder, GetRecordedLogsAsStringFormatsLogs)
 
 TEST_F(TestLogRecorder, GetRecordedLogsAsStringWithMaxLogsLimitsOutput)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 1");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 2");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 3");
@@ -277,7 +277,7 @@ TEST_F(TestLogRecorder, GetRecordedLogsAsStringWithMaxLogsLimitsOutput)
 
 TEST_F(TestLogRecorder, GetRecordedLogsAsStringSkipMessageSingular)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 1");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 2");
 
@@ -289,7 +289,7 @@ TEST_F(TestLogRecorder, GetRecordedLogsAsStringSkipMessageSingular)
 
 TEST_F(TestLogRecorder, GetRecordedLogsAsStringNoLimitShowsAll)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 1");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 2");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 3");
@@ -307,7 +307,7 @@ TEST_F(TestLogRecorder, GetRecordedLogsAsStringNoLimitShowsAll)
 
 TEST_F(TestLogRecorder, GetRecordedLogsAsStringMaxLogsGreaterThanCountShowsAll)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 1");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 2");
 
@@ -323,7 +323,7 @@ TEST_F(TestLogRecorder, GetRecordedLogsAsStringMaxLogsGreaterThanCountShowsAll)
 
 TEST_F(TestLogRecorder, GetRecordedLogsAsStringFormatsSeverities)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "info msg");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_ERROR, "error msg");
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_WARN, "warn msg");
@@ -350,7 +350,7 @@ TEST_F(TestLogRecorder, LogRecordingOutputCallsCallbackWhenLevelAllows)
     static bool s_callbackWasCalled = false; // NOLINT(readability-identifier-naming)
     s_callbackWasCalled = false;
 
-    auto testCallback = [](hipdnnSeverity_t severity, const char* message) {
+    const auto testCallback = [](hipdnnSeverity_t severity, const char* message) {
         (void)severity;
         (void)message;
         s_callbackWasCalled = true;
@@ -367,7 +367,7 @@ TEST_F(TestLogRecorder, LogRecordingOutputDoesNotCallCallbackWhenLevelBlocks)
     static bool s_callbackWasCalled = false; // NOLINT(readability-identifier-naming)
     s_callbackWasCalled = false;
 
-    auto testCallback = [](hipdnnSeverity_t severity, const char* message) {
+    const auto testCallback = [](hipdnnSeverity_t severity, const char* message) {
         (void)severity;
         (void)message;
         s_callbackWasCalled = true;
@@ -384,7 +384,7 @@ TEST_F(TestLogRecorder, LogRecordingOutputDoesNotCallCallbackWhenLevelBlocks)
 
 TEST_F(TestLogRecorder, EmptyLogMessagesAreRecorded)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "");
 
     EXPECT_EQ(LogRecording::instance(LogRecording::Id::SHARED).getRecordedLogCount(), 1);
@@ -394,7 +394,7 @@ TEST_F(TestLogRecorder, EmptyLogMessagesAreRecorded)
 
 TEST_F(TestLogRecorder, SpecialCharactersInMessages)
 {
-    auto recorder = SharedLogRecorder::withCurrentLevel();
+    const auto recorder = SharedLogRecorder::withCurrentLevel();
     LogRecording::instance(LogRecording::Id::SHARED)
         .recordLog(HIPDNN_SEV_INFO, "Message with \n newlines \t tabs \"quotes\"");
 
@@ -408,9 +408,9 @@ TEST_F(TestLogRecorder, MultipleRecordersCanExist)
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
 
     {
-        auto recorder1 = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+        const auto recorder1 = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
         {
-            auto recorder2 = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+            const auto recorder2 = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
             EXPECT_EQ(hipdnn_data_sdk::logging::getLogLevel(), HIPDNN_SEV_ERROR);
         }
         // Inner recorder destroyed - should restore to outer's level
@@ -428,13 +428,13 @@ TEST_F(TestLogRecorder, SeverityToStringReturnsCorrectStrings)
     EXPECT_STREQ(severityToString(HIPDNN_SEV_FATAL), "fatal");
     EXPECT_STREQ(severityToString(HIPDNN_SEV_OFF), "off");
     // Cast invalid integer to severity type
-    auto invalidSeverity = static_cast<hipdnnSeverity_t>(999);
+    const auto invalidSeverity = static_cast<hipdnnSeverity_t>(999);
     EXPECT_STREQ(severityToString(invalidSeverity), "UNKNOWN");
 }
 
 TEST_F(TestLogRecorder, LogRecordingCallbackIgnoresNullMessage)
 {
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const size_t countBefore = recorder.getRecordedLogCount();
 
     logRecordingCallback(HIPDNN_SEV_INFO, nullptr);
@@ -445,7 +445,7 @@ TEST_F(TestLogRecorder, LogRecordingCallbackIgnoresNullMessage)
 
 TEST_F(TestLogRecorder, LogRecordingCallbackRecordsValidMessage)
 {
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
     logRecordingCallback(HIPDNN_SEV_WARN, "test message");
 
     // Should record to SHARED instance
@@ -457,7 +457,7 @@ TEST_F(TestLogRecorder, LogRecordingCallbackRecordsValidMessage)
 
 TEST_F(TestLogRecorder, LogChainedRecordingCallbackRecordsValidMessage)
 {
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
     logChainedRecordingCallback(HIPDNN_SEV_ERROR, "chained test message");
 
     // Should record to SHARED instance
@@ -469,7 +469,7 @@ TEST_F(TestLogRecorder, LogChainedRecordingCallbackRecordsValidMessage)
 
 TEST_F(TestLogRecorder, LogChainedRecordingCallbackIgnoresNullMessage)
 {
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const size_t countBefore = recorder.getRecordedLogCount();
 
     logChainedRecordingCallback(HIPDNN_SEV_INFO, nullptr);
@@ -536,7 +536,7 @@ TEST_F(TestLogRecorder, IsolatedWithOverrideLevelChangesLevel)
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
 
     {
-        auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
         EXPECT_EQ(hipdnn_data_sdk::logging::getLogLevel(), HIPDNN_SEV_ERROR);
     }
 }
@@ -546,7 +546,7 @@ TEST_F(TestLogRecorder, IsolatedWithOverrideLevelRestoresOriginal)
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_WARN);
 
     {
-        auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
         EXPECT_EQ(hipdnn_data_sdk::logging::getLogLevel(), HIPDNN_SEV_ERROR);
     }
 
@@ -559,7 +559,7 @@ TEST_F(TestLogRecorder, IsolatedWithCurrentLevelPreservesLevel)
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_WARN);
 
     {
-        auto recorder = IsolatedLogRecorder::withCurrentLevel();
+        const auto recorder = IsolatedLogRecorder::withCurrentLevel();
         EXPECT_EQ(hipdnn_data_sdk::logging::getLogLevel(), HIPDNN_SEV_WARN);
     }
 
@@ -716,8 +716,8 @@ TEST_F(TestLogRecorder, IsolatedAndSharedInstancesAreIndependent)
 TEST_F(TestLogRecorder, SharedAndIsolatedInstancesAreSeparate)
 {
     // Get references to both instances
-    auto& sharedInstance = LogRecording::instance(LogRecording::Id::SHARED);
-    auto& isolatedInstance = LogRecording::instance(LogRecording::Id::ISOLATED);
+    const auto& sharedInstance = LogRecording::instance(LogRecording::Id::SHARED);
+    const auto& isolatedInstance = LogRecording::instance(LogRecording::Id::ISOLATED);
 
     // Verify they are different instances (different addresses)
     EXPECT_NE(&sharedInstance, &isolatedInstance);
@@ -761,8 +761,8 @@ TEST_F(TestLogRecorder, SharedAndIsolatedRecordersWorkTogether)
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
 
     // Create both recorders simultaneously
-    auto sharedRecorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto isolatedRecorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto sharedRecorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const auto isolatedRecorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     // The last one to set the level wins (IsolatedLogRecorder)
     EXPECT_EQ(hipdnn_data_sdk::logging::getLogLevel(), HIPDNN_SEV_ERROR);

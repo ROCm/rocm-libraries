@@ -26,15 +26,15 @@ TEST(TestLayernormAttributes, SetRequiredTensors)
 {
     LayernormAttributes attrs;
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1);
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(2);
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(3);
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_uid(4);
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(5);
 
     attrs.set_x(x);
@@ -66,7 +66,7 @@ TEST(TestLayernormAttributes, SetOptionalMean)
 {
     LayernormAttributes attrs;
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(30);
     attrs.set_mean(mean);
 
@@ -78,7 +78,7 @@ TEST(TestLayernormAttributes, SetOptionalInvVariance)
 {
     LayernormAttributes attrs;
 
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(40);
     attrs.set_inv_variance(invVariance);
 
@@ -104,31 +104,31 @@ TEST(TestLayernormAttributes, LogicalAndStrictEquality)
     attr1.set_forward_phase(hipdnn_frontend::NormFwdPhase::TRAINING);
     attr1.set_normalized_dim_count(2);
 
-    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x1->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_x(x1);
 
-    auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     scale1->set_uid(2).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_scale(scale1);
 
-    auto bias1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto bias1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     bias1->set_uid(3).set_name("Bias").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_bias(bias1);
 
-    auto epsilon1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto epsilon1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilon1->set_uid(4).set_name("Epsilon").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_epsilon(epsilon1);
 
-    auto y1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto y1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     y1->set_uid(5).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_y(y1);
 
-    auto mean1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto mean1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     mean1->set_uid(6).set_name("Mean").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_mean(mean1);
 
-    auto invVar1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto invVar1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     invVar1->set_uid(7).set_name("InvVariance").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_inv_variance(invVar1);
 
@@ -137,31 +137,31 @@ TEST(TestLayernormAttributes, LogicalAndStrictEquality)
     attr2.set_forward_phase(hipdnn_frontend::NormFwdPhase::TRAINING);
     attr2.set_normalized_dim_count(2);
 
-    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x2->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_x(x2);
 
-    auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     scale2->set_uid(2).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_scale(scale2);
 
-    auto bias2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto bias2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     bias2->set_uid(3).set_name("Bias").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_bias(bias2);
 
-    auto epsilon2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto epsilon2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilon2->set_uid(4).set_name("Epsilon").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_epsilon(epsilon2);
 
-    auto y2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto y2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     y2->set_uid(5).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_y(y2);
 
-    auto mean2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto mean2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     mean2->set_uid(6).set_name("Mean").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_mean(mean2);
 
-    auto invVar2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto invVar2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     invVar2->set_uid(7).set_name("InvVariance").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_inv_variance(invVar2);
 
@@ -171,7 +171,7 @@ TEST(TestLayernormAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto structuralMismatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     structuralMismatchX->set_uid(99).set_name("MismatchedX");
     attr2.set_x(structuralMismatchX);
 
@@ -193,7 +193,7 @@ TEST(TestLayernormAttributes, LogicalAndStrictEquality)
     attr2.set_normalized_dim_count(2); // Revert
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchX
         ->set_uid(555) // Diverges from attr1's x1 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's x1 ("X")

@@ -49,7 +49,7 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowXTensor
+        const auto shallowXTensor
             = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
         auto shallowYTensor
             = createShallowTensor<YDataType>(_params.yTensor, variantPack.at(_params.yTensor.uid));

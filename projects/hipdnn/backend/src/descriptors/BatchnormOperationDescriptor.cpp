@@ -523,7 +523,7 @@ std::shared_ptr<BatchnormOperationDescriptor> BatchnormOperationDescriptor::from
                               *attrs->next_running_variance_tensor_uid,
                               "BatchnormOperationDescriptor::fromNode: NextRunningVariance");
     }
-    for(auto uid : attrs->peer_stats_tensor_uid)
+    for(const auto uid : attrs->peer_stats_tensor_uid)
     {
         desc->_peerStatsDescs.push_back(
             findTensorInMap(tensorMap, uid, "BatchnormOperationDescriptor::fromNode: peer_stats"));

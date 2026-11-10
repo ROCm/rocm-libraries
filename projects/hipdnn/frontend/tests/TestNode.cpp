@@ -63,7 +63,7 @@ TEST(TestNode, PostValidateNodeComputeDataType)
     for(auto [dataType, errorCode] : expectedResults)
     {
         node.attributes.set_compute_data_type(dataType);
-        auto result = node.post_validate_node();
+        const auto result = node.post_validate_node();
         EXPECT_EQ(result.code, errorCode) << "For " + std::string(to_string(dataType));
     }
 }
@@ -86,14 +86,14 @@ class TestNodePostValidateNodeTensors : public ::testing::TestWithParam<FakeNode
 protected:
     void SetUp() override
     {
-        auto param = GetParam();
+        const auto param = GetParam();
 
-        auto validTensorAttribute = std::make_shared<TensorAttributes>();
+        const auto validTensorAttribute = std::make_shared<TensorAttributes>();
         validTensorAttribute->set_data_type(DataType::FLOAT)
             .set_dim({1, 2, 3, 4})
             .set_stride({1, 2, 3, 4});
 
-        auto invalidTensorAttribute = std::make_shared<TensorAttributes>();
+        const auto invalidTensorAttribute = std::make_shared<TensorAttributes>();
         invalidTensorAttribute->set_dim({1, 2, 3, 4}).set_stride({1, 2, 3});
 
         _attributes.set_compute_data_type(DataType::FLOAT);
@@ -120,7 +120,7 @@ protected:
 
 TEST_P(TestNodePostValidateNodeTensors, Correctness)
 {
-    auto tensorsToString
+    const auto tensorsToString
         = [&](const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensors) {
               std::string ret = "[";
 
@@ -143,7 +143,7 @@ TEST_P(TestNodePostValidateNodeTensors, Correctness)
                                    + " Outputs: " + tensorsToString(_attributes.outputs);
     const FakeNode node(std::move(_attributes), _graphAttributes);
 
-    auto nodes = node.getNodeOutputTensorAttributes();
+    const auto nodes = node.getNodeOutputTensorAttributes();
 
     EXPECT_EQ(node.post_validate_node().code, _expectedResult) << caseString;
 }

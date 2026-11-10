@@ -115,8 +115,8 @@ protected:
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -127,11 +127,11 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, CreatesValidFinalized
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -141,7 +141,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, NodeFactoryDelegatesC
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type,
               NodeAttributes::BatchnormInferenceAttributesVarianceExt);
-    auto desc = std::static_pointer_cast<BatchnormInferenceVarianceExtOperationDescriptor>(graphOp);
+    const auto desc
+        = std::static_pointer_cast<BatchnormInferenceVarianceExtOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -164,16 +165,16 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, NodeFactoryDelegatesC
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_BN_INF_VAR_EXT_X_UID);
@@ -193,8 +194,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getXDesc(), _tensorMap[K_BN_INF_VAR_EXT_X_UID]);
     EXPECT_EQ(desc->getMeanDesc(), _tensorMap[K_BN_INF_VAR_EXT_MEAN_UID]);
@@ -207,8 +208,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, TensorReferencesMatch
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_BN_INF_VAR_EXT_X_UID);
@@ -256,7 +257,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, SetsTensorReferencesW
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingXTensor)
 {
     _tensorMap.erase(K_BN_INF_VAR_EXT_X_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
         BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap),
@@ -266,7 +267,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingXTens
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingMeanTensor)
 {
     _tensorMap.erase(K_BN_INF_VAR_EXT_MEAN_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
         BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap),
@@ -276,7 +277,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingMeanT
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingVarianceTensor)
 {
     _tensorMap.erase(K_BN_INF_VAR_EXT_VARIANCE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
         BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap),
@@ -286,7 +287,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingVaria
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingScaleTensor)
 {
     _tensorMap.erase(K_BN_INF_VAR_EXT_SCALE_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
         BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap),
@@ -296,7 +297,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingScale
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingBiasTensor)
 {
     _tensorMap.erase(K_BN_INF_VAR_EXT_BIAS_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
         BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap),
@@ -306,7 +307,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingBiasT
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingYTensor)
 {
     _tensorMap.erase(K_BN_INF_VAR_EXT_Y_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
         BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap),
@@ -316,7 +317,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingYTens
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingEpsilonTensor)
 {
     _tensorMap.erase(K_BN_INF_VAR_EXT_EPSILON_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
         BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap),
@@ -325,8 +326,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingEpsil
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 7);
@@ -341,8 +342,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetTensorDescriptorsR
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -363,8 +364,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -502,7 +503,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, NamePreservedFromNode
     auto node = createStandardNode();
     node.name = "test_batchnorminferencevarianceext_1";
 
-    auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -518,8 +519,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, NamePreservedFromNode
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -531,7 +532,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, BuildNodePreservesNam
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
@@ -543,7 +544,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, ToStringIncludesName)
     auto node = createStandardNode();
     node.name = "test_to_string";
 
-    auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
-    auto str = desc->toString();
+    const auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
+    const auto str = desc->toString();
     EXPECT_NE(str.find("test_to_string"), std::string::npos);
 }

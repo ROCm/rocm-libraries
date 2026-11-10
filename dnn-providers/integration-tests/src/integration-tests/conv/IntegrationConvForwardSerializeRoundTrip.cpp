@@ -56,18 +56,18 @@ public:
         hipdnn_frontend::graph::Graph graphObj;
         graphObj.set_name("ConvolutionForwardSerializeRoundTrip");
 
-        auto dataType = getDataTypeEnumFromType<DataType>();
+        const auto dataType = getDataTypeEnumFromType<DataType>();
         graphObj.set_intermediate_data_type(dataType)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
         auto xAttr = graph::makeTensorAttributes(
             "x", testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
-        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        const auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto wAttr = graph::makeTensorAttributes(
             "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
-        auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
+        const auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
         graph::ConvFpropAttributes convAttrs;
         convAttrs.set_pre_padding(testCase.convPrePadding);
@@ -75,16 +75,16 @@ public:
         convAttrs.set_stride(testCase.convStride);
         convAttrs.set_dilation(testCase.convDilation);
 
-        auto yAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
+        const auto yAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
         yAttr->set_output(true);
 
-        auto validateResult = graphObj.validate();
+        const auto validateResult = graphObj.validate();
         if(validateResult.is_bad())
         {
             throw std::runtime_error("Failed to validate graph: " + validateResult.get_message());
         }
 
-        auto buildResult = graphObj.build_operation_graph(handle);
+        const auto buildResult = graphObj.build_operation_graph(handle);
         if(buildResult.is_bad())
         {
             throw std::runtime_error("Failed to build operation graph: "
@@ -118,12 +118,12 @@ protected:
         GraphTensorBundle refBundle;
         this->generateBundles(graphObj, refBundle, gpuBundle);
         this->inputFillRecipes().setGlobalSeed(convTestCase.seed);
-        auto gpuInit = this->initializeBundle(graphObj, gpuBundle);
+        const auto gpuInit = this->initializeBundle(graphObj, gpuBundle);
         if(!gpuInit.filled)
         {
             GTEST_SKIP() << "Cannot fill GPU inputs: " << gpuInit.reason;
         }
-        auto refInit = this->initializeBundle(graphObj, refBundle);
+        const auto refInit = this->initializeBundle(graphObj, refBundle);
         if(!refInit.filled)
         {
             GTEST_SKIP() << "Cannot fill ref inputs: " << refInit.reason;
@@ -138,13 +138,14 @@ protected:
         // actually used. A SYNC WARN recorder around to_binary() captures whether
         // the plan-degradation warning fired; the recorder must stay alive across
         // the branch below so its logs remain available.
-        auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-        auto cbErr = setUserLogCallback(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-                                        HIPDNN_SEV_WARN,
-                                        LogCallbackMode::SYNC,
-                                        this);
+        const auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+        const auto cbErr
+            = setUserLogCallback(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+                                 HIPDNN_SEV_WARN,
+                                 LogCallbackMode::SYNC,
+                                 this);
         ASSERT_EQ(cbErr.code, ErrorCode::OK);
-        auto lvlErr = setGlobalLogLevel(HIPDNN_SEV_WARN);
+        const auto lvlErr = setGlobalLogLevel(HIPDNN_SEV_WARN);
         ASSERT_EQ(lvlErr.code, ErrorCode::OK);
 
         auto [blob, serErr] = graphObj.to_binary();
@@ -191,8 +192,8 @@ protected:
         ASSERT_GT(gpuBundle.outputTensorIds.count(yUid), 0u)
             << "Output tensor was not registered in the bundle";
 
-        auto& refTensor = refBundle.tensors.at(yUid);
-        auto& gpuTensor = gpuBundle.tensors.at(yUid);
+        const auto& refTensor = refBundle.tensors.at(yUid);
+        const auto& gpuTensor = gpuBundle.tensors.at(yUid);
 
         // Mark device data dirty so host access triggers a device-to-host sync
         // before the comparison reads it.

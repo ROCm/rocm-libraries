@@ -61,8 +61,8 @@ void GpuFpReferenceMatmul::launchMatmul(const void* aPtr,
     std::memcpy(args.cDims, cDims.data(), cDims.size() * sizeof(int64_t));
     std::memcpy(args.cStrides, cStrides.data(), cStrides.size() * sizeof(int64_t));
 
-    auto mTiles = (aDims[aDims.size() - 2] + tileSize - 1) / tileSize;
-    auto nTiles = (bDims[bDims.size() - 1] + tileSize - 1) / tileSize;
+    const auto mTiles = (aDims[aDims.size() - 2] + tileSize - 1) / tileSize;
+    const auto nTiles = (bDims[bDims.size() - 1] + tileSize - 1) / tileSize;
 
     int64_t batches = 1;
     for(size_t i = 0; i < cDims.size() - 2; ++i)

@@ -41,9 +41,9 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
 inline auto get_fallback_engine_list(DescriptorType_t mode,
                                      const std::string& opGraphTag) -> std::vector<int>
 {
-    auto major_version = detail::get_backend_version() / 1000;
+    const auto major_version = detail::get_backend_version() / 1000;
 
-    auto minor_version = (detail::get_backend_version() / 100) % 10;
+    const auto minor_version = (detail::get_backend_version() / 100) % 10;
     if(major_version >= 8)
     {
         if(minor_version <= 2)
@@ -197,7 +197,7 @@ public:
                   .setHeurMode(CUDNN_HEUR_MODE_FALLBACK)
                   .setOperationGraph(m_fallback_list.opGraph, m_fallback_list.opGraphTag)
                   .build();
-        auto count = fallback_heuristics.getEngineConfigCount();
+        const auto count = fallback_heuristics.getEngineConfigCount();
         m_fallback_list.m_engine_configs = fallback_heuristics.getEngineConfig(count);
         CUDNN_FE_LOG_LABEL_ENDL(m_fallback_list);
         return std::move(m_fallback_list);

@@ -574,7 +574,7 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
         const unsigned int seed
             = recipes.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
         seeds.emplace(uid, seed);
-        auto fillResult = fill(*inputs.at(uid), recipes.fill(uid), seed, device);
+        const auto fillResult = fill(*inputs.at(uid), recipes.fill(uid), seed, device);
         if(!fillResult.filled)
         {
             return FillResult::unsupported("uid " + std::to_string(uid) + ": " + fillResult.reason);

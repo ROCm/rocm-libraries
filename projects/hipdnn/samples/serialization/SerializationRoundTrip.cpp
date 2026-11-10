@@ -69,9 +69,9 @@ bool testJsonSerialization(const graph::Graph& originalGraph,
     HIPDNN_FE_CHECK(jsonGraph.build_plans());
 
     auto jsonTensors = jsonGraph.getTensorsByName();
-    auto xAttrJson = jsonTensors.at("x");
-    auto wAttrJson = jsonTensors.at("w");
-    auto yAttrJson = jsonTensors.at("y");
+    const auto xAttrJson = jsonTensors.at("x");
+    const auto wAttrJson = jsonTensors.at("w");
+    const auto yAttrJson = jsonTensors.at("y");
 
     utilities::Tensor<InputType> yJson(yAttrJson->get_dim(), layout);
     yJson.fillWithValue(static_cast<InputType>(0.0f));
@@ -112,9 +112,9 @@ bool testBinarySerialization(const graph::Graph& originalGraph,
     HIPDNN_FE_CHECK(binaryGraph.build_plans());
 
     auto binaryTensors = binaryGraph.getTensorsByName();
-    auto xAttrBin = binaryTensors.at("x");
-    auto wAttrBin = binaryTensors.at("w");
-    auto yAttrBin = binaryTensors.at("y");
+    const auto xAttrBin = binaryTensors.at("x");
+    const auto wAttrBin = binaryTensors.at("w");
+    const auto yAttrBin = binaryTensors.at("y");
 
     utilities::Tensor<InputType> yBinary(yAttrBin->get_dim(), layout);
     yBinary.fillWithValue(static_cast<InputType>(0.0f));
@@ -140,31 +140,31 @@ bool SampleRunner::operator()(const TensorLayout& layout)
               << "] ===\n";
 
     // Input
-    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 4;
+    const int64_t n = !config.dims.empty() ? config.dims[0] : 4;
     const int64_t c = config.dims.size() > 1 ? config.dims[1] : 8;
     const int64_t h = config.dims.size() > 2 ? config.dims[2] : 8;
     const int64_t w = config.dims.size() > 3 ? config.dims[3] : 8;
 
     // Filter
-    const int64_t k = config.filter.size() > 0 ? config.filter[0] : 8;
+    const int64_t k = !config.filter.empty() ? config.filter[0] : 8;
     const int64_t r = config.filter.size() > 1 ? config.filter[1] : 3;
     const int64_t s = config.filter.size() > 2 ? config.filter[2] : 3;
 
     // Stride
-    const int64_t u = config.stride.size() > 0 ? config.stride[0] : 1;
+    const int64_t u = !config.stride.empty() ? config.stride[0] : 1;
     const int64_t v = config.stride.size() > 1 ? config.stride[1] : 1;
 
     // Padding
-    const int64_t padH = config.padding.size() > 0 ? config.padding[0] : 1;
+    const int64_t padH = !config.padding.empty() ? config.padding[0] : 1;
     const int64_t padW = config.padding.size() > 1 ? config.padding[1] : 1;
 
     // Dilation
-    const int64_t dilH = config.dilation.size() > 0 ? config.dilation[0] : 1;
+    const int64_t dilH = !config.dilation.empty() ? config.dilation[0] : 1;
     const int64_t dilW = config.dilation.size() > 1 ? config.dilation[1] : 1;
 
     // Set names on tensors so we can retrieve them after deserialization
-    auto xAttrOrig = createTensor({n, c, h, w}, inputType, layout);
-    auto wAttrOrig = createTensor({k, c, r, s}, inputType, layout);
+    const auto xAttrOrig = createTensor({n, c, h, w}, inputType, layout);
+    const auto wAttrOrig = createTensor({k, c, r, s}, inputType, layout);
     xAttrOrig->set_name("x");
     wAttrOrig->set_name("w");
 
@@ -189,7 +189,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_stride({u, v})
         .set_dilation({dilH, dilW});
 
-    auto yAttrOrig = originalGraph.conv_fprop(xAttrOrig, wAttrOrig, convAttrs);
+    const auto yAttrOrig = originalGraph.conv_fprop(xAttrOrig, wAttrOrig, convAttrs);
     yAttrOrig->set_name("y");
     yAttrOrig->set_output(true);
 
@@ -223,7 +223,7 @@ int main(int argc, char* argv[])
     {
         RETURN_SUCCESS_IF_NO_DEVICE();
 
-        auto config = parseCommandLineArgs(argc, argv);
+        const auto config = parseCommandLineArgs(argc, argv);
 
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);

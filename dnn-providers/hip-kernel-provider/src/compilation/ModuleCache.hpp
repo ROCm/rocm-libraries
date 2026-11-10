@@ -38,7 +38,7 @@ public:
         const std::string key = Derived::makeKey(args...);
 
         const std::lock_guard<std::mutex> lock(_mutex);
-        auto it = _entries.find(key);
+        auto const it = _entries.find(key);
         if(it != _entries.end())
         {
             return it->second;

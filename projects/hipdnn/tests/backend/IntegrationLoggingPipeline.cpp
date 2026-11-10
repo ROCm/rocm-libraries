@@ -48,11 +48,11 @@ TEST_F(IntegrationGpuLoggingPipeline, HandleLogging)
 
     hipdnnHandle_t handle = nullptr;
 
-    auto createStatus = hipdnnCreate(&handle);
+    const auto createStatus = hipdnnCreate(&handle);
     ASSERT_EQ(createStatus, HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(handle, nullptr);
 
-    auto destroyStatus = hipdnnDestroy(handle);
+    const auto destroyStatus = hipdnnDestroy(handle);
     ASSERT_EQ(destroyStatus, HIPDNN_STATUS_SUCCESS);
 }
 
@@ -68,7 +68,7 @@ TEST_F(IntegrationGpuLoggingPipeline, StreamLogging)
     ASSERT_EQ(hipStreamCreate(&stream), hipSuccess) << "Failed to create HIP stream.";
 
     // This should trigger logHipDeviceInfo() with a real stream
-    auto setStreamStatus = hipdnnSetStream(handle, stream);
+    const auto setStreamStatus = hipdnnSetStream(handle, stream);
     ASSERT_EQ(setStreamStatus, HIPDNN_STATUS_SUCCESS);
 
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
@@ -88,7 +88,7 @@ TEST_F(IntegrationGpuLoggingPipeline, DescriptorLogging)
            HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR,
            HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR};
 
-    for(auto type : descriptorTypes)
+    for(const auto type : descriptorTypes)
     {
         hipdnnBackendDescriptor_t descriptor = nullptr;
 
@@ -111,7 +111,7 @@ TEST_F(IntegrationGpuLoggingPipeline, FinalizeLogging)
     test_util::createTestHandle(&handle);
     test_util::createTestGraph(&graph, handle);
 
-    auto status = hipdnnBackendFinalize(graph);
+    const auto status = hipdnnBackendFinalize(graph);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
     hipdnnBackendDestroyDescriptor(graph);

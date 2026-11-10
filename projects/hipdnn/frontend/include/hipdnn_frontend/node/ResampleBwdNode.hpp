@@ -70,21 +70,21 @@ public:
                               ErrorCode::ATTRIBUTE_NOT_SET,
                               "ResampleBwdNode missing window for pre-validation");
 
-        auto dy = attributes.get_dy();
+        const auto dy = attributes.get_dy();
         if(!dy->get_dim().empty() && dy->get_dim().size() < 3)
         {
             return {ErrorCode::INVALID_VALUE,
                     "ResampleBwdNode input DY must have at least rank 3 (N, C, spatial...)"};
         }
 
-        auto dx = attributes.get_dx();
+        const auto dx = attributes.get_dx();
         if(!dx->get_dim().empty() && dx->get_dim().size() < 3)
         {
             return {ErrorCode::INVALID_VALUE,
                     "ResampleBwdNode output DX must have at least rank 3 (N, C, spatial...)"};
         }
 
-        if(auto index = attributes.get_index())
+        if(const auto index = attributes.get_index())
         {
             if(!index->get_dim().empty() && index->get_dim().size() < 3)
             {
@@ -119,8 +119,8 @@ public:
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
-        auto dxTensor = attributes.get_dx();
-        auto dyTensor = attributes.get_dy();
+        const auto dxTensor = attributes.get_dx();
+        const auto dyTensor = attributes.get_dy();
 
         // Infer output dimensions if not set
         auto dxDims = dxTensor->get_dim();
@@ -172,13 +172,13 @@ public:
                 ErrorCode::ATTRIBUTE_NOT_SET,
                 "ResampleBwdNode: Stride dimension mismatch between input and output tensors");
 
-            auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(dyStrides);
-            auto dxStrides
+            const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(dyStrides);
+            const auto dxStrides
                 = hipdnn_data_sdk::utilities::generateStrides(currentDxDims, strideOrder);
             dxTensor->set_stride(dxStrides);
         }
 
-        auto index = attributes.get_index();
+        const auto index = attributes.get_index();
         if(index)
         {
             if(index->get_dim().empty())

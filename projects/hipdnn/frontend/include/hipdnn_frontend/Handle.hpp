@@ -55,7 +55,7 @@ struct HipdnnHandleDeleter
 
         if(*handlePtr != nullptr)
         {
-            auto status = detail::hipdnnBackend()->destroy(*handlePtr);
+            const auto status = detail::hipdnnBackend()->destroy(*handlePtr);
             if(status != HIPDNN_STATUS_SUCCESS)
             {
                 HIPDNN_FE_LOG_ERROR(

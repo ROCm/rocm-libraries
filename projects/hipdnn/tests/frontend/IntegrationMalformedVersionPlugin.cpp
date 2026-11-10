@@ -111,7 +111,7 @@ TEST_F(IntegrationMalformedVersionPlugin, BadPluginLoadedAlongsideGoodPluginDoes
     // `Version{plugin->apiVersion()}` parse, the malformed plugin would
     // trip an `std::invalid_argument` here even though it never produced
     // any applicable engine.
-    auto result = graph->execute(_handle, variantPack, nullptr);
+    const auto result = graph->execute(_handle, variantPack, nullptr);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 }
 
@@ -158,7 +158,7 @@ TEST_F(IntegrationMalformedVersionPlugin,
     variantPack[1] = xTensor.memory().deviceData();
     variantPack[2] = yTensor.memory().deviceData();
 
-    auto result = graph->execute(_handle, variantPack, nullptr);
+    const auto result = graph->execute(_handle, variantPack, nullptr);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 }
 
@@ -173,7 +173,7 @@ TEST_F(IntegrationMalformedVersionPlugin, VersionZeroPluginLoadedAloneHasNoAppli
     ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
 
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = createSimpleReluGraph("VersionZero_Alone", dims);
+    const auto graph = createSimpleReluGraph("VersionZero_Alone", dims);
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -205,7 +205,7 @@ TEST_F(IntegrationMalformedVersionPlugin, VersionLiarPluginExcludedForOverrideGr
         HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
 
-    auto graph = hipdnn_tests::override_test_utils::buildPointwiseReluGraph(
+    const auto graph = hipdnn_tests::override_test_utils::buildPointwiseReluGraph(
         "VersionLiar_OverrideGraph", {1, 3, 4, 4}, /*strides=*/{}, /*overrideShapeEnabled=*/true);
     resetLastCallRecordIfLoaded(liarPath, "VersionLiar");
 

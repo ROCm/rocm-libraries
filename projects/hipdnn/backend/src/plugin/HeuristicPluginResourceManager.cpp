@@ -119,7 +119,7 @@ HeuristicPluginResourceManager::HeuristicPluginResourceManager(
     {
         // Set logging callback before creating handle. This is a status-returning
         // call (not throwing) so it stays outside the try block.
-        auto logStatus
+        const auto logStatus
             = plugin->setLoggingCallback(hipdnn_backend::logging::backendLoggingCallback);
         if(logStatus != HIPDNN_PLUGIN_STATUS_SUCCESS)
         {
@@ -240,14 +240,14 @@ HeuristicPluginResourceManager&
 
 std::shared_ptr<HeuristicPluginResourceManager> HeuristicPluginResourceManager::create()
 {
-    auto pm = getOrCreatePluginManager();
+    const auto pm = getOrCreatePluginManager();
     return std::make_shared<HeuristicPluginResourceManager>(pm);
 }
 
 hipdnnHeuristicHandle_t
     HeuristicPluginResourceManager::getHeuristicHandleForPolicyId(int64_t policyId) const
 {
-    auto it = _policyIdToHandle.find(policyId);
+    const auto it = _policyIdToHandle.find(policyId);
     if(it == _policyIdToHandle.end())
     {
         return nullptr;
@@ -263,7 +263,7 @@ const HeuristicPlugin* HeuristicPluginResourceManager::getPluginForPolicyId(int6
         return nullptr;
     }
 
-    auto it = _handleToPlugin.find(handle);
+    const auto it = _handleToPlugin.find(handle);
     if(it == _handleToPlugin.end())
     {
         return nullptr;
@@ -328,7 +328,7 @@ std::string HeuristicPluginResourceManager::toString() const
     // Add loaded plugin paths
     if(_pm)
     {
-        auto loadedPlugins = _pm->getLoadedPluginFiles();
+        const auto loadedPlugins = _pm->getLoadedPluginFiles();
         oss << "  Loaded plugin paths: [";
         bool first = true;
         for(const auto& path : loadedPlugins)
@@ -343,7 +343,7 @@ std::string HeuristicPluginResourceManager::toString() const
         oss << "]\n";
     }
 
-    auto infos = getHeuristicPolicyInfos();
+    const auto infos = getHeuristicPolicyInfos();
     for(const auto& info : infos)
     {
         oss << "    Policy ID: " << info.policyId;

@@ -633,7 +633,7 @@ public:
                               ErrorCode::ATTRIBUTE_NOT_SET,
                               "Tensor " + _name + " dims must be non-empty");
 
-        auto isPositive = [](int64_t value) constexpr { return value > 0; };
+        const auto isPositive = [](int64_t value) constexpr { return value > 0; };
         HIPDNN_RETURN_IF_FALSE(std::all_of(_dim.begin(), _dim.end(), isPositive),
                                ErrorCode::INVALID_VALUE,
                                "Tensor " + _name + " must have only positive dimensions");

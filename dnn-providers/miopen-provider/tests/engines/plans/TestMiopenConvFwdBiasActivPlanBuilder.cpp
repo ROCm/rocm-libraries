@@ -135,11 +135,11 @@ protected:
         _handle = std::make_unique<HipdnnMiopenHandle>();
 
         auto param = GetParam();
-        auto& convTestCase = param.convTestCase;
+        const auto& convTestCase = param.convTestCase;
         auto& activTestCase = param.activTestCase;
-        auto& layout = param.layout;
+        const auto& layout = param.layout;
 
-        auto isVirtual = [&param](TypeKey key) {
+        const auto isVirtual = [&param](TypeKey key) {
             return std::find(param.virtualTensors.begin(), param.virtualTensors.end(), key)
                    != param.virtualTensors.end();
         };
@@ -156,7 +156,7 @@ protected:
                                    param.dataTypes[TypeKey::X],
                                    convTestCase.xDims,
                                    generateStrides(convTestCase.xDims, layout.strideOrder));
-        auto xTensorAttr = std::make_shared<TensorAttributes>(std::move(xTensorAttrObj));
+        const auto xTensorAttr = std::make_shared<TensorAttributes>(std::move(xTensorAttrObj));
         xTensorAttr->set_is_virtual(isVirtual(TypeKey::X));
 
         auto wTensorAttrObj
@@ -164,7 +164,7 @@ protected:
                                    param.dataTypes[TypeKey::W],
                                    convTestCase.wDims,
                                    generateStrides(convTestCase.wDims, param.layout.strideOrder));
-        auto wTensorAttr = std::make_shared<TensorAttributes>(std::move(wTensorAttrObj));
+        const auto wTensorAttr = std::make_shared<TensorAttributes>(std::move(wTensorAttrObj));
         wTensorAttr->set_is_virtual(isVirtual(TypeKey::W));
 
         ConvFpropAttributes convAttrs;
@@ -174,7 +174,7 @@ protected:
         convAttrs.set_dilation(convTestCase.convDilation);
         convAttrs.set_compute_data_type(param.dataTypes[TypeKey::CONV_COMPUTE]);
 
-        auto yConvTensorAttr = _graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
+        const auto yConvTensorAttr = _graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
         yConvTensorAttr->set_data_type(param.dataTypes[TypeKey::Y_CONV]);
         yConvTensorAttr->set_dim(convTestCase.yDims);
         yConvTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
@@ -189,7 +189,8 @@ protected:
                                        param.dataTypes[TypeKey::BIAS],
                                        biasDims,
                                        generateStrides(biasDims, layout.strideOrder));
-            auto biasTensorAttr = std::make_shared<TensorAttributes>(std::move(biasTensorAttrObj));
+            const auto biasTensorAttr
+                = std::make_shared<TensorAttributes>(std::move(biasTensorAttrObj));
             biasTensorAttr->set_is_virtual(isVirtual(TypeKey::BIAS));
 
             PointwiseAttributes biasAttrs;
@@ -234,7 +235,7 @@ protected:
             activAttrs.set_softplus_beta(activTestCase.softplusBeta.value());
         }
 
-        auto yTensorAttr = _graphObj.pointwise(
+        const auto yTensorAttr = _graphObj.pointwise(
             param.op == FusedOp::CBA ? yBiasTensorAttr : yConvTensorAttr, activAttrs);
         yTensorAttr->set_data_type(param.dataTypes[TypeKey::Y]);
         yTensorAttr->set_dim(convTestCase.yDims);
@@ -242,7 +243,7 @@ protected:
         yTensorAttr->set_output(true);
         yTensorAttr->set_is_virtual(isVirtual(TypeKey::Y));
 
-        auto status = _graphObj.validate();
+        const auto status = _graphObj.validate();
         ASSERT_TRUE(status.is_good());
 
         _isApplicable = param.isApplicable;
@@ -625,7 +626,7 @@ TEST_P(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableGetWorkspaceSizeAnd
 {
     auto [graphBuffer, serErr] = _graphObj.to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graph = GraphWrapper(graphBuffer.data(), graphBuffer.size());
+    const auto graph = GraphWrapper(graphBuffer.data(), graphBuffer.size());
     const MockEngineConfig mockEngineConfig;
 
     // Per ROCm/rocm-libraries#6979: when this case expects an applicable engine
@@ -657,7 +658,7 @@ INSTANTIATE_TEST_SUITE_P(,
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsupportedGraph)
 {
     {
-        auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+        const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
 
@@ -665,7 +666,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
         EXPECT_FALSE(applicable);
     }
     {
-        auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+        const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
 
@@ -673,7 +674,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
         EXPECT_FALSE(applicable);
     }
     {
-        auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+        const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
 
@@ -681,7 +682,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
         EXPECT_FALSE(applicable);
     }
     {
-        auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+        const auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
 
@@ -689,7 +690,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
         EXPECT_FALSE(applicable);
     }
     {
-        auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
+        const auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
 
@@ -700,7 +701,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
 
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdBiasActivGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdBiasActivGraph(
         {4, 4, 4, 4},
         {64, 16, 4, 1},
         {4, 4, 1, 1},
@@ -765,7 +766,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForWrongNode
 
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForUnsupportedGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -800,7 +801,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGr
 
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForUnsupportedGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     HipdnnMiopenContext ctx;

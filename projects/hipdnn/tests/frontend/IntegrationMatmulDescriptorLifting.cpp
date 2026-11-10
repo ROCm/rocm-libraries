@@ -39,18 +39,18 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto a = std::make_shared<TensorAttributes>();
+        const auto a = std::make_shared<TensorAttributes>();
         a->set_uid(K_MATMUL_TENSOR_A_UID).set_name("A").set_data_type(DataType::FLOAT);
         a->set_dim(toVec(K_MATMUL_TENSOR_A_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_A_STRIDES));
 
-        auto b = std::make_shared<TensorAttributes>();
+        const auto b = std::make_shared<TensorAttributes>();
         b->set_uid(K_MATMUL_TENSOR_B_UID).set_name("B").set_data_type(DataType::FLOAT);
         b->set_dim(toVec(K_MATMUL_TENSOR_B_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_B_STRIDES));
 
         MatmulAttributes matmulAttrs;
         matmulAttrs.set_name("matmul_op");
 
-        auto c = graph->matmul(a, b, matmulAttrs);
+        const auto c = graph->matmul(a, b, matmulAttrs);
         c->set_uid(K_MATMUL_TENSOR_C_UID).set_output(true).set_name("C");
 
         return graph;
@@ -62,9 +62,9 @@ protected:
 // validation of graph data types, tensor attributes, and operation parameters.
 TEST_F(IntegrationMatmulDescriptorLifting, BasicMatmulRoundTrip)
 {
-    auto originalGraph = buildMatmulGraph();
+    const auto originalGraph = buildMatmulGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -79,7 +79,7 @@ TEST_F(IntegrationMatmulDescriptorLifting, BasicMatmulRoundTrip)
 
     // Verify A tensor
     ASSERT_NE(tensorMap.count(K_MATMUL_TENSOR_A_UID), 0u);
-    auto liftedA = tensorMap[K_MATMUL_TENSOR_A_UID];
+    const auto liftedA = tensorMap[K_MATMUL_TENSOR_A_UID];
     EXPECT_EQ(liftedA->get_uid(), K_MATMUL_TENSOR_A_UID);
     EXPECT_EQ(liftedA->get_name(), "A");
     EXPECT_EQ(liftedA->get_dim(), toVec(K_MATMUL_TENSOR_A_DIMS));
@@ -88,7 +88,7 @@ TEST_F(IntegrationMatmulDescriptorLifting, BasicMatmulRoundTrip)
 
     // Verify B tensor
     ASSERT_NE(tensorMap.count(K_MATMUL_TENSOR_B_UID), 0u);
-    auto liftedB = tensorMap[K_MATMUL_TENSOR_B_UID];
+    const auto liftedB = tensorMap[K_MATMUL_TENSOR_B_UID];
     EXPECT_EQ(liftedB->get_uid(), K_MATMUL_TENSOR_B_UID);
     EXPECT_EQ(liftedB->get_name(), "B");
     EXPECT_EQ(liftedB->get_dim(), toVec(K_MATMUL_TENSOR_B_DIMS));
@@ -97,7 +97,7 @@ TEST_F(IntegrationMatmulDescriptorLifting, BasicMatmulRoundTrip)
 
     // Verify C tensor
     ASSERT_NE(tensorMap.count(K_MATMUL_TENSOR_C_UID), 0u);
-    auto liftedC = tensorMap[K_MATMUL_TENSOR_C_UID];
+    const auto liftedC = tensorMap[K_MATMUL_TENSOR_C_UID];
     EXPECT_EQ(liftedC->get_uid(), K_MATMUL_TENSOR_C_UID);
     EXPECT_EQ(liftedC->get_name(), "C");
     EXPECT_EQ(liftedC->get_dim(), toVec(K_MATMUL_TENSOR_C_DIMS));
@@ -121,9 +121,9 @@ TEST_F(IntegrationMatmulDescriptorLifting, BasicMatmulRoundTrip)
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationMatmulDescriptorLifting, MatmulTensorSharingPreserved)
 {
-    auto originalGraph = buildMatmulGraph();
+    const auto originalGraph = buildMatmulGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -154,27 +154,27 @@ TEST_F(IntegrationMatmulDescriptorLifting, MatmulTensorSharingPreserved)
 // survive the round trip and are all distinct.
 TEST_F(IntegrationMatmulDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AutoUidMatmulLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_name("A").set_data_type(DataType::FLOAT);
     a->set_dim(toVec(K_MATMUL_TENSOR_A_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_A_STRIDES));
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_name("B").set_data_type(DataType::FLOAT);
     b->set_dim(toVec(K_MATMUL_TENSOR_B_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_B_STRIDES));
 
     MatmulAttributes matmulAttrs;
     matmulAttrs.set_name("auto_uid_matmul_op");
 
-    auto c = graph->matmul(a, b, matmulAttrs);
+    const auto c = graph->matmul(a, b, matmulAttrs);
     c->set_output(true).set_name("C");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -200,9 +200,9 @@ TEST_F(IntegrationMatmulDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
     ASSERT_NE(matmulNode, nullptr);
 
     // Verify tensor dims survived the round trip
-    auto aUid = matmulNode->attributes.get_a()->get_uid();
-    auto bUid = matmulNode->attributes.get_b()->get_uid();
-    auto cUid = matmulNode->attributes.get_c()->get_uid();
+    const auto aUid = matmulNode->attributes.get_a()->get_uid();
+    const auto bUid = matmulNode->attributes.get_b()->get_uid();
+    const auto cUid = matmulNode->attributes.get_c()->get_uid();
 
     EXPECT_NE(aUid, bUid);
     EXPECT_NE(aUid, cUid);
@@ -217,9 +217,9 @@ TEST_F(IntegrationMatmulDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
 // all fields survive the backend C API serialization path.
 TEST_F(IntegrationMatmulDescriptorLifting, MatmulLiftWithoutFinalization)
 {
-    auto originalGraph = buildMatmulGraph();
+    const auto originalGraph = buildMatmulGraph();
 
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types

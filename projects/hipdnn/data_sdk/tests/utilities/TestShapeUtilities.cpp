@@ -38,7 +38,7 @@ TEST(TestShapeUtils, GenerateStridesNhwcValid)
 {
     const std::vector<int64_t> dim = {1, 2, 3, 4};
     const std::vector<int64_t> strideOrder = {3, 0, 2, 1}; // NHWC
-    auto strides = generateStrides(dim, strideOrder);
+    const auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{24, 1, 8, 2}));
 }
@@ -47,7 +47,7 @@ TEST(TestShapeUtils, GenerateStridesNdhwcValid)
 {
     const std::vector<int64_t> dim = {1, 2, 3, 4, 5};
     const std::vector<int64_t> strideOrder = {4, 0, 3, 2, 1}; // NDHWC
-    auto strides = generateStrides(dim, strideOrder);
+    const auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{120, 1, 40, 10, 2}));
 }
@@ -56,7 +56,7 @@ TEST(TestShapeUtils, GenerateStridesNchwValid)
 {
     const std::vector<int64_t> dim = {1, 2, 3, 4};
     const std::vector<int64_t> strideOrder = {3, 2, 1, 0}; // NCHW
-    auto strides = generateStrides(dim, strideOrder);
+    const auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{24, 12, 4, 1}));
 }
@@ -65,7 +65,7 @@ TEST(TestShapeUtils, GenerateStridesNcdhwValid)
 {
     const std::vector<int64_t> dim = {1, 2, 3, 4, 5};
     const std::vector<int64_t> strideOrder = {4, 3, 2, 1, 0}; // NCDHW
-    auto strides = generateStrides(dim, strideOrder);
+    const auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{120, 60, 20, 5, 1}));
 }
@@ -74,13 +74,13 @@ TEST(TestShapeUtils, GenerateStridesBhsdValid)
 {
     // BHSD: dims [B=2, H=4, S=128, D=64], row-major (same stride order as NCHW)
     const std::vector<int64_t> dim = {2, 4, 128, 64};
-    auto strides = generateStrides(dim, TensorLayout::BHSD.strideOrder);
+    const auto strides = generateStrides(dim, TensorLayout::BHSD.strideOrder);
 
     // D contiguous, then S, then H, then B
     EXPECT_EQ(strides, (std::vector<int64_t>{32768, 8192, 64, 1}));
 
     // BHSD should produce the same strides as NCHW
-    auto nchwStrides = generateStrides(dim, TensorLayout::NCHW.strideOrder);
+    const auto nchwStrides = generateStrides(dim, TensorLayout::NCHW.strideOrder);
     EXPECT_EQ(strides, nchwStrides);
 }
 
@@ -88,13 +88,13 @@ TEST(TestShapeUtils, GenerateStridesBshdValid)
 {
     // BSHD: dims [B=2, H=4, S=128, D=64], sequence-major
     const std::vector<int64_t> dim = {2, 4, 128, 64};
-    auto strides = generateStrides(dim, TensorLayout::BSHD.strideOrder);
+    const auto strides = generateStrides(dim, TensorLayout::BSHD.strideOrder);
 
     // D contiguous, then H, then S, then B
     EXPECT_EQ(strides, (std::vector<int64_t>{32768, 64, 256, 1}));
 
     // BSHD should NOT produce the same strides as NHWC
-    auto nhwcStrides = generateStrides(dim, TensorLayout::NHWC.strideOrder);
+    const auto nhwcStrides = generateStrides(dim, TensorLayout::NHWC.strideOrder);
     EXPECT_NE(strides, nhwcStrides);
 }
 
@@ -102,7 +102,7 @@ TEST(TestShapeUtils, GenerateStridesSingleDimension)
 {
     const std::vector<int64_t> dim = {5};
     const std::vector<int64_t> strideOrder = {0};
-    auto strides = generateStrides(dim, strideOrder);
+    const auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{1}));
 }
@@ -110,7 +110,7 @@ TEST(TestShapeUtils, GenerateStridesSingleDimension)
 TEST(TestShapeUtils, StrideOrderNhwcFiveDimensions)
 {
     const size_t numDims = 5;
-    auto strideOrder = strideOrderNhwc(numDims);
+    const auto strideOrder = strideOrderNhwc(numDims);
 
     EXPECT_EQ(strideOrder, (std::vector<int64_t>{4, 0, 3, 2, 1}));
 }
@@ -118,7 +118,7 @@ TEST(TestShapeUtils, StrideOrderNhwcFiveDimensions)
 TEST(TestShapeUtils, StrideOrderNhwcFourDimensions)
 {
     const size_t numDims = 4;
-    auto strideOrder = strideOrderNhwc(numDims);
+    const auto strideOrder = strideOrderNhwc(numDims);
 
     EXPECT_EQ(strideOrder, (std::vector<int64_t>{3, 0, 2, 1}));
 }
@@ -126,7 +126,7 @@ TEST(TestShapeUtils, StrideOrderNhwcFourDimensions)
 TEST(TestShapeUtils, StrideOrderNhwcThreeDimensions)
 {
     const size_t numDims = 3;
-    auto strideOrder = strideOrderNhwc(numDims);
+    const auto strideOrder = strideOrderNhwc(numDims);
 
     EXPECT_EQ(strideOrder, (std::vector<int64_t>{2, 0, 1}));
 }
@@ -134,7 +134,7 @@ TEST(TestShapeUtils, StrideOrderNhwcThreeDimensions)
 TEST(TestShapeUtils, StrideOrderNhwcWithTwoDimensions)
 {
     const size_t numDims = 2;
-    auto strideOrder = strideOrderNhwc(numDims);
+    const auto strideOrder = strideOrderNhwc(numDims);
 
     EXPECT_EQ(strideOrder, (std::vector<int64_t>{1, 0}));
 }
@@ -142,7 +142,7 @@ TEST(TestShapeUtils, StrideOrderNhwcWithTwoDimensions)
 TEST(TestShapeUtils, StrideOrderNhwcWithSingleDimension)
 {
     const size_t numDims = 1;
-    auto strideOrder = strideOrderNhwc(numDims);
+    const auto strideOrder = strideOrderNhwc(numDims);
 
     EXPECT_EQ(strideOrder, (std::vector<int64_t>{0}));
 }
@@ -151,7 +151,7 @@ TEST(TestShapeUtils, GenerateStridesEmptyDimensions)
 {
     const std::vector<int64_t> dim = {};
     const std::vector<int64_t> strideOrder = {};
-    auto strides = generateStrides(dim, strideOrder);
+    const auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{}));
 }
@@ -339,7 +339,7 @@ TEST(TestShapeUtils, GenerateStridesLessDimsThanStridesValid)
     const std::vector<int64_t> dim = {1, 2, 3};
     const std::vector<int64_t> strideOrder = {3, 2, 1, 0};
 
-    auto strides = generateStrides(dim, strideOrder);
+    const auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{6, 3, 1}));
 }
@@ -350,7 +350,7 @@ TEST(TestShapeUtils, GenerateStridesFewerDimsNhwcOrdering)
     const std::vector<int64_t> strideOrder = {2, 0, 1, 3};
 
     // Should use first 3 elements: {2, 0, 1} for NHW ordering
-    auto strides = generateStrides(dim, strideOrder);
+    const auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{12, 1, 3}));
 }
@@ -360,7 +360,7 @@ TEST(TestShapeUtils, GenerateStridesEmptyDimsWithNonEmptyStridesValid)
     const std::vector<int64_t> dim = {};
     const std::vector<int64_t> strideOrder = {3, 2, 1, 0};
 
-    auto strides = generateStrides(dim, strideOrder);
+    const auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{}));
 }
@@ -368,7 +368,7 @@ TEST(TestShapeUtils, GenerateStridesEmptyDimsWithNonEmptyStridesValid)
 TEST(TestShapeUtils, GenerateDefaultPackedStridesEmpty)
 {
     const std::vector<int64_t> dims = {};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{}));
 }
@@ -376,7 +376,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStridesEmpty)
 TEST(TestShapeUtils, GenerateDefaultPackedStrides1D)
 {
     const std::vector<int64_t> dims = {10};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{1}));
 }
@@ -384,7 +384,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides1D)
 TEST(TestShapeUtils, GenerateDefaultPackedStrides2D)
 {
     const std::vector<int64_t> dims = {5, 8};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     // Row-major: {8, 1}
     EXPECT_EQ(strides, (std::vector<int64_t>{8, 1}));
@@ -393,7 +393,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides2D)
 TEST(TestShapeUtils, GenerateDefaultPackedStrides3D)
 {
     const std::vector<int64_t> dims = {4, 5, 6};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     // Row-major: {5*6, 6, 1} = {30, 6, 1}
     EXPECT_EQ(strides, (std::vector<int64_t>{30, 6, 1}));
@@ -402,7 +402,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides3D)
 TEST(TestShapeUtils, GenerateDefaultPackedStrides4D)
 {
     const std::vector<int64_t> dims = {2, 3, 4, 5};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     // Row-major: {3*4*5, 4*5, 5, 1} = {60, 20, 5, 1}
     EXPECT_EQ(strides, (std::vector<int64_t>{60, 20, 5, 1}));
@@ -411,7 +411,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides4D)
 TEST(TestShapeUtils, GenerateDefaultPackedStrides5D)
 {
     const std::vector<int64_t> dims = {2, 3, 4, 5, 6};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     // Row-major: {3*4*5*6, 4*5*6, 5*6, 6, 1} = {360, 120, 30, 6, 1}
     EXPECT_EQ(strides, (std::vector<int64_t>{360, 120, 30, 6, 1}));
@@ -420,7 +420,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides5D)
 TEST(TestShapeUtils, GenerateDefaultPackedStrides6D)
 {
     const std::vector<int64_t> dims = {1, 2, 3, 4, 5, 6};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     // Row-major: {2*3*4*5*6, 3*4*5*6, 4*5*6, 5*6, 6, 1} = {720, 360, 120, 30, 6, 1}
     EXPECT_EQ(strides, (std::vector<int64_t>{720, 360, 120, 30, 6, 1}));
@@ -429,7 +429,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides6D)
 TEST(TestShapeUtils, GenerateDefaultPackedStrides7D)
 {
     const std::vector<int64_t> dims = {2, 2, 2, 2, 2, 2, 2};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     // Row-major: {64, 32, 16, 8, 4, 2, 1}
     EXPECT_EQ(strides, (std::vector<int64_t>{64, 32, 16, 8, 4, 2, 1}));
@@ -438,7 +438,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides7D)
 TEST(TestShapeUtils, GenerateDefaultPackedStridesWithOnes)
 {
     const std::vector<int64_t> dims = {1, 1, 5, 1, 3};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     // Row-major: {1*5*1*3, 5*1*3, 1*3, 3, 1} = {15, 15, 3, 3, 1}
     EXPECT_EQ(strides, (std::vector<int64_t>{15, 15, 3, 3, 1}));
@@ -447,7 +447,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStridesWithOnes)
 TEST(TestShapeUtils, GenerateDefaultPackedStridesLargeDims)
 {
     const std::vector<int64_t> dims = {100, 200};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{200, 1}));
 }
@@ -455,8 +455,8 @@ TEST(TestShapeUtils, GenerateDefaultPackedStridesLargeDims)
 TEST(TestShapeUtils, GenerateDefaultPackedStridesMatchesNchwFor4D)
 {
     const std::vector<int64_t> dims = {2, 3, 4, 5};
-    auto packedStrides = generateStrides(dims);
-    auto nchwStrides = generateStrides(dims, {3, 2, 1, 0}); // NCHW stride order
+    const auto packedStrides = generateStrides(dims);
+    const auto nchwStrides = generateStrides(dims, {3, 2, 1, 0}); // NCHW stride order
 
     EXPECT_EQ(packedStrides, nchwStrides);
 }
@@ -464,8 +464,8 @@ TEST(TestShapeUtils, GenerateDefaultPackedStridesMatchesNchwFor4D)
 TEST(TestShapeUtils, GenerateDefaultPackedStridesMatchesNcdhwFor5D)
 {
     const std::vector<int64_t> dims = {2, 3, 4, 5, 6};
-    auto packedStrides = generateStrides(dims);
-    auto ncdhwStrides = generateStrides(dims, {4, 3, 2, 1, 0}); // NCDHW stride order
+    const auto packedStrides = generateStrides(dims);
+    const auto ncdhwStrides = generateStrides(dims, {4, 3, 2, 1, 0}); // NCDHW stride order
 
     EXPECT_EQ(packedStrides, ncdhwStrides);
 }
@@ -485,7 +485,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStridesCalculation)
 TEST(TestShapeUtils, GenerateDefaultPackedStridesAllOnes)
 {
     const std::vector<int64_t> dims = {1, 1, 1, 1};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{1, 1, 1, 1}));
 }
@@ -495,7 +495,7 @@ TEST_P(TestShapeUtilsExtractStrideOrder, VerifyExtractedStrideOrder)
     auto& testCase = GetParam();
 
     // Create RAII log recorder - captures all logs for this test
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Sanity-check test data
@@ -600,7 +600,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(TestShapeUtils, GenerateStridesWithPackedAxisNchwAxis1)
 {
     // NCHW input, make axis 1 (C) most packed
-    auto strides
+    const auto strides
         = generateStridesWithPackedAxis({65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 64, 32, 32}, 1);
 
     // Sorted by stride ascending: [3,2,1,0], rotate axis=1 to front → [1,0,3,2]
@@ -611,7 +611,7 @@ TEST(TestShapeUtils, GenerateStridesWithPackedAxisNchwAxis1)
 TEST(TestShapeUtils, GenerateStridesWithPackedAxisNhwcAxis3)
 {
     // NHWC input, make axis 3 (W) most packed
-    auto strides
+    const auto strides
         = generateStridesWithPackedAxis({65536, 1, 2048, 64}, {2, 64, 32, 32}, {2, 64, 32, 32}, 3);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{1024, 2048, 32, 1}));
@@ -620,7 +620,7 @@ TEST(TestShapeUtils, GenerateStridesWithPackedAxisNhwcAxis3)
 TEST(TestShapeUtils, GenerateStridesWithPackedAxisNoAxisPreservesOrder)
 {
     // Without axis, stride ordering matches the reference layout
-    auto strides
+    const auto strides
         = generateStridesWithPackedAxis({65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 64, 32, 32});
 
     EXPECT_EQ(strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
@@ -629,7 +629,7 @@ TEST(TestShapeUtils, GenerateStridesWithPackedAxisNoAxisPreservesOrder)
 TEST(TestShapeUtils, GenerateStridesWithPackedAxisDifferentTargetDims)
 {
     // Target dims differ from reference (e.g., scale tensor with reduced axis dim)
-    auto strides
+    const auto strides
         = generateStridesWithPackedAxis({65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 2, 32, 32}, 1);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{2, 1, 128, 4}));
@@ -661,7 +661,7 @@ TEST(TestShapeUtils, GenerateStridesWithPackedAxis3D)
 TEST(TestShapeUtils, GenerateStridesWithPackedAxisLastAxis)
 {
     // Packing the last axis (already most packed in NCHW) preserves original layout
-    auto strides
+    const auto strides
         = generateStridesWithPackedAxis({65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 64, 32, 32}, 3);
 
     // Sorted ascending: [3,2,1,0], rotate axis=3 (at position 0) to front → no change
@@ -671,19 +671,19 @@ TEST(TestShapeUtils, GenerateStridesWithPackedAxisLastAxis)
 TEST(TestShapeUtils, IsTensorPackedTrueForPackedTensor)
 {
     const std::vector<int64_t> shape3D = {2, 3, 4};
-    auto strides3D = generateStrides(shape3D);
+    const auto strides3D = generateStrides(shape3D);
     EXPECT_TRUE(isTensorPacked(shape3D, strides3D));
 
     const std::vector<int64_t> shape4D = {2, 3, 4, 5};
-    auto stridesNchw = generateStrides(shape4D);
+    const auto stridesNchw = generateStrides(shape4D);
     EXPECT_TRUE(isTensorPacked(shape4D, stridesNchw));
-    auto stridesNhwc = generateStrides(shape4D, {3, 0, 2, 1});
+    const auto stridesNhwc = generateStrides(shape4D, {3, 0, 2, 1});
     EXPECT_TRUE(isTensorPacked(shape4D, stridesNhwc));
 
     const std::vector<int64_t> shape5D = {2, 3, 4, 5, 6};
-    auto stridesNcdhw = generateStrides(shape5D);
+    const auto stridesNcdhw = generateStrides(shape5D);
     EXPECT_TRUE(isTensorPacked(shape5D, stridesNcdhw));
-    auto stridesNdhwc = generateStrides(shape5D, {4, 0, 3, 2, 1});
+    const auto stridesNdhwc = generateStrides(shape5D, {4, 0, 3, 2, 1});
     EXPECT_TRUE(isTensorPacked(shape5D, stridesNdhwc));
 }
 
@@ -800,7 +800,7 @@ TEST(TestShapeUtils, IsTensorPackedLargeTensor)
 {
     // Test with a larger tensor
     const std::vector<int64_t> dims = {4, 16, 32, 64};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
     EXPECT_TRUE(isTensorPacked(dims, strides));
 }
 
@@ -810,14 +810,14 @@ TEST(TestShapeUtils, IsTensorPackedCustomPackedLayout)
     const std::vector<int64_t> dims = {2, 3, 4};
     // Order: [2, 0, 1] means dimension 2 is innermost, then 0, then 1
     const std::vector<int64_t> customOrder = {2, 0, 1};
-    auto customStrides = generateStrides(dims, customOrder);
+    const auto customStrides = generateStrides(dims, customOrder);
     EXPECT_TRUE(isTensorPacked(dims, customStrides));
 }
 
 TEST(TestShapeUtils, GetDerivedShape5DValid)
 {
     const std::vector<int64_t> shape = {2, 4, 8, 16, 32};
-    auto derivedShape = getDerivedShape(shape);
+    const auto derivedShape = getDerivedShape(shape);
 
     EXPECT_EQ(derivedShape, (std::vector<int64_t>{1, 4, 1, 1, 1}));
 }
@@ -833,7 +833,7 @@ TEST(TestShapeUtils, CalculateGroupCountReturnsOneForStandardConvolution)
     const std::vector<int64_t> inputDims = {1, 16, 32, 32};
     const std::vector<int64_t> weightDims = {32, 16, 3, 3};
 
-    auto groupCount = calculateGroupCount(inputDims, weightDims);
+    const auto groupCount = calculateGroupCount(inputDims, weightDims);
     EXPECT_EQ(groupCount, 1);
 }
 
@@ -842,7 +842,7 @@ TEST(TestShapeUtils, CalculateGroupCountReturnsCorrectValueForGroupedConvolution
     const std::vector<int64_t> inputDims = {1, 16, 32, 32};
     const std::vector<int64_t> weightDims = {32, 8, 3, 3};
 
-    auto groupCount = calculateGroupCount(inputDims, weightDims);
+    const auto groupCount = calculateGroupCount(inputDims, weightDims);
     EXPECT_EQ(groupCount, 2);
 }
 

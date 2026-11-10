@@ -63,7 +63,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
 {
     const auto frontendDataType = hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType);
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("SdpaFwdTest");
     graph->set_io_data_type(frontendDataType)
         .set_compute_data_type(frontendDataType)
@@ -73,17 +73,20 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     auto qAttr
         = hipdnn_frontend::graph::makeTensorAttributes("Q", frontendDataType, tensorBundle.qTensor);
     qAttr.set_uid(uid++);
-    auto qTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(qAttr));
+    const auto qTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(qAttr));
 
     auto kAttr
         = hipdnn_frontend::graph::makeTensorAttributes("K", frontendDataType, tensorBundle.kTensor);
     kAttr.set_uid(uid++);
-    auto kTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(kAttr));
+    const auto kTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(kAttr));
 
     auto vAttr
         = hipdnn_frontend::graph::makeTensorAttributes("V", frontendDataType, tensorBundle.vTensor);
     vAttr.set_uid(uid++);
-    auto vTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(vAttr));
+    const auto vTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(vAttr));
 
     hipdnn_frontend::graph::SdpaAttributes sdpaAttrs;
     sdpaAttrs.set_name("SdpaFwd");
@@ -179,7 +182,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
 {
     const auto frontendDataType = hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType);
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("SdpaBwdTest");
     graph->set_io_data_type(frontendDataType)
         .set_compute_data_type(frontendDataType)
@@ -189,33 +192,37 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     auto qAttr
         = hipdnn_frontend::graph::makeTensorAttributes("Q", frontendDataType, tensorBundle.qTensor);
     qAttr.set_uid(uid++);
-    auto qTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(qAttr));
+    const auto qTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(qAttr));
 
     auto kAttr
         = hipdnn_frontend::graph::makeTensorAttributes("K", frontendDataType, tensorBundle.kTensor);
     kAttr.set_uid(uid++);
-    auto kTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(kAttr));
+    const auto kTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(kAttr));
 
     auto vAttr
         = hipdnn_frontend::graph::makeTensorAttributes("V", frontendDataType, tensorBundle.vTensor);
     vAttr.set_uid(uid++);
-    auto vTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(vAttr));
+    const auto vTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(vAttr));
 
     auto oAttr
         = hipdnn_frontend::graph::makeTensorAttributes("O", frontendDataType, tensorBundle.oTensor);
     oAttr.set_uid(uid++);
-    auto oTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(oAttr));
+    const auto oTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(oAttr));
 
     auto doAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "dO", frontendDataType, tensorBundle.doTensor);
     doAttr.set_uid(uid++);
-    auto doTensorAttr
+    const auto doTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(doAttr));
 
     auto statsAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "Stats", hipdnn_frontend::DataType::FLOAT, tensorBundle.statsTensor);
     statsAttr.set_uid(uid++);
-    auto statsTensorAttr
+    const auto statsTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(statsAttr));
 
     hipdnn_frontend::graph::SdpaBackwardAttributes sdpaBwdAttrs;

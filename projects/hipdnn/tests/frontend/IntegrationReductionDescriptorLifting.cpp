@@ -42,7 +42,7 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_REDUCTION_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
         x->set_dim(toVec(K_REDUCTION_TENSOR_X_DIMS))
             .set_stride(toVec(K_REDUCTION_TENSOR_X_STRIDES));
@@ -51,7 +51,7 @@ protected:
         attrs.set_name("test_op");
         attrs.set_mode(ReductionMode::ADD);
 
-        auto y = graph->reduction(x, attrs);
+        const auto y = graph->reduction(x, attrs);
         y->set_uid(K_REDUCTION_TENSOR_Y_UID).set_output(true).set_name("y");
         y->set_dim(toVec(K_REDUCTION_TENSOR_Y_DIMS))
             .set_stride(toVec(K_REDUCTION_TENSOR_Y_STRIDES));
@@ -65,9 +65,9 @@ protected:
 // validation of graph data types, tensor attributes, and operation parameters.
 TEST_F(IntegrationReductionDescriptorLifting, BasicReductionRoundTrip)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -117,9 +117,9 @@ TEST_F(IntegrationReductionDescriptorLifting, BasicReductionRoundTrip)
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationReductionDescriptorLifting, ReductionTensorSharingPreserved)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -145,9 +145,9 @@ TEST_F(IntegrationReductionDescriptorLifting, ReductionTensorSharingPreserved)
 // all fields survive the backend C API serialization path.
 TEST_F(IntegrationReductionDescriptorLifting, ReductionLiftWithoutFinalization)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -187,13 +187,13 @@ TEST_F(IntegrationReductionDescriptorLifting, ReductionLiftWithoutFinalization)
 // Verifies that the optional is_deterministic attribute survives a lifting round-trip.
 TEST_F(IntegrationReductionDescriptorLifting, IsDeterministicPreservedInLiftingRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("ReductionIsDeterministicLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_REDUCTION_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_REDUCTION_TENSOR_X_DIMS)).set_stride(toVec(K_REDUCTION_TENSOR_X_STRIDES));
 
@@ -202,11 +202,11 @@ TEST_F(IntegrationReductionDescriptorLifting, IsDeterministicPreservedInLiftingR
     attrs.set_mode(ReductionMode::ADD);
     attrs.set_is_deterministic(true);
 
-    auto y = graph->reduction(x, attrs);
+    const auto y = graph->reduction(x, attrs);
     y->set_uid(K_REDUCTION_TENSOR_Y_UID).set_output(true).set_name("y");
     y->set_dim(toVec(K_REDUCTION_TENSOR_Y_DIMS)).set_stride(toVec(K_REDUCTION_TENSOR_Y_STRIDES));
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
@@ -224,13 +224,13 @@ TEST_F(IntegrationReductionDescriptorLifting, IsDeterministicPreservedInLiftingR
 // distinct and survive the round-trip.
 TEST_F(IntegrationReductionDescriptorLifting, AutoAssignedUidsPreservedInLiftingRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("ReductionAutoUidLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("x").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_REDUCTION_TENSOR_X_DIMS)).set_stride(toVec(K_REDUCTION_TENSOR_X_STRIDES));
 
@@ -238,15 +238,15 @@ TEST_F(IntegrationReductionDescriptorLifting, AutoAssignedUidsPreservedInLifting
     attrs.set_name("test_auto_uid");
     attrs.set_mode(ReductionMode::ADD);
 
-    auto y = graph->reduction(x, attrs);
+    const auto y = graph->reduction(x, attrs);
     y->set_output(true).set_name("y");
     y->set_dim(toVec(K_REDUCTION_TENSOR_Y_DIMS)).set_stride(toVec(K_REDUCTION_TENSOR_Y_STRIDES));
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify the tensor map has the expected number of tensors
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 2u);
 
     // Verify all UIDs are distinct

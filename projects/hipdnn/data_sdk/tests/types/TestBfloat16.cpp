@@ -192,28 +192,28 @@ TEST_F(TestBfloat16, NumericLimitsSpecificValues)
 {
     // bfloat16 max is 0x7F7F = (2 - 2^-7) * 2^127 ≈ 3.3895e+38
     const bfloat16 maxVal = std::numeric_limits<bfloat16>::max();
-    auto maxFloat = static_cast<float>(maxVal);
+    const auto maxFloat = static_cast<float>(maxVal);
     EXPECT_GT(maxFloat, 3.3e38f);
     EXPECT_LT(maxFloat, std::numeric_limits<float>::max());
     EXPECT_EQ(maxVal.data, 0x7F7F);
 
     // bfloat16 min (smallest positive normal) is 0x0080 = 2^-126 ≈ 1.175e-38
     const bfloat16 minVal = std::numeric_limits<bfloat16>::min();
-    auto minFloat = static_cast<float>(minVal);
+    const auto minFloat = static_cast<float>(minVal);
     EXPECT_GT(minFloat, 1.1e-38f);
     EXPECT_LT(minFloat, 1.2e-38f);
     EXPECT_EQ(minVal.data, 0x0080);
 
     // bfloat16 lowest is -max = 0xFF7F ≈ -3.3895e+38
     const bfloat16 lowestVal = std::numeric_limits<bfloat16>::lowest();
-    auto lowestFloat = static_cast<float>(lowestVal);
+    const auto lowestFloat = static_cast<float>(lowestVal);
     EXPECT_LT(lowestFloat, -3.3e38f);
     EXPECT_GT(lowestFloat, -std::numeric_limits<float>::max());
     EXPECT_EQ(lowestVal.data, 0xFF7F);
 
     // bfloat16 epsilon is 2^-7 = 0.0078125
     const bfloat16 eps = std::numeric_limits<bfloat16>::epsilon();
-    auto epsFloat = static_cast<float>(eps);
+    const auto epsFloat = static_cast<float>(eps);
     EXPECT_TRUE(nearEqual(epsFloat, 0.0078125f, 0.0001f));
     EXPECT_EQ(eps.data, 0x3C00);
 
