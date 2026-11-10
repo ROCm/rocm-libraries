@@ -236,12 +236,14 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
     const int col = lane & 15;
     T* out = static_cast<T*>(a.out);
     const unsigned chunkBytes = static_cast<unsigned>(16 * chanStride) * sizeof(T);
-    // V swizzle (CDNA): tiles 8 apart share 64-bank rows, so tiles with bit 3 set take the other
-    // half of their 8 channel-pair dwords: the transform's dword stores (16 tiles x 4 pairs a
-    // wave) and the B reads (16 tiles x 4 two-dword pairs) then hit 64 distinct banks.
+    // V swizzle: tiles 8 apart share 64-bank rows, so tiles with bit 3 set take the other half
+    // of their 8 channel-pair dwords: the transform's dword stores and the B reads then spread
+    // over the banks (CDNA: 16 tiles x 4 pairs a wave, conflict cycles 3.2e8 -> 1.2e8 on gfx950
+    // unet; gfx12: unet -4%). gfx11 reads all 8 dwords of a tile in one fragment (KPL 16), which
+    // the half swap would split: not swizzled.
     auto vSwz = [](int tile) __attribute__((always_inline))
     {
-        return WAVE == 64 ? ((tile >> 3) & 1) << 2 : 0;
+        return W::KPL <= 8 ? ((tile >> 3) & 1) << 2 : 0;
     };
 
     // A fragment lane offset (bytes) within a U unit (k5CoopFilterTransform): the lane's KPL
