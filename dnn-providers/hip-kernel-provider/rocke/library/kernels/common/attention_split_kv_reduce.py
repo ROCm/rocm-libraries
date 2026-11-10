@@ -16,8 +16,8 @@ leaves ``spec`` unannotated because each arch has its own reduce spec class, and
 ``hkp_pack`` only accepts a predicate whose first parameter is annotated with the
 builder's spec class. So an arch cannot re-export it as-is (``hkp_pack`` would refuse
 the reduce builder at pack time); it must wrap it in a predicate typed with its own
-spec, under the name its builder's predicate alias expects (gfx950:
-``supports_tiled_reduce_spec``).
+spec, under the name its builder's predicate alias expects (gfx950 and gfx942 each
+wrap it as ``supports_tiled_reduce_spec``).
 """
 
 from __future__ import annotations
