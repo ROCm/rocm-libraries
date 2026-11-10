@@ -9302,6 +9302,24 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, ReadsNothingPastExactBuffersForATrailingEmpt
                 spec, F16_TOLERANCE, RdnaFamily::PREFILL);
         }
     }
+    // Dropping, on the gfx11 16-bit dropout objects: those at head dims up to 96 issue their Q
+    // loads before the empty KV loop's branch, so an empty sequence's row is loaded (gfx12 drops
+    // 16-bit graphs on the aiw objects).
+    if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
+    {
+        return;
+    }
+    for(auto spec : trailingEmptySequenceSpecs(64))
+    {
+        SCOPED_TRACE("dropout, lengths " + std::to_string(spec.packedSeqLensQ.back()) + "/"
+                     + std::to_string(spec.packedSeqLensKv.back()));
+        setDropout(spec, 0.2F);
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+        spec.dataType = DataType::HALF;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(
+            spec, F16_TOLERANCE, RdnaFamily::PREFILL);
+    }
 }
 
 // AOTriton's decode_addressing moves an empty sequence to token 0 on the aiw kernel.

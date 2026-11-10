@@ -1017,13 +1017,16 @@ table, the sequence extent still the longest sequence.
   length stay unwritten. The packed buffers hold exactly the sequences' tokens, so a load past the last
   sequence would leave the allocation. An empty sequence reads at token 0, not at its table entry
   (modification 38), so a trailing empty one (`cu_seqlens [0, 5, 9, 9]`) reads nothing past the
-  tensor whatever the compiler does with the prologue's loads. (The objects before it issued no
-  such read either: their Q loads sit behind the empty KV loop's branch, which an empty sequence
-  takes; the source no longer relies on that.)
+  tensor whatever the compiler does with the prologue's loads. Before it, the 48 gfx11 16-bit
+  dropout objects at head dim 64 or 96 (their specialized and generic tiers) issued their Q
+  loads ahead of the empty KV loop's branch and so read one row past Q; every other RDNA
+  prefill object loads Q behind that branch, which an empty sequence takes.
   `ReadsNothingPastExactBuffersForATrailingEmptySequence` (RDNA prefill, aiw, CDNA; the last
-  sequence empty on the query side, the key side or both) puts every packed operand in a buffer
-  whose next page is unmapped, so a kernel that reads or writes past the tensor faults (a read
-  one element past such a buffer is a memory-access fault on gfx942 and gfx1201).
+  sequence empty on the query side, the key side or both; on gfx11 the RDNA prefill case also
+  drops, bf16 and f16 at head dim 64) puts every packed operand in a buffer whose next page is
+  unmapped, so a kernel that reads or writes past the tensor faults (a read one element past
+  such a buffer is a memory-access fault on gfx942 and gfx1201). On gfx1100 the gfx11 objects
+  from before modification 38 fault on its first dropping case (an illegal memory access).
   `seqused_k` itself
   (`TestGpuFlydslSdpaRdnaDispatch.MirrorsSequsedKOnPackedKeySlots`): slots longer than
   `seqused_k` with NaN in every K and V element past it, so a read of the tail turns rows NaN;
