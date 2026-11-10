@@ -68,6 +68,12 @@ TDM_STORE_PATHS = {
 STINKY_KEEP = "[stinky-keep]"
 
 
+def hasEpilogueSideEffects(pt):
+  """Whether the epilogue writes or reduces per-element outputs beyond C and D (E, Gradient, gate residual,
+  AmaxD), which the TDM block, computing the elements outside D without masks, cannot bound."""
+  return pt["UseE"] or pt["Gradient"] or pt["UseGateResidual"] or pt["OutputAmaxD"]
+
+
 def tdmStoreRejectReason(state):
   """Return why a TDMStoreInst solution is outside the configurations the TDM block is built for, or None.
 
@@ -80,7 +86,9 @@ def tdmStoreRejectReason(state):
   The block also computes the elements outside D and bounds only the C loads and the D store, so
   besides C and D the epilogue may only read the bias and ScaleAlphaVec vectors along M, the latter
   with or without the device-scalar bit of UseScaleAlphaVec, and the ScaleAB vectors, which the staged
-  tile follows in LDS.
+  tile follows in LDS, and scalars such as ScaleC and ScaleD; it may not write or reduce per-element
+  outputs (hasEpilogueSideEffects). GroupedGemm sets the sizes, strides and addresses the block reads for
+  each group.
   A GlobalSplitU=-1 kernel, with any GlobalSplitUAlgorithm and AdaptiveGemmGSUA, uses the block only
   when the runtime GSU is 1; the partials and atomics of its GSU>1 branch keep buffer_store.
   """
@@ -108,9 +116,9 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst does not support CompactLoopStore"
   if pt["FusedGemmA2A"]:
     return "TDMStoreInst does not support FusedGemmA2A"
-  if pt["UseE"] or pt["Gradient"] or pt["UseGateResidual"] or pt["UseScaleCD"] or pt["OutputAmaxD"] \
-      or pt["GroupedGemm"]:
-    return "TDMStoreInst does not support E, Gradient, gate residual, ScaleCD, AmaxD or GroupedGemm"
+  if hasEpilogueSideEffects(pt):
+    return "TDMStoreInst does not support per-element epilogue side effects beyond C and D " \
+      "(E, Gradient, gate residual, AmaxD)"
   if pt["UseBias"] > 1 or scaleAlphaVectorMode(pt["UseScaleAlphaVec"]) > 1:
     return "TDMStoreInst supports bias and ScaleAlphaVec only along M"
   if state["MacroTile1"] % (state["NumThreads"] // state["WavefrontSize"]) != 0:
