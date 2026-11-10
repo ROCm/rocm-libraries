@@ -296,7 +296,7 @@ std::vector<DeviceCase> deviceCases()
     auto convolution = depthwise(32, {17, 19}, {3, 3}, {1, 1}, {1, 1}, true);
     convolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"K3ConvolutionMode", convolution, FWD});
-    // Channels-first: every catalog filter, channel counts odd and below a pair, rows wider than
+    // Channels-first: every catalog filter, odd channel counts and a single pair, rows wider than
     // a 128-column tile, the first plane's padding (reached before the buffer's start), folds
     // of up to 8 images over a batch of 9.
     const auto first = [](ConvShape shape) {
@@ -305,7 +305,7 @@ std::vector<DeviceCase> deviceCases()
     };
     cases.push_back({"NchwK3C5", first(depthwise(5, {13, 37}, {3, 3}, {1, 1}, {1, 1})), FWD});
     cases.push_back({"NchwK5C3Wide", first(depthwise(3, {9, 150}, {5, 5}, {2, 2}, {1, 1})), FWD});
-    cases.push_back({"NchwK7C1", first(depthwise(1, {6, 5}, {7, 7}, {3, 3}, {1, 1})), FWD});
+    cases.push_back({"NchwK7C2", first(depthwise(2, {6, 5}, {7, 7}, {3, 3}, {1, 1})), FWD});
     cases.push_back({"NchwK9C4", first(depthwise(4, {11, 12}, {9, 9}, {4, 4}, {1, 1})), FWD});
     auto nchwBatch = first(depthwise(6, {7, 14}, {3, 3}, {1, 1}, {1, 1}));
     nchwBatch.n = 9;

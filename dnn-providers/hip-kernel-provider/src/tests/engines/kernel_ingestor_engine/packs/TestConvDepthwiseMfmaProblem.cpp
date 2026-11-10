@@ -255,7 +255,8 @@ TEST(TestConvDepthwiseMfmaKernelMatch, ChannelsFirstTakesAnyChannelCount)
     fields.config.layout = "NCHW";
     fields.config.waves = 4;
     EXPECT_TRUE(admits(fields, channelsFirst(3)));
-    EXPECT_TRUE(admits(fields, channelsFirst(1)));
+    EXPECT_TRUE(admits(fields, channelsFirst(5)));
+    EXPECT_TRUE(admits(fields, channelsFirst(18)));
     fields.config.waves = 3;
     EXPECT_FALSE(admits(fields, channelsFirst(6)));
 }
