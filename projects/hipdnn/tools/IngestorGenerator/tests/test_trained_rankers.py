@@ -237,13 +237,19 @@ def test_the_fingerprint_covers_multi_launch_specs():
 # the shipped rankers: trained on the shipped catalog, bound as configured
 # ---------------------------------------------------------------------------
 
+
+def _binds_a_ranker(path: Path) -> bool:
+    """Whether the config binds a trained ``sort_kernel_catalog`` model for any arch.
+    Selecting on the binding, not on ``trained_catalog_sha256``, keeps a binding
+    that never recorded its catalog from skipping the gate."""
+    engine = yaml.safe_load(path.read_text()).get("engine") or {}
+    return bool((engine.get("heuristics") or {}).get("sort_kernel_catalog"))
+
+
 _SELECTIONS = [
     p
     for p in sorted((_ROOT / "configs").glob("*.yaml"))
-    if not p.name.endswith(".engine.yaml")
-    and (yaml.safe_load(p.read_text()).get("engine") or {}).get(
-        "trained_catalog_sha256"
-    )
+    if not p.name.endswith(".engine.yaml") and _binds_a_ranker(p)
 ]
 
 
@@ -256,6 +262,18 @@ class TestShippedRankers:
     @pytest.fixture
     def bundle(self, config) -> Path:
         return _DESCRIPTORS / config.authored_subpath
+
+    def test_every_bound_arch_records_its_trained_catalog(self, config):
+        """A ranker bound with no recorded catalog cannot be checked against the
+        shipped one, so the binding alone requires the fingerprint."""
+        bound = config.engine.heuristics["sort_kernel_catalog"]
+        recorded = config.engine.trained_catalog_sha256 or {}
+        missing = sorted(set(bound) - set(recorded))
+        assert not missing, (
+            f"{config.engine.name} binds sort_kernel_catalog for {missing} without "
+            f"engine.trained_catalog_sha256: record the catalog the models were trained "
+            f"on (tools/catalog_fingerprint.py) in both configs."
+        )
 
     def test_trained_on_the_shipped_catalog(self, config, bundle):
         for pack in config.packs:
@@ -276,7 +294,7 @@ class TestShippedRankers:
     def test_the_shipped_ued_binds_the_configured_ids(self, config, bundle):
         ued = json.loads((bundle / f"{config.engine.slug}.ued.json").read_text())
         bound = config.engine.heuristics["sort_kernel_catalog"]
-        assert set(bound) == set(config.engine.trained_catalog_sha256)
+        assert set(bound) == set(config.engine.trained_catalog_sha256 or {})
         for arch, ids in bound.items():
             assert ued["sort_kernel_catalog"].get(arch) == ids
 
