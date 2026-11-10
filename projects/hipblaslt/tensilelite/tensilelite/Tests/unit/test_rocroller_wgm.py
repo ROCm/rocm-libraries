@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from tensilelite.CustomKernels import _metadataArgToCustomArg
+from tensilelite.CustomKernels import _metadataArgToCustomArg, readCustomKernelConfig
 from tensilelite.RocRollerWgm import (
     WGM_ROLE_ORDER,
     classify_wgm_expression,
@@ -155,39 +155,31 @@ def test_wgm_kernargs_follow_the_hoisted_formula(sizes, expected):
     assert [got[name] for name in WGM_ROLE_ORDER] == expected
 
 
-def _args_section(text):
-    import yaml
-
-    lines = []
-    capture = False
-    for line in text.splitlines(keepends=True):
-        if line.startswith("    .args:"):
-            capture = True
-            lines.append(line)
-            continue
-        if capture:
-            if line.strip() == "..." or (
-                line.startswith("    .") and not line.startswith("      ")
-            ):
-                break
-            lines.append(line)
-    return yaml.safe_load("".join(lines))[".args"]
-
-
-def test_shipped_wgm_kernels_classify_to_the_eleven_roles():
+def _shipped_rocroller_custom_kernels():
+    """(name, CustomKernel) for every shipped kernel of rocRoller origin."""
     root = Path(__file__).resolve().parents[2] / "CustomKernels" / "rocroller"
-    kernels = sorted(root.glob("*_WGM_.s"))
-    assert len(kernels) == 20
-    for path in kernels:
-        text = path.read_text(errors="replace")
+    for path in sorted(root.glob("*.s")):
+        config = readCustomKernelConfig(path.stem, directory=str(root))
+        if config.get("Source", {}).get("Origin") == "rocroller":
+            yield path.stem, config["CustomKernel"]
+
+
+def test_shipped_wgm_kernels_declare_the_eleven_roles():
+    # A kernel maps workgroups when its custom.config declares the
+    # RR_WorkgroupMapping kernarg: that is what the launch reads, so it is what
+    # this checks, rather than the name or rocRoller's expression trees.
+    wgmKernels = 0
+    for name, customKernel in _shipped_rocroller_custom_kernels():
+        roles = [arg["semantic"] for arg in customKernel["args"]
+                 if arg["semantic"] in WGM_ROLE_ORDER]
+        if "RR_WorkgroupMapping" not in roles:
+            assert roles == [], name
+            continue
+        wgmKernels += 1
         # Flattened workgroup X. These kernels do not read workgroup Y.
-        assert "grid: [TilesXY, One, Batch]" in text, path.name
-        roles = []
-        for arg in _args_section(text):
-            mapped = _metadataArgToCustomArg(arg, path.stem)
-            if mapped["semantic"] in WGM_ROLE_ORDER:
-                roles.append(mapped["semantic"])
-        assert tuple(roles) == WGM_ROLE_ORDER, path.name
+        assert customKernel["grid"] == ["TilesXY", "One", "Batch"], name
+        assert tuple(roles) == WGM_ROLE_ORDER, name
+    assert wgmKernels == 20
 
 
 def test_wgm_expression_classifier_reads_the_tree_not_the_suffix():
