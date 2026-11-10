@@ -41,7 +41,18 @@ ATOMS = {
 }
 EB = {"HALF": 2, "BFLOAT16": 2, "FLOAT": 4}
 # (th, wp, cb): output rows, 16-column fragments and 16-channel blocks a workgroup.
-TILES = [(4, 2, 2), (4, 2, 4), (4, 4, 2), (8, 2, 2), (8, 1, 4), (2, 4, 4)]
+# One-block tiles (cb 1) are RDNA's best for 16 channels a group (gfx1201 1.2x, stride-2
+# forward 1.5x over the cb 2 tiles).
+TILES = [
+    (4, 2, 2),
+    (4, 2, 4),
+    (4, 4, 2),
+    (8, 2, 2),
+    (8, 1, 4),
+    (2, 4, 4),
+    (4, 2, 1),
+    (8, 2, 1),
+]
 # Tiles that also ship channels-first in place (cf 1: the graph's packed N C D H W activations
 # read and written without staging): the bench winners of that form on every target.
 CF_TILES = [(4, 2, 2), (4, 4, 2), (8, 2, 2)]
