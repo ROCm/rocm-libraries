@@ -5,7 +5,6 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_kvcache_layout_enum.hpp"
-#include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_rotary_embedding.hpp"
 
 namespace ck_tile {
@@ -298,16 +297,9 @@ struct BlockFmhaFwdSplitKVPipelineProblem
     static constexpr index_t kBlockPerCu             = Traits::kBlockPerCu;
     static constexpr bool kHasSink                   = Traits::kHasSink;
 
-    // Split-kv never supports dropout or a quantization scale, and it stores no
-    // random values. Spelled out so the split-kv qr_tdm, whose body is copied
-    // from the prefill qr_tdm, can query these members as the prefill code does.
-    using RandValOutputDataType       = uint8_t;
-    static constexpr bool kHasDropout = false;
-    static constexpr auto QScaleEnum  = BlockAttentionQuantScaleEnum::NO_SCALE;
-
-    // qr_tdm LDS-arena knobs. kUseDoubleKVLdsBuffer must stay false: the split-kv
-    // qr_tdm implements only the single-V layout it selects. That pipeline
-    // overrides kProgressiveDsLoadK locally rather than flipping it here.
+    // qr_tdm LDS-arena knobs read by the shared qr_tdm policy. The split-kv
+    // qr_tdm asserts kUseDoubleKVLdsBuffer is false. kProgressiveDsLoadK only
+    // matters behind it, but the policy names it, so it must exist.
     static constexpr bool kUseDoubleKVLdsBuffer = false;
     static constexpr bool kProgressiveDsLoadK   = false;
 };

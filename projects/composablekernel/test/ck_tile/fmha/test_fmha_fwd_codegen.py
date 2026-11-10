@@ -2041,7 +2041,7 @@ class SplitKVQrTdmTiles(unittest.TestCase):
         ]
 
     def test_every_qr_tdm_tile_keeps_bn0_64(self):
-        # kProgressiveDsLoadK is gated on kN0 == 64 and turns itself off
+        # kReloadKProgressively is gated on kN0 == 64 and turns itself off
         # silently on any other tile, so pin it here in codegen.
         tdm = self._tdm_kernels()
         self.assertTrue(tdm, "no qr_tdm split-kv kernels were generated")

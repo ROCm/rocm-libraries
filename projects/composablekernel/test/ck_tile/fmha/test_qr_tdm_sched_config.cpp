@@ -262,7 +262,7 @@ TYPED_TEST(QrTdmSplitKVConfig, ProgressiveKReloadStaysOn)
     // Progressive K reload needs bn0 64. This model is built
     // with N = 64, so this only checks the gate tracks kN0; that codegen emits
     // bn0 64 is asserted in test_fmha_fwd_codegen.py.
-    EXPECT_TRUE(Pipeline::kProgressiveDsLoadK);
+    EXPECT_TRUE(Pipeline::kReloadKProgressively);
     EXPECT_EQ(Pipeline::kN0, 64);
 }
 

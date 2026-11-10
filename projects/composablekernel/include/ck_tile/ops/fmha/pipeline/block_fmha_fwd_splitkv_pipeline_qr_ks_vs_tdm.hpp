@@ -25,21 +25,20 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     static constexpr auto I0 = number<0>{};
     static constexpr auto I1 = number<1>{};
 
-    using Problem               = remove_cvref_t<Problem_>;
-    using Policy                = remove_cvref_t<Policy_>;
-    using QDataType             = remove_cvref_t<typename Problem::QDataType>;
-    using KDataType             = remove_cvref_t<typename Problem::KDataType>;
-    using VDataType             = remove_cvref_t<typename Problem::VDataType>;
-    using SaccDataType          = remove_cvref_t<typename Problem::SaccDataType>;
-    using SMPLComputeDataType   = remove_cvref_t<typename Problem::SMPLComputeDataType>;
-    using BiasDataType          = remove_cvref_t<typename Problem::BiasDataType>;
-    using RandValOutputDataType = remove_cvref_t<typename Problem::RandValOutputDataType>;
-    using LSEDataType           = remove_cvref_t<typename Problem::LSEDataType>;
-    using PDataType             = remove_cvref_t<typename Problem::PDataType>;
-    using OaccDataType          = remove_cvref_t<typename Problem::OaccDataType>;
-    using ODataType             = remove_cvref_t<typename Problem::ODataType>;
-    using AttentionVariant      = remove_cvref_t<typename Problem::AttentionVariant>;
-    using FmhaMask              = remove_cvref_t<typename Problem::FmhaMask>;
+    using Problem             = remove_cvref_t<Problem_>;
+    using Policy              = remove_cvref_t<Policy_>;
+    using QDataType           = remove_cvref_t<typename Problem::QDataType>;
+    using KDataType           = remove_cvref_t<typename Problem::KDataType>;
+    using VDataType           = remove_cvref_t<typename Problem::VDataType>;
+    using SaccDataType        = remove_cvref_t<typename Problem::SaccDataType>;
+    using SMPLComputeDataType = remove_cvref_t<typename Problem::SMPLComputeDataType>;
+    using BiasDataType        = remove_cvref_t<typename Problem::BiasDataType>;
+    using LSEDataType         = remove_cvref_t<typename Problem::LSEDataType>;
+    using PDataType           = remove_cvref_t<typename Problem::PDataType>;
+    using OaccDataType        = remove_cvref_t<typename Problem::OaccDataType>;
+    using ODataType           = remove_cvref_t<typename Problem::ODataType>;
+    using AttentionVariant    = remove_cvref_t<typename Problem::AttentionVariant>;
+    using FmhaMask            = remove_cvref_t<typename Problem::FmhaMask>;
 
     using BlockFmhaShape             = remove_cvref_t<typename Problem::BlockFmhaShape>;
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
@@ -75,9 +74,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         Problem::kPadHeadDimV; // support multiple of vector(like 8x)
 
     static constexpr bool kHasLogitsSoftCap = Problem::kHasLogitsSoftCap;
-    static constexpr bool kHasDropout       = Problem::kHasDropout;
     static constexpr auto BiasEnum          = Problem::BiasEnum;
-    static constexpr auto QScaleEnum        = Problem::QScaleEnum;
     static constexpr bool kStoreLSE         = Problem::kStoreLSE;
     static constexpr bool kHasSink          = Problem::kHasSink;
     static constexpr bool kIsPagedKV        = Problem::kIsPagedKV;
@@ -93,10 +90,14 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     static constexpr bool kUsesUntransposedVKernelPath = true;
     static constexpr bool kUsesTdmAffineDramPath       = true;
 
-    // Overridden locally: the problem declares it false, but the shared policy
-    // reads that only behind kUseDoubleKVLdsBuffer (also false), so the mismatch
-    // is harmless. Gated on kN0 == 64 for the reload's static_asserts.
-    static constexpr bool kProgressiveDsLoadK = (kN0 == 64);
+    // The single-V arena below is the only layout this pipeline implements.
+    static_assert(!Problem::kUseDoubleKVLdsBuffer,
+                  "split-kv qr_tdm implements only the single-V LDS layout");
+
+    // Reload K from LDS in place during the QK sweep. Independent of the
+    // problem's kProgressiveDsLoadK, which configures the double-buffer path.
+    // Gated on kN0 == 64 for the reload's static_asserts.
+    static constexpr bool kReloadKProgressively = (kN0 == 64);
 
     // Every softmax site here calls exp2 directly; there is no exp() path to fall back to.
     static_assert(CK_TILE_FMHA_FWD_FAST_EXP2,
@@ -109,12 +110,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
                   "qr_tdm split-kv folds scale_s into the capped score, so logits soft cap and "
                   "bias cannot share the same instance");
-
-    // Dropout would need the kernel to hand over a dropout object and a randval window.
-    static_assert(!kHasDropout, "qr_tdm pipeline does not yet support dropout");
-
-    static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE,
-                  "qr_tdm split-kv has no quantized path");
 
     static_assert(!is_any_of<VDataType, fp8_t, bf8_t>::value,
                   "qr_tdm split-kv does not support fp8/bf8");
@@ -138,8 +133,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
     static constexpr index_t kAlignmentBias =
         kPadSeqLenK ? 1 : Policy::template GetAlignmentBias<Problem>();
-    static constexpr index_t kAlignmentRandVal =
-        kPadSeqLenK ? 1 : Policy::template GetAlignmentRandVal<Problem>();
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
@@ -705,7 +698,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
             s_wait_tensorcnt_barrier<2>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_ptr(number<kCurBuf>{}));
-            if constexpr(kProgressiveDsLoadK)
+            if constexpr(kReloadKProgressively)
             {
                 // Reload k_tile in place, in groups of four ds_loads dropped
                 // into the WMMA sweep right after the fragments they overwrite
