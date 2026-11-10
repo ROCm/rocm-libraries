@@ -1622,6 +1622,14 @@ namespace rocalution
             status = rocsparse_csric0_clear(
                 ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle), this->mat_info_);
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+            assert(inv_diag != NULL);
+            HIPAcceleratorVector<ValueType>* cast_diag
+                = dynamic_cast<HIPAcceleratorVector<ValueType>*>(inv_diag);
+            assert(cast_diag != NULL);
+
+            cast_diag->Allocate(this->nrow_);
+            this->ExtractInverseDiagonal(cast_diag);
         }
 
         return true;
@@ -4978,6 +4986,7 @@ namespace rocalution
         return true;
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::ExtractExtRowNnz(int                  offset,
                                                               BaseVector<PtrType>* row_nnz) const
@@ -5198,7 +5207,9 @@ namespace rocalution
 
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
+    // LCOV_EXCL_START (deprecated interface)
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::AMGConnect(ValueType        eps,
                                                         BaseVector<int>* connections) const
@@ -6419,7 +6430,9 @@ namespace rocalution
         // cast_prolong->Sort();
         return true;
     }
+    // LCOV_EXCL_STOP
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::AMGBoundaryNnz(const BaseVector<int>&  boundary,
                                                             const BaseVector<bool>& connections,
@@ -6513,6 +6526,7 @@ namespace rocalution
         CHECK_HIP_ERROR(__FILE__, __LINE__);
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::AMGComputeStrongConnections(
@@ -6694,6 +6708,7 @@ namespace rocalution
             }
             else
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 if(avg_nnz_per_row <= 8)
                 {
                     kernel_csr_amg_connect<true, 1>
@@ -6834,6 +6849,7 @@ namespace rocalution
                             cast_l2g->vec_,
                             cast_conn->vec_);
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             CHECK_HIP_ERROR(__FILE__, __LINE__);
@@ -6889,6 +6905,7 @@ namespace rocalution
         }
         else
         {
+            // COVERAGE_EXCL_NO_MPI_START
             kernel_csr_amg_init_mis_tuples<true>
                 <<<GridSize,
                    BlockSize,
@@ -6902,12 +6919,14 @@ namespace rocalution
                     cast_conn->vec_,
                     cast_state->vec_,
                     cast_hash->vec_);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         return true;
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::AMGExtractBoundaryState(
         const BaseVector<PtrType>&   bnd_csr_row_ptr,
@@ -6971,6 +6990,7 @@ namespace rocalution
 
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::AMGPMISFindMaxNeighbourNode(
@@ -7221,6 +7241,7 @@ namespace rocalution
             }
             else
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 if(avg_nnz_per_row <= 8)
                 {
                     kernel_csr_amg_find_max_node<true, 256, 1>
@@ -7403,6 +7424,7 @@ namespace rocalution
                             cast_agg->vec_,
                             d_undecided);
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
@@ -7478,6 +7500,7 @@ namespace rocalution
         }
         else
         {
+            // COVERAGE_EXCL_NO_MPI_START
             kernel_csr_amg_update_aggregates<true>
                 <<<dim3((this->nrow_ - 1) / this->local_backend_.HIP_block_size + 1),
                    dim3(this->local_backend_.HIP_block_size),
@@ -7496,6 +7519,7 @@ namespace rocalution
                     cast_max_state->vec_,
                     cast_agg->vec_,
                     cast_agg_nodes->vec_);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
@@ -8110,6 +8134,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
 
@@ -8122,6 +8147,7 @@ namespace rocalution
 
             // Number of ghost rows is identical to interior
             cast_pg->nrow_ = this->nrow_;
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Get maximum non-zeros per row to decided on size of unordered set
@@ -8158,6 +8184,7 @@ namespace rocalution
 
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // Get maximum non-zeros per row to decided on size of unordered set
             kernel_calc_row_nnz<<<(this->nrow_ - 1) / 256 + 1,
                                   256,
@@ -8175,6 +8202,7 @@ namespace rocalution
                                 this->nrow_,
                                 rocprim::maximum<int>(),
                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         free_hip(&rocprim_buffer);
@@ -8183,15 +8211,19 @@ namespace rocalution
         copy_d2h(1, cast_pi->mat_.row_offset, &max_row_nnz);
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             int max_row_nnz_gst;
             copy_d2h(1, cast_pg->mat_.row_offset, &max_row_nnz_gst);
             max_row_nnz = std::max(max_row_nnz, max_row_nnz_gst);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         set_to_zero_hip(256, this->nrow_ + 1, cast_pi->mat_.row_offset);
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             set_to_zero_hip(256, this->nrow_ + 1, cast_pg->mat_.row_offset);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Call corresponding kernel to compute non-zero entries per row of P
@@ -8462,6 +8494,7 @@ namespace rocalution
         }
         else
         {
+            // COVERAGE_EXCL_NO_MPI_START
             if(max_row_nnz < 8)
             {
                 kernel_csr_sa_prolong_nnz<true, 256, 4, 8>
@@ -8726,6 +8759,7 @@ namespace rocalution
 
                 return false;
             }
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
@@ -8801,6 +8835,7 @@ namespace rocalution
 
         if(global)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             CHECK_HIP_STATUS(
                 rocprim::reduce(rocprim_buffer,
                                 rocprim_size,
@@ -8810,6 +8845,7 @@ namespace rocalution
                                 this->nrow_,
                                 rocprim::maximum<int>(),
                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         free_hip(&rocprim_buffer);
@@ -8818,9 +8854,11 @@ namespace rocalution
         copy_d2h(1, cast_pi->mat_.row_offset + this->nrow_, &max_row_nnz);
         if(global)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             int max_row_nnz_gst;
             copy_d2h(1, cast_pg->mat_.row_offset + this->nrow_, &max_row_nnz_gst);
             max_row_nnz = std::max(max_row_nnz, max_row_nnz_gst);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Perform exclusive scan on internal prolongation row offsets
@@ -8866,6 +8904,7 @@ namespace rocalution
 
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
             assert(cast_glo != NULL);
@@ -8910,6 +8949,7 @@ namespace rocalution
             set_to_zero_hip(256, cast_pg->nnz_, cast_pg->mat_.val);
 
             cast_glo->Allocate(cast_pg->nnz_);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Call corresponding kernel to compute non-zero entries per row of P
@@ -9249,6 +9289,7 @@ namespace rocalution
         }
         else
         {
+            // COVERAGE_EXCL_NO_MPI_START
             if(max_row_nnz < 8)
             {
                 kernel_csr_sa_prolong_fill<true, 128, 4, 8>
@@ -9585,6 +9626,7 @@ namespace rocalution
 
                 return false;
             }
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         CHECK_HIP_ERROR(__FILE__, __LINE__);
@@ -9634,6 +9676,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             assert(dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost) != NULL);
             assert(cast_pg != NULL);
 
@@ -9646,6 +9689,7 @@ namespace rocalution
 
             // Number of ghost rows is identical to interior
             cast_pg->nrow_ = this->nrow_;
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Call corresponding kernel to compute non-zero entries per row of P
@@ -9667,6 +9711,7 @@ namespace rocalution
         }
         else
         {
+            // COVERAGE_EXCL_NO_MPI_START
             kernel_csr_ua_prolong_nnz<256>
                 <<<(this->nrow_ - 1) / 256 + 1,
                    256,
@@ -9680,6 +9725,7 @@ namespace rocalution
                     cast_f2c->vec_,
                     cast_pi->mat_.row_offset,
                     cast_pg->mat_.row_offset);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
@@ -9766,6 +9812,7 @@ namespace rocalution
 
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             assert(dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost) != NULL);
             assert(cast_pg != NULL);
             assert(cast_glo != NULL);
@@ -9810,6 +9857,7 @@ namespace rocalution
             set_to_zero_hip(256, cast_pg->nnz_, cast_pg->mat_.val);
 
             cast_glo->Allocate(cast_pg->nnz_);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Call corresponding kernel to compute non-zero entries per row of P
@@ -9836,6 +9884,7 @@ namespace rocalution
         }
         else
         {
+            // COVERAGE_EXCL_NO_MPI_START
             kernel_csr_ua_prolong_fill<true, 256>
                 <<<(this->nrow_ - 1) / 256 + 1,
                    256,
@@ -9854,12 +9903,14 @@ namespace rocalution
                     cast_pg->mat_.col,
                     cast_pg->mat_.val,
                     cast_glo->vec_);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         return true;
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::CombineAndRenumber(int     ncol,
                                                                 int64_t ext_nnz,
@@ -11962,6 +12013,7 @@ namespace rocalution
 
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template class HIPAcceleratorMatrixCSR<double>;
     template class HIPAcceleratorMatrixCSR<float>;

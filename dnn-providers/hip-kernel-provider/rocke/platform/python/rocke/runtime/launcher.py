@@ -94,9 +94,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence, Tuple
 
-from ..core.ir import check_cluster_dims
+from ..core.ir import KernelDef, PtrType, check_cluster_dims, type_bits
+from .contract import (
+    LaunchRefused,
+    LaunchSupport,
+    ParameterContract,
+    parameter_contract,
+)
 from .hip_module import Runtime
-from .packing import compile_packer
+from .packing import SCALAR_ARG_FORMATS, compile_packer
 from .torch_interop import resolve_stream
 
 __all__ = [
@@ -108,6 +114,7 @@ __all__ = [
     "StreamConfig",
     "WorkspaceSpec",
     "WorkspacePool",
+    "first_supported",
     "launch_kernel",
     "make_kernel",
     "no_fence",
@@ -171,6 +178,10 @@ class LaunchSummary:
     launches: int
 
 
+# The block a launch uses when its LaunchConfig leaves ``block`` unset.
+_DEFAULT_BLOCK: tuple[int, int, int] = (64, 1, 1)
+
+
 @dataclass
 class LaunchConfig:
     """Per-call options for a launcher.
@@ -191,8 +202,12 @@ class LaunchConfig:
     grid: Tuple[int, int, int] = (1, 1, 1)
     """3D launch grid (number of CTAs in each dim)."""
 
-    block: Tuple[int, int, int] = (64, 1, 1)
-    """3D block dim (threads per CTA). Default is a single wave64."""
+    block: tuple[int, int, int] | None = None
+    """3D block dim (threads per CTA). ``None`` launches with the kernel's
+    exact ``workgroup_size`` when the launcher knows it (see
+    :meth:`KernelLauncher.from_artifact`), else with ``(64, 1, 1)``, a single
+    wave64. A block passed to such a launcher must equal
+    ``(workgroup_size, 1, 1)``."""
 
     shared_bytes: int = 0
     """Dynamic LDS bytes requested at launch (in addition to the
@@ -346,6 +361,19 @@ def release_retained_for_stream(stream: int = 0) -> None:
     _runtime().release_pending_for_stream(resolve_stream(stream))
 
 
+def check_gpu_checks(stream: int | None = None) -> None:
+    """Raise :class:`~rocke.runtime.GpuCheckFailed` if a ``gpu_checked_value``
+    fact was false in a launch rocke queued on ``stream`` (every stream of the
+    current device when None) since rocke last waited on it.
+
+    rocke's own waits read the kernels' GPU-check words already. Call this
+    after waiting some other way -- ``torch.cuda.synchronize()``, an event's
+    ``synchronize`` -- before using the outputs: such a wait reads nothing.
+    See :meth:`Runtime.check_gpu_checks`.
+    """
+    _runtime().check_gpu_checks(None if stream is None else resolve_stream(stream))
+
+
 def wait_stream_and_release(stream: int = 0) -> None:
     """Event-synchronize on ``stream`` and release all retained refs.
 
@@ -425,6 +453,12 @@ class KernelLauncher:
 
     ``cluster_dims`` is the kernel's compiled cluster shape (the IR kernel
     attr, also recorded in the manifest). When set, every launch uses it.
+
+    A launcher built by :meth:`from_artifact` holds the kernel's parameter
+    contract (:func:`rocke.runtime.contract.parameter_contract`) and checks it
+    before every launch, raising :class:`LaunchRefused` with every failed row.
+    A launcher built from code-object bytes alone, as here, cannot see the
+    contract and checks nothing.
     """
 
     def __init__(
@@ -454,6 +488,60 @@ class KernelLauncher:
         # recently used formats, so the saving is that surrounding work,
         # not the format compile itself.
         self._packer = compile_packer(self._signature)
+        # Set only by ``from_artifact``: the bytes alone carry no contract.
+        self._contract: ParameterContract | None = None
+
+    @classmethod
+    def from_artifact(
+        cls, artifact: Any, kernel_name: str | None = None
+    ) -> KernelLauncher:
+        """A launcher that checks the kernel's parameter contract before every launch.
+
+        ``artifact`` is what ``compile_kernel`` / ``compile_kernel_via_hipcc``
+        (a ``KernelArtifact``) or ``compile_module`` (a ``ModuleArtifact``)
+        returns; both hold the ``KernelDef``, from which the contract, the
+        argument signature and ``cluster_dims`` are taken, so the caller
+        restates nothing about the kernel. ``kernel_name`` picks a kernel of a
+        ``ModuleArtifact`` (the primary when omitted); for a ``KernelArtifact``
+        it may only name its one kernel.
+
+        Every launch -- ``launcher(values, config=...)`` and ``bind`` -- checks
+        each row and raises :class:`LaunchRefused` listing every failed one. A
+        block left unset becomes ``(workgroup_size, 1, 1)`` for a kernel that
+        states its exact size.
+        """
+        kernel = _artifact_kernel(artifact, kernel_name)
+        contract = parameter_contract(kernel)
+        launcher = cls(
+            hsaco=artifact.hsaco,
+            kernel_name=kernel.name,
+            signature=_kernel_signature(kernel),
+            cluster_dims=kernel.cluster_dims,
+        )
+        launcher._contract = contract
+        return launcher
+
+    @property
+    def contract(self) -> ParameterContract | None:
+        """The kernel's parameter contract (``print`` it to read it), or ``None``
+        for a launcher built from code-object bytes, which carry none."""
+        return self._contract
+
+    def supports(self, values: Mapping[str, Any]) -> LaunchSupport:
+        """Whether a launch with ``values`` would pass the contract.
+
+        ``values`` may leave the pointers out, as an applicability check made
+        before any buffer exists does: an alignment row without its pointer is
+        reported in ``checked_at_launch``, not as passed. The launch block is
+        checked at launch.
+        """
+        if self._contract is None:
+            raise ValueError(
+                f"{self._kernel_name}: this launcher was built from code-object bytes, "
+                "which carry no parameter contract -- build it with "
+                "KernelLauncher.from_artifact to check launches"
+            )
+        return self._contract.check(values)
 
     @property
     def kernel_name(self) -> str:
@@ -476,6 +564,12 @@ class KernelLauncher:
             )
         return self._fn
 
+    def _resolve_block(self, config: LaunchConfig) -> tuple[int, int, int]:
+        if config.block is not None:
+            return config.block
+        exact = None if self._contract is None else self._contract.workgroup_size
+        return _DEFAULT_BLOCK if exact is None else (exact, 1, 1)
+
     def _resolve_cluster(self, config: LaunchConfig) -> Optional[Tuple[int, int, int]]:
         if config.cluster is None:
             return self._cluster_dims
@@ -487,6 +581,23 @@ class KernelLauncher:
             )
         return cluster
 
+    def _checked_launch(
+        self, values: Mapping[str, Any], config: LaunchConfig
+    ) -> tuple[bytes, tuple[int, int, int], tuple[int, int, int] | None]:
+        """The one check-and-pack step of every launch: check the contract (when
+        the launcher holds one), resolve the block and the cluster, and pack.
+
+        Returns ``(packed arguments, block, cluster)``; raises
+        :class:`LaunchRefused` before anything is packed when a row fails.
+        """
+        if self._contract is not None:
+            support = self._contract.check(values, block=config.block, at_launch=True)
+            if not support.ok:
+                raise LaunchRefused.of(self._kernel_name, support.reasons)
+        block = self._resolve_block(config)
+        cluster = self._resolve_cluster(config)
+        return self._packer(values), block, cluster
+
     def __call__(
         self,
         values: Mapping[str, Any],
@@ -494,8 +605,7 @@ class KernelLauncher:
         config: LaunchConfig,
     ) -> LaunchSummary:
         rt = _runtime()
-        cluster = self._resolve_cluster(config)
-        args = self._packer(values)
+        args, block, cluster = self._checked_launch(values, config)
         stream = resolve_stream(config.stream)
         fence = _resolved_fence(config.fence)
 
@@ -512,7 +622,7 @@ class KernelLauncher:
             rt.launch_blocking(
                 self._live_fn(),
                 config.grid,
-                config.block,
+                block,
                 args,
                 shared_bytes=config.shared_bytes,
                 stream=stream,
@@ -533,7 +643,7 @@ class KernelLauncher:
         rt.launch(
             self._live_fn(),
             config.grid,
-            config.block,
+            block,
             args,
             shared_bytes=config.shared_bytes,
             stream=stream,
@@ -558,15 +668,19 @@ class KernelLauncher:
         launch, and for a kernel shorter than that the loop times the
         host. The callable keeps ``values`` alive for as long as it
         lives; drain the stream before dropping it.
+
+        The arguments are checked once, when they are packed, exactly as a
+        call checks them.
         """
+        args, block, cluster = self._checked_launch(values, config)
         launch = _runtime().prepare_launch(
             self._live_fn(),
             config.grid,
-            config.block,
-            self._packer(values),
+            block,
+            args,
             shared_bytes=config.shared_bytes,
             stream=resolve_stream(config.stream),
-            cluster=self._resolve_cluster(config),
+            cluster=cluster,
         )
         keep = tuple(values.values())
 
@@ -601,6 +715,81 @@ class KernelLauncher:
         key_str = f", cache_key={self._cache_key!r}" if self._cache_key else ""
         dead = "" if self._module is not None else ", unloaded"
         return f"KernelLauncher({self._kernel_name!r}{key_str}{dead})"
+
+
+def first_supported(
+    launchers: Sequence[KernelLauncher], values: Mapping[str, Any]
+) -> KernelLauncher:
+    """The first of ``launchers`` whose contract accepts ``values``.
+
+    Each launcher must hold a contract (:meth:`KernelLauncher.from_artifact`).
+    Raises :class:`LaunchRefused` with every candidate's reasons when none does.
+    """
+    if not launchers:
+        raise ValueError("first_supported needs at least one launcher")
+    refused: list[tuple[str, tuple[str, ...]]] = []
+    for launcher in launchers:
+        support = launcher.supports(values)
+        if support.ok:
+            return launcher
+        refused.append((launcher.kernel_name, support.reasons))
+    lines = "".join(
+        f"\n  {name}:" + "".join(f"\n    {r}" for r in reasons)
+        for name, reasons in refused
+    )
+    flat_reasons = [f"{name}: {r}" for name, reasons in refused for r in reasons]
+    raise LaunchRefused(f"no candidate accepts this launch:{lines}", flat_reasons)
+
+
+def _artifact_kernel(artifact: Any, kernel_name: str | None) -> KernelDef:
+    """The ``KernelDef`` ``kernel_name`` picks from a compile artifact.
+
+    Read by attribute: the artifact classes live in ``rocke.helpers``, which
+    the runtime does not import.
+    """
+    module = getattr(artifact, "module", None)
+    kernel = getattr(artifact, "kernel", None)
+    if module is not None:
+        kernels = tuple(module.kernels)
+        if kernel_name is None:
+            return kernels[0]
+    elif isinstance(kernel, KernelDef):
+        kernels = (kernel,)
+        if kernel_name is None:
+            return kernel
+    else:
+        raise TypeError(
+            "KernelLauncher.from_artifact takes what compile_kernel, "
+            "compile_kernel_via_hipcc or compile_module returns, got "
+            f"{type(artifact).__name__}"
+        )
+    for candidate in kernels:
+        if candidate.name == kernel_name:
+            return candidate
+    names = ", ".join(k.name for k in kernels)
+    raise ValueError(
+        f"KernelLauncher.from_artifact: the artifact has no kernel {kernel_name!r} "
+        f"(it has {names})"
+    )
+
+
+def _kernel_signature(kernel: KernelDef) -> list[dict[str, str]]:
+    """The launch signature of ``kernel``'s parameters, in argument order: the
+    IR type names, which the packer reads (``packing.SCALAR_ARG_FORMATS``)."""
+    signature: list[dict[str, str]] = []
+    for param in kernel.params:
+        t = param.type
+        if (isinstance(t, PtrType) and type_bits(t) == 64) or (
+            t.name in SCALAR_ARG_FORMATS
+        ):
+            signature.append({"name": param.name, "type": t.name})
+        else:
+            raise ValueError(
+                f"{kernel.name}: parameter {param.name} has type {t.name}, which the "
+                "launcher cannot pack -- a launch argument is a 64-bit pointer or "
+                f"one of {', '.join(SCALAR_ARG_FORMATS)}"
+            )
+    return signature
 
 
 class PipelineLauncher:

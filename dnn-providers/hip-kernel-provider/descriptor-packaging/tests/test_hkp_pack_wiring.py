@@ -53,10 +53,17 @@ class _Consumer(SuppliedPython):
         (self.source / "authored").mkdir()
         (self.source / "kpack with spaces" / "rocm_kpack").mkdir(parents=True)
 
-    def wire(self, rocke_keywords):
-        """One root, wired with `rocke_keywords` spliced into the call."""
+    def wire(self, rocke_keywords, *, require_dvc=None):
+        """One root, wired with `rocke_keywords` spliced into the call. `require_dvc`
+        sets the build's REQUIRE_DVC_DESCRIPTORS option before the call when given."""
+        option = (
+            ""
+            if require_dvc is None
+            else f"set(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS {require_dvc})\n"
+        )
         self._write(
-            """set(HKP_TOOL "${CMAKE_CURRENT_SOURCE_DIR}/consumer.py")
+            option
+            + """set(HKP_TOOL "${CMAKE_CURRENT_SOURCE_DIR}/consumer.py")
 hkp_wire_pack_target(
     NAME off
     SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/authored"
@@ -145,6 +152,19 @@ def test_a_root_without_rocke_packs_under_a_base_interpreter_without_pip(consume
     assert "path_list_prepend" not in (consumer.build_dir / "build.ninja").read_text(
         encoding="utf-8"
     )
+
+
+@pytest.mark.parametrize("require_dvc", [None, "OFF", "ON"])
+def test_the_pack_is_strict_about_dvc_exactly_when_the_build_requires_dvc(
+    consumer, require_dvc
+):
+    """REQUIRE_DVC_DESCRIPTORS reaches the packer as --require-dvc: without it an
+    un-pulled model is left out with a warning, with it the pack fails."""
+    consumer.wire("ENABLE_ROCKE OFF", require_dvc=require_dvc)
+    consumer.configure()
+    consumer.build()
+
+    assert ("--require-dvc" in consumer.invocation()["argv"]) == (require_dvc == "ON")
 
 
 @pytest.mark.parametrize(
@@ -406,7 +426,7 @@ set_property(GLOBAL PROPERTY HKP_PACK_ARCHES_product gfx950)
 set_property(GLOBAL PROPERTY HKP_PACK_PROBE_OK_product {probe_ok})
 set_property(GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_product
     "{_cmake_string(json.dumps(shipped))}")
-hkp_gfx950_attention_dense_available(_available)
+hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950AttentionDense" gfx950)
 if(_available)
     set(_available TRUE)
 else()
@@ -447,16 +467,22 @@ def test_hidden_paths_and_excluded_folders_are_neither_pack_inputs_nor_configure
     consumer, empty_arch_fixture
 ):
     """Editing a file the packer never reads must not repack or reconfigure: the
-    input manifest and the probe's configure dependencies skip hidden paths and the
-    excluded family folders."""
+    input manifest and the probe's configure dependencies skip hidden paths, the
+    excluded family folders and an excluded bundle path (matched case-insensitively,
+    as the packer matches it)."""
     authored = consumer.source / "authored"
     _wildcard_pointwise(empty_arch_fixture, authored / "pointwise")
-    for hidden in (authored / ".hidden", authored / "fam"):
-        hidden.mkdir()
+    for hidden in (
+        authored / ".hidden",
+        authored / "fam",
+        authored / "nested" / "bundle",
+    ):
+        hidden.mkdir(parents=True)
     (authored / ".hidden" / "x.kdp.json").write_text("{", encoding="utf-8")
     (authored / "fam" / "y.kdp.json").write_text("{", encoding="utf-8")
+    (authored / "nested" / "bundle" / "z.kdp.json").write_text("{", encoding="utf-8")
     consumer._write(
-        _wire_root(exclude="fam")
+        _wire_root(exclude="fam NESTED/bundle")
         + f"""get_property(_deps DIRECTORY PROPERTY CMAKE_CONFIGURE_DEPENDS)
 {_report("deps", "${_deps}")}
 """
@@ -471,6 +497,7 @@ def test_hidden_paths_and_excluded_folders_are_neither_pack_inputs_nor_configure
     for path in [*deps, *inputs]:
         assert "/.hidden/" not in path
         assert "/fam/" not in path
+        assert "/nested/bundle/" not in path
 
 
 @pytest.mark.parametrize("enable_rocke", ["ON", "OFF"])
@@ -496,7 +523,7 @@ def test_the_bundle_gate_reads_the_root_not_the_build_arches(
             + _wire_root("product", arches="gfx90a", enable_rocke=enable_rocke)
             + f"""{forced}
 hkp_product_offers_engine(_offered "test_fixture:attention")
-hkp_gfx950_attention_dense_available(_available)
+hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950AttentionDense" gfx950)
 get_property(_dormant GLOBAL PROPERTY HKP_PACK_DORMANT_LABELS)
 {_report("dormant", "${_dormant}")}
 foreach(_name IN ITEMS offered available)

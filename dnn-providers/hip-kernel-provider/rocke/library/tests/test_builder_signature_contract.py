@@ -340,6 +340,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_grouped.DirectCoalescedWeightsDgradSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectMfmaDgradSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectConvWgradSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseWgradSpec": ("problem",),
     "kernels.common.conv_direct_nongrouped.DirectNongroupedConvSpec": ("problem",),
     "kernels.common.conv_dgrad_patch_wmma.DgradPatchWmmaSpec": ("problem",),
     "kernels.common.conv_dgrad_smallc_wmma.DgradSmallcWmmaSpec": ("problem",),

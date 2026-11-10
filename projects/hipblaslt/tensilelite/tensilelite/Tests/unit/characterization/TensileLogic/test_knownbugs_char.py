@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``TensileLogic.KnownBugs``.
+"""Characterization tests for ``tensilelite.logic.known_bugs``.
 
 The existing ``test_KnownBugs.py`` covers the happy round-trip, the missing-file
 return, the ``skips: not-a-list`` error, and the missing-PyYAML guard. This suite
@@ -39,7 +39,7 @@ from pathlib import Path
 
 import pytest
 
-from tensilelite.TensileLogic.KnownBugs import (
+from tensilelite.logic.known_bugs import (
     is_known_bug,
     load_known_bugs,
     normalize_logic_relative_path,

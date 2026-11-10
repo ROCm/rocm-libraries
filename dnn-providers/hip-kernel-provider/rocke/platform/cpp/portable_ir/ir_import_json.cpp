@@ -20,7 +20,6 @@
 #include "rocke/ir_import.h"
 
 #include <limits.h>
-#include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -28,6 +27,9 @@
 #include <string.h>
 
 #include "rocke/arena.h"
+#include "rocke/error.hpp"
+#include "rocke/intexpr.h"
+#include "rocke/ir_internal.h"
 
 /* ====================================================================== */
 /* Minimal JSON DOM + parser                                              */
@@ -787,18 +789,13 @@ static const rocke_type_t* import_type(importer_t* im, const jval_t* t)
 
 static bool import_int_value(importer_t* im, const char* context, const jval_t* v, int64_t* out)
 {
-    /* JSON numbers are doubles in this parser. Stay in the safe-integer range
-     * and validate before casting: larger adjacent integer spellings can round
-     * to the same double, while non-finite and out-of-range conversions are
-     * undefined behavior. */
-    if(!v || v->kind != J_NUM || !isfinite(v->num)
-       || !(v->num >= -9007199254740991.0 && v->num <= 9007199254740991.0)
-       || v->num != (double)(int64_t)v->num)
+    /* JSON numbers are doubles in this parser, so only an exact one is an
+     * integer (rocke_intexpr_exact_int). */
+    if(!v || v->kind != J_NUM || !rocke_intexpr_exact_int(v->num, out))
     {
         imp_fail(im, "%s is not an integer", context);
         return false;
     }
-    *out = (int64_t)v->num;
     return true;
 }
 
@@ -1277,6 +1274,46 @@ static void import_region_ops(importer_t* im, const jval_t* region)
         import_op(im, ops->arr[i]);
 }
 
+/* A param attr value, as rocke_param_opts_set_attr reads it. */
+static rocke_param_attr_value_t import_param_attr_value(const jval_t* v)
+{
+    rocke_param_attr_value_t value = {ROCKE_PARAM_ATTR_OTHER, false, 0.0, NULL};
+    if(v->kind == J_BOOL)
+        value = {ROCKE_PARAM_ATTR_BOOL, v->b, 0.0, NULL};
+    else if(v->kind == J_NUM)
+        value = {ROCKE_PARAM_ATTR_NUMBER, false, v->num, NULL};
+    else if(v->kind == J_STR)
+        value = {ROCKE_PARAM_ATTR_STRING, false, 0.0, v->str};
+    return value;
+}
+
+/* Read a param's attrs into *opts through rocke_param_opts_set_attr, the one
+ * reader both portable-IR importers share. */
+static bool
+    import_param_attrs(importer_t* im, const char* name, const jval_t* pa, rocke_param_opts_t* opts)
+{
+    memset(opts, 0, sizeof *opts);
+    if(!pa)
+        return true;
+    if(pa->kind != J_OBJ)
+    {
+        imp_fail(im, ROCKE_PARAM_ATTRS_NOT_OBJECT, name);
+        return false;
+    }
+    for(int k = 0; k < pa->obj_len; k++)
+    {
+        const rocke_param_attr_value_t value = import_param_attr_value(pa->obj[k].val);
+        char err[ROCKE_ERR_MSG_CAP];
+        if(const char* refusal
+           = rocke_param_opts_set_attr(opts, name, pa->obj[k].key, &value, err, sizeof err))
+        {
+            imp_fail(im, "%s", refusal);
+            return false;
+        }
+    }
+    return true;
+}
+
 static void import_params(importer_t* im, const jval_t* params)
 {
     if(!params)
@@ -1297,49 +1334,20 @@ static void import_params(importer_t* im, const jval_t* params)
             return;
         }
         rocke_param_opts_t opts;
-        memset(&opts, 0, sizeof opts);
-        const jval_t* pa = jobj_get(p, "attrs");
-        if(pa && pa->kind == J_OBJ)
+        if(!import_param_attrs(im, name, jobj_get(p, "attrs"), &opts))
+            return;
+        /* The builder raises (ckc::Error) a declaration it refuses, such as a
+         * fact it cannot state; report its text as the import's failure. */
+        rocke_value_t* pv = NULL;
+        try
         {
-            for(int k = 0; k < pa->obj_len; k++)
-            {
-                const char* key = pa->obj[k].key;
-                const jval_t* v = pa->obj[k].val;
-                if(strcmp(key, "noalias") == 0)
-                {
-                    opts.noalias = v->b;
-                    opts.noalias_set = true;
-                }
-                else if(strcmp(key, "readonly") == 0)
-                {
-                    opts.readonly = v->b;
-                    opts.readonly_set = true;
-                }
-                else if(strcmp(key, "writeonly") == 0)
-                {
-                    opts.writeonly = v->b;
-                    opts.writeonly_set = true;
-                }
-                else if(strcmp(key, "align") == 0)
-                {
-                    int64_t align;
-                    if(!import_int_value(im, "param align", v, &align) || align < INT_MIN
-                       || align > INT_MAX)
-                    {
-                        if(!im->failed)
-                            imp_fail(im, "param align is outside the int range");
-                        return;
-                    }
-                    opts.align = (int)align;
-                    opts.align_set = true;
-                }
-                else if(strcmp(key, "addr_space") == 0)
-                {
-                    opts.addr_space = v->str;
-                }
-            }
+            pv = rocke_b_param(im->b, name, type, &opts);
         }
-        rocke_value_t* pv = rocke_b_param(im->b, name, type, &opts);
+        catch(const ckc::Error& error)
+        {
+            imp_fail(im, "%s", error.what());
+            return;
+        }
         if(!pv)
         {
             imp_fail(im, "param '%s' build failed", name);

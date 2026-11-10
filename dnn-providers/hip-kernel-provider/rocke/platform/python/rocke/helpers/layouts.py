@@ -344,6 +344,47 @@ class ConvKOuterFragmentReader:
 
     wave_size: int
 
+    @staticmethod
+    def wave32_lane_offsets(
+        b: IRBuilder,
+        lane: Value,
+        *,
+        n: int,
+        mn_base: Optional[Value] = None,
+        k_base: Optional[Value] = None,
+    ) -> Tuple[Value, Value]:
+        """The wave32 ``ds_load_tr16_b128`` lane map: ``(col, row0)``.
+
+        ``col  = mn_base + ((lane % 16) // 8) * 8``
+        ``row0 = k_base  + (lane // 16) * n + lane % 8``
+
+        See :meth:`_BoundConvKOuterFragmentReader.fragment` for why the lane
+        supplies a K row rather than its own column. ``n`` is the per-lane
+        fragment length (16 for a WMMA 16x16x32 operand). Without ``mn_base``
+        / ``k_base`` the offsets come back relative to the tile origin, for
+        callers that address a flat LDS buffer (``row0 * pitch + col``)
+        instead of a ``[row][col]`` one. The fragment reader and the direct
+        wgrad builders call it. The wave32 dgrad WMMA builders
+        (``conv_direct_dgrad_wmma``, ``conv_dgrad_patch_wmma``,
+        ``conv_dgrad_smallc_wmma``) still compute the same map inline. Mirrors
+        ``rocke_conv_tr_lane_offsets32`` in the C++ engine.
+        """
+        c16 = b.const_i32(16)
+        c8 = b.const_i32(8)
+        lane_mod16 = b.mod(lane, c16)
+        col_grp = b.div(lane_mod16, c8)
+        col = b.mul(col_grp, c8)
+        if mn_base is not None:
+            col = b.add(mn_base, col)
+        lane_div16 = b.div(lane, c16)
+        c_n = b.const_i32(n)
+        row_mul = b.mul(lane_div16, c_n)
+        lane_mod8 = b.mod(lane, c8)
+        row0 = b.add(row_mul, lane_mod8)
+        if k_base is not None:
+            row0 = b.add(k_base, row0)
+        return col, row0
+
     def bind(self, b: IRBuilder, lane: Value) -> "_BoundConvKOuterFragmentReader":
         """Materialize the lane-derived constants once per kernel.
 
@@ -414,18 +455,9 @@ class _BoundConvKOuterFragmentReader:
         """
         lane = self.lane
         if self.wave_size == 32:
-            c16 = b.const_i32(16)
-            c8 = b.const_i32(8)
-            lane_mod16 = b.mod(lane, c16)
-            col_grp = b.div(lane_mod16, c8)
-            col_off = b.mul(col_grp, c8)
-            col = b.add(mn_base, col_off)
-            lane_div16 = b.div(lane, c16)
-            c_n = b.const_i32(n)
-            row_mul = b.mul(lane_div16, c_n)
-            lane_mod8 = b.mod(lane, c8)
-            row_sum = b.add(row_mul, lane_mod8)
-            row0 = b.add(k_base, row_sum)
+            col, row0 = ConvKOuterFragmentReader.wave32_lane_offsets(
+                b, lane, n=n, mn_base=mn_base, k_base=k_base
+            )
             parts = [
                 b.ds_read_tr16_b128(
                     smem, b.add(row0, b.const_i32(8 * r)), col, dtype=dtype

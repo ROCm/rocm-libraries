@@ -4,14 +4,14 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Unit tests for the rocisa backend guard in Tensile.TensileCreateLibrary.Run."""
+"""Unit tests for the rocisa backend guard in tensilelite.create_library.run."""
 import sys
 import types
 
 import pytest
 
 import rocisa
-from tensilelite.TensileCreateLibrary.Run import _assertCorrectBackendForKernel, _GFX1250
+from tensilelite.create_library.run import _assertCorrectBackendForKernel, _GFX1250
 
 pytestmark = pytest.mark.unit
 

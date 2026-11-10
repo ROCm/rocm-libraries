@@ -10,6 +10,7 @@ This document describes the environment variables and runtime configuration opti
   - [Kernel Ingestor Descriptors](#kernel-ingestor-descriptors)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Benchmarking](#benchmarking)
+  - [Ingestor Shortlist Limit](#ingestor-shortlist-limit)
   - [Engine Applicability Threading](#engine-applicability-threading)
   - [Caching](#caching)
   - [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)
@@ -294,6 +295,43 @@ export HIPDNN_FORCE_BENCHMARKING=0
 - The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
 - Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample, so each sample reads what the previous one wrote. The winner runs last, but the final contents are correct only when in-place execution is idempotent. `Graph::autotune()` also runs its winner last, after every timed pass, and waits for that run to finish, so on success the buffers you passed hold the winner's output, with the same in-place caveat.
+
+### Ingestor Shortlist Limit
+
+#### HIPDNN_INGESTOR_SHORTLIST_LIMIT
+
+A process-wide cap on how many of the best-ranked candidates the generic kernel ingestor
+(`GenericPlanBuilder`) builds a plan from. Only kernel-ingestor engines consult it; it has no
+effect on the MIOpen provider or any other engine kind. It is read fresh on every plan build
+and every prediction query -- there is no process-wide cache of the parsed value.
+
+| Value        | Description                                                |
+|--------------|------------------------------------------------------------|
+| (unset)      | No limit: every candidate left after knob and workspace filtering is eligible (default) |
+| `<n>`, n > 0 | Keep only the best-ranked `n` candidates of the filtered set |
+| `0`, a negative value, non-numeric text, or a value past `size_t` | Ignored; logged as a warning naming the variable and the value, treated as unset |
+
+**Example:**
+```bash
+export HIPDNN_INGESTOR_SHORTLIST_LIMIT=8
+```
+
+**Notes:**
+- Primarily a tuning/test knob: an engine with thousands of applicable kernels otherwise
+  loads and benchmarks every one of them on a cold plan build. It is not meant to be left set
+  in a normal deployment.
+- With benchmarking off, a build whose entire shortlist fails to prepare throws
+  `throwNoBuildableKernel` even when a lower-ranked kernel outside the limit would have built;
+  without a limit the same graph falls through to that lower-ranked candidate instead.
+- Setting any limit, even one larger than the knob-filtered candidate set, changes winner-cache
+  behavior: a benchmarked record that covers only that (possibly smaller) set is trusted and
+  serves the build, where without a limit the same record would be ignored as partial coverage
+  and the candidates re-benchmarked.
+- `predictConfiguration` (the `HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT` query path) applies
+  the same limit to the candidates it predicts over, so its answer names a configuration plan
+  build could actually shortlist.
+- A slotted engine's `slotCandidates` path ignores this limit entirely: every slot keeps its
+  full knob- and workspace-filtered catalog regardless of the value set here.
 
 ### Engine Applicability Threading
 

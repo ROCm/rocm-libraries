@@ -40,13 +40,13 @@
  *     A tile.smem_alloc result is named exactly per its recipe bind so the LDS
  *     global symbol (and thus the HSACO) matches the Python reference.
  *
- * <intexpr> := number | {"spec":NAME} | {"var":NAME} | {"spec_str_eq":[n,lit]}
- *            | {"<OP>":[e,e]}  for OP in add sub mul div mod eq ne lt le gt ge
+ * <intexpr> is the integer-expression tree of rocke/intexpr.h, evaluated by the
+ * one shared evaluator (rocke_intexpr_eval) with spec values and loop indices
+ * as its leaves.
  */
 #include "rocke/recipe_vm.h"
 
 #include <limits.h>
-#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,6 +55,9 @@
 #include "rocke/abi.h"
 #include "rocke/arena.h"
 #include "rocke/cbor_dom.h"
+#include "rocke/error.hpp"
+#include "rocke/intexpr.h"
+#include "rocke/ir_internal.h"
 #include "rocke/json_dom.h"
 #include "rocke/recipe_guard.h"
 #include "rocke/recipe_launch.h"
@@ -311,149 +314,55 @@ static void rv_ivar_push(rvm_t* vm, const char* name, long value)
 
 /* ----------------------------------------------------------- intexpr eval */
 
+/* A recipe number as a long: an exact integer (rocke_intexpr_exact_int) that
+ * also fits a long, which is 32 bits on Windows. */
 static bool rv_number_to_long(double n, long* out)
 {
-    /* Check before casting: larger adjacent integer spellings can round to the
-     * same double, while non-finite and out-of-range conversions are undefined.
-     * The upper long bound is exclusive so the first out-of-range power of two
-     * is rejected even where LONG_MAX rounds to it. */
-    if(!isfinite(n) || n < -9007199254740991.0 || n > 9007199254740991.0 || n < (double)LONG_MIN
-       || n >= (double)LONG_MAX + 1.0)
+    int64_t value = 0;
+    if(!rocke_intexpr_exact_int(n, &value) || value < LONG_MIN || value > LONG_MAX)
         return false;
-    long value = (long)n;
-    if(n != (double)value)
-        return false;
-    *out = value;
+    *out = (long)value;
     return true;
 }
 
-static bool rv_number_to_int64(double n, int64_t* out)
+/* Leaf lookup for the shared evaluator: spec ints and loop vars. A recipe has
+ * no kernel-parameter values, so a {"param": ...} leaf is unbound here. The
+ * VM's own integers stay `long`; they widen to int64_t on the way in. */
+static bool rv_lookup_int(void* ctx, rocke_intexpr_leaf_t kind, const char* name, int64_t* out)
 {
-    /* Recipe numbers use a double-backed DOM, so values outside the safe-integer
-     * range can silently change when adjacent spellings round to one double. */
-    if(!isfinite(n) || !(n >= -9007199254740991.0 && n <= 9007199254740991.0))
-        return false;
-    int64_t value = (int64_t)n;
-    if(n != (double)value)
-        return false;
-    *out = value;
-    return true;
+    rvm_t* vm = (rvm_t*)ctx;
+    long v = 0;
+    bool found = false;
+    if(kind == ROCKE_INTEXPR_SPEC)
+        found = rv_spec_int(vm, name, &v);
+    else if(kind == ROCKE_INTEXPR_VAR)
+        found = rv_ivar_get(vm, name, &v);
+    if(found)
+        *out = v;
+    return found;
 }
 
-static long rv_int(rvm_t* vm, const jd_val_t* e)
+static const char* rv_lookup_str(void* ctx, const char* name)
+{
+    return rv_spec_str((rvm_t*)ctx, name);
+}
+
+/* Evaluate an intexpr with the one shared evaluator (rocke/intexpr.h). An
+ * absent field reads as 0, as it always has; an evaluation failure makes the VM
+ * sticky-failed with the evaluator's message. */
+static int64_t rv_int(rvm_t* vm, const jd_val_t* e)
 {
     if(vm->failed || !e)
         return 0;
-    double n;
-    if(rocke_jnum(e, &n))
+    const rocke_intexpr_env_t env = {rv_lookup_int, rv_lookup_str, vm};
+    char err[ROCKE_ERR_MSG_CAP];
+    int64_t value = 0;
+    if(!rocke_intexpr_eval(e, &env, &value, err, sizeof err))
     {
-        long value;
-        if(!rv_number_to_long(n, &value))
-        {
-            rv_fail(vm, "intexpr number is not an integer");
-            return 0;
-        }
-        return value;
+        rv_fail(vm, "%s", err);
+        return 0;
     }
-    if(e->kind == JD_OBJ)
-    {
-        const jd_val_t* s = rocke_jget(e, "spec");
-        if(s)
-        {
-            long v = 0; /* left 0 on the failure path; the VM is sticky-failed */
-            if(!rv_spec_int(vm, rocke_jstr(s), &v))
-                rv_fail(vm, "unknown spec int '%s'", rocke_jstr(s) ? rocke_jstr(s) : "?");
-            return v;
-        }
-        const jd_val_t* var = rocke_jget(e, "var");
-        if(var)
-        {
-            long v = 0; /* left 0 on the failure path; the VM is sticky-failed */
-            if(!rv_ivar_get(vm, rocke_jstr(var), &v))
-                rv_fail(vm, "unknown loop var '%s'", rocke_jstr(var) ? rocke_jstr(var) : "?");
-            return v;
-        }
-        /* spec_str_eq: ["specname","literal"] -> 1 if the spec string matches. */
-        const jd_val_t* sse = rocke_jget(e, "spec_str_eq");
-        if(sse && sse->kind == JD_ARR && sse->arr_len == 2)
-        {
-            const char* sv = rv_spec_str(vm, rocke_jstr(sse->arr[0]));
-            const char* lit = rocke_jstr(sse->arr[1]);
-            return (sv && lit && strcmp(sv, lit) == 0) ? 1 : 0;
-        }
-        /* Unary functions of ONE operand: {"<fn>": e} (no array wrapper).
-           These regenerate constants that a code generator derived from a spec
-           value rather than values the kernel computed from it: the operands of
-           a strength-reduced unsigned division, emitted as
-           (umul_hi(n, M) + n) >> s. The shift is logarithmic in the divisor and
-           the multiplier depends on its odd part, so neither is expressible as
-           arithmetic on the axis -- the recipe has to regenerate them.
-           Mirrors recipe_expand.py::magic_division_constants, and upstream of
-           both, helpers/magic_division.py::calculate_magic_numbers. */
-        const jd_val_t* mm = rocke_jget(e, "magic_multiplier");
-        const jd_val_t* ms = rocke_jget(e, "magic_shift");
-        if(mm || ms)
-        {
-            long d = rv_int(vm, mm ? mm : ms);
-            if(d < 1 || d > 0x7fffffffL)
-            {
-                rv_fail(vm, "magic division needs 1 <= divisor < 2^31, got %ld", d);
-                return 0;
-            }
-            int shift = 0;
-            while((1LL << shift) < (long long)d)
-                shift++;
-            if(ms)
-                return shift;
-            long long mult = ((((1LL << shift) - (long long)d) << 32) / (long long)d) + 1;
-            if(mult >= (1LL << 31))
-                mult -= (1LL << 32);
-            return (long)mult;
-        }
-        /* Binary arithmetic + comparisons: {"<op>":[e,e]}. */
-        static const char* ops[]
-            = {"add", "sub", "mul", "div", "mod", "eq", "ne", "lt", "le", "gt", "ge"};
-        for(int k = 0; k < (int)(sizeof ops / sizeof ops[0]); k++)
-        {
-            const jd_val_t* bin = rocke_jget(e, ops[k]);
-            if(!bin)
-                continue;
-            if(bin->kind != JD_ARR || bin->arr_len != 2)
-            {
-                rv_fail(vm, "bad intexpr '%s'", ops[k]);
-                return 0;
-            }
-            long a = rv_int(vm, bin->arr[0]);
-            long b = rv_int(vm, bin->arr[1]);
-            switch(k)
-            {
-            case 0:
-                return a + b;
-            case 1:
-                return a - b;
-            case 2:
-                return a * b;
-            case 3:
-                return b ? a / b : 0;
-            case 4:
-                return b ? a % b : 0;
-            case 5:
-                return a == b;
-            case 6:
-                return a != b;
-            case 7:
-                return a < b;
-            case 8:
-                return a <= b;
-            case 9:
-                return a > b;
-            case 10:
-                return a >= b;
-            }
-        }
-    }
-    rv_fail(vm, "bad intexpr");
-    return 0;
+    return value;
 }
 
 /* ------------------------------------------------------------- wire ABI gate */
@@ -512,17 +421,15 @@ static bool rv_abi_ok(const jd_val_t* node, char* err, size_t err_cap)
  *
  * It reuses rv_int above rather than carrying its own evaluator. That is the
  * point of expressing guards in the recipe language at all: no second grammar to
- * implement, and the CI gate that already pins rv_int against
- * recipe_expand.eval_intexpr covers guards without being extended.
+ * implement, and the CI gate that pins rocke_intexpr_eval against
+ * rocke.core.intexpr.eval_intexpr covers guards without being extended.
  *
  * Rule ORDER is part of the contract, not presentation, and so is stopping at
- * the first failure. This evaluator and the Python one disagree about `mod` and
- * `div` with a negative left operand (Python floors, C truncates), which has
- * never mattered because spec values are sizes -- and a guard is the first thing
- * to be handed a hostile one. Guards stay clear of it two ways: they only ever
- * test whether a remainder is ZERO, which is the same question in either
- * convention, and the generator puts a bounds rule ahead of the divisibility
- * rule on an axis so a negative is rejected before the `mod` is reached. Do not
+ * the first failure. Both evaluators refuse a `mod` or `div` with a negative
+ * operand (Python floors, C truncates), so a rule that reaches one refuses the
+ * binding as "did not evaluate" in both engines. The generator puts a bounds
+ * rule ahead of the divisibility rule on an axis, so a negative is refused by
+ * the bounds rule, with its own reason, before the `mod` is reached. Do not
  * reorder rules, and do not evaluate them all to collect every reason. */
 
 /* Bound by the caller, as either an int or a string? */
@@ -607,7 +514,7 @@ static rocke_guard_verdict_t
             const jd_val_t* pred = rocke_jget(rule, "pred");
             const char* why = rocke_jstr(rocke_jget(rule, "reason"));
             bool saved = vm->failed;
-            long ok = rv_int(vm, pred);
+            int64_t ok = rv_int(vm, pred);
             if(vm->failed && !saved)
             {
                 /* A rule that could not be evaluated decides nothing, so it
@@ -933,7 +840,7 @@ static void rv_kernel_int_list(rvm_t* vm, rocke_attr_map_t* m, const char* key, 
             rv_fail(vm, "kernel attr '%s': item %d is not a bare int", key, i);
             return;
         }
-        if(!rv_number_to_int64(d, &ints[i]))
+        if(!rocke_intexpr_exact_int(d, &ints[i]))
         {
             rv_fail(vm, "kernel attr '%s': item %d is not an integer", key, i);
             return;
@@ -950,6 +857,46 @@ static const char* rv_bind_name(rvm_t* vm, const jd_val_t* instr, const char* fa
 {
     const char* b = rocke_jstr(rocke_jget(instr, "bind"));
     return b ? rv_resolve_name(vm, b) : fallback;
+}
+
+/* A param attr value, as rocke_param_opts_set_attr reads it. */
+static rocke_param_attr_value_t rv_param_attr_value(const jd_val_t* v)
+{
+    rocke_param_attr_value_t value = {ROCKE_PARAM_ATTR_OTHER, false, 0.0, NULL};
+    if(v->kind == JD_BOOL)
+        value = {ROCKE_PARAM_ATTR_BOOL, v->b, 0.0, NULL};
+    else if(v->kind == JD_NUM)
+        value = {ROCKE_PARAM_ATTR_NUMBER, false, v->num, NULL};
+    else if(v->kind == JD_STR)
+        value = {ROCKE_PARAM_ATTR_STRING, false, 0.0, v->str};
+    return value;
+}
+
+/* Read a param instr's attrs into *opts through rocke_param_opts_set_attr, the
+ * one reader both portable-IR importers share. */
+static bool
+    rv_param_attrs(rvm_t* vm, const char* name, const jd_val_t* pa, rocke_param_opts_t* opts)
+{
+    memset(opts, 0, sizeof *opts);
+    if(!pa)
+        return true;
+    if(pa->kind != JD_OBJ)
+    {
+        rv_fail(vm, ROCKE_PARAM_ATTRS_NOT_OBJECT, name);
+        return false;
+    }
+    for(int k = 0; k < pa->obj_len; k++)
+    {
+        const rocke_param_attr_value_t value = rv_param_attr_value(pa->obj[k].val);
+        char err[ROCKE_ERR_MSG_CAP];
+        if(const char* refusal
+           = rocke_param_opts_set_attr(opts, name, pa->obj[k].key, &value, err, sizeof err))
+        {
+            rv_fail(vm, "%s", refusal);
+            return false;
+        }
+    }
+    return true;
 }
 
 static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
@@ -973,48 +920,20 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             return;
         }
         rocke_param_opts_t opts;
-        memset(&opts, 0, sizeof opts);
-        const jd_val_t* pa = rocke_jget(instr, "attrs");
-        if(pa && pa->kind == JD_OBJ)
+        if(!rv_param_attrs(vm, name, rocke_jget(instr, "attrs"), &opts))
+            return;
+        /* The builder raises (ckc::Error) a declaration it refuses, such as a
+         * fact it cannot state; report its text as the replay's failure. */
+        rocke_value_t* pv = NULL;
+        try
         {
-            for(int k = 0; k < pa->obj_len; k++)
-            {
-                const char* key = pa->obj[k].key;
-                const jd_val_t* v = pa->obj[k].val;
-                double d;
-                if(strcmp(key, "noalias") == 0)
-                {
-                    opts.noalias = v->b;
-                    opts.noalias_set = true;
-                }
-                else if(strcmp(key, "readonly") == 0)
-                {
-                    opts.readonly = v->b;
-                    opts.readonly_set = true;
-                }
-                else if(strcmp(key, "writeonly") == 0)
-                {
-                    opts.writeonly = v->b;
-                    opts.writeonly_set = true;
-                }
-                else if(strcmp(key, "align") == 0 && rocke_jnum(v, &d))
-                {
-                    long align;
-                    if(!rv_number_to_long(d, &align) || align < INT_MIN || align > INT_MAX)
-                        rv_fail(vm, "param '%s' align is not an integer", name);
-                    else
-                    {
-                        opts.align = (int)align;
-                        opts.align_set = true;
-                    }
-                }
-                else if(strcmp(key, "addr_space") == 0)
-                {
-                    opts.addr_space = v->str;
-                }
-            }
+            pv = rocke_b_param(vm->b, name, type, &opts);
         }
-        rocke_value_t* pv = rocke_b_param(vm->b, name, type, &opts);
+        catch(const ckc::Error& error)
+        {
+            rv_fail(vm, "%s", error.what());
+            return;
+        }
         if(!pv)
         {
             rv_fail(vm, "param '%s' failed", name);
@@ -1093,7 +1012,7 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
     if(strcmp(op, "static_if") == 0)
     {
         /* Compile-time branch on a spec predicate (truthy intexpr). */
-        long pred = rv_int(vm, rocke_jget(instr, "pred"));
+        int64_t pred = rv_int(vm, rocke_jget(instr, "pred"));
         if(vm->failed)
             return;
         const jd_val_t* arm = rocke_jget(instr, pred ? "then" : "else");
@@ -1504,7 +1423,7 @@ static rocke_status_t rv_run_root(jd_val_t* root,
             else if(t && v && strcmp(t, "i") == 0 && rocke_jnum(v, &d))
             {
                 int64_t value;
-                if(!rv_number_to_int64(d, &value))
+                if(!rocke_intexpr_exact_int(d, &value))
                     rv_fail(&vm, "kernel attr '%s' value is not an integer", key);
                 else
                     rocke_attr_set_int(out_builder, &k->attrs, key, value);
@@ -1943,6 +1862,75 @@ static bool rv_plan_cluster(const rocke_kernel_def_t* kernel,
     return true;
 }
 
+/* The kernel's exact workgroup_size attr, read off the built kernel. The kernel
+ * is compiled for exactly that many threads, so the recipe's block must be
+ * (size, 1, 1): a smaller block runs it with threads missing and a larger one
+ * fails at launch. Without a block the caller picks one the plan cannot check,
+ * so such a recipe is refused. (Mirrored, with the same messages, by
+ * _check_workgroup_size in portable_ir/src/launch.py.) */
+static bool rv_plan_workgroup_size(const rocke_kernel_def_t* kernel,
+                                   const rocke_launch_plan_t* plan,
+                                   char* err,
+                                   size_t cap)
+{
+    const rocke_attr_value_t* v = kernel ? rocke_attr_get(&kernel->attrs, "workgroup_size") : NULL;
+    if(!v)
+        return true;
+    if(v->kind != ROCKE_ATTR_INT)
+    {
+        if(err && cap)
+            ROCKE_ERR_SNPRINTF(err, cap, "%s: workgroup_size must be one integer", kernel->name);
+        return false;
+    }
+    const long long size = (long long)v->u.i;
+    if(!plan->has_geometry)
+    {
+        if(err && cap)
+            ROCKE_ERR_SNPRINTF(err,
+                               cap,
+                               "%s: the kernel states workgroup_size %lld but the recipe "
+                               "carries no launch block to check it against -- record the "
+                               "launch geometry, or " ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT,
+                               kernel->name,
+                               size);
+        return false;
+    }
+    if((long long)plan->block.x != size || plan->block.y != 1 || plan->block.z != 1)
+    {
+        if(err && cap)
+            ROCKE_ERR_SNPRINTF(err,
+                               cap,
+                               "%s: recipe block (%u, %u, %u) differs from the kernel's "
+                               "workgroup_size %lld -- the block must be (%lld, 1, 1)",
+                               kernel->name,
+                               plan->block.x,
+                               plan->block.y,
+                               plan->block.z,
+                               size,
+                               size);
+        return false;
+    }
+    return true;
+}
+
+/* A kernel with a gpu_checked_value: a lane whose fact is false stores to the
+ * kernel's GPU-check word and returns, and a caller launching from a plan never
+ * reads that word, so the launch would succeed with every output undefined.
+ * Such a recipe is refused. (Mirrored, with the same message, by
+ * _refuse_gpu_checks in portable_ir/src/launch.py.) */
+static bool rv_plan_gpu_checks(const rocke_kernel_def_t* kernel, char* err, size_t cap)
+{
+    if(!rocke_i_kernel_checks_on_gpu(kernel))
+        return true;
+    if(err && cap)
+        ROCKE_ERR_SNPRINTF(err,
+                           cap,
+                           "%s: " ROCKE_GPU_CHECK_UNREAD_REASON
+                           " -- " ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT,
+                           kernel->name);
+    return false;
+}
+
 static rocke_status_t rv_plan_on(jd_val_t* root,
                                  const rocke_recipe_spec_int_t* ints,
                                  int n_ints,
@@ -1965,6 +1953,31 @@ static rocke_status_t rv_plan_on(jd_val_t* root,
     rocke_status_t st = rv_run_root(root, ints, n_ints, strs, n_strs, &b, &kernel, err, err_cap);
     if(st != ROCKE_OK)
         return st;
+
+    /* The caller copies argument values into the kernarg itself, so the plan
+     * never sees them and cannot check the facts a parameter states. Refuse
+     * such a recipe rather than describe a launch the GPU would trust
+     * unchecked. (Mirrored, with the same message, by launch.plan in
+     * portable_ir/src/launch.py.) */
+    for(int i = 0; kernel && i < kernel->num_params; i++)
+    {
+        if(rocke_param_states_facts(kernel->params[i]))
+        {
+            if(err && err_cap)
+                ROCKE_ERR_SNPRINTF(err,
+                                   err_cap,
+                                   "%s: " ROCKE_PARAM_FACTS_UNCHECKED_REASON
+                                   " -- " ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT,
+                                   kernel->name);
+            rocke_ir_builder_free(&b);
+            return ROCKE_ERR_VALUE;
+        }
+    }
+    if(!rv_plan_gpu_checks(kernel, err, err_cap))
+    {
+        rocke_ir_builder_free(&b);
+        return ROCKE_ERR_VALUE;
+    }
 
     rocke_launch_plan_t* plan = (rocke_launch_plan_t*)calloc(1, sizeof *plan);
     if(!plan)
@@ -2034,7 +2047,8 @@ static rocke_status_t rv_plan_on(jd_val_t* root,
     vm.strs = strs;
     vm.n_strs = n_strs;
     if(!rv_plan_geometry(&vm, root, plan, err, err_cap)
-       || !rv_plan_cluster(kernel, plan, err, err_cap))
+       || !rv_plan_cluster(kernel, plan, err, err_cap)
+       || !rv_plan_workgroup_size(kernel, plan, err, err_cap))
     {
         rocke_ir_builder_free(&b);
         rocke_launch_plan_free(plan);

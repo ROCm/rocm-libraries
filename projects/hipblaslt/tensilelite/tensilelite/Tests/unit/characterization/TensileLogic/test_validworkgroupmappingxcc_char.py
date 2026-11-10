@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``TensileLogic.ValidWorkGroupMappingXCC``.
+"""Characterization tests for ``tensilelite.logic.valid_work_group_mapping_xcc``.
 
 ``_validateWorkGroupMappingXCC`` checks that ``WorkGroupMappingXCC`` for a
 solution under a ``*_<N>cu`` directory is ``-1`` or a power-of-two dividing the
@@ -42,8 +42,8 @@ from pathlib import Path
 
 import pytest
 
-import tensilelite.TensileLogic.ValidWorkGroupMappingXCC as xcc_mod
-from tensilelite.TensileLogic.ValidWorkGroupMappingXCC import (
+import tensilelite.logic.valid_work_group_mapping_xcc as xcc_mod
+from tensilelite.logic.valid_work_group_mapping_xcc import (
     _cu_count_from_path,
     _validateWorkGroupMappingXCC,
     reset_reported_failures,

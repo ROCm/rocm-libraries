@@ -29,12 +29,17 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from rocke.core.ir import check_cluster_dims
-from rocke.portable_ir.utils.recipe_expand import (
-    ExpandError,
-    eval_intexpr,
-    expand_recipe,
+from rocke.core.intexpr import eval_intexpr
+from rocke.core.ir import (
+    GPU_CHECK_FAILED_OP,
+    GPU_CHECK_UNREAD_REASON,
+    LAUNCH_THROUGH_FROM_ARTIFACT,
+    PARAM_FACTS_UNCHECKED_REASON,
+    check_cluster_dims,
 )
+from rocke.core.param_facts import FACT_WORDS
+from rocke.portable_ir.src.abi import walk_instrs
+from rocke.portable_ir.utils.recipe_expand import ExpandError, expand_recipe
 
 # Kernarg representations, mirroring rv_arg_classify in recipe_vm.cpp:
 # (kind, size in bytes). Alignment equals size -- the AMDGPU natural-alignment
@@ -247,12 +252,19 @@ def signature(
     runtime/packing.py and rv_plan_on. Packing fields back to back is correct
     only until a signature mixes widths -- (ptr, i32, ptr) puts its last pointer
     at 16, not 12 -- and then it is wrong for everything after the mix."""
-    flat = expand_recipe(recipe, {**spec_int, **(spec_str or {})})
+    return _signature(expand_recipe(recipe, {**spec_int, **(spec_str or {})}))
+
+
+def _param_instrs(flat: dict[str, Any]) -> list[dict[str, Any]]:
+    """The ``param`` instructions of an expanded recipe, in declaration order."""
+    return [instr for instr in flat["program"] if instr.get("op") == "param"]
+
+
+def _signature(flat: dict[str, Any]) -> list[dict[str, Any]]:
+    """``signature`` of an already expanded recipe."""
     args: List[Dict[str, Any]] = []
     off = 0
-    for instr in flat["program"]:
-        if instr.get("op") != "param":
-            continue
+    for instr in _param_instrs(flat):
         kind, size = _classify(instr["type"])
         off = -(-off // size) * size
         args.append(
@@ -290,16 +302,84 @@ def plan(
     mirror of rocke_launch_plan_t, and the oracle the C plan is tested against.
 
     ``cluster`` is None for a kernel without ``cluster_dims``; otherwise launch
-    with hipDrvLaunchKernelEx and a cluster-dimension attribute of that shape."""
+    with hipDrvLaunchKernelEx and a cluster-dimension attribute of that shape.
+
+    Refuses a recipe whose parameters state facts (``ge``, ``le``,
+    ``multiple_of``, ...): the caller packs the arguments itself, so a plan
+    cannot check them, and the GPU would trust them unchecked. Pointer
+    attributes such as ``align`` are not facts and plan as before.
+
+    Refuses a recipe whose kernel checks ``gpu_checked_value`` facts: a lane
+    whose fact is false stores to the kernel's GPU-check word and returns, and
+    the caller of a plan never reads that word, so the launch would succeed with
+    every output undefined.
+
+    For a kernel that states an exact ``workgroup_size`` N, the recipe's block
+    must be (N, 1, 1), and a recipe without a block is refused: the kernel is
+    compiled for exactly N threads, so a smaller block runs it with threads
+    missing and a larger one fails at launch."""
     spec_str = spec_str or {}
-    args = signature(recipe, spec_int, spec_str)
+    kernel_name = format_kernel_name(
+        recipe.get("kernel_name_fmt", ""), spec_int, spec_str
+    )
+    flat = expand_recipe(recipe, {**spec_int, **spec_str})
+    _refuse_stated_facts(flat, kernel_name)
+    _refuse_gpu_checks(flat, kernel_name)
+    args = _signature(flat)
     geometry = eval_launch(recipe, spec_int, spec_str)
+    cluster = eval_cluster(recipe, geometry)
+    _check_workgroup_size(recipe, geometry, kernel_name)
     return {
-        "kernel_name": format_kernel_name(
-            recipe.get("kernel_name_fmt", ""), spec_int, spec_str
-        ),
+        "kernel_name": kernel_name,
         "args": args,
         "kernarg_size": kernarg_size(args),
         "geometry": geometry,
-        "cluster": eval_cluster(recipe, geometry),
+        "cluster": cluster,
     }
+
+
+def _check_workgroup_size(
+    recipe: dict[str, Any], geometry: dict[str, Any] | None, kernel_name: str
+) -> None:
+    """Mirrors rv_plan_workgroup_size in recipe_vm.cpp, with its messages."""
+    tv = (recipe.get("attrs") or {}).get("workgroup_size")
+    if tv is None:
+        return
+    if not isinstance(tv, dict) or tv.get("t") != "i":
+        raise ExpandError(f"{kernel_name}: workgroup_size must be one integer")
+    size = int(tv["v"])
+    if geometry is None:
+        raise ExpandError(
+            f"{kernel_name}: the kernel states workgroup_size {size} but the "
+            "recipe carries no launch block to check it against -- record the "
+            f"launch geometry, or {LAUNCH_THROUGH_FROM_ARTIFACT}"
+        )
+    block = tuple(geometry["block"])
+    if block != (size, 1, 1):
+        raise ExpandError(
+            f"{kernel_name}: recipe block ({block[0]}, {block[1]}, {block[2]}) "
+            f"differs from the kernel's workgroup_size {size} -- the block must "
+            f"be ({size}, 1, 1)"
+        )
+
+
+def _refuse_stated_facts(flat: dict[str, Any], kernel_name: str) -> None:
+    """Mirrors the refusal in rv_plan_on (recipe_vm.cpp), with its message."""
+    for instr in _param_instrs(flat):
+        if any(word in (instr.get("attrs") or {}) for word in FACT_WORDS):
+            raise ExpandError(
+                f"{kernel_name}: {PARAM_FACTS_UNCHECKED_REASON} -- "
+                f"{LAUNCH_THROUGH_FROM_ARTIFACT}"
+            )
+
+
+def _refuse_gpu_checks(flat: dict[str, Any], kernel_name: str) -> None:
+    """Mirrors rv_plan_gpu_checks in recipe_vm.cpp, with its message: the
+    recipe form of ``kernel_checks_on_gpu``, which looks for the same op."""
+    if any(
+        instr.get("op") == "emit" and instr.get("opcode") == GPU_CHECK_FAILED_OP
+        for instr in walk_instrs(flat["program"])
+    ):
+        raise ExpandError(
+            f"{kernel_name}: {GPU_CHECK_UNREAD_REASON} -- {LAUNCH_THROUGH_FROM_ARTIFACT}"
+        )

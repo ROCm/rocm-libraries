@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1612,6 +1612,7 @@ namespace rocalution
         copy_h2h(end - start, values, this->vec_ + start);
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     void HostVector<ValueType>::RSPMISUpdateCFmap(const BaseVector<int>& index,
                                                   BaseVector<ValueType>* values)
@@ -1642,6 +1643,7 @@ namespace rocalution
             }
         }
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     // LCOV_EXCL_START
     template <typename ValueType>

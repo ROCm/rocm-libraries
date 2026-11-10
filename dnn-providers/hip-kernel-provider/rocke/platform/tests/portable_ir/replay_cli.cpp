@@ -22,6 +22,14 @@
  *   replay_cli --recipe  <recipe.json>               [common opts] [spec opts]
  *   replay_cli --recipe  <recipe.cbor> --cbor        [common opts] [spec opts]
  *   replay_cli --bundle  <bundle.cbor> --key KEY     [common opts] [spec opts]
+ *   replay_cli (--recipe <recipe.cbor> --cbor | --bundle ...) --plan [spec opts]
+ *
+ * --plan prints the launch plan (rocke_recipe_plan_launch_cbor or
+ * rocke_bundle_plan_launch_cbor) as one JSON object, in the shape of
+ * python/rocke/portable_ir/src/launch.py::plan with each argument's kind as its
+ * rocke_arg_kind_t value, instead of lowering; a refused
+ * plan is a failure with the engine's message. It is how a test with no
+ * shared engine pins the C++ plan to the Python one.
  *
  *   common opts: --arch GFX (default gfx950), --flavor llvm20|llvm22|llvm23|llvm24
  *   spec opts  : --int NAME=VALUE, --str NAME=VALUE  (repeatable)
@@ -39,6 +47,7 @@
 #include "rocke/ir.h"
 #include "rocke/ir_import.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/recipe_launch.h"
 #include "rocke/recipe_vm.h"
 #include "rocke/rocke_build_id.h"
 
@@ -57,7 +66,7 @@ void usage(const char* argv0)
 {
     std::fprintf(stderr,
                  "usage: %s (--ir FILE | --recipe FILE [--cbor] | --bundle FILE --key KEY)\n"
-                 "          [--arch GFX] [--flavor llvm20|llvm22|llvm23|llvm24]\n"
+                 "          [--arch GFX] [--flavor llvm20|llvm22|llvm23|llvm24] [--plan]\n"
                  "          [--int NAME=VALUE]... [--str NAME=VALUE]...\n"
                  "       %s --provenance\n",
                  argv0,
@@ -95,6 +104,70 @@ bool split_kv(const char* arg, std::string* key, std::string* val)
     return true;
 }
 
+// Write `text` as a JSON string.
+void print_json_string(const char* text)
+{
+    std::fputc('"', stdout);
+    for(const char* c = text ? text : ""; *c; ++c)
+    {
+        if(*c == '"' || *c == '\\')
+            std::fprintf(stdout, "\\%c", *c);
+        else if(static_cast<unsigned char>(*c) < 0x20)
+            std::fprintf(stdout, "\\u%04x", static_cast<unsigned>(*c));
+        else
+            std::fputc(*c, stdout);
+    }
+    std::fputc('"', stdout);
+}
+
+void print_dims(const rocke_launch_dims_t& dims)
+{
+    std::printf("[%u, %u, %u]", dims.x, dims.y, dims.z);
+}
+
+// The plan as JSON, with the keys and nulls of launch.py::plan. An argument's
+// kind is its rocke_arg_kind_t value; online.ARG_KINDS names it, as it does for
+// the in-process reader.
+void print_plan(const rocke_launch_plan_t* plan)
+{
+    std::printf("{\"kernel_name\": ");
+    print_json_string(rocke_launch_plan_kernel_name(plan));
+    std::printf(", \"args\": [");
+    for(int i = 0; i < rocke_launch_plan_num_args(plan); ++i)
+    {
+        const rocke_arg_desc_t* arg = rocke_launch_plan_arg(plan, i);
+        std::printf("%s{\"name\": ", i ? ", " : "");
+        print_json_string(arg->name);
+        std::printf(", \"type\": ");
+        print_json_string(arg->type_name);
+        std::printf(", \"kind\": %d, \"size\": %u, \"offset\": %u}",
+                    (int)arg->kind,
+                    arg->size,
+                    arg->offset);
+    }
+    std::printf("], \"kernarg_size\": %u, \"geometry\": ", rocke_launch_plan_kernarg_size(plan));
+    rocke_launch_dims_t grid, block, cluster;
+    unsigned lds_bytes = 0;
+    if(rocke_launch_plan_geometry(plan, &grid, &block, &lds_bytes))
+    {
+        std::printf("{\"grid\": ");
+        print_dims(grid);
+        std::printf(", \"block\": ");
+        print_dims(block);
+        std::printf(", \"lds_bytes\": %u}", lds_bytes);
+    }
+    else
+    {
+        std::printf("null");
+    }
+    std::printf(", \"cluster\": ");
+    if(rocke_launch_plan_cluster(plan, &cluster))
+        print_dims(cluster);
+    else
+        std::printf("null");
+    std::printf("}\n");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -106,6 +179,7 @@ int main(int argc, char** argv)
     const char* flavor_name = nullptr;
     bool cbor = false;
     bool print_provenance = false;
+    bool plan_only = false;
 
     // The spec name/value strings must outlive the spec arrays handed to the VM,
     // so they are owned here and only pointed at below.
@@ -151,6 +225,10 @@ int main(int argc, char** argv)
         else if(std::strcmp(a, "--cbor") == 0)
         {
             cbor = true;
+        }
+        else if(std::strcmp(a, "--plan") == 0)
+        {
+            plan_only = true;
         }
         else if((std::strcmp(a, "--int") == 0 || std::strcmp(a, "--str") == 0) && has_next)
         {
@@ -200,6 +278,11 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "replay_cli: --bundle requires --key\n");
         return 2;
     }
+    if(plan_only && (mode == Mode::Ir || !cbor))
+    {
+        std::fprintf(stderr, "replay_cli: --plan reads a CBOR recipe or bundle\n");
+        return 2;
+    }
 
     rocke_llvm_flavor_t flavor = ROCKE_LLVM_FLAVOR_AUTO;
     if(flavor_name)
@@ -240,11 +323,49 @@ int main(int argc, char** argv)
     const int n_ints = static_cast<int>(ints.size());
     const int n_strs = static_cast<int>(strs.size());
 
-    rocke_ir_builder_t b;
-    rocke_kernel_def_t* kernel = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = ROCKE_OK;
+
+    if(plan_only)
+    {
+        rocke_launch_plan_t* plan = nullptr;
+        st = mode == Mode::Bundle ? rocke_bundle_plan_launch_cbor(data,
+                                                                  blob.size(),
+                                                                  key,
+                                                                  arch,
+                                                                  ints.data(),
+                                                                  n_ints,
+                                                                  strs.data(),
+                                                                  n_strs,
+                                                                  &plan,
+                                                                  err,
+                                                                  sizeof(err))
+                                  : rocke_recipe_plan_launch_cbor(data,
+                                                                  blob.size(),
+                                                                  ints.data(),
+                                                                  n_ints,
+                                                                  strs.data(),
+                                                                  n_strs,
+                                                                  &plan,
+                                                                  err,
+                                                                  sizeof(err));
+        if(st != ROCKE_OK || !plan)
+        {
+            std::fprintf(stderr,
+                         "replay_cli: launch plan of '%s' failed (status %d): %s\n",
+                         path,
+                         (int)st,
+                         err[0] ? err : "unknown error");
+            return 1;
+        }
+        print_plan(plan);
+        rocke_launch_plan_free(plan);
+        return 0;
+    }
+
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = nullptr;
 
     switch(mode)
     {

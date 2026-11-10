@@ -305,6 +305,47 @@ inline std::optional<std::vector<unsigned char>> unifiedAttentionWorkspaceImage(
     return image;
 }
 
+/// Where the three f32 split-KV segment scratch sections sit, in bytes.
+struct UnifiedAttentionSegmentScratchLayout
+{
+    std::size_t segmOutputOffset = 0;
+    std::size_t segmOutputBytes = 0;
+    std::size_t segmMaxOffset = 0;
+    std::size_t segmMaxBytes = 0;
+    std::size_t segmExpsumOffset = 0;
+    std::size_t segmExpsumBytes = 0;
+    /// The 256-byte boundary after `segm_expsum`: where the next section, or the end, goes.
+    std::size_t endOffset = 0;
+};
+
+/**
+ * @brief The split-KV segment scratch every unified 3D (segment + reduce) pack lays out,
+ *        starting at @p base.
+ *
+ * Restates `kernels/common/attention_unified.py::_attention_3d_workspace_specs`:
+ *
+ *     segm_output  f32 [total_q, Hq, num_segments, D]
+ *     segm_max     f32 [total_q, Hq, num_segments]
+ *     segm_expsum  f32 [total_q, Hq, num_segments]
+ *
+ * with @p rows = `total_q * Hq * num_segments`. Each section starts on a 256-byte boundary,
+ * so @p base must be one. The caller validates the dimensions (positive, and `rows * D`
+ * representable); this only places the sections.
+ */
+inline UnifiedAttentionSegmentScratchLayout
+    unifiedAttentionSegmentScratchLayout(std::size_t base, std::size_t rows, std::size_t headSize)
+{
+    UnifiedAttentionSegmentScratchLayout s;
+    s.segmOutputOffset = base;
+    s.segmOutputBytes = rows * headSize * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
+    s.segmMaxOffset = s.segmOutputOffset + detail::alignWorkspaceSection(s.segmOutputBytes);
+    s.segmMaxBytes = rows * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
+    s.segmExpsumOffset = s.segmMaxOffset + detail::alignWorkspaceSection(s.segmMaxBytes);
+    s.segmExpsumBytes = s.segmMaxBytes;
+    s.endOffset = s.segmExpsumOffset + detail::alignWorkspaceSection(s.segmExpsumBytes);
+    return s;
+}
+
 /// Where each workspace section sits, in bytes: the identity paged-KV metadata (exactly
 /// the 2D layout), then the three split-KV segment scratch arrays.
 struct UnifiedAttention3DWorkspaceLayout
@@ -374,19 +415,17 @@ inline std::optional<UnifiedAttention3DWorkspaceLayout>
         return std::nullopt;
     }
 
+    const auto scratch = unifiedAttentionSegmentScratchLayout(
+        identity->totalBytes, static_cast<std::size_t>(rows), static_cast<std::size_t>(headSize));
     UnifiedAttention3DWorkspaceLayout layout;
     layout.identity = *identity;
-    layout.segmOutputOffset = identity->totalBytes;
-    layout.segmOutputBytes
-        = static_cast<std::size_t>(outputElements) * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
-    layout.segmMaxOffset
-        = layout.segmOutputOffset + detail::alignWorkspaceSection(layout.segmOutputBytes);
-    layout.segmMaxBytes = static_cast<std::size_t>(rows) * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
-    layout.segmExpsumOffset
-        = layout.segmMaxOffset + detail::alignWorkspaceSection(layout.segmMaxBytes);
-    layout.segmExpsumBytes = layout.segmMaxBytes;
-    layout.totalBytes
-        = layout.segmExpsumOffset + detail::alignWorkspaceSection(layout.segmExpsumBytes);
+    layout.segmOutputOffset = scratch.segmOutputOffset;
+    layout.segmOutputBytes = scratch.segmOutputBytes;
+    layout.segmMaxOffset = scratch.segmMaxOffset;
+    layout.segmMaxBytes = scratch.segmMaxBytes;
+    layout.segmExpsumOffset = scratch.segmExpsumOffset;
+    layout.segmExpsumBytes = scratch.segmExpsumBytes;
+    layout.totalBytes = scratch.endOffset;
     return layout;
 }
 
