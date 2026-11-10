@@ -205,7 +205,6 @@ constexpr std::string_view BWD_GRAPH_MATCHER_SYMBOL = "hipkernel.conv_group_bwd.
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.conv_group.kernel_match";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_group.dispatch";
 
-constexpr std::string_view CONV_ENTRY_POINT = "ConvGroup";
 constexpr std::string_view EXPAND_ENTRY_POINT = "ConvGroupExpand";
 constexpr std::string_view COPY_ENTRY_POINT = "ConvGroupCopy";
 constexpr std::string_view TRANSPOSE_ENTRY_POINT = "ConvGroupTranspose";
