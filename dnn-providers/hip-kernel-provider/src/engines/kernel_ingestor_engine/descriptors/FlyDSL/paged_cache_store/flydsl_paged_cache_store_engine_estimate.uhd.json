@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "b57135a6-d264-5fe4-8dcc-cca52347f158",
+  "name": "flydsl paged_cache_store engine estimate",
+  "provenance": "Default slot for the engine estimate: a trained model installed under heuristics/ for an arch takes precedence there. No scorer is registered under this symbol, so on any other arch the loader disables the estimate and keeps the engine.",
+  "adapter": "native",
+  "objective": "max",
+  "score": {
+    "metric": "tflops"
+  },
+  "native": {
+    "symbol": "hipkernel.flydsl_paged_cache_store.engine_estimate"
+  }
+}

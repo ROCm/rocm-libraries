@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "291882cb-4494-5bdd-962f-94aed802cf66",
+  "name": "flydsl paged_cache_store: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_paged_cache_store.kernel_match"
+}

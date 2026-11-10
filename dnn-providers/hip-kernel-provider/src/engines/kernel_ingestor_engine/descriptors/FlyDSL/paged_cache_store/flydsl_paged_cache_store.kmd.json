@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "id": "57bd64f1-267f-507a-bf80-339745a2b05d",
+  "name": "flydsl paged_cache_store variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "cache_dtype",
+      "type": "string"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    }
+  ]
+}

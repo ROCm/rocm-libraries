@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "69d1fc7b-5525-561f-97fa-59dc6b7d134c",
+  "name": "flydsl paged_cache_store dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_paged_cache_store.dispatch"
+}

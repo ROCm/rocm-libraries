@@ -87,8 +87,8 @@ from generators._manifest import inputs_digest  # noqa: E402
 # UKD_VERSION_MINOR = 0 (DescriptorLoader.hpp:288-289).
 DESCRIPTOR_VERSION = "1.0"
 # Ops whose engines read a runtime pass-by-value scalar (the SDPA softmax scale, the
-# RMSNorm epsilon), and the graph schema that introduced such tensors
-# (PluginVersionConstants.hpp, K_PASS_BY_VALUE_MIN_API_VERSION).
+# RMSNorm epsilon, the paged-cache-store scale), and the graph schema that introduced
+# such tensors (PluginVersionConstants.hpp, K_PASS_BY_VALUE_MIN_API_VERSION).
 SDPA_OPS = (
     "sdpa_rdna",
     "sdpa_rdna_decode",
@@ -97,7 +97,7 @@ SDPA_OPS = (
     "sdpa_cdna_decode",
     "sdpa_aiw",
 )
-PASS_BY_VALUE_OPS: tuple[str, ...] = ("rmsnorm",) + SDPA_OPS
+PASS_BY_VALUE_OPS: tuple[str, ...] = ("rmsnorm", "paged_cache_store") + SDPA_OPS
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
 
 MANIFEST_NAME = "manifest.json"
@@ -150,6 +150,8 @@ GRAPH_DETERMINED_FIELDS = {
     # moves per lane, which the row's bytes and the bases' alignment must admit.
     "index_dtype",
     "vec_bytes",
+    # Paged cache store: the container's element type, x's own or an FP8 format.
+    "cache_dtype",
     "out_dtype",
     # Softmax (`out_dtype` above is s's dtype): the width an object's copies need N
     # to be a multiple of.

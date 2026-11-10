@@ -666,6 +666,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
         "hipkernel.flydsl_gather.dispatch",
         "hipkernel.flydsl_rope.dispatch",
+        "hipkernel.flydsl_paged_cache_store.dispatch",
         "hipkernel.flydsl_softmax.dispatch",
         "hipkernel.flydsl_topk.dispatch",
 #endif

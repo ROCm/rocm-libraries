@@ -90,6 +90,10 @@ void resetFlydslSdpaCdnaDecodeModuleCache();
 void registerFlydslGatherSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslGatherModuleCache();
 
+/// @see packs/FlydslPagedCacheStoreNative.cpp
+void registerFlydslPagedCacheStoreSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslPagedCacheStoreModuleCache();
+
 /// @see packs/FlydslRopeNative.cpp
 void registerFlydslRopeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslRopeModuleCache();

@@ -1141,6 +1141,64 @@ the census `TestFlydslRopePacks`.
 
 ---
 
+## Paged KV-cache store — `hipkernel:flydsl_paged_cache_store`
+
+Objects per arch: **gfx942** and **gfx950** 9, **gfx90a** 3 (no FP8). Kernel:
+[`kernels_src/kernels/paged_cache/paged_cache_store_kernel.py`](kernels_src/kernels/paged_cache/paged_cache_store_kernel.py),
+the KV-cache write half of FlyDSL v0.5.0's `kernels/attention/fused_rope_cache_kernel.py`
+(commit `226cde8d`) ported to flydsl 0.3.4 (the header lists the modifications); native half:
+[`FlydslPagedCacheStoreNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslPagedCacheStoreNative.cpp).
+Upstream writes the flash `[nb, bs, KH, D]` and ATOM x-packed layouts with a packed K/V;
+this kernel writes hipDNN's `[nb, H, bs, D]` (any strides) from one strided x.
+
+It computes the schema's store (`paged_cache_store_attributes.fbs`,
+`CpuFpReferencePagedCacheStore`): for each token (b, s) whose slot is in
+`[0, nb * bs)`, `container[slot / bs, h, slot % bs, d] = cast(x[b, h, s, d] * scale)` with the
+product in f32 and one round-to-nearest-even cast; nothing else is written. One 256-thread
+workgroup per token on grid `(S, B)`; token-packed x `[T, H, D]` is B = 1, S = T. A 16-byte
+vector path runs when D, the inner strides (1) and every stepped stride admit it and the x
+and container bases are aligned (checked per launch from the pointers); otherwise a scalar
+path serves any strides and any D.
+
+**Baked:** x's dtype (`bf16`, `f16`, `f32`) and the container's (`cache_dtype`: x's own, or an
+FP8 format). FP8 uses `v_cvt_pk_{fp8,bf8}_f32`, which produces FNUZ on gfx942 and OCP on
+gfx950 and does not exist on gfx90a, so each arch ships only the encoding its hardware
+writes: `fp8_e4m3_fnuz`/`fp8_e5m2_fnuz` on gfx942, `fp8_e4m3`/`fp8_e5m2` on gfx950. The
+product is clamped to the format's largest finite before conversion (NaN passes), matching
+the reference's saturating cast. **Runtime:** H, D, block_size, the slot count, every stride
+of x, slot_mapping and the container (64-bit token and slot bases), the slot dtype, and the
+scale.
+
+**Slots.** Negative slots are skipped. A slot at or past `nb * bs`, or an INT64 slot that
+does not fit 31 bits, is outside the op's contract (the CPU reference throws); the kernel
+cannot report it and skips it rather than writing out of bounds. Two tokens on one slot are
+outside the contract too; both are written, in no defined order.
+
+| Graph-scoped (`flydslPagedCacheStoreGraphMatches`) | Accepted | Declined |
+|---|---|---|
+| Nodes | exactly one `PagedCacheStoreAttributes` node | anything else; override-shape graphs |
+| Operands | x, slot_mapping, container real device tensors | virtual, pass-by-value or ragged |
+| Dtypes | x bf16 / f16 / f32; container x's dtype or FP8 E4M3 / E5M2 (OCP or FNUZ); slots INT32 / INT64; compute type unset or FLOAT | other dtypes; a converting non-FP8 container; HALF / BFLOAT16 compute |
+| Shape | x `[T, H, D]` with slots `[T]`, or `[B, H, S, D]` with `[B, S]`; container `[nb, H, bs, D]` | anything else; a zero extent |
+| Strides | any non-negative strides on every operand | a negative stride; a container whose coordinates alias |
+| Scale | absent; or one FLOAT element (any rank), a device tensor, a baked or a runtime pass-by-value scalar | another dtype or element count |
+| Extents | one token's x row and one slot's container row <= 2^31 - 1 bytes; `nb * bs`, S and `H * D` (+1024) <= 2^31 - 1; B <= 65535 (grid y); each operand's span < 2^62 bytes | larger |
+
+| Kernel-scoped (`flydslPagedCacheStoreKernelMatches`) | |
+|---|---|
+| `dtype`, `cache_dtype` | equal x's and the container's; an FP8 container finds an object only on the arch whose hardware writes its encoding |
+
+**Checked by:** `TestFlydslPagedCacheStoreEngine` (every accept and decline row, kernel match,
+score; host-only), `TestGpuFlydslPagedCacheStoreObjects` (every staged object through
+graph_match, kernel_match, prepare and launch against `CpuFpReferencePagedCacheStore`, the
+whole container compared byte for byte so untouched slots, skipped tokens and stride padding
+must keep their random contents: token-packed on the vector path, SDPA-native BSHD x with
+strided INT64 slots into a head-major padded container, a scalar-path odd D with a strided
+innermost x, and for FP8 scales that saturate and that reach subnormals; scale absent, device
+and runtime), and the census `TestFlydslPagedCacheStorePacks`.
+
+---
+
 ## Top-k — `hipkernel:flydsl_topk`
 
 12 objects per arch, built for **gfx90a, gfx942 and gfx950**: the kernel uses buffer loads

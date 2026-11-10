@@ -27,6 +27,7 @@ OP_KERNEL_DIRS = {
     "sdpa_aiw": ("attention_rdna4",),
     "gather": ("gather",),
     "rope": ("rope",),
+    "paged_cache_store": ("paged_cache",),
     "softmax": ("softmax",),
     "topk": ("topk",),
 }

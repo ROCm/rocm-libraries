@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "fdb66659-a33d-587d-a563-92b10971b3d4",
+  "name": "flydsl paged_cache_store selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_paged_cache_store.score"
+  }
+}

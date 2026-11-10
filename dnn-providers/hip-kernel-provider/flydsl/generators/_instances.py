@@ -115,6 +115,7 @@ _ABBREV = {
     "reduce_symbol": "",
     "index_dtype": "idx",
     "vec_bytes": "vec",
+    "cache_dtype": "cache",
     "out_dtype": "out",
     "n_align": "align",
     "threads_per_row": "tpr",
@@ -1537,6 +1538,49 @@ def rope_instances() -> list[Instance]:
     return instances
 
 
+# --- Paged KV-cache store --------------------------------------------------------
+
+# kernels_src/kernels/paged_cache/paged_cache_store_kernel.py: one block per token,
+# and H, D, block_size, the slot count, every stride of x, slot_mapping and the
+# container, the slot dtype and the scale are runtime arguments, so one object per
+# (x dtype, container dtype) serves every graph of that pair. The container is x's
+# dtype, or an FP8 format the target's v_cvt_pk_{fp8,bf8}_f32 produces: FNUZ on
+# gfx942, OCP on gfx950, none on gfx90a. Nothing else is baked, so there is no tier
+# to rank.
+PAGED_CACHE_STORE_DTYPES = ("bf16", "f16", "f32")
+PAGED_CACHE_STORE_FP8 = {
+    "gfx90a": (),
+    "gfx942": ("fp8_e4m3_fnuz", "fp8_e5m2_fnuz"),
+    "gfx950": ("fp8_e4m3", "fp8_e5m2"),
+}
+PAGED_CACHE_STORE_BLOCK_THREADS = 256
+
+
+def paged_cache_store_instances(arch: str) -> list[Instance]:
+    """The paged-cache-store table for one target: every x dtype, into itself and
+    into each FP8 format the target converts to."""
+    if arch not in PAGED_CACHE_STORE_FP8:
+        raise KeyError(
+            f"paged_cache_store is built for {', '.join(PAGED_CACHE_STORE_FP8)}, "
+            f"not {arch}"
+        )
+    instances = [
+        Instance(
+            op="paged_cache_store",
+            dtype=dtype,
+            priority=PRIORITY_GENERIC,
+            knobs={
+                "cache_dtype": cache_dtype,
+                "block_threads": PAGED_CACHE_STORE_BLOCK_THREADS,
+            },
+        )
+        for dtype in PAGED_CACHE_STORE_DTYPES
+        for cache_dtype in (dtype,) + PAGED_CACHE_STORE_FP8[arch]
+    ]
+    _assert_unique(instances)
+    return instances
+
+
 # --- Softmax ------------------------------------------------------------------
 
 # kernels_src/kernels/softmax/softmax_kernel.py (FlyDSL v0.5.0's softmax, ported to
@@ -1690,11 +1734,18 @@ OPS = {
     "sdpa_aiw": sdpa_aiw_instances,
     "gather": gather_instances,
     "rope": rope_instances,
+    "paged_cache_store": paged_cache_store_instances,
     "softmax": softmax_instances,
     "topk": topk_instances,
 }
 # Ops whose table differs by target and so takes the arch.
-_PER_TARGET_OPS = {"sdpa_cdna", "sdpa_cdna_dualwave", "sdpa_cdna_decode", "sdpa_aiw"}
+_PER_TARGET_OPS = {
+    "sdpa_cdna",
+    "sdpa_cdna_dualwave",
+    "sdpa_cdna_decode",
+    "sdpa_aiw",
+    "paged_cache_store",
+}
 
 
 def instances_for(op: str, arch: str | None = None) -> list[Instance]:

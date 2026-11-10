@@ -446,6 +446,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheSixSlotSignature
         )
     endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_paged_cache_store)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_paged_cache_store}
+            SUITES TestFlydslPagedCacheStorePacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsEachXDtypeIntoItselfAndOneFp8Encoding
+                UnderstandsRuntimeScaleGraphs
+                EveryKernelDeclaresTheTwentyTwoSlotSignature
+        )
+    endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_topk)
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
