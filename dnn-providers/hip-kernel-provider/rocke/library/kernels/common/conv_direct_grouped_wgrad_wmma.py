@@ -45,6 +45,7 @@ from rocke.helpers.spec import ceil_div
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _io_type,
+    channel_totals_reason,
     dilation_reason,
     emit_direct_params,
 )
@@ -139,6 +140,9 @@ class GroupedWgradWmmaSpec:
 
 
 def is_valid_grouped_wgrad_wmma_spec(spec: GroupedWgradWmmaSpec, arch: str = "gfx1250"):
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     p = spec.problem
     why = dilation_reason(p)
     if why is not None:

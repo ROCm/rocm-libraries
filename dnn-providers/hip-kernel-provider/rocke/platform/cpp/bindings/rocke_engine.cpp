@@ -53,6 +53,7 @@ extern "C" {
 #include "rocke/instance_conv_direct_fwd_tapouter_wmma.h"
 #include "rocke/instance_conv_direct_fwd_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/instance_conv_direct_grouped_wgrad_wmma.h"
 #include "rocke/instance_conv_direct_nongrouped.h"
 #include "rocke/instance_conv_fwd_small_wmma.h"
 #include "rocke/instance_conv_fwd_split_k_reduce.h"
@@ -3473,6 +3474,117 @@ std::vector<std::string> conv_wgrad_reduce_verify(const py::dict& d, const std::
                              rocke_build_wgrad_workspace_reduce_new(&b, &s, arch.c_str()));
 }
 
+/* ===================== conv_direct_grouped_wgrad_wmma ===================== */
+
+/* Wave32 WMMA grouped direct wgrad (gfx1250, cpg = kpg in {4, 8}) into
+ * partial slots. The dict mirrors GroupedWgradWmmaSpec with the problem
+ * nested. */
+rocke_grouped_wgrad_wmma_spec_t gwgw_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_grouped_wgrad_wmma_spec_t s = rocke_grouped_wgrad_wmma_spec_default();
+    /* The problem's shape fields are required, as in DirectConvProblem: a
+     * missing one would silently read as the zero default. */
+    if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
+        throw py::value_error("GroupedWgradWmmaSpec requires a problem dictionary");
+    {
+        py::dict pd = d["problem"].cast<py::dict>();
+        const char* required[] = {"N", "H", "W", "groups", "cpg", "kpg"};
+        for(const char* key : required)
+        {
+            if(!pd.contains(key))
+                throw py::value_error(std::string("GroupedWgradWmmaSpec.problem requires ") + key);
+        }
+        std::string v;
+        fill_direct_conv_problem(&s.problem, pd);
+        if(dict_str(pd, "dtype", v))
+            s.problem.dtype = keep(v);
+    }
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+    }
+    s.waves_c = dict_int(d, "waves_c", s.waves_c);
+    s.q_steps = dict_int(d, "q_steps", s.q_steps);
+    s.rows_per_chunk = dict_int(d, "rows_per_chunk", s.rows_per_chunk);
+    s.target_blocks = dict_int(d, "target_blocks", s.target_blocks);
+    s.stages = dict_int(d, "stages", s.stages);
+    return s;
+}
+
+std::string conv_direct_grouped_wgrad_wmma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_grouped_wgrad_wmma_spec_t s = gwgw_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_grouped_wgrad_wmma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_engine.conv_direct_grouped_wgrad_wmma_lower_llvm");
+}
+
+std::string conv_direct_grouped_wgrad_wmma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.conv_direct_grouped_wgrad_wmma_serialize_ir",
+                                rocke_grouped_wgrad_wmma_spec_t,
+                                gwgw_build_spec,
+                                rocke_build_grouped_wgrad_wmma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_direct_grouped_wgrad_wmma_verify(const py::dict& d,
+                                                               const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_direct_grouped_wgrad_wmma_verify",
+                             rocke_grouped_wgrad_wmma_spec_t,
+                             gwgw_build_spec,
+                             rocke_build_grouped_wgrad_wmma_new(&b, &s, arch.c_str()));
+}
+
+/* is_valid_grouped_wgrad_wmma_spec + kernel_name / grid / lds_bytes and the
+ * fold contract in one call: -> (ok, reason, kernel_name, (gx, gy, gz),
+ * lds_bytes, n_partitions, workspace_bytes, fold_taps, fold_channels). The
+ * grid and the fold contract are zero for a rejected spec. */
+py::tuple conv_direct_grouped_wgrad_wmma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_grouped_wgrad_wmma_spec_t s = gwgw_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    int block[3] = {0, 0, 0};
+    long n_parts = 0, ws_bytes = 0;
+    long long taps = 0, chans = 0;
+    bool ok = rocke_grouped_wgrad_wmma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_grouped_wgrad_wmma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok) /* a rejected spec may have no channel tiles */
+    {
+        rocke_grouped_wgrad_wmma_launch_geometry(&s, grid, block);
+        n_parts = rocke_grouped_wgrad_wmma_n_partitions(&s);
+        ws_bytes = rocke_grouped_wgrad_wmma_workspace_bytes(&s);
+        taps = rocke_grouped_wgrad_wmma_fold_taps(&s);
+        chans = rocke_grouped_wgrad_wmma_fold_channels(&s);
+    }
+    return py::make_tuple(ok,
+                          std::string(reason),
+                          std::string(name),
+                          py::make_tuple(grid[0], grid[1], grid[2]),
+                          rocke_grouped_wgrad_wmma_lds_bytes(&s),
+                          n_parts,
+                          ws_bytes,
+                          taps,
+                          chans);
+}
+
 /* ================= conv_fwd_split_k_reduce (fwd split-K Stage 2) =============== */
 
 rocke_fwd_split_k_reduce_spec_t conv_fwd_split_k_reduce_build_spec(const py::dict& d,
@@ -5389,6 +5501,16 @@ PYBIND11_MODULE(rocke_engine, m)
          conv_wgrad_reduce_lower_llvm,
          conv_wgrad_reduce_serialize_ir,
          conv_wgrad_reduce_verify);
+    /* gfx1250 grouped direct wgrad into partial slots (folded by the
+     * DwWgradFoldSpec kernel). */
+    reg3("conv_direct_grouped_wgrad_wmma",
+         &conv_direct_grouped_wgrad_wmma_lower_llvm,
+         &conv_direct_grouped_wgrad_wmma_serialize_ir,
+         &conv_direct_grouped_wgrad_wmma_verify);
+    m.def("conv_direct_grouped_wgrad_wmma_describe",
+          &conv_direct_grouped_wgrad_wmma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
     /* ---- fwd split-K Stage 2 (folds the [ks_count][M][K] fp32 slabs) ---- */
     reg3("conv_fwd_split_k_reduce",
          conv_fwd_split_k_reduce_lower_llvm,

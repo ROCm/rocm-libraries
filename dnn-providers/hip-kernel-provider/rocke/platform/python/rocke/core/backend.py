@@ -1271,6 +1271,36 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     )
 
 
+def conv_direct_grouped_wgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`GroupedWgradWmmaSpec` -> flat dict (problem nested, dtype and
+    ``pad_w`` included: the column padding sets ``Wo``, hence the grid)."""
+    p = spec.problem
+    return dict(
+        problem=dict(
+            N=p.N,
+            H=p.H,
+            W=p.W,
+            groups=p.groups,
+            cpg=p.cpg,
+            kpg=p.kpg,
+            KH=p.KH,
+            KW=p.KW,
+            PAD=p.PAD,
+            pad_w=p.pad_w,
+            stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
+            dtype=p.dtype,
+        ),
+        name=spec.name,
+        waves_c=spec.waves_c,
+        q_steps=spec.q_steps,
+        rows_per_chunk=spec.rows_per_chunk,
+        target_blocks=spec.target_blocks,
+        stages=spec.stages,
+    )
+
+
 def conv_direct_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`DirectFwdWmmaSpec` -> flat dict (problem nested, dtype included).
     ``sched`` is forwarded as-is; ``None`` means the backend default."""
@@ -2320,6 +2350,46 @@ def lower_conv_direct_dgrad_wmma(
         py_fn,
         lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
         lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_grouped_wgrad_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`GroupedWgradWmmaSpec` (the gfx1250 WMMA grouped direct
+    wgrad into partial slots)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_grouped_wgrad_wmma import (
+            build_grouped_wgrad_wmma,
+        )
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_grouped_wgrad_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_grouped_wgrad_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_grouped_wgrad_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_grouped_wgrad_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_grouped_wgrad_wmma_serialize_ir(sd, arch=arch),
         _name_of(spec),
     )
 

@@ -65,6 +65,7 @@
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_dw_dgrad.h"
 #include "rocke/instance_conv_direct_grouped_wgrad_mfma.h"
+#include "rocke/instance_conv_direct_grouped_wgrad_wmma.h"
 #include "rocke/instance_conv_direct_wgrad_gather.h"
 #include "rocke/instance_conv_direct_wgrad_tiled.h"
 #include "rocke/instance_conv_fwd_small_wmma.h"
@@ -868,6 +869,9 @@ static void test_wgrad_dilation_reason(void)
     check_wgrad_dilation("grouped_wgrad_mfma",
                          rocke_grouped_wgrad_mfma_spec_default(),
                          rocke_grouped_wgrad_mfma_is_valid_spec);
+    check_wgrad_dilation("grouped_wgrad_wmma",
+                         rocke_grouped_wgrad_wmma_spec_default(),
+                         rocke_grouped_wgrad_wmma_is_valid_spec);
 }
 
 /* Every validator whose builder keeps a channel total in an int refuses
@@ -943,6 +947,11 @@ static void test_channel_totals_refused(void)
                          1 << 28,
                          8,
                          rocke_grouped_wgrad_mfma_is_valid_spec);
+    check_channel_totals("grouped_wgrad_wmma",
+                         rocke_grouped_wgrad_wmma_spec_default(),
+                         1 << 28,
+                         8,
+                         rocke_grouped_wgrad_wmma_is_valid_spec);
 }
 
 /* A zero or negative extent is refused first, with Python's

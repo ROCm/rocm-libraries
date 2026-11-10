@@ -48,15 +48,23 @@ extern "C" {
  *  class DwWgradFoldSpec:
  *      taps: int
  *      name: str = "dw_wgrad_fold"
+ *      cols: int = 64     # outputs per block
+ *      slices: int = 16   # threads per output, splitting the partitions
+ *      unroll: int = 4    # partition loads in flight per thread
  * ===================================================================== */
 typedef struct rocke_dw_wgrad_fold_spec
 {
     int taps;
     const char* name; /* default "dw_wgrad_fold" */
+    int cols; /* default 64 */
+    int slices; /* default 16 */
+    int unroll; /* default 4 */
 } rocke_dw_wgrad_fold_spec_t;
 
 rocke_dw_wgrad_fold_spec_t rocke_dw_wgrad_fold_spec_default(void);
-/* kernel_name_join(name, t{taps}). */
+/* kernel_name_join(name, t{taps}), plus c{cols}, s{slices}, u{unroll} when
+ * (cols, slices, unroll) differs from the default (64, 16, 4). The block is
+ * slices * cols threads over ceil(channels * taps / cols) blocks. */
 rocke_status_t rocke_dw_wgrad_fold_kernel_name(const rocke_dw_wgrad_fold_spec_t* spec,
                                                char* out,
                                                size_t out_cap);
