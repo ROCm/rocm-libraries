@@ -653,11 +653,13 @@ def placeScaleShadowReads(
         entries, gaps, start, base=0, backEdge=None,
         tiers=_SCALE_SHADOW_TIERS,
         warGap=_SCALE_SOURCE_WAR_MFMA_GAP,
-        ignoreSourceWar=False):
+        ignoreSourceWar=False, avoid=(), taken=()):
     """Choose the C1 MFMA gap of each C0-entry scale refresh.
 
     ``gaps[i]`` holds the instructions after body MFMA ``base + i``, and
-    ``gaps[backEdge]`` is the one the loop branch follows.  A local-read
+    ``gaps[backEdge]`` is the one the loop branch follows; no read takes
+    a gap in ``avoid``, and each index in ``taken`` holds one refresh
+    already.  A local-read
     wait is taken to follow the last gap: the next C0 entry, or the head
     of the next partition.  Reads go in first-C0-use order, SA before SB,
     and each takes the earliest gap at or after ``start`` and its WAR
@@ -666,6 +668,8 @@ def placeScaleShadowReads(
     Returns ``([(index, entry)], unplaced)``.
     """
     reserved = [0] * len(gaps)
+    for index in taken:
+        reserved[index] += 1
     drains = [
         index for index, group in enumerate(gaps)
         if any(_isWaitCnt(x) and (getattr(x, "waitAll", False) or x.dscnt >= 0)
@@ -674,7 +678,7 @@ def placeScaleShadowReads(
     def fits(tier, index):
         shareLoad, nearDrain, takeBackEdge, shareSync, readCap = tier
         group = [inst for inst in gaps[index] if not isinstance(inst, TextBlock)]
-        if index == backEdge and not takeBackEdge:
+        if index in avoid or (index == backEdge and not takeBackEdge):
             return False
         if not nearDrain and next(d for d in drains if d > index) - index < (
                 _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT):
@@ -4249,14 +4253,46 @@ def _scheduleHalfDisjointHalf(
         return spi - shadowReads[interval] - sum(
             map(len, placer._placed[interval * spi:(interval + 1) * spi]))
 
+    def memoryGap(interval):
+        return interval not in seams and not any(
+            _isWaitCnt(x) or _isBarrier(x) or _isVALU(x) for x in intervalInsts(interval))
+
+    # As in the cell scheduler, a refresh keeps a gap the reads and loads
+    # could take only while the half has such gaps to spare, one per load
+    # and per _MXFP8_DATA_DS_READS reads. Past that, a refresh takes a gap
+    # no load can take if one fits it, and appendC1ScaleShadowReads finds
+    # it there; one with no such gap keeps its own, so no refresh is left
+    # to share a gap with a load.
     if scaleShadows:
+        shadowGaps = [[inst for _, inst in split[0][1]]] + [
+            intervalInsts(i) for i in range(intervals)]
+        shadowStart = firstInterval + 1 if any(
+            _isBarrier(inst) for _, inst in syncItems) else 0
+        shadowTiers = [tier for tier in _SCALE_SHADOW_TIERS if not tier[0]]
         reservedShadows, scaleShadows[:] = placeScaleShadowReads(
-            scaleShadows,
-            [[inst for _, inst in split[0][1]]] + [intervalInsts(i) for i in range(intervals)],
-            firstInterval + 1 if any(_isBarrier(inst) for _, inst in syncItems) else 0,
-            base=mfmaBase - 1,
-            tiers=[tier for tier in _SCALE_SHADOW_TIERS if not tier[0]])
-        for gap, _entry in reservedShadows:
+            scaleShadows, shadowGaps, shadowStart, base=mfmaBase - 1, tiers=shadowTiers)
+        reads = sum(_isDsRead(inst) for c in range(len(cells)) for _, inst in split[c][2])
+        spare = sum(map(memoryGap, range(firstInterval, intervals))) - sum(
+            _isBufferLoad(inst) for c in range(len(cells)) for _, inst in split[c][3]
+        ) - math.ceil(reads / _MXFP8_DATA_DS_READS)
+        kept, displaced = [], []
+        for gap, entry in reservedShadows:
+            if gap and memoryGap(gap - 1) and all(g != gap for g, _ in kept):
+                if spare <= 0:
+                    displaced.append((gap, entry))
+                    continue
+                spare -= 1
+            kept.append((gap, entry))
+        if displaced:
+            elsewhere, _ = placeScaleShadowReads(
+                [entry for _, entry in displaced], shadowGaps, shadowStart,
+                base=mfmaBase - 1, tiers=shadowTiers,
+                avoid={i + 1 for i in range(intervals) if memoryGap(i)},
+                taken=[g for g, _ in kept])
+            moved = {id(entry) for _, entry in elsewhere}
+            kept += elsewhere + [
+                (gap, entry) for gap, entry in displaced if id(entry) not in moved]
+        for gap, _entry in kept:
             if gap:
                 shadowReads[gap - 1] += 1
 

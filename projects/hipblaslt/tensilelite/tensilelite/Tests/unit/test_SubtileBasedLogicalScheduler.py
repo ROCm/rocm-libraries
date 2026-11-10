@@ -6894,6 +6894,32 @@ class TestHalfDisjointHalf:
             assert sum(c.startswith("A MT=n+2") for gap in gaps for c in gap) == 4
             assert not shadows
 
+    def test_dense_half_reserves_a_refresh_gap_only_with_one_to_spare(self):
+        memory = lambda gap: [c for c in gap if c.startswith(("B MT=n tile", "A MT=n+2"))]
+        for crossCellReads in (False, True):
+            # Two loads and two reads a cell leave the half gaps to spare:
+            # the refresh keeps gap 1, its WAR floor.
+            shadows = [TestC1ScaleShadowReads._entry(17, "SA", -8, 0)]
+            sparse = self._half(self._twoCells(reads=2, loads=2), scaleShadows=shadows,
+                                crossCellReads=crossCellReads)
+            _prefix, gaps = self._gaps(sparse)
+            assert not memory(gaps[1]) and not shadows
+            # Five loads and four reads a cell have none: the refresh takes
+            # the fence gap of cell 1, which no load can take, and the reads
+            # and loads keep the plan they have without it.
+            dense = lambda shadows: self._gaps(self._half(
+                self._twoCells(reads=4, loads=5), scaleShadows=shadows,
+                crossCellReads=crossCellReads))[1]
+            shadows = [TestC1ScaleShadowReads._entry(17, "SA", -8, 0)]
+            assert list(map(memory, dense(shadows))) == list(map(memory, dense(None)))
+            assert not shadows
+            # Past the fence every gap could take a load, so the refresh
+            # keeps its floor, gap 10, rather than share a gap with a load.
+            shadows = [TestC1ScaleShadowReads._entry(17, "SA", 2, 0)]
+            gaps = dense(shadows)
+            assert not memory(gaps[10]) and not shadows
+            assert sum(c.startswith("A MT=n+2") for gap in gaps for c in gap) == 10
+
     def test_later_cell_fence_stays_alone_before_its_first_mfma(self):
         scheduled = self._half(self._twoCells(reads=2, loads=2))
         _prefix, gaps = self._gaps(scheduled)
