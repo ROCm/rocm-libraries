@@ -941,13 +941,15 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename VFrag,
               typename VFragWindow,
               typename Scales,
-              typename RescaleO>
+              typename RescaleO,
+              typename KEarly>
     CK_TILE_DEVICE static void Gemm1ByVFragment(OAcc& o_acc,
                                                 const PTile& p_tile,
                                                 VFrag v_frag,
                                                 VFragWindow& v_frag_window,
                                                 const Scales& scales,
-                                                const RescaleO& rescale_o)
+                                                const RescaleO& rescale_o,
+                                                const KEarly& k_early)
     {
         using Gemm1 = remove_cvref_t<decltype(Policy::template GetPVBlockGemm<Problem>())>;
         constexpr index_t kNIter = Gemm1::NIterPerWarp;
@@ -978,6 +980,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                     v_scale_bufs[(n + kVReadAhead) % (kVReadAhead + 1)] =
                         v_scale(number<n + kVReadAhead>{}, number<0>{});
             }
+            // No V read is issued from here on: the next tile's leading K reads take the slot.
+            if constexpr(n == kNIter - kVReadAhead)
+                k_early();
             rescale_o(i_n);
             if constexpr(kMx)
                 Policy::template RunPVFragment<Problem>(
@@ -2323,6 +2328,20 @@ struct BlockFmhaPipelineQRKSVSTdm
             else
                 return load_tile(k_lds_read_window);
         }();
+        // MX whole-K tiles read the next tile's K scales in the PV tail, with its leading K.
+        constexpr bool kKScaleEarly = kMx && !kKFragments;
+        constexpr index_t kKScaleN  = remove_cvref_t<decltype(gemm_0)>::NIterPerWarp;
+        [[maybe_unused]] array<int32_t, kKScaleN * kMxKSteps> k_scales{};
+        [[maybe_unused]] auto load_k_scales = [&](index_t tile) {
+            static_for<0, kKScaleN, 1>{}([&](auto i_n) {
+                static_for<0, kMxKSteps, 1>{}([&](auto i_k) {
+                    k_scales(number<i_n * kMxKSteps + i_k>{}) =
+                        mx_tiles.k(tile, i_n * kWmmaRows + mx_lane, i_k);
+                });
+            });
+        };
+        if constexpr(kKScaleEarly)
+            load_k_scales(0);
 
         __builtin_amdgcn_sched_barrier(0);
 
@@ -2348,6 +2367,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                             KDataType* __restrict__ v_lds_write_ptr,
                             KDataType* __restrict__ v_lds_read_ptr) {
             const index_t kv_tile_start = kv_tile_start_of(i_total_loops);
+            [[maybe_unused]] constexpr index_t kKAccesses =
+                remove_cvref_t<decltype(k_lds_read_window)>::Traits::NumAccess;
+            [[maybe_unused]] constexpr index_t kKEarlyAccesses = kKAccesses / 2;
             [[maybe_unused]] const auto kv_descale =
                 kDeferKDescaleClamp ? clamp_k_descale(next_kv_descale) : next_kv_descale;
 
@@ -2545,14 +2567,20 @@ struct BlockFmhaPipelineQRKSVSTdm
                 return q_scales[decltype(i_m)::value * kMxKSteps + decltype(i_k)::value];
             };
             [[maybe_unused]] const auto mx_k_scale = [&](auto i_n, auto i_k) {
-                return mx_tiles.k(i_total_loops,
-                                  decltype(i_n)::value * kWmmaRows + mx_lane,
-                                  decltype(i_k)::value);
+                if constexpr(kKScaleEarly)
+                    return k_scales[number<decltype(i_n)::value * kMxKSteps +
+                                           decltype(i_k)::value>{}];
+                else
+                    return mx_tiles.k(i_total_loops,
+                                      decltype(i_n)::value * kWmmaRows + mx_lane,
+                                      decltype(i_k)::value);
             };
             if constexpr(is_any_of<KDataType, fp8_t, bf8_t>::value)
             {
                 static_assert(k0_loops == 1 && !Problem::kProgressiveDsLoadK);
                 Gemm0Fp8(s_acc, q_tile, k_tile, k_frag_window, mx_q_scale, mx_k_scale);
+                // Keeps the QK WMMAs above the merged barrier below.
+                __builtin_amdgcn_sched_barrier(0);
             }
             else if constexpr(!kStagedKPairs && Problem::kProgressiveDsLoadK)
             {
@@ -2618,8 +2646,9 @@ struct BlockFmhaPipelineQRKSVSTdm
             // load's scale tile too (kTdmPerKvTile).
             if constexpr(kMergedWarBarriers)
             {
-                // dscnt 0: gemm0's K reads are done in every wave past this barrier.
-                s_wait_tensorcnt_barrier<2 * kTdmPerKvTile, 0>();
+                // dscnt 0: gemm0's K reads are done in every wave past this barrier. <1> also
+                // retires K(i+1), which the PV tail reads.
+                s_wait_tensorcnt_barrier<kTdmPerKvTile, 0>();
                 prefetch_k();
             }
             else
@@ -2921,12 +2950,31 @@ struct BlockFmhaPipelineQRKSVSTdm
                 // Keeps V fragments 1+ below softmax and the P cast. A masked fence lets softmax
                 // sink below it instead.
                 __builtin_amdgcn_sched_barrier(0);
-                Gemm1ByVFragment(o_acc,
-                                 p_tile,
-                                 v_tile,
-                                 v_frag_window,
-                                 make_tuple(p_scale_arg, v_scale(number<0>{})),
-                                 rescale_o_fragment);
+                Gemm1ByVFragment(
+                    o_acc,
+                    p_tile,
+                    v_tile,
+                    v_frag_window,
+                    make_tuple(p_scale_arg, v_scale(number<0>{})),
+                    rescale_o_fragment,
+                    [&]() {
+                        // every V read is issued by now: retire them here, so the
+                        // loop-end barrier does not wait for the K reads below
+                        s_wait_dscnt<0>();
+                        if constexpr(kKScaleEarly)
+                            load_k_scales(i_total_loops + 1);
+                        if constexpr(kKFragments)
+                        {
+                            k_frag_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
+                            k_tile = load_k_fragments();
+                        }
+                        else
+                        {
+                            k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
+                            k_lds_read_window.template load_access_range<0, kKEarlyAccesses>(
+                                k_tile);
+                        }
+                    });
             }
             else if constexpr(1 < k1_loops)
             {
@@ -2973,20 +3021,32 @@ struct BlockFmhaPipelineQRKSVSTdm
                                        rowsum_p);
             }
 
-            // Mirrors the V wait: in flight are last iteration's K then this one's V and
-            // K, so <2> retires that K -- exactly what load_tile below reads. Merged: dscnt
-            // 0 also retires gemm1's V reads, which frees the V buffer for the next call.
+            // Mirrors the V wait: <2> retires last iteration's K, which load_tile below reads.
+            // The barrier frees the V buffer for the next call: fp8 drained its V reads before
+            // the early K reads (k_early), which may stay in flight past it, as K(i+1)'s buffer
+            // is rewritten only after the next mid barrier's dscnt 0. Others wait on dscnt 0.
             s_wait_tensorcnt_barrier<2 * kTdmPerKvTile,
-                                     kMergedWarBarriers ? 0 : waitcnt_arg::kMaxLgkmCnt>();
+                                     kVFragments || !kMergedWarBarriers ? waitcnt_arg::kMaxLgkmCnt
+                                                                        : 0>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
-            if constexpr(kKFragments)
+            if constexpr(kVFragments)
             {
-                k_frag_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
-                k_tile = load_k_fragments();
+                // the PV tail read the leading half (or the whole fragment ring head)
+                if constexpr(!kKFragments)
+                    k_lds_read_window.template load_access_range<kKEarlyAccesses, kKAccesses>(
+                        k_tile);
             }
             else
             {
-                k_tile = load_tile(k_lds_read_window);
+                if constexpr(kKFragments)
+                {
+                    k_frag_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
+                    k_tile = load_k_fragments();
+                }
+                else
+                {
+                    k_tile = load_tile(k_lds_read_window);
+                }
             }
 
             if constexpr(kVFragments)
