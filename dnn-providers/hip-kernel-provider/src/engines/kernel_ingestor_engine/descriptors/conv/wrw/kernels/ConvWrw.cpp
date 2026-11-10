@@ -9,7 +9,9 @@
 //                    LDS DMA (gfx950, width stride 1); 3 row ring on FMA (exact fp32 without
 //                    an fp32 matrix core: RDNA); 4 output rows on FMA (any stride, vec 1 for
 //                    rows that are not a whole number of vectors); 5 direct (ConvWrwDirect.h:
-//                    gfx950, 16-bit, unit stride and height dilation, persistent grid)
+//                    gfx950, 16-bit, unit stride and height dilation, persistent grid); 6
+//                    small-C output rows (stems: (channel, tap) pairs on the N axis,
+//                    channels-first, WC 1)
 //   CONV_K3_ATOM     K1's matrix-core atom (ConvIgemmCore.h); loops 0 to 2
 //   CONV_K3_LAYOUT   0 channels-first (N C D H W); 1 channels-last (N D H W C) transposed into
 //                    LDS; 2 channels-last kept channels-last, LDS transpose reads (gfx950, 16-bit)
@@ -62,6 +64,19 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
                 CONV_K3_PP,
                 CONV_K3_SWZ,
                 CONV_K3_XCD>(a);
+#elif CONV_K3_LOOP == 6
+    k3WrwRowsSmallC<CONV_K3_T,
+                    CONV_K3_ATOM,
+                    CONV_K3_BK,
+                    CONV_K3_BC,
+                    CONV_K3_BQ,
+                    CONV_K3_FR,
+                    CONV_K3_S,
+                    CONV_K3_SW,
+                    CONV_K3_DW,
+                    CONV_K3_WK,
+                    CONV_K3_VEC,
+                    CONV_K3_XCD>(a);
 #elif CONV_K3_LOOP == 4
     k3WrwRowsFma<CONV_K3_T,
                  CONV_K3_LAYOUT,

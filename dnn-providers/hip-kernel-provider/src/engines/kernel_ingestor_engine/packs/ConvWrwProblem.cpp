@@ -324,7 +324,8 @@ int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
     const int64_t threads = waves * wave;
     const bool cf = config.layout == LAYOUT_CHANNELS_FIRST;
     const int64_t kv = config.layout == LAYOUT_CHANNELS_LAST ? 4 / elementBytes : 1;
-    const int64_t rows = config.loop == LOOP_ROWS ? config.fr : 1;
+    const int64_t rows
+        = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_SMALLC ? config.fr : 1;
     const int64_t win = (config.bq - 1) * config.sw + (config.s - 1) * config.dw + 1;
     const int64_t nbv = divUp(win + (config.align != 0 ? vec - 1 : 0), vec);
     const int64_t phRaw = cf ? nbv * vec / config.sw : divUp(win, config.sw);
@@ -452,7 +453,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     }
     const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA;
     const bool direct = config.loop == LOOP_DIRECT;
-    const bool rows = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA;
+    const bool smallc = config.loop == LOOP_ROWS_SMALLC;
+    const bool rows = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA || smallc;
     if(fma != (info->wave == 0))
     {
         return std::nullopt;
@@ -472,7 +474,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx950";
 
     // Loop and layout.
-    if(config.loop < LOOP_ROWS || config.loop > LOOP_DIRECT)
+    if(config.loop < LOOP_ROWS || config.loop > LOOP_ROWS_SMALLC)
     {
         return std::nullopt;
     }
@@ -511,7 +513,9 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         {
             return std::nullopt;
         }
-        if(config.bk % (config.wk * shape.dim) != 0 || config.bc % (config.wc * shape.dim) != 0
+        // Small-C rows: the N axis is bc x s (channel, tap) pairs, the waves split k only.
+        if(config.bk % (config.wk * shape.dim) != 0
+           || (smallc ? config.wc != 1 : config.bc % (config.wc * shape.dim) != 0)
            || config.bq % shape.ka != 0)
         {
             return std::nullopt;
@@ -543,6 +547,12 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         }
     }
     else if((kg % config.vec != 0 && config.align != 2) || cg % config.vec != 0)
+    {
+        return std::nullopt;
+    }
+    // Small-C rows: channels-first, for at most 16 input channels per group (stems); a tile of
+    // at most 16 of them.
+    if(smallc && (!cf || cg > 16 || config.bc > 16))
     {
         return std::nullopt;
     }

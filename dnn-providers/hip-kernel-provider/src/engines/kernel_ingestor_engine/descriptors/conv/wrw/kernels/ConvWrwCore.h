@@ -1117,6 +1117,241 @@ __device__ void k3WrwRows(const K3Args& a)
     k3StorePartials<Atom, FR, S, FK, FC, WTK, WTC>(a, acc, g, fr0, frows, k0, c0, wk, wc, lane, bz);
 }
 
+/// KPL consecutive elements of an LDS row starting OFF elements past p, OFF a per-lane runtime
+/// value (p aligned to 4 bytes): dwords from the floor, shifted into place for an odd 16-bit
+/// start.
+template <class Atom, class T>
+__device__ inline typename Atom::frag k3FragAtRt(const T* p, int off)
+{
+    typedef typename Atom::frag F;
+    constexpr int KPL = Atom::KPL;
+    if constexpr(sizeof(T) == 4)
+    {
+        F v;
+#pragma unroll
+        for(int i = 0; i < KPL; ++i)
+            reinterpret_cast<unsigned*>(&v)[i] = reinterpret_cast<const unsigned*>(p + off)[i];
+        return v;
+    }
+    else
+    {
+        constexpr int ND = KPL / 2;
+        const unsigned* d = reinterpret_cast<const unsigned*>(p + (off & ~1));
+        unsigned w[ND + 1];
+#pragma unroll
+        for(int i = 0; i <= ND; ++i)
+            w[i] = d[i];
+        const unsigned sh = (off & 1) * 2;
+        unsigned v[ND];
+#pragma unroll
+        for(int i = 0; i < ND; ++i)
+            v[i] = __builtin_amdgcn_alignbyte(w[i + 1], w[i], sh);
+        return __builtin_bit_cast(F, v);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Small-C output rows (stems: few input channels, channels-first). The output-rows kernel with
+// the GEMM's N axis the (input channel, filter-width tap) pairs instead of the input channels:
+// lane column n of a fragment is channel n / S, tap n % S, read from the channel's window at
+// the tap's stride phase and offset, so BC S columns fill whole fragments where BC channels
+// alone would leave most of them idle. Waves split the output channels only (WC = 1).
+template <class T,
+          class Atom,
+          int BK,
+          int BC,
+          int BQ,
+          int FR,
+          int S,
+          int SW,
+          int DW,
+          int WK,
+          int VEC,
+          int XCD = 0>
+__device__ void k3WrwRowsSmallC(const K3Args& a)
+{
+    constexpr int WAVE = Atom::WAVE;
+    constexpr int THREADS = WK * WAVE;
+    constexpr int DIM = Atom::DIM, KA = Atom::KA, KPL = Atom::KPL;
+    constexpr int WTK = BK / WK;
+    constexpr int FK = WTK / DIM;
+    constexpr int FN = (BC * S + DIM - 1) / DIM; // (channel, tap) fragments
+    constexpr int KK = BQ / KA;
+    static_assert(FK * DIM * WK == BK && BQ % KA == 0, "K3 small-C tile");
+    typedef K3Tiles<T, K3_NCHW, BK, BC, BQ, FR, S, SW, DW, VEC, THREADS> Tiles;
+    static_assert(
+        k3LdsBytes(6, K3_NCHW, sizeof(T), BK, BC, BQ, FR, S, SW, DW, WK, 1, 0, 0, VEC, 0, 0)
+            == 2 * (Tiles::A_ELEMS + Tiles::B_ELEMS) * sizeof(T),
+        "K3 LDS arithmetic (ConvWrwGeom.h)");
+    constexpr int LDA = Tiles::LDA, LDB = Tiles::LDB;
+    constexpr int BUF = Tiles::A_ELEMS + Tiles::B_ELEMS;
+    static_assert(LDB % 2 == 0, "K3 small-C rows dword aligned");
+
+    __shared__ __attribute__((aligned(16))) T lds[2 * BUF];
+
+    const int tid = threadIdx.x;
+    const int lane = tid % WAVE, wk = tid / WAVE;
+    const int kg = a.k / a.groups, cg = a.c / a.groups;
+    unsigned bx, by, bz;
+    k3BlockIds<XCD>(bx, by, bz);
+    const int kTiles = (kg + BK - 1) / BK;
+    const int k0 = (bx % kTiles) * BK;
+    const int c0 = (bx / kTiles) * BC;
+    const int frows = a.ft * a.fr;
+    const int frGroups = (frows + FR - 1) / FR;
+    const int g = by / frGroups;
+    const int fr0 = (by % frGroups) * FR;
+    const long long begin = bz * a.stepsPerSplit;
+    const long long end = begin + a.stepsPerSplit < a.steps ? begin + a.stepsPerSplit : a.steps;
+
+    typename Atom::acc acc[FR][FK][FN];
+#pragma unroll
+    for(int f = 0; f < FR; ++f)
+#pragma unroll
+        for(int x = 0; x < FK; ++x)
+#pragma unroll
+            for(int y = 0; y < FN; ++y)
+                acc[f][x][y] = typename Atom::acc{};
+
+    // The lane's column per fragment: channel, tap, its phase row and offset in the B tile.
+    int nOff[FN];
+    bool nOk[FN];
+#pragma unroll
+    for(int y = 0; y < FN; ++y)
+    {
+        const int n = y * DIM + lane % DIM;
+        const int c = n / S, s = n % S;
+        nOk[y] = c < BC;
+        const int ph = (s * DW) % SW, off = (s * DW) / SW;
+        nOff[y] = nOk[y] ? (ph * BC + c) * LDB + off : 0;
+    }
+    int ft[FR], frr[FR];
+#pragma unroll
+    for(int f = 0; f < FR; ++f)
+    {
+        ft[f] = (fr0 + f) / a.fr;
+        frr[f] = (fr0 + f) - ft[f] * a.fr;
+    }
+    const int ys2 = static_cast<int>(a.ys[2]), ys3 = static_cast<int>(a.ys[3]);
+    const int xs2 = static_cast<int>(a.xs[2]), xs3 = static_cast<int>(a.xs[3]);
+    int n = 0, od = 0, oh = 0, chunk = 0;
+    if(begin < end)
+    {
+        const long long row = begin / a.chunks;
+        chunk = static_cast<int>(begin - row * a.chunks);
+        oh = static_cast<int>(row % a.ho);
+        const long long r2 = row / a.ho;
+        od = static_cast<int>(r2 % a.dout);
+        n = static_cast<int>(r2 / a.dout);
+    }
+    Tiles tiles;
+    tiles.init(a, tid, g, k0, c0, kg, cg);
+    auto issue = [&](bool live) {
+        live = live && n < a.n;
+        bool xOk[FR];
+        int xRow[FR];
+#pragma unroll
+        for(int f = 0; f < FR; ++f)
+        {
+            const int id = od * a.sd + ft[f] * a.dd - a.pd;
+            const int ih = oh * a.sh + frr[f] * a.dh - a.ph;
+            xOk[f] = live && fr0 + f < frows && id >= 0 && id < a.di && ih >= 0 && ih < a.hi;
+            xRow[f] = id * xs2 + ih * xs3;
+        }
+        tiles.load(a, live ? n : 0, chunk * BQ, live, od * ys2 + oh * ys3, xOk, xRow);
+    };
+    auto advance = [&]() {
+        if(++chunk == a.chunks)
+        {
+            chunk = 0;
+            if(++oh == a.ho)
+            {
+                oh = 0;
+                if(++od == a.dout)
+                {
+                    od = 0;
+                    ++n;
+                }
+            }
+        }
+    };
+
+    if(begin < end)
+    {
+        issue(true);
+        tiles.template wait<0, 0>();
+        tiles.store(a, lds, lds + Tiles::A_ELEMS, tid);
+        __syncthreads();
+    }
+    const int kb = Atom::template kBase<KPL>(lane);
+    int buf = 0;
+    for(long long step = begin; step < end; ++step)
+    {
+        advance();
+        issue(step + 1 < end);
+        const T* As = lds + buf * BUF;
+        const T* Bs = As + Tiles::A_ELEMS;
+#pragma unroll
+        for(int kk = 0; kk < KK; ++kk)
+        {
+            typename Atom::frag dyf[FK];
+#pragma unroll
+            for(int x = 0; x < FK; ++x)
+                dyf[x] = k3FragAt<Atom, T, 0>(As + (wk * WTK + lane % DIM) * LDA + kb
+                                              + x * DIM * LDA + kk * KA);
+#pragma unroll
+            for(int f = 0; f < FR; ++f)
+#pragma unroll
+                for(int y = 0; y < FN; ++y)
+                {
+                    typename Atom::frag bf
+                        = k3FragAtRt<Atom, T>(Bs + f * SW * BC * LDB + kk * KA + kb, nOff[y]);
+                    bf = nOk[y] ? bf : typename Atom::frag{};
+#pragma unroll
+                    for(int x = 0; x < FK; ++x)
+                        acc[f][x][y] = Atom::mma(dyf[x], bf, acc[f][x][y]);
+                }
+        }
+        tiles.template wait<0, 0>();
+        if(step + 1 < end)
+        {
+            T* nA = lds + (buf ^ 1) * BUF;
+            tiles.store(a, nA, nA + Tiles::A_ELEMS, tid);
+        }
+        __syncthreads();
+        buf ^= 1;
+    }
+
+    // Partials [split][g][tap][k][c]: column n is channel c0 + n / S, tap row fr0 + f, tap s.
+    const long long kc = static_cast<long long>(kg) * cg;
+    float* out = a.partial + bz * a.partialElems + static_cast<long long>(g) * frows * S * kc;
+#pragma unroll
+    for(int f = 0; f < FR; ++f)
+    {
+        if(fr0 + f >= frows)
+            continue;
+#pragma unroll
+        for(int y = 0; y < FN; ++y)
+        {
+            const int nn = y * DIM + lane % DIM;
+            const int c = c0 + nn / S, s = nn % S;
+            if(nn / S >= BC || c >= cg)
+                continue;
+#pragma unroll
+            for(int x = 0; x < FK; ++x)
+#pragma unroll
+                for(int e = 0; e < Atom::ACC; ++e)
+                {
+                    const int k = k0 + wk * WTK + x * DIM + Atom::dRow(lane, e);
+                    if(k < kg)
+                        out[static_cast<long long>((fr0 + f) * S + s) * kc
+                            + static_cast<long long>(k) * cg + c]
+                            = acc[f][x][y][e];
+                }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Row-ring kernel (height stride 1). A block owns BK output channels, BC input channels, one
 // depth tap t and all R x S taps of it. The reduction runs along tracks (image, output depth,

@@ -78,6 +78,7 @@ inline constexpr int64_t LOOP_RING_DMA = 2; ///< row ring with LDS DMA (gfx950)
 inline constexpr int64_t LOOP_RING_FMA = 3; ///< row ring on FMA (exact fp32)
 inline constexpr int64_t LOOP_ROWS_FMA = 4; ///< output rows on FMA (exact fp32, any stride)
 inline constexpr int64_t LOOP_DIRECT = 5; ///< direct (gfx950, 16-bit, persistent grid)
+inline constexpr int64_t LOOP_ROWS_SMALLC = 6; ///< output rows, (channel, tap) N axis (stems)
 
 /// The activation layouts (CONV_K3_LAYOUT): the graph's x and dy are channels-first (0) or
 /// channels-last (1: transposed into LDS; 2: kept channels-last, read with LDS transpose reads).
@@ -264,6 +265,10 @@ DirectPlan directPlanFor(int64_t tiles,
  * height dilation (or a one-row filter), bc and bk powers of two from 32 to 512 whose rows have a
  * conflict-free rotation (ConvWrwGeom.h), bpu 1; its grid follows directPlanFor. Every other
  * loop takes wq 0.
+ *
+ * Loop 6 (small-C rows): loop 0 on a matrix atom with the N axis the (input channel, filter-width
+ * tap) pairs: channels-first, at most 16 input channels per group, bc at most 16, wc 1, bk whole
+ * fragments per wave, bq whole atom steps.
  */
 std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,
