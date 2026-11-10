@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from ._compiler_tools import require_tools_or_skip
+from ._compiler_test_utils import require_tools_or_skip
 
 # An installed test tree carries a copy of the two headers under ``hkp_packs/``
 # (``platform/CMakeLists.txt`` installs it); a source checkout reads the provider's.

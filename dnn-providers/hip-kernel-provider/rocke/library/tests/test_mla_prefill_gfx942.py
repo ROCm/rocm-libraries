@@ -35,7 +35,7 @@ from kernels.mla.mla_prefill_gfx942 import (
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
-from ._compiler_tools import require_tools_or_skip
+from ._compiler_test_utils import require_tools_or_skip
 
 
 def _spec(**kw) -> MlaPrefillSpec:

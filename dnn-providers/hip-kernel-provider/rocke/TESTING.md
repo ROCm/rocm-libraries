@@ -764,7 +764,7 @@ take the compiler paths; `rocke_library_mla_pytest` and
 entry needs the paths and the requirement for the reduce-LDS comgr cases in
 `test_attention_tiled_3d_reduce_lds.py`, which otherwise skip silently on a missing
 `llvm-objdump` instead of failing. Both entries' tests apply the requirement through
-one helper, `require_tools_or_skip` in `library/tests/_compiler_tools.py`.
+one helper, `require_tools_or_skip` in `library/tests/_compiler_test_utils.py`.
 
 The table describes values added by the generated manifest. CTest still passes
 through its parent process environment, so a caller that explicitly exports

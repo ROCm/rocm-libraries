@@ -1015,10 +1015,12 @@ if(ROCKE_INSTALL_TESTS)
            "  TIMEOUT 180)\n")
 
     # Library MLA CPU tests (no GPU required): kernel lowering/admission, dispatch
-    # wiring, the IR golden, the fp32 oracle, the benchmark shape loader, and the
-    # shared read-ahead helper. The prefill occupancy / agpr_acc guards compile
+    # wiring, the IR golden, the fp32 oracle, the benchmark shape loader, the
+    # shared read-ahead helper, and the compile-test skip policy. The prefill
+    # occupancy / agpr_acc guards compile
     # through comgr and read the code object with llvm-objdump, so the entry also
-    # takes the compiler environment; with it they fail rather than skip. Same
+    # takes the compiler environment; with it they fail rather than skip, and the
+    # skip-policy tests check that they do. Same
     # PYTHONPATH contract as the conv entry above; the staged library tree carries
     # kernels/mla, dispatch/mla, builders/mla, benchmarks/common/mla_shapes.py and
     # tests/golden/mla_prefill_gfx942_ir_sha256.json.
@@ -1028,7 +1030,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_mla_prefill_gfx942_golden.py"
         "tests/library/tests/test_mla_reference.py"
         "tests/library/tests/test_mla_benchmark_shapes.py"
-        "tests/library/tests/test_read_ahead.py")
+        "tests/library/tests/test_read_ahead.py"
+        "tests/library/tests/test_compiler_test_utils.py")
     set(_ROCKE_LIBRARY_MLA_TESTS "")
     foreach(_rocke_mla_test ${_ROCKE_LIBRARY_MLA_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_MLA_TESTS
