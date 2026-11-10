@@ -292,6 +292,31 @@ def _half_gaps(body):
     return [half[:-1] for half in halves]
 
 
+def test_c1_scale_refreshes_sit_at_their_war_floors(dual_src):
+    """Each next-C0 scale refresh issues in the first legal C1 gap past
+    the ninth MFMA after its last C1 reader, and takes the back-edge gap
+    only when that is its floor."""
+    body = _mainloop_lines(dual_src)
+    gap, c1Start, refreshes = -1, None, []
+    for ln in body:
+        code = ln.split("//")[0].strip()
+        if "MAINLOOP_C1 start" in ln:
+            c1Start = gap + 1
+        if code.startswith("v_mfma"):
+            gap += 1
+        elif "prior C1 shadow" in ln:
+            last = int(re.search(r"last-use=M(\d+)", ln).group(1))
+            refreshes.append((gap, c1Start + last + 8))
+    backEdge = gap
+    assert refreshes
+    gaps = _mfma_gap_lines(body)
+    for at, floor in refreshes:
+        assert floor <= at <= backEdge, (at, floor)
+        assert sum(code.startswith("ds_read") for code in gaps[at]) <= 2, gaps[at]
+        assert at < backEdge or floor == backEdge, (at, floor)
+    assert [floor for _at, floor in refreshes] == [at for at, _floor in refreshes]
+
+
 def test_loads_share_a_gap_with_reads_only_when_no_free_gap_is_left(dual_src):
     """A half puts a load beside a ds_read only when it has fewer gaps
     after its barrier that could take a load alone than loads: gaps with

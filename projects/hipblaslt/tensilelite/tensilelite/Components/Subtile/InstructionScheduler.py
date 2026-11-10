@@ -630,17 +630,103 @@ def dropEntryScaleReads(emitted3d, entryRegisters):
                         emitted.instructionMetadata = keptMeta
 
 
+# Gap tiers for a C0-entry scale refresh, tried in order: (may share a
+# gap with m0 or a direct-to-LDS load, may sit fewer than
+# _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT MFMAs ahead of the next
+# local-read wait, may take the back-edge gap, may share a barrier or a
+# VMEM wait, ds_reads per gap).  A read follows a local-read wait in its
+# own gap.  A cap of None takes only a gap with no other instruction, up
+# to every follower slot.
+_SCALE_SHADOW_TIERS = (
+    (False, False, False, False, _MXFP8_DATA_DS_READS),
+    (False, True, False, False, _MXFP8_DATA_DS_READS),
+    (True, False, False, False, _MXFP8_DATA_DS_READS),
+    (True, True, False, False, _MXFP8_DATA_DS_READS),
+    (True, True, True, False, _MXFP8_DATA_DS_READS),
+    (True, True, True, True, _MXFP8_DATA_DS_READS),
+    (True, True, True, True, _MXFP8_DATA_DS_READ_OVERFLOW),
+    (True, True, True, True, None),
+)
+
+
+def placeScaleShadowReads(
+        entries, gaps, start, base=0, backEdge=None,
+        tiers=_SCALE_SHADOW_TIERS,
+        warGap=_SCALE_SOURCE_WAR_MFMA_GAP,
+        ignoreSourceWar=False):
+    """Choose the C1 MFMA gap of each C0-entry scale refresh.
+
+    ``gaps[i]`` holds the instructions after body MFMA ``base + i``, and
+    ``gaps[backEdge]`` is the one the loop branch follows.  A local-read
+    wait is taken to follow the last gap: the next C0 entry, or the head
+    of the next partition.  Reads go in first-C0-use order, SA before SB,
+    and each takes the earliest gap at or after ``start`` and its WAR
+    floor in the first tier that has room.  The floor puts the direct
+    write ``warGap`` issue positions past the scale's last C1 consumer.
+    Returns ``([(index, entry)], unplaced)``.
+    """
+    reserved = [0] * len(gaps)
+    drains = [
+        index for index, group in enumerate(gaps)
+        if any(_isWaitCnt(x) and (getattr(x, "waitAll", False) or x.dscnt >= 0)
+               for x in group)] + [len(gaps)]
+
+    def fits(tier, index):
+        shareLoad, nearDrain, takeBackEdge, shareSync, readCap = tier
+        group = [inst for inst in gaps[index] if not isinstance(inst, TextBlock)]
+        if index == backEdge and not takeBackEdge:
+            return False
+        if not nearDrain and next(d for d in drains if d > index) - index < (
+                _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT):
+            return False
+        if not shareSync and any(_isBarrier(x) or (_isWaitCnt(x) and (
+                getattr(x, "waitAll", False) or x.vlcnt >= 0 or x.vscnt >= 0))
+                for x in group):
+            return False
+        if not shareLoad and any(_isDtlLoad(x) or _isM0Update(x) for x in group):
+            return False
+        if readCap is None:
+            return not group and reserved[index] < _MXFP8_FOLLOWER_SLOTS
+        if len(group) + reserved[index] >= _MXFP8_FOLLOWER_SLOTS:
+            return False
+        return sum(map(_isDsRead, group)) + reserved[index] < readCap
+
+    placed, unplaced = [], []
+    for entry in sorted(
+            entries,
+            key=lambda entry: (
+                entry["firstC0Mfma"],
+                0 if entry["tensor"] == "SA" else 1,
+                entry["canonicalVgpr"])):
+        # A staging VGPR is not a source of the in-flight MFMAs, so the
+        # read only has to follow the LDS barrier.
+        earliest = start if ignoreSourceWar else max(
+            start, entry["lastC1Mfma"] + warGap - 1 - base)
+        target = next(
+            (index for tier in tiers
+             for index in range(earliest, len(gaps)) if fits(tier, index)),
+            None)
+        if target is None:
+            unplaced.append(entry)
+            continue
+        placed.append((target, entry))
+        reserved[target] += 1
+    return placed, unplaced
+
+
 def appendC1ScaleShadowReads(
         schedule, plan, finalPartitionMfmas,
         warGap=_SCALE_SOURCE_WAR_MFMA_GAP,
         ignoreSourceWar=False):
-    """Refresh C0-entry scales in dependency-safe C1 P3 MFMA shadows.
+    """Refresh C0-entry scales in dependency-safe C1 tail MFMA shadows.
 
-    Prefer an empty final-partition suffix.  A scale ds_read then counts
-    toward the same two-read cap as a data read, and uses three only when
-    a two-read schedule cannot fit.  An empty shadow may hold as many
-    scale reads as it has follower slots.  Every direct write issues at
-    least ``warGap`` positions after that scale's final C1 consumer.
+    The tail is the last ``finalPartitionMfmas`` MFMAs, from their last
+    barrier on.  placeScaleShadowReads puts each read at its WAR floor or
+    the first gap after it that keeps the two-read cap, holds no load,
+    barrier or VMEM wait, is not the back-edge gap and leaves the next
+    local-read wait a few MFMAs away.  Only when no such gap is left does
+    it give up the wait distance, then the load, the back-edge gap, the
+    barrier or VMEM wait, and the two-read cap, in that order.
 
     Returns ``None`` when the final partition has no barrier to hang the
     reads on.  Otherwise returns ``(unplaced, c1Mfmas)``.  Unplaced
@@ -671,120 +757,23 @@ def appendC1ScaleShadowReads(
     ]
     if not barrierShadows:
         return None
-    afterBarrier = barrierShadows[-1]
-
-    def canAppend(index, requireEmpty, reserved, maxLocalReads):
-        group = followers[index]
-        if requireEmpty and _physicalInstructionCount(group):
-            return False
-        if (_physicalInstructionCount(group) + reserved[index]
-                >= _MXFP8_FOLLOWER_SLOTS):
-            return False
-        localReads = sum(
-            isinstance(inst, LocalReadInstruction) for inst in group)
-        return localReads + reserved[index] < maxLocalReads
-
-    orderedPlan = sorted(
-        plan,
-        key=lambda entry: (
-            entry["lastC1Mfma"],
-            0 if entry["tensor"] == "SA" else 1,
-            entry["canonicalVgpr"]))
-
-    occupied = [
-        index for index in range(finalStart, len(followers))
-        if _physicalInstructionCount(followers[index])
-    ]
-    emptyTailStart = occupied[-1] + 1 if occupied else finalStart
-
-    def makePlacement(start, requireEmpty, maxLocalReads):
-        placements = []
-        reserved = [0] * len(followers)
-        searchFrom = max(start, finalStart, afterBarrier)
-        for entry in orderedPlan:
-            # A staging VGPR is not a source of the in-flight MFMAs, so the
-            # read only has to follow the LDS barrier.
-            sourceEarliest = (
-                searchFrom if ignoreSourceWar
-                else entry["lastC1Mfma"] + warGap - 1)
-            earliest = max(searchFrom, sourceEarliest)
-            target = next(
-                (
-                    index for index in range(earliest, len(followers))
-                    if canAppend(
-                        index, requireEmpty, reserved, maxLocalReads)
-                ),
-                None)
-            if target is None:
-                return None
-            placements.append((target, entry))
-            reserved[target] += 1
-            searchFrom = target
-        return placements
-
-    placements = makePlacement(
-        emptyTailStart, requireEmpty=True,
-        maxLocalReads=_MXFP8_DATA_DS_READS)
-    if placements is None:
-        placements = makePlacement(
-            finalStart, requireEmpty=False,
-            maxLocalReads=_MXFP8_DATA_DS_READS)
-    if placements is None:
-        placements = makePlacement(
-            finalStart, requireEmpty=False,
-            maxLocalReads=_MXFP8_DATA_DS_READ_OVERFLOW)
-    def commit(selected):
-        for target, entry in selected:
-            read = copy.deepcopy(entry["readTemplate"])
-            read.comment = (
-                f"{getattr(read, 'comment', '')}; "
-                "refresh next C0 entry scale in prior C1 shadow; "
-                f"{entry['tensor']} canonical=v{entry['canonicalVgpr']} "
-                f"last-use=M{entry['lastC1Mfma']}"
-            )
-            followers[target].append(read)
-        items = list(prefix)
-        for mfma, group in zip(mfmas, followers):
-            items.append(mfma)
-            items.extend(group)
-        schedule.setItems(items)
-
-    if placements is not None:
-        commit(placements)
-        return [], len(mfmas)
-
-    # The strict caps could not take every refresh.  Keep the ones that
-    # still land in C1.  An empty shadow is scale-only, so it can use
-    # every follower slot; a shadow that already has data reads stays
-    # on the overflow cap.
-    placements = []
-    leftovers = []
-    reserved = [0] * len(followers)
-    searchFrom = max(finalStart, afterBarrier)
-
-    def readCap(index):
-        if _physicalInstructionCount(followers[index]) == 0:
-            return _MXFP8_FOLLOWER_SLOTS
-        return _MXFP8_DATA_DS_READ_OVERFLOW
-
-    for entry in orderedPlan:
-        sourceEarliest = (
-            searchFrom if ignoreSourceWar
-            else entry["lastC1Mfma"] + warGap - 1)
-        earliest = max(searchFrom, sourceEarliest)
-        target = next(
-            (
-                index for index in range(earliest, len(followers))
-                if canAppend(index, False, reserved, readCap(index))
-            ),
-            None)
-        if target is None:
-            leftovers.append(entry)
-            continue
-        placements.append((target, entry))
-        reserved[target] += 1
-        searchFrom = target
-    commit(placements)
+    placements, leftovers = placeScaleShadowReads(
+        plan, followers, barrierShadows[-1], backEdge=len(followers) - 1,
+        warGap=warGap, ignoreSourceWar=ignoreSourceWar)
+    for target, entry in placements:
+        read = copy.deepcopy(entry["readTemplate"])
+        read.comment = (
+            f"{getattr(read, 'comment', '')}; "
+            "refresh next C0 entry scale in prior C1 shadow; "
+            f"{entry['tensor']} canonical=v{entry['canonicalVgpr']} "
+            f"last-use=M{entry['lastC1Mfma']}"
+        )
+        followers[target].append(read)
+    items = list(prefix)
+    for mfma, group in zip(mfmas, followers):
+        items.append(mfma)
+        items.extend(group)
+    schedule.setItems(items)
     return leftovers, len(mfmas)
 
 
@@ -3452,7 +3441,7 @@ def _requestBundles(requests):
 def _scheduleHalfDisjointCell(
         emittedModules, pathOrders, preMfmaOrders, mfmas,
         minGapDsReadToWait, earliestWriteShadow=None, mfmaBase=0,
-        tailScaleReads=0):
+        scaleShadows=None):
     """Schedule one partition of a half-disjoint body.
 
     The VMEM wait, local-read drain, and barrier that open a half follow
@@ -3468,8 +3457,11 @@ def _scheduleHalfDisjointCell(
     reads left free, so a load issues alone.  When too few gaps are free,
     only the requests left over take gaps with the fewest reads; when no
     such placement fits, requests are spaced over every gap after the
-    barrier.  tailScaleReads scale reads are appended after the cell, two
-    per gap; the gaps they need stay free of requests.
+    barrier.  appendC1ScaleShadowReads later adds the ``scaleShadows``
+    C0-entry scale refreshes to the C1 tail.  The gaps of this cell that
+    placeScaleShadowReads gives them without sharing a load stay free of
+    requests, and the entries placed here are removed from the list, so
+    a later tail cell reserves only the rest.
     """
     spi = _MXFP8_FOLLOWER_SLOTS
     syncItems, prefix, reads, requests, others = _splitHalfDisjointCell(
@@ -3530,26 +3522,53 @@ def _scheduleHalfDisjointCell(
         return [item[1] for slot in placer._placed[interval * spi:(interval + 1) * spi]
                 for item in slot if not isinstance(item[1], TextBlock)]
 
-    def emptySlots(interval):
-        return spi - sum(map(len, placer._placed[interval * spi:(interval + 1) * spi]))
+    def loadable(interval):
+        insts = intervalInsts(interval)
+        return (not any(_isWaitCnt(x) or _isBarrier(x) or _isVALU(x) for x in insts)
+                and len(insts) <= spi - 2)
 
-    # The items after the last load need empty slots behind its m0 and
-    # load, ahead of the tail scale reads.
-    scaleTail = max(
-        firstInterval, intervals - math.ceil(tailScaleReads / _MXFP8_DATA_DS_READS))
-    tailEnd = scaleTail
+    # The prefix sits in the gap ahead of the cell's first MFMA, so a
+    # cell without the half's barrier offers that gap too.  A scale
+    # refresh keeps a gap a request could take only while the requests
+    # have such gaps to spare.
+    shadowReads = [0] * intervals
+    if scaleShadows:
+        opensHalf = any(_isBarrier(inst) for _, inst in syncItems)
+        reservedShadows, scaleShadows[:] = placeScaleShadowReads(
+            scaleShadows,
+            [[inst for _, inst in prefix]] + [intervalInsts(i) for i in range(intervals)],
+            firstInterval + 1 if opensHalf else 0, base=mfmaBase - 1,
+            tiers=[tier for tier in _SCALE_SHADOW_TIERS if not tier[0]])
+        spare = sum(
+            loadable(interval) and sum(map(_isDsRead, intervalInsts(interval)))
+            <= _MXFP8_DATA_DS_READ_OVERFLOW
+            for interval in range(firstInterval, intervals)) - len(bundles)
+        for gap, _entry in reservedShadows:
+            interval = gap - 1
+            if interval < 0:
+                continue
+            if not shadowReads[interval] and loadable(interval):
+                if spare <= 0:
+                    continue
+                spare -= 1
+            shadowReads[interval] += 1
+
+    def emptySlots(interval):
+        return spi - shadowReads[interval] - sum(
+            map(len, placer._placed[interval * spi:(interval + 1) * spi]))
+
+    # The items after the last load need empty slots behind its m0 and load.
+    tailEnd = intervals
     while tailEnd > firstInterval and emptySlots(tailEnd - 1) - 2 + sum(
-            map(emptySlots, range(tailEnd, scaleTail))) < len(pending):
+            map(emptySlots, range(tailEnd, intervals))) < len(pending):
         tailEnd -= 1
 
     def loadGaps(reads):
         """Gaps after the barrier with this many ds_reads and room for a request."""
         return [
             interval for interval in range(firstInterval, tailEnd)
-            if sum(map(_isDsRead, intervalInsts(interval))) == reads
-            and not any(_isWaitCnt(x) or _isBarrier(x) or _isVALU(x)
-                        for x in intervalInsts(interval))
-            and len(intervalInsts(interval)) <= spi - 2]
+            if not shadowReads[interval] and loadable(interval)
+            and sum(map(_isDsRead, intervalInsts(interval))) == reads]
 
     def evenly(gaps, count):
         return [gaps[index * len(gaps) // count] for index in range(count)]
@@ -3601,7 +3620,9 @@ def _scheduleHalfDisjointCell(
             break
         chosen += gaps
     spaced = evenly(
-        list(range(firstInterval, max(intervals, firstInterval + 1))), len(bundles))
+        [interval for interval in range(firstInterval, max(intervals, firstInterval + 1))
+         if interval >= intervals or not shadowReads[interval]] or [firstInterval],
+        len(bundles))
     attempts += [(spaced, None, True), (spaced, None, False)]
     saved = ([list(slot) for slot in placer._placed], list(placer._firstPos),
              list(placer._lastPos), dict(rules.__dict__))
@@ -4446,8 +4467,7 @@ def instructionScheduleHalf(
             if c:
                 result.add(cellComments[c - 1])
             result.add(_scheduleHalfDisjointCell(
-                *cell, minGapDsReadToWait, earliestWriteShadow, base,
-                tailScaleReads if c == len(cells) - 1 else 0))
+                *cell, minGapDsReadToWait, earliestWriteShadow, base))
             base += len(cell[3])
         return result
 
@@ -4477,7 +4497,7 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
                       retainAllLocalReads: bool = False,
                       vmemBoundary: Optional[int] = None,
                       halfDisjoint: bool = False,
-                      tailScaleReads: int = 0):
+                      scaleShadows=None):
     """Interleave non-MFMA instructions between MFMAs using 2 slots/interval.
 
     Rules (shared):
@@ -4511,7 +4531,7 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
             and _isMx8Schedule(mfmas)):
         return _scheduleHalfDisjointCell(
             emittedModules, pathOrders, preMfmaOrders, mfmas,
-            minGapDsReadToWait, earliestWriteShadow, mfmaBase, tailScaleReads)
+            minGapDsReadToWait, earliestWriteShadow, mfmaBase, scaleShadows)
     # Only the dual-period uniform epoch reorders partition zero. Every other
     # caller keeps the placer below, including MXFP4 and single-partition MXFP8.
     if (uniformPgrEpoch and partitionPrefetch and not multiDU

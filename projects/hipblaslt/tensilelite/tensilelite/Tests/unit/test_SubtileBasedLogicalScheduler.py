@@ -6271,6 +6271,128 @@ class TestLateScalePrefetch:
         assert "keep C0 scale read" in items[read_at].comment
 
 
+class TestC1ScaleShadowReads:
+    """Where appendC1ScaleShadowReads puts the next C0's entry scales."""
+
+    MFMAS = 24
+    BARRIER = 12
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _entry(register, tensor, lastUse, firstUse):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32
+        return {
+            "canonicalVgpr": register,
+            "tensor": tensor,
+            "readTemplate": DSLoadB32(
+                dst=vgpr(register), src=vgpr(12), ds=DSModifiers(offset=0),
+                comment=f"{tensor} v{register}"),
+            "firstC0Mfma": firstUse,
+            "lastC1Mfma": lastUse,
+        }
+
+    def _place(self, entries, reads=(), loads=(), waits=()):
+        """Body gap of each refresh, in issue order, and the unplaced entries.
+
+        Gap i follows MFMA i; the barrier opens the second half at gap 12,
+        and the last gap is the back edge."""
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import (
+            BufferLoadB128, DSLoadB128, MXMFMAInstruction, SAddU32, SBarrier,
+            SWaitCnt)
+        from rocisa.enum import InstType
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            appendC1ScaleShadowReads)
+        body = Module("C1")
+        for index in range(self.MFMAS):
+            body.add(MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(84, 8),
+                b=vgpr(180, 8), mxsa=vgpr(17), mxsb=vgpr(246)))
+            if index == self.BARRIER:
+                body.add(SWaitCnt(vlcnt=2, comment="vmcnt"))
+                body.add(SBarrier(comment="barrier"))
+            if index in waits:
+                body.add(SWaitCnt(dscnt=0, comment="drain"))
+            if index in loads:
+                body.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"),
+                                 src1=0, comment="m0"))
+                body.add(BufferLoadB128(
+                    dst=None, vaddr=vgpr(1), saddr=sgpr("SrdA", 4), soffset=0,
+                    mubuf=MUBUFModifiers(offen=True, lds=True), comment="load"))
+            for _ in range(reads.count(index)):
+                body.add(DSLoadB128(dst=vgpr(100, 4), src=vgpr(7),
+                                    ds=DSModifiers(offset=0), comment="data"))
+        placed = appendC1ScaleShadowReads(
+            body, entries, self.MFMAS - self.BARRIER)
+        assert placed is not None
+        gap, where = -1, []
+        for inst in body.flatitems():
+            if isinstance(inst, MXMFMAInstruction):
+                gap += 1
+            elif "prior C1 shadow" in (getattr(inst, "comment", "") or ""):
+                where.append((gap, inst.comment.split(";")[0]))
+        return where, placed[0]
+
+    def test_each_refresh_takes_its_war_floor(self):
+        entries = [self._entry(17, "SA", 5, 0), self._entry(18, "SA", 7, 4),
+                   self._entry(246, "SB", 10, 0)]
+        where, left = self._place(entries)
+        assert not left
+        # Floor = last C1 reader + 9 - 1: the write is the ninth issue.
+        assert sorted(where) == [(13, "SA v17"), (15, "SA v18"), (18, "SB v246")]
+        for gap, name in where:
+            last = next(e["lastC1Mfma"] for e in entries
+                        if name.endswith(f"v{e['canonicalVgpr']}"))
+            assert gap - last >= 8
+        # Every refresh is in C1, ahead of the next C0's head wait and use.
+        assert all(gap < self.MFMAS for gap, _ in where)
+
+    def test_refreshes_go_in_first_c0_use_order(self):
+        # Both floors reach gap 13, which has room for one more read. The
+        # SB scale is consumed by C0 M0 and wins it, though its last C1
+        # reader is later.
+        where, _left = self._place(
+            [self._entry(17, "SA", 4, 4), self._entry(246, "SB", 5, 0)],
+            reads=[13])
+        assert where == [(13, "SB v246"), (14, "SA v17")]
+
+    def test_refresh_avoids_loads_and_the_back_edge(self):
+        # Gaps 16..19 issue loads, so the read past its floor takes 20.
+        where, _left = self._place(
+            [self._entry(17, "SA", 8, 0)], loads=[16, 17, 18, 19])
+        assert where == [(20, "SA v17")]
+        # Past gap 20 only load gaps are left before the back edge (23):
+        # the read shares one of them instead.
+        where, _left = self._place(
+            [self._entry(17, "SA", 13, 0)], loads=[21, 22])
+        assert where == [(21, "SA v17")]
+        where, _left = self._place([self._entry(17, "SA", 13, 0)])
+        assert where == [(21, "SA v17")]
+
+    def test_refresh_keeps_clear_of_the_next_drain(self):
+        # A drain at gap 18 retires a read issued in 15..17 a few MFMAs
+        # later, so the read follows that drain instead.
+        where, _left = self._place([self._entry(17, "SA", 7, 0)], waits=[18])
+        assert where == [(18, "SA v17")]
+        where, _left = self._place([self._entry(17, "SA", 6, 0)], waits=[18])
+        assert where == [(14, "SA v17")]
+
+    def test_refresh_stays_out_of_the_barrier_gap(self):
+        where, _left = self._place([self._entry(17, "SA", 0, 0)])
+        assert where == [(13, "SA v17")]
+
+
 class TestHalfDisjointCell:
     """Placement inside one partition cell of a half-disjoint MXFP8 body."""
 
@@ -6335,7 +6457,8 @@ class TestHalfDisjointCell:
         ])
 
     @staticmethod
-    def _schedule(paths, mfmas, preMfma=(), writeFloor=None, tailScaleReads=0):
+    def _schedule(paths, mfmas, preMfma=(), writeFloor=None, scaleShadows=None,
+                  mfmaBase=0):
         from tensilelite.Components.Subtile.InstructionScheduler import (
             _scheduleHalfDisjointCell)
         modules, orders = [], []
@@ -6348,8 +6471,8 @@ class TestHalfDisjointCell:
             orders.append(order)
         pre = orders[:len(preMfma)]
         return _scheduleHalfDisjointCell(
-            modules, orders[len(preMfma):], pre, mfmas, 4, writeFloor or {}, 0,
-            tailScaleReads)
+            modules, orders[len(preMfma):], pre, mfmas, 4, writeFloor or {},
+            mfmaBase, scaleShadows)
 
     @staticmethod
     def _gaps(module):
@@ -6548,12 +6671,14 @@ class TestHalfDisjointCell:
         assert loads[:6] == [1] * 6
         assert longest == 6
 
-    def _reads_and_loads(self, reads, bundles, intervals, tailScaleReads=0):
+    def _reads_and_loads(self, reads, bundles, intervals, scaleShadows=None,
+                         mfmaBase=0):
         """Reads per gap, loads per gap, and the load tiles in gap order."""
         path = self._opener() + [self._data_read(4 + t) for t in range(reads)]
         scheduled = self._schedule(
             [path] + [[self._load(t)] for t in range(bundles)],
-            self._mfmas(intervals + 1), tailScaleReads=tailScaleReads)
+            self._mfmas(intervals + 1), scaleShadows=scaleShadows,
+            mfmaBase=mfmaBase)
         _prefix, gaps = self._gaps(scheduled)
         gaps = gaps[:intervals]
         readCount = [sum(c.startswith("B MT=n tile=") for c in gap) for gap in gaps]
@@ -6602,12 +6727,21 @@ class TestHalfDisjointCell:
         assert not any(r and l for r, l in zip(reads, loads)), (reads, loads)
         assert self._longest_run(loads) <= 5, loads
 
-    def test_tail_scale_reads_keep_their_gaps_free_of_loads(self):
+    def test_scale_refresh_gaps_stay_free_of_loads(self):
         _reads, loads = self._reads_and_loads(reads=4, bundles=3, intervals=9)
-        assert any(loads[7:])
-        _reads, loads = self._reads_and_loads(
-            reads=4, bundles=3, intervals=9, tailScaleReads=4)
-        assert sum(loads) == 3 and not any(loads[7:]), loads
+        taken = [i for i, load in enumerate(loads) if load]
+        assert taken[1] <= 5, loads
+        # The cell starts at body MFMA 40. The refresh floor is the gap of
+        # the second load: last reader + 9 - 1.
+        floor = taken[1]
+        shadows = [TestC1ScaleShadowReads._entry(17, "SA", 40 + floor - 8, 0),
+                   TestC1ScaleShadowReads._entry(18, "SA", 60, 4)]
+        reads, loads = self._reads_and_loads(
+            reads=4, bundles=3, intervals=9, scaleShadows=shadows, mfmaBase=40)
+        assert sum(loads) == 3 and not loads[floor], (floor, loads)
+        assert not any(r and l for r, l in zip(reads, loads)), (reads, loads)
+        # The first is reserved here; the second is past this cell.
+        assert [entry["canonicalVgpr"] for entry in shadows] == [18]
 
     def test_valu_without_a_legal_slot_is_still_emitted(self):
         path = self._opener() + [self._swap()]
