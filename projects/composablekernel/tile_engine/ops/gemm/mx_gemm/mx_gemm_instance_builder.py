@@ -21,13 +21,36 @@ def _import_gemm_kernel_builder():
     gemm_builder_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gemm_builder_module)
 
-    return (
-        gemm_builder_module.GemmKernelBuilder,
-        gemm_builder_module._validation_utils.GEMM_MX_PIPELINES_BY_ARCH,
+    return gemm_builder_module.GemmKernelBuilder, gemm_builder_module._validation_utils
+
+
+GemmKernelBuilder, _validation_utils = _import_gemm_kernel_builder()
+GEMM_MX_PIPELINES_BY_ARCH = _validation_utils.GEMM_MX_PIPELINES_BY_ARCH
+V4_PIPELINE = _validation_utils.MX_TDM_V4_PIPELINE
+mx_tdm_v4 = _validation_utils.load_mx_tdm_v4()
+
+
+def _parse_tile_config(tile_str):
+    tile_dims, warp_dims, warp_tile_dims = (
+        [int(v) for v in group.split("x")] for group in tile_str.split("_")
     )
+    keys = ("tile", "warp", "warp_tile")
+    dims = (tile_dims, warp_dims, warp_tile_dims)
+    return {f"{k}_{d}": v[i] for k, v in zip(keys, dims) for i, d in enumerate("mnk")}
 
 
-GemmKernelBuilder, GEMM_MX_PIPELINES_BY_ARCH = _import_gemm_kernel_builder()
+def _parse_trait_combo(trait_str):
+    # From the right, so pipeline names may contain underscores.
+    parts = trait_str.split("_")
+    return (
+        "_".join(parts[:-6]),  # pipeline
+        parts[-6],  # epilogue
+        parts[-5],  # scheduler
+        parts[-4] == "True",  # pad_m
+        parts[-3] == "True",  # pad_n
+        parts[-2] == "True",  # pad_k
+        parts[-1] == "True",  # persistent
+    )
 
 
 class MxGemmKernelBuilder(GemmKernelBuilder):
@@ -67,6 +90,238 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             and not (arch == "gfx1250" and (combo[5] or combo[6]))  # pad_k, persistent
         ]
 
+    # comp_tdm_v4 (rocKE's mx_gemm) carries a tuning besides its tile and traits: rocKE's
+    # schedule knobs and the shape traits of the instance, from the optional "tuning_config"
+    # section (the product of its values; rocKE's defaults when absent). Other pipelines take no
+    # tuning.
+
+    def _v4_tunings(self):
+        return mx_tdm_v4.expand_tuning_config(self.config.get("tuning_config"))
+
+    def _v4_spec(self, tile_config, tuning):
+        out = mx_tdm_v4.TE_OUT_DTYPES[self._c_datatype()]
+        return mx_tdm_v4.spec_from_tile(
+            tile_config, tuning, self.datatype, self.datatype, out
+        )
+
+    def _v4_reject_reason(self, tile_config, tuning):
+        keys = ("tile", "warp", "warp_tile")
+        dims = [tile_config[f"{k}_{d}"] for k in keys for d in "mnk"]
+        return _validation_utils.mx_tdm_v4_reject_reason(
+            *dims,
+            self.datatype,
+            self.datatype,
+            self._c_datatype(),
+            self.gpu_target,
+            tuning,
+        )
+
+    def _v4_name_suffix(self, tile_config, tuning):
+        return mx_tdm_v4.instance_name_suffix(
+            self._v4_spec(tile_config, tuning), tuning
+        )
+
+    def _get_sampled_kernel_list(self):
+        """The parent's enumeration with every comp_tdm_v4 entry expanded over the valid
+        tunings (key "tuning"; None for other pipelines), then sampled."""
+        max_instances, self.max_instances = self.max_instances, None
+        try:
+            kernels = super()._get_sampled_kernel_list()
+        finally:
+            self.max_instances = max_instances
+        expanded = []
+        for kernel in kernels:
+            if kernel["trait_combo"][0] != V4_PIPELINE:
+                expanded.append({**kernel, "tuning": None})
+                continue
+            for tuning in self._v4_tunings():
+                if self._v4_reject_reason(kernel["tile_config"], tuning):
+                    continue
+                suffix = self._v4_name_suffix(kernel["tile_config"], tuning)
+                expanded.append(
+                    {**kernel, "name": kernel["name"] + suffix, "tuning": tuning}
+                )
+        return self._apply_sampling(expanded)
+
+    def _list_kernels(self):
+        """Write the kernel list for CMake: name|tile|trait, then for comp_tdm_v4
+        |tuning token|name suffix."""
+        kernel_list = self._get_sampled_kernel_list()
+        with open(
+            self.working_path / f"{self.kernel_name_prefix}_kernel_count.txt", "w"
+        ) as f:
+            f.write(str(len(kernel_list)))
+        with open(
+            self.working_path / f"{self.kernel_name_prefix}_kernel_list.txt", "w"
+        ) as f:
+            for kernel in kernel_list:
+                line = "|".join(
+                    (
+                        kernel["name"],
+                        self._format_tile_config_string(kernel["tile_config"]),
+                        self._format_trait_combo_string(kernel["trait_combo"]),
+                    )
+                )
+                if kernel["tuning"] is not None:
+                    token = mx_tdm_v4.encode_tuning(kernel["tuning"])
+                    suffix = self._v4_name_suffix(
+                        kernel["tile_config"], kernel["tuning"]
+                    )
+                    line += f"|{token}|{suffix}"
+                f.write(line + "\n")
+        print(f"Listed {len(kernel_list)} kernel configurations")
+
+    def _generate_kernel_instance(
+        self, tile_config, trait_combo, validate=False, tuning=None
+    ):
+        if self._normalize_trait_combo(trait_combo)[0] == V4_PIPELINE:
+            return self._generate_v4_instance(tile_config, trait_combo, tuning)
+        if tuning is not None and not mx_tdm_v4.is_default_tuning(tuning):
+            raise ValueError(f"only {V4_PIPELINE} takes a tuning")
+        return super()._generate_kernel_instance(tile_config, trait_combo, validate)
+
+    def _generate_v4_instance(self, tile_config, trait_combo, tuning):
+        tuning = mx_tdm_v4.normalize_tuning(tuning)
+        pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = (
+            self._normalize_trait_combo(trait_combo)
+        )
+        if not _validation_utils.is_trait_combination_valid(
+            pipeline,
+            epilogue,
+            scheduler,
+            persistent,
+            self.kernel_name_prefix,
+            self.layout,
+            pad_m=pad_m,
+            pad_n=pad_n,
+            pad_k=pad_k,
+            gpu_target=self.gpu_target,
+        ):
+            raise ValueError(
+                f"{V4_PIPELINE} needs the {_validation_utils.MX_TDM_V4_EPILOGUE} epilogue, "
+                "the intrawave scheduler, no padding and no persistence"
+            )
+        reason = self._v4_reject_reason(tile_config, tuning)
+        if reason:
+            raise ValueError(f"tile {tile_config} with tuning {tuning}: {reason}")
+        spec = self._v4_spec(tile_config, tuning)
+        kernel_name = self._format_kernel_name(
+            trait_combo, tile_config
+        ) + mx_tdm_v4.instance_name_suffix(spec, tuning)
+        instance_code = self._v4_instance_code(kernel_name, tile_config, spec, tuning)
+
+        simplified_name = kernel_name[len(self.kernel_name_prefix) + 1 :]
+        header_file = (
+            self.working_path
+            / f"{self.kernel_name_prefix}_single_{simplified_name}.hpp"
+        )
+        with open(header_file, "w") as f:
+            f.write(instance_code)
+        print(f"Generated {header_file}")
+        return kernel_name, instance_code
+
+    def _v4_instance_code(self, kernel_name, tile_config, spec, tuning):
+        t = tile_config
+        return f"""// Generated kernel instance for {kernel_name}
+#pragma once
+
+#include <stdexcept>
+#include <string>
+#include "ck_tile/core.hpp"
+#include "ck_tile/host.hpp"
+#include "ck_tile/ops/epilogue.hpp"
+#include "ck_tile/ops/gemm.hpp"
+{self.populate_kernel_dtype_layout()}
+// Kernel name for display
+constexpr const char* KERNEL_NAME = "{kernel_name}";
+
+// rocKE's mx_gemm (GemmPipelineAgBgCrCompTDMV4): K-major scales, D = A * B^T.
+struct SelectedKernel {{
+    static constexpr ck_tile::index_t BlockSize = 128;
+    static constexpr ck_tile::index_t TileM = {t["tile_m"]};
+    static constexpr ck_tile::index_t TileN = {t["tile_n"]};
+    static constexpr ck_tile::index_t TileK = {t["tile_k"]};
+    static constexpr ck_tile::index_t WarpPerBlock_M = {t["warp_m"]};
+    static constexpr ck_tile::index_t WarpPerBlock_N = {t["warp_n"]};
+    static constexpr ck_tile::index_t WarpPerBlock_K = 1;
+    static constexpr ck_tile::index_t WarpTileM = {t["warp_tile_m"]};
+    static constexpr ck_tile::index_t WarpTileN = 16;
+    static constexpr ck_tile::index_t WarpTileK = 128;
+    static constexpr bool Preshuffle = false;
+    static constexpr bool KMajorScales = true;
+    // The B reshuffle interface the profiler names (unused: B is not preshuffled).
+    static constexpr ck_tile::index_t N_Warp_Tile = WarpTileN;
+    static constexpr ck_tile::index_t K_Warp_Tile = WarpTileK;
+    static constexpr ck_tile::index_t BContiguousItemsPerAccess =
+        std::is_same_v<BDataType, ck_tile::pk_fp4_t> ? 32 : 16;
+    static constexpr bool BPreshuffleLaneInterleavedK = true;
+
+    using Tuning = {mx_tdm_v4.cpp_tuning_type(tuning)};
+    using Traits = {mx_tdm_v4.cpp_kernel_traits(spec, tuning)};
+    using Kernel = ck_tile::MxGemmTdmV4Kernel<
+        ck_tile::GemmPipelineAgBgCrCompTDMV4<
+            ck_tile::MxGemmTdmV4Problem<
+                ADataType,
+                BDataType,
+                CDataType,
+                ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
+                                       ck_tile::sequence<WarpPerBlock_M, WarpPerBlock_N, 1>,
+                                       ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>>,
+            ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>,
+        Traits>;
+
+    static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream)
+    {{
+        if(args.k_batch != 1)
+            throw std::runtime_error("{V4_PIPELINE} requires k_batch==1");
+        if(args.stride_As[0] != args.K || args.stride_Bs[0] != args.K || args.stride_E != args.N)
+            throw std::runtime_error("{V4_PIPELINE} requires packed rcr strides");
+        const typename Kernel::Args kargs{{args.as_ptr[0],
+                                          args.bs_ptr[0],
+                                          args.as_scale_ptr[0],
+                                          args.bs_scale_ptr[0],
+                                          nullptr,
+                                          args.e_ptr,
+                                          args.M,
+                                          args.N,
+                                          args.K,
+                                          1.0f,
+                                          0.0f}};
+        if(const char* why = Kernel::GetUnsupportedReason(kargs))
+            throw std::runtime_error(std::string("Arguments not supported: ") + why);
+        return ck_tile::launch_mx_gemm_tdm_v4<Kernel>(stream, kargs);
+    }}
+}};
+"""
+
+    def _generate_cmake_individual_targets(self, kernel_list):
+        """The generated CMake include, with comp_tdm_v4's tuning token and name suffix."""
+        cmake_code = (
+            f"# Generated CMake file for individual {self.kernel_name_prefix} targets\n"
+        )
+        cmake_code += f"# Datatype: {self.datatype}, Layout: {self.layout}\n"
+        for kernel_name, trait_combo, tile_config, tuning in kernel_list:
+            args = [
+                self.datatype,
+                self.layout,
+                self._format_trait_combo_string(trait_combo),
+                self._format_tile_config_string(tile_config),
+            ]
+            if tuning is not None:
+                args += [
+                    mx_tdm_v4.encode_tuning(tuning),
+                    self._v4_name_suffix(tile_config, tuning),
+                ]
+            quoted = " ".join(f'"{a}"' for a in args)
+            cmake_code += (
+                f"create_individual_{self.kernel_name_prefix}_target({quoted})\n"
+            )
+        with open(
+            self.working_path / f"{self.kernel_name_prefix}_individual_targets.cmake",
+            "w",
+        ) as f:
+            f.write(cmake_code)
+
     def _generate_all_individual(self, num_workers=None):
         """Generate individual kernel files for separate compilation with parallel processing"""
         if num_workers is None:
@@ -74,53 +329,24 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
                 multiprocessing.cpu_count(), 8
             )  # Limit to avoid memory issues
 
-        tile_configs = self._get_tile_configs()
-        trait_combos = self._generate_trait_combinations()
-
-        # Prepare work items for parallel processing
-        work_items = []
-        for tile_config in tile_configs:
-            for trait_combo in trait_combos:
-                if not self._validate_tile_config(
-                    tile_config["tile_m"],
-                    tile_config["tile_n"],
-                    tile_config["tile_k"],
-                    tile_config["warp_m"],
-                    tile_config["warp_n"],
-                    tile_config["warp_k"],
-                    tile_config["warp_tile_m"],
-                    tile_config["warp_tile_n"],
-                    tile_config["warp_tile_k"],
-                    trait_combo[0],
-                ):
-                    continue
-                work_items.append(
-                    (
-                        tile_config,
-                        trait_combo,
-                        self.kernel_name_prefix,
-                        self.working_path,
-                        self.gpu_target,
-                        self.datatype,
-                        self.layout,
-                        self.config_json,
-                    )
-                )
-
-        # Apply RFC-compliant sampling (Sobol + LHS + maximin)
-        if self.max_instances is not None and len(work_items) > self.max_instances:
-            kernel_dicts = [
-                {"tile_config": item[0], "trait_combo": item[1], "_work_item": item}
-                for item in work_items
-            ]
-            sampled = self._apply_sampling(kernel_dicts)
-            work_items = [k["_work_item"] for k in sampled]
+        work_items = [
+            (
+                kernel["tile_config"],
+                kernel["trait_combo"],
+                kernel["tuning"],
+                self.kernel_name_prefix,
+                self.working_path,
+                self.gpu_target,
+                self.datatype,
+                self.layout,
+                self.config_json,
+            )
+            for kernel in self._get_sampled_kernel_list()
+        ]
 
         print(
             f"Generating {len(work_items)} individual kernel files using {num_workers} workers..."
         )
-        print(f"  Tile configs: {len(tile_configs)}")
-        print(f"  Trait combinations: {len(trait_combos)}")
         print(f"  Total kernels: {len(work_items)}")
 
         # Show first few work items for debugging
@@ -176,6 +402,7 @@ def _generate_single_kernel_individual(work_item):
     (
         tile_config,
         trait_combo,
+        tuning,
         kernel_name_prefix,
         working_path,
         gpu_target,
@@ -190,24 +417,11 @@ def _generate_single_kernel_individual(work_item):
     )
 
     try:
-        kernel_name, instance_code = builder._generate_kernel_instance(
-            tile_config, trait_combo
+        # _generate_kernel_instance writes the header itself.
+        kernel_name, _ = builder._generate_kernel_instance(
+            tile_config, trait_combo, tuning=tuning
         )
-
-        # Create simplified filename without the "mx_gemm_" prefix
-        # Remove "mx_gemm_" from the beginning of kernel_name for the filename
-        simplified_name = kernel_name
-        if simplified_name.startswith("mx_gemm_"):
-            simplified_name = simplified_name[
-                len(kernel_name_prefix) + 1 :
-            ]  # Remove "mx_gemm" prefix
-
-        # Write individual header file
-        header_file = working_path / f"mx_gemm_single_{simplified_name}.hpp"
-        with open(header_file, "w") as f:
-            f.write(instance_code)
-
-        return (kernel_name, trait_combo, tile_config)
+        return (kernel_name, trait_combo, tile_config, tuning)
     except Exception as e:
         print(f"Error generating individual kernel: {e}")
         return None
@@ -253,6 +467,10 @@ def main():
     )
     parser.add_argument(
         "--trait_combo", help="Trait combination string for single generation"
+    )
+    parser.add_argument(
+        "--tuning",
+        help="comp_tdm_v4 tuning token (key=value,...) for single generation",
     )
     parser.add_argument(
         "--list_kernels",
@@ -307,40 +525,12 @@ def main():
                 "--gen_single requires --kernel_name, --tile_config, and --trait_combo"
             )
 
-        # Parse tile config
-        tile_parts = args.tile_config.split("_")
-        tile_dims = tile_parts[0].split("x")
-        warp_dims = tile_parts[1].split("x")
-        warp_tile_dims = tile_parts[2].split("x")
+        tile_config = _parse_tile_config(args.tile_config)
+        trait_combo = _parse_trait_combo(args.trait_combo)
+        tuning = mx_tdm_v4.decode_tuning(args.tuning) if args.tuning else None
 
-        tile_config = {
-            "tile_m": int(tile_dims[0]),
-            "tile_n": int(tile_dims[1]),
-            "tile_k": int(tile_dims[2]),
-            "warp_m": int(warp_dims[0]),
-            "warp_n": int(warp_dims[1]),
-            "warp_k": int(warp_dims[2]),
-            "warp_tile_m": int(warp_tile_dims[0]),
-            "warp_tile_n": int(warp_tile_dims[1]),
-            "warp_tile_k": int(warp_tile_dims[2]),
-        }
-
-        # Parse trait combo from the right so pipeline names may contain underscores.
-        trait_parts = args.trait_combo.split("_")
-        trait_combo = (
-            "_".join(trait_parts[:-6]),  # pipeline
-            trait_parts[-6],  # epilogue
-            trait_parts[-5],  # scheduler
-            trait_parts[-4] == "True",  # pad_m
-            trait_parts[-3] == "True",  # pad_n
-            trait_parts[-2] == "True",  # pad_k
-            trait_parts[-1] == "True",  # persistent
-        )
-
-        # Generate the kernel
         builder._generate_kernel_instance(
-            tile_config,
-            trait_combo,
+            tile_config, trait_combo, validate=True, tuning=tuning
         )
     elif args.gen_all_individual:
         # Generate all individual kernel files

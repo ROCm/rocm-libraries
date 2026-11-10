@@ -10,8 +10,16 @@ option(ENABLE_CCACHE_MX_GEMM "Enable ccache for GEMM MX ops compilation" OFF)
 # Store the directory path for use in functions
 set(MX_GEMM_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
 
-# Function to create individual MX GEMM targets
+# Function to create individual MX GEMM targets. comp_tdm_v4 kernels pass two more arguments: the
+# tuning token (key=value,...) and the kernel-name suffix it adds.
 function(create_individual_mx_gemm_target datatype layout trait tile_config config_json)
+    set(tuning "")
+    set(name_suffix "")
+    if(ARGC GREATER 6)
+        set(tuning "${ARGV5}")
+        set(name_suffix "${ARGV6}")
+    endif()
+
     # Use the parent scope MX_GEMM_GPU_TARGETS_INDIVIDUAL variable
     if(NOT MX_GEMM_GPU_TARGETS_INDIVIDUAL)
         message(WARNING "Skipping individual MX GEMM target ${datatype}_${layout}_${trait}_${tile_config}: No supported GPU targets")
@@ -43,11 +51,15 @@ function(create_individual_mx_gemm_target datatype layout trait tile_config conf
     list(GET warp_tile_parts 1 warp_tile_n)
     list(GET warp_tile_parts 2 warp_tile_k)
 
-    set(target_name "benchmark_mx_gemm_${datatype}_${layout}_${trait}_${tile_config}")
+    set(target_name "benchmark_mx_gemm_${datatype}_${layout}_${trait}_${tile_config}${name_suffix}")
     set(working_path "${CMAKE_CURRENT_BINARY_DIR}/${datatype}/${layout}")
 
     # Generate the single instance header for this kernel
-    set(instance_header "${working_path}/mx_gemm_single_${datatype}_${layout}_${trait}_${tile_config}.hpp")
+    set(instance_header "${working_path}/mx_gemm_single_${datatype}_${layout}_${trait}_${tile_config}${name_suffix}.hpp")
+    set(tuning_args "")
+    if(NOT "${tuning}" STREQUAL "")
+        set(tuning_args --tuning "${tuning}")
+    endif()
 
     # Add custom command to generate the header file at build time
     add_custom_command(
@@ -58,11 +70,12 @@ function(create_individual_mx_gemm_target datatype layout trait tile_config conf
                 --layout ${layout}
                 --config_json ${config_json}
                 --gen_single
-                --kernel_name "mx_gemm_${datatype}_${layout}_${trait}_${tile_config}"
+                --kernel_name "mx_gemm_${datatype}_${layout}_${trait}_${tile_config}${name_suffix}"
                 --tile_config "${tile_config}"
                 --trait_combo "${trait}"
+                ${tuning_args}
                 --gpu_target "${MX_GEMM_GPU_TARGETS_INDIVIDUAL}"
-        DEPENDS ${MX_GEMM_SOURCE_DIR}/mx_gemm_instance_builder.py ${config_json}
+        DEPENDS ${MX_GEMM_SOURCE_DIR}/mx_gemm_instance_builder.py ${MX_GEMM_SOURCE_DIR}/mx_tdm_v4.py ${config_json}
         COMMENT "Generating ${instance_header}"
     )
 
@@ -94,6 +107,15 @@ function(create_individual_mx_gemm_target datatype layout trait tile_config conf
         --offload-compress
         -include ${instance_header}
     )
+    if(trait MATCHES "^comp_tdm_v4_")
+        # rocKE's comgr options; the v4 schedule assumes them.
+        target_compile_options(${target_name} PRIVATE
+            "SHELL:-mllvm -amdgpu-expert-scheduling-mode"
+            "SHELL:-mllvm -enable-misched=false"
+            "SHELL:-mllvm -enable-post-misched=false"
+            "SHELL:-mllvm -greedy-regclass-priority-trumps-globalness"
+        )
+    endif()
 
     # Add to collection targets
     add_dependencies(benchmark_mx_gemm_all ${target_name})
@@ -102,7 +124,7 @@ function(create_individual_mx_gemm_target datatype layout trait tile_config conf
     add_dependencies(benchmark_mx_gemm_${datatype}_${layout} ${target_name})
 
     # Add to trait-specific targets
-    if(trait MATCHES "^(comp_async_eight_waves|comp_tdm_v2|comp_async|comp_tdm|weight_preshuffle)_")
+    if(trait MATCHES "^(comp_async_eight_waves|comp_tdm_v2|comp_tdm_v4|comp_async|comp_tdm|weight_preshuffle)_")
         set(pipeline "${CMAKE_MATCH_1}")
         string(REGEX REPLACE "^${pipeline}_" "" trait_tail "${trait}")
         string(REPLACE "_" ";" trait_parts ${trait_tail})
@@ -230,14 +252,21 @@ function(build_individual_mx_gemm_targets datatype layout)
     if(EXISTS ${working_path}/mx_gemm_kernel_list.txt)
         file(STRINGS ${working_path}/mx_gemm_kernel_list.txt kernel_lines)
         foreach(line IN LISTS kernel_lines)
-            # Parse line: kernel_name|tile_config|trait_combo
+            # Parse line: kernel_name|tile_config|trait_combo[|tuning|name_suffix]
             string(REPLACE "|" ";" parts "${line}")
             list(GET parts 0 kernel_name)
             list(GET parts 1 tile_config)
             list(GET parts 2 trait_combo)
+            list(LENGTH parts num_parts)
 
             # Create individual target
-            create_individual_mx_gemm_target("${datatype}" "${layout}" "${trait_combo}" "${tile_config}" "${json_blob}")
+            if(num_parts GREATER 4)
+                list(GET parts 3 tuning)
+                list(GET parts 4 name_suffix)
+                create_individual_mx_gemm_target("${datatype}" "${layout}" "${trait_combo}" "${tile_config}" "${json_blob}" "${tuning}" "${name_suffix}")
+            else()
+                create_individual_mx_gemm_target("${datatype}" "${layout}" "${trait_combo}" "${tile_config}" "${json_blob}")
+            endif()
         endforeach()
     else()
         message(FATAL_ERROR "Kernel list file not found")
@@ -313,8 +342,8 @@ else()
 
     # Create trait-based collection targets
     # These are common trait components used across all MX GEMM kernels
-    set(MX_GEMM_PIPELINES "comp_async;comp_async_eight_waves;weight_preshuffle;comp_tdm;comp_tdm_v2")
-    set(MX_GEMM_EPILOGUES "cshuffle;tdm")
+    set(MX_GEMM_PIPELINES "comp_async;comp_async_eight_waves;weight_preshuffle;comp_tdm;comp_tdm_v2;comp_tdm_v4")
+    set(MX_GEMM_EPILOGUES "cshuffle;tdm;alphabeta")
     set(MX_GEMM_SCHEDULERS "intrawave")
 
     foreach(pipeline IN LISTS MX_GEMM_PIPELINES)

@@ -1,0 +1,210 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+#pragma once
+
+#include <string>
+#include <type_traits>
+
+#include "ck_tile/core.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4_spec.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v4_tuning.hpp"
+
+namespace ck_tile {
+
+/**
+ * @brief Problem of GemmPipelineAgBgCrCompTDMV4: D = alpha * A @ B^T + beta * C.
+ *
+ * A is M x K and B is N x K, both K-contiguous (RCR); C and D are M x N row-major. A and B are
+ * pk_fp4_t, fp8_t or bf8_t of the same width, with one E8M0 scale per 32 K values in the K-major
+ * layout [ceil(K / 128)][M or N][4] (see host/mx_scale_kmajor.hpp). ODataType (C and D) is fp8_t
+ * (saturating), half_t or bf16_t.
+ *
+ * BlockGemmShape is a TileGemmShape: block tile (tile_m, tile_n, tile_k), block warps 2x2x1,
+ * 4x1x1 or 1x4x1 and warp tile 32x16x128 (FP4) or 16x16x128: the scaled WMMA atom.
+ */
+template <typename ADataType_, typename BDataType_, typename ODataType_, typename BlockGemmShape_>
+struct MxGemmTdmV4Problem
+{
+    using ADataType      = remove_cvref_t<ADataType_>;
+    using BDataType      = remove_cvref_t<BDataType_>;
+    using ODataType      = remove_cvref_t<ODataType_>;
+    using AccDataType    = float;
+    using BlockGemmShape = remove_cvref_t<BlockGemmShape_>;
+
+    static constexpr index_t kBlockSize = mx_tdm_v4::kWave * mx_tdm_v4::kWaves;
+};
+
+namespace mx_tdm_v4 {
+
+/// The MxTdmV4Dtype of an A or B type; an out-of-range value (rejected as "dtype") otherwise.
+template <typename T>
+CK_TILE_HOST_DEVICE constexpr MxTdmV4Dtype dtype_of()
+{
+    if constexpr(std::is_same_v<T, pk_fp4_t>)
+        return MxTdmV4Dtype::Fp4;
+    else if constexpr(std::is_same_v<T, fp8_t>)
+        return MxTdmV4Dtype::Fp8;
+    else if constexpr(std::is_same_v<T, bf8_t>)
+        return MxTdmV4Dtype::Bf8;
+    else
+        return static_cast<MxTdmV4Dtype>(-1);
+}
+
+/// The MxTdmV4OutDtype of C and D; an out-of-range value (rejected as "out_dtype") otherwise.
+template <typename T>
+CK_TILE_HOST_DEVICE constexpr MxTdmV4OutDtype out_dtype_of()
+{
+    if constexpr(std::is_same_v<T, fp8_t>)
+        return MxTdmV4OutDtype::Fp8E4M3;
+    else if constexpr(std::is_same_v<T, half_t>)
+        return MxTdmV4OutDtype::Fp16;
+    else if constexpr(std::is_same_v<T, bf16_t>)
+        return MxTdmV4OutDtype::Bf16;
+    else
+        return static_cast<MxTdmV4OutDtype>(-1);
+}
+
+/// Instantiating this with a reason other than Ok fails, and the compiler names the reason.
+template <MxTdmV4Reason R>
+struct InvalidTuning;
+template <>
+struct InvalidTuning<MxTdmV4Reason::Ok>
+{
+    static constexpr bool value = true;
+};
+
+} // namespace mx_tdm_v4
+
+/**
+ * @brief Policy of GemmPipelineAgBgCrCompTDMV4: the tuning (see MxTdmV4DefaultTuning) and
+ *        everything derived from it and the Problem's tile, at compile time.
+ */
+template <typename Tuning = MxTdmV4DefaultTuning>
+struct GemmPipelineAgBgCrCompTDMV4Policy
+{
+    using TuningType = Tuning;
+
+    /// The compile-time part of the spec: M, N and K are 0.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr MxTdmV4Spec GetSpec()
+    {
+        using Shape              = typename Problem::BlockGemmShape;
+        using WarpTile           = typename Shape::WarpTile;
+        using Warps              = typename Shape::BlockWarps;
+        constexpr index_t atom_m = WarpTile::at(number<0>{});
+        constexpr index_t atom_n = WarpTile::at(number<1>{});
+        constexpr index_t atom_k = WarpTile::at(number<2>{});
+        constexpr bool warp_k_ok = Warps::at(number<2>{}) == 1 && atom_k == mx_tdm_v4::kAtomK;
+
+        MxTdmV4Spec s{};
+        s.out                    = mx_tdm_v4::out_dtype_of<typename Problem::ODataType>();
+        s.tile_m                 = Shape::kM;
+        s.tile_n                 = Shape::kN;
+        s.tile_k                 = Shape::kK;
+        s.warp_m                 = warp_k_ok ? Warps::at(number<0>{}) : 0;
+        s.warp_n                 = warp_k_ok ? Warps::at(number<1>{}) : 0;
+        s.mma                    = (atom_m == 32 && atom_n == 16)   ? MxTdmV4Mma::M32N16
+                                   : (atom_m == 16 && atom_n == 16) ? MxTdmV4Mma::M16N16
+                                                                    : static_cast<MxTdmV4Mma>(-1);
+        s.a_dtype                = mx_tdm_v4::dtype_of<typename Problem::ADataType>();
+        s.b_dtype                = mx_tdm_v4::dtype_of<typename Problem::BDataType>();
+        s.cluster_x              = Tuning::kClusterDimX;
+        s.cluster_y              = Tuning::kClusterDimY;
+        s.cluster_z              = Tuning::kClusterDimZ;
+        s.gl2_distance           = Tuning::kGl2PrefetchDistance;
+        s.signal_wmmas_in        = Tuning::kClusterSignalWmmas;
+        s.local_prefetch         = Tuning::kLocalPrefetch;
+        s.half_plr               = Tuning::kHalfPlr;
+        s.half_b_order           = Tuning::kHalfBOrder;
+        s.lds_segment_interleave = Tuning::kLdsSegmentInterleave;
+        return s;
+    }
+
+    /// The spec of one problem, for the run-time checks.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr MxTdmV4Spec
+    GetSpec(long_index_t M, long_index_t N, long_index_t K)
+    {
+        MxTdmV4Spec s = GetSpec<Problem>();
+        s.M           = M;
+        s.N           = N;
+        s.K           = K;
+        return s;
+    }
+
+    /// The first compile-time rule the Problem and tuning break, or Ok.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr MxTdmV4Reason GetReason()
+    {
+        return mx_tdm_v4_validate(GetSpec<Problem>(), false);
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr MxTdmV4LdsLayout GetLdsLayout()
+    {
+        return mx_tdm_v4_lds_layout(GetSpec<Problem>());
+    }
+
+    /// Bytes of LDS: both buffers.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
+    {
+        return GetLdsLayout<Problem>().lds_bytes;
+    }
+
+    /// The K loop's s_wait_dscnt count i (0 or 1), clamped to the 6-bit immediate.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetDscntWait(index_t i)
+    {
+        return mx_tdm_v4::min_i(GetSpec<Problem>().dscnt_wait(i), mx_tdm_v4::kDscntMax);
+    }
+
+    /// Reads of the other buffer left in flight at the cluster late wait, clamped.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLatePendingReads()
+    {
+        return mx_tdm_v4::min_i(GetSpec<Problem>().late_pending_reads(), mx_tdm_v4::kDscntMax);
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSignalWmmas()
+    {
+        return GetSpec<Problem>().signal_wmmas();
+    }
+
+    /// The cluster the kernel must be launched with: (x, y, z) = (N tiles, M tiles, 1).
+    CK_TILE_HOST_DEVICE static constexpr bool HasCluster()
+    {
+        return !(Tuning::kClusterDimX == 1 && Tuning::kClusterDimY == 1);
+    }
+};
+
+/// rocKE's validate() at compile time: nullptr if Problem and Tuning build, else the reason code
+/// (see mx_tdm_v4_reason_code). The shape rules are MxGemmTdmV4Kernel::IsSupportedArgument's.
+template <typename Problem, typename Tuning = MxTdmV4DefaultTuning>
+CK_TILE_HOST_DEVICE constexpr const char* MxTdmV4Validate()
+{
+    constexpr MxTdmV4Reason r =
+        GemmPipelineAgBgCrCompTDMV4Policy<Tuning>::template GetReason<Problem>();
+    return r == MxTdmV4Reason::Ok ? nullptr : mx_tdm_v4_reason_code(r);
+}
+
+/// The rocKE name suffix of a tuning: the cluster, then its non-default values (see
+/// mx_tdm_v4_tuning_name), without the parts a CK kernel name already has.
+template <typename Tuning>
+CK_TILE_HOST std::string MxTdmV4TuningName()
+{
+    MxTdmV4Spec s{};
+    s.cluster_x              = Tuning::kClusterDimX;
+    s.cluster_y              = Tuning::kClusterDimY;
+    s.cluster_z              = Tuning::kClusterDimZ;
+    s.gl2_distance           = Tuning::kGl2PrefetchDistance;
+    s.signal_wmmas_in        = Tuning::kClusterSignalWmmas;
+    s.local_prefetch         = Tuning::kLocalPrefetch;
+    s.half_plr               = Tuning::kHalfPlr;
+    s.half_b_order           = Tuning::kHalfBOrder;
+    s.lds_segment_interleave = Tuning::kLdsSegmentInterleave;
+    return mx_tdm_v4_tuning_name(s, false);
+}
+
+} // namespace ck_tile

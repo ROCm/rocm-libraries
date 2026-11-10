@@ -28,7 +28,11 @@ Data types (verified against ck_tile headers / example/ck_tile/42_mx_gemm):
   scale: ck_tile::e8m0_t (biased exponent, byte e decodes to 2^(e-127); 127 == 1.0)
 """
 
-from dispatcher_common import arch_feature_defines, normalize_arch, unified_framework_flags
+from dispatcher_common import (
+    arch_feature_defines,
+    normalize_arch,
+    unified_framework_flags,
+)
 import concurrent.futures
 import ctypes
 import functools
@@ -41,7 +45,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -274,16 +278,29 @@ class MxGemmKernelConfig:
 
     k_block_per_cu: int = 1
 
+    # comp_tdm_v4 only: rocKE's tuning knobs and the instance's shape traits (keys of
+    # mx_tdm_v4.TUNING_DEFAULTS / SHAPE_DEFAULTS; missing keys take rocKE's defaults).
+    tuning: Optional[Dict[str, Any]] = None
+
     # cached name so we do not re-shell the codegen repeatedly.
     _name_cache: Optional[str] = field(default=None, repr=False, compare=False)
 
     def to_codegen_config(self) -> dict:
         arch = normalize_arch(self.gpu_target or _get_arch())
         pipeline = self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
-        epilogue = self.epilogue or (
-            "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
-        )
+        if pipeline == "comp_tdm_v4":
+            default_epilogue = "alphabeta"
+        elif pipeline in ("comp_tdm", "comp_tdm_v2"):
+            default_epilogue = "tdm"
+        else:
+            default_epilogue = "cshuffle"
+        epilogue = self.epilogue or default_epilogue
+        tuning = {
+            k: list(v) if isinstance(v, tuple) else v
+            for k, v in (self.tuning or {}).items()
+        }
         return {
+            **tuning,
             "datatype": self.datatype,
             "layout": self.layout,
             "gpu_target": arch,
@@ -362,14 +379,14 @@ class MxGemmKernelConfig:
             "mx_gemm",
             self.datatype,
             self.layout,
-            self.pipeline
-            or ("comp_tdm" if arch == "gfx1250" else "comp_async"),
+            self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async"),
             self.epilogue
             or (
-                "tdm"
+                "alphabeta"
+                if self.pipeline == "comp_tdm_v4"
+                else "tdm"
                 if (
-                    self.pipeline
-                    or ("comp_tdm" if arch == "gfx1250" else "comp_async")
+                    self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
                 )
                 in ("comp_tdm", "comp_tdm_v2")
                 else "cshuffle"
@@ -988,6 +1005,7 @@ def expand_mx_sweep(
             pad_k=pad_k,
             persistent=persistent,
             k_block_per_cu=k_block_per_cu,
+            tuning=kernel.get("tuning"),
             **kernel["tile_config"],
         )
         if cfg.is_valid():

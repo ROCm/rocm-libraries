@@ -98,21 +98,31 @@ class MXGemmProfiler : public GemmProfiler<MXGemmProfiler, GemmProblem, MxGemmHo
 #if defined(CK_USE_GFX1250)
         if(gemm_problem.split_k_ != 1)
             throw std::runtime_error("gfx1250 MX GEMM supports only split_k=1");
-        if(gemm_problem.k_ % 128 != 0 || gemm_problem.k_ % SelectedKernel::TileK != 0)
+        // K-major kernels check their own K tails in GetUnsupportedReason.
+        if(!ck_tile::uses_kmajor_mx_scales_v<SelectedKernel> &&
+           (gemm_problem.k_ % 128 != 0 || gemm_problem.k_ % SelectedKernel::TileK != 0))
             throw std::runtime_error("gfx1250 MX GEMM requires K divisible by 128 and TileK");
         auto shuffle_scales = [&](const ck_tile::HostTensor<ScaleType>& input, auto is_a) {
-            constexpr bool IsA     = decltype(is_a)::value;
-            constexpr auto tile_mn = IsA ? SelectedKernel::TileM : SelectedKernel::TileN;
-            constexpr auto warp_mn = IsA ? SelectedKernel::WarpTileM : SelectedKernel::WarpTileN;
-            const auto mn          = IsA ? gemm_problem.m_ : gemm_problem.n_;
-            const auto padded_mn   = ck_tile::integer_divide_ceil(mn, tile_mn) * tile_mn;
-            ck_tile::HostTensor<ScaleType> padded(
-                {static_cast<std::size_t>(padded_mn), static_cast<std::size_t>(scale_k_size)});
-            std::copy(input.mData.begin(), input.mData.end(), padded.mData.begin());
-            ck_tile::HostTensor<ScaleType> shuffled(padded.mDesc);
-            ck_tile::preShuffleScaleBuffer_gfx1250<ScaleType, 32, true>(
-                padded.data(), shuffled.data(), padded_mn, scale_k_size, warp_mn);
-            return shuffled;
+            constexpr bool IsA = decltype(is_a)::value;
+            const auto mn      = IsA ? gemm_problem.m_ : gemm_problem.n_;
+            if constexpr(ck_tile::uses_kmajor_mx_scales_v<SelectedKernel>)
+            {
+                return ck_tile::mx_scale_tensor_to_kmajor(input, mn, gemm_problem.k_);
+            }
+            else
+            {
+                constexpr auto tile_mn = IsA ? SelectedKernel::TileM : SelectedKernel::TileN;
+                constexpr auto warp_mn =
+                    IsA ? SelectedKernel::WarpTileM : SelectedKernel::WarpTileN;
+                const auto padded_mn = ck_tile::integer_divide_ceil(mn, tile_mn) * tile_mn;
+                ck_tile::HostTensor<ScaleType> padded(
+                    {static_cast<std::size_t>(padded_mn), static_cast<std::size_t>(scale_k_size)});
+                std::copy(input.mData.begin(), input.mData.end(), padded.mData.begin());
+                ck_tile::HostTensor<ScaleType> shuffled(padded.mDesc);
+                ck_tile::preShuffleScaleBuffer_gfx1250<ScaleType, 32, true>(
+                    padded.data(), shuffled.data(), padded_mn, scale_k_size, warp_mn);
+                return shuffled;
+            }
         };
         auto scale_a_shuffled = shuffle_scales(scale_a_host, std::true_type{});
         auto scale_b_shuffled = shuffle_scales(scale_b_host, std::false_type{});

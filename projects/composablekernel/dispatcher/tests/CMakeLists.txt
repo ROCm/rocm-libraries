@@ -421,9 +421,9 @@ set_tests_properties(dispatcher_test_gemm_driver_pairs PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
-# MX bridge host tests and CMake configuration tests. Report missing host build
+# MX bridge host tests, CMake configuration tests and comp_tdm_v4. Report missing host build
 # tools as a skipped CMake test rather than an all-skipped pass.
-foreach(_mx_test bridge cmake)
+foreach(_mx_test bridge cmake tdm_v4)
     add_test(
         NAME dispatcher_test_mx_gemm_${_mx_test}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_unittest_77.py test_mx_gemm_${_mx_test}.py

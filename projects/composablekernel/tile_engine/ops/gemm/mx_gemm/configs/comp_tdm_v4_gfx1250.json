@@ -1,0 +1,115 @@
+{
+    "tile_config": {
+        "tile_m": {
+            "values": [
+                128,
+                256
+            ]
+        },
+        "tile_n": {
+            "values": [
+                128,
+                256
+            ]
+        },
+        "tile_k": {
+            "values": [
+                512,
+                1024
+            ]
+        },
+        "warp_m": {
+            "values": [
+                2
+            ]
+        },
+        "warp_n": {
+            "values": [
+                2
+            ]
+        },
+        "warp_k": {
+            "values": [
+                1
+            ]
+        },
+        "warp_tile_m": {
+            "values": [
+                32
+            ]
+        },
+        "warp_tile_n": {
+            "values": [
+                16
+            ]
+        },
+        "warp_tile_k": {
+            "values": [
+                128
+            ]
+        }
+    },
+    "trait_config": {
+        "pipeline": {
+            "values": [
+                "comp_tdm_v4"
+            ]
+        },
+        "scheduler": {
+            "values": [
+                "intrawave"
+            ]
+        },
+        "epilogue": {
+            "values": [
+                "alphabeta"
+            ]
+        },
+        "pad_m": {
+            "values": [
+                false
+            ]
+        },
+        "pad_n": {
+            "values": [
+                false
+            ]
+        },
+        "pad_k": {
+            "values": [
+                false
+            ]
+        },
+        "persistent": {
+            "values": [
+                false
+            ]
+        }
+    },
+    "tuning_config": {
+        "cluster_dim": {
+            "values": [
+                [
+                    4,
+                    4
+                ],
+                [
+                    2,
+                    2
+                ]
+            ]
+        },
+        "gl2_prefetch_distance": {
+            "values": [
+                4
+            ]
+        },
+        "half_b_order": {
+            "values": [
+                "ahead",
+                "late"
+            ]
+        }
+    },
+    "k_block_per_cu": 1
+}

@@ -301,13 +301,16 @@ GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2"]
 # preshuffle_pipeline_reject_reason in dispatcher/codegen/codegen_common.py.
 GEMM_PACKED_B_PIPELINES = ["preshufflev2", "preshuffle_tdm"]
 # Listed explicitly: comp_tdm_pc is a TDM pipeline without preshuffle wiring.
-GEMM_PRESHUFFLE_GFX1250_PIPELINES = ["preshuffle_tdm", "comp_async", "comp_tdm", "comp_tdm_v2"]
+GEMM_PRESHUFFLE_GFX1250_PIPELINES = [
+    "preshuffle_tdm",
+    "comp_async",
+    "comp_tdm",
+    "comp_tdm_v2",
+]
 PRESHUFFLE_GFX1250_LAYOUT = "rcr"
 # The host shuffle_b_v0 packs whole N x K tiles: a partial N tile overflows the
 # packed buffer and a partial K tile packs the wrong elements.
-PRESHUFFLE_PAD_NK_REJECT_REASON = (
-    "preshuffled B holds whole N/K tiles, so gfx1250 preshuffle requires pad_n=pad_k=False"
-)
+PRESHUFFLE_PAD_NK_REJECT_REASON = "preshuffled B holds whole N/K tiles, so gfx1250 preshuffle requires pad_n=pad_k=False"
 # These block GEMMs ignore K warps while the launch still counts them, so the
 # extra waves run as M warps past the tile and corrupt C (comp_tdm* only survive
 # through their TDM store), on every arch.
@@ -339,7 +342,9 @@ def preshuffle_pipeline_reject_reason(
     yet" and are not checked, so the helper can run at trait level and at tile
     level.
     """
-    unwired = set(UNSUPPORTED_ASYNC_TDM_PIPELINES) - set(GEMM_PRESHUFFLE_GFX1250_PIPELINES)
+    unwired = set(UNSUPPORTED_ASYNC_TDM_PIPELINES) - set(
+        GEMM_PRESHUFFLE_GFX1250_PIPELINES
+    )
     if pipeline in unwired:
         return f"gemm_preshuffle has no {pipeline} kernel"
     # comp_* pipelines are Intrawave-only, the weight-preshuffle ones Default.
@@ -357,7 +362,9 @@ def preshuffle_pipeline_reject_reason(
         on_gfx1250 = arch == GFX1250_ONLY_PIPELINE_ARCH
         return PRESHUFFLE_PAD_NK_REJECT_REASON if pad_nk and on_gfx1250 else ""
     if arch and arch != GFX1250_ONLY_PIPELINE_ARCH:
-        return f"pipeline {pipeline!r} requires {GFX1250_ONLY_PIPELINE_ARCH}, got {arch!r}"
+        return (
+            f"pipeline {pipeline!r} requires {GFX1250_ONLY_PIPELINE_ARCH}, got {arch!r}"
+        )
     # rcr also covers the comp_async A row-major / B col-major requirement.
     if layout and layout != PRESHUFFLE_GFX1250_LAYOUT:
         return f"preshuffle {pipeline} requires layout {PRESHUFFLE_GFX1250_LAYOUT!r}, got {layout!r}"
@@ -368,7 +375,11 @@ def preshuffle_pipeline_reject_reason(
         return f"preshuffle {pipeline} requires epilogue {want_epilogue!r}, got {epilogue!r}"
     if pipeline != "comp_async" and any(_is_true(p) for p in pads):
         return TDM_PAD_REJECT_REASON
-    if pipeline == "comp_async" and None not in pads and not all(_is_true(p) for p in pads):
+    if (
+        pipeline == "comp_async"
+        and None not in pads
+        and not all(_is_true(p) for p in pads)
+    ):
         return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
     if pipeline == "comp_tdm_v2" and num_waves is not None and num_waves != 4:
         return f"comp_tdm_v2 requires exactly 4 waves, got {num_waves}"
@@ -389,6 +400,7 @@ GEMM_MX_PIPELINES_BY_ARCH = {
     "gfx1250": (
         "comp_tdm",
         "comp_tdm_v2",
+        "comp_tdm_v4",
         "comp_async",
         "comp_async_eight_waves",
         "weight_preshuffle",
@@ -399,6 +411,78 @@ GEMM_MX_PIPELINES = list(
         p for pipelines in GEMM_MX_PIPELINES_BY_ARCH.values() for p in pipelines
     )
 )
+# rocKE's mx_gemm: K-major scales, the alpha/beta epilogue and its own tuning knobs.
+MX_TDM_V4_PIPELINE = "comp_tdm_v4"
+MX_TDM_V4_EPILOGUE = "alphabeta"
+
+
+def load_mx_tdm_v4():
+    """The mx_gemm/mx_tdm_v4.py module (the Python form of the comp_tdm_v4 spec)."""
+    import importlib.util
+    import os
+    import sys
+
+    name = "mx_tdm_v4"
+    if name not in sys.modules:
+        path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "mx_gemm", "mx_tdm_v4.py"
+        )
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+def mx_tdm_v4_reject_reason(
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
+    a_datatype: str,
+    b_datatype: str,
+    c_datatype: str,
+    gpu_target: str,
+    tuning=None,
+) -> str:
+    """Why a comp_tdm_v4 instance is invalid ("" if valid). With tuning None, why the tile is
+    invalid under every schedule (the tuning_config product is checked per instance later)."""
+    if _base_gfx_arch(gpu_target) != "gfx1250":
+        return f"{MX_TDM_V4_PIPELINE} requires gfx1250"
+    v4 = load_mx_tdm_v4()
+    out = v4.TE_OUT_DTYPES.get(c_datatype)
+    if out is None or a_datatype not in v4.MX_DTYPES or b_datatype not in v4.MX_DTYPES:
+        return f"{MX_TDM_V4_PIPELINE} does not support {a_datatype}x{b_datatype}->{c_datatype}"
+    tile = {
+        "tile_m": tile_m,
+        "tile_n": tile_n,
+        "tile_k": tile_k,
+        "warp_m": warp_m,
+        "warp_n": warp_n,
+        "warp_k": warp_k,
+        "warp_tile_m": warp_tile_m,
+        "warp_tile_n": warp_tile_n,
+        "warp_tile_k": warp_tile_k,
+    }
+    candidates = [tuning] if tuning is not None else v4.schedule_tunings()
+    first = None
+    for candidate in candidates:
+        try:
+            spec = v4.spec_from_tile(tile, candidate, a_datatype, b_datatype, out)
+            reason = v4.validate_instance(spec, candidate)
+        except ValueError as e:
+            return str(e)
+        if reason == "ok":
+            return ""
+        first = first or reason
+    return f"{MX_TDM_V4_PIPELINE}: {first}"
+
+
 GEMM_BQUANT_PIPELINES = ["compv3"]
 
 GEMM_ABQUANT_PIPELINES = ["compv3"]
@@ -694,6 +778,12 @@ def is_trait_combination_valid(
                 pipeline in ("comp_tdm", "comp_tdm_v2")
                 and epilogue == "tdm"
                 and not persistent_or_preshuffle_quant
+            )
+            or (
+                pipeline == MX_TDM_V4_PIPELINE
+                and epilogue == MX_TDM_V4_EPILOGUE
+                and not persistent_or_preshuffle_quant
+                and not any((pad_m, pad_n, pad_k))
             )
         )
     if kernel_name_prefix == "gemm_preshuffle" and preshuffle_pipeline_reject_reason(
@@ -1092,7 +1182,13 @@ GFX1250_WARP_TILES = {
     "bf8": ([16, 16, 64], [16, 16, 128], [32, 32, 128]),
     "int8": ([16, 16, 64],),
 }
-GFX9_FP32_WARP_TILES = ([16, 16, 4], [16, 16, 8], [16, 16, 16], [32, 32, 4], [32, 32, 8])
+GFX9_FP32_WARP_TILES = (
+    [16, 16, 4],
+    [16, 16, 8],
+    [16, 16, 16],
+    [32, 32, 4],
+    [32, 32, 8],
+)
 # A (arch, dtype) with no row is left to the shared table (gfx1201 fp16 is
 # covered there), except fp32 and gfx1250, which the shared table lacks.
 OP_ARCH_WARP_TILES = {
@@ -1365,6 +1461,27 @@ def is_tile_config_valid(
     if warp_tile_m <= 0 or warp_tile_n <= 0 or warp_tile_k <= 0:
         return False
 
+    if pipeline == MX_TDM_V4_PIPELINE:
+        # The v4 spec owns its wave groups, atoms and LDS layout.
+        reason = mx_tdm_v4_reject_reason(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
+            c_datatype,
+            gpu_target,
+        )
+        if reason:
+            logging.debug(f"comp_tdm_v4 validation failed: {reason}")
+        return not reason
+
     # Check that warp tiles fit within block tiles
     if warp_m * warp_tile_m > tile_m:
         return False
@@ -1526,7 +1643,9 @@ def is_tile_config_valid(
         if is_preshuffle:
             warp_tile = [warp_tile_m, warp_tile_n, warp_tile_k]
             warp_tile_valid = op_warp_tile_allowed(gpu_target, a_datatype, warp_tile)
-            warp_tile_error = f"warp tile {warp_tile} not listed for {a_datatype} on {gpu_target}"
+            warp_tile_error = (
+                f"warp tile {warp_tile} not listed for {a_datatype} on {gpu_target}"
+            )
         else:
             warp_tile_valid, warp_tile_error = validate_gemm_warp_tile_combination(
                 warp_tile_m,
@@ -2137,6 +2256,24 @@ def validate_gemm_mx(
     # MX GEMM uses the scaled MFMA path from ck_tile example 42.
     if layout.lower() != "rcr":
         return False, "MX GEMM currently supports only rcr layout"
+
+    if pipeline == MX_TDM_V4_PIPELINE:
+        reason = mx_tdm_v4_reject_reason(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
+            c_datatype,
+            gpu_target,
+        )
+        return not reason, reason
 
     if a_datatype not in ["fp4", "fp8"] or b_datatype not in ["fp4", "fp8"]:
         return False, "MX GEMM currently supports fp4 and fp8 inputs only"

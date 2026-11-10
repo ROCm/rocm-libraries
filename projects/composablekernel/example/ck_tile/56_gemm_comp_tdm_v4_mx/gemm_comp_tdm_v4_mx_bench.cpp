@@ -1,0 +1,466 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// MX GEMM on the comp_tdm_v4 pipeline (the rocKE gfx1250 mx_gemm kernel): D = alpha * A @ B^T +
+// beta * C with K-major E8M0 scales [ceil(K/128)][MN][4]. Named instances carry rocKE's tuning
+// knobs; -list prints them, -kernel picks one.
+//
+//   verify  rocKE's sparse check inputs, D bit for bit against the host reference (sampled rows
+//           when the problem is large)
+//   bench   timed on rocKE's timing data (-data=tensile, FP4 sin/cos codes) or random finite
+//           inputs (-data=random)
+//   check   whether the instance runs the problem; no device work
+//   file    A, B, scales and C from -load (raw a.bin, b.bin, a_scale.bin, b_scale.bin, c.bin in
+//           the kernel's layouts), D to -save_d: the rocKE cross-check feeds both kernels the
+//           same bytes this way
+
+#include <cmath>
+#include <cstdio>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <random>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "ck_tile/core.hpp"
+#include "ck_tile/host.hpp"
+#include "ck_tile/host/arg_parser.hpp"
+#include "ck_tile/ops/gemm/kernel/mx_gemm_tdm_v4_launch.hpp"
+#include "ck_tile/host/mx_scale_kmajor.hpp"
+#include "ck_tile/ops/gemm.hpp"
+
+namespace {
+
+using ck_tile::index_t;
+using ck_tile::long_index_t;
+using ck_tile::MxTdmV4Dtype;
+using ck_tile::MxTdmV4HalfBOrder;
+using ck_tile::MxTdmV4HalfPlr;
+using ck_tile::MxTdmV4OutDtype;
+namespace v4 = ck_tile::mx_tdm_v4;
+
+template <typename A,
+          typename B,
+          typename O,
+          index_t TileM,
+          index_t TileN,
+          index_t TileK,
+          index_t WarpM,
+          index_t WarpN,
+          index_t AtomM,
+          typename Tuning,
+          typename Traits>
+using Kernel = ck_tile::MxGemmTdmV4Kernel<
+    ck_tile::GemmPipelineAgBgCrCompTDMV4<
+        ck_tile::MxGemmTdmV4Problem<A,
+                                    B,
+                                    O,
+                                    ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
+                                                           ck_tile::sequence<WarpM, WarpN, 1>,
+                                                           ck_tile::sequence<AtomM, 16, 128>>>,
+        ck_tile::GemmPipelineAgBgCrCompTDMV4Policy<Tuning>>,
+    Traits>;
+
+template <index_t CX,
+          index_t CY,
+          index_t Gl2             = 4,
+          index_t Signal          = -1,
+          index_t Lp              = 1,
+          MxTdmV4HalfPlr Plr      = MxTdmV4HalfPlr::B,
+          MxTdmV4HalfBOrder Order = MxTdmV4HalfBOrder::Ahead,
+          bool Lsi                = true>
+using Tu = ck_tile::MxTdmV4TuningT<CX, CY, Gl2, Signal, Lp, Plr, Order, Lsi>;
+
+// Whole tiles, even tile count, no K tail.
+template <index_t StoreWidth>
+using Even = v4::KernelTraits<false, false, false, false, false, 0, 0, StoreWidth>;
+// Any M, N (edges), any tile count, no K tail.
+template <index_t StoreWidth>
+using Any = v4::KernelTraits<true, true, false, false, false, -1, 0, StoreWidth>;
+
+using ck_tile::bf16_t;
+using ck_tile::bf8_t;
+using ck_tile::fp8_t;
+using ck_tile::half_t;
+using ck_tile::pk_fp4_t;
+
+struct Options
+{
+    index_t M, N, K;
+    float alpha, beta;
+    std::string mode, load, save_d, data;
+    int warmup, repeat;
+    uint32_t seed;
+};
+
+std::vector<uint8_t> read_file(const std::string& path, std::size_t bytes)
+{
+    std::ifstream f(path, std::ios::binary);
+    if(!f)
+        throw std::runtime_error("cannot open " + path);
+    std::vector<uint8_t> data(bytes);
+    f.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(bytes));
+    if(f.gcount() != static_cast<std::streamsize>(bytes))
+        throw std::runtime_error(path + ": expected " + std::to_string(bytes) + " bytes");
+    return data;
+}
+
+/// rocKE's sparse check inputs (see test_mx_gemm_tdm_v4_util.hpp) or random finite ones: FP4 any
+/// code, 8-bit codes below 2 in magnitude, E8M0 2^-3..2^3. With `trig` FP4 A and B are rocKE's
+/// timing data instead (the Tensile client's initArrayTrig): the E2M1 code, rounded to nearest
+/// even, of sin (A) or cos (B) of the element's linear index, K fastest.
+struct Host
+{
+    std::vector<uint8_t> a, b, as, bs, c;
+};
+
+uint8_t e2m1_rne(float x)
+{
+    // Midpoints between consecutive E2M1 magnitudes 0, 0.5, 1, 1.5, 2, 3, 4, 6.
+    static constexpr float kMidpoint[7] = {0.25f, 0.75f, 1.25f, 1.75f, 2.5f, 3.5f, 5.0f};
+    const float a                       = std::fabs(x);
+    uint8_t code                        = 7;
+    for(uint8_t c = 0; c < 7; ++c)
+    {
+        if(a < kMidpoint[c])
+        {
+            code = c;
+            break;
+        }
+        if(!(a > kMidpoint[c]))
+        {
+            code = static_cast<uint8_t>(c % 2 == 0 ? c : c + 1);
+            break;
+        }
+    }
+    return static_cast<uint8_t>((std::signbit(x) ? 8 : 0) | code);
+}
+
+Host make_inputs(const ck_tile::MxTdmV4Spec& s, bool sparse, bool trig, uint32_t seed)
+{
+    std::mt19937 rng(seed);
+    const long_index_t K = s.K;
+    std::set<long_index_t> steps;
+    const long_index_t n_steps = (K + 127) / 128, per_tile = s.tile_k / 128;
+    const long_index_t last = (n_steps - 1) / per_tile * per_tile;
+    for(long_index_t x : {long_index_t{0}, n_steps - 1, per_tile - 1, per_tile, last - 1, last})
+        if(x >= 0 && x < n_steps)
+            steps.insert(x);
+    while(static_cast<long_index_t>(steps.size()) < std::min<long_index_t>(12, n_steps))
+        steps.insert(static_cast<long_index_t>(rng() % n_steps));
+    auto code = [&](MxTdmV4Dtype t) -> uint8_t {
+        if(t == MxTdmV4Dtype::Fp4)
+            return static_cast<uint8_t>(rng() % 16);
+        if(!sparse)
+            return static_cast<uint8_t>(rng() & 0xBF);
+        const int bits = t == MxTdmV4Dtype::Fp8 ? 3 : 2, bias = t == MxTdmV4Dtype::Fp8 ? 7 : 15;
+        return static_cast<uint8_t>(((rng() % 2) << 7) | ((bias - rng() % 2) << bits) |
+                                    (rng() % (1u << bits)));
+    };
+    auto operand = [&](MxTdmV4Dtype t, index_t rows, bool use_cos) {
+        const long_index_t rb = v4::row_bytes(t, K);
+        const bool trig_fp4   = trig && !sparse && t == MxTdmV4Dtype::Fp4;
+        std::vector<uint8_t> data(static_cast<std::size_t>(rows) * rb, 0);
+        for(index_t r = 0; r < rows; ++r)
+        {
+            uint8_t* row = data.data() + r * rb;
+            auto put     = [&](long_index_t k) {
+                const double index = static_cast<double>(r * K + k);
+                const uint8_t x =
+                    trig_fp4
+                            ? e2m1_rne(static_cast<float>(use_cos ? std::cos(index) : std::sin(index)))
+                            : code(t);
+                if(t == MxTdmV4Dtype::Fp4)
+                    row[k / 2] |= static_cast<uint8_t>(k % 2 ? x << 4 : x);
+                else
+                    row[k] = x;
+            };
+            if(sparse)
+                for(long_index_t st : steps)
+                    for(long_index_t k = st * 128; k < std::min(K, (st + 1) * 128); ++k)
+                        put(k);
+            else
+                for(long_index_t k = 0; k < K; ++k)
+                    put(k);
+        }
+        return data;
+    };
+    Host h;
+    h.a                       = operand(s.a_dtype, s.M, false);
+    h.b                       = operand(s.b_dtype, s.N, true);
+    const long_index_t groups = (K + 31) / 32;
+    const bool fp4            = s.a_dtype == MxTdmV4Dtype::Fp4;
+    auto scales               = [&](index_t rows) {
+        std::vector<uint8_t> natural(static_cast<std::size_t>(rows) * groups);
+        for(auto& x : natural)
+            x = static_cast<uint8_t>(!sparse ? 124 + rng() % 7
+                                             : (fp4 ? 125 + rng() % 4 : 126 + rng() % 2));
+        return ck_tile::mx_scale_to_kmajor(natural.data(), rows, K, groups);
+    };
+    h.as = scales(s.M);
+    h.bs = scales(s.N);
+    h.c.resize(static_cast<std::size_t>(s.M) * s.N * v4::out_bytes(s.out));
+    std::uniform_real_distribution<float> uniform(-2.0f, 2.0f);
+    for(std::size_t i = 0; i < static_cast<std::size_t>(s.M) * s.N; ++i)
+        v4::store_out(s.out, h.c.data(), i, uniform(rng));
+    return h;
+}
+
+template <typename K>
+int run(const Options& o)
+{
+    const auto s      = K::Policy::template GetSpec<typename K::Problem>(o.M, o.N, o.K);
+    const float alpha = o.mode == "verify" ? 1.0f / 64 : o.alpha;
+    {
+        uint8_t dummy = 0;
+        const typename K::Args probe{
+            &dummy, &dummy, &dummy, &dummy, &dummy, &dummy, o.M, o.N, o.K, alpha, o.beta};
+        if(const char* why = K::GetUnsupportedReason(probe))
+        {
+            std::cerr << K::GetName() << " does not run M " << o.M << " N " << o.N << " K " << o.K
+                      << ": " << why << "\n";
+            return 2;
+        }
+    }
+    std::cout << K::GetName() << " M " << o.M << " N " << o.N << " K " << o.K << " grid "
+              << K::GridSize(o.M, o.N).x << "x" << K::GridSize(o.M, o.N).y << " lds "
+              << K::GetSmemSize() << "\n";
+    if(o.mode == "check")
+        return 0;
+    Host h;
+    if(o.mode == "file")
+        h = Host{read_file(o.load + "/a.bin",
+                           static_cast<std::size_t>(o.M) * v4::row_bytes(s.a_dtype, o.K)),
+                 read_file(o.load + "/b.bin",
+                           static_cast<std::size_t>(o.N) * v4::row_bytes(s.b_dtype, o.K)),
+                 read_file(o.load + "/a_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.M, o.K)),
+                 read_file(o.load + "/b_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.N, o.K)),
+                 read_file(o.load + "/c.bin",
+                           static_cast<std::size_t>(o.M) * o.N * v4::out_bytes(s.out))};
+    else
+        h = make_inputs(s, o.mode == "verify", o.data == "tensile", o.seed);
+
+    ck_tile::DeviceMem a(h.a.size()), b(h.b.size()), as(h.as.size()), bs(h.bs.size()),
+        c(h.c.size()), d(h.c.size());
+    a.ToDevice(h.a.data());
+    b.ToDevice(h.b.data());
+    as.ToDevice(h.as.data());
+    bs.ToDevice(h.bs.data());
+    c.ToDevice(h.c.data());
+    d.SetZero();
+    typename K::Args args{a.GetDeviceBuffer(),
+                          b.GetDeviceBuffer(),
+                          as.GetDeviceBuffer(),
+                          bs.GetDeviceBuffer(),
+                          c.GetDeviceBuffer(),
+                          d.GetDeviceBuffer(),
+                          o.M,
+                          o.N,
+                          o.K,
+                          alpha,
+                          o.beta};
+
+    if(o.mode == "bench")
+    {
+        const float ms = ck_tile::launch_mx_gemm_tdm_v4<K>(
+            ck_tile::stream_config{nullptr, true, 0, o.warmup, o.repeat}, args);
+        const double flops = 2.0 * o.M * o.N * static_cast<double>(o.K);
+        std::printf("%.3f us, %.1f TFLOPS\n", ms * 1e3, flops / (ms * 1e-3) / 1e12);
+        return 0;
+    }
+
+    ck_tile::launch_mx_gemm_tdm_v4<K>(ck_tile::stream_config{nullptr, false}, args);
+    HIP_CHECK_ERROR(hipDeviceSynchronize());
+    std::vector<uint8_t> got(h.c.size());
+    d.FromDevice(got.data());
+    if(o.mode == "file")
+    {
+        std::ofstream(o.save_d, std::ios::binary)
+            .write(reinterpret_cast<const char*>(got.data()),
+                   static_cast<std::streamsize>(got.size()));
+        std::cout << "D written to " << o.save_d << "\n";
+        return 0;
+    }
+
+    // Full check up to 2^32 multiply-adds, else the first and last tile of rows and 64 random.
+    std::vector<index_t> rows;
+    if(static_cast<double>(o.M) * o.N * o.K <= 4294967296.0)
+        for(index_t r = 0; r < o.M; ++r)
+            rows.push_back(r);
+    else
+    {
+        std::set<index_t> pick;
+        std::mt19937 rng(0xB10C);
+        for(index_t r = 0; r < std::min(o.M, s.tile_m); ++r)
+        {
+            pick.insert(r);
+            pick.insert(o.M - 1 - r);
+        }
+        for(int i = 0; i < 64; ++i)
+            pick.insert(static_cast<index_t>(rng() % o.M));
+        rows.assign(pick.begin(), pick.end());
+    }
+    const index_t ob = v4::out_bytes(s.out);
+    std::vector<uint8_t> want(rows.size() * o.N * ob);
+    ck_tile::reference_mx_gemm_tdm_v4(s.a_dtype,
+                                      s.b_dtype,
+                                      s.out,
+                                      h.a.data(),
+                                      v4::row_bytes(s.a_dtype, o.K),
+                                      h.b.data(),
+                                      v4::row_bytes(s.b_dtype, o.K),
+                                      h.as.data(),
+                                      h.bs.data(),
+                                      h.c.data(),
+                                      o.N,
+                                      want.data(),
+                                      o.N,
+                                      o.M,
+                                      o.N,
+                                      o.K,
+                                      alpha,
+                                      o.beta,
+                                      0,
+                                      rows.data(),
+                                      static_cast<index_t>(rows.size()));
+    std::size_t bad = 0;
+    for(std::size_t i = 0; i < rows.size(); ++i)
+        for(index_t n = 0; n < o.N; ++n)
+        {
+            const std::size_t g = static_cast<std::size_t>(rows[i]) * o.N + n, w = i * o.N + n;
+            if(std::memcmp(got.data() + g * ob, want.data() + w * ob, ob) != 0 && bad++ < 8)
+                std::printf("D(%d, %d): got %g, want %g\n",
+                            rows[i],
+                            n,
+                            v4::load_out(s.out, got.data(), g),
+                            v4::load_out(s.out, want.data(), w));
+        }
+    std::printf("%s: %zu of %zu rows checked, %zu mismatches\n",
+                bad ? "FAIL" : "PASS",
+                rows.size(),
+                static_cast<std::size_t>(o.M),
+                bad);
+    return bad ? 1 : 0;
+}
+
+/// The named instances: rocKE's winners for the ck_backport problems and variants of each knob.
+const std::map<std::string, std::pair<const char*, std::function<int(const Options&)>>>& instances()
+{
+    static const std::map<std::string, std::pair<const char*, std::function<int(const Options&)>>>
+        m{
+            {"maf",
+             {"mxfp4 t256x256x512 c4x4, fp8 out (MAF / medium winner)",
+              run<Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<4, 4>, Even<8>>>}},
+            {"maf_fp16",
+             {"maf with fp16 out",
+              run<Kernel<pk_fp4_t, pk_fp4_t, half_t, 256, 256, 512, 2, 2, 32, Tu<4, 4>, Even<8>>>}},
+            {"maf_bf16",
+             {"maf with bf16 out",
+              run<Kernel<pk_fp4_t, pk_fp4_t, bf16_t, 256, 256, 512, 2, 2, 32, Tu<4, 4>, Even<8>>>}},
+            {"maf_hblate",
+             {"maf, GL2 distance 2, half-B late",
+              run<Kernel<pk_fp4_t,
+                         pk_fp4_t,
+                         fp8_t,
+                         256,
+                         256,
+                         512,
+                         2,
+                         2,
+                         32,
+                         Tu<4, 4, 2, -1, 1, MxTdmV4HalfPlr::B, MxTdmV4HalfBOrder::Late>,
+                         Even<8>>>}},
+            {"maf_c2x2",
+             {"maf on a 2x2 cluster",
+              run<Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<2, 2>, Even<8>>>}},
+            {"medium_t128",
+             {"mxfp4 t128x128x1024 c2x2",
+              run<Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 128, 128, 1024, 2, 2, 32, Tu<2, 2>, Even<4>>>}},
+            {"mab",
+             {"mxfp4 t128x16x512 wave 4x1, 16x16 atom, c1x4, no local prefetch (MAB)",
+              run<Kernel<pk_fp4_t,
+                         pk_fp4_t,
+                         fp8_t,
+                         128,
+                         16,
+                         512,
+                         4,
+                         1,
+                         16,
+                         Tu<1, 4, 0, -1, 0, MxTdmV4HalfPlr::None>,
+                         Even<1>>>}},
+            {"any",
+             {"mxfp4 t256x256x512 c1x1 for any M, N and tile count (no K tail)",
+              run<Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<1, 1>, Any<1>>>}},
+            {"fp8",
+             {"mxfp8 t128x128x256 16x16 atom c2x2",
+              run<Kernel<fp8_t, fp8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Even<4>>>}},
+            {"fp8_bf8_bf16",
+             {"fp8 x bf8, bf16 out, t128x128x256 c2x2",
+              run<Kernel<fp8_t, bf8_t, bf16_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Even<4>>>}},
+        };
+    return m;
+}
+
+} // namespace
+
+int main(int argc, char* argv[])
+{
+    ck_tile::ArgParser arg;
+    arg.insert("kernel", "maf", "named instance (-list=1)")
+        .insert("list", "0", "1: print the instances and exit")
+        .insert("m", "1024", "M")
+        .insert("n", "1024", "N")
+        .insert("k", "2048", "K (a multiple of 32)")
+        .insert("alpha", "1", "alpha (verify uses rocKE's 2^-6)")
+        .insert("beta", "0", "beta; 0 does not read C")
+        .insert("mode", "verify", "verify | bench | file | check")
+        .insert("load", "", "file mode: directory of a.bin, b.bin, a_scale.bin, b_scale.bin, c.bin")
+        .insert("save_d", "d.bin", "file mode: where D goes")
+        .insert("data",
+                "tensile",
+                "bench data: tensile (rocKE's timing data: FP4 sin/cos codes) | random")
+        .insert("warmup", "50", "bench: untimed launches")
+        .insert("repeat", "200", "bench: timed launches")
+        .insert("seed", "23206", "input RNG seed");
+    if(!arg.parse(argc, argv))
+        return 1;
+    if(arg.get_int("list"))
+    {
+        for(const auto& [name, entry] : instances())
+            std::printf("%-14s %s\n", name.c_str(), entry.first);
+        return 0;
+    }
+    const auto it = instances().find(arg.get_str("kernel"));
+    if(it == instances().end())
+    {
+        std::cerr << "unknown -kernel " << arg.get_str("kernel") << " (see -list=1)\n";
+        return 1;
+    }
+    const Options o{arg.get_int("m"),
+                    arg.get_int("n"),
+                    arg.get_int("k"),
+                    arg.get_float("alpha"),
+                    arg.get_float("beta"),
+                    arg.get_str("mode"),
+                    arg.get_str("load"),
+                    arg.get_str("save_d"),
+                    arg.get_str("data"),
+                    arg.get_int("warmup"),
+                    arg.get_int("repeat"),
+                    static_cast<uint32_t>(arg.get_int("seed"))};
+    if(o.mode != "verify" && o.mode != "bench" && o.mode != "file" && o.mode != "check")
+    {
+        std::cerr << "-mode must be verify, bench, file or check\n";
+        return 1;
+    }
+    if(o.data != "tensile" && o.data != "random")
+    {
+        std::cerr << "-data must be tensile or random\n";
+        return 1;
+    }
+    return it->second.second(o);
+}
