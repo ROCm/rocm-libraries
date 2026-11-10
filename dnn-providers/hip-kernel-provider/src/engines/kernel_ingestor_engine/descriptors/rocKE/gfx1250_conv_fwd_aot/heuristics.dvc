@@ -1,0 +1,7 @@
+outs:
+- md5: 31bca6527c08e09cb190c27d88cafe32.dir
+  size: 643163
+  nfiles: 2
+  hash: md5
+  path: heuristics
+  remote: ingestor

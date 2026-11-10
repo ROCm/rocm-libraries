@@ -110,9 +110,11 @@ def test_sweep_returns_the_opt_in_plans():
 
 
 def test_registered_instances_hold_no_winograd():
-    for spec in gc.registered_conv_grouped_instances(direction="fwd"):
-        assert spec.algorithm != "winograd"
-    assert gc.registered_conv_grouped_instances("gfx1250") == ()
+    """gfx1250's forward list registers instances; Winograd stays the opt-in
+    route, never one of them."""
+    for arch in ("gfx950", "gfx1250"):
+        specs = gc.registered_conv_grouped_instances(arch, direction="fwd")
+        assert specs and all(s.algorithm != "winograd" for s in specs), arch
 
 
 def _unfused2d_spec(req, tile):

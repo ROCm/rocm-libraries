@@ -93,6 +93,8 @@ DW_FWD_WMMA_WIDE_FRAG_VGPRS = 112
 # Statically unrolled WMMAs per wave (rows x KH x passes): a whole 56..64-row
 # map in one tile.
 DW_FWD_WMMA_MAX_UNROLL = 1024
+# Hardware cap on gridDim.z.
+DW_FWD_WMMA_MAX_GRID_DIM = 65535
 
 
 @dataclass(frozen=True)
@@ -250,6 +252,13 @@ def dw_fwd_wmma_reason(spec: DwFwdWmmaSpec) -> Optional[str]:
         return (
             f"X/Y of {max(x_bytes, y_bytes)} bytes exceed the "
             f"{DW_DGRAD_WIN_MAX_TENSOR_BYTES}-byte sentinel addressing range"
+        )
+    # Grid Z = ceil(N / w_fold) * ceil(Ho / block_h) must fit the hardware cap.
+    grid_z = ceil_div(p.N, spec.w_fold) * ceil_div(p.Ho, spec.block_h)
+    if grid_z > DW_FWD_WMMA_MAX_GRID_DIM:
+        return (
+            f"grid Z {grid_z} exceeds the hardware cap of "
+            f"{DW_FWD_WMMA_MAX_GRID_DIM}; raise w_fold or block_h"
         )
     return None
 

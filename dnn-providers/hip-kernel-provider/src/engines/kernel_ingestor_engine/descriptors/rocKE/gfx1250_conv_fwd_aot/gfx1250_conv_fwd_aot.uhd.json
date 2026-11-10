@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "941a2fea-b1be-4bfc-810a-fd5aeb587766",
+  "name": "Gfx1250ConvFwdAot selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.gfx1250_conv_fwd_aot.score"
+  }
+}

@@ -2943,6 +2943,20 @@ class TestExpandedKernelsAreKeyChecked:
         )
         assert self._load(tmp_path, raw) is not None
 
+    def test_a_shapes_priority_is_its_kernels_priority(self, tmp_path):
+        raw = self._variants_raw()
+        shapes = raw["packs"][0]["variants"][0]["shapes"]
+        shapes[0]["priority"] = 7
+        config = self._load(tmp_path, raw)
+        kernels = config.packs[0].kernels
+        assert kernels[0].priority == 7
+        assert all(
+            k.priority == 0
+            for k in kernels[
+                len(raw["packs"][0]["variants"][0]["knob_sets"]["pinned"]) :
+            ]
+        )
+
     def test_a_foreign_kind_key_in_kernel_defaults_is_refused(self, tmp_path):
         raw = self._axes_raw()
         raw["packs"][0]["kernel_defaults"]["source_file"] = "K.cpp"

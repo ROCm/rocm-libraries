@@ -102,10 +102,9 @@ def read_labels(path: Path) -> list:
 
 def read_rocke_catalog(direction: str) -> list:
     """rocKE's own registered instances of ``(ARCH, direction)``, as dicts, in
-    rocKE's on-disk order -- rocKE is a set, not a priority order
-    (``dispatch.grouped_convolution``'s module docstring), so this makes no
-    claim about that order mattering; it is simply whatever rocKE's loader
-    returns. rocKE must already be bound (:func:`_bind_rocke`)."""
+    rocKE's on-disk order (for a forward list, its priority order; see
+    ``dispatch.grouped_convolution``'s module docstring); this tool's lists do
+    not depend on it. rocKE must already be bound (:func:`_bind_rocke`)."""
     from dispatch.grouped_convolution import (
         _INSTANCE_DIR,
         _INSTANCE_LISTS,

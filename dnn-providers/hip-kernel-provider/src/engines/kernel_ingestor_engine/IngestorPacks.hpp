@@ -86,6 +86,13 @@ void resetFlydslSdpaCdnaDualwaveModuleCache();
 void registerFlydslSdpaCdnaDecodeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslSdpaCdnaDecodeModuleCache();
 
+/// The engine name gfx1250_conv_fwd_aot.ued.json declares.
+inline constexpr std::string_view GFX1250_CONV_FWD_AOT_ENGINE_NAME = "hipkernel:Gfx1250ConvFwdAot";
+
+/// @see packs/Gfx1250ConvFwdAotNative.cpp
+void registerGfx1250ConvFwdAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx1250ConvFwdAotModuleCache();
+
 /// @see packs/Gfx950AttentionDenseNative.cpp
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();

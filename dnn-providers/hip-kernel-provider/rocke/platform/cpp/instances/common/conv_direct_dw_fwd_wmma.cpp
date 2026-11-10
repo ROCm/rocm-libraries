@@ -223,6 +223,18 @@ static bool dfw_check(const rocke_direct_dw_fwd_wmma_spec_t* spec, char* reason,
                             mx,
                             (long long)ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES);
     }
+    {
+        /* Grid Z = ceil(N / w_fold) * ceil(Ho / block_h) must fit the hardware cap. */
+        const long long grid_z
+            = (long long)rocke_ceil_div(p->N, spec->w_fold)
+              * (long long)rocke_ceil_div(rocke_direct_conv_problem_Ho(p), spec->block_h);
+        if(grid_z > ROCKE_DW_FWD_WMMA_MAX_GRID_DIM)
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "grid Z %lld exceeds the hardware cap of %d; raise w_fold or block_h",
+                            grid_z,
+                            ROCKE_DW_FWD_WMMA_MAX_GRID_DIM);
+    }
     return true;
 }
 

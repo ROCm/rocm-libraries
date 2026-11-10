@@ -16,8 +16,10 @@ logs name kernels by their lossless labels instead; this tool moves between
 the two.
 
   labels LIST                 print the instances' labels, sorted
-  add LIST [LABEL...]         add the labelled kernels (position does not
-                              matter -- the write sorts); --from FILE reads
+  add LIST [LABEL...]         add the labelled kernels (a dgrad list is a set
+                              and the write sorts it; a forward list keeps its
+                              order, so they go last, at the lowest priority);
+                              --from FILE reads
                               one label per line, '#' starting a comment
   new LIST [LABEL...]         write a new list of the labelled kernels; arch
                               and direction come from the labels, and the

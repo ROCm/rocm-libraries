@@ -6,15 +6,16 @@ SPDX-License-Identifier: MIT
 # Convolution coverage and remaining work
 
 The delivered scope is forward, backward-data, and backward-weight on gfx942
-and gfx950, with FP16/BF16 implicit-GEMM configurations. Coverage is bounded by
+and gfx950, with FP16/BF16 implicit-GEMM configurations, and forward on gfx1250,
+with FP16/BF16 implicit-GEMM and direct instances. Coverage is bounded by
 the cases and execution protocols below. A registered architecture, a constructible
 kernel, and successful GPU numerical execution are different evidence levels.
 
-| Direction | gfx942 | gfx950 |
-|---|---|---|
-| Forward | Pinned cases; explicit 64x64x64 configuration | Pinned cases; production implicit-GEMM selection |
-| Backward-data | Explicit-spec cases | Production implicit-GEMM cases, except explicit K=33 cases |
-| Backward-weight | Explicit cases; atomic and two-stage split-K | Explicit cases; atomic, two-stage, and merged groups |
+| Direction | gfx942 | gfx950 | gfx1250 |
+|---|---|---|---|
+| Forward | Pinned cases; explicit 64x64x64 configuration | Pinned cases; production implicit-GEMM selection | Production selection from an ordered list of 526 FP16/BF16 implicit-GEMM and direct instances |
+| Backward-data | Explicit-spec cases | Production implicit-GEMM cases, except explicit K=33 cases | Not delivered |
+| Backward-weight | Explicit cases; atomic and two-stage split-K | Explicit cases; atomic, two-stage, and merged groups | Not delivered |
 
 From the rocKE root, `python library/tests/run_conv_reference.py cases --arch <arch>`
 lists the pinned forward cases. The gradient cases are in
@@ -27,12 +28,12 @@ qualification from checks of the current source. Use the
 
 ## Production selection and explicit coverage
 
-The grouped-convolution dispatcher registers only gfx950 forward and dgrad
-instance lists. A gfx942 request or wgrad request cannot establish production
-selection coverage. Their tests build explicit configurations without modifying
-the production registry. No test silently falls back from a refused production
-request. The explicitly enrolled gfx950 K=33 gradient cases preserve coverage
-where the production list has no admitted instance.
+The grouped-convolution dispatcher registers gfx950 forward and dgrad instance lists
+and a gfx1250 forward list. A gfx942 request, a gfx1250 dgrad request or a wgrad
+request cannot establish production selection coverage. Their tests build explicit
+configurations without modifying the production registry. No test silently falls
+back from a refused production request. The explicitly enrolled gfx950 K=33 gradient
+cases preserve coverage where the production list has no admitted instance.
 
 The gfx950 forward request fixes the algorithm to implicit-GEMM. Default
 selection may choose a direct depthwise kernel; such a result is a different

@@ -1,0 +1,32 @@
+{
+  "claims": {
+    "hipkernel:Gfx1250ConvFwdAot": [
+      {
+        "cases": [
+          "dense3x3_s2_bfloat16",
+          "dense3x3_s2_half",
+          "dense5x5_bfloat16",
+          "dense5x5_half",
+          "dilated2_bfloat16",
+          "dilated2_half",
+          "few_out_k3_bfloat16",
+          "few_out_k3_half",
+          "nonsquare3x5_bfloat16",
+          "nonsquare3x5_half",
+          "pointwise_s2_bfloat16",
+          "pointwise_s2_half",
+          "row1x7_bfloat16",
+          "row1x7_half",
+          "stem7x7_c3_bfloat16",
+          "stem7x7_c3_half"
+        ],
+        "support": {
+          "gfx1250": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

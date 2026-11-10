@@ -90,10 +90,31 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
             (_problem(K=5, PAD=2), dict(block_waves=16, prefetch_rows=4), "16 waves"),
             (_problem(K=7, PAD=3), dict(block_h=80), "unrolled"),
             (_problem(N=4096, H=256, W=256), {}, "sentinel"),
+            # grid Z = ceil(N/w_fold)*ceil(Ho/block_h) must not exceed 65535.
+            (
+                _problem(N=1, H=65536, W=1, C=8),
+                dict(block_h=1, w_fold=1),
+                "grid Z",
+            ),
         ):
             why = dw_fwd_wmma_reason(DwFwdWmmaSpec(problem=problem, **knobs))
             self.assertIsNotNone(why, (problem, knobs))
             self.assertIn(needle, why)
+
+    def test_grid_z_boundary(self):
+        """grid Z = ceil(N/w_fold)*ceil(Ho/block_h): exactly 65535 is admitted,
+        65536 is refused."""
+        # Ho = H with stride=1, kh=3, PAD=1.  N=1, block_h=1, w_fold=1 ->
+        # grid_z = Ho.
+        at_cap = _problem(N=1, H=65535, W=1, C=8)
+        over_cap = _problem(N=1, H=65536, W=1, C=8)
+        self.assertIsNone(
+            dw_fwd_wmma_reason(DwFwdWmmaSpec(problem=at_cap, block_h=1, w_fold=1)),
+            "grid Z 65535 should be admitted",
+        )
+        why = dw_fwd_wmma_reason(DwFwdWmmaSpec(problem=over_cap, block_h=1, w_fold=1))
+        self.assertIsNotNone(why, "grid Z 65536 should be refused")
+        self.assertIn("grid Z", why)
 
     def test_engines_refuse_non_positive_extents(self):
         """A zero or negative extent is refused before any other rule, with
@@ -189,6 +210,9 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
             (_problem(PAD=3), {}),
             (_problem(H=1, PAD=0), {}),
             (_problem(C=12), {}),
+            # grid Z = 65535 is admitted; 65536 is refused by both engines.
+            (_problem(N=1, H=65535, W=1, C=8), dict(block_h=1, w_fold=1)),
+            (_problem(N=1, H=65536, W=1, C=8), dict(block_h=1, w_fold=1)),
             # groups = 0 (and -16) passed the divisibility rule and gave an
             # empty grid; every non-positive extent is refused first.
             (_problem(C=0), {}),

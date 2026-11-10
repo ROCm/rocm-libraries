@@ -7,10 +7,10 @@ WHAT IS REGISTERED
 ------------------
 Exactly the instances in the per-arch, per-direction lists under
 ``grouped_convolution_instances/`` (``<arch>_<direction>.json``) -- currently
-forward and backward-data (dgrad) convolutions on gfx950. Weight-gradient
-(wgrad), gfx942 forward and gfx1250 forward have no list registered at all:
-this rewrite moved fwd/dgrad onto the instance-list machinery but has not yet
-ported those onto it, so those
+forward and backward-data (dgrad) convolutions on gfx950 and forward
+convolutions on gfx1250. Weight-gradient (wgrad), gfx942 forward and gfx1250
+dgrad have no list registered at all: this rewrite moved fwd/dgrad onto the
+instance-list machinery but has not yet ported those onto it, so those
 directions/arches are an explicit, declared gap rather than a silent
 regression -- a request for either is rejected with a reason, not routed to a
 default.
@@ -55,15 +55,18 @@ WHAT DISPATCH DECIDES
   The instances are shape-generic binaries built against a probe problem, so
   admission never builds a kernel. The LLVM flavor is part of an instance's
   name, and admission checks it against ``ConvGroupedRequest.llvm_flavor``
-  (default :data:`DEFAULT_LLVM_FLAVOR`, the flavor the registered lists are
-  built for): a request for another flavor admits none of them. Selection is
+  (default: the arch's :data:`DEFAULT_LLVM_FLAVORS` entry, the flavor its
+  registered lists are built for): a request for another flavor admits none
+  of them. Selection is
   a pure function of the request -- it never probes the process
   (``ROCKE_LLVM_FLAVOR``, COMGR) for a flavor.
 * **Selection** among admitted instances, with no ``ranker``, is the first one
-  by a deterministic key (the instance's label, sorted; see
-  ``_instance_sort_key``) -- a registered list is a set, not a priority order,
-  so its on-disk position carries no meaning. That is a placeholder policy
-  until measured rankings exist; the ``ranker`` hook of
+  in the list's registered order. A forward list is ordered: its on-disk
+  position is its priority (the gfx1250 engine's catalog priority follows it).
+  A dgrad list (:data:`_SET_SEMANTICS_DIRECTIONS`) is a set, ordered by a
+  deterministic key (the instance's label, sorted; see
+  ``_instance_sort_key``), so its on-disk position carries no meaning. That is
+  a placeholder policy until measured rankings exist; the ``ranker`` hook of
   :func:`dispatch_conv_grouped` is where one plugs in.
 
 Compiling the instances is not done here: their binaries come from the AOT
@@ -93,7 +96,12 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from rocke.core.arch import ArchTarget
-from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
+from kernels.conv.aot_jobs import (
+    job_for_identity,
+    kernel_for_job,
+    spec_for_job,
+    spec_launch_block_size,
+)
 from kernels.conv.direct_aot_jobs import (
     direct_job_for_identity,
     direct_kernel_for_job,
@@ -152,6 +160,7 @@ __all__ = [
     "CONV_GROUPED_ABI_VERSION",
     "CONV_WINOGRAD_ABI_VERSION",
     "DEFAULT_LLVM_FLAVOR",
+    "DEFAULT_LLVM_FLAVORS",
     "ConvGroupedRequest",
     "ConvInstanceSpec",
     "ConvLaunchPlan",
@@ -190,12 +199,15 @@ _INSTANCE_DIR = Path(__file__).resolve().with_name("grouped_convolution_instance
 _INSTANCE_LISTS: dict[tuple[str, str], str] = {
     ("gfx950", "fwd"): "gfx950_fwd.json",
     ("gfx950", "dgrad"): "gfx950_dgrad.json",
+    ("gfx1250", "fwd"): "gfx1250_fwd.json",
 }
 
-# The LLVM flavor a request is admitted against unless it names its own: the
-# one every registered list is built for (pinned by
-# test_default_llvm_flavor_is_the_registered_one).
+# The LLVM flavor a request is admitted against unless it names its own: per
+# arch, the one its registered lists are built for (pinned by
+# test_default_llvm_flavor_is_the_registered_one); DEFAULT_LLVM_FLAVOR for an
+# arch with no list.
 DEFAULT_LLVM_FLAVOR = "llvm22"
+DEFAULT_LLVM_FLAVORS: dict[str, str] = {"gfx950": "llvm22", "gfx1250": "llvm24"}
 
 # The buffers bound to an instance's A, B and D operands, by direction.
 _OPERANDS = {"fwd": ("x", "w", "y"), "dgrad": ("dy", "w", "dx")}
@@ -238,8 +250,16 @@ class ConvGroupedRequest(OperatorRequest):
     algorithm: str = "auto"
     spec_id: str = "auto"
     # LLVM flavor the caller lowers to; instances built for another flavor are
-    # not admitted. Part of the request, never read from the process.
-    llvm_flavor: str = DEFAULT_LLVM_FLAVOR
+    # not admitted. Part of the request, never read from the process: None
+    # resolves to the arch's DEFAULT_LLVM_FLAVORS entry, once, at construction.
+    # dataclasses.replace(req, arch=...) therefore keeps the old arch's flavor;
+    # pass llvm_flavor=None with the new arch to resolve the new arch's default.
+    llvm_flavor: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.llvm_flavor is None:
+            flavor = DEFAULT_LLVM_FLAVORS.get(self.arch, DEFAULT_LLVM_FLAVOR)
+            object.__setattr__(self, "llvm_flavor", flavor)
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -340,8 +360,11 @@ def _gemm_problem(req: ConvGroupedRequest) -> ConvProblem | None:
 def _direct_problem(req: ConvGroupedRequest) -> tuple[DirectConvProblem | None, str]:
     """The direct-conv view of ``req``: ``(problem, "ok")`` or ``(None, why)``.
 
-    Direct conv describes a 2-D convolution with one stride and one padding
-    for both axes, so a request outside that has no direct view at all.
+    Direct conv describes a 2-D convolution with one stride for both axes, so
+    a request outside that has no direct view at all. A column padding of its
+    own rides ``pad_w`` (as the direct benchmark builds it); only the
+    variants of ``PER_AXIS_PAD_VARIANTS`` take one, the others refuse it in
+    :func:`direct_spec_for_problem`.
     """
     if req.Di is not None:
         return None, "direct conv is 2-D only"
@@ -349,8 +372,6 @@ def _direct_problem(req: ConvGroupedRequest) -> tuple[DirectConvProblem | None, 
         return None, (
             f"direct conv takes one stride (got {req.stride_h}x{req.stride_w})"
         )
-    if req.pad_h != req.pad_w:
-        return None, f"direct conv takes one padding (got {req.pad_h}x{req.pad_w})"
     return (
         DirectConvProblem(
             N=int(req.N),
@@ -366,6 +387,7 @@ def _direct_problem(req: ConvGroupedRequest) -> tuple[DirectConvProblem | None, 
             dtype=req.dtype.lower(),
             dil_h=int(req.dilation_h),
             dil_w=int(req.dilation_w),
+            pad_w=-1 if req.pad_w == req.pad_h else int(req.pad_w),
         ),
         "ok",
     )
@@ -520,7 +542,11 @@ def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, st
 def _instance_block(identity: KernelIdentity) -> tuple[int, int, int]:
     """Workgroup size of an instance, from its tuning alone."""
     if not identity.is_direct:
-        return (identity.warp_m * identity.warp_n * identity.wave_size, 1, 1)
+        if identity.pipeline != "wavelet":
+            return (identity.warp_m * identity.warp_n * identity.wave_size, 1, 1)
+        # Wavelet appends load waves to the workgroup; the spec knows how many.
+        spec = spec_for_job(job_for_identity(identity), identity.dtype_a)
+        return (spec_launch_block_size(spec), 1, 1)
     # threads_per_block reads only the knobs, so any shape the spec accepts
     # at construction answers it.
     probe = DirectConvProblem(
@@ -651,8 +677,16 @@ def _grid(spec: ConvInstanceSpec, req: OperatorRequest) -> tuple[int, int, int]:
         return (tiles, max(1, req.G), max(1, ident.split_k))
     from kernels.common.conv_args import ConvArgs
 
+    problem = _gemm_problem(req)
+    if ident.group_merge > 1:
+        # One workgroup owns group_merge conv groups: GEMM-N is that many
+        # times wider and there are that many fewer group slices
+        # (ImplicitGemmConvSpec.grid_N_gemm / grid_groups).
+        problem = dataclasses.replace(
+            problem, groups=problem.groups // ident.group_merge
+        )
     return ConvArgs.from_problem(
-        _gemm_problem(req), tile_m=ident.tile_m, tile_n=ident.tile_n
+        problem, tile_m=ident.tile_m, tile_n=ident.tile_n
     ).grid()
 
 
@@ -976,8 +1010,11 @@ class InstanceListError(ValueError):
 class InstanceList:
     """One instance list file: ``grouped_convolution_instances/<arch>_<dir>.json``.
 
-    ``identities`` are a set, no position meaning carried; stored sorted by
-    label (:func:`_instance_sort_key`) for diff stability. ``defaults`` are field values every
+    ``identities`` are in the list's order: for a dgrad list
+    (:data:`_SET_SEMANTICS_DIRECTIONS`) a set with no position meaning, stored
+    sorted by label (:func:`_instance_sort_key`) for diff stability; for a
+    forward list the position is the instance's priority, first highest.
+    ``defaults`` are field values every
     record shares unless it spells its own (``llvm_flavor``, ``wave_size``);
     a record spells only the fields that leave the family's baseline
     (:func:`kernels.conv.kernel_label.field_baseline`) or ``defaults``,
@@ -1090,9 +1127,10 @@ class InstanceList:
 
 
 def load_instance_list(path: Path) -> InstanceList:
-    """The instance list in ``path``: a set of identities, in on-disk order
-    (canonically sorted by :func:`_instance_sort_key` when the file was
-    written by :func:`format_instance_list`, but not re-sorted on load).
+    """The instance list in ``path``: its identities in on-disk order, not
+    re-sorted on load. A forward list's order is its priority; a dgrad list is
+    a set, canonically sorted by :func:`_instance_sort_key` when the file was
+    written by :func:`format_instance_list`.
 
     Fails on a broken list rather than skipping an entry: a record that does
     not spell an identity of the list's arch and direction, or one that repeats an
@@ -1136,10 +1174,6 @@ def load_instance_list(path: Path) -> InstanceList:
     for i, record in enumerate(records):
         where = f"{path.name}: instances[{i}]"
         identity = lst.identity(record, where)
-        if identity.pipeline == "wavelet":
-            # Wavelet appends load waves to the workgroup, which _instance_block
-            # does not model; no registered arch builds it.
-            raise InstanceListError(f"{where}: wavelet instances are not supported")
         if identity in seen:
             raise InstanceListError(
                 f"{where}: {identity.label()} is already instances[{seen[identity]}]"
@@ -1156,8 +1190,9 @@ def _json(value: object) -> str:
 def _instance_sort_key(identity: KernelIdentity) -> str:
     """The deterministic key the registered instances are a set under.
 
-    A list's ``identities`` carry no selection meaning by position; a
-    record's file order is irrelevant. ``label()`` is already the canonical,
+    A dgrad list's (:data:`_SET_SEMANTICS_DIRECTIONS`) ``identities`` carry no
+    selection meaning by position; a record's file order is irrelevant (a
+    forward list keeps its on-disk order, which is its priority). ``label()`` is already the canonical,
     unique, lossless name every identity has (used for dedup in
     :func:`load_instance_list`), so it doubles as the sort key that makes the
     on-disk file -- and the default (no ``ranker``) pick among admitted
@@ -1284,9 +1319,9 @@ CONV_FWD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["fwd"]
 CONV_DGRAD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["dgrad"]
 
 # Registered instances by name; a candidate's spec does not depend on the request.
-# ``priority`` here is the index in _read_instance_list's deterministic
-# (sorted-by-label) order, not file position -- a list is a set on disk; see
-# _instance_sort_key.
+# ``priority`` here is the index in _read_instance_list's order: file position
+# for a forward list, the sorted-by-label order of a set-semantics (dgrad) list;
+# see _instance_sort_key.
 _INSTANCE_SPECS: dict[str, ConvInstanceSpec] = {}
 for (_arch, _direction), _ in _INSTANCE_LISTS.items():
     for _priority, _identity in enumerate(_read_instance_list(_arch, _direction)):
@@ -1616,7 +1651,12 @@ def _no_instance_reason(req: ConvGroupedRequest) -> str:
         return "; ".join(errors)
     reasons: dict[str, int] = {}
     opt_in = []
+    # A pinned request: only the candidates the pin names say why (the rest
+    # refuse for the pin alone).
+    pinned = (req.algorithm, req.spec_id) != ("auto", "auto")
     for candidate in _registry(req).candidates():
+        if pinned and not selector_matches(req, candidate)[0]:
+            continue
         ok, why = candidate.admits(req)
         if not ok:
             reasons[why] = reasons.get(why, 0) + 1
@@ -1630,6 +1670,11 @@ def _no_instance_reason(req: ConvGroupedRequest) -> str:
         )
         reasons[note] = reasons.get(note, 0) + 1
     if not reasons:
+        if pinned:
+            return (
+                f"no candidate matches algorithm={req.algorithm!r}, "
+                f"spec_id={req.spec_id!r}"
+            )
         return "no instances registered"
     top = sorted(reasons.items(), key=lambda kv: -kv[1])[:5]
     return "; ".join(f"{n}x {why}" for why, n in top) + (

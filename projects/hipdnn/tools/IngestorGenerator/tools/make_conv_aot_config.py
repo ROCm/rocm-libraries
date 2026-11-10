@@ -530,21 +530,53 @@ def build_config(
                 "variants": variants,
             }
         )
+    return packaged_config(
+        engine_name=engine_name,
+        product_engine=PRODUCT_ENGINE,
+        knobs=ENGINE_KNOBS,
+        kmd_fields=kmd,
+        metadata=metadata,
+        packs=packs,
+        authored_subpath=authored_subpath,
+        native_symbols_from_slug=native_symbols_from_slug,
+    )
+
+
+def packaged_config(
+    *,
+    engine_name: str,
+    product_engine: str,
+    knobs,
+    kmd_fields: list,
+    metadata: list,
+    packs: list,
+    authored_subpath: str = "",
+    native_symbols_from_slug: str | None = None,
+) -> dict:
+    """The packaged-dialect generator config around ``packs``: one native-heuristic
+    engine with ``knobs``, the KMD ``kmd_fields``, one shared-shape graph match, no
+    workspace, every ``metadata`` field bound to the spec field of its name.
+
+    ``engine_name`` other than ``product_engine`` borrows that engine's native
+    symbols (``native_symbols_from``, and ``native_symbols_from_slug`` when given,
+    see :func:`build_config`). ``authored_subpath`` defaults to
+    ``rocKE/<engine slug>``.
+    """
     engine = {
         "name": engine_name,
         "sdk_version": "1.0.0",
-        "knobs": list(ENGINE_KNOBS),
+        "knobs": list(knobs),
         "heuristic": "native",
     }
-    if engine_name != PRODUCT_ENGINE:
-        engine["native_symbols_from"] = PRODUCT_ENGINE
+    if engine_name != product_engine:
+        engine["native_symbols_from"] = product_engine
         if native_symbols_from_slug is not None:
             engine["native_symbols_from_slug"] = native_symbols_from_slug
     return {
         "dialect": "packaged",
         "authored_subpath": authored_subpath or f"rocKE/{engine_slug(engine_name)}",
         "engine": engine,
-        "kmd_fields": kmd,
+        "kmd_fields": kmd_fields,
         "kernel_source_kind": "rocke",
         "workspace_policy": "none",
         "graph_match": {"shape": "shared_shape", "discriminator": "none"},
@@ -661,6 +693,28 @@ def _kernels(node):
             yield from _kernels(value)
 
 
+def identity_entries(paths: list) -> tuple:
+    """``(entries, identities, rejected)`` of the JSON identity lists ``paths``, read
+    as one catalog: every entry in order, ``index -> identity dict`` of each entry that
+    is one (a ``KernelIdentity`` dict, or an object carrying one under
+    ``"identity"``), and ``(index, reason)`` of each that is not. ``ValueError``
+    when a file does not hold a JSON list."""
+    entries = []
+    for path in paths:
+        listed = json.loads(Path(path).read_text())
+        if not isinstance(listed, list):
+            raise ValueError(f"--instances {path} must hold a JSON list")
+        entries += listed
+    identities, rejected = {}, []
+    for index, entry in enumerate(entries):
+        identity = entry.get("identity", entry) if isinstance(entry, dict) else None
+        if isinstance(identity, dict):
+            identities[index] = identity
+        else:
+            rejected.append((index, "entry is not an identity dict"))
+    return entries, identities, rejected
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
@@ -721,20 +775,11 @@ def main(argv=None) -> int:
         parser.error("--rocke-root, --instances and --output are required")
     _bind_rocke(args.rocke_root)
 
-    entries = []
-    for path in args.instances:
-        listed = json.loads(path.read_text())
-        if not isinstance(listed, list):
-            parser.error(f"--instances {path} must hold a JSON list")
-        entries += listed
-    specs, seen, rejected = [], set(), []
-    identities = {}
-    for index, entry in enumerate(entries):
-        identity = entry.get("identity", entry) if isinstance(entry, dict) else None
-        if isinstance(identity, dict):
-            identities[index] = identity
-        else:
-            rejected.append((index, "entry is not an identity dict"))
+    try:
+        entries, identities, rejected = identity_entries(args.instances)
+    except ValueError as exc:
+        parser.error(str(exc))
+    specs, seen = [], set()
     converted = instance_specs(list(identities.values()), args.jobs)
     for index, (spec, reason) in zip(identities, converted):
         if spec is None:

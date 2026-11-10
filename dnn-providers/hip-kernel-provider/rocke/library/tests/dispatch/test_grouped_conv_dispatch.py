@@ -36,6 +36,7 @@ from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common import kernel_sweep as ks
 from benchmarks.common.grouped_conv import instance_list
 from dispatch import grouped_convolution as gc
+from kernels.conv import aot_jobs
 from kernels.conv.direct_variants import direct_spec_takes_target_wave
 from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.lower_llvm import LLVM_FLAVORS
@@ -52,19 +53,22 @@ def _listed_names(path: Path = _LIST) -> list[str]:
 
 
 @pytest.fixture(autouse=True)
-def _instance_flavor(monkeypatch):
-    """Lower the flavor the instances were named for.
+def _instance_flavor(request, monkeypatch):
+    """Lower the flavor the test's arch's instances were named for (the
+    test's ``arch`` parameter, else :data:`_ARCH`).
 
     Dispatch does not need it (a request carries its flavor); the AOT cache
     and job builders the tests compare against check the process's own.
     """
+    callspec = getattr(request.node, "callspec", None)
+    arch = callspec.params.get("arch", _ARCH) if callspec else _ARCH
     flavors = {
         s.identity.llvm_flavor
         for direction in ("fwd", "dgrad")
-        for s in gc.registered_conv_grouped_instances(direction=direction)
+        for s in gc.registered_conv_grouped_instances(arch, direction=direction)
     }
-    assert len(flavors) == 1
-    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavors.pop())
+    assert len(flavors) <= 1
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavors.pop() if flavors else "llvm22")
 
 
 def _req(**kw) -> gc.ConvGroupedRequest:
@@ -109,6 +113,14 @@ _SHAPES = {
     "dilated_h3": dict(Hi=32, Wi=32, C=128, K=128, dilation_h=3),
     "stem_c3": dict(
         C=3, K=64, Y=7, X=7, Hi=64, Wi=64, stride_h=2, stride_w=2, pad_h=3, pad_w=3
+    ),
+    # gfx1250's few-output-channel kernels (direct_fwd_smallk_wmma bakes K)
+    # and its dilation-2 tap-outer kernels.
+    "dense_k3": dict(N=1, C=64, K=3, Hi=64, Wi=64),
+    # A 1-D filter padded along the row only (per-axis padding).
+    "row_1x7_k1": dict(N=1, C=32, K=1, Hi=1, Wi=4096, Y=1, X=7, pad_h=0, pad_w=3),
+    "dilated2": dict(
+        N=1, C=256, K=256, Hi=32, Wi=32, pad_h=2, pad_w=2, dilation_h=2, dilation_w=2
     ),
 }
 
@@ -252,8 +264,7 @@ def test_an_instance_builds_only_for_its_own_arch():
     [
         (dict(arch="gfx90a"), "arch 'gfx90a'"),
         (dict(arch="gfx942"), "arch 'gfx942'"),
-        (dict(arch="gfx1250"), "arch 'gfx1250'"),
-        (dict(arch="gfx1250", llvm_flavor="llvm23"), "arch 'gfx1250'"),
+        (dict(arch="gfx1250", llvm_flavor="llvm23"), "built for LLVM flavor llvm24"),
         (dict(direction="wgrad"), "no 'wgrad' instances"),
         (dict(dtype="fp32"), "fp16 or bf16 only"),
         (dict(C=63, G=2), "divisible by G"),
@@ -274,7 +285,7 @@ def test_nothing_outside_the_lists_dispatches(kw, match):
     results = gc.dispatch_conv_grouped_all(req)
     if fields["arch"] == "gfx1250" and kw.get("llvm_flavor") == "llvm23":
         # Only the opt-in Winograd forward route (its 3x3 plans lower at
-        # llvm23 only); never an auto pick.
+        # llvm23; the registered instances at llvm24); never an auto pick.
         assert results
         assert {r.spec.algorithm for r in results} == {"winograd"}
         assert all(r.candidate.opt_in for r in results)
@@ -318,13 +329,31 @@ def test_another_llvm_flavor_admits_nothing():
 
 
 def test_default_llvm_flavor_is_the_registered_one():
-    flavors = {
-        s.identity.llvm_flavor
-        for direction in ("fwd", "dgrad")
-        for s in gc.registered_conv_grouped_instances(direction=direction)
-    }
-    assert flavors == {gc.DEFAULT_LLVM_FLAVOR}
-    assert _req().llvm_flavor == gc.DEFAULT_LLVM_FLAVOR
+    """Per arch: a request that names no flavor is admitted against the one
+    that arch's lists are built for."""
+    for arch in sorted({a for a, _ in gc._INSTANCE_LISTS}):
+        flavors = {
+            s.identity.llvm_flavor
+            for direction in ("fwd", "dgrad")
+            for s in gc.registered_conv_grouped_instances(arch, direction=direction)
+        }
+        assert flavors == {gc.DEFAULT_LLVM_FLAVORS[arch]}, arch
+        assert _req(arch=arch).llvm_flavor == gc.DEFAULT_LLVM_FLAVORS[arch]
+    assert _req(arch="gfx942").llvm_flavor == gc.DEFAULT_LLVM_FLAVOR
+    assert _req(arch="gfx1250", llvm_flavor="llvm23").llvm_flavor == "llvm23"
+
+
+def test_replace_across_arches_keeps_the_flavor_unless_reset():
+    """The default flavor is resolved once, at construction: replacing only the
+    arch keeps the old arch's flavor, replacing it with ``llvm_flavor=None`` too
+    resolves the new arch's default (as the field's comment documents)."""
+    gfx950 = _req(arch="gfx950")
+    assert gfx950.llvm_flavor == gc.DEFAULT_LLVM_FLAVORS["gfx950"]
+    kept = dataclasses.replace(gfx950, arch="gfx1250")
+    assert kept.llvm_flavor == gc.DEFAULT_LLVM_FLAVORS["gfx950"]
+    reset = dataclasses.replace(gfx950, arch="gfx1250", llvm_flavor=None)
+    assert reset == _req(arch="gfx1250")
+    assert reset.llvm_flavor == gc.DEFAULT_LLVM_FLAVORS["gfx1250"]
 
 
 def test_dispatch_does_not_read_the_process_flavor(monkeypatch):
@@ -397,6 +426,8 @@ def _direct_problem(req):
         dtype=req.dtype,
         dil_h=req.dilation_h,
         dil_w=req.dilation_w,
+        # As benchmark_direct_conv builds a problem with a column padding.
+        pad_w=-1 if req.pad_w == req.pad_h else req.pad_w,
     )
 
 
@@ -452,7 +483,7 @@ def _cache_side_admits(spec, req) -> bool:
 
         problem = _launch_problem(spec.direction, _implicit_problem(req))
         return KernelCache.supports_problem(ident, problem)[0]
-    if req.stride_h != req.stride_w or req.pad_h != req.pad_w:
+    if req.stride_h != req.stride_w:
         return False
     if ident.algorithm == "direct_nongrouped" and req.G != 1:
         return False
@@ -464,7 +495,12 @@ def _cache_side_admits(spec, req) -> bool:
 @pytest.mark.parametrize("arch, direction, shape", _CASES)
 def test_admission_matches_the_aot_run_path(arch, direction, shape):
     req = _case_req(arch, direction, shape)
-    admitted = [r.spec.name for r in gc.dispatch_conv_grouped_all(req)]
+    # The instances; gfx1250's opt-in Winograd routes are no list's records.
+    admitted = [
+        r.spec.name
+        for r in gc.dispatch_conv_grouped_all(req)
+        if isinstance(r.spec, gc.ConvInstanceSpec)
+    ]
     expected = [
         s.name
         for s in gc.registered_conv_grouped_instances(arch, direction=direction)
@@ -474,17 +510,20 @@ def test_admission_matches_the_aot_run_path(arch, direction, shape):
     assert admitted, f"{arch} {shape}: no registered instance runs it"
 
 
-@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
-def test_the_shapes_reach_every_registered_family(direction):
+@pytest.mark.parametrize("arch, direction", sorted(gc._INSTANCE_LISTS))
+def test_the_shapes_reach_every_registered_family(arch, direction):
     shapes = _SHAPES if direction == "fwd" else _DGRAD_SHAPES
     families = {
         s.algorithm
-        for s in gc.registered_conv_grouped_instances(_ARCH, direction=direction)
+        for s in gc.registered_conv_grouped_instances(arch, direction=direction)
     }
     reached = {
         r.spec.algorithm
         for kw in shapes.values()
-        for r in gc.dispatch_conv_grouped_all(_req(direction=direction, **kw))
+        for r in gc.dispatch_conv_grouped_all(
+            _req(arch=arch, direction=direction, **kw)
+        )
+        if isinstance(r.spec, gc.ConvInstanceSpec)
     }
     assert reached == families
 
@@ -532,10 +571,15 @@ def _cache_side_plan(spec, req, ptrs, sizes):
             tuple(sizes[b] for b in buffers),
             extras,
         )
+        # The block the AOT cache launches: its entry's recorded block_size
+        # (kernel_for_job's meta; a wavelet kernel appends its load waves).
+        block = aot_jobs.spec_launch_block_size(
+            aot_jobs.spec_for_job(aot_jobs.job_for_identity(ident), ident.dtype_a)
+        )
         step = (
             ident,
             tuple(grid),
-            (ident.warp_m * ident.warp_n * ident.wave_size, 1, 1),
+            (block, 1, 1),
             [a["name"] for a in _signature_for_identity(ident, ident.dtype_a)],
             buffers,
             values,
@@ -574,6 +618,8 @@ _SIZES = {name: 100 + i for i, name in enumerate(_PTRS)}
 @pytest.mark.parametrize("arch, direction, shape", _CASES)
 def test_launch_plan_matches_the_aot_run_path(arch, direction, shape):
     for result in gc.dispatch_conv_grouped_all(_case_req(arch, direction, shape)):
+        if not isinstance(result.spec, gc.ConvInstanceSpec):
+            continue  # an opt-in Winograd route (test_conv_winograd_*_dispatch)
         name = result.spec.name
         plan = gc.launch_plan_for(result.request, result.spec)
         got = [
@@ -828,6 +874,16 @@ def test_pin_to_an_instance_that_cannot_run_the_shape_is_refused():
         gc.dispatch_conv_grouped(_req(C=3, K=64, spec_id=vec8))
 
 
+def test_a_pin_no_candidate_matches_says_so():
+    """A pinned algorithm no registered candidate has is refused with that reason,
+    not as an empty registry."""
+    with pytest.raises(
+        ValueError,
+        match=r"no candidate matches algorithm='no_such_family', spec_id='auto'",
+    ):
+        gc.dispatch_conv_grouped(_req(algorithm="no_such_family"))
+
+
 def test_algorithm_pin_keeps_one_family():
     req = _req(**_SHAPES["depthwise7x7"], algorithm="direct_depthwise_tiled")
     results = gc.dispatch_conv_grouped_all(req)
@@ -940,9 +996,10 @@ def _with(**kw) -> dict:
         ([_implicit_record()], {"defaults": {}}, "lacks llvm_flavor, wave_size"),
         ([_implicit_record()], {"defaults": {"arch": _ARCH}}, "the list's"),
         ([_implicit_record()], {"instance": []}, "unknown keys"),
-        ([_with(pipeline="wavelet")], {}, "wavelet"),
-        # Another well-formed forward kernel is a valid list.
+        # Other well-formed forward kernels are valid lists (wavelet included:
+        # its block counts the load waves, see _instance_block).
         ([_with(unroll_k=None)], {}, None),
+        ([_with(pipeline="wavelet")], {}, None),
     ],
 )
 def test_instance_list_loader_rejects_broken_lists(tmp_path, records, header, match):
