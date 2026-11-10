@@ -208,7 +208,7 @@ guess credentials, and do not acquire hardware on your own.
 Print it inline; write no file. Keep it scannable.
 
 ```
-# Review - <branch or PR #N: title> (<head> -> <base>, +<add>/-<del>, <files> files)
+*Review - <branch or PR #N: title>* (<head> -> <base>, +<add>/-<del>, <files> files)
 Confirmed: X | Overstated: Y | Rejected: Z | Blind spots: B
 <1-2 sentences: the headline finding, or "no blockers">
 ```
@@ -230,22 +230,45 @@ any. End with the level you used and why, and the deep-review recommendation fro
 Turn Confirmed and Overstated findings, blind spots and anything reproduced into comments a human can act
 on. Drop rejected findings, and drop `[not reproduced]` ones unless the user asks to keep them.
 
-- Per comment: anchor (`file:line` or general); one short paragraph (what is wrong, why it matters, the
-  scenario); evidence when reproduced (command, arch, short real output); the proposed fix; severity as a
-  plain word. Factual and collegial, no filler.
+- Per comment: a short italicized title, anchor (`file:line` or general), and one short paragraph
+  (what is wrong, why it matters, the scenario); evidence when reproduced (command, arch, short real
+  output); the proposed fix; severity as a plain word where useful. Factual and collegial, no filler.
+- Use italicized titles for inline and summary comments, not Markdown headings (`#`, `##`, etc.).
+  Keep severity out of titles; do not use oversized numbered headings.
 - Where the fix is a small self-contained edit to lines in the PR diff, add a GitHub suggestion block under a
   marker line: `Suggested fix - one-click accept (verified on <arch>)` or `(untested)`. Larger or multi-hunk
   fixes are prose or a plain snippet. List the suggestions in a numbered veto table (`S1`, `S2`, ...).
 - One top-level summary comment: overview, count of suggestions and which are verified, and a line stating
   the review was AI-assisted.
 
-Show the numbered draft and iterate ("drop 3", "soften 5", "veto S2") until the user explicitly approves.
+Show each draft comment with a small control number on its own line, separate from the comment body.
+Keep surviving numbers stable when comments are dropped or edited, so later instructions remain
+unambiguous. These numbers are local review controls, not part of the text approved for posting.
+For example:
+
+```text
+Draft 1
+Anchor: <file:line>
+
+*Regression test selection*
+
+<comment paragraph>
+```
+
+End with a short instruction: `You can say "drop 1", "modify 2: ...", or "veto S1". Nothing posted.`
+Iterate until the user explicitly approves the final comment bodies.
 
 ## Step 7 - Post (only after explicit approval)
 
 Never post, submit or edit anything on GitHub without explicit approval of the exact final draft;
 "looks good so far" is not approval, and a changed draft needs re-confirmation. PR mode only; in local
 mode the approved drafts stay in the response.
+
+Before posting, strip the local control numbers (`Draft 1`, etc.), anchor labels, suggestion veto
+IDs/table, and editing instructions. Preserve the approved italicized titles, comment paragraphs,
+evidence, and GitHub suggestion blocks; use anchors as API metadata, not comment text. Posted inline
+comments and the summary have no draft numbering or Markdown headings. This presentation-only
+stripping does not require another approval; any change to the approved comment bodies does.
 
 Post inline comments and the summary as one pending review, adding to the user's existing pending
 review if there is one, and submit as `COMMENT` unless the user asked otherwise. Never push to the PR
