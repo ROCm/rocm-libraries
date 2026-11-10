@@ -125,7 +125,7 @@ run_fp8_tests() {
 # perhead is only generated for gfx125x, and the example exits non-zero when an instance is
 # missing, so this cannot be folded into run_fp8bf16_tests without breaking the other targets.
 run_gfx125_qscale_tests() {
-    # hdim 256 is left out: qr_tdm generates no d=256 fp8 instance
+    # hdim 256 is left out: only qr_tdm_fp8_sched serves it, and the QuantScaleHdim256 gtests cover it
     for prec in fp8 fp8bf16 ; do
     for scale in n pt ph bs ; do
     for mode in 0 1 ; do

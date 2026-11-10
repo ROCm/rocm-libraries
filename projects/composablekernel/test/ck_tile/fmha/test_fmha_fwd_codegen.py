@@ -124,14 +124,15 @@ inline std::string get_device_name() {
     return value == nullptr ? "gfx1250" : value;
 }
 template <bool> struct SimplifiedGenericAttentionMask {};
-enum class BlockFmhaPipelineEnum { QRKSVS, QRKSVS_TDM, QRKSVS_TDM_SCHED, QRKSVS_TDM_PINGPONG };
+enum class BlockFmhaPipelineEnum { QRKSVS, QRKSVS_TDM, QRKSVS_TDM_SCHED, QRKSVS_TDM_PINGPONG, QRKSVS_TDM_SCHED_FP8 };
 enum class BlockAttentionBiasEnum { NO_BIAS, ELEMENTWISE_BIAS, ALIBI };
-enum class BlockAttentionQuantScaleEnum { NO_SCALE, PERTENSOR, BLOCKSCALE, KV_BLOCKSCALE, MX };
+enum class BlockAttentionQuantScaleEnum { NO_SCALE, PERTENSOR, BLOCKSCALE, KV_BLOCKSCALE, MX, PERHEAD };
 }
 enum class mask_enum { no_mask, mask_top_left, mask_bottom_right, window_generic };
 enum class bias_enum { no_bias, elementwise_bias, alibi };
-enum class quant_scale_enum { no_scale, pertensor, blockscale, kv_blockscale, mx };
+enum class quant_scale_enum { no_scale, pertensor, blockscale, kv_blockscale, mx, perhead };
 struct FmhaFwdBf16 {};
+struct FmhaFwdFp8 {};
 struct FmhaFwdFp16 {};
 struct FmhaMasks {
     struct NoMask {};
@@ -140,7 +141,8 @@ struct FmhaMasks {
 };
 inline constexpr ck_tile::index_t fmha_fwd_largest_n_tile_size = 128;
 template <int, typename, bool, int, int, int, int, int, int, bool, auto, bool,
-          typename, auto, bool, bool, auto, bool, bool, bool, bool, bool, bool, bool, int = -1>
+          typename, auto, bool, bool, auto, bool, bool, bool, bool, bool, bool, bool, int = -1,
+          bool = false>
 struct fmha_fwd_traits_ {};
 struct fmha_fwd_traits {
     int hdim_q = 192, hdim_v = 128;
@@ -162,7 +164,11 @@ struct fmha_fwd_args {
     const void* cu_seqlen_k_ptr = nullptr;
     const void* o_ptr = nullptr;
     int stride_o = 1024, nhead_stride_o = 128, batch_stride_o = 262144;
+    int block_scale_size_q = 0, block_scale_size_kv = 0;
 };
+inline bool fmha_fwd_can_merge_head_groups(const fmha_fwd_args&, int, bool, bool, bool = false) {
+    return false;
+}
 template <typename Trait, typename Arch> struct dispatch_id;
 template <typename Trait, typename Arch>
 float fmha_fwd_(const ck_tile::stream_config&, const fmha_fwd_args&) {
@@ -182,7 +188,8 @@ int main() {
          >> t.data_type >> arg_q >> arg_v >> max_q >> a.batch >> a.nhead_q
          >> a.nhead_k >> a.window_size_left >> a.window_size_right
          >> has_cu_sk >> has_sk_ptr >> has_sink_ptr >> o_offset >> a.stride_o
-         >> a.nhead_stride_o >> a.batch_stride_o)) return 2;
+         >> a.nhead_stride_o >> a.batch_stride_o >> a.block_scale_size_q
+         >> a.block_scale_size_kv)) return 2;
     t.mask_type = static_cast<mask_enum>(mask);
     t.bias_type = static_cast<bias_enum>(bias);
     t.qscale_type = static_cast<quant_scale_enum>(scale);
@@ -309,6 +316,8 @@ class _CompiledDispatcher:
             stride_o=1024,
             nhead_stride_o=128,
             batch_stride_o=262144,
+            block_scale_size_q=0,
+            block_scale_size_kv=0,
         )
         if changes.keys() - case.keys():
             raise ValueError(
@@ -1768,8 +1777,8 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     traits[hdim] = Counter(key(k) for k in sched)
                     if hdim == 64:
                         api = pool.render("test")
-                        # FP8 and MXFP8 have no other D64 pipeline.
-                        if dtype in ("fp8", "mxfp8", "mxfp8bf16"):
+                        # MXFP8 has no other D64 pipeline.
+                        if dtype in ("mxfp8", "mxfp8bf16"):
                             self.assertEqual(
                                 len(sched),
                                 sum(k.F_pipeline.F_packgqa == "f" for k in kernels),
@@ -2376,6 +2385,52 @@ int main() {
                         lse=1,
                     ),
                     [candidate],
+                )
+
+    def test_fp8_head_dims_below_d64_reach_qr_tdm(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d*_fp8_[bg]*_nlogits_nbias_nmask_nlse_ndropout_nskip_*_nsink*",
+            0,
+            [64, 128],
+            "simplified",
+        )
+        dispatch = _CompiledDispatcher(
+            self, pool, kernels, filter_fn=lambda trait: True
+        )
+        pertensor, blockscale = 1, 2
+        for hdim_q, hdim_v, qscale, block_scale_size, pipeline, padded in (
+            (32, 32, pertensor, 0, "qr_tdm", True),
+            (48, 48, pertensor, 0, "qr_tdm", True),
+            (64, 32, pertensor, 0, "qr_tdm", True),
+            (64, 64, pertensor, 0, "qr_tdm_fp8_sched", False),
+            (64, 64, blockscale, 64, "qr_tdm", False),
+            (64, 64, blockscale, 128, "qr_tdm_fp8_sched", False),
+        ):
+            with self.subTest(hdim_q=hdim_q, hdim_v=hdim_v, qscale=qscale):
+                features = dict(
+                    dtype="fp8",
+                    hdim=64,
+                    mode="batch",
+                    pipeline=pipeline,
+                    qscale="pertensor" if qscale == pertensor else "blockscale",
+                    dpad="t" if padded else "f",
+                    dvpad="t" if padded else "f",
+                    spad="f" if pipeline == "qr_tdm" else "t",
+                )
+                if pipeline == "qr_tdm_fp8_sched":
+                    features["packgqa"] = "f"
+                self.assertEqual(
+                    dispatch.run(
+                        dtype="fp8",
+                        hdim_q=hdim_q,
+                        hdim_v=hdim_v,
+                        qscale=qscale,
+                        block_scale_size_q=block_scale_size,
+                        block_scale_size_kv=block_scale_size,
+                        nhead_k=8,
+                    ),
+                    [dispatch.expected_id(**features)],
                 )
 
     def test_batch_sched_only_dispatch(self):

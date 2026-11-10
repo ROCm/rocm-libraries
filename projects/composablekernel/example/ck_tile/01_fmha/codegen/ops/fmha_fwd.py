@@ -2277,7 +2277,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     ]
                 )
             return result
-        elif dtype in cls._DT_FP8BF16:
+        elif dtype in cls._DT_FP8_FP8BF16:
             result = {
                 #                             bm0, bn0, bk0, bn1, bk1,
                 ( 64,  64) : [FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1),
@@ -2289,13 +2289,6 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             return cls._with_qr_tdm_sched_fp8_tiles(result)
         elif dtype in cls._DT_MXFP8:
             return cls._with_qr_tdm_sched_fp8_tiles({})
-        elif dtype in cls._DT_FP8:
-            result = {
-                #                             bm0, bn0, bk0, bn1, bk1,
-                (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1),
-                              FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
-            }  # fmt: skip
-            return cls._with_qr_tdm_sched_fp8_tiles(result)
         else:
             raise ValueError(f"unsupported dtype={dtype}")
 

@@ -2536,6 +2536,7 @@ TEST(TestCkTileFmhaFwd, QuantScaleMxDispatch)
     EXPECT_EQ(DecodeKernelOf(kernel), "sched") << kernel;
     EXPECT_GE(RunMxProbe(true, 0, true, kernel), 0) << kernel;
     EXPECT_EQ(DecodeKernelOf(kernel), "sched") << kernel;
+    kernel.clear();
     EXPECT_LT(RunMxProbe(true, 0, false, kernel), 0) << kernel;
     EXPECT_EQ(DecodeKernelOf(kernel), "sched") << kernel;
 }

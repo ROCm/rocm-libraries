@@ -119,7 +119,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     // Normalize O by the row sum of the fp8 P gemm_1 consumed, so a common rounding gain cancels.
     static constexpr bool kNormalizeQuantizedP = kQuantized && !kMx;
     // Without LSE or sink nothing needs the unquantized row sum, so l sums q(P) directly.
-    static constexpr bool kQuantizedRowSum = kNormalizeQuantizedP && !kStoreLSE && !kHasSink;
+    static constexpr bool kQuantizedRowSum =
+        kNormalizeQuantizedP && !kStoreLSE && !kHasSink && !kEnableVirtualSink;
 
     static constexpr index_t kAlignmentQ    = Policy::template GetAlignmentQ<Problem>();
     static constexpr index_t kAlignmentK    = Policy::template GetAlignmentK<Problem>();
