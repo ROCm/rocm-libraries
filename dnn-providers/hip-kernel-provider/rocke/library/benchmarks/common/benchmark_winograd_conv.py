@@ -110,6 +110,20 @@ def k3_configs(arch: str) -> Tuple[tuple, ...]:
     )
 
 
+def k3_sweep_configs(sweep: str, arch: str) -> Tuple[tuple, ...]:
+    """The implicit-GEMM K3 candidate list for a given *sweep* mode and *arch*.
+
+    ``"short"`` and ``"first"`` delegate to :func:`k3_configs` so that the
+    arch-specific grid (MFMA extras on gfx950) flows through automatically.
+    ``"tiny"`` is arch-independent.
+    """
+    return {
+        "short": k3_configs(arch),
+        "tiny": K3_CONFIGS_TINY,
+        "first": k3_configs(arch)[:1],
+    }[sweep]
+
+
 def _u8(t):
     return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
@@ -840,11 +854,7 @@ def run_case(problem, io_dtype: str, m, args, arch: str, ref_cache: dict):
     impls = ("wmma", "implicit") if args.k3 == "both" else (args.k3,)
     built = {}
     if "implicit" in impls:
-        configs = {
-            "short": k3_configs(arch),
-            "tiny": K3_CONFIGS_TINY,
-            "first": k3_configs(arch)[:1],
-        }[args.k3_sweep]
+        configs = k3_sweep_configs(args.k3_sweep, arch)
         cands = build_k3_candidates(
             configs, pipe.gemm_problem, operand, arch, jobs=args.jobs
         )

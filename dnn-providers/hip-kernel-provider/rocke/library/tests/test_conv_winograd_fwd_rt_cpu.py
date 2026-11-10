@@ -182,6 +182,19 @@ def test_aot_k3_grid_on_gfx950_adds_the_mfma_configs():
             assert spec is not None and is_valid_spec(spec, "gfx950")[0], cfg
 
 
+@pytest.mark.parametrize("arch", ["gfx950", "gfx1250"])
+def test_jit_sweep_short_matches_k3_configs(arch):
+    """The JIT sweep's ``"short"`` list equals ``k3_configs(arch)`` for every arch.
+
+    Catches a regression where the sweep reverts to a hard-coded gfx1250 list
+    instead of calling ``k3_sweep_configs`` (which delegates to ``k3_configs``).
+    """
+    from benchmarks.common.benchmark_winograd_conv import k3_configs, k3_sweep_configs
+
+    assert k3_sweep_configs("short", arch) == k3_configs(arch)
+    assert k3_sweep_configs("first", arch) == k3_configs(arch)[:1]
+
+
 _PROBLEMS = [
     ConvProblem(N=2, Hi=20, Wi=24, C=64, K=96, Y=3, X=3, pH=1, pW=1),
     ConvProblem(N=1, Hi=13, Wi=11, C=36, K=20, Y=3, X=3, pH=0, pW=2),
