@@ -1147,16 +1147,15 @@ def test_tiled_2d_lse_with_additive_bias(q_lens, kv_lens, branch):
     """Additive bias is added to the log2 score before the running max, so LSE
     must include it. gfx950 default routing: the ragged shape takes branch A
     (16 slots: bias turns scalar state off), 5/3 takes C and keeps two keyless
-    rows. gfx942 has no bias kernel: the tiled 2D gate must refuse it."""
+    rows. gfx942 serves bias on its narrow 16x16 path, so both shapes take its
+    striped16 epilogue."""
     problem, q, kc, vc, cu, su, bt = _case(q_lens, kv_lens)
     problem = dataclasses.replace(problem, use_additive_bias=True)
     arch = _arch()
     ok, why = au.supports_native_unified_attention_tiled(problem, arch)
-    if arch == "gfx942":
-        assert not ok and "only implemented on gfx950" in why, why
-        return
     assert ok, f"the tiled 2D gate refuses LSE + bias: {why}"
-    assert _epilogue_branch(au._tiled_spec_from_problem(problem, arch)) == branch
+    want = "striped16" if arch == "gfx942" else branch
+    assert _epilogue_branch(au._tiled_spec_from_problem(problem, arch)) == want
     g = torch.Generator(device="cuda").manual_seed(1)
     bias = torch.randn(
         len(q_lens),

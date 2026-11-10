@@ -394,9 +394,7 @@ _CONFIGS = {
         use_qq_bias=True,
         kv_storage_dtype=None,
     ),
-    # idx34: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
-    # The gfx942 Python spec has no use_additive_bias field (TypeError); the C
-    # twin rejects it in rocke_unified_attention_3d_tiled_spec_validate.
+    # idx34-38: additive bias. idx34: on cfg33's shape (fp16 D64 GQA).
     34: dict(
         head_size=64,
         block_size=16,
@@ -410,20 +408,77 @@ _CONFIGS = {
         use_additive_bias=True,
         kv_storage_dtype=None,
     ),
+    # idx35: composed with ALiBi, QQ bias and softcap on the wide K/V loader.
+    35: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=True,
+        use_alibi=True,
+        use_qq_bias=True,
+        use_additive_bias=True,
+        kv_storage_dtype=None,
+        use_wide_kv_load=True,
+    ),
+    # idx36: the spec the selector builds for gfx942 decode (wide loader,
+    # decode grid, swizzled K/V LDS, page-id window).
+    36: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=32,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        kv_storage_dtype=None,
+        use_wide_kv_load=True,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+        use_kv_lds_swizzle=True,
+        use_wave_page_id_load=True,
+    ),
+    # idx37: half-page tiles, sinks and a sliding window.
+    37: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=16,
+        num_kv_heads=2,
+        dtype="fp16",
+        num_segments=16,
+        use_sinks=True,
+        sliding_window=256,
+        has_softcap=False,
+        use_additive_bias=True,
+        kv_storage_dtype=None,
+        tile_size_override=16,
+        use_decode_grid=True,
+    ),
+    # idx38: an fp8 K/V cache.
+    38: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=4,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        kv_storage_dtype="fp8e4m3",
+    ),
 }
 
 # Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
 _REDUCE_LSE = frozenset({20, 21})
-
-# Configs both engines must reject, with the reason each one pins: run_diff
-# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
-# reason, a typo included).
-_EXPECTED_REJECTIONS = {
-    34: (
-        r"unexpected keyword argument 'use_additive_bias'"
-        r"|use_additive_bias is not implemented on gfx942"
-    ),
-}
 
 
 def _strided_decode(head_size, block_size, tile, dtype, num_segments, heads=(32, 8)):

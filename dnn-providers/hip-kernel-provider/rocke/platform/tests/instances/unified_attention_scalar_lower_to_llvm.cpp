@@ -183,8 +183,9 @@ done:
 static int expect_refusal(kind_t kind, const char* entry, rocke_status_t st, const char* err)
 {
     const char* want
-        = kind == KIND_2D ? "scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only"
-                          : "scalar 3D kernel: additive bias runs on the gfx950 tiled kernels only";
+        = kind == KIND_2D
+              ? "scalar 2D kernel: additive bias runs on the gfx942/gfx950 tiled kernels only"
+              : "scalar 3D kernel: additive bias runs on the gfx942/gfx950 tiled kernels only";
     if(st == ROCKE_OK || strstr(err, want) == NULL)
     {
         fprintf(stderr,

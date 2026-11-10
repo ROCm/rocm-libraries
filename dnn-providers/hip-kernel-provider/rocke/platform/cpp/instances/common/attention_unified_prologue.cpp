@@ -56,9 +56,9 @@ const char* rocke_attn_unified_scalar_bias_refusal(rocke_attn_unified_kind_t kin
     switch(kind)
     {
     case ROCKE_ATTN_UNIFIED_2D:
-        return "scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only";
+        return "scalar 2D kernel: additive bias runs on the gfx942/gfx950 tiled kernels only";
     case ROCKE_ATTN_UNIFIED_3D:
-        return "scalar 3D kernel: additive bias runs on the gfx950 tiled kernels only";
+        return "scalar 3D kernel: additive bias runs on the gfx942/gfx950 tiled kernels only";
     case ROCKE_ATTN_UNIFIED_REDUCE:
         break;
     }

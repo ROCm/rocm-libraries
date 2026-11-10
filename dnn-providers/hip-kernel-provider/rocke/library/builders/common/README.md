@@ -66,7 +66,7 @@ All remaining shapes.  Key knob decisions:
 | `use_k_single_buffer` | `_enable_k_single_buffer`: d128 small-tile cohort + env opt-in (gfx950 spec only) |
 | `use_fp8_mfma_qk` | `_enable_fp8_mfma_qk`: decode fp8 path only |
 | `use_i64_kv_addr` | cache size > 2 GiB (see gfx950 README "Paged-cache size" section) |
-| `use_additive_bias` | `problem.use_additive_bias` (gfx950 spec only; passed directly by `_spec_gfx950_generic`) |
+| `use_additive_bias` | `problem.use_additive_bias` (gfx942 and gfx950 specs; gfx950's tail passes it directly in `_spec_gfx950_generic`, gfx942 sets it in `_spec_generic_2d_non_gfx950`) |
 
 ### Tiled-3D dispatch cases
 
@@ -202,7 +202,7 @@ is 1).  Like ALiBi/QQ bias it is added after the softcap, so the score is
 `sq_stride` may exceed `max_seqlen_k` for a padded row.  The bias load is
 predicated on the same row/causal mask as the score: masked lanes (padding rows,
 tail columns) load element 0 instead of an out-of-range index, and the value is
-discarded.  Gfx950 spec only (field-presence guard);
+discarded.  gfx942 and gfx950 specs only (field-presence guard);
 `supports_native_unified_attention_tiled` / `_3d_tiled` reject it on other
 arches.  Default OFF: the bias pointer and its three strides are appended to the
 end of the kernel ABI only when ON (kernel name gains an `addb` token), so the
@@ -211,7 +211,13 @@ the plain transposed 32x32 path: `__post_init__` rejects it together with
 `use_transposed_mask_limit`, `use_transposed_invariant_hoist`,
 `use_transposed_mask_once`, the non-transposed 32x32 path,
 `use_grouped_kv2_softmax` and `use_register_pv`, and the selector keeps those
-knobs off when `problem.use_additive_bias` is set.
+knobs off when `problem.use_additive_bias` is set.  On gfx942 the selectors route
+every score-bias problem to the narrow 16x16 2D path, so that is the only 2D path
+that emits it: `__post_init__` rejects it with `use_mfma_32x32x8` and
+`use_register_pv`, `supports_tiled_2d` refuses it on the x8 and 4-warp GQA
+geometries (so `supports_gfx942_4warp_gqa_spec` and an explicit 4-warp tuning
+spec reject a biased spec up front), and the 4-warp GQA builder refuses it.  The gfx942 3D split-KV
+kernel emits it on every load variant except strided KV.
 Enabled by `UnifiedAttentionProblem.use_additive_bias`; the tensor and strides
 are passed to `run_unified_attention_torch(additive_bias=...,
 additive_bias_batch_stride=..., additive_bias_head_stride=...,
@@ -228,9 +234,9 @@ Broadcasting a dimension (stride 0) shrinks the index; i64 bias addressing is a
 follow-up.  That same index must also lie inside the tensor's storage (past its
 storage offset), so strides that do not match the tensor raise `ValueError`.
 The C++ engine mirrors it byte-for-byte (selectors, spec validation and
-emission).  From the dispatcher, a gfx950 `AttentionRequest(use_attn_bias=True)`
+emission).  From the dispatcher, a gfx942/gfx950 `AttentionRequest(use_attn_bias=True)`
 (`attn_bias_dtype="f32"` only) sets `problem.use_additive_bias`; the explicit
 tuning bindings take the bias as `tensors["attn_bias"]`
 (`[B|1, H|1, Sq|1, Sk]`, unit key stride) and derive the three strides from it
 (0 on a size-1 dimension).  Numeric coverage:
-[test_attention_additive_bias_gfx950_numeric.py](../../tests/test_attention_additive_bias_gfx950_numeric.py).
+[test_attention_additive_bias_numeric.py](../../tests/test_attention_additive_bias_numeric.py).

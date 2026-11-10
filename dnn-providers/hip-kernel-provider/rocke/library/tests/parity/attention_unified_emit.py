@@ -118,8 +118,8 @@ _CONFIGS[11] = dict(_CONFIGS[2], use_additive_bias=True)
 # requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
 # reason, a typo included).
 _EXPECTED_REJECTIONS = {
-    11: r"scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only",
-    12: r"scalar 3D kernel: additive bias runs on the gfx950 tiled kernels only",
+    11: r"scalar 2D kernel: additive bias runs on the gfx942/gfx950 tiled kernels only",
+    12: r"scalar 3D kernel: additive bias runs on the gfx942/gfx950 tiled kernels only",
 }
 
 # Reduce config index -> the 2D config whose problem it reduces.

@@ -159,6 +159,10 @@ def _field_defaults(spec_type: type) -> Mapping[str, object]:
     return {f.name: f.default for f in _dataclass_fields(spec_type)}
 
 
+def _identity_omit_names(spec_type: type) -> Tuple[str, ...]:
+    return tuple(getattr(spec_type, "_IDENTITY_OMIT_WHEN_OFF", ()))
+
+
 @lru_cache(maxsize=None)
 def _declared_defaults(spec_type: type) -> Tuple[Tuple[str, object], ...]:
     """The fields with a declared default -- the ones knobs are a delta
@@ -392,11 +396,15 @@ class UnifiedSpace(WavesPerEuSpace):
             # ``emit_lse`` is an output the problem selects, not a default that
             # knobs are a delta against: keeping it out of both the 2D kernel
             # and the split-KV reduce defaults leaves every config_key, and so
-            # every stored pin, as before the field existed.
+            # every stored pin, as before the field existed. A field the spec
+            # class omits from its identity while off (see _identity_omitted) is
+            # off in every declared default, so it stays out too.
             "kernel": {
                 name: value
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
-                if name not in recorded and name != "emit_lse"
+                if name not in recorded
+                and name != "emit_lse"
+                and name not in _identity_omit_names(type(kernel.kernel_spec))
             },
             "reduce": (
                 None

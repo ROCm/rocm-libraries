@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""On-GPU numeric lane for additive attention bias on gfx950.
+"""On-GPU numeric lane for additive attention bias on gfx942 and gfx950.
 
 Drives ``run_unified_attention_torch`` with an fp32 additive bias on both the 2D
 tiled (``backend="tiled"``) and 3D split-KV (``backend="3d"``) paths and checks
@@ -15,8 +15,13 @@ sliding-window groups run on 2D and 3D, and a d64 / block 32 GQA-8 bf16 group
 covers the transposed 32x32 combo stack. The score path and compile backend of
 every 2D group, and the bias knobs of the combo and fp8 cohorts, are pinned
 without a GPU in ``test_attention_additive_bias_routes.py``. A dispatcher group
-launches an ``AttentionRequest(use_attn_bias=True)`` through the gfx950 tuning
+launches an ``AttentionRequest(use_attn_bias=True)`` through the tuning
 candidates' binding with ``tensors["attn_bias"]``.
+
+The groups run on whichever of gfx942 / gfx950 the device is. gfx942 serves
+every 2D bias problem on its narrow 16x16 path; the combo cohorts, the top-left
+and no-mask alignments and an fp8 K/V cache on 2D are gfx950-only, and gfx942
+runs its fp8 K/V group on 3D with an fnuz cache.
 
 Bias addressing (element strides; Sk stride is always 1):
 ``bias[seq_idx*batch_stride + q_head*head_stride + q_local*sq_stride + k_abs]``.
@@ -29,11 +34,11 @@ the bottom need torch for real CPU tensors (``_validate_additive_bias`` checks
 a torch-specific dtype string), so they are gated with ``requires_torch`` and
 skip, rather than erroring the whole module, on an image with no torch (e.g.
 TheRock's gfx94X CI). The installed CTest tree has no torch either, so this
-file skips there; ``test_attention_additive_bias_gfx950_device_numeric.py``
-runs one case per path in it without torch, on a gfx950 device. Run
+file skips there; ``test_attention_additive_bias_device_numeric.py``
+runs one case per path in it without torch, on a gfx942 or gfx950 device. Run
 standalone:
 
-    HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_additive_bias_gfx950_numeric.py
+    HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_additive_bias_numeric.py
 """
 
 from __future__ import annotations
@@ -55,16 +60,21 @@ except ImportError:
 requires_torch = pytest.mark.skipif(not _HAS_TORCH, reason="ROCm torch required")
 
 
-def _gpu_ready():
-    """True only on a gfx950 box with ROCm torch (gate on ``gcnArchName``)."""
+def _gpu_arch():
+    """``gfx942`` / ``gfx950`` on such a box with ROCm torch, else ``None``
+    (gate on ``gcnArchName``)."""
     if not _HAS_TORCH or not torch.cuda.is_available():
-        return False
-    arch = torch.cuda.get_device_properties(0).gcnArchName.lower()
-    return "gfx950" in arch
+        return None
+    name = torch.cuda.get_device_properties(0).gcnArchName.lower()
+    return next((arch for arch in ("gfx942", "gfx950") if arch in name), None)
 
 
+_GPU_ARCH = _gpu_arch()
+requires_bias_gpu = pytest.mark.skipif(
+    _GPU_ARCH is None, reason="needs a gfx942 or gfx950 GPU with ROCm torch"
+)
 requires_gfx950_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx950 GPU with ROCm torch"
+    _GPU_ARCH != "gfx950", reason="needs a gfx950 GPU with ROCm torch"
 )
 
 _TORCH_DT = {"fp16": "float16", "bf16": "bfloat16"}
@@ -343,7 +353,7 @@ def _check_case(
         assert gap > 3 * tol, f"softcap too weak to pin the order (gap={gap:.3e})"
 
 
-@requires_gfx950_gpu
+@requires_bias_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("heads", sorted(_HEADS))
 @pytest.mark.parametrize("bias_mode", list(_BIAS_MODES))
@@ -354,7 +364,7 @@ def test_additive_bias_matches_reference(case, dtype, bias_mode, heads):
     _check_case(case, backend, seq_lens, {}, dtype, bias_mode, heads)
 
 
-@requires_gfx950_gpu
+@requires_bias_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("heads", sorted(_HEADS))
 @pytest.mark.parametrize("bias_mode", _EXTRA_BIAS_MODES)
@@ -384,21 +394,27 @@ def test_additive_bias_combo_cohort_matches_reference(heads, bias_mode):
 
 
 # Bias combined with the other features the routed candidates declare: the
-# top-left causal and no-mask alignments, attention sinks, an fp8 K/V cache and
-# the LSE output (2D and split-KV). feature -> (problem fields, paths).
+# top-left causal and no-mask alignments, attention sinks, an fp8 K/V cache (OCP
+# on gfx950, fnuz on gfx942) and the LSE output (2D and split-KV).
+# feature -> (problem fields, {arch: paths}). gfx942's tiled kernels have no
+# top-left or unbounded mask, and its 2D kernel no fp8 K/V cache.
+_BOTH = ("2d", "3d")
 _FEATURES = {
-    "top_left": ({"causal_top_left": True, "right_bound": 0}, ("2d", "3d")),
-    "no_mask": ({"right_bound": -1}, ("2d", "3d")),
-    "sinks": ({"use_sinks": True}, ("2d", "3d")),
-    "fp8_kv": ({"use_fp8": True}, ("2d", "3d")),
-    "lse": ({"emit_lse": True}, ("2d", "3d")),
+    "top_left": ({"causal_top_left": True, "right_bound": 0}, {"gfx950": _BOTH}),
+    "no_mask": ({"right_bound": -1}, {"gfx950": _BOTH}),
+    "sinks": ({"use_sinks": True}, {"gfx942": _BOTH, "gfx950": _BOTH}),
+    "fp8_kv": ({"use_fp8": True}, {"gfx950": _BOTH}),
+    "fp8_kv_fnuz": ({"use_fp8": True, "fp8_fnuz": True}, {"gfx942": ("3d",)}),
+    "lse": ({"emit_lse": True}, {"gfx942": _BOTH, "gfx950": _BOTH}),
 }
 _FEATURE_PATHS = {
     "2d": ("tiled", [(37, 101), (64, 64), (5, 130)]),
     "3d": ("3d", [(4, 300), (16, 517), (1, 64)]),
 }
 _FEATURE_CASES = [
-    (feature, path) for feature, (_, paths) in _FEATURES.items() for path in paths
+    (feature, path)
+    for feature, (_, arch_paths) in _FEATURES.items()
+    for path in sorted(set().union(*arch_paths.values()))
 ]
 _FP8_K_SCALE, _FP8_V_SCALE = 0.5, 0.25
 
@@ -425,8 +441,9 @@ def _check_feature_case(
     if fields.get("use_fp8"):
         # Quantise the cache; the reference reads the same dequantised values.
         k_scale, v_scale = _FP8_K_SCALE, _FP8_V_SCALE
-        k = (k.float() / k_scale).to(torch.float8_e4m3fn)
-        v = (v.float() / v_scale).to(torch.float8_e4m3fn)
+        fp8 = torch.float8_e4m3fnuz if fields.get("fp8_fnuz") else torch.float8_e4m3fn
+        k = (k.float() / k_scale).to(fp8)
+        v = (v.float() / v_scale).to(fp8)
         k_ref, v_ref = k.float() * k_scale, v.float() * v_scale
     else:
         k_ref, v_ref = k, v
@@ -507,7 +524,7 @@ def _check_feature_case(
         assert lse_err < tol, f"{label}: lse max_abs={lse_err:.3e} >= {tol}"
 
 
-@requires_gfx950_gpu
+@requires_bias_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("heads", sorted(_HEADS))
 @pytest.mark.parametrize("bias_mode", _EXTRA_BIAS_MODES)
@@ -516,11 +533,14 @@ def _check_feature_case(
 def test_additive_bias_with_more_features_matches_reference(
     feature, path, dtype, bias_mode, heads
 ):
+    if path not in _FEATURES[feature][1].get(_GPU_ARCH, ()):
+        pytest.skip(f"{feature} on {path} with bias is not served on {_GPU_ARCH}")
     _check_feature_case(feature, path, dtype, bias_mode, heads)
 
 
 # -inf bias entries: whole key columns, one fully masked query row, and on 3D
-# one whole split-KV segment. case -> (backend, seq_lens, emit_lse).
+# one whole split-KV segment. case -> (backend, seq_lens, emit_lse). On gfx942
+# "2d_transposed32" runs on the narrow 16x16 path like the other 2D cases.
 _NEG_INF_CASES = {
     "2d": ("tiled", [(37, 101), (64, 64), (5, 130)], False),
     "2d_transposed32": ("tiled", [(300, 420), (512, 512)], False),
@@ -545,7 +565,7 @@ def _neg_inf_bias(problem, backend, seq_lens, hq, max_q, max_k):
         return bias, None
     from kernels.common.attention_unified import _tiled_3d_spec_from_problem
 
-    spec = _tiled_3d_spec_from_problem(problem, "gfx950")
+    spec = _tiled_3d_spec_from_problem(problem, _GPU_ARCH)
     seq = max(range(len(seq_lens)), key=lambda i: seq_lens[i][1])
     kv_len = seq_lens[seq][1]
     seg_keys = -(-kv_len // (spec.num_segments * spec.tile_size)) * spec.tile_size
@@ -554,7 +574,7 @@ def _neg_inf_bias(problem, backend, seq_lens, hq, max_q, max_k):
     return bias, (seq, seg_keys, 2 * seg_keys)
 
 
-@requires_gfx950_gpu
+@requires_bias_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("case", list(_NEG_INF_CASES))
@@ -649,23 +669,30 @@ def test_additive_bias_fp8_single_batch_combo_matches_reference(head_size):
     )
 
 
-# Dispatcher lane: an AttentionRequest(use_attn_bias=True) pinned to a gfx950
-# tuning geometry, bound with tensors["attn_bias"] and launched through the
-# candidate's binding. One geometry per score path.
+# Dispatcher lane: an AttentionRequest(use_attn_bias=True) pinned to a tuning
+# geometry of the device's arch, bound with tensors["attn_bias"] and launched
+# through the candidate's binding. One geometry per score path (gfx942: one and
+# two M atoms per warp on its single 2D path).
 _DISPATCH_GEOMETRIES = (
     "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
     "attention_gfx950_u2d_transposed32_nw2_mw32_t2xb_llvm",
     "attention_gfx950_u3d_splitkv_seg8_t1xb",
+    "attention_gfx942_u2d_narrow_nw2_mw16_t4xb_llvm",
+    "attention_gfx942_u2d_narrow_nw2_mw32_t1xb_llvm",
+    "attention_gfx942_u3d_splitkv_seg8_t1xb",
 )
 
 
-@requires_gfx950_gpu
+@requires_bias_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("bias_shape", ["full", "key_padding"])
 @pytest.mark.parametrize("geometry", _DISPATCH_GEOMETRIES)
 def test_dispatched_attn_bias_matches_reference(geometry, bias_shape):
     from dispatch.attention import AttentionRequest, attention_execution_candidates
     from dispatch.attention.common import AttentionMaskType
+
+    if not geometry.startswith(f"attention_{_GPU_ARCH}_"):
+        pytest.skip(f"{geometry} is not a {_GPU_ARCH} geometry")
 
     batch, seqlen_q, seqlen_k, hq, hkv, dtype = 2, 96, 200, 8, 2, "bf16"
     seq_lens = [(seqlen_q, seqlen_k)] * batch
@@ -687,7 +714,7 @@ def test_dispatched_attn_bias_matches_reference(geometry, bias_shape):
         hdim_q=_HEAD_SIZE,
         hdim_v=_HEAD_SIZE,
         kv_block_size=_BLOCK_SIZE,
-        arch="gfx950",
+        arch=_GPU_ARCH,
         dtype=dtype,
         mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
         use_attn_bias=True,
