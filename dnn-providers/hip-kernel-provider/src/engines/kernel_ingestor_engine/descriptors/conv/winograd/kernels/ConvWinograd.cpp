@@ -6,7 +6,8 @@
 //   CONV_WINO_T          element type: float, _Float16, or unsigned short (bf16 bits)
 //   CONV_WINO_VARIANT    0 multipass (four launches), 1 fused VALU, 2 fused WMMA (gfx11 / gfx12),
 //                        3 fused WMMA with register-built operands (gfx11 / gfx12),
-//                        4 fused VALU with register operands (wave64: gfx9)
+//                        4 fused VALU with register operands (wave64: gfx9),
+//                        5 fused WMMA, cooperative input transform (gfx11 / gfx12)
 //   CONV_WINO_DIR        0 forward, 1 backward data (the filter pre-pass only)
 //   CONV_WINO_LAYOUT     0 NCHW (filter KCRS), 1 NHWC (filter KRSC); fused variants read NCHW
 //   CONV_WINO_M          output tile: 2 for F(2,3), 4 for F(4,3) (multipass fp32 only), 3 for
@@ -17,8 +18,11 @@
 //   register WMMA: CONV_WINO_BK, _TG, _BINS, _F16MATH, _GFX12   K-block, 16-tile groups, bins per
 //                  wave, fp16 packed input-transform math, gfx12 operand layout
 //   register VALU: CONV_WINO_BK, _F16MATH                       K-block, fp16 packed math
+//   cooperative WMMA: CONV_WINO_MT, _NT, _KW, _F16MATH, _GFX12  16-channel K tiles per wave,
+//                  16-tile groups, K waves per row, fp16 packed math, gfx12 operand layout
 
 #include "ConvWinogradSreg.h"
+#include "ConvWinogradWmmaCoop.h"
 
 /// Stages an operand to or from the layout the variant reads.
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradCopy(K5CopyArgs a)
@@ -142,6 +146,27 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradFusedFilter(K5Args
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradSreg(K5Args a)
 {
     k5SregConv<CONV_WINO_T, CONV_WINO_BK, CONV_WINO_F16MATH != 0>(a);
+}
+
+#elif CONV_WINO_VARIANT == 5
+
+#define CONV_WINO_COOP_CFG \
+    K5CoopCfg<CONV_WINO_T, CONV_WINO_GFX12 != 0, CONV_WINO_MT, CONV_WINO_NT, CONV_WINO_KW>
+
+extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args a)
+{
+    k5WmmaFilterTransform<CONV_WINO_T, K5_NCHW, CONV_WINO_DIR>(a);
+}
+
+extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
+    ConvWinogradCoop(K5Args a)
+{
+    k5CoopConv<CONV_WINO_T,
+               CONV_WINO_GFX12 != 0,
+               CONV_WINO_MT,
+               CONV_WINO_NT,
+               CONV_WINO_KW,
+               CONV_WINO_F16MATH != 0>(a);
 }
 
 #endif

@@ -489,6 +489,20 @@ ConfigFields wreg(const std::string& arch, int64_t f16math)
     return f;
 }
 
+/// Cooperative WMMA: 16 waves (4 K groups of 4 rows), 16-channel K tiles, 32 tiles: bk 64.
+ConfigFields coop(const std::string& arch, int64_t f16math)
+{
+    ConfigFields f;
+    f.variant = "coop";
+    f.arch = arch;
+    f.gemmBm = f.gemmBn = f.gemmBk = 0;
+    f.bk = 64;
+    f.bt = 32;
+    f.waves = 16;
+    f.f16math = f16math;
+    return f;
+}
+
 /// Register-operand VALU (wave64 gfx9): 16-wide K block, 64 tiles, 4 waves.
 ConfigFields sreg(int64_t f16math)
 {
@@ -631,6 +645,20 @@ TEST(TestConvWinogradKernelMatch, RegisterWmmaOnlyOnItsFamilyAndOnlyForSixteenBi
     EXPECT_FALSE(admits(wreg("gfx11", 1), "gfx1100", strideTwo(), "HALF"));
 }
 
+TEST(TestConvWinogradKernelMatch, CooperativeWmmaOnlyOnItsFamilyAndOnlyForSixteenBitTypes)
+{
+    EXPECT_TRUE(admits(coop("gfx11", 1), "gfx1100", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(coop("gfx11", 0), "gfx1151", baseShape(), "BFLOAT16"));
+    EXPECT_TRUE(admits(coop("gfx12", 1), "gfx1201", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop("gfx11", 1), "gfx1201", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop("gfx12", 1), "gfx942", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop("gfx11", 0), "gfx1100", baseShape(), "FLOAT"));
+    // Packed fp16 transform math is for fp16 only.
+    EXPECT_FALSE(admits(coop("gfx11", 1), "gfx1100", baseShape(), "BFLOAT16"));
+    // F(2,3): stride 1 only.
+    EXPECT_FALSE(admits(coop("gfx11", 1), "gfx1100", strideTwo(), "HALF"));
+}
+
 TEST(TestConvWinogradKernelMatch, RegisterValuOnlyOnWave64Gfx9AndNotForBFloat16)
 {
     EXPECT_TRUE(admits(sreg(0), "gfx906"));
@@ -721,6 +749,67 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
              f.f16math = 2;
              return f;
          }},
+        {"CoopWaves12",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.waves = 12;
+             return f;
+         }},
+        {"CoopWaves64",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.waves = 64;
+             f.bk = 256;
+             return f;
+         }},
+        {"CoopTileBlock64",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.bt = 64;
+             return f;
+         }},
+        {"CoopKBlockNotSixteenPerKGroup",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.bk = 48;
+             return f;
+         }},
+        {"CoopKBlockFourTilesPerKGroup",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.bk = 256;
+             return f;
+         }},
+        {"CoopArchAny",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.arch = "any";
+             return f;
+         }},
+        {"CoopTileF43",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.m = 4;
+             return f;
+         }},
+        {"CoopLlc",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.llc = 1;
+             return f;
+         }},
+        {"CoopNhwc",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.layout = "NHWC";
+             return f;
+         }},
+        {"CoopBins",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.bins = 4;
+             return f;
+         }},
         {"SregKBlock32",
          [] {
              auto f = sreg(0);
@@ -781,6 +870,7 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
     // The unmodified configs parse, so each decline above is its field's.
     EXPECT_TRUE(conv_winograd::configOf(kernelOf(wreg("gfx11", 1), "HALF")).has_value());
     EXPECT_TRUE(conv_winograd::configOf(kernelOf(sreg(0), "HALF")).has_value());
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(coop("gfx11", 1), "HALF")).has_value());
 }
 
 TEST(TestConvWinogradKernelMatch, RefusesUnknownMetadata)

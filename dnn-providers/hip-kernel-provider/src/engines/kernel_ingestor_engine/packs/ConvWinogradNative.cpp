@@ -403,6 +403,10 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         {
             config.variant = Variant::SREG;
         }
+        else if(variant == "coop")
+        {
+            config.variant = Variant::COOP;
+        }
         else
         {
             return std::nullopt;
@@ -438,8 +442,9 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         config.llcPlan = llc == 1;
         config.f16Math = f16Math == 1;
         // Fields a variant does not read must be 0 (one knob tuple per config).
-        const bool registerVariant
-            = config.variant == Variant::WREG || config.variant == Variant::SREG;
+        const bool registerVariant = config.variant == Variant::WREG
+                                     || config.variant == Variant::SREG
+                                     || config.variant == Variant::COOP;
         if((config.variant != Variant::WREG && config.bins != 0)
            || (!registerVariant && config.f16Math))
         {
@@ -498,6 +503,22 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             }
             break;
         }
+        case Variant::COOP:
+        {
+            // 4 waves per K group (one per transform row), each 16 x mt out channels by bt tiles:
+            // bk = 16 x mt x waves / 4 with mt 1 or 2 (at most 2 x 2 accumulator tiles per bin).
+            const int kw = config.waves / 4;
+            const int mt = kw > 0 && config.bk % (16 * kw) == 0 ? config.bk / (16 * kw) : 0;
+            if(config.m != 2 || config.layout != Layout::NCHW || config.llcPlan
+               || (config.arch != "gfx11" && config.arch != "gfx12")
+               || (config.waves != 4 && config.waves != 8 && config.waves != 16
+                   && config.waves != 32)
+               || (config.bt != 16 && config.bt != 32) || (mt != 1 && mt != 2))
+            {
+                return std::nullopt;
+            }
+            break;
+        }
         case Variant::SREG:
             // 4 waves of 64 lanes (one per transform row), 64 tiles.
             if(config.m != 2 || config.layout != Layout::NCHW || config.llcPlan
@@ -525,6 +546,7 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
     {
     case Variant::WMMA:
     case Variant::WREG:
+    case Variant::COOP:
         return arch.size() > 5 && arch.substr(0, 5) == config.arch;
     case Variant::SREG:
         // Wave64 with v_dot2_f32_f16: gfx906 and later gfx9.
@@ -629,6 +651,7 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     }
     case Variant::WMMA:
     case Variant::WREG:
+    case Variant::COOP:
         uBytes = groups * 16 * cgo * divUp(cgi, 16) * 16 * eb;
         break;
     case Variant::SREG:
@@ -770,6 +793,20 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
             std::clamp<long long>(items, 1, computeUnits * PERSISTENT_PER_CU));
         break;
     }
+    case Variant::COOP:
+    {
+        // About 1024 resident threads per unit (the configs run at 4-8 waves per SIMD).
+        plan.mainThreads = static_cast<unsigned int>(32 * config.waves);
+        const long long items = groups * divUp(cgo, config.bk) * divUp(tiles, config.bt);
+        if(!grid(plan.filterBlocks, divUp(groups * cgo * divUp(cgi, 16) * 16, 256), 1, 1))
+        {
+            return std::nullopt;
+        }
+        const long long perUnit = std::max<long long>(1, 1024 / plan.mainThreads);
+        plan.mainBlocks
+            = static_cast<unsigned int>(std::clamp<long long>(items, 1, computeUnits * perUnit));
+        break;
+    }
     case Variant::SREG:
     {
         const long long vw = problem.base.dataType == data_objects::DataType::HALF ? 2 : 1;
@@ -907,7 +944,8 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     }
     const bool fp32 = problem->base.dataType == data_objects::DataType::FLOAT;
     const bool bf16 = problem->base.dataType == data_objects::DataType::BFLOAT16;
-    const bool wmmaFamily = config->variant == Variant::WMMA || config->variant == Variant::WREG;
+    const bool wmmaFamily = config->variant == Variant::WMMA || config->variant == Variant::WREG
+                            || config->variant == Variant::COOP;
     // Register variants: packed fp16 transform math only for fp16 (bf16 / fp32 transform in fp32).
     const bool f16MathOk
         = !config->f16Math || problem->base.dataType == data_objects::DataType::HALF;
@@ -1050,7 +1088,8 @@ public:
                                 : config.variant == Variant::FUSED   ? 1
                                 : config.variant == Variant::WMMA    ? 2
                                 : config.variant == Variant::WREG    ? 3
-                                                                     : 4;
+                                : config.variant == Variant::SREG    ? 4
+                                                                     : 5;
         options.add("CONV_WINO_VARIANT", std::to_string(variantCode));
         options.add("CONV_WINO_DIR",
                     std::string(resolved->problem.direction == ConvDirection::FORWARD ? "0" : "1"));
@@ -1071,6 +1110,11 @@ public:
         options.add("CONV_WINO_TG", std::to_string(std::max(1, config.bt / 16)));
         options.add("CONV_WINO_BINS", std::to_string(config.bins));
         options.add("CONV_WINO_F16MATH", std::string(config.f16Math ? "1" : "0"));
+        // Cooperative WMMA: K wave groups, 16-channel K tiles per wave, 16-tile groups.
+        const int coopKw = std::max(1, config.waves / 4);
+        options.add("CONV_WINO_KW", std::to_string(coopKw));
+        options.add("CONV_WINO_MT", std::to_string(std::max(1, config.bk / (16 * coopKw))));
+        options.add("CONV_WINO_NT", std::to_string(std::max(1, config.bt / 16)));
 
         const auto build = [&](std::string_view entryPoint,
                                const std::vector<KernelArgument>& signature,
@@ -1121,6 +1165,12 @@ public:
                 build("ConvWinogradFusedFilter", signatureOf<K5Args>(), 256, plan.filterBlocks));
             kernels.push_back(
                 build("ConvWinogradSreg", signatureOf<K5Args>(), plan.mainThreads, mainGrid));
+            break;
+        case Variant::COOP:
+            kernels.push_back(
+                build("ConvWinogradWmmaFilter", signatureOf<K5Args>(), 256, plan.filterBlocks));
+            kernels.push_back(
+                build("ConvWinogradCoop", signatureOf<K5Args>(), plan.mainThreads, mainGrid));
             break;
         default:
             break;
