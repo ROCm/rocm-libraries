@@ -3,10 +3,11 @@
 #
 # CI wiring for the test directories that live inside the ``rocke`` package.
 #
-# ``rocke_pytest`` collects ``platform/tests`` only. The directories below sit
-# next to the code they test, so no other lane runs them. Each directory runs
-# in its own pytest process: the directories use ``unittest`` and plain pytest
-# styles and share module names, and a process per directory keeps them apart.
+# The ``rocke_pytest_*`` entries collect ``platform/tests`` only. The
+# directories below sit next to the code they test, so no other lane runs them.
+# Each directory runs in its own pytest process: the directories use
+# ``unittest`` and plain pytest styles and share module names, and a process per
+# directory keeps them apart.
 # ``portable_ir/tests`` is not listed: ``portable_ir/test_portable_ir.py::test_unit``
 # runs it.
 
@@ -67,7 +68,7 @@ def test_in_tree_file(package, relpath):
     env = rocke_subprocess_env()
     target = _package_dir(package) / relpath
     # ``-c`` replaces ``platform/tests/pytest.ini``: the child does not read the
-    # ``rocke_pytest`` options.
+    # ``rocke_pytest_*`` options.
     command = rocke_python_command(
         "-m",
         "pytest",
