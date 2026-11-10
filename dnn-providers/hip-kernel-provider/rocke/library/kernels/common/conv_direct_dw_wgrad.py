@@ -103,11 +103,28 @@ def dw_wgrad_fold_signature(spec: DwWgradFoldSpec) -> list:
     return sb.build()
 
 
+def is_valid_dw_wgrad_fold_spec(spec: DwWgradFoldSpec):
+    """The block shape: at least one output, slice and load per block, and no
+    more than 1024 threads (``slices * cols``)."""
+    if spec.cols < 1:
+        return False, f"cols {spec.cols} < 1"
+    if spec.slices < 1:
+        return False, f"slices {spec.slices} < 1"
+    if spec.unroll < 1:
+        return False, f"unroll {spec.unroll} < 1"
+    if spec.slices * spec.cols > 1024:
+        return False, f"slices * cols = {spec.slices * spec.cols} threads > 1024"
+    return True, "ok"
+
+
 def build_dw_wgrad_fold(spec: DwWgradFoldSpec, arch: str = "gfx950") -> KernelDef:
     """Each block owns ``cols`` outputs; ``slices`` rows of threads split the
     partition axis and meet in LDS."""
     from rocke.core.ir import I32, PtrType
 
+    ok, why = is_valid_dw_wgrad_fold_spec(spec)
+    if not ok:
+        raise ValueError(f"invalid DwWgradFoldSpec: {why}")
     b = IRBuilder(spec.kernel_name())
     COLS, S, U = spec.cols, spec.slices, spec.unroll
     b.kernel.attrs["max_workgroup_size"] = S * COLS

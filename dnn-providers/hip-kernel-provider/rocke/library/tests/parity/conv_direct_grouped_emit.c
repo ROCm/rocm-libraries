@@ -3363,7 +3363,7 @@ static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** 
 static int make_fold_knob_cfg(int idx, rocke_dw_wgrad_fold_spec_t* f, const char** arch)
 {
     /* (taps, cols, slices, unroll, gfx1250) per index; name set below. */
-    static const int table[8][5] = {
+    static const int table[11][5] = {
         {36, 32, 32, 8, 1},
         {72, 32, 32, 8, 0},
         {9, 64, 8, 2, 0},
@@ -3372,8 +3372,11 @@ static int make_fold_knob_cfg(int idx, rocke_dw_wgrad_fold_spec_t* f, const char
         {9, 128, 4, 1, 0},
         {9, 64, 16, 0, 0},
         {9, 64, 0, 4, 0},
+        {9, 0, 16, 4, 0},
+        {9, -32, 16, 4, 0},
+        {9, 64, 32, 4, 0},
     };
-    if(idx < 0 || idx >= 8)
+    if(idx < 0 || idx >= 11)
         return -1;
     *f = rocke_dw_wgrad_fold_spec_default();
     f->taps = table[idx][0];

@@ -304,6 +304,55 @@ static void check_wmma_per_axis_padding(const char* kernel, Spec spec, Valid is_
     CHECK(strstr(reason, "pad_w") != NULL, "%s reason names pad_w: %s", kernel, reason);
 }
 
+/* rocke_dw_wgrad_fold_is_valid_spec refuses with is_valid_dw_wgrad_fold_spec's
+ * texts (test_direct_grouped_wgrad_wmma.py _FOLD_REJECTED), and the builder
+ * fails with them. */
+static void test_fold_block_shape_refused(void)
+{
+    struct
+    {
+        int cols, slices, unroll;
+        const char* want;
+    } cases[] = {
+        {0, 16, 4, "cols 0 < 1"},
+        {-32, 16, 4, "cols -32 < 1"},
+        {64, 0, 4, "slices 0 < 1"},
+        {64, 16, 0, "unroll 0 < 1"},
+        {64, 32, 4, "slices * cols = 2048 threads > 1024"},
+    };
+    char reason[ERR_CAP];
+    for(const auto& c : cases)
+    {
+        rocke_dw_wgrad_fold_spec_t f = rocke_dw_wgrad_fold_spec_default();
+        f.taps = 9;
+        f.cols = c.cols;
+        f.slices = c.slices;
+        f.unroll = c.unroll;
+        CHECK(!rocke_dw_wgrad_fold_is_valid_spec(&f, reason, sizeof(reason)),
+              "fold accepted cols=%d slices=%d unroll=%d",
+              c.cols,
+              c.slices,
+              c.unroll);
+        CHECK(strcmp(reason, c.want) == 0, "fold reason: %s (want %s)", reason, c.want);
+        char want[ERR_CAP];
+        snprintf(want, sizeof(want), "invalid DwWgradFoldSpec: %s", c.want);
+        rocke_ir_builder_t b;
+        rocke_kernel_def_t* k = rocke_build_dw_wgrad_fold_new(&b, &f, "gfx950");
+        const char* err = rocke_ir_builder_error(&b);
+        CHECK(k == NULL, "fold built cols=%d slices=%d unroll=%d", c.cols, c.slices, c.unroll);
+        CHECK(err != NULL && strcmp(err, want) == 0, "fold build error: %s", err ? err : "(none)");
+        rocke_ir_builder_free(&b);
+    }
+    rocke_dw_wgrad_fold_spec_t f = rocke_dw_wgrad_fold_spec_default();
+    f.taps = 9;
+    f.cols = 32;
+    f.slices = 32;
+    f.unroll = 8;
+    CHECK(rocke_dw_wgrad_fold_is_valid_spec(&f, reason, sizeof(reason)),
+          "fold refused 32 x 32 x 8: %s",
+          reason);
+}
+
 static void test_wmma_kernels_refuse_per_axis_padding(void)
 {
     rocke_direct_fwd_wmma_spec_t fwd = rocke_direct_fwd_wmma_spec_default();
@@ -1051,6 +1100,7 @@ int main(void)
     test_tiled_dgrad_name_carries_per_axis_padding();
     test_tiled_dgrad_refuses_cpl();
     test_wmma_kernels_refuse_per_axis_padding();
+    test_fold_block_shape_refused();
     test_stem_wmma_kernels_refuse_per_axis_padding();
     test_toeplitz_wmma_refusals();
     test_fwd_wmma_strided_view_refusals();

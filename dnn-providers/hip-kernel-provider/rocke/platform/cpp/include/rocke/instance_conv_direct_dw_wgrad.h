@@ -11,7 +11,8 @@
  *
  *   Python (conv_direct_dw_wgrad.py)           C (this header)
  *   ------------------------------------   -----------------------------------
- *   DwWgradFoldSpec / build_dw_wgrad_fold   rocke_dw_wgrad_fold_spec_t /
+ *   DwWgradFoldSpec / is_valid_.._fold_spec rocke_dw_wgrad_fold_spec_t /
+ *     / build_dw_wgrad_fold                   rocke_dw_wgrad_fold_is_valid_spec /
  *                                             rocke_build_dw_wgrad_fold(_new)
  *   DwWgradColsSpec / is_valid_.._cols_spec rocke_dw_wgrad_cols_spec_t /
  *     / build_dw_wgrad_cols                   rocke_dw_wgrad_cols_is_valid_spec /
@@ -72,6 +73,11 @@ void rocke_dw_wgrad_fold_launch_geometry(const rocke_dw_wgrad_fold_spec_t* spec,
                                          int channels,
                                          int grid[3],
                                          int block[3]);
+/* is_valid_dw_wgrad_fold_spec(spec): cols, slices and unroll each >= 1 and
+ * slices * cols <= 1024 threads; on refusal writes Python's reason. */
+bool rocke_dw_wgrad_fold_is_valid_spec(const rocke_dw_wgrad_fold_spec_t* spec,
+                                       char* reason,
+                                       size_t reason_cap);
 rocke_kernel_def_t* rocke_build_dw_wgrad_fold(rocke_ir_builder_t* b,
                                               const rocke_dw_wgrad_fold_spec_t* spec,
                                               const char* arch);

@@ -21,6 +21,7 @@ import pytest
 from kernels.common.conv_direct_dw_wgrad import (
     DwWgradFoldSpec,
     build_dw_wgrad_fold,
+    is_valid_dw_wgrad_fold_spec,
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_direct_grouped_wgrad_wmma import (
@@ -297,3 +298,36 @@ def test_fold_block_shape():
     assert DwWgradFoldSpec(taps=9, unroll=8).kernel_name() == (
         "dw_wgrad_fold_t9_c64_s16_u8"
     )
+
+
+# (block shape, reason) the fold validator refuses; the C++ twin
+# (rocke_dw_wgrad_fold_is_valid_spec) writes the same texts, checked in
+# conv_direct_dw_dgrad_host.cpp.
+_FOLD_REJECTED = (
+    (dict(cols=0), "cols 0 < 1"),
+    (dict(cols=-32), "cols -32 < 1"),
+    (dict(slices=0), "slices 0 < 1"),
+    (dict(unroll=0), "unroll 0 < 1"),
+    (dict(cols=64, slices=32), "slices * cols = 2048 threads > 1024"),
+)
+
+
+@pytest.mark.parametrize("knobs, reason", _FOLD_REJECTED)
+def test_fold_rejects(knobs, reason):
+    spec = DwWgradFoldSpec(taps=9, **knobs)
+    assert is_valid_dw_wgrad_fold_spec(spec) == (False, reason)
+    with pytest.raises(ValueError) as exc:
+        build_dw_wgrad_fold(spec)
+    assert str(exc.value) == f"invalid DwWgradFoldSpec: {reason}"
+
+
+def test_fold_accepts_1024_threads():
+    for knobs in (
+        dict(),
+        dict(cols=32, slices=32, unroll=8),
+        dict(cols=1024, slices=1),
+    ):
+        assert is_valid_dw_wgrad_fold_spec(DwWgradFoldSpec(taps=9, **knobs)) == (
+            True,
+            "ok",
+        )

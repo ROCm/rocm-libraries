@@ -2425,11 +2425,12 @@ def _wgrad_stem_spec(idx: int):
 
 
 # ---------------------------------------------------------------------------
-# DwWgradFoldSpec block shapes, indices 359..366: the narrow, deep fold the
+# DwWgradFoldSpec block shapes, indices 359..369: the narrow, deep fold the
 # gfx1250 grouped WMMA wgrad runs with (cols 32, slices 32, unroll 8) on
 # gfx1250 and gfx950, wide / shallow and narrow shapes, the defaults spelled
-# out (the original kernel name), a one-load unroll; then no unroll and no
-# slices, which both engines must reject. Follows the 3 wgrad stems.
+# out (the original kernel name), a one-load unroll; then no unroll, no
+# slices, no cols, negative cols and a 2048-thread block (slices * cols past
+# 1024), which both engines must reject. Follows the 3 wgrad stems.
 # ---------------------------------------------------------------------------
 _FOLD_KNOB_CFG_BASE = 359
 
@@ -2449,6 +2450,9 @@ def _fold_knob_spec(idx: int):
         5: (F(taps=9, cols=128, slices=4, unroll=1), "gfx950"),
         6: (F(taps=9, unroll=0), "gfx950"),
         7: (F(taps=9, slices=0), "gfx950"),
+        8: (F(taps=9, cols=0), "gfx950"),
+        9: (F(taps=9, cols=-32), "gfx950"),
+        10: (F(taps=9, cols=64, slices=32), "gfx950"),
     }
     sel = table.get(idx)
     if sel is None:

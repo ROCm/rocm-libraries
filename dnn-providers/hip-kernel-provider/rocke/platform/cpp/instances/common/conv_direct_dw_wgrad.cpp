@@ -88,6 +88,36 @@ extern "C" void rocke_dw_wgrad_fold_launch_geometry(const rocke_dw_wgrad_fold_sp
     block[2] = 1;
 }
 
+/* is_valid_dw_wgrad_fold_spec: at least one output, slice and load per
+ * block, and no more than 1024 threads (slices * cols). */
+extern "C" bool rocke_dw_wgrad_fold_is_valid_spec(const rocke_dw_wgrad_fold_spec_t* s,
+                                                  char* reason,
+                                                  size_t reason_cap)
+{
+    char msg[ROCKE_ERR_MSG_CAP];
+    if(s == NULL)
+    {
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
+        return false;
+    }
+    const long long threads = (long long)s->slices * s->cols;
+    if(s->cols < 1)
+        snprintf(msg, sizeof msg, "cols %d < 1", s->cols);
+    else if(s->slices < 1)
+        snprintf(msg, sizeof msg, "slices %d < 1", s->slices);
+    else if(s->unroll < 1)
+        snprintf(msg, sizeof msg, "unroll %d < 1", s->unroll);
+    else if(threads > 1024)
+        snprintf(msg, sizeof msg, "slices * cols = %lld threads > 1024", threads);
+    else
+    {
+        rocke_spec_set_reason(reason, reason_cap, "ok");
+        return true;
+    }
+    rocke_spec_set_reason(reason, reason_cap, msg);
+    return false;
+}
+
 namespace
 {
 
@@ -96,14 +126,13 @@ namespace
 rocke_kernel_def_t* build_fold(rocke_ir_builder_t* b, const rocke_dw_wgrad_fold_spec_t* spec)
 {
     Em e{b};
-    const int COLS = spec->cols, S = spec->slices, U = spec->unroll;
-    /* Python cannot build these either: no slice leaves nothing to store,
-     * no unroll an empty partition sum. */
-    if(S < 1 || U < 1)
+    char reason[ROCKE_ERR_MSG_CAP];
+    if(!rocke_dw_wgrad_fold_is_valid_spec(spec, reason, sizeof reason))
     {
-        fail_invalid(b, "invalid DwWgradFoldSpec", "slices and unroll must be >= 1");
+        fail_invalid(b, "invalid DwWgradFoldSpec", reason);
         return NULL;
     }
+    const int COLS = spec->cols, S = spec->slices, U = spec->unroll;
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", S * COLS);
     rocke_param_opts_t ro;
     memset(&ro, 0, sizeof(ro));
