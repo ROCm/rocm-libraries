@@ -41,9 +41,6 @@ GFX942_ARCH = ArchTrait(
     preprocessor_check="defined(__gfx942__)",
 )
 
-# Guards the gfx9 kernels when gfx125x targets are generated in the same build.
-GFX9_ARCH = ArchTrait("gfx9")
-
 # gfx125x uses the TDM page-tile kernel (FmhaBatchPrefillQrTdmPageTileKernel) instead of the
 # gfx9 async pipeline. Later TDM-capable gfx12 parts are added only after their own validation.
 GFX125_ARCH = ArchTrait("gfx125")
@@ -554,9 +551,7 @@ class FmhaFwdApiPool:
         per_dtypes = str()
         for i, dtype in enumerate(self.pool.keys()):
             per_hdim_case = str()
-            # Ascending head dims: each case accepts t.hdim_q <= hdim.
-            hdims = sorted(self.pool[dtype].keys(), key=int)
-            for j, hdim in enumerate(hdims):
+            for j, hdim in enumerate(self.pool[dtype].keys()):
                 traits = self.pool[dtype][hdim]
                 inners = str()
                 for k, trait in enumerate(traits):
@@ -1149,7 +1144,9 @@ def get_fwd_blobs(
     # (amd_buffer_addressing.hpp raw buffer loads) that is not compatible with
     # non-gfx9 architectures (gfx11/gfx12/gfx10 are wave32 and use different
     # buffer instruction formats). gfx125x uses the TDM page-tile kernel instead; any other
-    # target gets no batch_prefill kernels.
+    # target gets no batch_prefill kernels. gfx9 and gfx125x are not generated together: the
+    # dispatch has one head-dim chain per data type, so a gfx9 request would stop at a head-dim
+    # case only page-tile kernels serve.
     target_list = targets if targets is not None else ["gfx9"]
     has_gfx9 = any(t.startswith("gfx9") for t in target_list)
     has_page_tile = any(t.startswith(GFX125_ARCH.name) for t in target_list)
@@ -1165,6 +1162,10 @@ def get_fwd_blobs(
 
     if has_unsupported:
         return api_pool, gen
+    if has_gfx9 and has_page_tile:
+        raise ValueError(
+            "batch_prefill: generate the gfx9 and gfx125x targets in separate builds"
+        )
 
     for dtype in FWD_DTYPE_MAP.keys() if has_gfx9 else []:
         d = CustomFactory.get_hdim_tile_size_dict(dtype)
@@ -1175,12 +1176,6 @@ def get_fwd_blobs(
             # batch_prefill pipeline requires group mode (static_assert in pipeline problem)
             if mode != "group":
                 continue
-            if has_page_tile:
-                # Keep the gfx9 kernels out of the gfx125x device pass and host dispatch.
-                tiles = [
-                    tile if tile.F_arch is not None else replace(tile, F_arch=GFX9_ARCH)
-                    for tile in tiles
-                ]
             for tile, pipeline in itertools.product(
                 tiles, CustomFactory.get_pipelines(dtype, hdim, receipt, mask_impl)
             ):
