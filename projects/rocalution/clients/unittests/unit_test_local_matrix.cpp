@@ -1943,6 +1943,71 @@ TEST_P(local_matrix_formats, apply_analyse_keeps_the_analysis_until_the_entries_
     });
 }
 
+// The CSR SpMV analysis splits the rows into blocks by their lengths. A copy with as
+// many entries but other row lengths needs a new analysis. With a few thousand rows
+// and a row of 1001 entries, a stale one spans other blocks than the new rows.
+TEST_P(local_matrix_formats, apply_after_a_copy_with_other_row_lengths)
+{
+    if(!is(CSR) && !is(COO))
+    {
+        GTEST_SKIP() << "only CSR and COO copy a matrix with as many entries in place";
+    }
+    for_each_type<RealTypes>([&](auto type) {
+        using T     = typename decltype(type)::type;
+        const int n = 4000;
+
+        auto csr_of = [&](const std::vector<std::vector<int>>& cols) {
+            Csr<T> M(n);
+            for(int i = 0; i < n; ++i)
+            {
+                for(int j : cols[i])
+                {
+                    M.add(j, static_cast<T>(1 + (7 * i + 3 * j) % 11));
+                }
+                M.end_row();
+            }
+            return M;
+        };
+        std::vector<std::vector<int>> even(n);
+        std::vector<std::vector<int>> skewed(n);
+        for(int i = 0; i < n; ++i)
+        {
+            even[i] = i + 1 < n ? std::vector<int>{i, i + 1} : std::vector<int>{0, i};
+        }
+        for(int j = 0; j <= 1000; ++j)
+        {
+            skewed[0].push_back(j);
+        }
+        for(int i = 1; i < n; ++i)
+        {
+            skewed[i] = i <= 3000 ? std::vector<int>{i, i + 1} : std::vector<int>{i};
+        }
+        const Csr<T> a = csr_of(even);
+        const Csr<T> c = csr_of(skewed);
+        ASSERT_EQ(a.nnz(), c.nnz());
+
+        // The products are exact, the values and the entries of x are multiples of 1/2
+        const std::vector<T> x              = rhs<T>(n);
+        auto                 A              = make(a);
+        auto                 expect_applies = [&](const Csr<T>& ref) {
+            auto y = vector_of(std::vector<T>(n, 0.0));
+            A->Apply(*vector_of(x), y.get());
+            expect_close(values_of(*y), ref.apply(x), tol<T>());
+        };
+
+        A->ApplyAnalyse();
+        expect_applies(a);
+
+        A->CopyFrom(*make(c));
+        expect_applies(c);
+        A->ApplyAnalyse();
+        expect_applies(c);
+
+        A->CopyFrom(*make(a));
+        expect_applies(a);
+    });
+}
+
 TEST_P(local_matrix_formats, triangular_analyses_follow_a_new_sparsity_pattern)
 {
     if(!has_analysis(backend(), format().id, "L"))
