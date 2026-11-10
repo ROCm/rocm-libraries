@@ -63,6 +63,41 @@
 
 namespace
 {
+    // Owns a handle or descriptor, so an ASSERT that returns early does not
+    // leak it.
+    template <typename H, auto DESTROY>
+    struct guard
+    {
+        H obj = nullptr;
+
+        guard()                        = default;
+        guard(const guard&)            = delete;
+        guard& operator=(const guard&) = delete;
+        ~guard()
+        {
+            if(obj != nullptr)
+            {
+                EXPECT_EQ(DESTROY(obj), rocsparse_status_success);
+            }
+        }
+
+        operator H() const
+        {
+            return obj;
+        }
+        H operator->() const
+        {
+            return obj;
+        }
+    };
+
+    using handle_guard       = guard<rocsparse_handle, rocsparse_destroy_handle>;
+    using mat_descr_guard    = guard<rocsparse_mat_descr, rocsparse_destroy_mat_descr>;
+    using mat_info_guard     = guard<rocsparse_mat_info, rocsparse_destroy_mat_info>;
+    using spmat_guard        = guard<rocsparse_spmat_descr, rocsparse_destroy_spmat_descr>;
+    using dnvec_guard        = guard<rocsparse_dnvec_descr, rocsparse_destroy_dnvec_descr>;
+    using sptrsv_descr_guard = guard<rocsparse_sptrsv_descr, rocsparse_destroy_sptrsv_descr>;
+
     struct csr_matrix
     {
         rocsparse_int              m;
@@ -209,18 +244,13 @@ namespace
         rocsparse_ut::device_vector<double>        d_x(x);
         rocsparse_ut::device_vector<double>        d_y(
             std::vector<double>(A.m, std::numeric_limits<double>::quiet_NaN()));
-        ASSERT_NE(d_row_ptr.ptr, nullptr);
-        ASSERT_NE(d_col_ind.ptr, nullptr);
-        ASSERT_NE(d_val.ptr, nullptr);
-        ASSERT_NE(d_x.ptr, nullptr);
-        ASSERT_NE(d_y.ptr, nullptr);
 
-        rocsparse_handle    handle = nullptr;
-        rocsparse_mat_descr descr  = nullptr;
-        rocsparse_mat_info  info   = nullptr;
-        ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+        handle_guard    handle;
+        mat_descr_guard descr;
+        mat_info_guard  info;
+        ASSERT_EQ(rocsparse_create_handle(&handle.obj), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_mat_descr(&descr.obj), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_mat_info(&info.obj), rocsparse_status_success);
         ASSERT_EQ(rocsparse_set_mat_fill_mode(descr, fill), rocsparse_status_success);
 
         if(max_grid_x > 0)
@@ -242,7 +272,6 @@ namespace
                   rocsparse_status_success);
 
         rocsparse_ut::device_vector<char> d_buffer(buffer_size > 0 ? buffer_size : 1);
-        ASSERT_NE(d_buffer.ptr, nullptr);
 
         ASSERT_EQ(rocsparse_dcsrsv_analysis(handle,
                                             trans,
@@ -281,10 +310,6 @@ namespace
         EXPECT_TRUE(status == rocsparse_status_success || status == rocsparse_status_zero_pivot);
 
         y = rocsparse_ut::to_host(d_y);
-
-        EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
     }
 
     const char* label(rocsparse_fill_mode fill, rocsparse_operation trans)
@@ -344,10 +369,9 @@ namespace
 
     rocsparse_int row_blocks(rocsparse_int m)
     {
-        rocsparse_handle handle = nullptr;
-        EXPECT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
+        handle_guard handle;
+        EXPECT_EQ(rocsparse_create_handle(&handle.obj), rocsparse_status_success);
         const rocsparse_int rows = 1024 / handle->wavefront_size;
-        EXPECT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
         return (m - 1) / rows + 1;
     }
 
@@ -436,11 +460,6 @@ TEST(internal_level2_csrsv_grid_x_chunk, spsv_int64_small_grids)
     rocsparse_ut::device_vector<double>  d_x(x);
     rocsparse_ut::device_vector<double>  d_y(static_cast<size_t>(A.m));
     const std::vector<double>            nan(A.m, std::numeric_limits<double>::quiet_NaN());
-    ASSERT_NE(d_row_ptr.ptr, nullptr);
-    ASSERT_NE(d_col_ind.ptr, nullptr);
-    ASSERT_NE(d_val.ptr, nullptr);
-    ASSERT_NE(d_x.ptr, nullptr);
-    ASSERT_NE(d_y.ptr, nullptr);
 
     for(rocsparse_fill_mode fill : {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper})
     {
@@ -450,14 +469,14 @@ TEST(internal_level2_csrsv_grid_x_chunk, spsv_int64_small_grids)
 
             for(int grid : small_grids)
             {
-                rocsparse_handle handle = nullptr;
-                ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
+                handle_guard handle;
+                ASSERT_EQ(rocsparse_create_handle(&handle.obj), rocsparse_status_success);
                 handle->properties.maxGridSize[0] = grid;
 
-                rocsparse_spmat_descr mat = nullptr;
-                rocsparse_dnvec_descr vx  = nullptr;
-                rocsparse_dnvec_descr vy  = nullptr;
-                ASSERT_EQ(rocsparse_create_csr_descr(&mat,
+                spmat_guard mat;
+                dnvec_guard vx;
+                dnvec_guard vy;
+                ASSERT_EQ(rocsparse_create_csr_descr(&mat.obj,
                                                      A.m,
                                                      A.m,
                                                      static_cast<int64_t>(A.col_ind.size()),
@@ -472,10 +491,12 @@ TEST(internal_level2_csrsv_grid_x_chunk, spsv_int64_small_grids)
                 ASSERT_EQ(rocsparse_spmat_set_attribute(
                               mat, rocsparse_spmat_fill_mode, &fill, sizeof(fill)),
                           rocsparse_status_success);
-                ASSERT_EQ(rocsparse_create_dnvec_descr(&vx, A.m, d_x.ptr, rocsparse_datatype_f64_r),
-                          rocsparse_status_success);
-                ASSERT_EQ(rocsparse_create_dnvec_descr(&vy, A.m, d_y.ptr, rocsparse_datatype_f64_r),
-                          rocsparse_status_success);
+                ASSERT_EQ(
+                    rocsparse_create_dnvec_descr(&vx.obj, A.m, d_x.ptr, rocsparse_datatype_f64_r),
+                    rocsparse_status_success);
+                ASSERT_EQ(
+                    rocsparse_create_dnvec_descr(&vy.obj, A.m, d_y.ptr, rocsparse_datatype_f64_r),
+                    rocsparse_status_success);
 
                 ASSERT_EQ(
                     hipMemcpy(d_y.ptr, nan.data(), sizeof(double) * A.m, hipMemcpyHostToDevice),
@@ -495,7 +516,6 @@ TEST(internal_level2_csrsv_grid_x_chunk, spsv_int64_small_grids)
                                          nullptr),
                           rocsparse_status_success);
                 rocsparse_ut::device_vector<char> d_buffer(buffer_size > 0 ? buffer_size : 1);
-                ASSERT_NE(d_buffer.ptr, nullptr);
                 ASSERT_EQ(rocsparse_spsv(handle,
                                          trans,
                                          &alpha,
@@ -529,11 +549,6 @@ TEST(internal_level2_csrsv_grid_x_chunk, spsv_int64_small_grids)
                     ASSERT_NEAR(got[i], ref[i], 1e-12 * (1.0 + std::abs(ref[i])))
                         << "spsv i64 " << label(fill, trans) << " grid.x " << grid << ", row " << i;
                 }
-
-                EXPECT_EQ(rocsparse_destroy_dnvec_descr(vy), rocsparse_status_success);
-                EXPECT_EQ(rocsparse_destroy_dnvec_descr(vx), rocsparse_status_success);
-                EXPECT_EQ(rocsparse_destroy_spmat_descr(mat), rocsparse_status_success);
-                EXPECT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
             }
         }
     }
@@ -573,23 +588,18 @@ namespace
         rocsparse_ut::device_vector<double>        d_x(x);
         rocsparse_ut::device_vector<double>        d_y(
             std::vector<double>(m * batch_count, std::numeric_limits<double>::quiet_NaN()));
-        ASSERT_NE(d_row_ptr.ptr, nullptr);
-        ASSERT_NE(d_col_ind.ptr, nullptr);
-        ASSERT_NE(d_val.ptr, nullptr);
-        ASSERT_NE(d_x.ptr, nullptr);
-        ASSERT_NE(d_y.ptr, nullptr);
 
-        rocsparse_handle handle = nullptr;
-        ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
+        handle_guard handle;
+        ASSERT_EQ(rocsparse_create_handle(&handle.obj), rocsparse_status_success);
         if(max_grid_x > 0)
         {
             handle->properties.maxGridSize[0] = max_grid_x;
         }
 
-        rocsparse_spmat_descr mat = nullptr;
-        rocsparse_dnvec_descr vx  = nullptr;
-        rocsparse_dnvec_descr vy  = nullptr;
-        ASSERT_EQ(rocsparse_create_csr_descr(&mat,
+        spmat_guard mat;
+        dnvec_guard vx;
+        dnvec_guard vy;
+        ASSERT_EQ(rocsparse_create_csr_descr(&mat.obj,
                                              m,
                                              m,
                                              nnz,
@@ -607,15 +617,15 @@ namespace
         ASSERT_EQ(
             rocsparse_spmat_set_attribute(mat, rocsparse_spmat_fill_mode, &fill, sizeof(fill)),
             rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_dnvec_descr(&vx, m, d_x.ptr, rocsparse_datatype_f64_r),
+        ASSERT_EQ(rocsparse_create_dnvec_descr(&vx.obj, m, d_x.ptr, rocsparse_datatype_f64_r),
                   rocsparse_status_success);
         ASSERT_EQ(rocsparse_dnvec_set_strided_batch(vx, batch_count, m), rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_dnvec_descr(&vy, m, d_y.ptr, rocsparse_datatype_f64_r),
+        ASSERT_EQ(rocsparse_create_dnvec_descr(&vy.obj, m, d_y.ptr, rocsparse_datatype_f64_r),
                   rocsparse_status_success);
         ASSERT_EQ(rocsparse_dnvec_set_strided_batch(vy, batch_count, m), rocsparse_status_success);
 
-        rocsparse_sptrsv_descr descr = nullptr;
-        ASSERT_EQ(rocsparse_create_sptrsv_descr(&descr), rocsparse_status_success);
+        sptrsv_descr_guard descr;
+        ASSERT_EQ(rocsparse_create_sptrsv_descr(&descr.obj), rocsparse_status_success);
         const rocsparse_sptrsv_alg      alg  = rocsparse_sptrsv_alg_default;
         const rocsparse_operation       op   = rocsparse_operation_none;
         const rocsparse_datatype        type = rocsparse_datatype_f64_r;
@@ -657,7 +667,7 @@ namespace
                                                      descr,
                                                      rocsparse_sptrsv_input_scalar_alpha,
                                                      &alpha,
-                                                     sizeof(&alpha),
+                                                     sizeof(alpha),
                                                      nullptr),
                           rocsparse_status_success);
             }
@@ -666,7 +676,6 @@ namespace
                           handle, descr, mat, vx, vy, stage, &buffer_size, nullptr),
                       rocsparse_status_success);
             rocsparse_ut::device_vector<char> d_buffer(buffer_size > 0 ? buffer_size : 1);
-            ASSERT_NE(d_buffer.ptr, nullptr);
             ASSERT_EQ(rocsparse_sptrsv(handle,
                                        descr,
                                        mat,
@@ -681,12 +690,6 @@ namespace
         }
 
         y = rocsparse_ut::to_host(d_y);
-
-        EXPECT_EQ(rocsparse_destroy_sptrsv_descr(descr), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_destroy_dnvec_descr(vy), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_destroy_dnvec_descr(vx), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_destroy_spmat_descr(mat), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
     }
 }
 
@@ -742,6 +745,7 @@ TEST(internal_level2_csrsv_grid_x_chunk, sptrsv_batched_small_grids)
         }
     }
 }
+
 // The real dispatch limit, without a forced clamp: one row block more than
 // grid.x can hold, 134,217,697 rows on wave32 devices and 67,108,849 on wave64
 // devices. Before the clamp the analysis launch was rejected at this size.
@@ -750,8 +754,8 @@ TEST(internal_level2_csrsv_grid_x_chunk, sptrsv_batched_small_grids)
 // two rows long. It needs about 6 GB of device memory and skips without it.
 TEST(internal_level2_csrsv_grid_x_chunk, real_dispatch_limit)
 {
-    rocsparse_handle handle = nullptr;
-    ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
+    handle_guard handle;
+    ASSERT_EQ(rocsparse_create_handle(&handle.obj), rocsparse_status_success);
     const int64_t       rows = 1024 / handle->wavefront_size;
     const rocsparse_int m    = static_cast<rocsparse_int>(4194303 * rows + 1);
 
@@ -760,7 +764,6 @@ TEST(internal_level2_csrsv_grid_x_chunk, real_dispatch_limit)
     ASSERT_EQ(hipMemGetInfo(&free_bytes, &total_bytes), hipSuccess);
     if(free_bytes < static_cast<size_t>(m) * 48)
     {
-        EXPECT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
         GTEST_SKIP() << "Insufficient device memory: need about " << static_cast<size_t>(m) * 48
                      << " bytes";
     }
@@ -790,16 +793,11 @@ TEST(internal_level2_csrsv_grid_x_chunk, real_dispatch_limit)
     rocsparse_ut::device_vector<float>         d_x(std::vector<float>(m, 1.0f));
     rocsparse_ut::device_vector<float>         d_y(
         std::vector<float>(m, std::numeric_limits<float>::quiet_NaN()));
-    ASSERT_NE(d_row_ptr.ptr, nullptr);
-    ASSERT_NE(d_col_ind.ptr, nullptr);
-    ASSERT_NE(d_val.ptr, nullptr);
-    ASSERT_NE(d_x.ptr, nullptr);
-    ASSERT_NE(d_y.ptr, nullptr);
 
-    rocsparse_mat_descr descr = nullptr;
-    rocsparse_mat_info  info  = nullptr;
-    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+    mat_descr_guard descr;
+    mat_info_guard  info;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr.obj), rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_mat_info(&info.obj), rocsparse_status_success);
 
     const rocsparse_operation trans       = rocsparse_operation_none;
     size_t                    buffer_size = 0;
@@ -815,7 +813,6 @@ TEST(internal_level2_csrsv_grid_x_chunk, real_dispatch_limit)
                                            &buffer_size),
               rocsparse_status_success);
     rocsparse_ut::device_vector<char> d_buffer(buffer_size);
-    ASSERT_NE(d_buffer.ptr, nullptr);
 
     ASSERT_EQ(rocsparse_scsrsv_analysis(handle,
                                         trans,
@@ -861,8 +858,4 @@ TEST(internal_level2_csrsv_grid_x_chunk, real_dispatch_limit)
         const float want = (i > 0 && i % 32 == 0) ? 0.625f : 0.5f;
         ASSERT_EQ(y[i], want) << "row " << i << " of " << m;
     }
-
-    EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
-    EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
-    EXPECT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
 }
