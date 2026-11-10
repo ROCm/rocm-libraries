@@ -29,6 +29,7 @@ from .graph_builders import (
     build_conv_wgrad_graph,
     build_custom_op_graph,
     build_gather_graph,
+    build_gdn_graph,
     build_layernorm_backward_graph,
     build_layernorm_graph,
     build_matmul_graph,
@@ -108,6 +109,7 @@ _OPERATION_CASES = (
     ("gather", lambda: build_gather_graph()[0], "GatherAttributes"),
     ("moe_routing", lambda: build_moe_routing_graph()[0], "MoeRoutingAttributes"),
     ("rope", lambda: build_rope_graph()[0], "RopeAttributes"),
+    ("gdn", lambda: build_gdn_graph()[0], "GdnAttributes"),
     ("topk", lambda: build_topk_graph()[0], "TopkAttributes"),
     (
         "paged_cache_store",

@@ -38,6 +38,7 @@ add_executable(
     utilities/TestCpuFpReferencePagedCacheStore.cpp
     utilities/TestCpuFpReferenceCausalConv1d.cpp
     utilities/TestCpuFpReferenceGather.cpp
+    utilities/TestCpuFpReferenceGdn.cpp
     utilities/TestCpuFpReferenceTopk.cpp
     utilities/TestCpuFpReferenceRope.cpp
     utilities/TestCpuFpReferenceReduction.cpp
@@ -110,6 +111,8 @@ add_executable(
     utilities/cpu_graph_executor/TestCausalConv1dSignatureKey.cpp
     utilities/cpu_graph_executor/TestGatherPlan.cpp
     utilities/cpu_graph_executor/TestGatherSignatureKey.cpp
+    utilities/cpu_graph_executor/TestGdnPlan.cpp
+    utilities/cpu_graph_executor/TestGdnSignatureKey.cpp
     utilities/cpu_graph_executor/TestTopkPlan.cpp
     utilities/cpu_graph_executor/TestTopkSignatureKey.cpp
     utilities/cpu_graph_executor/TestRopePlan.cpp

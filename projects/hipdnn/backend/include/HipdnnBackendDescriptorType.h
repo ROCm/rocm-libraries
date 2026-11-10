@@ -409,4 +409,13 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR = 39,
 
+    /**
+     * @brief Gated DeltaNet (GDN) forward operation descriptor (extension)
+     *
+     * Token-packed gated delta-rule linear attention over Q/K/V with scalar
+     * per-token decay G and write strength BETA, an optional recurrent state
+     * (dense or pooled via STATE_INDICES), and optional state checkpoints.
+     */
+    HIPDNN_BACKEND_OPERATION_GDN_DESCRIPTOR_EXT = 46,
+
 } hipdnnBackendDescriptorType_t;

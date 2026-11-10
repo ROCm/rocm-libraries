@@ -75,6 +75,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return ResampleFwdOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::RopeAttributes:
         return RopeOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::GdnAttributes:
+        return GdnOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::ResampleBwdAttributes:
         return ResampleBwdOperationDescriptor::fromNode(nodeT, tensorMap);
     default:

@@ -1670,13 +1670,14 @@ the trainer, and the runtime compute the same number.
    | `MoeRoutingAttributes` | unknown | Data movement, no arithmetic. |
    | `GatherAttributes` | unknown | Data movement, no arithmetic. |
    | `PagedCacheStoreAttributes` | unknown | Data movement, no arithmetic. |
+   | `GdnAttributes`, `KdaAttributes` | unknown | Linear-attention recurrences with no agreed count of their logical work yet. |
    | `CustomOpAttributes` | unknown | Opaque to hipDNN. |
 
    The per-element constants for the normalizations, resampling, and SDPA backward are conventions,
    chosen once and held; what matters is that every engine counts the same. A formula refuses — the
    node's work is unknown — when its operands are inconsistent: a missing tensor, a non-positive dim, or
    shapes that do not compose. The convolutions, Matmul, and SDPA forward and backward also require
-   floating-point operands. So 24 of the 30 node types have a static count; whether a given graph has one
+   floating-point operands. So 24 of the 32 node types have a static count; whether a given graph has one
    is still rule 3's to decide.
 6. **Bytes are a declared convention, and three different quantities are kept apart.**
    - **Logical footprint** — `$graph.logical_bytes`, a feature. The sum over the graph's non-virtual

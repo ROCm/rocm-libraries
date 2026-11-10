@@ -19,6 +19,7 @@
 #include "EngineHeuristicDescriptor.hpp"
 #include "ExecutionPlanDescriptor.hpp"
 #include "GatherOperationDescriptor.hpp"
+#include "GdnOperationDescriptor.hpp"
 #include "GraphDescriptor.hpp"
 #include "HipdnnException.hpp"
 #include "KnobDescriptor.hpp"
@@ -139,6 +140,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR:
         privateDesc = std::make_shared<RopeOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_GDN_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<GdnOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_TOPK_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<TopkOperationDescriptor>();

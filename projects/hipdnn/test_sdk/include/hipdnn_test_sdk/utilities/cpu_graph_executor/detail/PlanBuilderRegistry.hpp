@@ -15,6 +15,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/GatherPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/GdnPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormBpropPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormFpropPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>

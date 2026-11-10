@@ -91,6 +91,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/GatherAttributes.hpp>
+#include <hipdnn_frontend/attributes/GdnAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
@@ -138,6 +139,7 @@
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_frontend/node/GatherNode.hpp>
+#include <hipdnn_frontend/node/GdnNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
@@ -6706,6 +6708,109 @@ public:
             std::make_shared<RopeNode>(std::move(attributes), graph_attributes));
 
         return y;
+    }
+
+    /**
+     * @brief Gated DeltaNet (GDN) linear attention forward (mirrors cuDNN's Python graph.gdn).
+     *
+     * Token-packed inputs: `q [T, H, K]`, `k [T, HK, K]` with `HK` in `{H, HV}`,
+     * `v [T, HV, V]`, `g` and `beta [T, HO]` with `HO = max(H, HV)`; every head count divides
+     * `HO` and heads are replicated onto the `HO` output heads. `cuSeqlens [N + 1]` (INT32 or
+     * INT64) holds the sequence offsets. Per token `t` and output head, with state `S [V, K]`:
+     * @code
+     * S_t = alpha_t * S_{t-1} * (I - beta_t * k_t * k_t^T) + beta_t * v_t * k_t^T
+     * o_t = scale * S_t * q_t
+     * @endcode
+     * `alpha_t = exp(g)` (LOG domain), `g` (LINEAR domain), or
+     * `exp(-exp(a_log) * softplus(g + dt_bias))` with `safe_gate`; `beta` is used as is,
+     * through `sigmoid` (`use_beta_sigmoid`) or `2 * sigmoid` (`allow_neg_eigval`); `q`/`k` rows
+     * are L2-normalized first with `use_qk_l2norm`; `scale` defaults to `1 / sqrt(K)`.
+     *
+     * Optional inputs are set on the attributes: `set_initial_state()` (`[N, HO, V, K]`, or a pool
+     * `[P, HO, V, K]` with `set_state_indices()` `[N]` INT32), `set_a_log()` and `set_dt_bias()`
+     * (`[HO]`, safe gate only). `final_state` is created only with `set_output_final_state(true)`
+     * and `state_checkpoints` (`[max(T / n + N, 1), HO, V, K]`) only with
+     * `set_checkpoint_every_n_tokens(n)`, `n > 0`. Unset output dims/strides are inferred.
+     *
+     * @param q Queries `[T, H, K]`.
+     * @param k Keys `[T, HK, K]`.
+     * @param v Values `[T, HV, V]`.
+     * @param g Per-token, per-head decay `[T, HO]`.
+     * @param beta Per-token, per-head write strength `[T, HO]`.
+     * @param cuSeqlens Sequence offsets `[N + 1]`.
+     * @param attributes Operation configuration and optional inputs.
+     * @return `{o, final_state, state_checkpoints}`; the optional outputs are nullptr unless
+     *         requested.
+     *
+     * @see hipdnn_frontend::graph::GdnAttributes
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 3>
+        gdn(std::shared_ptr<TensorAttributes> q,
+            std::shared_ptr<TensorAttributes> k,
+            std::shared_ptr<TensorAttributes> v,
+            std::shared_ptr<TensorAttributes> g,
+            std::shared_ptr<TensorAttributes> beta,
+            std::shared_ptr<TensorAttributes> cuSeqlens,
+            GdnAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Gdn_" + std::to_string(_sub_nodes.size()));
+        }
+        // Null tensors are tolerated here so the error surfaces from pre_validate_node() as a
+        // missing-input error rather than a crash while auto-naming.
+        if(q && q->get_name().empty())
+        {
+            q->set_name(attributes.get_name() + "::Q");
+        }
+        if(k && k->get_name().empty())
+        {
+            k->set_name(attributes.get_name() + "::K");
+        }
+        if(v && v->get_name().empty())
+        {
+            v->set_name(attributes.get_name() + "::V");
+        }
+        if(g && g->get_name().empty())
+        {
+            g->set_name(attributes.get_name() + "::G");
+        }
+        if(beta && beta->get_name().empty())
+        {
+            beta->set_name(attributes.get_name() + "::BETA");
+        }
+        if(cuSeqlens && cuSeqlens->get_name().empty())
+        {
+            cuSeqlens->set_name(attributes.get_name() + "::CU_SEQLENS");
+        }
+
+        auto o = outputTensor(attributes.get_name() + "::O");
+        std::shared_ptr<TensorAttributes> finalState;
+        if(attributes.get_output_final_state())
+        {
+            finalState = outputTensor(attributes.get_name() + "::FINAL_STATE");
+        }
+        std::shared_ptr<TensorAttributes> stateCheckpoints;
+        if(attributes.get_checkpoint_every_n_tokens() > 0)
+        {
+            stateCheckpoints = outputTensor(attributes.get_name() + "::STATE_CHECKPOINTS");
+        }
+
+        attributes.set_q(std::move(q));
+        attributes.set_k(std::move(k));
+        attributes.set_v(std::move(v));
+        attributes.set_g(std::move(g));
+        attributes.set_beta(std::move(beta));
+        attributes.set_cu_seqlens(std::move(cuSeqlens));
+        attributes.set_o(o);
+        attributes.set_final_state(finalState);
+        attributes.set_state_checkpoints(stateCheckpoints);
+
+        _sub_nodes.emplace_back(std::make_shared<GdnNode>(std::move(attributes), graph_attributes));
+
+        return {o, finalState, stateCheckpoints};
     }
 
     /** @brief Add a custom operation to the graph

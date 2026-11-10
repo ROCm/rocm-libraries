@@ -42,6 +42,7 @@ enum class NodeType
     MOE_ROUTING = 30,
     ROPE = 24,
     CAUSAL_CONV1D = 29,
+    GDN = 31,
 };
 
 } // namespace hipdnn_frontend::graph

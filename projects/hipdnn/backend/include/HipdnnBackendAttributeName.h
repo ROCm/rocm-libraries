@@ -1651,6 +1651,86 @@ typedef enum
     /** @} */
 
     /**
+     * @name GDN Operation Attributes (4600-4699)
+     * Attributes for HIPDNN_BACKEND_OPERATION_GDN_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Query tensor [T, H, K] */
+    HIPDNN_ATTR_OPERATION_GDN_Q_EXT = 4600,
+
+    /** @brief Key tensor [T, HK, K], HK = H or HV */
+    HIPDNN_ATTR_OPERATION_GDN_K_EXT = 4601,
+
+    /** @brief Value tensor [T, HV, V] */
+    HIPDNN_ATTR_OPERATION_GDN_V_EXT = 4602,
+
+    /** @brief Scalar decay per token and head [T, HO] */
+    HIPDNN_ATTR_OPERATION_GDN_G_EXT = 4603,
+
+    /** @brief Write strength per token and head [T, HO] */
+    HIPDNN_ATTR_OPERATION_GDN_BETA_EXT = 4604,
+
+    /** @brief Sequence offsets tensor [N + 1] (INT32 or INT64) */
+    HIPDNN_ATTR_OPERATION_GDN_CU_SEQLENS_EXT = 4605,
+
+    /** @brief Output tensor [T, HO, V] */
+    HIPDNN_ATTR_OPERATION_GDN_O_EXT = 4606,
+
+    /** @brief Optional initial state tensor [N or P, HO, V, K] */
+    HIPDNN_ATTR_OPERATION_GDN_INITIAL_STATE_EXT = 4607,
+
+    /** @brief Optional safe-gate per-head log-amplitude [HO] */
+    HIPDNN_ATTR_OPERATION_GDN_A_LOG_EXT = 4608,
+
+    /** @brief Optional safe-gate per-head bias [HO] */
+    HIPDNN_ATTR_OPERATION_GDN_DT_BIAS_EXT = 4609,
+
+    /** @brief Optional state pool row per sequence [N] (INT32) */
+    HIPDNN_ATTR_OPERATION_GDN_STATE_INDICES_EXT = 4610,
+
+    /** @brief Optional final state output tensor [N or P, HO, V, K] */
+    HIPDNN_ATTR_OPERATION_GDN_FINAL_STATE_EXT = 4611,
+
+    /** @brief Optional state checkpoints output tensor [C, HO, V, K] */
+    HIPDNN_ATTR_OPERATION_GDN_STATE_CHECKPOINTS_EXT = 4612,
+
+    /** @brief Output scale (HIPDNN_TYPE_FLOAT); unset: 1 / sqrt(K) */
+    HIPDNN_ATTR_OPERATION_GDN_SCALE_EXT = 4613,
+
+    /** @brief Emit the final state (HIPDNN_TYPE_BOOLEAN) */
+    HIPDNN_ATTR_OPERATION_GDN_OUTPUT_FINAL_STATE_EXT = 4614,
+
+    /** @brief L2-normalize q and k rows (HIPDNN_TYPE_BOOLEAN) */
+    HIPDNN_ATTR_OPERATION_GDN_USE_QK_L2NORM_EXT = 4615,
+
+    /** @brief State checkpoint cadence in tokens (HIPDNN_TYPE_INT64); 0 disables */
+    HIPDNN_ATTR_OPERATION_GDN_CHECKPOINT_EVERY_N_TOKENS_EXT = 4616,
+
+    /** @brief Apply sigmoid to beta (HIPDNN_TYPE_BOOLEAN) */
+    HIPDNN_ATTR_OPERATION_GDN_USE_BETA_SIGMOID_EXT = 4617,
+
+    /** @brief Use 2 * sigmoid(beta) (HIPDNN_TYPE_BOOLEAN) */
+    HIPDNN_ATTR_OPERATION_GDN_ALLOW_NEG_EIGVAL_EXT = 4618,
+
+    /** @brief Safe-gate transform of g (HIPDNN_TYPE_BOOLEAN) */
+    HIPDNN_ATTR_OPERATION_GDN_SAFE_GATE_EXT = 4619,
+
+    /** @brief Gate domain (HIPDNN_TYPE_GATE_DOMAIN_EXT) */
+    HIPDNN_ATTR_OPERATION_GDN_GATE_DOMAIN_EXT = 4620,
+
+    /** @brief Batch-invariant scheduling (HIPDNN_TYPE_BOOLEAN) */
+    HIPDNN_ATTR_OPERATION_GDN_BATCH_INVARIANT_EXT = 4621,
+
+    /** @brief Final state overwrites the initial state buffer (HIPDNN_TYPE_BOOLEAN) */
+    HIPDNN_ATTR_OPERATION_GDN_OVERWRITE_INITIAL_STATE_EXT = 4622,
+
+    /** @brief Compute data type (HIPDNN_TYPE_DATA_TYPE) */
+    HIPDNN_ATTR_OPERATION_GDN_COMP_TYPE_EXT = 4623,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{

@@ -700,6 +700,65 @@ def build_causal_conv1d_graph():
     return graph, x, weight, cu_seqlens, bias, initial_state, y, final_state
 
 
+def build_gdn_graph():
+    """Build a Gated DeltaNet graph: T = 6 tokens in N = 2 sequences, GQA heads H = HK = 1,
+    HV = HO = 2, K = 4, V = 2, with an initial state, final state and checkpoints every 2 tokens.
+
+    Returns (graph, q, k, v, g, beta, cu_seqlens, initial_state, o, final_state,
+    state_checkpoints).
+    """
+    graph = create_float_graph()
+    q = hipdnn.Tensor.create([6, 1, 4], hipdnn.DataType.FLOAT)
+    q.set_name("q")
+    k = hipdnn.Tensor.create([6, 1, 4], hipdnn.DataType.FLOAT)
+    k.set_name("k")
+    v = hipdnn.Tensor.create([6, 2, 2], hipdnn.DataType.FLOAT)
+    v.set_name("v")
+    g = hipdnn.Tensor.create([6, 2], hipdnn.DataType.FLOAT)
+    g.set_name("g")
+    beta = hipdnn.Tensor.create([6, 2], hipdnn.DataType.FLOAT)
+    beta.set_name("beta")
+    cu_seqlens = hipdnn.Tensor.create([3], hipdnn.DataType.INT32)
+    cu_seqlens.set_name("cu_seqlens")
+    initial_state = hipdnn.Tensor.create([2, 2, 2, 4], hipdnn.DataType.FLOAT)
+    initial_state.set_name("initial_state")
+
+    o, final_state, state_checkpoints = graph.gdn(
+        q,
+        k,
+        v,
+        g,
+        beta,
+        cu_seqlens,
+        hipdnn.GdnAttributes()
+        .set_initial_state(initial_state)
+        .set_output_final_state(True)
+        .set_checkpoint_every_n_tokens(2)
+        .set_use_qk_l2norm(True),
+    )
+    for name, tensor in (
+        ("o", o),
+        ("final_state", final_state),
+        ("state_checkpoints", state_checkpoints),
+    ):
+        tensor.set_name(name)
+        tensor.set_output(True)
+
+    return (
+        graph,
+        q,
+        k,
+        v,
+        g,
+        beta,
+        cu_seqlens,
+        initial_state,
+        o,
+        final_state,
+        state_checkpoints,
+    )
+
+
 def build_custom_op_graph():
     """Build a two-in/two-out custom-op graph returning (graph, a, b, y0, y1)."""
     graph = create_float_graph()

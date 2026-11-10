@@ -15,6 +15,7 @@
 #include "ConvolutionWrwOperationDescriptor.hpp"
 #include "CustomOpOperationDescriptor.hpp"
 #include "GatherOperationDescriptor.hpp"
+#include "GdnOperationDescriptor.hpp"
 #include "IGraphOperation.hpp"
 #include "LayernormBackwardOperationDescriptor.hpp"
 #include "LayernormOperationDescriptor.hpp"

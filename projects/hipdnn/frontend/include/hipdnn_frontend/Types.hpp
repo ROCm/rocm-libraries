@@ -38,6 +38,7 @@
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
 #include <HipdnnDiagonalAlignment.h>
+#include <HipdnnGateDomain.h>
 #include <HipdnnMoeGroupedMatmulMode.h>
 #include <HipdnnNormFwdPhase.h>
 #include <HipdnnPaddingMode.h>
@@ -300,6 +301,16 @@ enum class CausalConv1dActivation
 {
     IDENTITY = 0, ///< No activation
     SILU = 1 ///< SiLU activation, x * sigmoid(x)
+};
+
+/**
+ * @enum GateDomain
+ * @brief How the g tensor of a linear-attention node (GDN) encodes the decay alpha
+ */
+enum class GateDomain
+{
+    LOG = 0, ///< g holds ln(alpha)
+    LINEAR = 1 ///< g holds alpha in (0, 1]
 };
 
 /**
@@ -628,6 +639,25 @@ inline hipdnnCausalConv1dActivation_t
 }
 
 /**
+ * @brief Convert frontend GateDomain to backend hipdnnGateDomain_t
+ *
+ * @param domain The frontend GateDomain value
+ * @return The corresponding hipdnnGateDomain_t value, or std::nullopt if unmapped
+ */
+inline std::optional<hipdnnGateDomain_t> toBackendGateDomain(const GateDomain& domain)
+{
+    switch(domain)
+    {
+    case GateDomain::LOG:
+        return HIPDNN_GATE_DOMAIN_LOG_EXT;
+    case GateDomain::LINEAR:
+        return HIPDNN_GATE_DOMAIN_LINEAR_EXT;
+    default:
+        return std::nullopt;
+    }
+}
+
+/**
  * @brief Convert backend hipdnnDiagonalAlignment_t to frontend DiagonalAlignment
  *
  * Maps the backend C API diagonal alignment enum to the frontend DiagonalAlignment enum.
@@ -719,6 +749,27 @@ inline std::pair<CausalConv1dActivation, Error>
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
                  "Unknown hipdnnCausalConv1dActivation_t value: "
                      + std::to_string(static_cast<int>(activation))}};
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnGateDomain_t to frontend GateDomain
+ *
+ * @param domain The backend hipdnnGateDomain_t value
+ * @return A pair of GateDomain and Error; error is set for unknown values
+ */
+inline std::pair<GateDomain, Error> fromHipdnnGateDomain(hipdnnGateDomain_t domain)
+{
+    switch(domain)
+    {
+    case HIPDNN_GATE_DOMAIN_LOG_EXT:
+        return {GateDomain::LOG, {}};
+    case HIPDNN_GATE_DOMAIN_LINEAR_EXT:
+        return {GateDomain::LINEAR, {}};
+    default:
+        return {GateDomain::LOG,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnGateDomain_t value: " + std::to_string(static_cast<int>(domain))}};
     }
 }
 

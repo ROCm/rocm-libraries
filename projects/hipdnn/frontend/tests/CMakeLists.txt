@@ -106,6 +106,9 @@ add_executable(
     TestRopeAttributes.cpp
     TestRopeNode.cpp
     TestGraphRope.cpp
+    TestGdnAttributes.cpp
+    TestGdnNode.cpp
+    TestGraphGdn.cpp
     TestNode.cpp
     TestOperationUnpacker.cpp
     TestSdpaAttributes.cpp

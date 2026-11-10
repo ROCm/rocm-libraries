@@ -81,6 +81,9 @@ add_executable(
     descriptors/TestRopeOperationDescriptor.cpp
     descriptors/TestRopeOperationFromNode.cpp
     descriptors/TestGraphDescriptorRope.cpp
+    descriptors/TestGdnOperationDescriptor.cpp
+    descriptors/TestGdnOperationFromNode.cpp
+    descriptors/TestGraphDescriptorGdn.cpp
     descriptors/TestGraphDescriptorBatchnormBackward.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp

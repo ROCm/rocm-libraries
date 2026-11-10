@@ -986,4 +986,48 @@ void getCausalConv1dActivation(hipdnn_flatbuffers_sdk::data_objects::CausalConv1
         *elementCount = 1;
     }
 }
+
+void setGateDomain(hipdnn_flatbuffers_sdk::data_objects::GateDomain& target,
+                   hipdnnBackendAttributeType_t attributeType,
+                   int64_t elementCount,
+                   const void* arrayOfElements,
+                   const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_GATE_DOMAIN_EXT, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnGateDomain_t domain;
+    std::memcpy(&domain, arrayOfElements, sizeof(domain));
+    target = toSdkGateDomain(domain);
+}
+
+void getGateDomain(hipdnn_flatbuffers_sdk::data_objects::GateDomain source,
+                   hipdnnBackendAttributeType_t attributeType,
+                   int64_t requestedElementCount,
+                   int64_t* elementCount,
+                   void* arrayOfElements,
+                   const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_GATE_DOMAIN_EXT, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    const auto domain = fromSdkGateDomain(source);
+    std::memcpy(arrayOfElements, &domain, sizeof(domain));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
 } // namespace hipdnn_backend

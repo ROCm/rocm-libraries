@@ -35,6 +35,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Backward Weights | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Causal Conv1d | FP16, BFP16, FP32 x/weight/bias/y/states; INT32, INT64 `cu_seqlens` and `state_indices` | x `[T, C]`, weight `[C, W]`, states `[N or P, C, W - 1]` | CPU Reference | Token-packed sequences; `weight[c, W - 1]` multiplies the current token; absent `initial_state` is zeros; every initial state is read before any final state is written, so `final_state` may share `initial_state`'s buffer; IDENTITY or SILU; sums in FP32; state row out of range or two sequences writing one row throws; ragged tensors rejected |
+| Gated DeltaNet (GDN) | FP16, BFP16, FP32 q/k/v/o; FP16, BFP16, FP32 g/beta/a_log/dt_bias/states/checkpoints (each its own type); INT32, INT64 `cu_seqlens`; INT32 `state_indices` | q `[T, H, K]`, k `[T, HK, K]`, v `[T, HV, V]`, g/beta `[T, HO]`, o `[T, HO, V]`, states `[N or P, HO, V, K]`, checkpoints `[C, HO, V, K]` | CPU Reference | `S = alpha S (I - beta k k^T) + beta v k^T`, `o = scale S q` in an FP32 state (cuDNN `reference_gdn.py`); heads replicated onto `HO = max(H, HV)`; LOG / LINEAR (1e-10 floor) / safe gate; sigmoid or 2*sigmoid beta; q/k L2 norm with epsilon 1e-6; absent `initial_state` is zeros; every state is read before any is written, so `final_state` may share `initial_state`'s buffer; checkpoint rows past the last written one untouched; `batch_invariant` has no effect; state row out of range or written twice throws; ragged tensors rejected |
 | Matmul | FP16, BFP16, FP32 | Any rank >= 2 | CPU Reference | Batch dims broadcast; ragged tensors rejected |
 | MoE Grouped Matmul Forward | FP16, BFP16, FP32 | Op-defined | CPU Reference | Ragged tensors rejected; `first_token_offset` holds `E·batch` group starts or (E > 1) `G + 1` explicit boundaries, rows past the final boundary untouched |
 | MoE Grouped Matmul Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | `first_token_offset` holds `E` group starts or (E > 1) `E + 1` explicit boundaries |
@@ -79,6 +80,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Convolution Backward Data | `ConvolutionBwdPlanBuilder` | `ConvolutionBwdSignatureKey` | Data gradient computation |
 | Convolution Backward Weights | `ConvolutionWrwPlanBuilder` | `ConvolutionWrwSignatureKey` | Weight gradient computation |
 | Causal Conv1d | `CausalConv1dPlanBuilder` | `CausalConv1dSignatureKey` | Depthwise causal 1-D convolution over token-packed sequences with a carried (optionally pooled, in-place) state |
+| Gated DeltaNet (GDN) | `GdnPlanBuilder` | `GdnSignatureKey` | Gated delta-rule linear attention over token-packed sequences with a carried (optionally pooled, in-place) state and state checkpoints |
 
 ### Matmul Operations
 

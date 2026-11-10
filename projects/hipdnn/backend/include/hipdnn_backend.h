@@ -56,6 +56,7 @@
 #include "HipdnnCausalConv1dActivation.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
+#include "HipdnnGateDomain.h"
 #include "HipdnnMoeGroupedMatmulMode.h"
 #include "HipdnnPaddingMode.h"
 #include "HipdnnReduceTensorOp.h"
