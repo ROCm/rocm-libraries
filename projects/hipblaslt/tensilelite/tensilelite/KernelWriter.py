@@ -10375,6 +10375,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # emitters do no address arithmetic of their own.
       self.defineSgpr("FusedPeerGroupPtr", 1)
 
+    if kernel["ProblemType"].get("TriggeredGateEpilogue", False):
+      # heap_base + tiles[GateTileBase + WorkGroup1].ready_offset, latched in the prologue.
+      self.defineSgpr("TrigGateReadyAddr", 2, 2)
+
     # Calculate numSgpr preload
     self.states.preloadGuard = []
     self.states.numSgprPreload = 0
@@ -12403,6 +12407,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # One entry for the whole fixed-size fusegemmm a2a segment
     if kernel["ProblemType"]["FusedGemmA2A"]:
       _reg("uint32", "FusedA2ASegment")
+
+    if kernel["ProblemType"].get("TriggeredGateEpilogue", False):
+      _reg("address", "GateView")
+      _reg("uint32", "GateTileBase")
 
   def _getKernelSource(self, kernel: Solution):
     """

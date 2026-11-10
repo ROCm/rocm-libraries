@@ -2715,6 +2715,36 @@ class Solution(collections.abc.Mapping):
         return
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for the last-WG election
 
+    if state["ProblemType"].get("TriggeredGateEpilogue", False):
+      # One gate add per work-group must equal one band contribution, so the grid
+      # must be exactly (M/MT0) x (N/MT1) work-groups, each storing its own tile once.
+      # WorkGroupMapping/WorkGroupMappingXCC only permute which work-group computes
+      # which tile, and the gate latch runs after that remap, so they are allowed.
+      pt = state["ProblemType"]
+      reason = None
+      if isa[:2] not in ((9, 4), (9, 5)):
+        reason = "TriggeredGateEpilogue requires a gfx94x/gfx95x ISA (buffer_wbl2 sc0 sc1 + sc1 atomic sequence)"
+      elif pt["FusedGemmA2A"]:
+        reason = "TriggeredGateEpilogue and FusedGemmA2A are mutually exclusive"
+      elif not pt["DestDataType"].isBFloat16():
+        reason = "TriggeredGateEpilogue only supports a bf16 D"
+      elif isStreamK(state):
+        reason = "TriggeredGateEpilogue requires StreamK=0"
+      elif isPersistent(state):
+        reason = "TriggeredGateEpilogue requires TileProcessingStrategy=None"
+      elif state["GlobalSplitU"] != 1:
+        reason = "TriggeredGateEpilogue requires GlobalSplitU=1"
+      elif pt["GroupedGemm"]:
+        reason = "TriggeredGateEpilogue does not support GroupedGemm"
+      elif pt["UseBias"] or pt["UseE"] or pt["OutputAmaxD"] or pt["Activation"] or pt["UseScaleAlphaVec"]:
+        reason = "TriggeredGateEpilogue does not support bias, E, AmaxD, activation or ScaleAlphaVec"
+      elif state.get("StinkyTofuRegisterAllocation", 0) not in (0, "0"):
+        reason = "TriggeredGateEpilogue requires StinkyTofuRegisterAllocation=0 (the gate add is emitted as text)"
+      if reason is not None:
+        reject(state, printRejectionReason, reason)
+        return
+      state["InternalSupportParams"]["SupportUserGSU"] = False
+
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:
       reject(state, printRejectionReason, "AdaptiveGemmGSUA requires GSU enablement")
       return

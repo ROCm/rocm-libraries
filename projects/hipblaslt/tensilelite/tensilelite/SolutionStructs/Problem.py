@@ -540,6 +540,10 @@ _defaultProblemType = {
     # PUSHes the first AM feature columns to remote peer recv slots from the
     # GEMM epilogue; the remaining columns store locally.
     "FusedGemmA2A": False,
+    # Ends every work-group with one 64-bit system-scope release add of 1 on its
+    # band's ready gate, located through the GateView/GateTileBase kernargs
+    # (tile = GateTileBase + WorkGroup1).
+    "TriggeredGateEpilogue": False,
     # For kernels putting arguments in workspaces instead of kernel arguments, they can choose to support user arguments input instead.
     "SupportUserArgs": True,
     "SwizzleTensorA": False,
@@ -1467,6 +1471,8 @@ class ProblemType(Mapping):
       name.append("AmaxD")
     if self["FusedGemmA2A"]:
       name.append("FusedA2A")
+    if self.get("TriggeredGateEpilogue", False):
+      name.append("TGE")
     if self["Sparse"]:
       if self["Sparse"] == 2:
         name.append("SPBML%d"%(self["MetadataLayout"]))

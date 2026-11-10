@@ -1,0 +1,17 @@
+# serializer version: 1
+# name: test_gate_epilogue_golden[gfx942]
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_H_TGE_UserArgs_MT128x128x32_MN8fFDSUgULydSLEqceFAUObDCjo4teFv1_Cb5eeP0Wo=',
+      'err': 0,
+    }),
+  ])
+# ---
+# name: test_gate_epilogue_golden[gfx950]
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_H_TGE_UserArgs_MT128x128x32_M5Xf-8YyNt4VyXmsJsgPQ3pgN3mQVa96xTt9IL-Sot0c=',
+      'err': 0,
+    }),
+  ])
+# ---
