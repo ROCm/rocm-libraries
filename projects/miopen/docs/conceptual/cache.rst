@@ -27,7 +27,10 @@ filesystems can cause slow finds, lock waits, and timeouts.
 Replace ``/local/scratch`` with node-local storage; ``/tmp`` is not necessarily local.
 
 MIOpen warns when these paths are on a recognized network filesystem. Explicit overrides are used
-as given. Non-development builds redirect network-backed default paths to the temporary directory,
+as given. Relative overrides are interpreted against the process working directory, including when
+the cache or database directories do not exist yet.
+
+Non-development builds redirect network-backed default paths to the temporary directory,
 so cached kernels and tuning results may not persist. SQLite also
 `does not support WAL mode over network filesystems <https://www.sqlite.org/wal.html>`_.
 

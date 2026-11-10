@@ -45,8 +45,8 @@
 #include <miopen/filesystem.hpp>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <mutex>
-#include <optional>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DISABLE_CACHE)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_CUSTOM_CACHE_DIR)
@@ -116,29 +116,28 @@ struct CachedPath
 };
 
 // Retain path state through process teardown: exit handlers may still query it.
-// The optional permits quiescent tests to reconstruct the once flag in place.
-std::optional<CachedPath>& UserCachePathRef()
+CachedPath& UserCachePathRef()
 {
-    static auto* const path = new std::optional<CachedPath>{std::in_place};
+    static auto* const path = new CachedPath;
     return *path;
 }
 
-std::optional<CachedPath>& SysCachePathRef()
+CachedPath& SysCachePathRef()
 {
-    static auto* const path = new std::optional<CachedPath>{std::in_place};
+    static auto* const path = new CachedPath;
     return *path;
 }
 
 const fs::path& GetUserCachePathInternal()
 {
-    auto& path = *UserCachePathRef();
+    auto& path = UserCachePathRef();
     std::call_once(path.initialized, [&path] { path.value = ComputeUserCachePath(); });
     return path.value;
 }
 
 const fs::path& GetSysCachePathInternal()
 {
-    auto& path = *SysCachePathRef();
+    auto& path = SysCachePathRef();
     std::call_once(path.initialized, [&path] { path.value = ComputeSysCachePath(); });
     return path.value;
 }
@@ -166,8 +165,12 @@ fs::path GetCachePath(bool is_system)
 namespace testing {
 void ResetCachedPaths()
 {
-    UserCachePathRef().emplace();
-    SysCachePathRef().emplace();
+    auto* user   = &UserCachePathRef();
+    auto* system = &SysCachePathRef();
+    std::destroy_at(user);
+    std::construct_at(user);
+    std::destroy_at(system);
+    std::construct_at(system);
 }
 } // namespace testing
 #endif

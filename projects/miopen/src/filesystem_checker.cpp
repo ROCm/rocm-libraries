@@ -132,7 +132,10 @@ bool FilesystemChecker::IsNetworkedFilesystem(const fs::path& path_) const
         MIOPEN_LOG_NQI2("Path does not exist: '" << path << '\'');
         path = path.parent_path();
         if(path.empty())
+        {
+            path = fs::current_path();
             break;
+        }
     }
     struct statfs stat;
     const int rc = statfs(path.c_str(), &stat);

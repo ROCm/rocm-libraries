@@ -35,4 +35,21 @@ TEST(CPU_FilesystemChecker_NONE, LocalFilesystemAndMissingAbsoluteAncestor)
     EXPECT_FALSE(fs::exists(missing.parent_path()));
 }
 
+TEST(CPU_FilesystemChecker_NONE, MissingRelativePathUsesCurrentFilesystem)
+{
+    const fs::path missing = "miopen-filesystem-checker-missing-relative/cache";
+    ASSERT_FALSE(fs::exists(missing.parent_path()));
+    const auto& checker = miopen::GetFilesystemChecker();
+    ScopedEnvironment<std::string> log_level{MIOPEN_LOG_LEVEL, "3"};
+
+    testing::internal::CaptureStderr();
+    const bool current_is_networked = checker.IsNetworkedFilesystem(fs::current_path());
+    const bool missing_is_networked = checker.IsNetworkedFilesystem(missing);
+    const auto errors               = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(missing_is_networked, current_is_networked);
+    EXPECT_TRUE(errors.empty()) << errors;
+    EXPECT_FALSE(fs::exists(missing.parent_path()));
+}
+
 #endif // __linux__

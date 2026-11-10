@@ -6,8 +6,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
-* [DB] Fixed a shutdown use-after-free when exit handlers query initialized kernel-cache paths;
+* [DB] Fixed a shutdown use-after-free when exit handlers read the SQLite kernel cache;
   synchronized path state is retained until process termination.
+* [DB] Fixed filesystem detection for missing relative cache and database paths by checking
+  the current working directory when no named ancestor exists.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
