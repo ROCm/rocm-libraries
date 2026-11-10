@@ -50,6 +50,7 @@ from support_features import (
     matmul,
     moe_grouped_matmul,
     moe_grouped_matmul_bwd,
+    moe_routing,
     paged_cache_store,
     pointwise,
     reduction,
@@ -7164,6 +7165,74 @@ class TestGatherExtract:
         node["inputs"]["indices_tensor_uid"] = None
         with pytest.raises(FeatureError, match="indices_tensor_uid is not bound"):
             gather.extract(node, tensors)
+
+
+def _moe_routing(
+    tokens=4,
+    top_k=2,
+    experts=4,
+    offset_dtype="int32",
+    ids_dtype="int32",
+    offset_dims=None,
+) -> tuple[dict, dict]:
+    rows = [1, tokens * top_k, 1]
+    tensors = {
+        1: {"uid": 1, "dims": [tokens, top_k], "data_type": ids_dtype},
+        2: {
+            "uid": 2,
+            "dims": list(offset_dims or [experts + 1, 1, 1]),
+            "data_type": offset_dtype,
+        },
+        3: {"uid": 3, "dims": list(rows), "data_type": "int32"},
+        4: {"uid": 4, "dims": list(rows), "data_type": "int32"},
+    }
+    node = {
+        "inputs": {"topk_ids_tensor_uid": 1},
+        "outputs": {
+            "first_token_offset_tensor_uid": 2,
+            "token_index_tensor_uid": 3,
+            "token_ks_tensor_uid": 4,
+        },
+        "num_experts": experts,
+    }
+    return node, tensors
+
+
+class TestMoeRoutingExtract:
+    PLAIN = {"offset_dtype:int32", "top_k:multi"}
+
+    def test_node_and_ports_cover_every_schema_field(self) -> None:
+        node, _ = _moe_routing()
+        assert set(batchnorm.bound(node)) | {"num_experts"} == table_fields(
+            moe_routing.SCHEMA_FILE, moe_routing.SCHEMA_TABLE
+        )
+
+    def test_plain_graph(self) -> None:
+        assert moe_routing.extract(*_moe_routing()) == self.PLAIN
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = moe_routing.extract(*_moe_routing())
+        reached |= moe_routing.extract(*_moe_routing(top_k=1, offset_dtype="int64"))
+        assert reached == {f.id for f in moe_routing.FEATURES}
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            ({"experts": 1}, "num_experts 1 is not an int of at least 2"),
+            ({"ids_dtype": "int64"}, "topk_ids_tensor_uid dtype"),
+            ({"offset_dtype": "float"}, "is not int32 or int64"),
+            ({"offset_dims": (4, 1, 1)}, "first_token_offset_tensor_uid dims"),
+        ],
+    )
+    def test_rejects(self, kwargs: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            moe_routing.extract(*_moe_routing(**kwargs))
+
+    def test_rejects_wrong_row_count(self) -> None:
+        node, tensors = _moe_routing()
+        tensors[4]["dims"] = [1, 7, 1]
+        with pytest.raises(FeatureError, match="token_ks_tensor_uid dims"):
+            moe_routing.extract(node, tensors)
 
 
 def _topk(

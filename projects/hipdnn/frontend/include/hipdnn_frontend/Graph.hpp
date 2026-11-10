@@ -97,6 +97,7 @@
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulBwdAttributes.hpp>
+#include <hipdnn_frontend/attributes/MoeRoutingAttributes.hpp>
 #include <hipdnn_frontend/attributes/PagedCacheStoreAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
@@ -142,6 +143,7 @@
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
+#include <hipdnn_frontend/node/MoeRoutingNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PagedCacheStoreNode.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -6435,6 +6437,58 @@ public:
             std::make_shared<SoftmaxNode>(std::move(attributes), graph_attributes));
 
         return ret;
+    }
+
+    /**
+     * @brief Routes mixture-of-experts tokens to experts (hipDNN extension; cuDNN leaves
+     * routing to the caller).
+     *
+     * `topkIds` is `[S, top_k]` INT32. Each pair `(s, k)` whose expert `e = topkIds[s, k]`
+     * lies in `[0, num_experts)` becomes one routed row; rows are ordered by expert, then
+     * by `s`, then by `k`. For routed row `r`, `token_index[r] = s` and `token_ks[r] = k`;
+     * `first_token_offset[e]` is the number of routed rows with expert `< e`. Ids outside
+     * `[0, num_experts)` are not routed (expert parallelism): the final boundary is then
+     * below `S * top_k` and the trailing `token_index` / `token_ks` rows are left unwritten.
+     * The outputs feed MoE grouped matmul GATHER (`token_index`) and SCATTER
+     * (`token_index`, `token_ks`, `top_k`) directly, `first_token_offset` being the
+     * explicit `num_experts + 1` group boundaries.
+     *
+     * Leaving output dimensions unset infers `[num_experts + 1, 1, 1]` and
+     * `[1, S * top_k, 1]` (packed strides, INT32); supplying them validates against those.
+     * `first_token_offset` may be set to INT64. `num_experts` must be at least 2 (a single
+     * expert needs no routing).
+     *
+     * @param topkIds Expert chosen for each (token, slot), shaped `[S, top_k]`, INT32.
+     * @param attributes Operation configuration (`set_num_experts`).
+     * @return `{first_token_offset, token_index, token_ks}`.
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 3>
+        moe_routing(std::shared_ptr<TensorAttributes> topkIds, MoeRoutingAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("MoeRouting_" + std::to_string(_sub_nodes.size()));
+        }
+        if(topkIds && topkIds->get_name().empty())
+        {
+            topkIds->set_name(attributes.get_name() + "::TOPK_IDS");
+        }
+
+        auto firstTokenOffset = outputTensor(attributes.get_name() + "::FIRST_TOKEN_OFFSET");
+        auto tokenIndex = outputTensor(attributes.get_name() + "::TOKEN_INDEX");
+        auto tokenKs = outputTensor(attributes.get_name() + "::TOKEN_KS");
+
+        attributes.set_topk_ids(std::move(topkIds));
+        attributes.set_first_token_offset(firstTokenOffset);
+        attributes.set_token_index(tokenIndex);
+        attributes.set_token_ks(tokenKs);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<MoeRoutingNode>(std::move(attributes), graph_attributes));
+
+        return {firstTokenOffset, tokenIndex, tokenKs};
     }
 
     /**

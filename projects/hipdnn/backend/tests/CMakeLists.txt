@@ -66,6 +66,9 @@ add_executable(
     descriptors/TestPagedCacheStoreOperationDescriptor.cpp
     descriptors/TestPagedCacheStoreOperationFromNode.cpp
     descriptors/TestGraphDescriptorPagedCacheStore.cpp
+    descriptors/TestMoeRoutingOperationDescriptor.cpp
+    descriptors/TestMoeRoutingOperationFromNode.cpp
+    descriptors/TestGraphDescriptorMoeRouting.cpp
     descriptors/TestCausalConv1dOperationDescriptor.cpp
     descriptors/TestCausalConv1dOperationFromNode.cpp
     descriptors/TestGraphDescriptorCausalConv1d.cpp

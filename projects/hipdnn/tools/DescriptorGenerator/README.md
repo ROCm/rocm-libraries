@@ -192,6 +192,7 @@ operation:
 | `resample_bwd.yaml` | Resample backward |
 | `moe_grouped_matmul.yaml` | MoE grouped matrix multiplication (checked-in `finalize()` is hand-maintained — see `CLAUDE.md` "Hand-maintained ops") |
 | `moe_grouped_matmul_bwd.yaml` | MoE grouped matrix multiplication backward |
+| `moe_routing.yaml` | MoE routing into grouped-matmul boundaries/row indices (`finalize()` and node hand-maintained — see `CLAUDE.md` "Hand-maintained ops") |
 | `gather.yaml` | Gather along one axis (index_select / embedding lookup) |
 | `topk.yaml` | Top-k selection along the last dim |
 | `paged_cache_store.yaml` | Paged KV-cache store into the SDPA paged container |

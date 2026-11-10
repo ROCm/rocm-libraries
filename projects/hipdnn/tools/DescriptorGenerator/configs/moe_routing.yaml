@@ -1,0 +1,106 @@
+operation:
+  name: "MoeRouting"
+  class_name: "MoeRoutingOperationDescriptor"
+  fbs_table: "MoeRoutingAttributes"
+  fbs_generated_header: "moe_routing_attributes_generated.h"
+
+  # cuDNN has no MoE routing node (cudnn-frontend leaves routing to the caller), so every
+  # name carries the _EXT suffix.
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_MOE_ROUTING_DESCRIPTOR_EXT"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_MOE_ROUTING"
+
+  error_label: "MoE routing"
+  packer_operation_label: "MoE routing"
+  packer_finalize_label: "MoE routing"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_MOE_ROUTING_EXT"
+
+  frontend:
+    packer_function: "createMoeRoutingOperation"
+    unpacker_function: "unpackMoeRoutingOperation"
+    node_class: "MoeRoutingNode"
+    attributes_class: "MoeRoutingAttributes"
+
+    inputs:
+      - name: "topk_ids"
+        enum_name: "TOPK_IDS"
+        required: true
+        getter_name: "get_topk_ids"
+        setter_name: "set_topk_ids"
+    outputs:
+      - name: "first_token_offset"
+        enum_name: "FIRST_TOKEN_OFFSET"
+        required: true
+        getter_name: "get_first_token_offset"
+        setter_name: "set_first_token_offset"
+      - name: "token_index"
+        enum_name: "TOKEN_INDEX"
+        required: true
+        getter_name: "get_token_index"
+        setter_name: "set_token_index"
+      - name: "token_ks"
+        enum_name: "TOKEN_KS"
+        required: true
+        getter_name: "get_token_ks"
+        setter_name: "set_token_ks"
+    graph_method_name: "moe_routing"
+    graph_method_params:
+      - name: "topkIds"
+        tensor_name: "topk_ids"
+    graph_return_type: "array"
+    graph_return_outputs:
+      - "first_token_offset"
+      - "token_index"
+      - "token_ks"
+    node_type_enum: "NodeType::MOE_ROUTING"
+    node_attributes_union_type: "MoeRoutingAttributes"
+
+  tensor_fields:
+    - name: "topk_ids"
+      fbs_field: "topk_ids_tensor_uid"
+      attr_suffix: "TOPK_IDS_DESC_EXT"
+      required: true
+      expected_data_type: "INT32"
+    - name: "first_token_offset"
+      fbs_field: "first_token_offset_tensor_uid"
+      attr_suffix: "FIRST_TOKEN_OFFSET_DESC_EXT"
+      required: true
+    - name: "token_index"
+      fbs_field: "token_index_tensor_uid"
+      attr_suffix: "TOKEN_INDEX_DESC_EXT"
+      required: true
+      expected_data_type: "INT32"
+    - name: "token_ks"
+      fbs_field: "token_ks_tensor_uid"
+      attr_suffix: "TOKEN_KS_DESC_EXT"
+      required: true
+      expected_data_type: "INT32"
+
+  data_fields:
+    - name: "num_experts"
+      fbs_field: "num_experts"
+      attr_name: "HIPDNN_ATTR_OPERATION_MOE_ROUTING_NUM_EXPERTS_EXT"
+      type: "scalar_int64"
+      default_value: "0"
+      required: true
+      frontend_getter: "get_num_experts()"
+
+  tensor_array_fields: []
+
+  has_compute_data_type: false
+
+  test_data:
+    tensor_const_prefix: "K_MOE_ROUTING_"
+    tensor_uids:
+      topk_ids: 9700
+      first_token_offset: 9701
+      token_index: 9702
+      token_ks: 9703
+    tensor_configs:
+      topk_ids: { dims: [4, 2], strides: [2, 1], data_type: INT32 }
+      first_token_offset: { dims: [5, 1, 1], strides: [1, 1, 1], data_type: INT32 }
+      token_index: { dims: [1, 8, 1], strides: [8, 1, 1], data_type: INT32 }
+      token_ks: { dims: [1, 8, 1], strides: [8, 1, 1], data_type: INT32 }
+    field_values:
+      num_experts: 4

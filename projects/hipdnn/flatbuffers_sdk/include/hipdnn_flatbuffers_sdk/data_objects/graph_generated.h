@@ -33,6 +33,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "matmul_attributes_generated.h"
 #include "moe_grouped_matmul_attributes_generated.h"
 #include "moe_grouped_matmul_bwd_attributes_generated.h"
+#include "moe_routing_attributes_generated.h"
 #include "paged_cache_store_attributes_generated.h"
 #include "pointwise_attributes_generated.h"
 #include "reduction_attributes_generated.h"
@@ -104,11 +105,12 @@ enum class NodeAttributes : uint8_t {
   GatherAttributes = 29,
   PagedCacheStoreAttributes = 30,
   CausalConv1dAttributes = 31,
+  MoeRoutingAttributes = 32,
   MIN = NONE,
-  MAX = CausalConv1dAttributes
+  MAX = MoeRoutingAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[32] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[33] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -141,13 +143,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[32] {
     NodeAttributes::TopkAttributes,
     NodeAttributes::GatherAttributes,
     NodeAttributes::PagedCacheStoreAttributes,
-    NodeAttributes::CausalConv1dAttributes
+    NodeAttributes::CausalConv1dAttributes,
+    NodeAttributes::MoeRoutingAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[33] = {
+  static const char * const names[34] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -180,13 +183,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "GatherAttributes",
     "PagedCacheStoreAttributes",
     "CausalConv1dAttributes",
+    "MoeRoutingAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::CausalConv1dAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::MoeRoutingAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -319,6 +323,10 @@ template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::Cau
   static const NodeAttributes enum_value = NodeAttributes::CausalConv1dAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::MoeRoutingAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -445,6 +453,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects
 
 template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::CausalConv1dAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::MoeRoutingAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -725,6 +737,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::CausalConv1dAttributes ?
       reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(value) : nullptr;
   }
+  hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributesT *AsMoeRoutingAttributes() {
+    return type == NodeAttributes::MoeRoutingAttributes ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributesT *AsMoeRoutingAttributes() const {
+    return type == NodeAttributes::MoeRoutingAttributes ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -857,6 +877,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::CausalConv1dAttributes: {
       return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::MoeRoutingAttributes: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -1079,6 +1103,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes *attributes_as_CausalConv1dAttributes() const {
     return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::CausalConv1dAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributes *attributes_as_MoeRoutingAttributes() const {
+    return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeRoutingAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -1219,6 +1246,10 @@ template<> inline const hipdnn_flatbuffers_sdk::data_objects::PagedCacheStoreAtt
 
 template<> inline const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes>() const {
   return attributes_as_CausalConv1dAttributes();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributes>() const {
+  return attributes_as_MoeRoutingAttributes();
 }
 
 struct NodeBuilder {
@@ -1777,6 +1808,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::MoeRoutingAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -1920,6 +1955,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::MoeRoutingAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -2051,6 +2090,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(value);
       return CreateCausalConv1dAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::MoeRoutingAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributesT *>(value);
+      return CreateMoeRoutingAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -2179,6 +2222,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::CausalConv1dAttributes: {
       value = new hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::MoeRoutingAttributes: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributesT *>(u.value));
       break;
     }
     default:
@@ -2340,6 +2387,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::CausalConv1dAttributes: {
       auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::CausalConv1dAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::MoeRoutingAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::MoeRoutingAttributesT *>(value);
       delete ptr;
       break;
     }

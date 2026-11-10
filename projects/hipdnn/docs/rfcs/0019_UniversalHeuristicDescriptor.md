@@ -1667,6 +1667,7 @@ the trainer, and the runtime compute the same number.
    | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` is `Sq·Sk`, or the attended pairs under a causal mask. |
    | `SdpaBackwardAttributes` | `2.5 ×` the forward count on its `q`/`k`/`v`/`o` | The FlashAttention convention. |
    | `MoeGroupedMatmulAttributes`, `MoeGroupedMatmulBwdAttributes` | unknown | `first_token_offset` decides how many rows are computed. |
+   | `MoeRoutingAttributes` | unknown | Data movement, no arithmetic. |
    | `GatherAttributes` | unknown | Data movement, no arithmetic. |
    | `PagedCacheStoreAttributes` | unknown | Data movement, no arithmetic. |
    | `CustomOpAttributes` | unknown | Opaque to hipDNN. |
@@ -1675,7 +1676,7 @@ the trainer, and the runtime compute the same number.
    chosen once and held; what matters is that every engine counts the same. A formula refuses — the
    node's work is unknown — when its operands are inconsistent: a missing tensor, a non-positive dim, or
    shapes that do not compose. The convolutions, Matmul, and SDPA forward and backward also require
-   floating-point operands. So 24 of the 29 node types have a static count; whether a given graph has one
+   floating-point operands. So 24 of the 30 node types have a static count; whether a given graph has one
    is still rule 3's to decide.
 6. **Bytes are a declared convention, and three different quantities are kept apart.**
    - **Logical footprint** — `$graph.logical_bytes`, a feature. The sum over the graph's non-virtual

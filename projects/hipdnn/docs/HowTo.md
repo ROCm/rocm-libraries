@@ -239,6 +239,7 @@ The tool ships with validated configs for all current operations:
 | `resample_bwd.yaml` | Resample backward |
 | `moe_grouped_matmul.yaml` | MoE grouped matrix multiplication |
 | `moe_grouped_matmul_bwd.yaml` | MoE grouped matrix multiplication backward |
+| `moe_routing.yaml` | MoE routing into grouped-matmul boundaries/row indices |
 | `topk.yaml` | Top-k selection along the last dim |
 | `paged_cache_store.yaml` | Paged KV-cache store into the SDPA paged container |
 | `causal_conv1d.yaml` | Depthwise causal conv1d with carried state (node hand-maintained) |

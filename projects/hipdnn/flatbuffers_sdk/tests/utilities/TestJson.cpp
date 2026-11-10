@@ -242,6 +242,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid softmax graph)";
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeRoutingAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidMoeRoutingGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid MoE routing graph)";
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PagedCacheStoreAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidPagedCacheStoreGraph();
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
@@ -390,6 +395,25 @@ TEST(TestJson, MoeGroupedMatmulBwdRoundTrip)
     EXPECT_EQ(outputs.at("dweight_tensor_uid").get<int64_t>(), 4);
 
     toJsonAndBackTestSuite(graph, "(MoE grouped matmul backward)");
+}
+
+TEST(TestJson, MoeRoutingRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidMoeRoutingGraph();
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    const auto& nodeJson = graphJson.at("nodes").at(0);
+    const auto& inputs = nodeJson.at("inputs");
+    const auto& outputs = nodeJson.at("outputs");
+
+    EXPECT_EQ(nodeJson.at("type").get<std::string>(), "MoeRoutingAttributes");
+    EXPECT_EQ(inputs.at("topk_ids_tensor_uid").get<int64_t>(), 1);
+    EXPECT_EQ(outputs.at("first_token_offset_tensor_uid").get<int64_t>(), 2);
+    EXPECT_EQ(outputs.at("token_index_tensor_uid").get<int64_t>(), 3);
+    EXPECT_EQ(outputs.at("token_ks_tensor_uid").get<int64_t>(), 4);
+    EXPECT_EQ(nodeJson.at("num_experts").get<int64_t>(), 4);
+
+    toJsonAndBackTestSuite(graph, "(MoE routing)");
 }
 
 TEST(TestJson, SoftmaxRoundTrip)

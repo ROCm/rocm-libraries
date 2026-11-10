@@ -24,6 +24,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MoeGroupedMatmulBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MoeGroupedMatmulSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MoeRoutingSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PagedCacheStoreSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwiseSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormBwdSignatureKey.hpp>
@@ -66,6 +67,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               MatmulSignatureKey,
                                               MoeGroupedMatmulSignatureKey,
                                               MoeGroupedMatmulBwdSignatureKey,
+                                              MoeRoutingSignatureKey,
                                               SoftmaxSignatureKey,
                                               PagedCacheStoreSignatureKey,
                                               CausalConv1dSignatureKey,

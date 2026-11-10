@@ -564,6 +564,29 @@ def build_gather_graph():
     return graph, table, ids, y
 
 
+def build_moe_routing_graph():
+    """Build a MoE routing graph (topk_ids [4, 2] INT32, 4 experts).
+
+    Returns (graph, topk_ids, first_token_offset, token_index, token_ks).
+    """
+    graph = create_float_graph()
+    topk_ids = hipdnn.Tensor.create([4, 2], hipdnn.DataType.INT32)
+    topk_ids.set_name("topk_ids")
+
+    first_token_offset, token_index, token_ks = graph.moe_routing(
+        topk_ids, hipdnn.MoeRoutingAttributes().set_num_experts(4)
+    )
+    for name, tensor in (
+        ("first_token_offset", first_token_offset),
+        ("token_index", token_index),
+        ("token_ks", token_ks),
+    ):
+        tensor.set_name(name)
+        tensor.set_output(True)
+
+    return graph, topk_ids, first_token_offset, token_index, token_ks
+
+
 def build_rope_graph():
     """Build a Qwen-style partial RoPE graph (x [2, 4, 16, 8], freqs [1, 1, 16, 4], rope_dim 4,
     leading segment).

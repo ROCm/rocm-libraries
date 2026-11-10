@@ -768,6 +768,12 @@ The checked-in `finalize()` delegates routing validation to
 contract. Regenerating the backend descriptor emits the template's original
 routing switch; preserve the checked-in `finalize()` during integration.
 
+**MoE routing** — generated except for `MoeRoutingOperationDescriptor::finalize()`
+(adds the `first_token_offset` INT32/INT64 and `num_experts >= 1` checks),
+`MoeRoutingNode.hpp` (shape inference and validation are hand-written), and the
+generated integration tests' graph setup (the generator binds only the first
+output of an `array` graph method). Preserve these during integration.
+
 **Causal conv1d** — generated except for `CausalConv1dOperationDescriptor::finalize()`
 (adds "STATE_INDICES_EXT requires INITIAL_STATE_EXT"), the frontend-only
 `output_final_state` flag in `CausalConv1dAttributes.hpp` and its unpacker line,

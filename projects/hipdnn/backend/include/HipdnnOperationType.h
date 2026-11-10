@@ -50,6 +50,7 @@ typedef enum
     HIPDNN_OPERATION_TYPE_TOPK_EXT = 26, ///< Top-k selection along the last dim
     HIPDNN_OPERATION_TYPE_PAGED_CACHE_STORE_EXT = 28, ///< Paged KV-cache store
     HIPDNN_OPERATION_TYPE_GATHER_EXT = 27, ///< Gather along one axis
+    HIPDNN_OPERATION_TYPE_MOE_ROUTING_EXT = 30, ///< MoE routing (expert counting sort)
     HIPDNN_OPERATION_TYPE_CAUSAL_CONV1D_EXT = 29, ///< Depthwise causal 1-D convolution with state
     HIPDNN_OPERATION_TYPE_ROPE_FWD_EXT = 24, ///< Rotary position embedding forward
 } hipdnnOperationType_ext_t;

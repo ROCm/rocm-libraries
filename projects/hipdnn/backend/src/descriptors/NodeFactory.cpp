@@ -53,6 +53,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return MoeGroupedMatmulBwdOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::SoftmaxAttributes:
         return SoftmaxOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::MoeRoutingAttributes:
+        return MoeRoutingOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::PagedCacheStoreAttributes:
         return PagedCacheStoreOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::PointwiseAttributes:

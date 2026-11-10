@@ -79,7 +79,8 @@ GROUP_RULES = (
     ("Batchnorm", lambda op: op.startswith("Batchnorm")),
     ("Layernorm", lambda op: op.startswith("Layernorm")),
     ("Convolution", lambda op: op.startswith("Convolution")),
-    ("Matmul", lambda op: "Matmul" in op),
+    # MoE routing only feeds MoE grouped matmul, so it sits with it.
+    ("Matmul", lambda op: "Matmul" in op or op == "MoeRouting"),
     ("Resample", lambda op: op.startswith("Resample")),
     ("Reduction", lambda op: op.startswith("Reduction")),
     ("Pointwise", lambda op: op.startswith("Pointwise")),

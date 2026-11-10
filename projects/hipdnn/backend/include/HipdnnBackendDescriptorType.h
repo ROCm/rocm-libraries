@@ -385,6 +385,15 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_GATHER_DESCRIPTOR_EXT = 42,
 
     /**
+     * @brief MoE routing operation descriptor (extension)
+     *
+     * Turns per-token expert choices (TOPK_IDS) into the FIRST_TOKEN_OFFSET group
+     * boundaries and the TOKEN_INDEX / TOKEN_KS row indices consumed by MoE grouped
+     * matmul GATHER / SCATTER.
+     */
+    HIPDNN_BACKEND_OPERATION_MOE_ROUTING_DESCRIPTOR_EXT = 45,
+
+    /**
      * @brief Causal conv1d operation descriptor (extension)
      *
      * Depthwise causal 1-D convolution over token-packed sequences with an

@@ -100,6 +100,9 @@ add_executable(
     TestTopkAttributes.cpp
     TestTopkNode.cpp
     TestGraphTopk.cpp
+    TestMoeRoutingAttributes.cpp
+    TestMoeRoutingNode.cpp
+    TestGraphMoeRouting.cpp
     TestRopeAttributes.cpp
     TestRopeNode.cpp
     TestGraphRope.cpp
