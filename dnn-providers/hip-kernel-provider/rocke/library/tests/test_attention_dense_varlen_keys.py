@@ -4,9 +4,10 @@
 """Host checks for a packed varlen dense-attention launch without the LSE output.
 
 The packed body zeroes no keyless row and has no handling for an empty KV sequence
-without LSE, so the launcher rejects both instead of returning wrong values. The helper
-tests need no torch and no GPU (the helper reads only ``dtype`` and ``tolist()`` of its
-offsets); only the launcher-level test builds torch tensors and skips without torch.
+without LSE, so the launcher rejects both instead of returning wrong values. No test
+needs torch or a GPU: the helper reads only ``dtype`` and ``tolist()`` of its offsets,
+and the launcher reaches the check before it reads q, k, v or out, so the launcher
+tests pass stand-ins for them and run in the CPU attention lane.
 """
 
 from __future__ import annotations
@@ -75,7 +76,7 @@ def test_window_accepts_sequences_that_all_keep_a_key():
 
 @pytest.mark.parametrize("kv_lengths", [(256, 0), (0, 256)])
 def test_rejects_an_empty_kv_sequence(kv_lengths):
-    with pytest.raises(ValueError, match="must be nonempty"):
+    with pytest.raises(NotImplementedError, match="must be nonempty"):
         validate_varlen_keys(_spec(), _offsets(256, 256), _offsets(*kv_lengths))
 
 
@@ -86,7 +87,7 @@ def test_accepts_an_inactive_slot_with_no_queries_and_no_keys():
 
 def test_window_rejects_a_sequence_that_leaves_rows_without_a_key():
     """The second sequence has q_len - kv_len = 128 = W: its last row sees no key."""
-    with pytest.raises(ValueError, match="no key"):
+    with pytest.raises(NotImplementedError, match="no key"):
         validate_varlen_keys(
             _spec(sliding_window=128), _offsets(256, 384), _offsets(256, 256)
         )
@@ -107,31 +108,33 @@ def test_rejects_offsets_that_are_not_int32():
         )
 
 
+# The launcher reads q, k, v and out only after the varlen check (and validate_dense_lse
+# returns at once without LSE), so a bare object stands in for each: a launch that got
+# past the check would fail on the first attribute it read, not with the check's error.
+_UNREAD = object()
+
+
+def _launch(spec, cu_seqlens_q, cu_seqlens_kv, **kw):
+    run_attention_dense_torch(
+        spec=spec,
+        q=_UNREAD,
+        k=_UNREAD,
+        v=_UNREAD,
+        out=_UNREAD,
+        scale=0.1,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_kv=cu_seqlens_kv,
+        **kw,
+    )
+
+
 def test_launcher_runs_the_check_when_lse_is_off():
     """The public launcher reaches the check before it touches the device."""
-    torch = pytest.importorskip("torch", reason="torch required for the launcher test")
-
-    def offsets(*lengths):
-        out = [0]
-        for n in lengths:
-            out.append(out[-1] + n)
-        return torch.tensor(out, dtype=torch.int32)
-
-    spec = _spec(seqlen_q=256, seqlen_kv=256)
-    q = torch.zeros(512, 4, 128, dtype=torch.bfloat16)
-    k = torch.zeros(256, 1, 128, dtype=torch.bfloat16)
-    v = torch.zeros_like(k)
-    out = torch.empty_like(q)
-    with pytest.raises(ValueError, match="must be nonempty"):
-        run_attention_dense_torch(
-            spec=spec,
-            q=q,
-            k=k,
-            v=v,
-            out=out,
-            scale=0.1,
-            cu_seqlens_q=offsets(256, 256),
-            cu_seqlens_kv=offsets(256, 0),
+    with pytest.raises(NotImplementedError, match="must be nonempty"):
+        _launch(
+            _spec(seqlen_q=256, seqlen_kv=256),
+            _offsets(256, 256),
+            _offsets(256, 0),
         )
 
 
@@ -142,7 +145,6 @@ def test_launcher_check_is_skipped_only_when_validate_varlen_is_off(
     """``validate_varlen=False`` skips the host check (it reads the offsets, a device sync).
 
     The next launcher step is stubbed to stop the call, so no kernel is built or run."""
-    torch = pytest.importorskip("torch", reason="torch required for the launcher test")
     import kernels.gfx950.attention_dense as dense
 
     class _Stop(Exception):
@@ -157,19 +159,8 @@ def test_launcher_check_is_skipped_only_when_validate_varlen_is_off(
         raise _Stop
 
     monkeypatch.setattr(dense, "validate_dense_lse", _stop)
-    offsets = torch.tensor([0, 256, 512], dtype=torch.int32)
-    q = torch.zeros(512, 4, 128, dtype=torch.bfloat16)
-    k = torch.zeros(512, 1, 128, dtype=torch.bfloat16)
+    spec = _spec(seqlen_q=256, seqlen_kv=256)
+    cu_q, cu_kv = _offsets(256, 256), _offsets(256, 256)
     with pytest.raises(_Stop):
-        run_attention_dense_torch(
-            spec=_spec(seqlen_q=256, seqlen_kv=256),
-            q=q,
-            k=k,
-            v=torch.zeros_like(k),
-            out=torch.empty_like(q),
-            scale=0.1,
-            cu_seqlens_q=offsets,
-            cu_seqlens_kv=offsets,
-            validate_varlen=validate,
-        )
-    assert len(calls) == (1 if validate else 0)
+        _launch(spec, cu_q, cu_kv, validate_varlen=validate)
+    assert calls == ([(spec, cu_q, cu_kv)] if validate else [])

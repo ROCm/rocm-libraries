@@ -284,8 +284,9 @@ def validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv):
     queries but a KV length of 0, and, with a sliding window, a sequence whose last
     query rows see no key (``q_len - kv_len >= window``). A slot with no queries exits
     before touching KV, so it may have no keys. Both rejections are implementation
-    shortcuts of the packed body, not hardware limits, and are reported as
-    NOT_YET_IMPLEMENTED. The offsets must be int32 (the kernel reads them as such).
+    shortcuts of the packed body, not hardware limits, so they raise
+    ``NotImplementedError`` with a NOT_YET_IMPLEMENTED detail; malformed offsets raise
+    ``ValueError``. The offsets must be int32 (the kernel reads them as such).
     Tile alignment and the spec maxima are not checked here; with LSE,
     :func:`validate_dense_lse` checks them. The spec has no sinks with varlen.
     Synchronizes both offset tensors to host.
@@ -307,12 +308,12 @@ def validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv):
     kv_lens = [stop - start for start, stop in zip(kv_off, kv_off[1:])]
     for i, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
         if q_len > 0 and kv_len <= 0:
-            raise ValueError(
+            raise NotImplementedError(
                 f"NOT_YET_IMPLEMENTED: packed KV sequence {i} must be nonempty "
                 "without LSE"
             )
         if window and q_len - kv_len >= window:
-            raise ValueError(
+            raise NotImplementedError(
                 f"NOT_YET_IMPLEMENTED: sequence {i}: sliding_window={window} over "
                 f"q_len={q_len}, kv_len={kv_len} leaves query rows with no key; "
                 "use emit_lse"
