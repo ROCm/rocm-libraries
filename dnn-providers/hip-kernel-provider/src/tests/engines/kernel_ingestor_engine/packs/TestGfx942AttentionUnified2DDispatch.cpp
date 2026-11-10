@@ -101,6 +101,7 @@ constexpr const char* OUTPUT_LAYOUT_MARKER = "not dense BSHD";
 constexpr const char* GEOMETRY_MARKER = "declares no supported geometry";
 constexpr const char* BLOCK_MARKER = "does not divide seqlen_kv";
 constexpr const char* RATIO_MARKER = "is built for a GQA ratio of";
+constexpr const char* WINDOW_MARKER = "this engine serves the unwindowed band only";
 
 } // namespace
 
@@ -440,6 +441,22 @@ TEST(TestGfx942AttentionUnified2DDispatch, RefusesToPrepareACandidateOfAnotherRa
     const std::string failure = prepareFailureFor(ratio8);
     ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
     EXPECT_NE(failure.find(RATIO_MARKER), std::string::npos) << failure;
+}
+
+/// The kernel takes the window as an int32 kernarg and graph_match binds 0, so a record that
+/// bakes one, here past int32 where a narrowing would read as 0, is refused by name even for
+/// a caller that skipped kernel_match.
+TEST(TestGfx942AttentionUnified2DDispatch, RefusesToPrepareACandidateThatBakesASlidingWindow)
+{
+    for(const int64_t window : {int64_t{128}, int64_t{1} << 32})
+    {
+        SCOPED_TRACE(window);
+        KernelSpec windowed;
+        windowed.slidingWindow = window;
+        const std::string failure = prepareFailureFor(windowed);
+        ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
+        EXPECT_NE(failure.find(WINDOW_MARKER), std::string::npos) << failure;
+    }
 }
 
 /// A block size that does not divide the graph's Skv is not a whole-block cache.

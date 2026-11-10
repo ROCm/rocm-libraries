@@ -656,6 +656,22 @@ void requireRatio(const AttentionUnified2DCandidate& candidate,
     }
 }
 
+/// The engine serves the unwindowed band only: the catalog bakes no window and graph_match
+/// binds 0. A record with one is refused, which also keeps its value from being narrowed to
+/// the kernel's int32 argument.
+void requireNoSlidingWindow(const AttentionUnified2DCandidate& candidate,
+                            const KernelDefinition& kernel)
+{
+    if(candidate.slidingWindow != 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "gfx942 attention_unified_2d: kernel '" + toString(kernel.kernelId)
+                + "' bakes a sliding window of " + std::to_string(candidate.slidingWindow)
+                + "; this engine serves the unwindowed band only");
+    }
+}
+
 /**
  * @brief The native dispatch behind this engine's UDD.
  */
@@ -701,6 +717,7 @@ public:
         const auto candidate = requireCandidate(kernel);
         const auto problem = boundProblem(context, binding);
         requireRatio(candidate, problem, kernel);
+        requireNoSlidingWindow(candidate, kernel);
         const auto layout = requireLayout(candidate, problem, kernel);
 
         // The host-side metadata is built before the code object is loaded, so a graph the

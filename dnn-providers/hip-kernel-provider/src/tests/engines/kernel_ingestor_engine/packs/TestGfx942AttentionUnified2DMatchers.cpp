@@ -204,6 +204,12 @@ TEST(TestGfx942AttentionUnified2DMatchers, DeclinesOperandsThatDisagreeInShapeOr
     GraphSpec mixed;
     mixed.kDataType = data_objects::DataType::HALF;
     cases.push_back({"K dtype differs from Q", mixed});
+    GraphSpec kBatch;
+    kBatch.kBatch = 1;
+    cases.push_back({"K batch differs from Q", kBatch});
+    GraphSpec kHeadSize;
+    kHeadSize.kHeadSize = 64;
+    cases.push_back({"K head size differs from Q", kHeadSize});
     GraphSpec vShorter;
     vShorter.vSeqLen = 128;
     cases.push_back({"V sequence differs from K", vShorter});
