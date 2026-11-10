@@ -6,7 +6,7 @@ from typing import Mapping, Optional
 from rocisa.code import Module, Label
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, SBranch, SCBranchSCC1, SCSelectB32, TensorLoadToLds, \
-    VReadfirstlaneB32, SSubU32
+    TensorStoreFromLds, VReadfirstlaneB32, SSubU32
 from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData, TENSORModifiers
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
@@ -658,3 +658,137 @@ class TensorDataMoverLoad(TensorDataMover):
         ldsPadDwords =  ldsPadSize // 4 # bytes to dwords
         assert ldsPadDwords > 0
         return ldsPadDwords - 1
+
+
+class TensorDataMoverStore:
+    """Descriptor builder for tensor_store_from_lds (LDS -> global) and tensor_load_to_lds, two-group form.
+
+    Not a Component: TensorDataMoverLoad already matches TDMInst/HasTDM, and a second match would
+    make Component.find() raise. The descriptor layout is the one tensor_load_to_lds uses; for the
+    tile of D or C, tile_dim0 = M (contiguous), tile_dim1 = the columns of one wave and
+    tensor_dim0_stride = StrideD or StrideC in elements.
+    Elements outside tensor_dim0/tensor_dim1 are neither written nor read, which is what clamps an edge tile.
+    mem_token is the LDS memory token of the tile the instruction reads or writes.
+    """
+    GROUP0_NUM_SGPR = 4
+    GROUP1_NUM_SGPR = 8
+
+    def __init__(self, mem_token: list[int]):
+        self.mem_token = mem_token
+
+    @staticmethod
+    def _sg(base: int | str, off: int = 0):
+        # allocTmpSgpr yields int indices -> numeric arithmetic; defined-symbol names -> "name+off".
+        if isinstance(base, int):
+            return sgpr(base + off)
+        return sgpr(base if off == 0 else f"{base}+{off}")
+
+    @staticmethod
+    def _sg2(base: int | str):
+        return sgpr(base, 2)
+
+    def initOperands(self, group0: int | str, group1: int | str) -> Module:
+        mod = Module("tdmInit")
+        for i in range(self.GROUP0_NUM_SGPR):
+            val = 1 if i == 0 else 0  # group0[0] bit0 = count = 1
+            mod.add(SMovB32(self._sg(group0, i), val))
+        mod.add(SOrB32(self._sg(group0, 3), self._sg(group0, 3), hex(2 << 30), "set type field to 2(image)"))
+        for i in range(self.GROUP1_NUM_SGPR):
+            mod.add(SMovB32(self._sg(group1, i), 0))
+        return mod
+
+    def setDataSize(self, numBytes: int, group1: str | int) -> Module:
+        mod = Module()
+        assert numBytes in (1, 2, 4, 8), f"unsupported element size for TDM data_size: {numBytes}"
+        dataSizeOp = int(log2(numBytes))
+        mod.add(SAndB32(self._sg(group1), self._sg(group1), hex(0xFFFCFFFF), "Reset data_size"))
+        mod.add(SOrB32(self._sg(group1), self._sg(group1), hex(dataSizeOp << 16), f"Set data_size to {dataSizeOp}"))
+        return mod
+
+    def setGlobalAddr(self, group0: int | str, sgprGlobalAddr: int | str) -> Module:
+        mod = Module()
+        mod.addComment("TDM set global addr")
+        mod.add(SMovB64(self._sg2(group0 + 2 if isinstance(group0, int) else f"{group0}+2"),
+                        self._sg2(sgprGlobalAddr)))
+        mod.add(SOrB32(self._sg(group0, 3), self._sg(group0, 3), hex(2 << 30), "set type field to 2(image)"))
+        return mod
+
+    def setLdsAddr(self, group0: int | str, ldsAddr: int | RegisterContainer) -> Module:
+        mod = Module()
+        mod.addComment("TDM set LDS addr")
+        mod.add(SMovB32(self._sg(group0, 1), ldsAddr))
+        return mod
+
+    def setTensorDim0(self, group1: int | str, sgprDim0: int | str, writer: "KernelWriterAssembly") -> Module:
+        # tensor_dim0 bit176: group1+1 hi16 + group1+2 lo16
+        mod = Module()
+        mod.addComment("TDM set tensor dim 0")
+        mod.add(SAndB32(self._sg(group1, 1), self._sg(group1, 1), hex(0x0000FFFF)))
+        mod.add(SAndB32(self._sg(group1, 2), self._sg(group1, 2), hex(0xFFFF0000)))
+        with writer.allocTmpSgpr(1, tag="tdmDim0_tmp") as tmp:
+            mod.add(SLShiftLeftB32(sgpr(tmp.idx), hex(16), sgpr(sgprDim0)))
+            mod.add(SOrB32(self._sg(group1, 1), self._sg(group1, 1), sgpr(tmp.idx)))
+            mod.add(SLShiftRightB32(sgpr(tmp.idx), hex(16), sgpr(sgprDim0)))
+            mod.add(SOrB32(self._sg(group1, 2), self._sg(group1, 2), sgpr(tmp.idx)))
+        return mod
+
+    def setTensorDim1(self, group1: int | str, sgprDim1: int | str, writer: "KernelWriterAssembly") -> Module:
+        # tensor_dim1 bit208: group1+2 hi16 + group1+3 lo16
+        mod = Module()
+        mod.addComment("TDM set tensor dim 1")
+        mod.add(SAndB32(self._sg(group1, 2), self._sg(group1, 2), hex(0x0000FFFF)))
+        mod.add(SAndB32(self._sg(group1, 3), self._sg(group1, 3), hex(0xFFFF0000)))
+        with writer.allocTmpSgpr(1, tag="tdmDim1_tmp") as tmp:
+            mod.add(SLShiftLeftB32(sgpr(tmp.idx), hex(16), sgpr(sgprDim1)))
+            mod.add(SOrB32(self._sg(group1, 2), self._sg(group1, 2), sgpr(tmp.idx)))
+            mod.add(SLShiftRightB32(sgpr(tmp.idx), hex(16), sgpr(sgprDim1)))
+            mod.add(SOrB32(self._sg(group1, 3), self._sg(group1, 3), sgpr(tmp.idx)))
+        return mod
+
+    def setTensorTile0(self, group1: int | str, tile0: int) -> Module:
+        # tile_dim0 bit240: group1+3 hi16 (immediate)
+        mod = Module()
+        mod.addComment("TDM set tensor tile 0")
+        mod.add(SAndB32(self._sg(group1, 3), self._sg(group1, 3), hex(0x0000FFFF)))
+        mod.add(SOrB32(self._sg(group1, 3), self._sg(group1, 3), hex((tile0 & 0xFFFF) << 16), f"set tile0 to {tile0}"))
+        return mod
+
+    def setTensorTile1(self, group1: int | str, tile1: int) -> Module:
+        # tile_dim1 bit256: group1+4 lo16 (immediate).
+        mod = Module()
+        mod.addComment("TDM set tensor tile 1")
+        mod.add(SAndB32(self._sg(group1, 4), self._sg(group1, 4), hex(0xFFFF0000)))
+        mod.add(SOrB32(self._sg(group1, 4), self._sg(group1, 4), hex(tile1 & 0xFFFF), f"set tile1 to {tile1}"))
+        return mod
+
+    def setTensorStride0(self, group1: int | str, sgprStride0: int | str | RegisterContainer) -> Module:
+        # tensor_dim0_stride bit288: group1+5 (low 32 of 48-bit field), group1+6 hi = 0
+        mod = Module()
+        mod.addComment("TDM set tensor stride 0")
+        if isinstance(sgprStride0, RegisterContainer):
+            mod.add(SMovB32(self._sg(group1, 5), sgprStride0))
+        else:
+            mod.add(SMovB32(self._sg(group1, 5), sgpr(sgprStride0)))
+        mod.add(SMovB32(self._sg(group1, 6), 0))
+        return mod
+
+    def _syncComment(self) -> str:
+        return "sync LDS%u" % self.mem_token[0] if len(self.mem_token) == 1 else f"sync LDS {self.mem_token}"
+
+    def issueStore(self, group0: int | str, group1: int | str,
+                   tensor: Optional[TENSORModifiers] = None) -> Module:
+        mod = Module("tensor store")
+        tensorStore = TensorStoreFromLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),
+                                         None, None, comment=self._syncComment(), tensor=tensor)
+        tensorStore.setMemToken(MemTokenData(self.mem_token))
+        mod.add(tensorStore)
+        return mod
+
+    def issueLoad(self, group0: int | str, group1: int | str,
+                  tensor: Optional[TENSORModifiers] = None) -> Module:
+        mod = Module("tensor load")
+        tensorLoad = TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),
+                                     None, None, comment=self._syncComment(), tensor=tensor)
+        tensorLoad.setMemToken(MemTokenData(self.mem_token))
+        mod.add(tensorLoad)
+        return mod
