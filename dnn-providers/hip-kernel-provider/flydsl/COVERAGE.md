@@ -284,14 +284,14 @@ and gfx950's CDNA objects (the dual-wave kernel among them) are covered only by 
 outside CI, in either tier. An RDNA comprehensive case runs nightly on gfx1151 and no longer on
 gfx110X; both are `gfx11-generic` and load the same objects (REGEN.md, "Why `gfx11-generic`"),
 so the nightly runs the moved RDNA cases on the objects gfx110X ships, on another member of
-the family, but only on a runner that stages the provider's content. The gfx1151 nightly
-splits these suites into four shards over a mixed runner pool, and on some of its runners no
-FlyDSL descriptor set loads: in the 2026-11-10 develop nightly, shard 2/4's RDNA dispatch
-cases failed with "nothing staged ... in this build's descriptor root" and its RDNA pack suites
-with "no descriptor set loaded for engine 'hipkernel:flydsl_sdpa_rdna'" (its kpack fixtures
-under `build/bin` were missing too), while shards 1, 3 and 4, on other runners, ran theirs.
-Until that staging fault is fixed, a moved RDNA case that lands on such a runner fails
-instead of running. No CI tier tests gfx90a or gfx12 (gfx1200, gfx1201) either: the CDNA
+the family. The gfx1151 nightly splits these suites into four shards. In the 2026-11-10
+develop nightly, shards 1, 3 and 4 ran their RDNA cases; shard 2/4 ran on the one runner
+whose content staging failed: no FlyDSL descriptor set loaded there, so its RDNA dispatch
+cases failed with "nothing staged ... in this build's descriptor root" and its RDNA pack
+suites with "no descriptor set loaded for engine 'hipkernel:flydsl_sdpa_rdna'" (its kpack
+fixtures under `build/bin` were missing too). The 2026-11-08 nightly's shards all ran theirs.
+The staging fault is develop's, on that runner; a shard that lands there fails its RDNA cases
+instead of running them. No CI tier tests gfx90a or gfx12 (gfx1200, gfx1201) either: the CDNA
 objects on gfx90a, and the gfx12 RDNA prefill, decode and aiw objects, are covered only by device runs
 outside CI, in either tier, so the tier split changes nothing there or on gfx950. No feature
 lost its only CI arch to the move: every moved case is an RDNA prefill/decode or CDNA case.
