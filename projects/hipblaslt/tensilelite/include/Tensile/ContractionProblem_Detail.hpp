@@ -205,6 +205,65 @@ namespace TensileLite
                                         rhs.getParams().deviceScalarAlpha());
         }
     };
+
+    // Equality for the solution caches. Accepts exactly the pairs where
+    // Comparison<ContractionProblemGemm>::compare(lhs, rhs) == 0, but checks each field once with
+    // ==, cheap scalars first, then tensors, and the operationIdentifier string last. The
+    // non-template overload is preferred over the generic operator== template.
+    inline bool operator==(ContractionProblemGemm const& lhs, ContractionProblemGemm const& rhs)
+    {
+        return lhs.transA() == rhs.transA() && lhs.transB() == rhs.transB()
+               && lhs.highPrecisionAccumulate() == rhs.highPrecisionAccumulate()
+               && lhs.kernelLanguage() == rhs.kernelLanguage()
+               && lhs.deterministicMode() == rhs.deterministicMode()
+               && lhs.computeInputTypeA() == rhs.computeInputTypeA()
+               && lhs.computeInputTypeB() == rhs.computeInputTypeB()
+               && lhs.workspaceSize() == rhs.workspaceSize()
+               && lhs.stridedBatched() == rhs.stridedBatched()
+               && lhs.groupedGemm() == rhs.groupedGemm()
+               && lhs.performanceMetric() == rhs.performanceMetric()
+               && lhs.activationType() == rhs.activationType()
+               && lhs.activationComputeType() == rhs.activationComputeType()
+               && lhs.activationNoGuard() == rhs.activationNoGuard()
+               && lhs.useGradient() == rhs.useGradient()
+               && lhs.useBias() == rhs.useBias()
+               && lhs.biasSrc() == rhs.biasSrc()
+               && lhs.useE() == rhs.useE()
+               && lhs.useGateResidual() == rhs.useGateResidual()
+               && lhs.useScaleAB() == rhs.useScaleAB()
+               && lhs.useScaleCD() == rhs.useScaleCD()
+               && lhs.useScaleAlphaVec() == rhs.useScaleAlphaVec()
+               && lhs.outputAmaxD() == rhs.outputAmaxD()
+               && lhs.f32XdlMathOp() == rhs.f32XdlMathOp()
+               && lhs.swizzleTensorA() == rhs.swizzleTensorA()
+               && lhs.swizzleTensorB() == rhs.swizzleTensorB()
+               && lhs.fusedGemmA2A() == rhs.fusedGemmA2A()
+               && lhs.fusedA2AExtent() == rhs.fusedA2AExtent()
+               && lhs.fusedA2AWorld() == rhs.fusedA2AWorld()
+               && lhs.mxBlockA() == rhs.mxBlockA()
+               && lhs.mxBlockB() == rhs.mxBlockB()
+               && lhs.mxBlockFreeA() == rhs.mxBlockFreeA()
+               && lhs.mxBlockFreeB() == rhs.mxBlockFreeB()
+               && lhs.mxTypeA() == rhs.mxTypeA()
+               && lhs.mxTypeB() == rhs.mxTypeB()
+               && lhs.getParams().smCountTarget() == rhs.getParams().smCountTarget()
+               && lhs.getParams().streamKTileSchedulingMode()
+                      == rhs.getParams().streamKTileSchedulingMode()
+               && lhs.getParams().uniformSummationOrder()
+                      == rhs.getParams().uniformSummationOrder()
+               && lhs.bias().dataType() == rhs.bias().dataType()
+               && lhs.getParams().activationEnum() == rhs.getParams().activationEnum()
+               && lhs.amaxd().dataType() == rhs.amaxd().dataType()
+               && (lhs.beta() == 0.0) == (rhs.beta() == 0.0)
+               && lhs.getParams().gsu() == rhs.getParams().gsu()
+               && lhs.getParams().fallbackStatus() == rhs.getParams().fallbackStatus()
+               && lhs.scaleBlockSizeA() == rhs.scaleBlockSizeA()
+               && lhs.scaleZeroPointA() == rhs.scaleZeroPointA()
+               && lhs.int4EncodingA() == rhs.int4EncodingA()
+               && lhs.a() == rhs.a() && lhs.b() == rhs.b() && lhs.c() == rhs.c()
+               && lhs.d() == rhs.d() && lhs.e() == rhs.e()
+               && lhs.operationIdentifier() == rhs.operationIdentifier();
+    }
 } // namespace TensileLite
 
 namespace std
@@ -212,62 +271,23 @@ namespace std
     template <>
     struct hash<TensileLite::ContractionProblemGemm>
     {
+        // Deliberately hashes only a cheap subset of the key. The caches store the full
+        // problem, so problems that share a hash are told apart by operator== (that is,
+        // Comparison<ContractionProblemGemm>::compare). Every field hashed here must be
+        // determined by fields that compare() checks, so equal problems hash equally:
+        //   - transA/transB come from the A/B index names in operationIdentifier();
+        //   - the data types are part of the a()/b()/d() TensorDescriptor comparison;
+        //   - problemSizes() is C's sizes followed by the bound sizes of A and B.
         inline size_t operator()(TensileLite::ContractionProblemGemm const& problem) const
         {
-            // Cached lookups include this flag because selection depends on it.
+            auto const& sizes = problem.problemSizes();
             return TensileLite::combine_hashes(
-                TensileLite::hash_combine(problem.operationIdentifier(),
-                                          problem.a(),
-                                          problem.b(),
-                                          problem.c(),
-                                          problem.d(),
-                                          problem.e(),
-                                          problem.computeInputTypeA(),
-                                          problem.computeInputTypeB(),
-                                          problem.highPrecisionAccumulate(),
-                                          problem.kernelLanguage(),
-                                          problem.deterministicMode(),
-                                          problem.workspaceSize(),
-                                          problem.stridedBatched(),
-                                          problem.groupedGemm(),
-                                          problem.performanceMetric(),
-                                          problem.activationType(),
-                                          problem.activationComputeType(),
-                                          problem.activationNoGuard(),
-                                          problem.useGradient(),
-                                          problem.useBias(),
-                                          problem.biasSrc(),
-                                          problem.useE(),
-                                          problem.useGateResidual(),
-                                          problem.useScaleAB(),
-                                          problem.useScaleCD(),
-                                          problem.useScaleAlphaVec(),
-                                          problem.outputAmaxD(),
-                                          problem.f32XdlMathOp(),
-                                          problem.swizzleTensorA(),
-                                          problem.swizzleTensorB(),
-                                          problem.fusedGemmA2A(),
-                                          problem.fusedA2AExtent(),
-                                          problem.world(),
-                                          problem.mxBlockA(),
-                                          problem.mxBlockB(),
-                                          problem.mxBlockFreeA(),
-                                          problem.mxBlockFreeB(),
-                                          problem.mxTypeA(),
-                                          problem.mxTypeB(),
-                                          problem.getParams().smCountTarget(),
-                                          problem.getParams().streamKTileSchedulingMode(),
-                                          problem.getParams().uniformSummationOrder()),
-                TensileLite::hash_combine(problem.bias().dataType(),
-                                          problem.getParams().activationEnum(),
-                                          problem.amaxd().dataType(),
-                                          problem.beta() == 0.0,
-                                          problem.getParams().gsu(),
-                                          problem.getParams().fallbackStatus(),
-                                          problem.scaleBlockSizeA(),
-                                          problem.scaleZeroPointA(),
-                                          problem.int4EncodingA(),
-                                          problem.getParams().deviceScalarAlpha()));
+                TensileLite::hash_combine(problem.transA(),
+                                          problem.transB(),
+                                          problem.a().dataType(),
+                                          problem.b().dataType(),
+                                          problem.d().dataType()),
+                TensileLite::hash_combine_iter(sizes.begin(), sizes.end()));
         }
     };
 
@@ -285,4 +305,3 @@ namespace std
     };
 
 } // namespace std
-
