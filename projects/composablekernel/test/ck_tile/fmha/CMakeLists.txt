@@ -249,6 +249,41 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     endforeach()
 endif()
 
+# Direct CR tests exercise its own kernel and host adapter even when codegen
+# filters omit CR from the default dispatcher.
+set(FMHA_QR_TDM_CR_TEST_TARGETS)
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
+    set(FMHA_QR_TDM_CR_GPU_TARGETS ${SUPPORTED_GPU_TARGETS})
+    list(FILTER FMHA_QR_TDM_CR_GPU_TARGETS INCLUDE REGEX "^gfx1250")
+    foreach(suffix IN ITEMS "" "_d64" "_long")
+        set(target "test_ck_tile_fmha_qr_tdm_cr_fwd${suffix}")
+        if(suffix STREQUAL "_long")
+            list(APPEND REGRESSION_TESTS ${target})
+        endif()
+        add_gtest_executable(${target} test_qr_tdm_cr_fwd.cpp)
+        target_compile_definitions(${target} PRIVATE CK_TILE_FMHA_FWD_FAST_EXP2=1)
+        target_compile_options(${target} PRIVATE
+            -Wno-float-equal -fgpu-flush-denormals-to-zero
+            "SHELL:-mllvm -amdgpu-expert-scheduling-mode"
+            "SHELL:-mllvm -amdgpu-sched-strategy=max-ilp"
+            "SHELL:-mllvm -amdgpu-barrier-signal-wait-latency=32")
+        if(suffix STREQUAL "_d64")
+            target_compile_definitions(${target} PRIVATE CK_TILE_TEST_CR_D64=1)
+            target_compile_options(${target} PRIVATE
+                "SHELL:-Xclang -target-feature -Xclang -real-true16")
+        elseif(suffix STREQUAL "_long")
+            target_compile_definitions(${target} PRIVATE CK_TILE_TEST_CR_LONG=1)
+            set_tests_properties(${target} PROPERTIES TIMEOUT 300)
+        endif()
+        set_property(TARGET ${target} PROPERTY HIP_ARCHITECTURES ${FMHA_QR_TDM_CR_GPU_TARGETS})
+        get_test_property(${target} LABELS common_labels)
+        set_tests_properties(${target} PROPERTIES
+            LABELS "${common_labels};${TEST_NAME};CK_TILE_FMHA_TESTS")
+        list(APPEND FMHA_QR_TDM_CR_TEST_TARGETS ${target})
+    endforeach()
+    add_dependencies(${TEST_NAME} ${FMHA_QR_TDM_CR_TEST_TARGETS})
+endif()
+
 # The independent arithmetic reference is a host test on every FMHA architecture.
 add_gtest_executable(test_ck_tile_fmha_reference test_fmha_reference.cpp)
 add_dependencies(${TEST_NAME} test_ck_tile_fmha_reference)
@@ -313,6 +348,7 @@ set_tests_properties(test_ck_tile_fmha_fwd_codegen PROPERTIES
 add_custom_target(ck_tile_fmha_tests
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} -L "CK_TILE_FMHA_TESTS"
     DEPENDS ${TEST_NAME} ${FMHA_QR_TDM_TEST_TARGETS} ${FMHA_QR_TDM_SCHED_TEST_TARGETS}
+        ${FMHA_QR_TDM_CR_TEST_TARGETS}
         test_ck_tile_fmha_fwd_workgroup_mapping
     USES_TERMINAL
     COMMENT "Running all ck_tile fmha tests..."

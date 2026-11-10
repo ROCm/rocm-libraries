@@ -322,6 +322,23 @@ class CppConstraint:
         return CppConstraint(f"({str(self)}) && ({str(other)})")
 
 
+def qr_tdm_cr_m64_preference(dtype, hdim, hdim_v) -> CppConstraint:
+    """Shapes for which measured M64 CR performance takes default priority."""
+    small = (
+        "(a.max_seqlen_q <= 2048 || a.mask_type != 0) && "
+        "int64_t{a.batch} * a.nhead_q <= 32"
+    )
+    if dtype == "bf16" and (int(hdim), int(hdim_v)) == (128, 128):
+        small = (
+            f"(({small}) && !fmha_fwd_cr_compact_args(a)) || "
+            "(fmha_fwd_cr_compact_args(a) && "
+            "((a.max_seqlen_q <= 4096 && int64_t{a.batch} * a.nhead_q <= 8) || "
+            "(a.mask_type != 0 && (a.seqlen_q == 128 || a.seqlen_q == 256) && "
+            "a.seqlen_k == a.seqlen_q && int64_t{a.batch} * a.nhead_q <= 256)))"
+        )
+    return CppConstraint(small)
+
+
 @dataclass
 class FmhaFwdApiTrait:
     arch: ArchTrait
@@ -443,6 +460,8 @@ class FmhaFwdApiTrait:
 
     @property
     def dcheck(self) -> str:
+        if self.pipeline_tag == "qr_tdm_cr":
+            return f"a.hdim_q == {self.bk0max}"
         if self.pipeline_tag == "qr_hpad":
             if self.dpad == "t":
                 return "a.hdim_q % 8 == 0"
@@ -471,6 +490,8 @@ class FmhaFwdApiTrait:
 
     @property
     def dvcheck(self) -> str:
+        if self.pipeline_tag == "qr_tdm_cr":
+            return f"a.hdim_v == {self.bn1}"
         if self.pipeline_tag == "qr_hpad":
             if self.dvpad == "t":
                 return "a.hdim_v % 8 == 0"
@@ -714,8 +735,8 @@ class FmhaFwdApiPool:
                 for i_hdim, ((hdim, hdim_v), pool_by_hdim) in enumerate(
                     item for item in pool_by_dtype.items() if has_traits(item[1])
                 ):
-                    # Preserve existing CK heuristics outside CR's fixed tuning
-                    # variants. Generic CR remains available in filtered builds.
+                    # Prefer the measured CR families, keeping the existing CK
+                    # heuristics for larger unmeasured tensor views.
                     traits = sorted(
                         (trait for trait in pool_by_hdim if filter_fn(trait)),
                         key=lambda trait: {"qr_tdm_cr": 2, "qr_tdm_sched": 0}.get(
@@ -726,13 +747,35 @@ class FmhaFwdApiPool:
                         replace(
                             trait,
                             constraint=trait.constraint
-                            & CppConstraint("fmha_fwd_cr_has_static_tuning(a)"),
+                            & CppConstraint(
+                                "fmha_fwd_cr_has_static_tuning(a) && fmha_fwd_cr_compact_args(a)"
+                            ),
                         )
                         for trait in traits
                         if trait.pipeline_tag == "qr_tdm_cr"
+                        and dtype == "bf16"
+                        and hdim == "128"
+                        and hdim_v == 128
+                        and trait.bm0 == 128
+                        and trait.mode == "batch"
                         and trait.spad == "f"
                         and trait.skpad == "f"
                     ]
+                    if hdim == "192":
+                        preferred_cr.extend(
+                            trait
+                            for trait in traits
+                            if trait.pipeline_tag == "qr_tdm_cr" and trait.bm0 == 128
+                        )
+                    preferred_cr.extend(
+                        replace(
+                            trait,
+                            constraint=trait.constraint
+                            & qr_tdm_cr_m64_preference(dtype, hdim, hdim_v),
+                        )
+                        for trait in traits
+                        if trait.pipeline_tag == "qr_tdm_cr" and trait.bm0 == 64
+                    )
                     traits = preferred_cr + traits
                     max_bm0 = max((trait.bm0 for trait in traits), default=0)
                     inners = str()
@@ -848,8 +891,6 @@ class FmhaFwdKernel:
 
     @classmethod
     def _get_cpp_kernel_class_name(cls, pipeline_tag):
-        if pipeline_tag == "qr_tdm_cr":
-            return "ck_tile::FmhaFwdTdmCrKernel"
         if pipeline_tag == "qr_async_trload_v3":
             return "ck_tile::FmhaFwdV3Kernel"
         else:
@@ -958,8 +999,8 @@ class FmhaFwdKernel:
             ),
             F_kernel=self._get_cpp_kernel_class_name(self.F_pipeline.tag),
             F_launch=(
-                f"    return fmha_fwd_cr_launch<k_, {self.F_arch.tag}>(s, a);"
-                if self.F_pipeline.tag == "qr_tdm_cr"
+                f"    return FmhaFwdLaunch<k_, {self.F_arch.tag}>::Run(s, a);"
+                if self.F_pipeline.tag != "qr_async_trload_v3"
                 else FMHA_FWD_LAUNCH_TEMPLATE.format(
                     F_kargs_creator=self._get_cpp_kargs_creator_func_name(
                         self.F_pipeline.tag
@@ -1700,11 +1741,33 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
             if kernel_ctx.pipeline.tag == "qr_tdm_cr":
-                return (
+                # Only compact BF16 D128 batch execution specializes its padding.
+                # Other CR paths always handle tails: one padded instance covers
+                # both aligned and unaligned lengths without duplicate compute.
+                compact = (
                     problem_ctx.dtype == "bf16"
+                    and problem_ctx.hdim == 128
+                    and problem_ctx.hdim_v == 128
                     and problem_ctx.mode == "batch"
-                    and problem_ctx.hdim == problem_ctx.hdim_v == 128
+                )
+                if not compact and (
+                    kernel_ctx.pipeline.F_spad != "t"
+                    or kernel_ctx.pipeline.F_skpad != "t"
+                ):
+                    return False
+                return (
+                    problem_ctx.dtype in cls._DT_FP16_BF16
+                    and (problem_ctx.hdim, problem_ctx.hdim_v)
+                    in cls._QR_TDM_SCHED_TILES
                     and kernel_ctx.tile.F_pipeline_tag == "qr_tdm_cr"
+                    and (
+                        problem_ctx.hdim != 192
+                        or kernel_ctx.tile.F_bm0 != 128
+                        or (
+                            problem_ctx.mode == "batch"
+                            and kernel_ctx.pipeline.F_mask not in ("no", "s_no")
+                        )
+                    )
                 )
             is_qr_tdm_sched_pipeline = kernel_ctx.pipeline.tag == "qr_tdm_sched"
             matches_qr_tdm_sched_dtype_and_dims = (
@@ -1876,13 +1939,50 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                         d192_n64,
                     ]
                 )
-            if dtype == "bf16":
-                result[(128, 128)].append(
-                    replace(
-                        copy.deepcopy(cls._QR_TDM_SCHED_TILES[(128, 128)][0]),
-                        F_pipeline_tag="qr_tdm_cr",
+            for dims in cls._QR_TDM_SCHED_TILES:
+                tile = copy.deepcopy(cls._QR_TDM_SCHED_TILES[dims][0])
+                if dims[0] == 64:
+                    tile = replace(tile, F_bn0=128, F_occupancy=1)
+                elif dims[0] == 192:
+                    tile = replace(tile, F_bm0=64, F_bn0=64, F_occupancy=1)
+                result[dims].append(replace(tile, F_pipeline_tag="qr_tdm_cr"))
+                if dims[0] == 192:
+                    # Reuse both K stages for the wider Q tile. The additional
+                    # rows amortize D192 loads without increasing LDS usage.
+                    result[dims].append(
+                        replace(
+                            tile,
+                            F_bm0=128,
+                            F_pipeline_tag="qr_tdm_cr",
+                            F_constraint=CppConstraint(
+                                "!t.is_group_mode && a.seqlen_q >= 8192 && a.seqlen_k >= 8192 && "
+                                "a.mask_type != 0 && int64_t{a.batch} * a.nhead_q <= 32"
+                            ),
+                        )
                     )
-                )
+                if dims[0] != 192:
+                    preferred = qr_tdm_cr_m64_preference(dtype, *dims)
+                    # Narrow windows also use M64 in CR-only/fallback builds.
+                    # Eligibility is wider than the measured default preference.
+                    window = (
+                        "a.max_seqlen_q <= 2048 && a.mask_type != 0 && "
+                        "a.window_size_left >= 0 && a.window_size_right >= 0 && "
+                        "int64_t{a.window_size_left} + a.window_size_right <= 64"
+                    )
+                    if dtype == "bf16" and dims == (128, 128):
+                        window = f"({window}) && !fmha_fwd_cr_compact_args(a)"
+                    small = f"({preferred}) || ({window})"
+                    result[dims].append(
+                        replace(
+                            tile,
+                            F_bm0=64,
+                            F_bn0=64,
+                            F_occupancy=1,
+                            F_pipeline_tag="qr_tdm_cr",
+                            F_constraint=CppConstraint(small),
+                        )
+                    )
+                result[dims].sort(key=lambda t: t.F_bm0)
             return result
         elif dtype in cls._DT_FP8_FP8BF16:
             return {
@@ -1991,13 +2091,14 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "f", "f", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
 
-            if dtype == "bf16" and (hdim, hdim_v) == (128, 128):
+            if (hdim, hdim_v) in cls._QR_TDM_SCHED_TILES:
                 constraint = CppConstraint(
                     'device_name.compare(0, 7, "gfx1250") == 0 && '
-                    "t.hdim_q == 128 && t.hdim_v == 128 && fmha_fwd_cr_supported_args(a)"
+                    f"t.hdim_q == {hdim} && t.hdim_v == {hdim_v} && "
+                    "t.is_group_mode == (a.seqstart_q_ptr != nullptr) && fmha_fwd_cr_supported_args(a)"
                 )
                 for mask, lse, spad, skpad in itertools.product(
-                    (m for m in get_mask_map(mask_impl) if m != "generic"),
+                    get_mask_map(mask_impl),
                     ["t", "f"],
                     ["f", "t"],
                     ["f", "t"],

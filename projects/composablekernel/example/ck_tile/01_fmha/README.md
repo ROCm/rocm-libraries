@@ -46,12 +46,13 @@ To speed up compile time, we instantiate the kernels into separate file. In this
 ### Conditional rescaling TDM forward pipeline
 
 `qr_tdm_cr` uses conditional rescaling (CR) to avoid unnecessary softmax
-rescaling and maximum reductions. It supports BF16 D128 contiguous BSHD
-tensors on gfx1250, with dense or top-left causal attention and optional LSE.
-Square bottom-right causal attention uses the equivalent top-left mask.
-Its fixed tuning variants (B32/H8, equal Q/K lengths of 512 through 32768 in
-powers of two) precede `qr_tdm_sched`. Other shapes retain the existing CK
-heuristics, with generic CR available as a fallback or in CR-only filtered builds.
+rescaling and maximum reductions. On gfx1250 it supports FP16/BF16 with
+D64/V64, D128/V128, or D192/V128, GQA/MQA, independent tensor strides,
+batch and variable-length group mode, dense and causal/local masks, and
+optional LSE. Head elements must be contiguous, with vector-aligned rows.
+See [codegen](codegen/ops/fmha_fwd.py) for dispatch selection and
+[argument validation](../../../include/ck_tile/ops/fmha/detail/fmha_fwd_cr_args.hpp)
+for runtime requirements.
 
 ### Scheduled TDM forward pipeline
 

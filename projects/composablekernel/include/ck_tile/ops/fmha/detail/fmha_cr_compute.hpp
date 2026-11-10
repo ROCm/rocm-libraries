@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/fmha/block/block_masking.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_cr_memory.hpp"
 
 // Keep QK/PV operand lifetimes and scheduling regions together.
@@ -18,16 +19,30 @@ struct Arguments
     float scale;
 };
 
-using F8        = float __attribute__((ext_vector_type(8)));
-using F2        = float __attribute__((ext_vector_type(2)));
-constexpr int D = 128;
+// Runtime tensor views for GQA, strided layouts and packed variable-length batches.
+// The compact Arguments ABI remains available for the measured BSHD specializations.
+struct StridedArguments : Arguments
+{
+    int kv_heads;
+    int stride_q, stride_k, stride_v, stride_o;
+    int64_t head_q, head_k, head_v, head_o, head_lse;
+    int64_t batch_q, batch_k, batch_v, batch_o, batch_lse;
+    const int32_t *start_q, *start_k, *length_q, *length_k, *cumulative_q, *cumulative_k;
+    int mask_type, left, right;
+    bool group;
+};
+
+using F8 = float __attribute__((ext_vector_type(8)));
+using F2 = float __attribute__((ext_vector_type(2)));
 
 template <class T>
 CK_TILE_DEVICE F8 mma(V16<T> a, V16<T> b, F8 c)
 {
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
-    static_assert(std::is_same_v<T, __bf16>);
-    return __builtin_amdgcn_wmma_f32_16x16x32_bf16(0, a, 0, b, 0, c, 0, 0);
+    if constexpr(std::is_same_v<T, __bf16>)
+        return __builtin_amdgcn_wmma_f32_16x16x32_bf16(0, a, 0, b, 0, c, 0, 0);
+    else
+        return __builtin_amdgcn_wmma_f32_16x16x32_f16(0, a, 0, b, 0, c, 0, 0);
 #else
     (void)a;
     (void)b;
@@ -35,10 +50,12 @@ CK_TILE_DEVICE F8 mma(V16<T> a, V16<T> b, F8 c)
 #endif
 }
 
-template <class T>
+template <int Width = 128, class T>
 CK_TILE_DEVICE V16<T> read_k32(const T* p, int pitch, int row, int k)
 {
     const int half = (threadIdx.x % 32) / 16;
+    if constexpr(Width == 192)
+        k += (k / 64) * 8;
     V16<T> r{};
     V8<T> a, b;
     __builtin_memcpy(&a, __builtin_assume_aligned(p + row * pitch + k + half * 8, 16), sizeof(a));
@@ -55,7 +72,7 @@ CK_TILE_DEVICE V16<T> read_k32(const T* p, int pitch, int row, int k)
 
 // Optional cooperative TDM: each issuing wave owns disjoint rows of the tile.
 // All issuing waves drain their own TENSORcnt before the workgroup barrier.
-template <int Rows, int Waves, bool Distributed, int PadBytes = 16, class T>
+template <int Rows, int Waves, bool Distributed, int PadBytes = 16, int Width = 128, class T>
 CK_TILE_DEVICE void load_tile(T* lds, const T* global, int remaining, int stride)
 {
     if constexpr(Distributed)
@@ -63,14 +80,15 @@ CK_TILE_DEVICE void load_tile(T* lds, const T* global, int remaining, int stride
         static_assert(Rows % Waves == 0);
         constexpr int Part = Rows / Waves;
         const int offset   = (threadIdx.x / 32) * Part;
-        load_strided<Part, 0, PadBytes>(lds + offset * (128 + PadBytes / 2),
-                                        global + int64_t(offset) * stride,
-                                        max(0, remaining - offset),
-                                        stride);
+        load_strided<Part, 0, PadBytes, Width>(
+            lds + offset * (Width + (Width == 192 ? 3 : 1) * PadBytes / 2),
+            global + int64_t(offset) * stride,
+            max(0, remaining - offset),
+            stride);
     }
     else
     {
-        load_strided<Rows, 0, PadBytes>(lds, global, remaining, stride);
+        load_strided<Rows, 0, PadBytes, Width>(lds, global, remaining, stride);
     }
 }
 
@@ -95,13 +113,27 @@ template <bool Causal,
           bool PeelCausal,
           int QKPriority,
           int PVPriority,
-          bool SetPVPriority>
-CK_TILE_DEVICE void run(Arguments a)
+          bool SetPVPriority,
+          typename T         = __bf16,
+          int DQ             = 128,
+          int DV             = 128,
+          int Tile           = 128,
+          typename Args      = Arguments,
+          int QueryTiles     = 0,
+          int KeyTiles       = 0,
+          int KeyTile        = Tile,
+          bool TailFragments = false>
+CK_TILE_DEVICE void run(Args a)
 {
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
-    using T          = __bf16;
-    constexpr int QM = 2, Waves = 4, BM = 128, BN = 128, Pitch = 136, VP = 144;
+    constexpr bool Generic = !std::is_same_v<Args, Arguments>;
+    constexpr int D = DQ, QM = Tile / 64, Waves = 4, BM = Tile, BN = KeyTile;
+    constexpr int Pitch = DQ + (DQ == 192 ? 24 : 8), VP = DV + 16;
+    constexpr int QKFragments = DQ / 16, VFragments = DV / 16;
     static_assert(LoopUnroll > 0);
+    // The launcher checks five Q/K tiles, Q % 16 == 15 and K % 128 > 112.
+    static_assert(!TailFragments || (!Generic && !Causal && Pad && !FullQ && BM == 128 &&
+                                     BN == 128 && QueryTiles == 5));
     static_assert(QKPriority >= 0 && QKPriority <= 3 && PVPriority >= 0 && PVPriority <= 3);
     static_assert(SetPVPriority || PVPriority == 0);
     static_assert(!PeelCausal || (Causal && !Pad && BM == BN && StaticS > 0 && StaticS % BN == 0));
@@ -114,10 +146,29 @@ CK_TILE_DEVICE void run(Arguments a)
         a.heads = 8;
         a.batch = 32;
     }
-    const unsigned grid_x = StaticS ? (StaticS + BM - 1) / BM : gridDim.x;
-    const unsigned grid_y = StaticS ? 256 : gridDim.y;
+    if constexpr(QueryTiles)
+    {
+        static_assert(!StaticS && !Generic);
+        if constexpr(KeyTiles)
+        {
+            static_assert(FullQ && !Pad);
+            a.sq = QueryTiles * BM;
+            a.sk = KeyTiles * BN;
+        }
+        a.heads = 8;
+    }
+    const unsigned grid_x = StaticS ? (StaticS + BM - 1) / BM : QueryTiles ? QueryTiles : gridDim.x;
+    const unsigned grid_y = StaticS ? 256 : QueryTiles && KeyTiles ? a.batch * 8 : gridDim.y;
 
-    __shared__ __align__(16) T ks[2][BN * Pitch], vs[2][BN * VP];
+    // A rectangular query tile temporarily spans both K buffers. Q is held
+    // in registers before either K buffer is filled; O reuses them after PV.
+    __shared__ __align__(16) union
+    {
+        T blocks[2][BN * Pitch];
+        T rows[BM * Pitch];
+    } k_storage;
+    auto& ks = k_storage.blocks;
+    __shared__ __align__(16) T vs[2][BN * VP];
     const int heads = a.heads;
     auto tile_div   = [&](unsigned x) { return x / grid_x; };
     const int lane = threadIdx.x % 32, wave = threadIdx.x / 32, tiles = grid_x;
@@ -156,61 +207,227 @@ CK_TILE_DEVICE void run(Arguments a)
     bh              = __builtin_amdgcn_readfirstlane(bh);
     tile            = __builtin_amdgcn_readfirstlane(tile);
     const int row0  = tile * BM + wave * 16 + lane % 16;
-    const int batch = bh / heads, head = bh % heads, row_stride = heads * D;
-    const int64_t qbase = int64_t(batch) * a.sq * row_stride + head * D;
-    const int64_t kbase = int64_t(batch) * a.sk * row_stride + head * D;
-    const auto* q       = static_cast<const T*>(a.q) + qbase;
-    const auto* k       = static_cast<const T*>(a.k) + kbase;
-    const auto* v       = static_cast<const T*>(a.v) + kbase;
-    auto* o             = static_cast<T*>(a.o) + qbase;
-    const int end       = Causal ? min(a.sk, (tile + 1) * BM) : a.sk;
-
-    load_tile<BN, Waves, true>(ks[0], k, a.sk, row_stride);
-    load_tile<BN, Waves, true, (VP - 128) * 2>(vs[0], v, a.sk, row_stride);
-    load_tile<BM, Waves, true>(
-        ks[1], q + int64_t(tile * BM) * row_stride, a.sq - tile * BM, row_stride);
+    const int batch = bh / heads, head = bh % heads;
+    int qstride = heads * D, kstride = qstride, vstride = qstride, row_stride = qstride;
+    int64_t qbase = int64_t(batch) * a.sq * qstride + head * D;
+    int64_t kbase = int64_t(batch) * a.sk * kstride + head * D;
+    int64_t vbase = kbase, obase = qbase, lbase = int64_t(bh) * a.sq;
+    if constexpr(Generic)
+    {
+        qstride                 = a.stride_q;
+        kstride                 = a.stride_k;
+        vstride                 = a.stride_v;
+        row_stride              = a.stride_o;
+        const int kv_head       = head / (heads / a.kv_heads);
+        const int64_t qs        = a.group ? a.start_q[batch] : 0;
+        const int64_t key_start = a.group ? a.start_k[batch] : 0;
+        qbase                   = (a.group ? qs * qstride : batch * a.batch_q) + head * a.head_q;
+        kbase = (a.group ? key_start * kstride : batch * a.batch_k) + kv_head * a.head_k;
+        vbase = (a.group ? key_start * vstride : batch * a.batch_v) + kv_head * a.head_v;
+        obase = (a.group ? qs * row_stride : batch * a.batch_o) + head * a.head_o;
+        lbase = (a.group ? qs : batch * a.batch_lse) + head * a.head_lse;
+        if(a.length_q)
+            a.sq = a.length_q[batch];
+        else if(a.cumulative_q)
+            a.sq = a.cumulative_q[batch + 1] - a.cumulative_q[batch];
+        else if(a.group)
+            a.sq = a.start_q[batch + 1] - qs;
+        if(a.length_k)
+            a.sk = a.length_k[batch];
+        else if(a.cumulative_k)
+            a.sk = a.cumulative_k[batch + 1] - a.cumulative_k[batch];
+        else if(a.group)
+            a.sk = a.start_k[batch + 1] - key_start;
+        if(tile * BM >= a.sq)
+            return;
+    }
+    const auto* q = static_cast<const T*>(a.q) + qbase;
+    const auto* k = static_cast<const T*>(a.k) + kbase;
+    const auto* v = static_cast<const T*>(a.v) + vbase;
+    auto* o       = static_cast<T*>(a.o) + obase;
+    auto mask     = [&]() {
+        if constexpr(Generic)
+            return make_generic_attention_mask_from_lr_window<
+                    SimplifiedGenericAttentionMask<Causal>>(
+                a.left, a.right, a.sq, a.sk, a.mask_type == 1);
+        else
+            return SimplifiedGenericAttentionMask<Causal>{a.sq, a.sk};
+    }();
+    // The tail contract fixes the number of K tiles. Keep the actual K length
+    // for TDM bounds and masking, and expose the fixed trip count to unrolling.
+    int begin = 0, end = TailFragments ? QueryTiles * BN
+                         : Causal      ? min(a.sk, (tile + 1) * BM)
+                                       : a.sk;
+    if constexpr(Generic)
+    {
+        if constexpr(Causal)
+        {
+            auto range = mask.GetTileRangeAlongX(tile * BM, number<BM>{}, number<BN>{});
+            begin      = min(a.sk, max(0, range.at(number<0>{})));
+            end        = min(a.sk, max(0, range.at(number<1>{})));
+        }
+        else
+            end = a.sk;
+        if(begin >= end)
+        {
+            if constexpr(DQ == 128 || DQ == 192)
+            {
+                for(int i = threadIdx.x; i < BM * (DV / 8); i += 128)
+                {
+                    const int row = tile * BM + i / (DV / 8);
+                    if(row < a.sq)
+                    {
+                        V8<T> zero{};
+                        __builtin_memcpy(__builtin_assume_aligned(o + int64_t(row) * row_stride +
+                                                                      (i % (DV / 8)) * 8,
+                                                                  16),
+                                         &zero,
+                                         sizeof(zero));
+                    }
+                }
+            }
+            else
+            {
+                for(int i = threadIdx.x; i < BM * DV; i += 128)
+                {
+                    const int row = tile * BM + i / DV;
+                    if(row < a.sq)
+                        o[int64_t(row) * row_stride + i % DV] = T(0);
+                }
+            }
+            if constexpr(StoreLSE)
+                for(int r = threadIdx.x; r < BM; r += 128)
+                    if(tile * BM + r < a.sq)
+                        a.lse[lbase + tile * BM + r] = -INFINITY;
+            return;
+        }
+    }
+    // Distribute the wider D192 descriptors across three waves. Each issuer
+    // drains its own TENSORcnt below before any wave reads the shared tiles.
+    if constexpr(BM > BN)
+    {
+        load_tile<BM, Waves, true, 16, DQ>(
+            k_storage.rows, q + int64_t(tile * BM) * qstride, a.sq - tile * BM, qstride);
+    }
+    else if constexpr(Generic && DQ == 192)
+    {
+        if(wave == 0)
+            load_tile<BN, Waves, false, 16, DQ>(
+                ks[0], k + int64_t(begin) * kstride, a.sk - begin, kstride);
+        if(wave == 1)
+            load_tile<BN, Waves, false, 32, DV>(
+                vs[0], v + int64_t(begin) * vstride, a.sk - begin, vstride);
+        if(wave == 2)
+            load_tile<BM, Waves, false, 16, DQ>(
+                ks[1], q + int64_t(tile * BM) * qstride, a.sq - tile * BM, qstride);
+    }
+    else
+    {
+        // A single issuer avoids redundant descriptors on short dense tiles.
+        constexpr bool Cooperative = !(Generic && DQ <= 128 && BM == 64 && !Causal);
+        if(Cooperative || wave == 0)
+        {
+            load_tile<BN, Waves, Cooperative, 16, DQ>(
+                ks[0], k + int64_t(begin) * kstride, a.sk - begin, kstride);
+            load_tile<BN, Waves, Cooperative, 32, DV>(
+                vs[0], v + int64_t(begin) * vstride, a.sk - begin, vstride);
+            load_tile<BM, Waves, Cooperative, 16, DQ>(
+                ks[1], q + int64_t(tile * BM) * qstride, a.sq - tile * BM, qstride);
+        }
+    }
 
     wait();
 
     __syncthreads();
 
-    V16<T> qr[QM][4];
-    F8 out[QM][8] = {};
+    V16<T> qr[QM][DQ / 32];
+    F8 out[QM][VFragments] = {};
     float maxima[QM], sums[QM] = {};
 #pragma unroll
     for(int qm = 0; qm < QM; ++qm)
     {
         maxima[qm] = -INFINITY;
 #pragma unroll
-        for(int t = 0; t < 4; ++t)
+        for(int t = 0; t < DQ / 32; ++t)
         {
-            qr[qm][t] = read_k32(ks[1], Pitch, wave * 16 + lane % 16 + qm * 16 * Waves, t * 32);
+            qr[qm][t] = read_k32<DQ>(BM > BN ? k_storage.rows : ks[1],
+                                     Pitch,
+                                     wave * 16 + lane % 16 + qm * 16 * Waves,
+                                     t * 32);
         }
     }
 
+    if constexpr(BM > BN)
+    {
+        __syncthreads();
+        load_tile<BN, Waves, true, 16, DQ>(
+            ks[0], k + int64_t(begin) * kstride, a.sk - begin, kstride);
+        load_tile<BN, Waves, true, 32, DV>(
+            vs[0], v + int64_t(begin) * vstride, a.sk - begin, vstride);
+        wait();
+        __syncthreads();
+    }
+
     const float scale2 = a.scale * 1.4426950408889634f;
-    V16<T> kc[8];
+    // Traverse all key columns before returning to an accumulator on long
+    // fixed shapes, increasing the distance between dependent QK instructions.
+    constexpr bool DenseRectangle = !Generic && !Causal && QueryTiles == 16 && KeyTiles == 8;
+    constexpr bool DepthFirst = StaticS == 32768 || (StaticS == 16384 && !Causal) || DenseRectangle;
+    static_assert(!DepthFirst || (DQ == 128 && BN == 128));
+    // Reverse the four depth slices on the longest dense specialization. This
+    // preserves the QK reduction while improving its measured operand schedule.
+    constexpr bool ReverseDepth = StaticS == 32768 && !Causal;
+    // Keep the expensive rescale path out of the common instruction sequence.
+    // The expectation must stay at the branch site to preserve its code placement.
+    constexpr bool HintRescale =
+        (StaticS == 32768 && !Causal) || (!StoreLSE && !Generic && !Causal &&
+                                          (DenseRectangle || (QueryTiles == 2 && KeyTiles == 2) ||
+                                           (QueryTiles == 5 && KeyTiles == 5)));
+    V16<T> kc[QKFragments];
+    auto read_slice = [&](int buffer, int slice, int i) {
+        return read_k32<DQ>(ks[buffer],
+                            Pitch,
+                            (DepthFirst ? i * 16 : slice * 32 + (i % 2) * 16) + lane % 16,
+                            DepthFirst ? (ReverseDepth ? (slice ^ 3) : slice) * 32 : (i / 2) * 32);
+    };
+    constexpr bool HoistInitialK = StaticS == 32768 && !Causal;
+    if constexpr(HoistInitialK)
+    {
+        // Initial K is already complete. Keep its read and the Q-buffer reuse
+        // barrier outside the unrolled loop; later slices arrive during PV.
+#pragma unroll
+        for(int i = 0; i < QKFragments; ++i)
+            kc[i] = read_slice(0, 0, i);
+        __syncthreads();
+    }
     int stage = 0;
     // The fixed-shape path can favor QK over PV to improve overlap between waves.
     // Softmax runs at priority zero; generic configurations keep both matrices at one.
     __builtin_amdgcn_s_setprio(QKPriority);
-    auto iteration = [&](auto mask_last, int start) __attribute__((always_inline))
+    auto iteration = [&](auto mask_last, auto last_iteration, int start)
+        __attribute__((always_inline))
     {
-        if(start == 0)
+        if constexpr(!HoistInitialK)
         {
-            if(wave == 0)
-                wait();
-            __syncthreads();
+            if(start == begin)
+            {
+                if(wave == 0)
+                    wait();
+                __syncthreads();
+            }
         }
-        if(wave == 0 && start + BN < end)
+        if(wave == 0 && !decltype(last_iteration)::value && start + BN < end)
         {
-            load_tile<BN, Waves, false>(
-                ks[stage ^ 1], k + int64_t(start + BN) * row_stride, a.sk - start - BN, row_stride);
-            load_tile<BN, Waves, false, (VP - 128) * 2>(
-                vs[stage ^ 1], v + int64_t(start + BN) * row_stride, a.sk - start - BN, row_stride);
+            // Every prefetched tile is complete on this fixed dense shape.
+            // A constant extent avoids rebuilding the TDM boundary fields.
+            const int remaining = StaticS == 32768 && !Causal ? BN : a.sk - start - BN;
+            load_tile<BN, Waves, false, 16, DQ>(
+                ks[stage ^ 1], k + int64_t(start + BN) * kstride, remaining, kstride);
+            load_tile<BN, Waves, false, 32, DV>(
+                vs[stage ^ 1], v + int64_t(start + BN) * vstride, remaining, vstride);
         }
 
-        V16<T> vr0[8];
+        V16<T> vr0[VFragments];
         // Keep a small register range live across QK to tune clang's allocation.
         // Empty asm emits no arithmetic; the reserved values never enter attention.
         // This is compiler-sensitive and must be checked with same-device timing.
@@ -223,40 +440,58 @@ CK_TILE_DEVICE void run(Arguments a)
 #endif
         F8 s[QM][BN / 16] = {};
 
-        // Keep the next N32 slice live while the current slice executes.
+        // Keep the next K slice live while the current slice executes.
 #pragma unroll
-        for(int i = 0; i < 8; ++i)
+        for(int i = 0; i < QKFragments; ++i)
         {
-            if(start == 0)
-                kc[i] = read_k32(ks[stage], Pitch, (i % 2) * 16 + lane % 16, (i / 2) * 32);
+            if constexpr(!HoistInitialK)
+            {
+                if(start == begin)
+                    kc[i] = read_slice(stage, 0, i);
+            }
         }
         __builtin_amdgcn_sched_barrier(0);
 #pragma unroll
         for(int ns = 0; ns < BN / 32; ++ns)
         {
 
-            V16<T> kn[8];
+            V16<T> kn[QKFragments];
             if(ns + 1 < BN / 32)
             {
 #pragma unroll
-                for(int i = 0; i < 8; ++i)
-                    kn[i] = read_k32(
-                        ks[stage], Pitch, (ns + 1) * 32 + (i % 2) * 16 + lane % 16, (i / 2) * 32);
+                for(int i = 0; i < QKFragments; ++i)
+                    kn[i] = read_slice(stage, ns + 1, i);
+            }
+            else if constexpr(StaticS != 32768)
+            {
+#pragma unroll
+                for(int d = 0; d < VFragments; ++d)
+                    vr0[d] = read_v32<VP>(vs[stage], d * 16, 0);
+            }
+
+            auto accumulate = [&](int qm, int i) {
+                const int column = DepthFirst ? i : ns * 2 + i % 2;
+                const int depth  = DepthFirst ? (ReverseDepth ? (ns ^ 3) : ns) : i / 2;
+                s[qm][column]    = mma(kc[i], qr[qm][depth], s[qm][column]);
+            };
+            if constexpr(DepthFirst && Causal)
+            {
+#pragma unroll
+                for(int qm = 0; qm < QM; ++qm)
+                {
+#pragma unroll
+                    for(int i = 0; i < QKFragments; ++i)
+                        accumulate(qm, i);
+                }
             }
             else
             {
 #pragma unroll
-                for(int d = 0; d < 8; ++d)
-                    vr0[d] = read_v32<VP>(vs[stage], d * 16, 0);
-            }
-
-            {
-#pragma unroll
-                for(int i = 0; i < 8; ++i)
+                for(int i = 0; i < QKFragments; ++i)
                 {
 #pragma unroll
                     for(int qm = 0; qm < QM; ++qm)
-                        s[qm][ns * 2 + i % 2] = mma(kc[i], qr[qm][i / 2], s[qm][ns * 2 + i % 2]);
+                        accumulate(qm, i);
                 }
             }
 
@@ -273,7 +508,7 @@ CK_TILE_DEVICE void run(Arguments a)
             if(ns + 1 < BN / 32)
             {
 #pragma unroll
-                for(int i = 0; i < 8; ++i)
+                for(int i = 0; i < QKFragments; ++i)
                     kc[i] = kn[i];
             }
         }
@@ -288,13 +523,34 @@ CK_TILE_DEVICE void run(Arguments a)
         for(int qm = 0; qm < QM; ++qm)
         {
             const int row = row0 + qm * 16 * Waves;
-            if constexpr((Causal && decltype(mask_last)::value) || Pad)
+            if constexpr(Generic && Causal)
+            {
+                if(mask.IsEdgeTile(tile * BM, start, number<BM>{}, number<BN>{}))
+                {
+#pragma unroll
+                    for(int n = 0; n < BN / 16; ++n)
+#pragma unroll
+                        for(int i = 0; i < 8; ++i)
+                        {
+                            const int col = start + n * 16 + lane / 16 * 8 + i;
+                            if(mask.IsOutOfBound(row, col))
+                                s[qm][n][i] = -INFINITY;
+                        }
+                }
+            }
+            else if constexpr((Causal && decltype(mask_last)::value) || Pad)
             {
                 if((Pad && start + BN > a.sk) || (Causal && start + BN > tile * BM))
                 {
 #pragma unroll
                     for(int n = 0; n < BN / 16; ++n)
                     {
+                        if constexpr(TailFragments)
+                        {
+                            // The first seven fragments are complete under the tail contract.
+                            if(n + 1 < BN / 16)
+                                continue;
+                        }
 #pragma unroll
                         for(int i = 0; i < 8; ++i)
                         {
@@ -319,7 +575,7 @@ CK_TILE_DEVICE void run(Arguments a)
                 return fmaxf(lm, swap16(lm)) * scale2;
             };
             auto exponentiate = [&](const auto& logits, float base) {
-                constexpr int Parts = 2;
+                constexpr int Parts = StaticS == 32768 ? 4 : 2;
                 F2 partial[Parts]   = {};
 #pragma unroll
                 for(int n = 0; n < BN / 16; ++n)
@@ -327,25 +583,46 @@ CK_TILE_DEVICE void run(Arguments a)
 #pragma unroll
                     for(int i = 0; i < 8; i += 2)
                     {
-                        const F2 x = __builtin_elementwise_fma(F2{logits[n][i], logits[n][i + 1]},
-                                                               F2{scale2, scale2},
-                                                               F2{-base, -base});
+                        const F2 x = __builtin_elementwise_fma(
+                            F2{logits[n][i], logits[n][i + 1]},
+                            F2{scale2, scale2},
+                            F2{-(Generic && base == -INFINITY ? 0.f : base),
+                               -(Generic && base == -INFINITY ? 0.f : base)});
                         const float e0                    = __builtin_amdgcn_exp2f(x[0]);
                         const F2 e                        = {e0, __builtin_amdgcn_exp2f(x[1])};
                         p[qm][n / 2][(n % 2) * 8 + i]     = T(e[0]);
                         p[qm][n / 2][(n % 2) * 8 + i + 1] = T(e[1]);
-                        if(n < Parts && i == 0)
-                            partial[n % Parts] = e;
+                        if constexpr(StaticS == 32768)
+                        {
+                            // The first nonnegative exp initializes each part;
+                            // adding it to zero otherwise survives codegen.
+                            if(!Causal && n * 4 + i / 2 < Parts)
+                                partial[(n * 4 + i / 2) % Parts] = e;
+                            else
+                                partial[(n * 4 + i / 2) % Parts] += e;
+                        }
                         else
-                            partial[n % Parts] += e;
+                        {
+                            if(n < Parts && i == 0)
+                                partial[n % Parts] = e;
+                            else
+                                partial[n % Parts] += e;
+                        }
                     }
+                }
+                if constexpr(StaticS == 32768)
+                {
+                    // Independent accumulators shorten the softmax dependency
+                    // chain; combine them before the same partial-sum guard.
+                    partial[0] += partial[2];
+                    partial[1] += partial[3];
                 }
                 F2 total = partial[0];
                 total += partial[1];
                 return total[0] + total[1];
             };
             float base = maxima[qm];
-            if(start == 0)
+            if(start == begin || (Generic && base == -INFINITY))
             {
                 if constexpr(FirstScore)
                 {
@@ -367,17 +644,19 @@ CK_TILE_DEVICE void run(Arguments a)
 
             // A nonnegative partial sum <= 2^8 proves each of its exp values <= 2^8.
             // Only the slow path needs the logit maximum. Overflow also enters it.
-            if((FirstScore || start != 0) && __any(!(row_sum <= 256.f)))
+            if((FirstScore || start != begin) &&
+               (HintRescale ? __builtin_expect(bool(__any(!(row_sum <= 256.f))), false)
+                            : __any(!(row_sum <= 256.f))))
             {
                 auto correct = [&](const auto& logits) {
                     const float candidate = fmaxf(base, local_max(logits));
                     const bool update     = candidate > base + 8.f;
-                    if(__any(update))
+                    if(HintRescale ? __builtin_expect(bool(__any(update)), false) : __any(update))
                     {
                         const float next  = update ? candidate : base;
                         const float alpha = __builtin_amdgcn_exp2f(base - next);
 #pragma unroll
-                        for(int d = 0; d < 8; ++d)
+                        for(int d = 0; d < VFragments; ++d)
                             out[qm][d] *= alpha;
                         sums[qm] *= alpha;
                         maxima[qm] = next;
@@ -390,14 +669,32 @@ CK_TILE_DEVICE void run(Arguments a)
                 }
             }
             sums[qm] += row_sum;
+            if constexpr(StaticS == 32768 && !Causal)
+            {
+                // Let the second row fragment's softmax hide the first V read.
+                // Delaying this read also shortens V's lifetime across QK.
+                if(qm == 0)
+                {
+#pragma unroll
+                    for(int d = 0; d < VFragments; ++d)
+                        vr0[d] = read_v32<VP>(vs[stage], d * 16, 0);
+                }
+            }
         }
 
+        if constexpr(StaticS == 32768 && Causal)
+        {
+            // The peeled causal schedule benefits from keeping V out of softmax.
+#pragma unroll
+            for(int d = 0; d < VFragments; ++d)
+                vr0[d] = read_v32<VP>(vs[stage], d * 16, 0);
+        }
         if constexpr(SetPVPriority)
             __builtin_amdgcn_s_setprio(PVPriority);
         {
-            V16<T> vc[8];
+            V16<T> vc[VFragments];
 #pragma unroll
-            for(int d = 0; d < 8; ++d)
+            for(int d = 0; d < VFragments; ++d)
             {
                 vc[d] = vr0[d];
             }
@@ -406,14 +703,14 @@ CK_TILE_DEVICE void run(Arguments a)
 #pragma unroll
             for(int t = 0; t < BN / 32; ++t)
             {
-                V16<T> vn[8];
+                V16<T> vn[VFragments];
                 if(t + 1 < BN / 32)
                 {
 #pragma unroll
-                    for(int d = 0; d < 8; ++d)
+                    for(int d = 0; d < VFragments; ++d)
                         vn[d] = read_v32<VP>(vs[stage], d * 16, (t + 1) * 32);
                 }
-                else
+                else if constexpr(!decltype(last_iteration)::value)
                 {
                     // All reads of the old V tile finish before its buffer is reused.
                     // Next K is ready here; its first slice overlaps this final PV stage.
@@ -423,9 +720,8 @@ CK_TILE_DEVICE void run(Arguments a)
                     }
                     __syncthreads();
 #pragma unroll
-                    for(int i = 0; i < 8; ++i)
-                        kc[i] =
-                            read_k32(ks[stage ^ 1], Pitch, (i % 2) * 16 + lane % 16, (i / 2) * 32);
+                    for(int i = 0; i < QKFragments; ++i)
+                        kc[i] = read_slice(stage ^ 1, 0, i);
                 }
 
                 // Keep each query fragment's PV instructions in one scheduling
@@ -435,7 +731,7 @@ CK_TILE_DEVICE void run(Arguments a)
                 for(int qm = 0; qm < QM; ++qm)
                 {
 #pragma unroll
-                    for(int d = 0; d < 8; ++d)
+                    for(int d = 0; d < VFragments; ++d)
                         out[qm][d] = mma(vc[d], p[qm][t], out[qm][d]);
                     __builtin_amdgcn_sched_barrier(0);
                 }
@@ -455,7 +751,7 @@ CK_TILE_DEVICE void run(Arguments a)
                 if(t + 1 < BN / 32)
                 {
 #pragma unroll
-                    for(int d = 0; d < 8; ++d)
+                    for(int d = 0; d < VFragments; ++d)
                         vc[d] = vn[d];
                 }
             }
@@ -464,105 +760,181 @@ CK_TILE_DEVICE void run(Arguments a)
         if constexpr(QKPriority != PVPriority)
             __builtin_amdgcn_s_setprio(QKPriority);
     };
-    if constexpr(PeelCausal)
+    if constexpr(!Generic && Pad && !Causal && BM == 128)
+    {
+        // A separate final iteration avoids prefetching an unused K slice.
+        int start = begin;
+#pragma unroll LoopUnroll
+        for(; start + BN < end; start += BN, stage ^= 1)
+            iteration(std::true_type{}, std::false_type{}, start);
+        if(start < end)
+            iteration(std::true_type{}, std::true_type{}, start);
+    }
+    else if constexpr(PeelCausal)
     {
         // For square, aligned M=N tiles, only the final K tile meets the diagonal.
         // Keep its mask outside the unrolled prefix to shorten register lifetimes.
-        int start = 0;
+        int start = begin;
 #pragma unroll LoopUnroll
         for(; start + BN < end; start += BN, stage ^= 1)
-            iteration(std::false_type{}, start);
+            iteration(std::false_type{}, std::false_type{}, start);
         if(start < end)
-            iteration(std::true_type{}, start);
+            iteration(std::true_type{}, std::false_type{}, start);
     }
     else
     {
 #pragma unroll LoopUnroll
-        for(int start = 0; start < end; start += BN, stage ^= 1)
-            iteration(std::true_type{}, start);
+        for(int start = begin; start < end; start += BN, stage ^= 1)
+            iteration(std::true_type{}, std::false_type{}, start);
     }
 
     __builtin_amdgcn_s_setprio(0);
 
-    static_assert(BM <= BN);
-    constexpr int OPitch = Pitch;
-    // Reuse the now-dead K0 storage after all waves finish their LDS accesses.
-    wait();
-    __syncthreads();
-#pragma unroll
-    for(int qm = 0; qm < QM; ++qm)
+    if constexpr(Generic && DQ == 128 && BM == 64)
     {
-        sums[qm] += swap16(sums[qm]);
-        const float inv     = 1.f / sums[qm];
-        const int local_row = wave * 16 + lane % 16 + qm * 16 * Waves;
-#pragma unroll
-        for(int d = 0; d < 8; ++d)
-        {
-            V8<T> result{};
-#pragma unroll
-            for(int i = 0; i < 8; ++i)
-                result[i] = T(out[qm][d][i] * inv);
-            __builtin_memcpy(
-                __builtin_assume_aligned(ks[0] + local_row * OPitch + d * 16 + lane / 16 * 8, 16),
-                &result,
-                sizeof(result));
-        }
-    }
-
-    // The row redistribution stays within each wave's own 16-row fragments.
-    __builtin_amdgcn_sched_barrier(0);
-    asm volatile("s_wait_dscnt 0" ::: "memory");
-
-    if constexpr(FullQ)
-    {
+        // The WMMA result already holds eight contiguous values per row/lane.
+        // Short strided tiles benefit from writing these vectors without an LDS shuffle.
+        wait();
 #pragma unroll
         for(int qm = 0; qm < QM; ++qm)
         {
-            uint32_t offset[8], local[8];
-#pragma unroll
-            for(int t = 0; t < 8; ++t)
+            sums[qm] += swap16(sums[qm]);
+            const float inv = sums[qm] == 0.f ? 0.f : 1.f / sums[qm];
+            const int row   = row0 + qm * 16 * Waves;
+            if(row < a.sq)
             {
-                const int local_row = wave * 16 + qm * 16 * Waves + 2 * t + lane / 16;
-                offset[t]           = uint32_t(local_row * row_stride + (lane % 16) * 8) * 2;
-                local[t]            = uint32_t(
-                    reinterpret_cast<uintptr_t>(ks[0] + local_row * OPitch + (lane % 16) * 8));
+#pragma unroll
+                for(int d = 0; d < VFragments; ++d)
+                {
+                    V8<T> result;
+#pragma unroll
+                    for(int i = 0; i < 8; ++i)
+                        result[i] = T(out[qm][d][i] * inv);
+                    __builtin_memcpy(__builtin_assume_aligned(o + int64_t(row) * row_stride +
+                                                                  d * 16 + lane / 16 * 8,
+                                                              16),
+                                     &result,
+                                     sizeof(result));
+                }
             }
-            store_async_x8(o + int64_t(tile * BM) * row_stride, offset, local);
         }
-        __builtin_amdgcn_s_wait_asynccnt(0);
     }
     else
     {
-        // Redistribute each row to 16 lanes, making each store cover two full rows.
-        V8<T> result[QM][8];
+        static_assert(BM <= 2 * BN);
+        constexpr int OPitch = Pitch;
+        T* output_lds        = k_storage.rows;
+        // Reuse the now-dead K0 storage after all waves finish their LDS accesses.
+        wait();
+        __syncthreads();
 #pragma unroll
         for(int qm = 0; qm < QM; ++qm)
         {
+            sums[qm] += swap16(sums[qm]);
+            // These compact BF16 tiles have nonempty rows. Native reciprocal
+            // avoids the general division sequence in their output epilogue.
+            constexpr bool NativeReciprocal =
+                TailFragments ||
+                (!StoreLSE && !Causal && !Generic &&
+                 ((QueryTiles == 4 && KeyTiles == 4) || (QueryTiles == 5 && KeyTiles == 5)));
+            const float inv     = NativeReciprocal             ? ck_tile::rcp(sums[qm])
+                                  : Generic && sums[qm] == 0.f ? 0.f
+                                                               : 1.f / sums[qm];
+            const int local_row = wave * 16 + lane % 16 + qm * 16 * Waves;
 #pragma unroll
-            for(int t = 0; t < 8; ++t)
+            for(int d = 0; d < VFragments; ++d)
             {
-                const int local_row = wave * 16 + qm * 16 * Waves + 2 * t + lane / 16;
-                __builtin_memcpy(
-                    &result[qm][t],
-                    __builtin_assume_aligned(ks[0] + local_row * OPitch + (lane % 16) * 8, 16),
-                    sizeof(result[qm][t]));
+                V8<T> result{};
+#pragma unroll
+                for(int i = 0; i < 8; ++i)
+                    result[i] = T(out[qm][d][i] * inv);
+                __builtin_memcpy(__builtin_assume_aligned(
+                                     output_lds + local_row * OPitch + d * 16 + lane / 16 * 8, 16),
+                                 &result,
+                                 sizeof(result));
             }
         }
+
+        // The row redistribution stays within each wave's own 16-row fragments.
         __builtin_amdgcn_sched_barrier(0);
+        asm volatile("s_wait_dscnt 0" ::: "memory");
+
+        constexpr bool Dense64 = Generic && DQ == 64 && BM == 64 && !Causal;
+        // Async stores use a 32-bit byte offset; wider output strides retain
+        // the 64-bit vector-store path below.
+        constexpr uint64_t MaxAsyncStride = ((uint64_t{1} << 32) - DV * 2) / (2 * (BM - 1));
+        const bool async_rows =
+            (!Generic && BM == 128) || (Dense64 && uint64_t(row_stride) <= MaxAsyncStride);
+        // A complete 16-row wave fragment can use the asynchronous burst
+        // even when a different fragment intersects the query boundary.
+        constexpr bool PartialAsync = !Generic && BM == 128 && !Causal;
 #pragma unroll
         for(int qm = 0; qm < QM; ++qm)
         {
-#pragma unroll
-            for(int t = 0; t < 8; ++t)
+            const bool full_fragment = tile * BM + wave * 16 + qm * 16 * Waves + 16 <= a.sq;
+            const bool fifteen_rows =
+                TailFragments && tile * BM + wave * 16 + qm * 16 * Waves + 15 == a.sq;
+            const bool async_fragment = TailFragments
+                                            ? (full_fragment || fifteen_rows)
+                                            : (FullQ || (async_rows && tile * BM + BM <= a.sq) ||
+                                               (PartialAsync && (full_fragment || fifteen_rows)));
+            if(async_fragment)
             {
-                const int row = tile * BM + wave * 16 + qm * 16 * Waves + 2 * t + lane / 16;
-                if(row < a.sq)
-                    __builtin_memcpy(__builtin_assume_aligned(
-                                         o + int64_t(row) * row_stride + (lane % 16) * 8, 16),
-                                     &result[qm][t],
-                                     sizeof(result[qm][t]));
+                uint32_t offset[VFragments], local[VFragments];
+#pragma unroll
+                for(int t = 0; t < VFragments; ++t)
+                {
+                    const int local_row =
+                        wave * 16 + qm * 16 * Waves + (256 / DV) * t + lane / (DV / 8);
+                    offset[t] = uint32_t(local_row * row_stride + (lane % (DV / 8)) * 8) * 2;
+                    local[t]  = uint32_t(reinterpret_cast<uintptr_t>(
+                        output_lds + local_row * OPitch + (lane % (DV / 8)) * 8));
+                }
+                if constexpr(VFragments == 8)
+                {
+                    if constexpr(TailFragments)
+                    {
+                        if(!full_fragment)
+                            store_async_15(o + int64_t(tile * BM) * row_stride, offset, local);
+                        else
+                            store_async_x8(o + int64_t(tile * BM) * row_stride, offset, local);
+                    }
+                    else
+                        store_async_x8(o + int64_t(tile * BM) * row_stride, offset, local);
+                }
+                else
+                    store_async_x4(o + int64_t(tile * BM) * row_stride, offset, local);
+            }
+            else if constexpr(!TailFragments)
+            {
+                // With Q % 16 == 15, a fragment that is neither full nor 15 rows
+                // has no valid rows, so the tail specialization needs no fallback.
+                // Keep only one vector live to avoid private scratch/LDS materialization.
+#pragma unroll
+                for(int t = 0; t < VFragments; ++t)
+                {
+                    const int local_row =
+                        wave * 16 + qm * 16 * Waves + (256 / DV) * t + lane / (DV / 8);
+                    const int row = tile * BM + local_row;
+                    if(row < a.sq)
+                    {
+                        V8<T> result;
+                        __builtin_memcpy(&result,
+                                         __builtin_assume_aligned(output_lds + local_row * OPitch +
+                                                                      (lane % (DV / 8)) * 8,
+                                                                  16),
+                                         sizeof(result));
+                        __builtin_memcpy(__builtin_assume_aligned(o + int64_t(row) * row_stride +
+                                                                      (lane % (DV / 8)) * 8,
+                                                                  16),
+                                         &result,
+                                         sizeof(result));
+                    }
+                }
             }
         }
+        if constexpr(FullQ || (!Generic && BM == 128) || Dense64)
+            __builtin_amdgcn_s_wait_asynccnt(0);
     }
 
     if constexpr(StoreLSE)
@@ -572,7 +944,7 @@ CK_TILE_DEVICE void run(Arguments a)
         {
             const int row = row0 + qm * 16 * Waves;
             if((FullQ || row < a.sq) && a.lse && lane < 16)
-                a.lse[int64_t(bh) * a.sq + row] = maxima[qm] * 0.6931471805599453f + logf(sums[qm]);
+                a.lse[lbase + row] = maxima[qm] * 0.6931471805599453f + logf(sums[qm]);
         }
     }
 

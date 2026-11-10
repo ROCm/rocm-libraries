@@ -10,7 +10,7 @@
 #include "ck_tile/ops/fmha.hpp"
 
 #include "bias.hpp"
-#include "fmha_fwd_cr.hpp"
+#include "fmha_fwd_cr_support.hpp"
 #include "mask.hpp"
 #include "quant.hpp"
 #include "rotary.hpp"
@@ -1854,3 +1854,24 @@ struct fmha_batch_prefill_traits : public fmha_fwd_traits
 float fmha_batch_prefill(fmha_batch_prefill_traits,
                          fmha_batch_prefill_args,
                          const ck_tile::stream_config&);
+
+// Host launch policy: self-contained pipelines may select native tuning variants
+// without adding device-side branches to FmhaFwdKernel.
+template <typename Kernel, typename Arch>
+struct FmhaFwdLaunch
+{
+    static float Run(const ck_tile::stream_config& s, const fmha_fwd_args& a)
+    {
+        auto [kargs, grids] = fmha_fwd_create_kargs_and_grids<Kernel>(a);
+        if(!Kernel::IsSupportedArgument(kargs))
+        {
+            ck_tile::CK_TILE_ERROR("Arguments not supported! Skipping fmha_fwd!");
+            return -1;
+        }
+        return ck_tile::launch_kernel(s,
+                                      ck_tile::make_kernel<Kernel::kBlockPerCu, Arch>(
+                                          Kernel{}, grids, Kernel::BlockSize(), 0, kargs));
+    }
+};
+
+#include "fmha_fwd_cr.hpp"

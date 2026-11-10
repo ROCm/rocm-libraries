@@ -19,7 +19,7 @@ using I8  = int32_t __attribute__((ext_vector_type(8)));
 // TDM descriptor for a native BSHD slice; row padding matches the WMMA LDS readers.
 // A [sequence, 128] slice of native BSHD memory. Source row_stride is in
 // halfword elements; the destination remains densely packed with LDS padding.
-template <int Rows, int CacheHint = 0, int PadBytes = 16, class T>
+template <int Rows, int CacheHint = 0, int PadBytes = 16, int Width = 128, class T>
 __device__ __forceinline__ void
 load_strided(T* lds, const T* global, int remaining, uint32_t row_stride)
 {
@@ -29,10 +29,11 @@ load_strided(T* lds, const T* global, int remaining, uint32_t row_stride)
     const uintptr_t addr = reinterpret_cast<uintptr_t>(global);
     const uint32_t local = uint32_t(reinterpret_cast<uintptr_t>(lds));
     U4 g0                = {1, local, uint32_t(addr), uint32_t(addr >> 32) | (2u << 30)};
-    I8 g1                = {int((1u << 16) | (1u << 20) | (5u << 22) | ((PadBytes / 4 - 1u) << 25)),
-                            128 << 16,
+    I8 g1                = {int((1u << 16) | (1u << 20) | ((Width == 128 ? 5u : 4u) << 22) |
+                 ((PadBytes / 4 - 1u) << 25)),
+                            Width << 16,
                             int(uint32_t(remaining) << 16),
-                            (128 << 16) | (remaining >> 16),
+                            (Width << 16) | (remaining >> 16),
                             Rows,
                             int(row_stride),
                             0,
@@ -93,6 +94,77 @@ store_async_x8(const void* base, const uint32_t (&offset)[8], const uint32_t (&l
 #endif
 }
 
+// A 15-row fragment contains seven full pairs of rows and one final row.
+// The upper half-wave must not store the missing sixteenth row.
+__device__ __forceinline__ void
+store_async_15(const void* base, const uint32_t (&offset)[8], const uint32_t (&local)[8])
+{
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+    asm volatile("global_store_async_from_lds_b128 %0, %7, %14\n\t"
+                 "global_store_async_from_lds_b128 %1, %8, %14\n\t"
+                 "global_store_async_from_lds_b128 %2, %9, %14\n\t"
+                 "global_store_async_from_lds_b128 %3, %10, %14\n\t"
+                 "global_store_async_from_lds_b128 %4, %11, %14\n\t"
+                 "global_store_async_from_lds_b128 %5, %12, %14\n\t"
+                 "global_store_async_from_lds_b128 %6, %13, %14\n\t"
+                 "s_wait_xcnt 0"
+                 :
+                 : "v"(offset[0]),
+                   "v"(offset[1]),
+                   "v"(offset[2]),
+                   "v"(offset[3]),
+                   "v"(offset[4]),
+                   "v"(offset[5]),
+                   "v"(offset[6]),
+                   "v"(local[0]),
+                   "v"(local[1]),
+                   "v"(local[2]),
+                   "v"(local[3]),
+                   "v"(local[4]),
+                   "v"(local[5]),
+                   "v"(local[6]),
+                   "s"(base)
+                 : "memory");
+    if(threadIdx.x % 32 < 16)
+        asm volatile("global_store_async_from_lds_b128 %0, %1, %2\n\t"
+                     "s_wait_xcnt 0"
+                     :
+                     : "v"(offset[7]), "v"(local[7]), "s"(base)
+                     : "memory");
+#else
+    (void)base;
+    (void)offset;
+    (void)local;
+#endif
+}
+
+__device__ __forceinline__ void
+store_async_x4(const void* base, const uint32_t (&offset)[4], const uint32_t (&local)[4])
+{
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+    asm volatile("global_store_async_from_lds_b128 %0, %4, %8\n\t"
+                 "global_store_async_from_lds_b128 %1, %5, %8\n\t"
+                 "global_store_async_from_lds_b128 %2, %6, %8\n\t"
+                 "global_store_async_from_lds_b128 %3, %7, %8\n\t"
+                 "s_wait_xcnt 0"
+                 :
+                 : "v"(offset[0]),
+                   "v"(offset[1]),
+                   "v"(offset[2]),
+                   "v"(offset[3]),
+                   "v"(local[0]),
+                   "v"(local[1]),
+                   "v"(local[2]),
+                   "v"(local[3]),
+                   "s"(base)
+                 : "memory");
+#else
+    (void)base;
+    (void)offset;
+    (void)local;
+#endif
+}
+
 __device__ __forceinline__ void wait()
 {
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
@@ -106,7 +178,6 @@ template <class T>
 __device__ __forceinline__ V8<T> transpose8(const T* lds)
 {
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
-    static_assert(std::is_same_v<T, __bf16>);
     using Native = __bf16 __attribute__((vector_size(16)));
     auto p       = ck_tile::to_lds(reinterpret_cast<Native*>(const_cast<T*>(lds)));
     return __builtin_bit_cast(V8<T>, __builtin_amdgcn_ds_load_tr16_b128_v8bf16(p));
