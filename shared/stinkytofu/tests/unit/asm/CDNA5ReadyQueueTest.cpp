@@ -231,24 +231,6 @@ TEST_F(CDNA5ReadyQueueTest, QueueFillConsumerSlackUsesResolvedWmmaLatencies) {
         queueFillConsumerSlackAllows(wmmaWindowStartCycle(f4, 22), kDsReadyCycle, kSafetyMargin));
 }
 
-TEST_F(CDNA5ReadyQueueTest, ExperimentalQueueFillTailSizeRejectsDsFreeRegion) {
-    EXPECT_FALSE(experimentalQueueFillTailSizeAllows(
-        /*remainingWmmas=*/5, /*burstWmmas=*/5, /*remainingDsLoads=*/0,
-        /*hardwareQueueDepth=*/5));
-}
-
-TEST_F(CDNA5ReadyQueueTest, ExperimentalQueueFillTailSizeUsesHardwareDepthBoundary) {
-    EXPECT_FALSE(experimentalQueueFillTailSizeAllows(
-        /*remainingWmmas=*/9, /*burstWmmas=*/5, /*remainingDsLoads=*/1,
-        /*hardwareQueueDepth=*/5));
-    EXPECT_TRUE(experimentalQueueFillTailSizeAllows(
-        /*remainingWmmas=*/10, /*burstWmmas=*/5, /*remainingDsLoads=*/1,
-        /*hardwareQueueDepth=*/5));
-    EXPECT_TRUE(experimentalQueueFillTailSizeAllows(
-        /*remainingWmmas=*/11, /*burstWmmas=*/5, /*remainingDsLoads=*/1,
-        /*hardwareQueueDepth=*/5));
-}
-
 TEST_F(CDNA5ReadyQueueTest, DsLoadDescCarriesDrainParams) {
     const auto expectDrain = [](GFX opcode, int maxDrain, int throughput) {
         const HwInstDesc* desc = getMCIDByUOp(opcode, GfxArchID::Gfx1250);

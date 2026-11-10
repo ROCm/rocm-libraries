@@ -2666,8 +2666,7 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_ReadyDsLoadWithoutAWaitIssuesBeforeTheQu
 
 // The loop header's first WMMA region starts with an empty queue: the WMMAs go ahead of the
 // ready ds_loads until the queue depth (8, not scale pairs) are outstanding. The first WMMA has
-// ended as the 9th issues, so 9 go first. Seventeen WMMAs leave exactly one hardware queue depth
-// after that burst, meeting the experimental tail-size boundary.
+// ended as the 9th issues, so 9 go first.
 TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_LoopHeaderFillsTheQueueFirst) {
     bb->addSuccessor(bb);
     for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
@@ -2709,11 +2708,10 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_CloseDsConsumerUsesBaselineOrder
     EXPECT_EQ(shape, "WdWWWWWWWWWWW");
 }
 
-// A close consumer rejects the loop-header fill, but that decision is not function-wide. The
-// barrier wait starts a new reset whose unrelated DS has no matrix consumer and whose 17-WMMA
-// tail leaves one hardware queue depth after the nine-WMMA burst, so it fills independently.
-// Explicit register edges keep the two WMMA groups on their barrier sides.
-TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_EachResetDecidesIndependently) {
+// A close consumer rejects the loop-header fill. The barrier reset reuses that loop policy even
+// though its own DS is unrelated, so both segments retain baseline ordering. Explicit register
+// edges keep the two WMMA groups on their barrier sides.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_BarrierResetReusesLoopHeadDecision) {
     bb->addSuccessor(bb);
     StinkyInstruction* firstDs =
         createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80, /*ldsToken=*/1);
@@ -2767,7 +2765,7 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_EachResetDecidesIndependently) {
         if (inst == secondDs) {
             sawSecondDs = true;
             EXPECT_TRUE(afterWait);
-            EXPECT_EQ(secondResetWmmas, 9);
+            EXPECT_EQ(secondResetWmmas, 4);
             break;
         }
         if (!isMatrixInstruction(*inst)) continue;
@@ -2780,10 +2778,9 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_EachResetDecidesIndependently) {
     EXPECT_TRUE(sawSecondDs);
 }
 
-// Experimental result for the tail-size policy: the consumer-slack gate admits an unrelated DS,
-// but a 12-WMMA region has only three WMMAs after its predicted nine-WMMA burst. That is less than
-// the hardware depth of eight, so normal scheduling issues the DS after one WMMA.
-TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_ExperimentalShortTailUsesBaselineOrdering) {
+// Tail size does not override an admitted loop-head policy: the queue fills before the unrelated
+// DS even though only three WMMAs remain after the predicted nine-WMMA burst.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_AdmittedShortTailFillsTheQueue) {
     bb->addSuccessor(bb);
     createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80, /*ldsToken=*/1);
     for (int i = 0; i < 12; ++i)
@@ -2801,11 +2798,11 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_ExperimentalShortTailUsesBaselin
     pass->run(*func, ctx, am);
 
     const std::string shape = wdShape(mnemonicSequence(*bb));
-    EXPECT_EQ(shape, "WdWWWWWWWWWWW");
+    EXPECT_EQ(shape, "WWWWWWWWWdWWW");
 }
 
 // A ready tensor_load is placed at the Prefetch level, above the queue fill: it is not held
-// behind the fill's WMMAs. The region is large enough to pass the experimental tail-size gate.
+// behind the fill's WMMAs.
 TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_TensorLoadIsNotHeld) {
     bb->addSuccessor(bb);
     createMovableTensorLoad(bb, /*s0=*/0, /*s1=*/4, /*ldsToken=*/9);
