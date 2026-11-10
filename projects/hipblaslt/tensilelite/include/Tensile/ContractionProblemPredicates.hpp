@@ -3264,13 +3264,13 @@ namespace TensileLite
                 bool fits(ContractionProblemGemm const& problem) const
                 {
                     const int64_t world = problem.world();
-                    if(world == 0 || value <= 0 || problem.getParams().gsuc()
+                    const int64_t k     = problem.boundSize(0);
+                    if(world == 0 || value <= 0 || k <= 0 || problem.getParams().gsuc()
                        || problem.batchMode() != ContractionProblemGemm::BATCHMODE::STRIDED)
                         return false;
                     for(size_t i = 0; i < problem.batchIndices().size(); i++)
                         if(problem.batchSize(i) != 1)
                             return false;
-                    const int64_t k        = problem.boundSize(0);
                     auto const&   b        = problem.b();
                     const int64_t rowBytes = (k / world) * (int64_t)b.elementBytes();
                     return problem.fusedA2AExtent() == k && k % (world * value) == 0

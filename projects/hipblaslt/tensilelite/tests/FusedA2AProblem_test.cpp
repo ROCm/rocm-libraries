@@ -258,6 +258,7 @@ TEST(FusedA2AProblem, A2AGemmShapePredicate)
     EXPECT_FALSE(du64(a2aGemmProblem(4096, 4, 4096 + 64)));
     EXPECT_FALSE(du64(a2aGemmProblem(4096, 4, 0, 2)));
     EXPECT_FALSE(du64(a2aGemmProblem(4096, 0)));
+    EXPECT_FALSE(du64(a2aGemmProblem(0, 4)));
 
     auto gsuc = a2aGemmProblem(4096, 4);
     gsuc.setParams().setGSUC(true);

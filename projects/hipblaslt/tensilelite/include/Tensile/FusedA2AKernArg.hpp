@@ -108,6 +108,9 @@ namespace TensileLite
         if(peers.size() != worldSize)
             throw std::runtime_error("[fused-a2a] " + std::to_string(peers.size())
                                      + " peer groups for world " + std::to_string(worldSize));
+        if(myRank >= worldSize)
+            throw std::runtime_error("[fused-a2a] rank " + std::to_string(myRank)
+                                     + " outside world " + std::to_string(worldSize));
         if(numCu == 0)
             throw std::runtime_error("[fused-a2a] no CU count for FusedNumCu.");
         size_t before = args.size();

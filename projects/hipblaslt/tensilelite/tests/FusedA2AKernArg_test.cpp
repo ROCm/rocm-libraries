@@ -47,6 +47,20 @@ TEST(FusedA2AKernArg, RejectsWorldSizeOutOfRange)
     }
 }
 
+TEST(FusedA2AKernArg, RejectsRankOutsideWorld)
+{
+    void* counter = reinterpret_cast<void*>(0xC0FFEE00);
+    for(uint32_t rank : {4u, (uint32_t)FUSED_A2A_MAX_RANKS})
+    {
+        KernelArgumentsCounter args;
+        EXPECT_THROW(appendFusedSegment(args, makePeers(4), counter, rank, 4, 0, 0, 304),
+                     std::runtime_error)
+            << "rank " << rank;
+    }
+    KernelArgumentsCounter args;
+    EXPECT_NO_THROW(appendFusedSegment(args, makePeers(4), counter, 3, 4, 0, 0, 304));
+}
+
 TEST(FusedA2AKernArg, AcceptsWorldOneAndMax)
 {
     for(uint32_t world : {1u, (uint32_t)FUSED_A2A_MAX_RANKS})
