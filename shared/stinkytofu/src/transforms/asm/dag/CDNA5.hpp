@@ -1051,6 +1051,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     DAGNode* popNonWmma(DAGNode* node, int pickKind);
 
     void restoreCrossBBStateFromLoop();
+    // Open the PipeOps gates the predecessors already scheduled left open at their end.
+    void seedPipeOpGatesFromPredecessors();
 
    public:
     explicit CDNA5ReadyQueue(const PassContext& passCtx)
@@ -2950,6 +2952,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
             distance = deriveWarGateWmmas(wmmaIssueConfig.latency, wmmaIssueConfig.issueCycles);
         pipeOpDistance_[ruleIdx] = distance;
     }
+    if (gateFeatures.dsRefillGate) seedPipeOpGatesFromPredecessors();
 
     restoreCrossBBStateFromLoop();
 
@@ -3025,11 +3028,42 @@ void CDNA5ReadyQueue::restoreCrossBBStateFromLoop() {
     crossBBDsReadResiduals_ = sawLoopPred ? dsLoopResiduals : dsNonLoopResiduals;
 }
 
+// A predecessor scheduled before this block hands over the pipe ops each of its gate entries
+// still needs. RPO schedules a loop header before its latch, so the back edge carries nothing.
+void CDNA5ReadyQueue::seedPipeOpGatesFromPredecessors() {
+    if (!currentBB_ || !getAnalysisCache()) return;
+    for (BasicBlock* pred : currentBB_->getPredecessors()) {
+        const BBScheduleState* state = getAnalysisCache()->lookup(pred);
+        if (!state) continue;
+        const size_t rules = std::min(state->pipeOpGatesLeft.size(), pipeOpGates_.size());
+        for (size_t ruleIdx = 0; ruleIdx < rules; ++ruleIdx) {
+            const int distance = pipeOpDistance_[ruleIdx];
+            if (distance <= 0) continue;
+            for (const auto& [key, left] : state->pipeOpGatesLeft[ruleIdx]) {
+                // The gap closes after `left` more pipe ops: (count - stamp) reaches distance.
+                const int stamp = pipeOpCount_[ruleIdx] + std::min(left, distance) - distance;
+                auto [it, inserted] = pipeOpGates_[ruleIdx].emplace(key, stamp);
+                if (!inserted) it->second = std::max(it->second, stamp);
+            }
+        }
+    }
+}
+
 void CDNA5ReadyQueue::onFinishBB() {
     if (!currentBB_ || !getAnalysisCache()) return;
-    getAnalysisCache()->store(currentBB_,
-                              {0, regDataReadyCounters, globalReadInflight_.size(),
-                               globalReadInflight_.maxResidual(), dsReadInflight_.residuals()});
+    BBScheduleState state{0, regDataReadyCounters, static_cast<int>(globalReadInflight_.size()),
+                          globalReadInflight_.maxResidual(), dsReadInflight_.residuals()};
+    if (getPassContext().getPassFeatureConfig().dagFeatures.dsRefillGate) {
+        state.pipeOpGatesLeft.resize(pipeOpGates_.size());
+        for (size_t ruleIdx = 0; ruleIdx < pipeOpGates_.size(); ++ruleIdx) {
+            const int distance = pipeOpDistance_[ruleIdx];
+            for (const auto& [key, stamp] : pipeOpGates_[ruleIdx]) {
+                const int left = distance - (pipeOpCount_[ruleIdx] - stamp);
+                if (left > 0) state.pipeOpGatesLeft[ruleIdx].emplace(key, left);
+            }
+        }
+    }
+    getAnalysisCache()->store(currentBB_, state);
 }
 
 // Per scheduling region. Rule (4): per-WMMA-window DS cap (computed in

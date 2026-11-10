@@ -185,7 +185,8 @@ struct PassFeatureConfig {
         /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.
         int warGateWmmas = 0;
         /// Mirrors ModuleOptions::DsRefillGate. A derived WmmaVgprSrcToDsWrite distance is the
-        /// WMMA count that hides the va_vdst wait (HWModel::WaitHide), not latency / issue.
+        /// WMMA count that hides the va_vdst wait (HWModel::WaitHide), not latency / issue, and
+        /// the gate's open entries carry into the successors scheduled after their block.
         bool dsRefillGate = false;
     };
 

@@ -158,6 +158,9 @@ struct BBScheduleState {
     // Kept as the full per-entry list, not collapsed to a count/worst-case
     // pair, so seeding doesn't overstate how long every entry has left.
     std::vector<int> dsReadResiduals;
+    // PipeOps gate entries still open at BB end, one map per hazard rule: register key ->
+    // pipe ops still to issue before a write to it is clear (see CDNA5ReadyQueue).
+    std::vector<std::map<int, int>> pipeOpGatesLeft;
 };
 
 // Cache for cross-BB scheduling state. Lives in the scheduler's run() scope

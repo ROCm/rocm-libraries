@@ -1,0 +1,54 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --enable-esm2-track-valu-vsrc --no-ds-spread --ds-refill-gate --print-output
+#
+# With --ds-refill-gate the mode2 WAR gate (WmmaVgprSrcToDsWrite) is carried over a block
+# boundary. WMMA #0 reads v[100:131] three WMMAs before the branch; the ds_load at the top of the
+# next block overwrites v[100:103], so it waits for the 12 - 3 = 9 WMMAs the gap still needs.
+# The ds pacer is off so its relief does not lift the gate.
+
+# CHECK-LABEL: @gate_carried_into_the_next_block
+# CHECK: ^next:
+# CHECK-NOT: "st.ds_load_b128"
+# CHECK: v[232:239] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NOT: "st.ds_load_b128"
+# CHECK: v[240:247] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NOT: "st.ds_load_b128"
+# CHECK: v[248:255] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NOT: "st.ds_load_b128"
+# CHECK: v[256:263] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NOT: "st.ds_load_b128"
+# CHECK: v[264:271] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NOT: "st.ds_load_b128"
+# CHECK: v[272:279] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NOT: "st.ds_load_b128"
+# CHECK: v[280:287] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NOT: "st.ds_load_b128"
+# CHECK: v[288:295] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NOT: "st.ds_load_b128"
+# CHECK: v[296:303] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NEXT: v[100:103] = "st.ds_load_b128"
+st.func @gate_carried_into_the_next_block() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[200:207] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[200:207]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[208:215] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[208:215]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[216:223] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[216:223]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  "st.s_cbranch_scc1"("exit", SCC0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^next, ^exit
+^next:
+  v[100:103] = "st.ds_load_b128"(v400) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[232:239] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[232:239]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[240:247] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[240:247]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[248:255] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[248:255]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[256:263] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[256:263]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[264:271] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[264:271]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[272:279] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[272:279]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[280:287] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[280:287]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[288:295] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[288:295]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[296:303] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[296:303]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[304:311] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[304:311]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[312:319] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[312:319]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[320:327] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[320:327]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+^exit:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
