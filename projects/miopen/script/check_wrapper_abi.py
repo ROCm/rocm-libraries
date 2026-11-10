@@ -19,12 +19,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from miopen_wrapper_libs import default_lib_dirs, resolve_pair
+from miopen_wrapper_libs import ON_WINDOWS, default_lib_dirs, resolve_pair
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
-def main():
+def main(argv=None, windows=ON_WINDOWS):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--lib-dir",
@@ -53,10 +53,12 @@ def main():
         "since an installed tree has no include directory. Enables the check that "
         "no excluded or wrapper-only symbol is declared there",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    lib_dirs = [Path(args.lib_dir)] if args.lib_dir else default_lib_dirs(SCRIPT_DIR)
-    wrapper_lib, private_lib, problems = resolve_pair(lib_dirs)
+    lib_dirs = (
+        [Path(args.lib_dir)] if args.lib_dir else default_lib_dirs(SCRIPT_DIR, windows)
+    )
+    wrapper_lib, private_lib, problems = resolve_pair(lib_dirs, windows)
     if problems:
         # Both are built whenever this entry is registered, so a missing one is a
         # packaging or layout regression rather than a configuration to skip over.

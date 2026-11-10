@@ -505,6 +505,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
             test_compare_forwarding_runs
             test_run_forwarding_parity
             test_forwarding_parity_gpu_labels
+            test_check_wrapper_registration
             test_check_wrapper_abi
             test_miopen_wrapper_libs
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")

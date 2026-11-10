@@ -15,7 +15,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-from miopen_wrapper_libs import default_lib_dirs, loader_path_variable, resolve_pair
+from miopen_wrapper_libs import (
+    ON_WINDOWS,
+    default_lib_dirs,
+    loader_path_variable,
+    resolve_pair,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -71,7 +76,7 @@ def replay(argv, mode, env):
     return True
 
 
-def main():
+def main(argv=None, windows=ON_WINDOWS):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gtest", required=True, help="the test binary to replay")
     parser.add_argument(
@@ -91,7 +96,7 @@ def main():
     parser.add_argument(
         "--known-divergences", default=SCRIPT_DIR / "known_forwarding_divergences.txt"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     gtest = Path(args.gtest).resolve()
     # Windows starts "miopen_gtest" when only miopen_gtest.exe exists, so both
@@ -101,8 +106,10 @@ def main():
         print(f"FAIL: test binary {gtest} does not exist", flush=True)
         return 1
 
-    lib_dirs = [Path(args.lib_dir)] if args.lib_dir else default_lib_dirs(SCRIPT_DIR)
-    wrapper_lib, private_lib, problems = resolve_pair(lib_dirs)
+    lib_dirs = (
+        [Path(args.lib_dir)] if args.lib_dir else default_lib_dirs(SCRIPT_DIR, windows)
+    )
+    wrapper_lib, private_lib, problems = resolve_pair(lib_dirs, windows)
     if problems:
         # Both are built whenever this entry is registered, so a missing one is a
         # packaging regression, not something to skip.
@@ -114,7 +121,7 @@ def main():
     # An installed test binary's RUNPATH names the ROCm library directory, so an
     # install to any other prefix would otherwise load some other MIOpen. Windows
     # has no RUNPATH; it looks beside the program first and then on PATH.
-    path_variable = loader_path_variable()
+    path_variable = loader_path_variable(windows)
     search_path = os.pathsep.join(
         p for p in (str(private_lib.parent), os.environ.get(path_variable)) if p
     )
