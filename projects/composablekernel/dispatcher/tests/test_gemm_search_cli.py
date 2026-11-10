@@ -704,6 +704,29 @@ def test_streamk_plain_run_measures_every_budget_of_one_build(monkeypatch, capsy
     rc, cap, _, _ = _main(monkeypatch, capsys, tmp_path, SK_CONFIG, *STREAMK, "--pairs",
                           str(pick), problems=PROBLEMS[:1], fixed=SK_BF16)
     assert rc == 1 and "and --budget-pct?" in cap.out
+    fails = tmp_path / "fails.csv"
+    noop_batch = lambda *a, **kw: ([], [], 0, 0)
+    failed = []
+    rc, cap = run_stub_driver(
+        drv, monkeypatch, capsys, tmp_path, [MISALIGNED], *STREAMK,
+        "--budget-pct", "100,50", "--max-kernels", "1", "--failures-csv", str(fails),
+        build=lambda cfgs, **kw: (
+            failed.extend(c.name for c in cfgs[1:])
+            or [tmp_path / "k0.so"] + [None] * (len(cfgs) - 1)),
+        run_batch=noop_batch, **SK_BF16)
+    assert failed and all("@budget" not in n for n in failed)
+    assert rc == 1 and f"{len(failed)}/{len(failed) + 1} kernel builds failed" in cap.out
+    assert f"{len(failed)} failed to compile, 0 built" in cap.out
+    assert cap.out.count("Build FAILED for fixed vector widths:") == len(failed)
+    with open(fails, newline="") as f:
+        assert [(r["kernel"], r["kind"]) for r in csv.DictReader(f)] == [
+            (n, "build-failed") for n in failed]
+    rc, cap = run_stub_driver(
+        drv, monkeypatch, capsys, tmp_path, PROBLEMS[:1], SK_CONFIG, *STREAMK,
+        "--budget-pct", "100,50", "--max-kernels", "2",
+        build=lambda cfgs, **kw: [tmp_path / "k.so"] * 4, run_batch=noop_batch,
+        **SK_BF16)
+    assert rc == 1 and "Incomplete kernel build results" in cap.out
 
 
 def test_streamk_budgets_of_a_kernel_cost_one_build(monkeypatch, capsys, tmp_path):

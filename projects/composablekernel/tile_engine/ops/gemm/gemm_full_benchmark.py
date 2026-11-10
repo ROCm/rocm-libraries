@@ -713,7 +713,7 @@ def build_kernels(configs, **kwargs):
         kernels.setdefault(c.kernel_config.name, c.kernel_config)
     built = setup_multiple_gemm_dispatchers(list(kernels.values()), **kwargs)
     if len(built) != len(kernels):
-        return built  # the callers' length checks report it
+        return []  # the callers' length checks report it
     libs = dict(zip(kernels, built))
     return [libs[c.kernel_config.name] for c in configs]
 
@@ -1315,22 +1315,28 @@ def main():
     )
     build_time = time.perf_counter() - t0
 
-    build_failures = sum(lib is None for lib in lib_paths)
     if len(lib_paths) != len(all_configs):
         print("  ERROR: Incomplete kernel build results")
         return 1
+    builds = {
+        cfg.kernel_config.name: (cfg.kernel_config, lib)
+        for cfg, lib in zip(all_configs, lib_paths)
+    }
+    build_failures = sum(lib is None for _, lib in builds.values())
     if build_failures:
-        print(f"  ERROR: {build_failures}/{len(all_configs)} kernel builds failed")
+        print(f"  ERROR: {build_failures}/{len(builds)} kernel builds failed")
 
-    vfb.report_builds(all_configs, lib_paths)
+    vfb.report_builds(
+        [cfg for cfg, _ in builds.values()],
+        [lib for _, lib in builds.values()],
+    )
     built_kernels, duplicate_count = unique_built_kernels(all_configs, lib_paths)
 
-    n_builds = len({cfg.kernel_config.name for cfg in all_configs})
     print(
         f"\n  Built {len(all_configs)} configs -> {len(built_kernels)} unique kernels "
         f"({duplicate_count} duplicates filtered) in {build_time:.0f}s"
-        + (f"; {n_builds} builds, shared by their launch variants"
-           if n_builds < len(all_configs) else "")
+        + (f"; {len(builds)} builds, shared by their launch variants"
+           if len(builds) < len(all_configs) else "")
     )
 
     # Failed builds are recorded now, so they are recorded even when nothing built.
@@ -1339,18 +1345,15 @@ def main():
         fail_file = open(args.failures_csv, "w", newline="")
         fail_writer = csv.DictWriter(fail_file, fieldnames=FAILURE_FIELDS)
         fail_writer.writeheader()
-        for name in dict.fromkeys(
-            cfg.kernel_config.name
-            for cfg, lib in zip(all_configs, lib_paths)
-            if lib is None
-        ):
-            fail_writer.writerow(
-                {
-                    "kernel": name,
-                    "kind": "build-failed",
-                    "error": build_failure_summary(build_errors.get(name)),
-                }
-            )
+        for name, (_, lib) in builds.items():
+            if lib is None:
+                fail_writer.writerow(
+                    {
+                        "kernel": name,
+                        "kind": "build-failed",
+                        "error": build_failure_summary(build_errors.get(name)),
+                    }
+                )
         fail_file.flush()
 
     if not built_kernels:
