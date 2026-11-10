@@ -2064,36 +2064,107 @@ __device__ inline void k1StridedCopy(const ConvIgemmCopyArgs& a)
     }
 }
 
-// Batched 2-D transpose through a 32 x 33 LDS tile: coalesced reads and writes. A 1-D grid of
-// (column tile, row tile, batch), column tiles fastest; 256 threads.
+// Batched 2-D transpose through a TT x TT LDS tile (CONV_IGEMM_TRANSPOSE_TILE): a 1-D grid of
+// (column tile, row tile, batch), column tiles fastest; 256 threads. Reads are 16-byte vectors
+// along the source rows when the columns are whole vectors and the source 16-byte aligned, and
+// writes 16-byte vectors along the destination rows (gathered from LDS) when the rows are whole
+// vectors and the destination aligned; otherwise one element per access. A thread issues all its
+// loads before storing any (clamped in-range addresses, no per-load branch).
 template <class E>
 __device__ inline void k1TransposeTile(const ConvIgemmTransposeArgs& a,
                                        long long tileCol,
                                        long long tileRow,
                                        long long b)
 {
-    __shared__ E tile[32][33];
+    constexpr int TT = CONV_IGEMM_TRANSPOSE_TILE;
+    constexpr int V = 16 / static_cast<int>(sizeof(E));
+    constexpr int RV = TT / V; // vectors per tile row
+    constexpr int VPT = TT * RV / 256; // vectors per thread
+    constexpr int EPT = TT * TT / 256; // elements per thread
+    constexpr int P = TT + (sizeof(E) == 2 ? 2 : 1); // LDS pitch: rows on different banks
+    static_assert(VPT >= 1 && EPT >= 1, "tile");
+    typedef typename K1Raw<16>::type Raw;
+    __shared__ E tile[TT * P];
     const E* src = static_cast<const E*>(a.src) + b * a.rows * a.cols;
     E* dst = static_cast<E*>(a.dst) + b * a.rows * a.cols;
-    const int tx = threadIdx.x % 32, ty = threadIdx.x / 32;
-    const long long r0 = tileRow * 32, c0 = tileCol * 32;
-    for(int r = ty; r < 32; r += 8)
+    const long long r0 = tileRow * TT, c0 = tileCol * TT;
+    const int tid = threadIdx.x;
+    const bool vecIn = a.cols % V == 0 && (reinterpret_cast<unsigned long long>(a.src) & 15) == 0;
+    const bool vecOut = a.rows % V == 0 && (reinterpret_cast<unsigned long long>(a.dst) & 15) == 0;
+    if(vecIn)
     {
-        if(r0 + r < a.rows && c0 + tx < a.cols)
-            tile[r][tx] = src[(r0 + r) * a.cols + c0 + tx];
+        Raw v[VPT];
+#pragma unroll
+        for(int k = 0; k < VPT; ++k)
+        {
+            const int i = tid + k * 256, r = i / RV, c = (i - r * RV) * V;
+            const long long rr = r0 + r < a.rows ? r0 + r : a.rows - 1;
+            const long long cc = c0 + c < a.cols ? c0 + c : a.cols - V;
+            v[k] = *reinterpret_cast<const Raw*>(src + rr * a.cols + cc);
+        }
+#pragma unroll
+        for(int k = 0; k < VPT; ++k)
+        {
+            const int i = tid + k * 256, r = i / RV, c = (i - r * RV) * V;
+            const E* e = reinterpret_cast<const E*>(&v[k]);
+#pragma unroll
+            for(int j = 0; j < V; ++j)
+                tile[r * P + c + j] = e[j];
+        }
+    }
+    else
+    {
+        E v[EPT];
+#pragma unroll
+        for(int k = 0; k < EPT; ++k)
+        {
+            const int i = tid + k * 256, r = i / TT, c = i - r * TT;
+            const long long rr = r0 + r < a.rows ? r0 + r : a.rows - 1;
+            const long long cc = c0 + c < a.cols ? c0 + c : a.cols - 1;
+            v[k] = src[rr * a.cols + cc];
+        }
+#pragma unroll
+        for(int k = 0; k < EPT; ++k)
+        {
+            const int i = tid + k * 256, r = i / TT, c = i - r * TT;
+            tile[r * P + c] = v[k];
+        }
     }
     __syncthreads();
-    for(int c = ty; c < 32; c += 8)
+    if(vecOut)
     {
-        if(c0 + c < a.cols && r0 + tx < a.rows)
-            dst[(c0 + c) * a.rows + r0 + tx] = tile[tx][c];
+#pragma unroll
+        for(int k = 0; k < VPT; ++k)
+        {
+            const int i = tid + k * 256, c = i / RV, r = (i - c * RV) * V;
+            if(c0 + c < a.cols && r0 + r < a.rows)
+            {
+                Raw v;
+                E* e = reinterpret_cast<E*>(&v);
+#pragma unroll
+                for(int j = 0; j < V; ++j)
+                    e[j] = tile[(r + j) * P + c];
+                *reinterpret_cast<Raw*>(dst + (c0 + c) * a.rows + r0 + r) = v;
+            }
+        }
+    }
+    else
+    {
+#pragma unroll
+        for(int k = 0; k < EPT; ++k)
+        {
+            const int i = tid + k * 256, c = i / TT, r = i - c * TT;
+            if(c0 + c < a.cols && r0 + r < a.rows)
+                dst[(c0 + c) * a.rows + r0 + r] = tile[r * P + c];
+        }
     }
 }
 
 __device__ inline void k1Transpose(const ConvIgemmTransposeArgs& a)
 {
-    const long long colTiles = (a.cols + 31) / 32;
-    const long long rowTiles = (a.rows + 31) / 32;
+    constexpr int TT = CONV_IGEMM_TRANSPOSE_TILE;
+    const long long colTiles = (a.cols + TT - 1) / TT;
+    const long long rowTiles = (a.rows + TT - 1) / TT;
     const long long block = blockIdx.x;
     const long long tileCol = block % colTiles;
     const long long tileRow = (block / colTiles) % rowTiles;
