@@ -762,10 +762,17 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
              f.bk = 256;
              return f;
          }},
-        {"CoopTileBlock64",
+        {"CoopTileBlock128",
          [] {
              auto f = coop("gfx11", 1);
-             f.bt = 64;
+             f.bt = 128;
+             return f;
+         }},
+        {"CoopOverFourAccumulatorTiles",
+         [] {
+             auto f = coop("gfx11", 1);
+             f.bk = 128; // mt 2 with 4 K groups
+             f.bt = 64; // nt 4
              return f;
          }},
         {"CoopKBlockNotSixteenPerKGroup",
@@ -871,6 +878,13 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
     EXPECT_TRUE(conv_winograd::configOf(kernelOf(wreg("gfx11", 1), "HALF")).has_value());
     EXPECT_TRUE(conv_winograd::configOf(kernelOf(sreg(0), "HALF")).has_value());
     EXPECT_TRUE(conv_winograd::configOf(kernelOf(coop("gfx11", 1), "HALF")).has_value());
+    // The largest legal tile counts parse: mt 1 x nt 4 and mt 2 x nt 2.
+    auto wide = coop("gfx11", 1);
+    wide.bt = 64;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(wide, "HALF")).has_value());
+    auto deep = coop("gfx11", 1);
+    deep.bk = 128;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(deep, "HALF")).has_value());
 }
 
 TEST(TestConvWinogradKernelMatch, RefusesUnknownMetadata)

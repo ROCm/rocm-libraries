@@ -506,14 +506,16 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         case Variant::COOP:
         {
             // 4 waves per K group (one per transform row), each 16 x mt out channels by bt tiles:
-            // bk = 16 x mt x waves / 4 with mt 1 or 2 (at most 2 x 2 accumulator tiles per bin).
+            // bk = 16 x mt x waves / 4 with mt 1 or 2, at most 4 accumulator tiles per bin (mt x
+            // bt / 16), and the double-buffered transformed input (bt KiB) within 64 KiB of LDS.
             const int kw = config.waves / 4;
             const int mt = kw > 0 && config.bk % (16 * kw) == 0 ? config.bk / (16 * kw) : 0;
             if(config.m != 2 || config.layout != Layout::NCHW || config.llcPlan
                || (config.arch != "gfx11" && config.arch != "gfx12")
                || (config.waves != 4 && config.waves != 8 && config.waves != 16
                    && config.waves != 32)
-               || (config.bt != 16 && config.bt != 32) || (mt != 1 && mt != 2))
+               || (config.bt != 16 && config.bt != 32 && config.bt != 64) || (mt != 1 && mt != 2)
+               || mt * (config.bt / 16) > 4)
             {
                 return std::nullopt;
             }
