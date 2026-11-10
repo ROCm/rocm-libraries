@@ -193,7 +193,10 @@ jobs:
       # defaults, including on workflow_dispatch. To skip a platform entirely,
       # pass 'none', which setup_multi_arch.yml resolves to an empty build
       # config.
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
+      # gfx90a is built on pull requests (not pushes) so the MIOpen rocjitsu dbsync check can
+      # run for it. Its GPU tests stay gated by TheRock's family config (nightly only), so on a
+      # PR only CPU-lane components such as miopen-dbsync run for gfx90a.
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || (github.event_name == 'pull_request' && 'gfx94X,gfx950,gfx125X,gfx90a' || 'gfx94X,gfx950,gfx125X') }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       pr_labels: ${{ inputs.pr_labels || '' }}
       # Copy all stages except math-libs and ml-libs from TheRock baseline
