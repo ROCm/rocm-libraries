@@ -16,6 +16,7 @@
 #include <barrier>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -72,6 +73,31 @@ protected:
 };
 
 namespace {
+
+#if GTEST_HAS_DEATH_TEST && defined(MIOPEN_CACHE_DIR) && !MIOPEN_DISABLE_USERDB
+struct ExitCachePaths
+{
+    const fs::path* user   = nullptr;
+    const fs::path* system = nullptr;
+};
+
+ExitCachePaths& ExpectedExitCachePaths()
+{
+    // Trivial pointer state remains usable during exit-handler execution.
+    static ExitCachePaths paths;
+    return paths;
+}
+
+[[noreturn]] void CheckCachePathsAtExit()
+{
+    const auto& expected = ExpectedExitCachePaths();
+    if(expected.user == nullptr || expected.system == nullptr ||
+       miopen::GetCachePath(false) != *expected.user ||
+       miopen::GetCachePath(true) != *expected.system)
+        std::_Exit(EXIT_FAILURE);
+    std::_Exit(EXIT_SUCCESS);
+}
+#endif
 
 class ScopedPathWarningLogging
 {
@@ -223,6 +249,33 @@ INSTANTIATE_TEST_SUITE_P(
                     PathWarningCase{false, true, true, "SuppressedUserDbNetwork", true, false},
                     PathWarningCase{true, true, true, "SuppressedCacheNetwork", true, false}),
     [](const testing::TestParamInfo<PathWarningCase>& info) { return info.param.name; });
+
+TEST(CPU_CachePathLifetimeDeathTest_NONE, CachePathsSurviveLateExitCallback)
+{
+#if GTEST_HAS_DEATH_TEST && defined(MIOPEN_CACHE_DIR) && !MIOPEN_DISABLE_USERDB
+    // Re-exec the child so no earlier test has initialized the path state.
+    const auto previous_style = GTEST_FLAG_GET(death_test_style);
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    EXPECT_EXIT(
+        {
+            if(std::atexit(CheckCachePathsAtExit) != 0)
+                std::_Exit(EXIT_FAILURE);
+            const auto user   = miopen::GetCachePath(false);
+            const auto system = miopen::GetCachePath(true);
+            auto& expected    = ExpectedExitCachePaths();
+            expected.user     = &user;
+            expected.system   = &system;
+            // exit() preserves these stack copies while running static destructors
+            // and the earlier callback, which must still be able to query the cache.
+            std::exit(EXIT_SUCCESS);
+        },
+        testing::ExitedWithCode(EXIT_SUCCESS),
+        "");
+    GTEST_FLAG_SET(death_test_style, previous_style);
+#else
+    GTEST_SKIP() << "Death tests or the user kernel cache are disabled in this build";
+#endif
+}
 
 // ============================================================================
 // Additional tests

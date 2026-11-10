@@ -115,17 +115,18 @@ struct CachedPath
     fs::path value;
 };
 
-// The optional owns the once flag so quiescent tests can reset initialization in place.
+// Retain path state through process teardown: exit handlers may still query it.
+// The optional permits quiescent tests to reconstruct the once flag in place.
 std::optional<CachedPath>& UserCachePathRef()
 {
-    static std::optional<CachedPath> path{std::in_place};
-    return path;
+    static auto* const path = new std::optional<CachedPath>{std::in_place};
+    return *path;
 }
 
 std::optional<CachedPath>& SysCachePathRef()
 {
-    static std::optional<CachedPath> path{std::in_place};
-    return path;
+    static auto* const path = new std::optional<CachedPath>{std::in_place};
+    return *path;
 }
 
 const fs::path& GetUserCachePathInternal()
