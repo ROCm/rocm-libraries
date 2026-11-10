@@ -93,19 +93,8 @@ namespace rocsparse
         // First row in this block
         J first_row = block_id * (BLOCKSIZE / WF_SIZE);
 
-        // Row that the wavefront will process. The chunked kernels can reach the
-        // last row block of a matrix whose m is within a block of the maximum
-        // of J, so there the sum is capped at m in 64 bits before it is narrowed.
-        J row;
-        if constexpr(CHUNKED)
-        {
-            const int64_t wide_row = static_cast<int64_t>(first_row) + wid;
-            row = static_cast<J>((wide_row < static_cast<int64_t>(m)) ? wide_row : m);
-        }
-        else
-        {
-            row = first_row + wid;
-        }
+        // Row that the wavefront will process
+        J row = first_row + wid;
 
         // Shared memory to set done flag for intra-block dependencies
         __shared__ int local_done_array[BLOCKSIZE / WF_SIZE];
@@ -532,18 +521,8 @@ namespace rocsparse
         // values can be loaded or computed with scalar instructions (idx, row, row_begin...)
         wid = rocsparse::read_first_lane(wid);
 
-        // Index into the row map, capped at m before narrowing in the chunked
-        // kernels as in csrsv_analysis_lower_device.
-        J idx;
-        if constexpr(CHUNKED)
-        {
-            const int64_t wide_idx = block_id * (BLOCKSIZE / WF_SIZE) + wid;
-            idx = static_cast<J>((wide_idx < static_cast<int64_t>(m)) ? wide_idx : m);
-        }
-        else
-        {
-            idx = block_id * (BLOCKSIZE / WF_SIZE) + wid;
-        }
+        // Index into the row map
+        const J idx = block_id * (BLOCKSIZE / WF_SIZE) + wid;
 
         // Shared memory to hold diagonal entry
         __shared__ T diagonal[BLOCKSIZE / WF_SIZE];
