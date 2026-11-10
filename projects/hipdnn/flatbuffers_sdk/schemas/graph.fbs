@@ -32,6 +32,7 @@ include "rope_attributes.fbs";
 include "softmax_attributes.fbs";
 include "topk_attributes.fbs";
 include "gather_attributes.fbs";
+include "paged_cache_store_attributes.fbs";
 
 // Excludes a field from the generated cache-key hash/equality (cachekey_generated.h).
 // Opt-out: an unannotated field always participates; apply only when a benchmark
@@ -92,7 +93,8 @@ union NodeAttributes {
 	RopeAttributes,
 	SoftmaxAttributes,
 	TopkAttributes,
-	GatherAttributes
+	GatherAttributes,
+	PagedCacheStoreAttributes
 }
 
 table Node {

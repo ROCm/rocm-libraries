@@ -27,6 +27,7 @@
 #include "MatmulOperationDescriptor.hpp"
 #include "MoeGroupedMatmulBwdOperationDescriptor.hpp"
 #include "MoeGroupedMatmulOperationDescriptor.hpp"
+#include "PagedCacheStoreOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
 #include "ProfilingControlDescriptor.hpp"
 #include "RMSNormBackwardOperationDescriptor.hpp"
@@ -124,6 +125,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_SOFTMAX_DESCRIPTOR:
         privateDesc = std::make_shared<SoftmaxOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_PAGED_CACHE_STORE_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<PagedCacheStoreOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR:
         privateDesc = std::make_shared<RopeOperationDescriptor>();

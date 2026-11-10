@@ -20,6 +20,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MoeGroupedMatmulBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MoeGroupedMatmulSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PagedCacheStoreSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanBuilderRegistry.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
@@ -281,6 +282,8 @@ private:
             return detail::MoeGroupedMatmulBwdSignatureKey(node, tensorMap, computeType);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SoftmaxAttributes:
             return detail::SoftmaxSignatureKey(node, tensorMap, computeType);
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PagedCacheStoreAttributes:
+            return detail::PagedCacheStoreSignatureKey(node, tensorMap, computeType);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GatherAttributes:
             return detail::GatherSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::TopkAttributes:

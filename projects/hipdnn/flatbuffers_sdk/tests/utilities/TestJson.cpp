@@ -242,6 +242,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid softmax graph)";
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PagedCacheStoreAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidPagedCacheStoreGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid paged cache store graph)";
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GatherAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidGatherGraph();
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
@@ -465,6 +470,24 @@ TEST(TestJson, TopkWithoutValuesRoundTrip)
     EXPECT_FALSE(graphJson.at("nodes").at(0).at("outputs").contains("values_tensor_uid"));
 
     toJsonAndBackTestSuite(graph, "(top-k indices only)");
+}
+
+TEST(TestJson, PagedCacheStoreRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidPagedCacheStoreGraph();
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    const auto& nodeJson = graphJson.at("nodes").at(0);
+    const auto& inputs = nodeJson.at("inputs");
+    const auto& outputs = nodeJson.at("outputs");
+
+    EXPECT_EQ(nodeJson.at("type").get<std::string>(), "PagedCacheStoreAttributes");
+    EXPECT_EQ(inputs.at("x_tensor_uid").get<int64_t>(), 1);
+    EXPECT_EQ(inputs.at("slot_mapping_tensor_uid").get<int64_t>(), 2);
+    EXPECT_EQ(inputs.at("scale_tensor_uid").get<int64_t>(), 4);
+    EXPECT_EQ(outputs.at("container_tensor_uid").get<int64_t>(), 3);
+
+    toJsonAndBackTestSuite(graph, "(paged cache store)");
 }
 
 // GraphToJsonAndBack covers one graph per node type; these cover the second

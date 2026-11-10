@@ -3807,6 +3807,70 @@ inline flatbuffers::FlatBufferBuilder createValidSoftmaxGraph(bool withStats = t
     return builder;
 }
 
+/// One PagedCacheStore node: x [T=4, H=2, D=8] FLOAT, slot_mapping [4] INT32, FLOAT scalar
+/// scale, written into a FLOAT container [num_blocks=3, H=2, block_size=4, D=8].
+inline flatbuffers::FlatBufferBuilder createValidPagedCacheStoreGraph()
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> xDims = {4, 2, 8};
+    const std::vector<int64_t> xStrides = {16, 8, 1};
+    const std::vector<int64_t> slotDims = {4};
+    const std::vector<int64_t> slotStrides = {1};
+    const std::vector<int64_t> containerDims = {3, 2, 4, 8};
+    const std::vector<int64_t> containerStrides = {64, 32, 8, 1};
+    const std::vector<int64_t> scaleDims = {1};
+    const std::vector<int64_t> scaleStrides = {1};
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        2,
+        "slot_mapping",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+        &slotStrides,
+        &slotDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        3,
+        "container",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &containerStrides,
+        &containerDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        4,
+        "scale",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &scaleStrides,
+        &scaleDims));
+
+    auto storeAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePagedCacheStoreAttributes(
+        builder, 1, 2, 3, 4);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "paged_cache_store",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PagedCacheStoreAttributes,
+        storeAttributes.Union()));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 // Gather along the middle axis: x [2, 5, 4] FLOAT, indices [3] INT64, axis 1 -> y [2, 3, 4].
 inline flatbuffers::FlatBufferBuilder createValidGatherGraph()
 {

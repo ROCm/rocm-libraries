@@ -96,6 +96,7 @@
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulBwdAttributes.hpp>
+#include <hipdnn_frontend/attributes/PagedCacheStoreAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
@@ -140,6 +141,7 @@
 #include <hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
+#include <hipdnn_frontend/node/PagedCacheStoreNode.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
@@ -6341,6 +6343,72 @@ public:
             std::make_shared<SoftmaxNode>(std::move(attributes), graph_attributes));
 
         return ret;
+    }
+
+    /**
+     * @brief Writes token rows into a paged KV-cache container (hipDNN extension).
+     *
+     * The container uses the SDPA paged layout `[num_blocks, H, block_size, D]` (the K/V
+     * container that `sdpa()` reads through `page_table_k` / `page_table_v`). For every token
+     * with `slot = slotMapping[token] >= 0`:
+     * `container[slot / block_size, h, slot % block_size, :] = cast(x[token, h, :] * scale)`.
+     * Tokens with a negative slot are skipped, and every container element no token addresses
+     * keeps its contents. Two tokens must not address the same slot. Two layouts are accepted:
+     * - token-packed: `x` `[T, H, D]` with `slotMapping` `[T]`;
+     * - SDPA-native: `x` `[B, H, S, D]` (any strides) with `slotMapping` `[B, S]`, so the
+     *   output of `rope()` can be stored without a reshape.
+     *
+     * `container` is not created by this method: it must be a caller-created, non-virtual tensor
+     * with its dims set, bound to the persistent cache buffer. The node writes it in place, and
+     * it is returned for chaining (the returned pointer is `container` itself).
+     *
+     * @param x Values to store, `[T, H, D]` or `[B, H, S, D]`.
+     * @param slotMapping INT32 or INT64 cache slot per token, `[T]` or `[B, S]`.
+     * @param container Paged cache, `[num_blocks, H, block_size, D]`; written in place.
+     * @param attributes Operation configuration; `set_scale()` binds an optional FLOAT scalar
+     *        (absent: 1).
+     * @return `container`.
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes>
+        paged_cache_store(std::shared_ptr<TensorAttributes> x,
+                          std::shared_ptr<TensorAttributes> slotMapping,
+                          std::shared_ptr<TensorAttributes> container,
+                          PagedCacheStoreAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("PagedCacheStore_" + std::to_string(_sub_nodes.size()));
+        }
+        // Null tensors are tolerated here so the error surfaces from pre_validate_node() as a
+        // missing-input error rather than a crash while auto-naming.
+        if(x && x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        if(slotMapping && slotMapping->get_name().empty())
+        {
+            slotMapping->set_name(attributes.get_name() + "::SLOT_MAPPING");
+        }
+        if(container && container->get_name().empty())
+        {
+            container->set_name(attributes.get_name() + "::CONTAINER");
+        }
+        auto scale = attributes.get_scale();
+        if(scale && scale->get_name().empty())
+        {
+            scale->set_name(attributes.get_name() + "::SCALE");
+        }
+
+        attributes.set_x(std::move(x));
+        attributes.set_slot_mapping(std::move(slotMapping));
+        attributes.set_container(container);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<PagedCacheStoreNode>(std::move(attributes), graph_attributes));
+
+        return container;
     }
 
     /**

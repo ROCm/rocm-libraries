@@ -1,0 +1,92 @@
+operation:
+  name: "PagedCacheStore"
+  class_name: "PagedCacheStoreOperationDescriptor"
+  fbs_table: "PagedCacheStoreAttributes"
+  fbs_generated_header: "paged_cache_store_attributes_generated.h"
+
+  # cuDNN has only PagedCacheLoad; the store is hipDNN-specific, so every name carries _EXT.
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_PAGED_CACHE_STORE_DESCRIPTOR_EXT"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_PAGED_CACHE_STORE"
+
+  error_label: "Paged cache store"
+  packer_operation_label: "paged cache store"
+  packer_finalize_label: "paged cache store"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_PAGED_CACHE_STORE_EXT"
+
+  frontend:
+    packer_function: "createPagedCacheStoreOperation"
+    unpacker_function: "unpackPagedCacheStoreOperation"
+    node_class: "PagedCacheStoreNode"
+    attributes_class: "PagedCacheStoreAttributes"
+
+    inputs:
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+      - name: "slot_mapping"
+        enum_name: "SLOT_MAPPING"
+        required: true
+        getter_name: "get_slot_mapping"
+        setter_name: "set_slot_mapping"
+      - name: "scale"
+        enum_name: "SCALE"
+        required: false
+        getter_name: "get_scale"
+        setter_name: "set_scale"
+    outputs:
+      - name: "container"
+        enum_name: "CONTAINER"
+        required: true
+        getter_name: "get_container"
+        setter_name: "set_container"
+    graph_method_name: "paged_cache_store"
+    graph_method_params:
+      - name: "x"
+        tensor_name: "x"
+      - name: "slotMapping"
+        tensor_name: "slot_mapping"
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "container"
+    node_type_enum: "NodeType::PAGED_CACHE_STORE"
+    node_attributes_union_type: "PagedCacheStoreAttributes"
+
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "XDESC_EXT"
+      required: true
+    - name: "slot_mapping"
+      fbs_field: "slot_mapping_tensor_uid"
+      attr_suffix: "SLOT_MAPPING_DESC_EXT"
+      required: true
+    - name: "container"
+      fbs_field: "container_tensor_uid"
+      attr_suffix: "CONTAINER_DESC_EXT"
+      required: true
+    - name: "scale"
+      fbs_field: "scale_tensor_uid"
+      attr_suffix: "SCALE_DESC_EXT"
+      required: false
+
+  data_fields: []
+  tensor_array_fields: []
+
+  has_compute_data_type: false
+
+  test_data:
+    tensor_const_prefix: "K_PAGED_CACHE_STORE_"
+    tensor_uids:
+      x: 9500
+      slot_mapping: 9501
+      container: 9502
+      scale: 9503
+    tensor_configs:
+      x: { dims: [4, 2, 8], strides: [16, 8, 1] }
+      slot_mapping: { dims: [4], strides: [1], data_type: INT32 }
+      container: { dims: [3, 2, 4, 8], strides: [64, 32, 8, 1] }
+      scale: { dims: [1], strides: [1], data_type: FLOAT }

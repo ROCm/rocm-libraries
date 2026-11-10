@@ -1,0 +1,26 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+// Paged KV-cache write. cuDNN has no equivalent (it only has PagedCacheLoad), so the backend
+// names carry the _EXT suffix. The container uses the SDPA paged layout
+// [num_blocks, H, block_size, D] (see sdpa_attributes.fbs page_table_k/v). Two token layouts
+// are accepted:
+//   token-packed: x [T, H, D] with slot_mapping [T];
+//   SDPA-native:  x [B, H, S, D] (any strides) with slot_mapping [B, S], token (b, s).
+// For each token with slot = slot_mapping[token] >= 0:
+//   container[slot / block_size, h, slot % block_size, :] = cast(x[token, h, :] * scale)
+// (SDPA-native: x[b, h, s, :]). Tokens with a negative slot are skipped; a slot at or past
+// num_blocks * block_size is invalid. Only addressed slots are written: every other element
+// of the container keeps its contents, so the caller binds the persistent cache buffer. Two
+// tokens must not address the same slot.
+table PagedCacheStoreAttributes {
+    x_tensor_uid:            long (cache_uid);         // [T, H, D] or [B, H, S, D]
+    slot_mapping_tensor_uid: long (cache_uid);         // [T] or [B, S], INT32 or INT64
+    container_tensor_uid:    long (cache_uid);         // output, [num_blocks, H, block_size, D]
+    scale_tensor_uid:        long = null (cache_uid);  // FP32 scalar; absent: 1
+}

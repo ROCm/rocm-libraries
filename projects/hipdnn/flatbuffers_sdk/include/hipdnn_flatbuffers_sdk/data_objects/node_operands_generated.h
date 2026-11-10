@@ -938,6 +938,18 @@ void visit(const GatherAttributes& op, V& visitor)
     visitor.scalar(std::string_view("axis"), static_cast<int64_t>(op.axis()));
 }
 
+template <typename V>
+void visit(const PagedCacheStoreAttributes& op, V& visitor)
+{
+    visitor.tensor(std::string_view("x"), static_cast<int64_t>(op.x_tensor_uid()), false);
+    visitor.tensor(std::string_view("slot_mapping"), static_cast<int64_t>(op.slot_mapping_tensor_uid()), false);
+    visitor.tensor(std::string_view("container"), static_cast<int64_t>(op.container_tensor_uid()), false);
+    if(const auto uid = op.scale_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("scale"), static_cast<int64_t>(*uid), false);
+    }
+}
+
 /// Visits @p node's operands. Returns false, visiting nothing, when the node has
 /// no attributes or a type this header predates.
 template <typename V>
@@ -945,7 +957,7 @@ bool visit(const Node& node, V&& visitor)
 {
     // Fails when NodeAttributes gains a member this header has no case for: rerun
     // scripts/gen_node_operands.py.
-    static_assert(NodeAttributes::MAX == NodeAttributes::GatherAttributes,
+    static_assert(NodeAttributes::MAX == NodeAttributes::PagedCacheStoreAttributes,
                   "node_operands_generated.h is stale: rerun scripts/gen_node_operands.py");
     switch(node.attributes_type())
     {
@@ -1147,6 +1159,13 @@ bool visit(const Node& node, V&& visitor)
         return false;
     case NodeAttributes::GatherAttributes:
         if(const auto* op = node.attributes_as_GatherAttributes(); op != nullptr)
+        {
+            visit(*op, visitor);
+            return true;
+        }
+        return false;
+    case NodeAttributes::PagedCacheStoreAttributes:
+        if(const auto* op = node.attributes_as_PagedCacheStoreAttributes(); op != nullptr)
         {
             visit(*op, visitor);
             return true;

@@ -49,6 +49,7 @@ from support_features import (
     matmul,
     moe_grouped_matmul,
     moe_grouped_matmul_bwd,
+    paged_cache_store,
     pointwise,
     reduction,
     registry,
@@ -788,6 +789,7 @@ class TestFeatureMatrixNames:
             "Linear attention",
             "Layernorm",
             "Matmul",
+            "PagedCacheStore",
             "Pointwise",
             "Reduction",
             "Resample",
@@ -7374,6 +7376,96 @@ class TestRopeExtract:
         node["inputs"]["freqs_tensor_uid"] = None
         with pytest.raises(FeatureError, match="freqs_tensor_uid is not bound"):
             rope.extract(node, tensors)
+
+
+def _paged_cache_store(
+    x_dims=(4, 2, 8),
+    slot_dims=(4,),
+    container_dims=(3, 2, 4, 8),
+    dtype="float",
+    container_dtype=None,
+    slot_dtype="int32",
+    scale=False,
+    scale_dims=(1,),
+    scale_dtype="float",
+) -> tuple[dict, dict]:
+    tensors = {
+        1: {"uid": 1, "dims": list(x_dims), "data_type": dtype},
+        2: {"uid": 2, "dims": list(slot_dims), "data_type": slot_dtype},
+        3: {
+            "uid": 3,
+            "dims": list(container_dims),
+            "data_type": container_dtype or dtype,
+        },
+    }
+    node = {
+        "inputs": {"x_tensor_uid": 1, "slot_mapping_tensor_uid": 2},
+        "outputs": {"container_tensor_uid": 3},
+    }
+    if scale:
+        tensors[4] = {"uid": 4, "dims": list(scale_dims), "data_type": scale_dtype}
+        node["inputs"]["scale_tensor_uid"] = 4
+    return node, tensors
+
+
+class TestPagedCacheStoreExtract:
+    PLAIN = {
+        "dtype:fp32",
+        "container:same",
+        "slot_dtype:int32",
+        "layout:token_packed",
+        "scale:absent",
+    }
+
+    def test_node_and_ports_cover_every_schema_field(self) -> None:
+        node, _ = _paged_cache_store(scale=True)
+        assert set(batchnorm.bound(node)) == table_fields(
+            paged_cache_store.SCHEMA_FILE, paged_cache_store.SCHEMA_TABLE
+        )
+
+    def test_registry_maps_the_node_type_here(self) -> None:
+        assert registry.op_module("PagedCacheStoreAttributes") is paged_cache_store
+
+    def test_plain_graph(self) -> None:
+        assert paged_cache_store.extract(*_paged_cache_store()) == self.PLAIN
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = paged_cache_store.extract(*_paged_cache_store())
+        for kwargs in (
+            {"dtype": "half", "container_dtype": "fp8_e4m3", "slot_dtype": "int64"},
+            {
+                "dtype": "bfloat16",
+                "container_dtype": "fp8_e5m2",
+                "x_dims": (2, 2, 3, 8),
+                "slot_dims": (2, 3),
+                "scale": True,
+            },
+        ):
+            reached |= paged_cache_store.extract(*_paged_cache_store(**kwargs))
+        assert reached == {f.id for f in paged_cache_store.FEATURES}
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            ({"slot_dims": (5,)}, "are neither"),
+            ({"x_dims": (2, 2, 3, 8), "slot_dims": (2, 4)}, "are neither"),
+            ({"container_dims": (3, 4, 4, 8)}, "container_tensor_uid dims"),
+            ({"container_dims": (3, 2, 4, 16)}, "container_tensor_uid dims"),
+            ({"slot_dtype": "float"}, "is not int32 or int64"),
+            ({"container_dtype": "half"}, "is neither that of x_tensor_uid nor fp8"),
+            ({"scale": True, "scale_dtype": "half"}, "is not float"),
+            ({"scale": True, "scale_dims": (2,)}, "are not one element"),
+        ],
+    )
+    def test_rejects(self, kwargs: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            paged_cache_store.extract(*_paged_cache_store(**kwargs))
+
+    def test_rejects_unbound_port(self) -> None:
+        node, tensors = _paged_cache_store()
+        node["outputs"]["container_tensor_uid"] = None
+        with pytest.raises(FeatureError, match="container_tensor_uid is not bound"):
+            paged_cache_store.extract(node, tensors)
 
 
 class TestCustomOpExtract:

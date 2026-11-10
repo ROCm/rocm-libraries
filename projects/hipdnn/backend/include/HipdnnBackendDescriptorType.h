@@ -369,6 +369,14 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_TOPK_DESCRIPTOR_EXT = 41,
 
     /**
+     * @brief Paged cache store operation descriptor (extension)
+     *
+     * Writes token rows [T, H, D] into a paged KV-cache container
+     * [num_blocks, H, block_size, D] at the slots given by a slot mapping tensor.
+     */
+    HIPDNN_BACKEND_OPERATION_PAGED_CACHE_STORE_DESCRIPTOR_EXT = 43,
+
+    /**
      * @brief Gather operation descriptor (extension)
      *
      * Gathers slices of X along one axis at the positions given by an INT32/INT64

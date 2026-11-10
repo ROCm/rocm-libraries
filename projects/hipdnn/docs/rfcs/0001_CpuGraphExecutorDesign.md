@@ -117,6 +117,7 @@ The Signature Key system provides unique identification for operation configurat
 │  - MatmulSignatureKey                                       │
 │  - MoeGroupedMatmulSignatureKey                             │
 │  - MoeGroupedMatmulBwdSignatureKey                          │
+│  - PagedCacheStoreSignatureKey                              │
 │  - PointwiseSignatureKey                                    │
 │  - RMSNormFwdSignatureKey                                   │
 │  - RMSNormBwdSignatureKey                                   │

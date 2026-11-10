@@ -621,6 +621,28 @@ def build_topk_graph():
     return graph, x, values, indices
 
 
+def build_paged_cache_store_graph():
+    """Build a paged KV-cache store (x [4, 2, 8], slot_mapping [4] INT32, container [3, 2, 4, 8]).
+
+    The container is a caller-created, non-virtual tensor that the node writes in place.
+    Returns (graph, x, slot_mapping, container).
+    """
+    graph = create_float_graph()
+    x = hipdnn.Tensor.create([4, 2, 8], hipdnn.DataType.FLOAT)
+    x.set_name("x")
+    slot_mapping = hipdnn.Tensor.create([4], hipdnn.DataType.INT32)
+    slot_mapping.set_name("slot_mapping")
+    container = hipdnn.Tensor.create([3, 2, 4, 8], hipdnn.DataType.FLOAT)
+    container.set_name("container")
+
+    stored = graph.paged_cache_store(
+        x, slot_mapping, container, hipdnn.PagedCacheStoreAttributes()
+    )
+    stored.set_output(True)
+
+    return graph, x, slot_mapping, container
+
+
 def build_custom_op_graph():
     """Build a two-in/two-out custom-op graph returning (graph, a, b, y0, y1)."""
     graph = create_float_graph()

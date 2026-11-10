@@ -26,6 +26,7 @@
 #include <hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
+#include <hipdnn_frontend/node/PagedCacheStoreNode.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
@@ -546,6 +547,16 @@ TEST(TestOperationUnpacker, CreateNodeForTypeCreatesMoeGroupedMatmulBwdNode)
     EXPECT_TRUE(error.is_good()) << error.get_message();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->getNodeType(), NodeType::MOE_GROUPED_MATMUL_BWD);
+}
+
+TEST(TestOperationUnpacker, CreateNodeForTypeCreatesPagedCacheStoreNode)
+{
+    const GraphAttributes graphAttrs;
+    const auto [node, error]
+        = createNodeForType(HIPDNN_OPERATION_TYPE_PAGED_CACHE_STORE_EXT, graphAttrs);
+    EXPECT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getNodeType(), NodeType::PAGED_CACHE_STORE);
 }
 
 TEST(TestOperationUnpacker, CreateNodeForTypeCreatesSoftmaxNode)

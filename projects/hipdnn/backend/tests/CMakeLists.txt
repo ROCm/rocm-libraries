@@ -63,6 +63,9 @@ add_executable(
     descriptors/TestSoftmaxOperationDescriptor.cpp
     descriptors/TestSoftmaxOperationFromNode.cpp
     descriptors/TestGraphDescriptorSoftmax.cpp
+    descriptors/TestPagedCacheStoreOperationDescriptor.cpp
+    descriptors/TestPagedCacheStoreOperationFromNode.cpp
+    descriptors/TestGraphDescriptorPagedCacheStore.cpp
     descriptors/TestTopkOperationDescriptor.cpp
     descriptors/TestTopkOperationFromNode.cpp
     descriptors/TestGraphDescriptorTopk.cpp

@@ -475,6 +475,7 @@ inline constexpr std::array NO_COUNTING_CONVENTION{
     NodeAttributes::MoeGroupedMatmulBwdAttributes,
     // Data movement, no arithmetic.
     NodeAttributes::GatherAttributes,
+    NodeAttributes::PagedCacheStoreAttributes,
     // Linear-attention recurrences with no agreed count of their logical work yet.
     NodeAttributes::GdnAttributes,
     NodeAttributes::KdaAttributes,

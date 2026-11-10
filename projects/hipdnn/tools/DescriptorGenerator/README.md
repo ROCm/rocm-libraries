@@ -194,6 +194,7 @@ operation:
 | `moe_grouped_matmul_bwd.yaml` | MoE grouped matrix multiplication backward |
 | `gather.yaml` | Gather along one axis (index_select / embedding lookup) |
 | `topk.yaml` | Top-k selection along the last dim |
+| `paged_cache_store.yaml` | Paged KV-cache store into the SDPA paged container |
 | `rope.yaml` | Rotary position embedding (RoPE) forward |
 | `softmax.yaml` | Softmax over the last dim with optional log-sum-exp stats |
 | `sdpa.yaml` | Scaled dot-product attention forward (packer/unpacker only; Attributes class is hand-maintained — see `CLAUDE.md` "Hand-maintained ops") |
