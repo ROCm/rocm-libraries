@@ -501,6 +501,21 @@ def test_store_vector_width_4(gp_gfx1250, gfx1250_iim, assembler, capsys, level)
       assert re.search(r"^\s*ds_store_b64 ", _tdmBlock(asm, beta, slot), re.M)
 
 
+@pytest.mark.parametrize("level", _LEVELS)
+def test_store_vector_width_16_splits_32_byte_vectors(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+  """bf16 at StoreVectorWidth 16 (VectorWidthA 2) puts 32-byte vectors through the TDM block, wider than any
+  DS instruction, so it stages each D vector, and with beta != 0 reads each C vector back, with two
+  16-byte DS ops."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, StoreVectorWidth=16, VectorWidthA=2)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["StoreVectorWidth"] == 16
+  for beta, tag, op in (("0", "stage D element", "ds_store_b128"), ("1", "load C element", "ds_load_b128")):
+    lines = [line for line in _tdmBlock(asm, beta, {1: 1, 2: 16, 3: 16}[level]).splitlines() if tag in line]
+    assert lines and {line.split()[0] for line in lines} == {op}, (beta, lines[:2])
+    coords = Counter(re.search(r"%s \((\d+), (\d+)\)" % tag, line).groups() for line in lines)
+    assert set(coords.values()) == {2}, (beta, lines[:4])
+
+
 def test_dynamic_gsu_with_epilogue_vectors_at_level_3(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """GlobalSplitU=-1 with bias and ScaleAlphaVec: the direct and the OptNLL store go through the TDM
   block, and the copy of the GSU>1 partials keeps buffer_store."""
