@@ -40,13 +40,15 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     using AttentionVariant    = remove_cvref_t<typename Problem::AttentionVariant>;
     using FmhaMask            = remove_cvref_t<typename Problem::FmhaMask>;
 
-    using BlockFmhaShape             = remove_cvref_t<typename Problem::BlockFmhaShape>;
-    using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
+    using BlockFmhaShape = remove_cvref_t<typename Problem::BlockFmhaShape>;
+    using VLayout        = remove_cvref_t<typename BlockFmhaShape::VLayout>;
+    // V is read untransposed as (seqlen_k, hdim_v); codegen emits only row-major V.
+    static_assert(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>,
+                  "qr_tdm split-kv supports only row-major V");
     static constexpr bool kQLoadOnce = true; // if q_tile load whole block length (hdim) at once
     static_assert(kQLoadOnce == Policy::QLoadOnce);
-    // Both paths stage a whole (kN0 x kSubQKHeaddim) K tile per LDS buffer, so
-    // the progressive reload -- which walks that tile slice by slice -- no
-    // longer depends on K/V double buffering.
+    // Each LDS buffer holds a whole (kN0 x kSubQKHeaddim) K tile, which the
+    // progressive reload walks slice by slice.
     static constexpr bool kKLoadOnce = true;
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
@@ -59,6 +61,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     static constexpr index_t kQKHeaddim    = BlockFmhaShape::kQKHeaddim;
     static constexpr index_t kSubQKHeaddim = BlockFmhaShape::kSubQKHeaddim;
     static constexpr index_t kNWarp        = BlockFmhaShape::Gemm0BlockWarps::at(I1);
+    // Softmax reads S straight from the gemm0 accumulators and MakePForGemm1
+    // relies on aligned lanes; codegen pairs qr_tdm only with one N warp.
+    static_assert(kNWarp == 1, "qr_tdm split-kv supports only one warp along N");
 
     // 512 is the last head dim this pipeline can stage: its arena needs a whole
     // 320 KiB of LDS, i.e. one workgroup per CU. See QrTdmLdsArenaLayout's
@@ -118,12 +123,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     // ... together with tensor distribution. tensor dist should able to overwrite this
     static constexpr index_t kAlignmentQ = Policy::template GetAlignmentQ<Problem>();
     static constexpr index_t kAlignmentK = Policy::template GetAlignmentK<Problem>();
-    static constexpr index_t kAlignmentV = []() {
-        if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
-            return Policy::template GetAlignmentV<Problem>();
-        else
-            return kPadSeqLenK ? 1 : Policy::template GetAlignmentV<Problem>();
-    }();
+    static constexpr index_t kAlignmentV = Policy::template GetAlignmentV<Problem>();
 
     static constexpr index_t kAlignmentO = Policy::template GetAlignmentO<Problem>();
     // Read by fmha_fwd_splitkv_kernel.hpp when it builds the o_acc dram window.
@@ -168,10 +168,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     static constexpr const char* name = "qr_tdm";
 
     // Progressive K reload: pull the next four K accesses back into k_tile once
-    // the WMMA sweep has consumed the fragments they overwrite. Both the single
-    // and the double K/V LDS buffer mainloops run this from their gemm0
-    // after-warp callback, so the reload shape, barrier mask and traversal stay
-    // defined in one place.
+    // the WMMA sweep has consumed the fragments they overwrite. Run from the
+    // gemm0 after-warp callback.
     template <typename Window, typename Tile, index_t NIter>
     CK_TILE_DEVICE static void
     ReloadProgressiveKFragment(Window& k_lds_read_window, Tile& k_tile, number<NIter>)
@@ -263,8 +261,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
             reinterpret_cast<KDataType*>(static_cast<char*>(smem_arena) + Layout::kK0Offset);
         auto* smem_ptrk1 =
             reinterpret_cast<KDataType*>(static_cast<char*>(smem_arena) + Layout::kK1Offset);
-        auto* smem_ptrs =
-            reinterpret_cast<SaccDataType*>(static_cast<char*>(smem_arena) + Layout::kSOffset);
         auto* smem_ptrv =
             reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) + Layout::kV0Offset);
         static_assert(
@@ -538,18 +534,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                              {0, 0},
                              Policy::template MakeKRegTileDistribution<Problem>());
 
-        // S tile in LDS
-        auto s_lds = make_tensor_view<address_space_enum::lds>(
-            reinterpret_cast<SaccDataType*>(smem_ptrs),
-            Policy::template MakeSLdsBlockDescriptor<Problem>());
-        auto s_write_lds_window = make_tile_window(
-            s_lds, Policy::template MakeSLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
-        auto s_read_lds_window =
-            make_tile_window(s_lds,
-                             Policy::template MakeSLdsBlockDescriptor<Problem>().get_lengths(),
-                             {0, 0},
-                             Policy::template MakeSRegTileDistribution<Problem>());
-
         // V tile in LDS: loaded via load_tile_tdm (same TDM machinery as Q/K),
         // with V's DRAM dist switched to trivial tile-major and the V LDS read
         // view kept plain row-major (matches the write view).
@@ -568,8 +552,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         // plain box per V tile) and lets the existing MakeVRegTileDistribution
         // outer-dist + QuadInputEncoding suffix (TransposedDstrEncode) drive
         // ds_load_tr_b128 with per-lane VOFFSETs that satisfy the WMMA B
-        // operand expected pattern. Verified end-to-end on ABC + multi-stride
-        // GQA + d-sweep (d <= 128).
+        // operand expected pattern.
         auto v_lds_read_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<VDataType*>(smem_ptrv),
             Policy::template MakeVLdsBlockDescriptor<Problem>());
@@ -872,20 +855,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
             move_tile_window(bias_dram_window, {0, kN0});
 
             // Gemm1
-            auto s_new = [&]() {
-                if constexpr(kNWarp > 1)
-                {
-                    auto s = cast_tile<SMPLComputeDataType>(s_acc); // S{j}
-
-                    store_tile(s_write_lds_window, s);
-                    block_sync_lds();
-                    return load_tile(s_read_lds_window);
-                }
-                else
-                {
-                    return cast_tile<SMPLComputeDataType>(s_acc); // S{j}
-                }
-            }();
+            auto s_new = cast_tile<SMPLComputeDataType>(s_acc); // S{j}
 
             auto m_local = block_tile_reduce<SMPLComputeDataType>(
                 s_new,
