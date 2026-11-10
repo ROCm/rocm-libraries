@@ -134,6 +134,7 @@ jobs:
       THEROCK_RUN_ID: ${{ github.run_id }}-host-asan-${{ matrix.family }}
     steps:
       - name: Checkout TheRock repository
+        # TheRock is at the workspace root, so ./.github/actions/... uses its actions.
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
