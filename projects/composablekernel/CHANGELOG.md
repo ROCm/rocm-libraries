@@ -27,6 +27,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added a Tile Engine Stream-K configuration for the gfx1250 TDM pipelines (comp_tdm, comp_tdm_v2 and comp_tdm_v3; persistent and non-persistent; atomic, linear and tree reduction), a Stream-K workgroup budget option (`--budget-pct`) to the Stream-K dispatcher benchmark, and the gfx1250 TDM pipelines with persistent and non-persistent kernels to the Stream-K dispatcher GPU correctness test.
 * Added batched GEMM to CK Tile GEMM Stream-K: `StreamKHostArgs` takes a batch count and A, B and C batch strides, and the data-parallel and Stream-K work, persistent or not, is shared over the output tiles of all batches with every reduction strategy.
 * Added the gfx1250 comp_tdm_v3 and comp_tdm_pc pipelines to CK Tile batched GEMM, in the CK Tile dispatcher and the Tile Engine.
+* Added batched Stream-K to the CK Tile dispatcher batched GEMM bridge and its Tile Engine benchmark (`batched_gemm_full_benchmark.py`): Stream-K sweep configs for gfx9 and gfx1250 (compv3, compv4, mem, comp_tdm, comp_tdm_v2, comp_tdm_v3) and the `--reduction-strategy` and `--budget-pct` options.
 
 ### Changed
 

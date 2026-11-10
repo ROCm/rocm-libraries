@@ -2894,6 +2894,58 @@ def _arch_filter_accepts(
 
 # Stream-K reduction strategies the codegen can emit (atomic/linear/tree).
 STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
+# The Stream-K and batched ctypes libs read a Stream-K kernel's workgroup budget
+# from this variable at each launch, in percent of CUs x occupancy (default 100).
+STREAMK_BUDGET_ENV = "CK_TILE_STREAMK_BUDGET_PCT"
+
+
+def add_streamk_args(parser) -> None:
+    """--reduction-strategy and --budget-pct of the full-benchmark drivers that run
+    Stream-K kernels; read --budget-pct back with parse_streamk_budgets()."""
+    parser.add_argument(
+        "--reduction-strategy",
+        choices=STREAMK_REDUCTION_STRATEGIES,
+        default=None,
+        help="Override the reduction strategy of the Stream-K configs; linear/tree "
+        "reduce partials in FP32",
+    )
+    parser.add_argument(
+        "--budget-pct",
+        default="100",
+        help="Comma-list of Stream-K workgroup budgets, in percent of the kernel's "
+        "default (CUs x occupancy, 100); each Stream-K kernel x problem runs once per "
+        "value (e.g. 100,75,50,25), any other kernel once",
+    )
+
+
+def parse_streamk_budgets(parser, args) -> List[int]:
+    """The --budget-pct values; a parser error unless all are integers in 1..100."""
+    try:
+        pcts = [int(p) for p in str(args.budget_pct).split(",") if p.strip()]
+    except ValueError:
+        pcts = []
+    if not pcts or any(not 0 < p <= 100 for p in pcts):
+        parser.error("--budget-pct values must be integers in 1..100")
+    return pcts
+
+
+def streamk_work_units(problems, pairs, built_kernels, batch_size, budget_pcts, dims):
+    """(problem index, problem, kernel batch, Stream-K budget) units of a
+    full-benchmark driver: per problem, its kernels (``pairs``, indices into
+    ``built_kernels`` = [(config, lib)]) in batches of ``batch_size``; a batch of
+    Stream-K kernels once per budget in ``budget_pcts``, any other batch once with
+    budget None. The problem keeps the keys in ``dims``."""
+    units = []
+    for prob_idx, (prob, idx) in enumerate(zip(problems, pairs)):
+        prob_dict = {k: int(prob[k]) for k in dims}
+        for budgets, streamk in ((budget_pcts, True), ([None], False)):
+            kernels = [
+                i for i in idx if (built_kernels[i][0].variant == "stream_k") == streamk
+            ]
+            for start in range(0, len(kernels), batch_size):
+                batch = [(i, *built_kernels[i]) for i in kernels[start : start + batch_size]]
+                units.extend((prob_idx, prob_dict, batch, b) for b in budgets)
+    return units
 
 
 def unique_by_name(configs: List[GemmKernelConfig]) -> List[GemmKernelConfig]:

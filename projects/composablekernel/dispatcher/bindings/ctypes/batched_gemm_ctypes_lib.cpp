@@ -29,10 +29,16 @@
  * drives ``SelectedKernel::launch`` with the SAME ``stream_config`` the Tile
  * Engine batched_gemm profiler uses -- a prerequisite for a fair A/B timing
  * comparison (the earlier version launched with defaults cold=3/repeat=10).
+ *
+ * A Stream-K kernel (the codegen's stream_k variant) runs the same batched
+ * problem: it launches with ``ck_tile::StreamKHostArgs`` carrying the batch
+ * count and strides, no split-K, and the workgroup budget the Stream-K library
+ * reads (CK_TILE_STREAMK_BUDGET_PCT, percent of CUs x occupancy, default 100).
  */
 
 #include <hip/hip_runtime.h>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -95,6 +101,81 @@ default_stride(std::int64_t rows, std::int64_t cols, std::int64_t provided, bool
 // types (not the layout aliases) into the global namespace, so we read layout
 // from the macros rather than std::is_same_v<ALayout, ...>.
 inline bool operand_is_row_major(const char* layout_char) { return layout_char[0] == 'r'; }
+
+// The Stream-K kernels the codegen emits expose their kernel type as StreamKGemmKernel.
+template <typename Kernel, typename = void>
+struct is_streamk_kernel : std::false_type
+{
+};
+template <typename Kernel>
+struct is_streamk_kernel<Kernel, std::void_t<typename Kernel::StreamKGemmKernel>> : std::true_type
+{
+};
+
+// Launches Kernel on device buffers: a Stream-K kernel with StreamKHostArgs (no split-K, the
+// workgroup budget from CK_TILE_STREAMK_BUDGET_PCT), any other with BatchedGemmHostArgs.
+template <typename Kernel>
+float launch_batched(const void* a,
+                     const void* b,
+                     void* c,
+                     ck_tile::index_t k_batch,
+                     ck_tile::index_t M,
+                     ck_tile::index_t N,
+                     ck_tile::index_t K,
+                     ck_tile::index_t stride_a,
+                     ck_tile::index_t stride_b,
+                     ck_tile::index_t stride_c,
+                     std::int64_t batch_stride_a,
+                     std::int64_t batch_stride_b,
+                     std::int64_t batch_stride_c,
+                     ck_tile::index_t batch_count,
+                     const ck_tile::stream_config& stream)
+{
+    if constexpr(is_streamk_kernel<Kernel>::value)
+    {
+        if(k_batch != 1)
+        {
+            throw std::runtime_error("Stream-K takes no split-K: k_batch must be 1");
+        }
+        const ck_tile::StreamKHostArgs args{a,
+                                            b,
+                                            c,
+                                            M,
+                                            N,
+                                            K,
+                                            stride_a,
+                                            stride_b,
+                                            stride_c,
+                                            batch_stride_a,
+                                            batch_stride_b,
+                                            batch_stride_c,
+                                            batch_count};
+        const char* budget = std::getenv("CK_TILE_STREAMK_BUDGET_PCT");
+        return Kernel::launch(
+            args, stream, budget != nullptr && *budget != '\0' ? std::atoi(budget) : 100);
+    }
+    else
+    {
+        // k_batch (split-K) is a real capability: Old-TE batched_gemm passes split_k_
+        // through BatchedGemmHostArgs, so we thread it here too (default 1 == no split).
+        return Kernel::launch(
+            ck_tile::BatchedGemmHostArgs{a,
+                                         b,
+                                         c,
+                                         k_batch,
+                                         M,
+                                         N,
+                                         K,
+                                         stride_a,
+                                         stride_b,
+                                         stride_c,
+                                         static_cast<ck_tile::index_t>(batch_stride_a),
+                                         static_cast<ck_tile::index_t>(batch_stride_b),
+                                         static_cast<ck_tile::index_t>(batch_stride_c),
+                                         batch_count},
+            stream);
+    }
+}
 
 #ifdef GEMM_KEY_LAYOUT_A
 constexpr const char* kLayoutA = GEMM_KEY_LAYOUT_A;
@@ -298,24 +379,6 @@ int dispatcher_run_batched(const void* A,
     float exec_time = -1.0f;
     try
     {
-        // k_batch (split-K) is a real capability: Old-TE batched_gemm passes
-        // split_k_ through BatchedGemmHostArgs, so we thread it here too
-        // (default 1 == no split).
-        ck_tile::BatchedGemmHostArgs args{A_dev,
-                                          B_dev,
-                                          C_dev,
-                                          kbatch,
-                                          static_cast<ck_tile::index_t>(M),
-                                          static_cast<ck_tile::index_t>(N),
-                                          static_cast<ck_tile::index_t>(K),
-                                          static_cast<ck_tile::index_t>(sa),
-                                          static_cast<ck_tile::index_t>(sb),
-                                          static_cast<ck_tile::index_t>(sc),
-                                          static_cast<ck_tile::index_t>(bsa),
-                                          static_cast<ck_tile::index_t>(bsb),
-                                          static_cast<ck_tile::index_t>(bsc),
-                                          static_cast<ck_tile::index_t>(batch_count)};
-
         // Build the stream_config to MATCH the Tile Engine batched_gemm profiler
         // (batched_gemm_profiler.hpp: {nullptr, true, log, n_warmup, n_repeat,
         // is_gpu_timer, flush_cache, rotating_count}). The struct field order is
@@ -337,7 +400,21 @@ int dispatcher_run_batched(const void* A,
                                             /*is_gpu_timer=*/true,
                                             /*flush_cache=*/do_flush,
                                             /*rotating_count=*/n_rotating};
-        exec_time = SelectedKernel::launch(args, stream);
+        exec_time = launch_batched<SelectedKernel>(A_dev,
+                                                   B_dev,
+                                                   C_dev,
+                                                   kbatch,
+                                                   static_cast<ck_tile::index_t>(M),
+                                                   static_cast<ck_tile::index_t>(N),
+                                                   static_cast<ck_tile::index_t>(K),
+                                                   static_cast<ck_tile::index_t>(sa),
+                                                   static_cast<ck_tile::index_t>(sb),
+                                                   static_cast<ck_tile::index_t>(sc),
+                                                   bsa,
+                                                   bsb,
+                                                   bsc,
+                                                   static_cast<ck_tile::index_t>(batch_count),
+                                                   stream);
     }
     catch(const std::exception& e)
     {
