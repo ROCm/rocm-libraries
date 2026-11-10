@@ -1965,39 +1965,6 @@ GetConfigEmbeddingVocab(const std::string& arch, const std::string& solver)
     return GetConfigEmbeddingTable(arch, solver).vocab;
 }
 
-MIOPEN_INTERNALS_EXPORT std::optional<std::vector<std::vector<float>>>
-TryEncodeKernelConfigsFromTable(const std::vector<std::vector<float>>& encoded_candidates,
-                                const std::string& arch,
-                                const std::string& solver)
-{
-    if(env::enabled(MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB))
-        return std::nullopt;
-
-    // Fall through on an empty batch so EncodeKernelConfigs keeps its existing (throwing)
-    // empty-input behaviour instead of returning an engaged optional of an empty vector.
-    if(encoded_candidates.empty())
-        return std::nullopt;
-
-    const auto& table = GetConfigEmbeddingTable(arch, solver);
-    if(!table.present)
-        return std::nullopt;
-
-    std::vector<std::vector<float>> result;
-    result.reserve(encoded_candidates.size());
-    for(const auto& candidate : encoded_candidates)
-    {
-        // A candidate whose encoding is not in the table (dimension drift or an un-enumerated
-        // config) returns nullopt; EncodeKernelConfigs then throws and RunAIHeuristics drops to the
-        // non-AI heuristic. There is no fdeep fallback -- the config encoders are not shipped.
-        if(candidate.size() != table.key_dim)
-            return std::nullopt;
-        auto it = table.rows.find(EmbeddingKey(candidate));
-        if(it == table.rows.end())
-            return std::nullopt;
-        result.push_back(it->second);
-    }
-    return result;
-}
 } // namespace candidate_selection
 
 } // namespace tuning

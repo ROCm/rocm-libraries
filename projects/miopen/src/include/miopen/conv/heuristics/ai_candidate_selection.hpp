@@ -80,17 +80,6 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
                                                 const std::string& arch,
                                                 const std::string& solver);
 
-/// Config-tower lookup: look each raw (EncodeKernelParams) candidate up in the shipped
-/// {arch}_{solver}_kernel_config_embeddings.bin table and return the stored embeddings, replacing
-/// the whole config tower (feature engineering + fdeep). nullopt on any miss (table absent or a
-/// candidate not enumerated) so EncodeKernelConfigs throws and the caller drops to the non-AI
-/// heuristic -- there is no fdeep fallback. Keyed on the raw encoded candidate, so it must run
-/// before EngineerKernelConfigFeaturesImpl. Implemented in ai_heuristics.cpp.
-MIOPEN_INTERNALS_EXPORT std::optional<std::vector<std::vector<float>>>
-TryEncodeKernelConfigsFromTable(const std::vector<std::vector<float>>& encoded_candidates,
-                                const std::string& arch,
-                                const std::string& solver);
-
 /// Ordered (kernel_id, precomputed-embedding) vocabulary from the installed v3 config-embedding
 /// table. Empty when no v3 table is present (callers then fall back to FillValidKernels).
 /// Implemented in ai_heuristics.cpp.
@@ -219,9 +208,6 @@ public:
 
     MIOPEN_INTERNALS_EXPORT std::vector<float>
     EncodeInputFeatures(const std::map<std::string, float>& features) const;
-    MIOPEN_INTERNALS_EXPORT std::vector<std::vector<float>>
-    EncodeKernelConfigs(const std::vector<std::vector<float>>& encoded_candidates,
-                        const std::vector<std::string>* candidate_kernel_names = nullptr) const;
     MIOPEN_INTERNALS_EXPORT std::vector<std::pair<int, float>>
     SelectBestCandidateIndices(const std::vector<float>& encoded_features,
                                const std::vector<std::vector<float>>& encoded_configs) const;
@@ -235,11 +221,6 @@ private:
 
 MIOPEN_INTERNALS_EXPORT const CandidateSelectionModel&
 GetCandidateSelectionModel(const std::string& arch, const std::string& solver);
-
-MIOPEN_INTERNALS_EXPORT std::vector<std::vector<float>>
-EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_params,
-                   const CandidateSelectionMetadata& metadata,
-                   bool use_split_k);
 
 struct MIOPEN_INTERNALS_EXPORT CandidateSelectionResult
 {
@@ -263,22 +244,6 @@ struct MIOPEN_INTERNALS_EXPORT CandidateSelectionResult
     size_t GetNumCandidates() const { return kernel_indices.size(); }
     bool IsEmpty() const { return kernel_indices.empty(); }
 };
-
-MIOPEN_INTERNALS_EXPORT
-CandidateSelectionResult
-ModelSelectBestCandidate(const std::string& arch,
-                         const std::string& solver,
-                         const std::map<std::string, float>& features,
-                         const std::vector<std::vector<std::string>>& valid_kernel_params,
-                         bool use_split_k,
-                         ValidationFunc&& is_valid);
-
-MIOPEN_INTERNALS_EXPORT
-std::pair<std::vector<std::vector<std::string>>, std::vector<std::pair<int, int>>>
-ExpandKernelParamsWithSplitK(const std::vector<std::vector<std::string>>& kernels,
-                             const std::vector<int>& indexes,
-                             const std::vector<int>& split_ks,
-                             ValidationFunc&& is_valid);
 
 } // namespace candidate_selection
 } // namespace tuning

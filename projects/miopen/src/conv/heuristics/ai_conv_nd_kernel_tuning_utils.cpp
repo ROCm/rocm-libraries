@@ -328,67 +328,6 @@ std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
     return tokens;
 }
 
-// Helper: Fill indexes and kernels from valid_kernels
-void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
-                          std::vector<int>& indexes,
-                          std::vector<std::vector<std::string>>& kernels)
-{
-    indexes.clear();
-    kernels.clear();
-    for(std::size_t i = 0; i < valid_kernels.size(); ++i)
-    {
-        auto tokens = GetKernelAsTokens(valid_kernels[i]);
-
-        // Special processing for Explicit_Xdl kernels to match format of implicit GEMM kernels (and
-        // thus the format expected by the heuristics)
-        if(!tokens.empty() &&
-           tokens[0].find("DeviceGroupedConvBwdWeight_Explicit_Xdl") != std::string::npos)
-        {
-            tokens = ProcessExplicitXdlParams(tokens);
-        }
-
-        indexes.push_back(i);
-        kernels.push_back(tokens);
-    }
-}
-
-// Helper: Generate split_k values (powers of two)
-// TODO: new CK functionality will use -1 for autodeduction, so we could add -1 to the list.
-// Note that the current models have not been trained with -1 in mind, so it may not work as
-// expected.
-std::vector<int> GenerateSplitK(int max_split_k)
-{
-    std::vector<int> split_ks;
-    for(int k = 1; k <= max_split_k; k *= 2)
-        split_ks.push_back(k);
-    return split_ks;
-}
-
-// Explicit template instantiations for common types
-// Note: We instantiate with a generic lambda type for the validation function
-template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<float, bool (*)(int, int)>(
-    const miopen::ExecutionContext&,
-    const ProblemDescription&,
-    std::vector<std::string>&,
-    int&,
-    int&,
-    std::string&,
-    std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string,
-    bool (*&&)(int, int));
-
-template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<int8_t, bool (*)(int, int)>(
-    const miopen::ExecutionContext&,
-    const ProblemDescription&,
-    std::vector<std::string>&,
-    int&,
-    int&,
-    std::string&,
-    std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string,
-    bool (*&&)(int, int));
 // helper function to get a dummy execution context for when we do not have a real context
 const miopen::ExecutionContext& GetDummyCtx()
 {

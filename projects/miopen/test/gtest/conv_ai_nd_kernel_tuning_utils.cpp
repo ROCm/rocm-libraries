@@ -283,113 +283,6 @@ ConvNDKernelTuningTestName(const ::testing::TestParamInfo<ConvNDKernelTuningTest
 // Helper function for metadata encoding validation
 // Validates that all CK kernel instances can be encoded without errors
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-void ValidateMetadataEncoding(const std::string& solver_name,
-                              const std::vector<std::string>& all_ck_kernels,
-                              const std::string& device_arch)
-{
-    ASSERT_FALSE(all_ck_kernels.empty()) << "No CK kernel instances found for " << solver_name;
-    MIOPEN_LOG_I("Testing " << all_ck_kernels.size() << " total CK instances for " << solver_name);
-
-    const auto& model    = GetCandidateSelectionModel(device_arch, solver_name);
-    const auto& metadata = model.metadata();
-
-    // Build parameter token vectors for EVERY enumerated CK instance -- supported names and
-    // unknown/new names alike -- so the encoder is exercised against the full instance set,
-    // including kernels the model has never seen. Append a default split_k token where the kernel's
-    // mapping declares one (mirrors ExpandKernelParamsWithSplitK).
-    std::vector<std::vector<std::string>> kernel_params;
-    std::vector<std::string> candidate_typestrings;
-    for(const auto& typestring : all_ck_kernels)
-    {
-        auto tokens = GetKernelAsTokens(typestring);
-        if(tokens.empty())
-            continue;
-
-        const std::string& kernel_name = tokens[0];
-        try
-        {
-            const auto kernel_mapping = metadata.GetKernelStrMapping(kernel_name);
-            const bool has_split_k_mapping =
-                std::any_of(kernel_mapping.begin(), kernel_mapping.end(), [](const auto& entry) {
-                    std::string param_lower = entry.second;
-                    std::transform(param_lower.begin(),
-                                   param_lower.end(),
-                                   param_lower.begin(),
-                                   [](unsigned char c) { return std::tolower(c); });
-                    return param_lower.find("splitk") != std::string::npos;
-                });
-            if(has_split_k_mapping)
-                tokens.push_back("1"); // default split_k
-        }
-        catch(const std::exception&)
-        {
-            // Unknown kernel (no mapping): no split_k token; the encoder emits a NaN sentinel.
-        }
-
-        kernel_params.push_back(std::move(tokens));
-        candidate_typestrings.push_back(typestring);
-    }
-    ASSERT_FALSE(kernel_params.empty()) << "No tokenizable CK instances for " << solver_name;
-
-    // --- Robustness gate (must hold for any set of kernels) --------------------------------------
-    // The encoder must handle EVERY instance without throwing and emit a well-formed row per
-    // candidate: the correct length, and either fully finite or a clean all-NaN sentinel. This is
-    // the invariant the SplitK decode crash violated. A new/unknown kernel satisfies it via the
-    // graceful NaN sentinel, so adding a kernel never trips this gate -- only an encoder/decode
-    // regression does. use_split_k mirrors the token append above.
-    std::vector<std::vector<float>> encoded;
-    ASSERT_NO_THROW(encoded = EncodeKernelParams(kernel_params, metadata, /*use_split_k=*/true))
-        << "EncodeKernelParams threw for " << solver_name
-        << " -- an unencodable config must degrade gracefully (NaN sentinel), not throw";
-    ASSERT_EQ(encoded.size(), kernel_params.size())
-        << "encoder changed the candidate count (index misalignment)";
-
-    const std::size_t expected_len =
-        metadata.output_params().size() - metadata.GetConstantOutputIndices().size();
-
-    std::vector<std::string> unencodable_kernels;
-    for(size_t i = 0; i < encoded.size(); ++i)
-    {
-        EXPECT_EQ(encoded[i].size(), expected_len)
-            << "candidate encoded to the wrong length: " << candidate_typestrings[i];
-
-        const std::size_t nan_in_row = static_cast<std::size_t>(std::count_if(
-            encoded[i].begin(), encoded[i].end(), [](float v) { return std::isnan(v); }));
-        // Well-formed == fully finite OR a clean all-NaN sentinel. A partial mix means the decode
-        // produced garbage for part of the row -- a real robustness regression.
-        const bool clean = nan_in_row == 0 || nan_in_row == encoded[i].size();
-        EXPECT_TRUE(clean) << "candidate produced a partial (mixed finite/NaN) encoding ("
-                           << nan_in_row << "/" << encoded[i].size()
-                           << "), indicating a decode regression: " << candidate_typestrings[i];
-
-        if(!encoded[i].empty() && nan_in_row == encoded[i].size())
-            unencodable_kernels.push_back(candidate_typestrings[i]);
-    }
-
-    // At least one instance must be encodable, else the model/metadata is broken. This is not a
-    // per-kernel coverage gap: a single added kernel cannot make every instance unencodable.
-    ASSERT_LT(unencodable_kernels.size(), encoded.size())
-        << "No CK instance is encodable by the model for " << solver_name;
-
-    // --- Coverage report (informational, never fails) --------------------------------------------
-    // Instances the current model cannot encode are ranked last at runtime (graceful) and signal
-    // that a retrain is due. This is EXPECTED when new kernels land before the model is updated, so
-    // it must NOT fail the build -- retraining is out of scope for a kernel-adding PR.
-    if(!unencodable_kernels.empty())
-    {
-        MIOPEN_LOG_W("[ai-coverage] "
-                     << solver_name << ": " << unencodable_kernels.size() << " / " << encoded.size()
-                     << " CK instances are not encodable by the current model (ranked last at "
-                        "runtime; retrain to cover them). Sample:");
-        for(size_t i = 0; i < unencodable_kernels.size() && i < 10; ++i)
-            MIOPEN_LOG_W("[ai-coverage]   " << unencodable_kernels[i]);
-    }
-    else
-    {
-        MIOPEN_LOG_I("[ai-coverage] " << solver_name << ": all " << encoded.size()
-                                      << " CK instances are encodable by the current model");
-    }
-}
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 } // anonymous namespace
@@ -737,13 +630,6 @@ TEST_F(GPU_ConvNDKernelTuningUtils_FP32, GetKernelAsTokens_Test)
     ASSERT_TRUE(empty.empty());
 }
 
-TEST_F(GPU_ConvNDKernelTuningUtils_FP32, GenerateSplitK_Test)
-{
-    auto split_ks             = GenerateSplitK(8);
-    std::vector<int> expected = {1, 2, 4, 8};
-    ASSERT_EQ(split_ks, expected);
-}
-
 TEST_F(GPU_ConvNDKernelTuningUtils_FP32, ProcessExplicitXdlParams_Test)
 {
     // Test case matching the Python preprocessing logic
@@ -797,37 +683,6 @@ TEST_F(GPU_ConvNDKernelTuningUtils_FP32, ProcessExplicitXdlParams_EmptyInput_Tes
     ASSERT_TRUE(result.empty());
 }
 
-TEST_F(GPU_ConvNDKernelTuningUtils_FP32, FillHeuristicKernels_WithExplicitXdl_Test)
-{
-    // Test that FillHeuristicKernels applies ProcessExplicitXdlParams for Explicit_Xdl kernels
-    std::vector<std::string> valid_kernels = {
-        "DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<Default,CRR>,"
-        "BlkSize:256,BlkTile:256x256x32,WaveTile:32x32,WaveMap:4x4,VmemReadVec:8x8,"
-        "BlkGemmPipelineScheduler:Intrawave,BlkGemmPipelineVersion:v4,"
-        "BlkGemmPipelinePrefetchStages:3,1>",
-        "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>"};
-
-    std::vector<int> indexes;
-    std::vector<std::vector<std::string>> kernels;
-
-    FillHeuristicKernels(valid_kernels, indexes, kernels);
-
-    ASSERT_EQ(kernels.size(), 2u);
-
-    // First kernel should be processed by ProcessExplicitXdlParams
-    EXPECT_EQ(kernels[0].size(), 16u)
-        << "Explicit_Xdl kernel should have 16 parameters after processing";
-    EXPECT_EQ(kernels[0][0], "DeviceGroupedConvBwdWeight_Explicit_Xdl");
-    EXPECT_EQ(kernels[0][2], "256"); // BlkSize value
-    EXPECT_EQ(kernels[0][3], "256"); // First part of BlkTile
-    EXPECT_EQ(kernels[0][4], "256"); // Second part of BlkTile
-    EXPECT_EQ(kernels[0][5], "32");  // Third part of BlkTile
-
-    // Second kernel should NOT be processed (regular kernel)
-    EXPECT_GT(kernels[1].size(), 0u);
-    EXPECT_EQ(kernels[1][0], "DeviceGroupedConvBwdWeight_Xdl_CShuffle");
-}
-
 // ------------------- AI Model Tests (Architecture-Dependent) -------------------
 
 class GPU_ConvNDKernelTuningAI_Base : public GPU_ConvNDKernelTuning_Base
@@ -877,64 +732,6 @@ TEST_P(GPU_ConvNDKernelTuningAI_FP32, CandidateSelectionModel_Test)
     ASSERT_FALSE(meta.output_params().empty());
 }
 
-TEST_P(GPU_ConvNDKernelTuningAI_FP32, RunParameterPredictionModel_Test)
-{
-    auto problem =
-        (spatial_dim == 3)
-            ? GetReusable3DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights)
-            : GetReusable2DProblemDescription(miopenFloat,
-                                              miopen::conv::Direction::BackwardWeights);
-
-    int index = 0, split_k = 1;
-    std::string kernel_id;
-    std::vector<std::string> valid_kernels;
-    std::string test_solver = GetSolverName(spatial_dim, miopen::conv::Direction::BackwardWeights);
-
-    auto [ai_success, result] =
-        miopen::solver::conv::RunParameterPredictionModel<float>(ctx,
-                                                                 problem,
-                                                                 valid_kernels,
-                                                                 index,
-                                                                 split_k,
-                                                                 kernel_id,
-                                                                 fill_valid_kernels,
-                                                                 test_solver,
-                                                                 accept_all_combinations);
-
-    ASSERT_TRUE(ai_success);
-    ASSERT_FALSE(kernel_id.empty());
-}
-
-TEST_P(GPU_ConvNDKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
-{
-    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)> empty_kernels =
-        [](const miopen::conv::ProblemDescription&) { return std::vector<std::string>{}; };
-
-    auto problem =
-        (spatial_dim == 3)
-            ? GetReusable3DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights)
-            : GetReusable2DProblemDescription(miopenFloat,
-                                              miopen::conv::Direction::BackwardWeights);
-    int index = 0, split_k = 1;
-    std::string kernel_id;
-    std::vector<std::string> valid_kernels;
-    std::string test_solver = GetSolverName(spatial_dim, miopen::conv::Direction::BackwardWeights);
-
-    auto [ai_success, result] =
-        miopen::solver::conv::RunParameterPredictionModel<float>(ctx,
-                                                                 problem,
-                                                                 valid_kernels,
-                                                                 index,
-                                                                 split_k,
-                                                                 kernel_id,
-                                                                 empty_kernels,
-                                                                 test_solver,
-                                                                 accept_all_combinations);
-
-    ASSERT_FALSE(ai_success);
-    ASSERT_TRUE(kernel_id.empty());
-}
-
 // ------------------- Metadata Encoding Validation Tests -------------------
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -968,54 +765,6 @@ protected:
         GPU_ConvNDKernelTuningAI_Base::SetUp();
     }
 };
-
-TEST_F(GPU_Conv2DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Wrw_Test)
-{
-    ValidateMetadataEncoding(
-        "ConvHipImplicitGemmGroupWrwXdlops",
-        GetAllKernelTypeStringsFor(miopen::solver::CKSolverType::GrpConvWrw, device_arch),
-        device_arch);
-}
-
-TEST_F(GPU_Conv2DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Fwd_Test)
-{
-    ValidateMetadataEncoding(
-        "ConvHipImplicitGemmGroupFwdXdlops",
-        GetAllKernelTypeStringsFor(miopen::solver::CKSolverType::GrpConvFwd, device_arch),
-        device_arch);
-}
-
-TEST_F(GPU_Conv2DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Bwd_Test)
-{
-    ValidateMetadataEncoding(
-        "ConvHipImplicitGemmGroupBwdXdlops",
-        GetAllKernelTypeStringsFor(miopen::solver::CKSolverType::GrpConvBwd, device_arch),
-        device_arch);
-}
-
-TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Wrw_Test)
-{
-    ValidateMetadataEncoding(
-        "ConvHipImplicitGemm3DGroupWrwXdlops",
-        GetAllKernelTypeStringsFor(miopen::solver::CKSolverType::GrpConv3dWrw, device_arch),
-        device_arch);
-}
-
-TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Fwd_Test)
-{
-    ValidateMetadataEncoding(
-        "ConvHipImplicitGemm3DGroupFwdXdlops",
-        GetAllKernelTypeStringsFor(miopen::solver::CKSolverType::GrpConv3dFwd, device_arch),
-        device_arch);
-}
-
-TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Bwd_Test)
-{
-    ValidateMetadataEncoding(
-        "ConvHipImplicitGemm3DGroupBwdXdlops",
-        GetAllKernelTypeStringsFor(miopen::solver::CKSolverType::GrpConv3dBwd, device_arch),
-        device_arch);
-}
 
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
