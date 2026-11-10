@@ -31,7 +31,7 @@ import rocisa
 from rocisa.code import Module, SignatureBase
 from rocisa.container import TENSORModifiers, sgpr
 from rocisa.enum import CacheScope, NonVolatile, TemporalHint
-from rocisa.instruction import TensorLoadToLds
+from rocisa.instruction import TensorLoadToLds, TensorStoreFromLds
 
 _ISA = (12, 5, 0)
 
@@ -78,6 +78,24 @@ _CASES = [
 @pytest.mark.parametrize("tensor, four_groups, expected", _CASES)
 def test_rocisa_tostring(tensor, four_groups, expected):
     assert str(_load(tensor, four_groups)) == expected + "\n"
+
+
+_STORE_CASES = [
+    (None, "tensor_store_from_lds s[0:3], s[4:11]"),
+    (TENSORModifiers(th=TemporalHint.TH_WB, isStore=True), "tensor_store_from_lds s[0:3], s[4:11] th:TH_STORE_WB"),
+    (TENSORModifiers(scope=CacheScope.SCOPE_DEV, th=TemporalHint.TH_NT_WB, nv=NonVolatile.NV, isStore=True),
+     "tensor_store_from_lds s[0:3], s[4:11] th:TH_STORE_NT_WB scope:SCOPE_DEV nv"),
+]
+
+
+@pytest.mark.parametrize("tensor, expected", _STORE_CASES)
+def test_store_rocisa_tostring(tensor, expected):
+    assert str(TensorStoreFromLds(sgpr(0, 4), sgpr(4, 8), None, None, tensor=tensor)) == expected + "\n"
+
+
+def test_store_rejects_half_of_the_second_group_pair():
+    with pytest.raises(ValueError):
+        TensorStoreFromLds(sgpr(0, 4), sgpr(4, 8), sgpr(12, 4), None)
 
 
 def test_modifier_survives_copy_and_pickle():
