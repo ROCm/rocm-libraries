@@ -50,6 +50,7 @@ add_library(
     descriptors/ProfilingControlDescriptor.cpp
     descriptors/ResampleBwdOperationDescriptor.cpp
     descriptors/ResampleFwdOperationDescriptor.cpp
+    descriptors/RopeOperationDescriptor.cpp
     descriptors/ReductionOperationDescriptor.cpp
     descriptors/RMSNormBackwardOperationDescriptor.cpp
     descriptors/RMSNormOperationDescriptor.cpp

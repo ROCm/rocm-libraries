@@ -23,6 +23,7 @@
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleBwdAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
+#include <hipdnn_frontend/attributes/RopeAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
 #include <nanobind/nanobind.h>
@@ -748,6 +749,39 @@ void attributesBindings(nb::module_& m)
         .def("get_output", &graph::MoeGroupedMatmulAttributes::get_output)
         .def("get_mode", &graph::MoeGroupedMatmulAttributes::get_mode)
         .def("get_top_k", &graph::MoeGroupedMatmulAttributes::get_top_k);
+
+    // RopeAttributes
+    nb::class_<graph::RopeAttributes>(m, "RopeAttributes")
+        .def(nb::init<>())
+        .def("set_name", &graph::RopeAttributes::set_name, nb::rv_policy::reference_internal)
+        .def("get_name", &graph::RopeAttributes::get_name)
+        .def("set_compute_data_type",
+             &graph::RopeAttributes::set_compute_data_type,
+             nb::rv_policy::reference_internal)
+        .def("get_compute_data_type", &graph::RopeAttributes::get_compute_data_type)
+        .def("set_x",
+             static_cast<TensorSetter<graph::RopeAttributes>>(&graph::RopeAttributes::set_x),
+             nb::rv_policy::reference_internal)
+        .def("set_freqs",
+             static_cast<TensorSetter<graph::RopeAttributes>>(&graph::RopeAttributes::set_freqs),
+             nb::rv_policy::reference_internal)
+        .def("set_y",
+             static_cast<TensorSetter<graph::RopeAttributes>>(&graph::RopeAttributes::set_y),
+             nb::rv_policy::reference_internal)
+        .def("set_output_scale",
+             &graph::RopeAttributes::set_output_scale,
+             nb::rv_policy::reference_internal)
+        .def(
+            "set_rope_dim", &graph::RopeAttributes::set_rope_dim, nb::rv_policy::reference_internal)
+        .def("set_rope_offset",
+             &graph::RopeAttributes::set_rope_offset,
+             nb::rv_policy::reference_internal)
+        .def("get_x", &graph::RopeAttributes::get_x)
+        .def("get_freqs", &graph::RopeAttributes::get_freqs)
+        .def("get_y", &graph::RopeAttributes::get_y)
+        .def("get_output_scale", &graph::RopeAttributes::get_output_scale)
+        .def("get_rope_dim", &graph::RopeAttributes::get_rope_dim)
+        .def("get_rope_offset", &graph::RopeAttributes::get_rope_offset);
 
     // PointwiseAttributes
     nb::class_<graph::PointwiseAttributes>(m, "PointwiseAttributes")

@@ -33,6 +33,7 @@
 #include "ReductionOperationDescriptor.hpp"
 #include "ResampleBwdOperationDescriptor.hpp"
 #include "ResampleFwdOperationDescriptor.hpp"
+#include "RopeOperationDescriptor.hpp"
 #include "SdpaBwdOperationDescriptor.hpp"
 #include "SdpaFwdOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
@@ -117,6 +118,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR:
         privateDesc = std::make_shared<MoeGroupedMatmulBwdOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR:
+        privateDesc = std::make_shared<RopeOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<RMSNormOperationDescriptor>();

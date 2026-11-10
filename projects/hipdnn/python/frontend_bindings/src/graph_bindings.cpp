@@ -24,6 +24,7 @@
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleBwdAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
+#include <hipdnn_frontend/attributes/RopeAttributes.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
@@ -714,6 +715,7 @@ void graphBindings(nb::module_& m)
                                std::shared_ptr<graph::TensorAttributes>,
                                graph::ReductionAttributes>(&graph::Graph::reduction))
         .def("moe_grouped_matmul", &graph::Graph::moe_grouped_matmul)
+        .def("rope", &graph::Graph::rope)
         .def("custom_op", &graph::Graph::custom_op)
 #ifdef HIPDNN_ENABLE_SDPA
         .def("sdpa",

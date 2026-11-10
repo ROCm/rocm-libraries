@@ -352,4 +352,12 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR = 38,
 
+    /**
+     * @brief RoPE forward operation descriptor
+     *
+     * Applies rotate-half rotary position embedding to a segment of the last
+     * dimension of X using raw FP32 angles from FREQS, producing Y.
+     */
+    HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR = 39,
+
 } hipdnnBackendDescriptorType_t;

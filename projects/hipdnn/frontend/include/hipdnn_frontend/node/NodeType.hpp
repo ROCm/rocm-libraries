@@ -34,7 +34,8 @@ enum class NodeType
     LAYERNORM_BACKWARD = 20,
     RESAMPLE_BWD = 21,
     MOE_GROUPED_MATMUL = 22,
-    MOE_GROUPED_MATMUL_BWD = 23
+    MOE_GROUPED_MATMUL_BWD = 23,
+    ROPE = 24,
 };
 
 } // namespace hipdnn_frontend::graph

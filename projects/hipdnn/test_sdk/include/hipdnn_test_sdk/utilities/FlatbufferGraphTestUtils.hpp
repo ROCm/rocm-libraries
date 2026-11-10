@@ -3751,6 +3751,57 @@ inline flatbuffers::FlatBufferBuilder createValidMoeGroupedMatmulBwdGraph()
     return builder;
 }
 
+// RoPE, Qwen-style partial rotary: x [1, 2, 3, 8] FLOAT, freqs [1, 1, 3, 4] FLOAT, rope_dim 4,
+// leading segment (rope_offset_ext 0), output_scale 0.5 -> y [1, 2, 3, 8]. When
+// withOffset is false, rope_offset_ext is absent (cuDNN trailing segment).
+inline flatbuffers::FlatBufferBuilder createValidRopeGraph(bool withOffset = true)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> xDims = {1, 2, 3, 8};
+    const std::vector<int64_t> xStrides = {48, 24, 8, 1};
+    const std::vector<int64_t> freqsDims = {1, 1, 3, 4};
+    const std::vector<int64_t> freqsStrides = {12, 12, 4, 1};
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        2,
+        "freqs",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &freqsStrides,
+        &freqsDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 3, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
+
+    const auto ropeOffset
+        = withOffset ? ::flatbuffers::Optional<int64_t>(0) : ::flatbuffers::Optional<int64_t>();
+    auto ropeAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateRopeAttributes(
+        builder, 1, 2, 3, 0.5f, 4, ropeOffset);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "rope",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RopeAttributes,
+        ropeAttributes.Union()));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 inline void addLinearAttentionTensor(
     flatbuffers::FlatBufferBuilder& builder,
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>&

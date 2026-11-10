@@ -24,6 +24,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleFwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RopeSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaRaggedFwdSignatureKey.hpp>
@@ -275,6 +276,8 @@ private:
             return detail::MoeGroupedMatmulSignatureKey(node, tensorMap, computeType);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes:
             return detail::MoeGroupedMatmulBwdSignatureKey(node, tensorMap, computeType);
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RopeAttributes:
+            return detail::RopeSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes:
             return detail::RMSNormFwdSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes:

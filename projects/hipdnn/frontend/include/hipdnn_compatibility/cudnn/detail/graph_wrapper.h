@@ -1014,6 +1014,16 @@ public:
         return dweight;
     }
 
+    /// @brief Adds a rotary position embedding (RoPE) forward node.
+    std::shared_ptr<Tensor_attributes> rope(std::shared_ptr<Tensor_attributes> x,
+                                            std::shared_ptr<Tensor_attributes> freqs,
+                                            RoPE_attributes attributes)
+    {
+        auto y = _graph->rope(std::move(x), std::move(freqs), std::move(attributes));
+        _mode = Mode::Native;
+        return y;
+    }
+
     // Nodes with no hipDNN engine yet.
 
     /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
@@ -1102,14 +1112,6 @@ public:
     HIPDNN_CUDNN_SHIM_FAIL_NODE(transpose,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const Transpose_attributes&),
-                                std::shared_ptr<Tensor_attributes>)
-
-    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
-    /// build_operation_graph().
-    HIPDNN_CUDNN_SHIM_FAIL_NODE(rope,
-                                (const std::shared_ptr<Tensor_attributes>&,
-                                 const std::shared_ptr<Tensor_attributes>&,
-                                 const RoPE_attributes&),
                                 std::shared_ptr<Tensor_attributes>)
 
     /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or

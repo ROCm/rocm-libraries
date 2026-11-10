@@ -1478,6 +1478,32 @@ typedef enum
     /** @} */
 
     /**
+     * @name RoPE Forward Operation Attributes (3900-3999)
+     * Attributes for HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Input tensor X [..., D] */
+    HIPDNN_ATTR_OPERATION_ROPE_FWD_XDESC = 3900,
+
+    /** @brief Raw rotation angles FREQS (FLOAT) [..., rope_dim], broadcast to X */
+    HIPDNN_ATTR_OPERATION_ROPE_FWD_FREQSDESC = 3901,
+
+    /** @brief Output tensor Y, same dims as X */
+    HIPDNN_ATTR_OPERATION_ROPE_FWD_YDESC = 3902,
+
+    /** @brief Scale applied to every output element (HIPDNN_TYPE_FLOAT, default 1.0) */
+    HIPDNN_ATTR_OPERATION_ROPE_FWD_OUTPUT_SCALE = 3903,
+
+    /** @brief Rotation width (HIPDNN_TYPE_INT64); 0 rotates the full last dim */
+    HIPDNN_ATTR_OPERATION_ROPE_FWD_ROPE_DIM = 3904,
+
+    /** @brief Start of the rotated segment (HIPDNN_TYPE_INT64); unset: D - rope_dim */
+    HIPDNN_ATTR_OPERATION_ROPE_FWD_ROPE_OFFSET_EXT = 3905,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{

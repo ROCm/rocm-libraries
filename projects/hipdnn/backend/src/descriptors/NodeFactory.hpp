@@ -24,6 +24,7 @@
 #include "ReductionOperationDescriptor.hpp"
 #include "ResampleBwdOperationDescriptor.hpp"
 #include "ResampleFwdOperationDescriptor.hpp"
+#include "RopeOperationDescriptor.hpp"
 #include "SdpaBwdOperationDescriptor.hpp"
 #include "SdpaFwdOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"

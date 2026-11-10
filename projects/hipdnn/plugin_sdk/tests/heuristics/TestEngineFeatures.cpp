@@ -867,7 +867,7 @@ TEST(TestEngineFeatures, EveryNodeTypePublishesItsOperands)
             EXPECT_GT(operands, 0U);
         }
     }
-    EXPECT_EQ(visited, 25U);
+    EXPECT_EQ(visited, 26U);
 }
 
 TEST(TestEngineFeatures, ConvolutionBackwardDataPublishesItsOperands)
@@ -1493,6 +1493,16 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
              return graph;
          },
          256.0},
+        // 3 * y.numel (1024).
+        {[] {
+             RopeAttributesT rope;
+             rope.x_tensor_uid = 1;
+             rope.freqs_tensor_uid = 2;
+             rope.y_tensor_uid = 3;
+             rope.rope_dim = 4;
+             return single({{2, 4, 16, 8}, {1, 1, 16, 4}, {2, 4, 16, 8}}, rope);
+         },
+         3072.0},
     };
     std::set<NodeAttributes> counted;
     for(const auto& [make, flops] : cases)

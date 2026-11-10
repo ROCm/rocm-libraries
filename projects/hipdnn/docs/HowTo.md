@@ -239,6 +239,7 @@ The tool ships with validated configs for all current operations:
 | `resample_bwd.yaml` | Resample backward |
 | `moe_grouped_matmul.yaml` | MoE grouped matrix multiplication |
 | `moe_grouped_matmul_bwd.yaml` | MoE grouped matrix multiplication backward |
+| `rope.yaml` | Rotary position embedding (RoPE) forward |
 | `sdpa.yaml` | Scaled dot-product attention |
 
 These serve as references when creating a config for a new operation. Use `convolution_fwd.yaml` as the primary reference — it exercises all config features.

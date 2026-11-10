@@ -37,6 +37,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "resample_fwd_attributes_generated.h"
 #include "rmsnorm_attributes_generated.h"
 #include "rmsnorm_backward_attributes_generated.h"
+#include "rope_attributes_generated.h"
 #include "sdpa_attributes_generated.h"
 #include "sdpa_backward_attributes_generated.h"
 #include "tensor_attributes_generated.h"
@@ -92,11 +93,12 @@ enum class NodeAttributes : uint8_t {
   MoeGroupedMatmulBwdAttributes = 23,
   GdnAttributes = 24,
   KdaAttributes = 25,
+  RopeAttributes = 26,
   MIN = NONE,
-  MAX = KdaAttributes
+  MAX = RopeAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[26] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[27] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -123,13 +125,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[26] {
     NodeAttributes::MoeGroupedMatmulAttributes,
     NodeAttributes::MoeGroupedMatmulBwdAttributes,
     NodeAttributes::GdnAttributes,
-    NodeAttributes::KdaAttributes
+    NodeAttributes::KdaAttributes,
+    NodeAttributes::RopeAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[27] = {
+  static const char * const names[28] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -156,13 +159,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "MoeGroupedMatmulBwdAttributes",
     "GdnAttributes",
     "KdaAttributes",
+    "RopeAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::KdaAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::RopeAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -271,6 +275,10 @@ template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::Kda
   static const NodeAttributes enum_value = NodeAttributes::KdaAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::RopeAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::RopeAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -373,6 +381,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects
 
 template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::KdaAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::RopeAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -605,6 +617,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::KdaAttributes ?
       reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(value) : nullptr;
   }
+  hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *AsRopeAttributes() {
+    return type == NodeAttributes::RopeAttributes ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *AsRopeAttributes() const {
+    return type == NodeAttributes::RopeAttributes ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -713,6 +733,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::KdaAttributes: {
       return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::RopeAttributes: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -917,6 +941,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_flatbuffers_sdk::data_objects::KdaAttributes *attributes_as_KdaAttributes() const {
     return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::KdaAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_flatbuffers_sdk::data_objects::RopeAttributes *attributes_as_RopeAttributes() const {
+    return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RopeAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -1033,6 +1060,10 @@ template<> inline const hipdnn_flatbuffers_sdk::data_objects::GdnAttributes *Nod
 
 template<> inline const hipdnn_flatbuffers_sdk::data_objects::KdaAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::KdaAttributes>() const {
   return attributes_as_KdaAttributes();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::RopeAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::RopeAttributes>() const {
+  return attributes_as_RopeAttributes();
 }
 
 struct NodeBuilder {
@@ -1567,6 +1598,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::RopeAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -1686,6 +1721,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::RopeAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -1793,6 +1832,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(value);
       return CreateKdaAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::RopeAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(value);
+      return CreateRopeAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -1897,6 +1940,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::KdaAttributes: {
       value = new hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::RopeAttributes: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(u.value));
       break;
     }
     default:
@@ -2028,6 +2075,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::KdaAttributes: {
       auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::RopeAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::RopeAttributesT *>(value);
       delete ptr;
       break;
     }

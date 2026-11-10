@@ -890,6 +890,20 @@ void visit(const KdaAttributes& op, V& visitor)
     visitor.scalar(std::string_view("overwrite_initial_state"), static_cast<bool>(op.overwrite_initial_state()));
 }
 
+template <typename V>
+void visit(const RopeAttributes& op, V& visitor)
+{
+    visitor.tensor(std::string_view("x"), static_cast<int64_t>(op.x_tensor_uid()), false);
+    visitor.tensor(std::string_view("freqs"), static_cast<int64_t>(op.freqs_tensor_uid()), false);
+    visitor.tensor(std::string_view("y"), static_cast<int64_t>(op.y_tensor_uid()), false);
+    visitor.scalar(std::string_view("output_scale"), static_cast<double>(op.output_scale()));
+    visitor.scalar(std::string_view("rope_dim"), static_cast<int64_t>(op.rope_dim()));
+    if(const auto value = op.rope_offset_ext(); value.has_value())
+    {
+        visitor.scalar(std::string_view("rope_offset_ext"), static_cast<int64_t>(*value));
+    }
+}
+
 /// Visits @p node's operands. Returns false, visiting nothing, when the node has
 /// no attributes or a type this header predates.
 template <typename V>
@@ -897,7 +911,7 @@ bool visit(const Node& node, V&& visitor)
 {
     // Fails when NodeAttributes gains a member this header has no case for: rerun
     // scripts/gen_node_operands.py.
-    static_assert(NodeAttributes::MAX == NodeAttributes::KdaAttributes,
+    static_assert(NodeAttributes::MAX == NodeAttributes::RopeAttributes,
                   "node_operands_generated.h is stale: rerun scripts/gen_node_operands.py");
     switch(node.attributes_type())
     {
@@ -1071,6 +1085,13 @@ bool visit(const Node& node, V&& visitor)
         return false;
     case NodeAttributes::KdaAttributes:
         if(const auto* op = node.attributes_as_KdaAttributes(); op != nullptr)
+        {
+            visit(*op, visitor);
+            return true;
+        }
+        return false;
+    case NodeAttributes::RopeAttributes:
+        if(const auto* op = node.attributes_as_RopeAttributes(); op != nullptr)
         {
             visit(*op, visitor);
             return true;

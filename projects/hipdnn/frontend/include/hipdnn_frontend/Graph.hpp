@@ -99,6 +99,7 @@
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
+#include <hipdnn_frontend/attributes/RopeAttributes.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
@@ -141,6 +142,7 @@
 #include <hipdnn_frontend/node/ReductionNode.hpp>
 #include <hipdnn_frontend/node/ResampleBwdNode.hpp>
 #include <hipdnn_frontend/node/ResampleFwdNode.hpp>
+#include <hipdnn_frontend/node/RopeNode.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
@@ -6288,6 +6290,60 @@ public:
             std::make_shared<MoeGroupedMatmulBwdNode>(std::move(attributes), graph_attributes));
 
         return dweight;
+    }
+
+    /**
+     * @brief Applies rotary position embedding (RoPE) to a segment of the last dim of `x`.
+     *
+     * Rotate-half (non-interleaved) rotation of `x[..., o : o + r]`, with `D` the last dim of
+     * `x`, `r = rope_dim` (0 means `D`), `h = r / 2`, `s = output_scale` and `f` the angles
+     * broadcast from `freqs`. For `0 <= i < h`:
+     * - `y[o + i]     = s * (x[o + i] cos f[i]         - x[o + i + h] sin f[i])`
+     * - `y[o + i + h] = s * (x[o + i + h] cos f[i + h] + x[o + i] sin f[i + h])`
+     *
+     * and `y[j] = s * x[j]` outside the segment. `y` has the dims of `x` (strides follow `x`
+     * when unset). The segment start `o` is `rope_offset` when set (hipDNN extension, e.g. 0 for
+     * Llama/Qwen partial rotary) and `D - r` otherwise (cuDNN: trailing segment).
+     *
+     * @param x Input tensor, rank >= 2, `[..., D]`.
+     * @param freqs Raw rotation angles in FLOAT; same rank as `x`, each non-last dim equal to
+     *        `x`'s or 1 (broadcast), last dim `r`. Multimodal RoPE is expressed by building
+     *        per-token angles here.
+     * @param attributes Operation configuration: `set_output_scale()`, `set_rope_dim()` (`r`
+     *        even, `0 < r <= D`), `set_rope_offset()` (`o + r <= D`).
+     * @return Output tensor `y`.
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> rope(std::shared_ptr<TensorAttributes> x,
+                                           std::shared_ptr<TensorAttributes> freqs,
+                                           RopeAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Rope_" + std::to_string(_sub_nodes.size()));
+        }
+        // Null tensors are tolerated here so the error surfaces from pre_validate_node() as a
+        // missing-input error rather than a crash while auto-naming.
+        if(x && x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        if(freqs && freqs->get_name().empty())
+        {
+            freqs->set_name(attributes.get_name() + "::FREQS");
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_freqs(std::move(freqs));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<RopeNode>(std::move(attributes), graph_attributes));
+
+        return y;
     }
 
     /** @brief Add a custom operation to the graph

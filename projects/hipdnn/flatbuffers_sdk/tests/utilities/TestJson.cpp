@@ -237,6 +237,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid MoE grouped matmul backward graph)";
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RopeAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidRopeGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid RoPE graph)";
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GdnAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidGdnGraph();
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
@@ -360,6 +365,35 @@ TEST(TestJson, MoeGroupedMatmulBwdRoundTrip)
     EXPECT_EQ(outputs.at("dweight_tensor_uid").get<int64_t>(), 4);
 
     toJsonAndBackTestSuite(graph, "(MoE grouped matmul backward)");
+}
+
+TEST(TestJson, RopeRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidRopeGraph();
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    const auto& nodeJson = graphJson.at("nodes").at(0);
+
+    EXPECT_EQ(nodeJson.at("type").get<std::string>(), "RopeAttributes");
+    EXPECT_EQ(nodeJson.at("inputs").at("x_tensor_uid").get<int64_t>(), 1);
+    EXPECT_EQ(nodeJson.at("inputs").at("freqs_tensor_uid").get<int64_t>(), 2);
+    EXPECT_EQ(nodeJson.at("outputs").at("y_tensor_uid").get<int64_t>(), 3);
+    EXPECT_FLOAT_EQ(nodeJson.at("output_scale").get<float>(), 0.5f);
+    EXPECT_EQ(nodeJson.at("rope_dim").get<int64_t>(), 4);
+    EXPECT_EQ(nodeJson.at("rope_offset_ext").get<int64_t>(), 0);
+
+    toJsonAndBackTestSuite(graph, "(RoPE leading offset)");
+}
+
+TEST(TestJson, RopeWithoutOffsetRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidRopeGraph(false);
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+
+    EXPECT_TRUE(graphJson.at("nodes").at(0).at("rope_offset_ext").is_null());
+
+    toJsonAndBackTestSuite(graph, "(RoPE trailing segment)");
 }
 
 // GraphToJsonAndBack covers one graph per node type; these cover the second

@@ -28,6 +28,7 @@ include "moe_grouped_matmul_attributes.fbs";
 include "moe_grouped_matmul_bwd_attributes.fbs";
 include "gdn_attributes.fbs";
 include "kda_attributes.fbs";
+include "rope_attributes.fbs";
 
 // Excludes a field from the generated cache-key hash/equality (cachekey_generated.h).
 // Opt-out: an unannotated field always participates; apply only when a benchmark
@@ -84,7 +85,8 @@ union NodeAttributes {
 	MoeGroupedMatmulAttributes,
 	MoeGroupedMatmulBwdAttributes,
 	GdnAttributes,
-	KdaAttributes
+	KdaAttributes,
+	RopeAttributes
 }
 
 table Node {

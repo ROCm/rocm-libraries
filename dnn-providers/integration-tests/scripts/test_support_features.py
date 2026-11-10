@@ -55,6 +55,7 @@ from support_features import (
     resample_fwd,
     rmsnorm,
     rmsnorm_backward,
+    rope,
     sdpa,
     scalar_source,
     sdpa_backward,
@@ -787,6 +788,7 @@ class TestFeatureMatrixNames:
             "Reduction",
             "Resample",
             "RMSNorm",
+            "Rope",
         }
 
     def test_rmsnorm_backward_is_rmsnorm_not_pointwise(self) -> None:
@@ -7057,6 +7059,86 @@ def _custom_op(
         "data": list(data),
     }
     return node, tensors
+
+
+def _rope(
+    x_dims=(2, 4, 16, 8),
+    freqs_dims=(1, 1, 16, 4),
+    rope_dim=4,
+    rope_offset=0,
+    output_scale=1.0,
+    dtype="float",
+    y_dtype=None,
+    freqs_dtype="float",
+    y_dims=None,
+) -> tuple[dict, dict]:
+    tensors = {
+        1: {"uid": 1, "dims": list(x_dims), "data_type": dtype},
+        2: {"uid": 2, "dims": list(freqs_dims), "data_type": freqs_dtype},
+        3: {"uid": 3, "dims": list(y_dims or x_dims), "data_type": y_dtype or dtype},
+    }
+    node = {
+        "inputs": {"x_tensor_uid": 1, "freqs_tensor_uid": 2},
+        "outputs": {"y_tensor_uid": 3},
+        "output_scale": output_scale,
+        "rope_dim": rope_dim,
+        "rope_offset_ext": rope_offset,
+    }
+    return node, tensors
+
+
+class TestRopeExtract:
+    PLAIN = {"dtype:fp32", "rotation:partial_leading", "freqs:broadcast", "scale:unit"}
+
+    def test_node_and_ports_cover_every_schema_field(self) -> None:
+        node, _ = _rope()
+        assert set(batchnorm.bound(node)) | {
+            "output_scale",
+            "rope_dim",
+            "rope_offset_ext",
+        } == table_fields(rope.SCHEMA_FILE, rope.SCHEMA_TABLE)
+
+    def test_plain_graph(self) -> None:
+        assert rope.extract(*_rope()) == self.PLAIN
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = rope.extract(*_rope())
+        for kwargs in (
+            {"dtype": "half", "rope_dim": 0, "freqs_dims": (2, 4, 16, 8)},
+            {"dtype": "bfloat16", "rope_offset": None, "output_scale": 0.5},
+            {"rope_offset": 2},
+        ):
+            reached |= rope.extract(*_rope(**kwargs))
+        assert reached == {f.id for f in rope.FEATURES}
+
+    def test_absent_offset_is_the_trailing_segment(self) -> None:
+        features = rope.extract(*_rope(rope_offset=None))
+        assert "rotation:partial_trailing" in features
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            ({"rope_dim": 3, "freqs_dims": (1, 1, 16, 3)}, "is not even"),
+            ({"rope_dim": 10, "freqs_dims": (1, 1, 16, 10)}, "is not even"),
+            ({"rope_dim": -2}, "is negative"),
+            ({"rope_offset": 6}, "exceeds"),
+            ({"freqs_dims": (1, 1, 16, 8)}, "last dim 8 is not 4"),
+            ({"freqs_dims": (1, 1, 8, 4)}, "do not broadcast"),
+            ({"freqs_dims": (16, 4)}, "rank 2 is not that of"),
+            ({"freqs_dtype": "half"}, "is not fp32"),
+            ({"y_dims": (2, 4, 16, 4)}, "y_tensor_uid dims"),
+            ({"y_dtype": "half"}, "is not that of x_tensor_uid"),
+        ],
+    )
+    def test_rejects(self, kwargs: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            rope.extract(*_rope(**kwargs))
+
+    def test_rejects_unbound_port(self) -> None:
+        node, tensors = _rope()
+        node["inputs"]["freqs_tensor_uid"] = None
+        with pytest.raises(FeatureError, match="freqs_tensor_uid is not bound"):
+            rope.extract(node, tensors)
 
 
 class TestCustomOpExtract:

@@ -33,6 +33,7 @@ add_executable(
     utilities/TestCpuFpReferenceMatmul.cpp
     utilities/TestCpuFpReferenceMoeGroupedMatmul.cpp
     utilities/TestCpuFpReferenceMoeGroupedMatmulBwd.cpp
+    utilities/TestCpuFpReferenceRope.cpp
     utilities/TestCpuFpReferenceReduction.cpp
     utilities/TestCpuFpReferenceInputValidation.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
@@ -93,6 +94,8 @@ add_executable(
     utilities/cpu_graph_executor/TestMoeGroupedMatmulSignatureKey.cpp
     utilities/cpu_graph_executor/TestMoeGroupedMatmulBwdPlan.cpp
     utilities/cpu_graph_executor/TestMoeGroupedMatmulBwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestRopePlan.cpp
+    utilities/cpu_graph_executor/TestRopeSignatureKey.cpp
     utilities/cpu_graph_executor/TestPointwiseOperationsCpuGraphExecutor.cpp
     utilities/cpu_graph_executor/TestGraphTensorBundle.cpp
     utilities/cpu_graph_executor/TestPlanRegistrySignatureKey.cpp

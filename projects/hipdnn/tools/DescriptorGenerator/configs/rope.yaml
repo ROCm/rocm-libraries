@@ -1,0 +1,125 @@
+operation:
+  name: "Rope"
+  class_name: "RopeOperationDescriptor"
+  fbs_table: "RopeAttributes"
+  fbs_generated_header: "rope_attributes_generated.h"
+
+  # cuDNN parity: cudnn-frontend include/cudnn_frontend/node/rope.h builds
+  # CUDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR and sets CUDNN_ATTR_OPERATION_ROPE_FWD_{XDESC,
+  # FREQSDESC, YDESC, OUTPUT_SCALE, ROPE_DIM}. rope_offset has no cuDNN equivalent (_EXT).
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_ROPE_FWD"
+
+  error_label: "RoPE"
+  packer_operation_label: "RoPE"
+  packer_finalize_label: "RoPE"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_ROPE_FWD_EXT"
+
+  frontend:
+    packer_function: "createRopeOperation"
+    unpacker_function: "unpackRopeOperation"
+    node_class: "RopeNode"
+    attributes_class: "RopeAttributes"
+
+    inputs:
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+      - name: "freqs"
+        enum_name: "FREQS"
+        required: true
+        getter_name: "get_freqs"
+        setter_name: "set_freqs"
+    outputs:
+      - name: "y"
+        enum_name: "Y"
+        required: true
+        getter_name: "get_y"
+        setter_name: "set_y"
+    graph_method_name: "rope"
+    graph_method_params:
+      - name: "x"
+        tensor_name: "x"
+      - name: "freqs"
+        tensor_name: "freqs"
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "y"
+    node_type_enum: "NodeType::ROPE"
+    node_attributes_union_type: "RopeAttributes"
+    compatibility_typedef: "RoPE_attributes"
+
+  infer_properties:
+    strategy: "same_as_input"
+
+  validation:
+    required_input_tensors:
+      - "x"
+      - "freqs"
+    required_input_dims:
+      - "x"
+      - "freqs"
+
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "XDESC"
+      required: true
+    - name: "freqs"
+      fbs_field: "freqs_tensor_uid"
+      attr_suffix: "FREQSDESC"
+      required: true
+      expected_data_type: "FLOAT"
+    - name: "y"
+      fbs_field: "y_tensor_uid"
+      attr_suffix: "YDESC"
+      required: true
+
+  data_fields:
+    - name: "output_scale"
+      fbs_field: "output_scale"
+      attr_name: "HIPDNN_ATTR_OPERATION_ROPE_FWD_OUTPUT_SCALE"
+      type: "scalar_float"
+      default_value: "1.0f"
+      required: true
+      frontend_getter: "get_output_scale()"
+      test_value: 0.5
+    - name: "rope_dim"
+      fbs_field: "rope_dim"
+      attr_name: "HIPDNN_ATTR_OPERATION_ROPE_FWD_ROPE_DIM"
+      type: "scalar_int64"
+      default_value: "0"
+      required: true
+      frontend_getter: "get_rope_dim()"
+      test_value: 4
+    - name: "rope_offset"
+      fbs_field: "rope_offset_ext"
+      attr_name: "HIPDNN_ATTR_OPERATION_ROPE_FWD_ROPE_OFFSET_EXT"
+      type: "scalar_int64"
+      required: false
+      fbs_optional: true
+      frontend_getter: "get_rope_offset()"
+      test_value: 0
+
+  tensor_array_fields: []
+
+  has_compute_data_type: false
+
+  test_data:
+    tensor_const_prefix: "K_ROPE_"
+    tensor_uids:
+      x: 9100
+      freqs: 9101
+      y: 9102
+    tensor_configs:
+      x: { dims: [2, 4, 16, 8], strides: [512, 128, 8, 1] }
+      freqs: { dims: [1, 1, 16, 4], strides: [64, 64, 4, 1], data_type: FLOAT }
+      y: { dims: [2, 4, 16, 8], strides: [512, 128, 8, 1] }
+    field_values:
+      output_scale: 0.5
+      rope_dim: 4
+      rope_offset: 0

@@ -107,6 +107,8 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(
                      HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR),
                  "HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR");
+    EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR),
+                 "HIPDNN_BACKEND_OPERATION_ROPE_FWD_DESCRIPTOR");
 
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
@@ -794,6 +796,18 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
     EXPECT_STREQ(
         hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_MATH_PREC),
         "HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_MATH_PREC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_ROPE_FWD_XDESC),
+                 "HIPDNN_ATTR_OPERATION_ROPE_FWD_XDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_ROPE_FWD_FREQSDESC),
+                 "HIPDNN_ATTR_OPERATION_ROPE_FWD_FREQSDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_ROPE_FWD_YDESC),
+                 "HIPDNN_ATTR_OPERATION_ROPE_FWD_YDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_ROPE_FWD_OUTPUT_SCALE),
+                 "HIPDNN_ATTR_OPERATION_ROPE_FWD_OUTPUT_SCALE");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_ROPE_FWD_ROPE_DIM),
+                 "HIPDNN_ATTR_OPERATION_ROPE_FWD_ROPE_DIM");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_ROPE_FWD_ROPE_OFFSET_EXT),
+                 "HIPDNN_ATTR_OPERATION_ROPE_FWD_ROPE_OFFSET_EXT");
 
     // Operation extension attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_NAME_EXT),
@@ -895,6 +909,8 @@ TEST(TestBackendEnumStringUtils, GetOperationTypeString)
                  "HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_EXT");
     EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_BWD_EXT),
                  "HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_BWD_EXT");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_ROPE_FWD_EXT),
+                 "HIPDNN_OPERATION_TYPE_ROPE_FWD_EXT");
     EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_NOT_SET_EXT),
                  "HIPDNN_OPERATION_TYPE_NOT_SET_EXT");
     EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_POINTWISE_EXT),
