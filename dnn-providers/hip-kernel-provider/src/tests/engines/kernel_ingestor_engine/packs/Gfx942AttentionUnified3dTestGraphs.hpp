@@ -20,6 +20,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 
 #include "IngestorPackTestSupport.hpp"
+#include "SdpaLayoutTestSupport.hpp"
 #include "UnifiedAttentionTestGraphs.hpp"
 
 /**
@@ -62,15 +63,6 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties gfx942Device(int cus = 304)
     return properties;
 }
 
-/// Contiguous `[B, Hq, 1, D]` (Q and O).
-inline std::vector<int64_t> decodeQoStrides(int64_t heads, int64_t headSize)
-{
-    return {heads * headSize, headSize, heads * headSize, 1};
-}
-
-/// BHSD `[B, Hkv, Skv, D]` and BSHD storage of the same logical view.
-using unified_attention::bhsdStrides;
-using unified_attention::bshdStrides;
 using unified_attention::idEndingIn;
 
 /// The mask spellings the admission table uses, as hipDNN bounds.
@@ -126,14 +118,15 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     const std::vector<int64_t> kDims = spec.kDims.value_or(kvDims);
     const std::vector<int64_t> vDims = spec.vDims.value_or(kvDims);
     const std::vector<int64_t> oDims = spec.oDims.value_or(qDims);
-    const auto qStrides
-        = spec.qStrides.value_or(decodeQoStrides(spec.numQueryHeads, spec.headSize));
-    const auto kStrides
-        = spec.kStrides.value_or(bhsdStrides(spec.numKvHeads, spec.seqLenKv, spec.headSize));
-    const auto vStrides
-        = spec.vStrides.value_or(bhsdStrides(spec.numKvHeads, spec.seqLenKv, spec.headSize));
-    const auto oStrides
-        = spec.oStrides.value_or(decodeQoStrides(spec.numQueryHeads, spec.headSize));
+    // Q and O default to contiguous [B, Hq, 1, D]: BSHD at Sq = 1, whatever seqLenQ says.
+    const auto qStrides = spec.qStrides.value_or(
+        sdpaStrides(SdpaLayout::BSHD, spec.numQueryHeads, 1, spec.headSize));
+    const auto kStrides = spec.kStrides.value_or(
+        sdpaStrides(SdpaLayout::BHSD, spec.numKvHeads, spec.seqLenKv, spec.headSize));
+    const auto vStrides = spec.vStrides.value_or(
+        sdpaStrides(SdpaLayout::BHSD, spec.numKvHeads, spec.seqLenKv, spec.headSize));
+    const auto oStrides = spec.oStrides.value_or(
+        sdpaStrides(SdpaLayout::BSHD, spec.numQueryHeads, 1, spec.headSize));
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
     const auto add = [&](int64_t uid,
