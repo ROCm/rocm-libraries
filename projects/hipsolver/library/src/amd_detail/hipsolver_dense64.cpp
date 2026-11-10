@@ -671,7 +671,7 @@ try
 
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
-    hipsolverStatus_t status;
+    hipsolverStatus_t       status;
     if(dataTypeA == HIP_R_32F && dataTypeTau == HIP_R_32F && computeType == HIP_R_32F)
     {
         status = hipsolver::rocblas2hip_status(
@@ -812,7 +812,7 @@ try
 
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
-    hipsolverStatus_t status, npvt_status;
+    hipsolverStatus_t       status, npvt_status;
     if(dataTypeA == HIP_R_32F && computeType == HIP_R_32F)
     {
         status = hipsolver::rocblas2hip_status(
@@ -981,7 +981,7 @@ try
 
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
-    hipsolverStatus_t status, npvt_status;
+    hipsolverStatus_t       status, npvt_status;
     if(dataTypeA == HIP_R_32F && dataTypeB == HIP_R_32F)
     {
         status = hipsolver::rocblas2hip_status(
@@ -1269,7 +1269,7 @@ try
 
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
-    hipsolverStatus_t status;
+    hipsolverStatus_t       status;
 
     if(dataTypeV == HIP_R_32F && dataTypeTau == HIP_R_32F && dataTypeT == HIP_R_32F
        && computeType == HIP_R_32F)
@@ -1501,7 +1501,7 @@ try
 
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
-    hipsolverStatus_t status;
+    hipsolverStatus_t       status;
 
     if(dataTypeA == HIP_R_32F && computeType == HIP_R_32F)
     {
@@ -1743,7 +1743,7 @@ try
     size_t sz;
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
-    hipsolverStatus_t status;
+    hipsolverStatus_t       status;
 
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && computeType == HIP_R_32F)
     {
@@ -2021,7 +2021,7 @@ try
     size_t sz;
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
-    hipsolverStatus_t status;
+    hipsolverStatus_t       status;
 
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && computeType == HIP_R_32F)
     {
@@ -2601,8 +2601,8 @@ try
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
 
-    hipsolverStatus_t status = HIPSOLVER_STATUS_SUCCESS;
-    int64_t strideA = int64_t(lda) * n;
+    hipsolverStatus_t status  = HIPSOLVER_STATUS_SUCCESS;
+    int64_t           strideA = int64_t(lda) * n;
     int64_t strideW = n;
     int64_t strideE = n;
 
@@ -2901,7 +2901,7 @@ try
 
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
-    hipsolverStatus_t status;
+    hipsolverStatus_t       status;
 
     if(dataTypeA == HIP_R_32F && dataTypeB == HIP_R_32F)
     {
@@ -2957,8 +2957,6 @@ try
     }
     else
     {
-        CHECK_ROCBLAS_ERROR(
-            rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice));
         status = HIPSOLVER_STATUS_INVALID_ENUM;
     }
 
@@ -3102,7 +3100,7 @@ try
 
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
-    hipsolverStatus_t status;
+    hipsolverStatus_t       status;
 
     // TODO: Update to call 64-bit versions once rocSOLVER adds rocsolver_*trtri_64
     // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int

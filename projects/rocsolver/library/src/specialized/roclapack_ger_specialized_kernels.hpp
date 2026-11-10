@@ -115,7 +115,7 @@ rocblas_status rocsolver_ger(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     rocblas_pointer_mode pmode;
-    ROCBLAS_CHECK(rocblas_get_pointer_mode(handle, &pmode));
+    THROW_IF_ROCBLAS_ERROR(rocblas_get_pointer_mode(handle, &pmode));
 
     // launch specialized kernel
     I blocksx = (m - 1) / BS2 + 1;

@@ -220,7 +220,7 @@ rocblas_status rocsolver_syevdj_heevdj_template(rocblas_handle handle,
     {
         // **** do not use D&C approach ****
 
-        ROCBLAS_CHECK(rocsolver_syevj_heevj_template<BATCHED, STRIDED, T>(
+        THROW_IF_ROCBLAS_ERROR(rocsolver_syevj_heevj_template<BATCHED, STRIDED, T>(
             handle, rocblas_esort_ascending, evect, uplo, n, A, shiftA, lda, strideA, (S)0, workE,
             20, workSplits, D, strideD, info, batch_count, workVec, workTau, (S*)work1,
             (rocblas_int*)work2, (rocblas_int*)work3, (rocblas_int*)work4));

@@ -283,7 +283,7 @@ rocblas_status rocsolver_gesvdj_notransv_template(rocblas_handle handle,
                        0, ldv_gemm, strideV_gemm, batch_count, (T**)work6_workArr);
 
         // apply eigenvalue decomposition to -A'A, obtaining V as eigenvectors
-        ROCBLAS_CHECK(rocsolver_syevj_heevj_template<false, STRIDED, T>(
+        THROW_IF_ROCBLAS_ERROR(rocsolver_syevj_heevj_template<false, STRIDED, T>(
             handle, rocblas_esort_ascending, rocblas_evect_original, rocblas_fill_upper, n, V_gemm,
             0, ldv_gemm, strideV_gemm, abstol, residual, max_sweeps, n_sweeps, S, strideS, info,
             batch_count, (T*)work1_UVtmp, (T*)work2, (SS*)work3, (rocblas_int*)work4,
@@ -325,7 +325,7 @@ rocblas_status rocsolver_gesvdj_notransv_template(rocblas_handle handle,
                        0, ldu_gemm, strideU_gemm, batch_count, (T**)work6_workArr);
 
         // apply eigenvalue decomposition to -AA', obtaining U as eigenvectors
-        ROCBLAS_CHECK(rocsolver_syevj_heevj_template<false, STRIDED, T>(
+        THROW_IF_ROCBLAS_ERROR(rocsolver_syevj_heevj_template<false, STRIDED, T>(
             handle, rocblas_esort_ascending, rocblas_evect_original, rocblas_fill_upper, m, U_gemm,
             0, ldu_gemm, strideU_gemm, abstol, residual, max_sweeps, n_sweeps, S, strideS, info,
             batch_count, (T*)work1_UVtmp, (T*)work2, (SS*)work3, (rocblas_int*)work4,

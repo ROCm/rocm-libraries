@@ -332,7 +332,7 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
             exploited somehow to improve performance must be explored in the future. The new stedc
             code will allow to do this easily as values are always ordered during the merging process.
             Running the stedcx_select_kernel would not be necessary.**/
-    ROCBLAS_CHECK(rocsolver_stedc_template<false, ISBATCHED, T>(
+    THROW_IF_ROCBLAS_ERROR(rocsolver_stedc_template<false, ISBATCHED, T>(
         handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, tmpT, 0, ldt, strideT,
         info, batch_count, work_stack, tempvect, tempgemm, tmpz, splits, workArr));
 
