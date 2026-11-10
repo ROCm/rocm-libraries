@@ -53,6 +53,7 @@ from kernels.common.conv_direct_grouped import (
     _io_type,
     dilation_reason,
     emit_direct_params,
+    one_padding_reason,
 )
 
 _WAVE = 32
@@ -184,6 +185,9 @@ def is_valid_direct_wgrad_wmma_spec(spec: DirectWgradWmmaSpec, arch: str = "gfx1
         return False, "stride 1 only"
     if p.PAD > p.KH - 1 or p.PAD > p.KW - 1:
         return False, "PAD <= K - 1"
+    why = one_padding_reason(p)  # the kernel offsets columns by PAD
+    if why is not None:
+        return False, why
     if p.total_c % 8 or p.total_k % 8:
         return False, "C and K must be multiples of 8 (16-byte chunks)"
     if spec.waves_k * spec.waves_c not in (2, 4, 8, 16):

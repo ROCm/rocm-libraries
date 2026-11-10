@@ -204,6 +204,10 @@ extern "C" bool rocke_grouped_wgrad_wmma_is_valid_spec(const rocke_grouped_wgrad
     {
         why = "PAD <= K - 1";
     }
+    else if(rocke_direct_conv_one_padding_reason(p, "", msg, sizeof msg))
+    {
+        why = msg; /* the kernel offsets columns by PAD */
+    }
     else if(pymod((int)rocke_direct_conv_problem_total_c(p), kTile))
     {
         why = "C must be a multiple of 16 (whole packed tiles)";

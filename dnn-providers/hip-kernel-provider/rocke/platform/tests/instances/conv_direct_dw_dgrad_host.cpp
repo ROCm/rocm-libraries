@@ -68,6 +68,7 @@
 #include "rocke/instance_conv_direct_grouped_wgrad_wmma.h"
 #include "rocke/instance_conv_direct_wgrad_gather.h"
 #include "rocke/instance_conv_direct_wgrad_tiled.h"
+#include "rocke/instance_conv_direct_wgrad_wmma.h"
 #include "rocke/instance_conv_fwd_small_wmma.h"
 #include "rocke/instance_conv_winograd_gemm_wmma.h"
 #include "rocke/lower_llvm.h"
@@ -317,6 +318,13 @@ static void test_wmma_kernels_refuse_per_axis_padding(void)
     rocke_fwd_smallk_wmma_spec_t smallk = rocke_fwd_smallk_wmma_spec_default();
     smallk.problem = dense_problem(32, 48, 64, 4);
     check_wmma_per_axis_padding("fwd_smallk_wmma", smallk, rocke_fwd_smallk_wmma_is_valid_spec);
+    rocke_direct_wgrad_wmma_spec_t wgrad = rocke_direct_wgrad_wmma_spec_default();
+    wgrad.problem = dense_problem(13, 40, 64, 96);
+    check_wmma_padding("direct_wgrad_wmma", wgrad, rocke_direct_wgrad_wmma_is_valid_spec);
+    rocke_grouped_wgrad_wmma_spec_t gwgrad = rocke_grouped_wgrad_wmma_spec_default();
+    gwgrad.problem = dense_problem(19, 45, 4, 4);
+    gwgrad.problem.groups = 16;
+    check_wmma_padding("grouped_wgrad_wmma", gwgrad, rocke_grouped_wgrad_wmma_is_valid_spec);
 }
 
 /* `spec` must be refused with exactly `want` (Python's reason), or accepted

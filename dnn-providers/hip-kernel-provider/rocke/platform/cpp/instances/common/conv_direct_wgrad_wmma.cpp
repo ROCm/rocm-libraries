@@ -274,6 +274,8 @@ bool rocke_direct_wgrad_wmma_is_valid_spec(const rocke_direct_wgrad_wmma_spec_t*
         rocke_spec_set_reason(reason, reason_cap, "PAD <= K - 1");
         return false;
     }
+    if(rocke_direct_conv_one_padding_reason(p, "", reason, reason_cap))
+        return false; /* the kernel offsets columns by PAD */
     if(rocke_direct_conv_problem_total_c(p) % 8 != 0
        || rocke_direct_conv_problem_total_k(p) % 8 != 0)
     {

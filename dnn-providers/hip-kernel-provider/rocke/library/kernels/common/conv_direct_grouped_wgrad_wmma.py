@@ -48,6 +48,7 @@ from kernels.common.conv_direct_grouped import (
     channel_totals_reason,
     dilation_reason,
     emit_direct_params,
+    one_padding_reason,
 )
 
 _WAVE = 32
@@ -155,6 +156,9 @@ def is_valid_grouped_wgrad_wmma_spec(spec: GroupedWgradWmmaSpec, arch: str = "gf
         return False, "stride 1 only"
     if p.PAD > p.KH - 1 or p.PAD > p.KW - 1:
         return False, "PAD <= K - 1"
+    why = one_padding_reason(p)  # the kernel offsets columns by PAD
+    if why is not None:
+        return False, why
     if p.total_c % _TILE:
         return False, "C must be a multiple of 16 (whole packed tiles)"
     if spec.waves_c not in (1, 2, 4, 8):
