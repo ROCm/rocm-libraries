@@ -146,7 +146,7 @@ namespace rocalution
     {
         // A char* would be printed as a string
         const void* addr = *ptr;
-        log_debug(0, "free_host()", addr);
+        log_debug(0, "free_pinned()", addr);
 
         free_host(ptr);
     }
