@@ -14,6 +14,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -1809,11 +1810,13 @@ public:
     /// @p fullMantissa adds 16 random low bits below each k/32 value (under 2^-6), so the
     /// operands hold values no 16-bit dtype does: an f32 object that narrowed an operand or P
     /// to 16 bits misses the f32 budget by orders of magnitude.
+    /// @p endGuarded allocates it where the next page is unmapped (EndGuardedAllocation).
     DeviceTensor(const std::vector<int64_t>& dims,
                  const std::vector<int64_t>& strides,
                  uint32_t seed,
                  bool fill,
-                 bool fullMantissa = false)
+                 bool fullMantissa = false,
+                 bool endGuarded = false)
         : _dims(dims)
         , _strides(strides)
     {
@@ -1839,13 +1842,24 @@ public:
             }
         }
 
-        EXPECT_EQ(hipSuccess, hipMalloc(&_device, bytes()));
+        if(endGuarded)
+        {
+            _guard = std::make_unique<EndGuardedAllocation>(bytes());
+            _device = _guard->get();
+        }
+        else
+        {
+            EXPECT_EQ(hipSuccess, hipMalloc(&_device, bytes()));
+        }
         EXPECT_EQ(hipSuccess, hipMemcpy(_device, _host.data(), bytes(), hipMemcpyHostToDevice));
     }
 
     ~DeviceTensor()
     {
-        static_cast<void>(hipFree(_device));
+        if(_guard == nullptr)
+        {
+            static_cast<void>(hipFree(_device));
+        }
     }
 
     DeviceTensor(const DeviceTensor&) = delete;
@@ -1963,6 +1977,7 @@ private:
     std::vector<int64_t> _strides;
     std::vector<T> _host;
     void* _device = nullptr;
+    std::unique_ptr<EndGuardedAllocation> _guard;
 };
 
 /// A constant, N(0, 1) draws or U[0, 1) draws in Q, K and V when @p spec asks for one (separate
@@ -2209,27 +2224,39 @@ void stageRdnaPacked(const SdpaGraphSpec& spec,
     const int64_t tokensKv
         = std::max<int64_t>(sdpaPackedTokens(packed.offsetsKv, spec.packedSeqLensKv), 1);
     const int64_t tokensQ = packed.tokensQ;
+    // Exact buffers end where the next page is unmapped (exactPackedBuffers).
+    const bool guard = spec.exactPackedBuffers;
     packed.q.emplace(std::vector<int64_t>{1, spec.heads, tokensQ, d},
                      rdnaTokenMajor(tokensQ, spec.heads, d),
                      0U,
-                     false);
+                     false,
+                     false,
+                     guard);
     packed.k.emplace(std::vector<int64_t>{1, spec.kvHeads, tokensKv, d},
                      rdnaTokenMajor(tokensKv, spec.kvHeads, d),
                      0U,
-                     false);
+                     false,
+                     false,
+                     guard);
     packed.v.emplace(std::vector<int64_t>{1, valueHeads, tokensKv, dv},
                      rdnaTokenMajor(tokensKv, valueHeads, dv),
                      0U,
-                     false);
+                     false,
+                     false,
+                     guard);
     packed.o.emplace(std::vector<int64_t>{1, spec.heads, tokensQ, dv},
                      rdnaTokenMajor(tokensQ, spec.heads, dv),
                      0U,
-                     false);
+                     false,
+                     false,
+                     guard);
     packed.o->fillWith(T(unwritten));
     packed.stats.emplace(std::vector<int64_t>{1, spec.heads, tokensQ, 1},
                          std::vector<int64_t>{tokensQ * spec.heads, 1, spec.heads, 1},
                          0U,
-                         false);
+                         false,
+                         false,
+                         guard);
     packed.stats->fillWith(unwritten);
     for(int64_t b = 0; b < spec.batch; ++b)
     {
@@ -6364,7 +6391,8 @@ INSTANTIATE_TEST_SUITE_P(PackedAndDropping,
                          [](const auto& info) { return info.param.name; });
 INSTANTIATE_TEST_SUITE_P(PackedRngDump,
                          TestFlydslSdpaRdnaFieldDeclines,
-                         ::testing::ValuesIn(sdpaDeclinesOver(sdpaRngDumpDeclines(), packedSpec)),
+                         ::testing::ValuesIn(sdpaDeclinesOver(sdpaPackedRngDumpDeclines(),
+                                                              packedSpec)),
                          [](const auto& info) { return info.param.name; });
 
 TEST(TestFlydslSdpaPackedKernelMatch, DropsOnTheAiwAndRdnaPrefillDropoutObjectsOnly)
@@ -9182,6 +9210,128 @@ TEST(TestGpuFlydslSdpaAiwDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrder)
     {
         SCOPED_TRACE(static_cast<int>(mask));
         spec.mask = mask;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    }
+}
+
+// The same forms at head dim 53, over the head-dim padding copies (FlydslSdpaHeadPad.hpp): each
+// copy reads and writes a sequence's own length from its table entry, so with the origins out
+// of order every sequence is copied in and its O copied back, and no token between them is
+// written.
+TEST(TestGpuFlydslSdpaRdnaDispatch, PacksSequencesAtOriginsInAnyOrderAtAHeadDimOffEight)
+{
+    SKIP_IF_NO_DEVICES();
+    auto spec = originsInAnyOrderGpuSpec();
+    spec.headDim = 53;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrderAtAHeadDimOffEight)
+{
+    SKIP_IF_NO_DEVICES();
+    auto spec = sequsedKAtKeyOriginsGpuSpec();
+    spec.headDim = 53;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrderAtAHeadDimOffEight)
+{
+    SKIP_IF_NO_DEVICES();
+    auto spec = sequsedKAtKeyOriginsGpuSpec();
+    spec.headDim = 53;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+}
+
+namespace
+{
+
+/// Packed sequences whose last is empty on the query side, the key side or both
+/// (cu_seqlens [0, 5, 9, 9], vLLM's padded batch): its table entry is the tensor's end. Every
+/// operand exactly as long as its regions, in a buffer whose next page is unmapped
+/// (exactPackedBuffers), so a load at that entry faults.
+std::vector<SdpaGraphSpec> trailingEmptySequenceSpecs(int64_t headDim)
+{
+    std::vector<SdpaGraphSpec> specs;
+    for(const auto& [lensQ, lensKv] :
+        {std::pair<std::vector<int32_t>, std::vector<int32_t>>{{5, 4, 0}, {7, 3, 0}},
+         {{5, 4, 3}, {7, 3, 0}},
+         {{5, 4, 0}, {7, 3, 2}}})
+    {
+        SdpaGraphSpec spec;
+        spec.batch = 3;
+        spec.headDim = headDim;
+        spec.heads = 4;
+        spec.kvHeads = 2;
+        spec.seqLenQ = 8;
+        spec.seqLenKv = 8;
+        spec.stats = SdpaStats::LSE;
+        setPacked(spec, lensQ, lensKv);
+        spec.exactPackedBuffers = true;
+        specs.push_back(spec);
+    }
+    return specs;
+}
+
+} // namespace
+
+// Modification 38: an empty packed sequence reads at token 0, not at its table entry.
+TEST(TestGpuFlydslSdpaRdnaDispatch, ReadsNothingPastExactBuffersForATrailingEmptySequence)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!endGuardedAllocationsAreGuarded())
+    {
+        GTEST_SKIP() << "no unmapped page past the buffers (no device virtual memory management)";
+    }
+    for(const int64_t headDim : {int64_t{64}, int64_t{128}})
+    {
+        for(auto spec : trailingEmptySequenceSpecs(headDim))
+        {
+            SCOPED_TRACE("head_dim " + std::to_string(headDim) + " lengths "
+                         + std::to_string(spec.packedSeqLensQ.back()) + "/"
+                         + std::to_string(spec.packedSeqLensKv.back()));
+            expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+                spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+            spec.dataType = DataType::HALF;
+            spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+            expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(
+                spec, F16_TOLERANCE, RdnaFamily::PREFILL);
+        }
+    }
+    // Dropping, on the gfx11 16-bit dropout objects: those at head dims up to 96 issue their Q
+    // loads before the empty KV loop's branch, so an empty sequence's row is loaded (gfx12 drops
+    // 16-bit graphs on the aiw objects).
+    if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
+    {
+        return;
+    }
+    for(auto spec : trailingEmptySequenceSpecs(64))
+    {
+        SCOPED_TRACE("dropout, lengths " + std::to_string(spec.packedSeqLensQ.back()) + "/"
+                     + std::to_string(spec.packedSeqLensKv.back()));
+        setDropout(spec, 0.2F);
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+        spec.dataType = DataType::HALF;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(
+            spec, F16_TOLERANCE, RdnaFamily::PREFILL);
+    }
+}
+
+// AOTriton's decode_addressing moves an empty sequence to token 0 on the aiw kernel.
+TEST(TestGpuFlydslSdpaAiwDispatch, ReadsNothingPastExactBuffersForATrailingEmptySequence)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!endGuardedAllocationsAreGuarded())
+    {
+        GTEST_SKIP() << "no unmapped page past the buffers (no device virtual memory management)";
+    }
+    for(const auto& spec : trailingEmptySequenceSpecs(64))
+    {
         expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
             spec, BF16_TOLERANCE, RdnaFamily::AIW);
     }

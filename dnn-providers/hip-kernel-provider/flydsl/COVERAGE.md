@@ -272,7 +272,30 @@ do not compute, declined rather than approximated.
 Tiers: GTest names prefixed `Full/` are excluded from the quick, standard and
 comprehensive tiers by `HIP_MLOPS_ENGINE_test_categories.yaml` and run only in the full
 tier; names prefixed `Comprehensive` are excluded from the quick and standard tiers and run
-in the comprehensive (nightly) and full tiers; every other case above runs in every tier.
+in the comprehensive and full tiers; every other case above runs in every tier.
+
+Which GPUs run which tier in CI (`.github/workflows/therock-multi-arch-ci.yml` and
+`therock-multi-arch-ci-nightly.yml`): pre-merge (standard tier) runs these tests on gfx94X on
+Linux and gfx110X on Windows; the nightly (comprehensive tier) on gfx94X on Linux and gfx1151 on
+Windows. Both workflows build gfx950, but neither runs the hip-kernel-provider or hipDNN tests
+there: the pre-merge gfx950 test jobs skip, and the nightly's gfx950 test shards run none of
+these suites. So a CDNA comprehensive case runs nightly on gfx942, the arch it ran on pre-merge,
+and gfx950's CDNA objects (the dual-wave kernel among them) are covered only by device runs
+outside CI, in either tier. An RDNA comprehensive case runs nightly on gfx1151 and no longer on
+gfx110X; both are `gfx11-generic` and load the same objects (REGEN.md, "Why `gfx11-generic`"),
+so the nightly runs the moved RDNA cases on the objects gfx110X ships, on another member of
+the family. The gfx1151 nightly splits these suites into four shards. In the 2026-11-10
+develop nightly, shards 1, 3 and 4 ran their RDNA cases; shard 2/4 ran on the one runner
+whose content staging failed: no FlyDSL descriptor set loaded there, so its RDNA dispatch
+cases failed with "nothing staged ... in this build's descriptor root" and its RDNA pack
+suites with "no descriptor set loaded for engine 'hipkernel:flydsl_sdpa_rdna'" (its kpack
+fixtures under `build/bin` were missing too). The 2026-11-08 nightly's shards all ran theirs.
+The staging fault is develop's, on that runner; a shard that lands there fails its RDNA cases
+instead of running them. No CI tier tests gfx90a or gfx12 (gfx1200, gfx1201) either: the CDNA
+objects on gfx90a, and the gfx12 RDNA prefill, decode and aiw objects, are covered only by device runs
+outside CI, in either tier, so the tier split changes nothing there or on gfx950. No feature
+lost its only CI arch to the move: every moved case is an RDNA prefill/decode or CDNA case.
+
 The FlyDSL SDPA cases that run in the comprehensive tier and not pre-merge:
 
 - `Comprehensive/TestGpuFlydslSdpaObjects.*/OnePerNightlyForm`: one RDNA prefill and decode
@@ -538,7 +561,7 @@ at `check_support()`, never at `execute()`.
 
 | | Effort | What it takes |
 |---|---|---|
-| THD on the decode objects; packed with lengths on aiw | medium each | Decode: the merge kernel indexes O by batch, so the row-offset table would join its arguments (a decode ABI change, every decode object rebuilt and A/B'd); a packed decode step runs on the prefill objects meanwhile. aiw packed with lengths (which is also PyTorch's `seqused_k`, §5.9): the main kernel already decodes the form (`varlen_bits` 0x1515), but it clamps a length to `Max_seqlen` rather than to the slot (`POSITION ARRAY` gives starts only), and the fill kernel needs each sequence's base and slot (a row-offset argument). Either the main kernel loads `offset[b + 1]` and clamps (its prologue changes in every object: rebuild and A/B), or the fill kernel, launched first, writes the clamped lengths to the workspace for the main kernel to read (the main kernel's code unchanged); both rebuild every aiw object, and the Q side's `INDIVIDUAL`/`ARRAY` mode is one AOTriton never tested. The `seqused_k`-only form, `seq_len_kv` without `seq_len_q` (SEM-028: Q compact, no fill), is served (§5.9). The RDNA prefill objects serve the form on gfx12 meanwhile, and they are the faster ones on decode-shaped graphs (§5.6). |
+| THD on the decode objects; packed with lengths on aiw | medium (decode); aiw engine-only | Decode: the merge kernel indexes O by batch, so the row-offset table would join its arguments (a decode ABI change, every decode object rebuilt and A/B'd); a packed decode step runs on the prefill objects meanwhile. aiw packed with lengths (which is also PyTorch's `seqused_k`, §5.9): the kernel already reads the form (`varlen_bits` 0x1515; a length clamped to `Max_seqlen_q`, and no fill launch for a packed graph), so no aiw object changes. What is missing is the engine's side: binding its query lengths, and device cases, the Q side's `INDIVIDUAL`/`ARRAY` mode among them (one AOTriton never tested). The `seqused_k`-only form, `seq_len_kv` without `seq_len_q` (SEM-028: Q compact, no fill), is served (§5.9). The RDNA prefill objects serve the form on gfx12 meanwhile, and they are the faster ones on decode-shaped graphs (§5.6). |
 | Dropout under padding with a bottom-right window or band, on gfx12 | medium | The aiw objects resolve only bottom-right causal per sequence (§5.9), and on gfx12 only they drop (§5.10). Either the aiw kernel takes each sequence's bottom-right bounds (a kernel change, every aiw object rebuilt and A/B'd), or gfx12-generic builds of the RDNA dropout twins ship (+16 objects or more, and gfx12 would no longer drop on the aiw objects alone). gfx11 and CDNA serve the graph; gfx12 serves it dense or undropped. Kept as a documented decline until a model needs it. |
 | Bias on the wide decode (576/512, 512/512) objects | small per class | A `has_bias` variant of each class, built and checked against the reference as the generic tiers' were; not built until a model needs them. |
 | A prefill schedule for absorbed MLA; a pair with a sink, or past 256, on gfx11 | medium; small per class; **large** past 256 | 192/128 prefill (modification 20), the pair tiers to 256 (modification 32), their bias objects and the 576/512 and 512/512 decode objects ship; on gfx12 §5.6's padded tiers serve any pair to 512, with a mask too. Chunked prefill at 576/512 runs on the decode objects' 16-row tiles; a prefill schedule at that width would share each K/V tile across more rows. A sink on the pair tiers is a `has_sink` row each, not built until a model needs it. A pair past 256 on gfx11 (E5b) is a kernel change, not a row: the prefill kernel's K and V tiles at 512 need 66 KB of LDS, past the 64 KiB a workgroup has, its key tile cannot shrink below 32, and the decode kernel's generic path takes no V width of its own. Kept a decline until a model needs it. A pair on the decode engine runs on the prefill pair tiers meanwhile. |
@@ -701,8 +724,9 @@ What differs, and why:
   separate pass; LDS reductions go through explicit per-wave partials. The split count is a
   pure function of the problem and the device's reported compute-unit count, so one graph
   gives the same bits on every run on a device, while two SKUs of one arch with different CU
-  counts may differ in the last bits. No test checks this yet; the follow-ups are an ISA scan
-  for atomics, a poison-differential run, and a run under a perturbed CU mask.
+  counts may differ in the last bits. `GivesTheSameBitsOnEveryLaunch` checks it on every family
+  (repeat launches with the outputs and workspace refilled between them, compared bit for bit);
+  the follow-ups are an ISA scan for atomics and a run under a perturbed CU mask.
 
 ### 5.8 Measured costs, and deferred performance work (RDNA, aiw)
 
@@ -930,10 +954,10 @@ table, the sequence extent still the longest sequence.
   (both bits 1 and 3; modification 37). `seq_len_q` alone, `padding_mask` without
   `seq_len_kv`, or a length tensor the kernels cannot read declines, and so does every packing the
   compact form declines. **aiw declines it:** its kernel could read the form (`varlen_bits`
-  STACKED, LENGTH INDIVIDUAL, POSITION ARRAY: `0x1515`), but its fill kernel addresses a
-  padded row by batch, which is another sequence's under packing, and its main kernel clamps
-  a length to `Max_seqlen_q`, not to the slot; both are aiw kernel changes (§5.4). On gfx12
-  the RDNA prefill objects serve it.
+  STACKED, LENGTH INDIVIDUAL, POSITION ARRAY: `0x1515`; a length clamped to `Max_seqlen_q`,
+  and no fill launch for a packed graph), but the engine does not take the form yet: serving
+  it needs its query lengths bound and device cases (§5.4). On gfx12 the RDNA prefill objects
+  serve it.
 - **PyTorch's `seqused_k` is packed with both lengths** (`torch.nn.attention.varlen.varlen_attn(..., seqused_k=)`,
   AOTriton's `varlen_bits` 0x150B): Q packed through `cu_seqlens_q` with `seq_len_q[b]` its own
   token count (`cu_seqlens_q[b + 1] − cu_seqlens_q[b]`), K and V packed through `cu_seqlens_k`
@@ -965,11 +989,15 @@ table, the sequence extent still the longest sequence.
   above without `seq_len_q`, against the per-sequence and CPU references),
   `MirrorsSequsedKAtKeyOriginsInAnyOrder` (the same with K's origins out of order) and the
   frontend lane's `PackedWithSeqLenKvAlone` and `RaggedOrigins/*`.
-- **Per-batch origins in any order** (#15080's ragged rules, SEM-026; RDNA modification 37,
+- **Per-batch origins in any order** (SEM-026's ragged layout rules; RDNA modification 37,
   CDNA modification 47): `TestGpuFlydsl*Dispatch.PacksSequencesAtOriginsInAnyOrder` (RDNA
   prefill, CDNA) and `...MirrorsSequsedKAtKeyOriginsInAnyOrder` (RDNA prefill, aiw, CDNA) put
   Q's and K's sequences out of order with gaps between them and a last table entry of 0; the
-  harnesses check every token no sequence owns keeps its fill. The frontend lane's
+  harnesses check every token no sequence owns keeps its fill. The `...AtAHeadDimOffEight`
+  variants (RDNA prefill and CDNA both forms, aiw the `seqused_k` one) run them at head dim 53,
+  over the head-dim padding copies (§7.12), which copy each sequence's own length from its
+  table entry in and back; the copies before they took the lengths, which sized a sequence by
+  `offset[b + 1] − offset[b]`, fail them. The frontend lane's
   `RaggedOrigins/*` cases run the same forms through `Graph::sdpa` against hipDNN's CPU
   reference graph executor, which addresses each batch at its origin for its length. The
   objects before modifications 37 and 47, which clamped a length to `offset[b + 1] −
@@ -978,7 +1006,9 @@ table, the sequence extent still the longest sequence.
   other than 1 (`OffsetsAtAStrideOfTwo`, `LengthsAtAStrideOfTwo`), offsets that count
   elements rather than tokens (`*CountingElements`), and head-major packing of Q/K/V/O or the
   LSE (`HeadMajorPacking`, `HeadMajorLse`): the kernels read int32 token offsets at
-  consecutive entries and token-major rows.
+  consecutive entries and token-major rows. All of this holds for a valid table: the caller
+  must keep each origin plus its length inside the allocation, with no two sequences
+  overlapping. The engines never read the table values on the host, so this is not checked.
 - **Tested** on gfx1201 (`TestGpuFlydslSdpaAiwDispatch.Packs*`, `...PutsEachPacked*`): the
   harness packs the dense values token-major and unpacks O and the LSE, so the per-sequence
   reference above applies unchanged; lengths 0, 1, odd and full, keyless sequences,
@@ -992,7 +1022,19 @@ table, the sequence extent still the longest sequence.
   tier, a sink, one table for every operand; packed with lengths: lengths 0, below and past
   the slot, keys cut short, with and without `padding_mask`, a sink; a slot's rows past its
   length stay unwritten. The packed buffers hold exactly the sequences' tokens, so a load past the last
-  sequence would leave the allocation. `seqused_k` itself
+  sequence would leave the allocation. An empty sequence reads at token 0, not at its table entry
+  (modification 38), so a trailing empty one (`cu_seqlens [0, 5, 9, 9]`) reads nothing past the
+  tensor whatever the compiler does with the prologue's loads. Before it, the 48 gfx11 16-bit
+  dropout objects at head dim 64 or 96 (their specialized and generic tiers) issued their Q
+  loads ahead of the empty KV loop's branch and so read one row past Q; every other RDNA
+  prefill object loads Q behind that branch, which an empty sequence takes.
+  `ReadsNothingPastExactBuffersForATrailingEmptySequence` (RDNA prefill, aiw, CDNA; the last
+  sequence empty on the query side, the key side or both; on gfx11 the RDNA prefill case also
+  drops, bf16 and f16 at head dim 64) puts every packed operand in a buffer whose next page is
+  unmapped, so a kernel that reads or writes past the tensor faults (a read one element past
+  such a buffer is a memory-access fault on gfx942 and gfx1201). On gfx1100 the gfx11 objects
+  from before modification 38 fault on its first dropping case (an illegal memory access).
+  `seqused_k` itself
   (`TestGpuFlydslSdpaRdnaDispatch.MirrorsSequsedKOnPackedKeySlots`): slots longer than
   `seqused_k` with NaN in every K and V element past it, so a read of the tail turns rows NaN;
   no mask, top-left and bottom-right; one query row; more queries than used keys;
@@ -1016,14 +1058,15 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
 | Probability 0 | the plain objects (the undropped result) | the plain objects | the plain objects |
 | RNG dump (`rng_dump`) of a dropping graph | **served**: the mask writer after the attention launch | prefill on gfx11: **served** the same way; elsewhere the graph's dropout is declined | **served** the same way, padded and packed graphs included (§7.9) |
 
-- **The mask is AOTriton's**, bit for bit from AOTriton 0.15 on: Philox4x32-10 keyed by the seed,
-  one counter per 4 keys of a (batch, query head, row) at
+- **The mask is AOTriton's**, bit for bit from AOTriton 0.14.1 (PyTorch 2.16) on: Philox4x32-10
+  keyed by the seed, one counter per 4 keys of a (batch, query head, row) at
   `offset1 + offset2 + ((b·Hq + h)·Sq + i)·cdiv(Skv, 4) + j/4`, key `j` taking word `j % 4`,
   kept iff that word as int32 exceeds `int32(f32(p − 0.5)·2³²)`. Checked against AOTriton
   b5e8cfb's `fast_dropout_mask` and the host oracle the tests use. **PyTorch 2.10 bundles
   AOTriton 0.11.1, whose words 1 and 2 sit the other way round** (columns `4g + {0, 2, 1, 3}`),
-  so its masks differ from these; from AOTriton 0.15 on they are the same. cuDNN's mapping is
-  undocumented: the promise there is the same semantics (keep with probability `1 − p`, kept
+  so its masks differ from these; AOTriton 0.14.1 (checked through PyTorch 2.16's flash path,
+  dense and packed) and b5e8cfb draw the same bits. Releases between 0.11.1 and 0.14.1 are
+  not checked. cuDNN's mapping is undocumented: the promise there is the same semantics (keep with probability `1 − p`, kept
   probabilities scaled by `1/(1 − p)`, the softmax normaliser and the LSE undropped), not the
   same bits.
 - **The threshold is computed in f32**, as AOTriton's kernel does it; PyTorch-ROCm applies
@@ -1959,7 +2002,7 @@ gfx950's 64 runs on the 128-row tile (tuned against AOTriton's own dropout cost 
 | Probability in (0, 1) with seed and offset | **served** by the `has_dropout` objects: either causal corner, bands and windows, GQA, the LSE | declines (inference; a dropping graph with one query row runs on the prefill objects) | declines; gfx950's generic dropout objects serve it |
 | Probability 0 | the plain objects (the undropped result) | the plain objects | the plain objects |
 
-- **The same mask as the aiw objects and AOTriton (≥ 0.15), bit for bit:** Philox4x32-10 (the aiw
+- **The same mask as the aiw objects and AOTriton (0.14.1 on), bit for bit:** Philox4x32-10 (the aiw
   kernel's `philox.py`, which the CDNA kernel imports as the RDNA one does: one source,
   vendored-kernel modification 38), the
   same counter layout, word order and f32 threshold (§5.10). The provider's tests run the aiw
@@ -2154,7 +2197,11 @@ changed.
   the `sdpa_head_pad` op's object (`kernels_src/kernels/head_pad/`, one per target), launched
   by the natives on the attention launch's stream, three times before it and once after; it
   moves 16-bit units, so f32 is two per element. Packed operands are copied through their own
-  token tables, slot by slot, so only rows that exist are read or written.
+  token tables, as the attention kernels read them: each sequence from its table entry, for its
+  per-batch length when the graph gives one (`seq_len_q` for Q and O, `seq_len_kv` for K and V,
+  so origins in any order and with gaps, §5.9), else for the table's difference. Only a
+  sequence's own tokens are read or written; a tensor bound as both a query-side and a key-side
+  operand with different lengths declines.
 - **Matching.** The engine's graph match, kernel match, score, workspace and prepare see a padded
   graph: Q/K/V/O at the padded width, in the padded layout, declaring 16-byte alignment, a packed
   operand's multiplier its new sequence stride; every other field is the graph's own. The scale

@@ -5,6 +5,7 @@
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
@@ -151,6 +152,96 @@ private:
     size_t _bytes = 0;
     void* _base = nullptr;
 };
+
+/// A device buffer of exactly the bytes asked for that ends where its mapping ends: the
+/// following page is reserved and never mapped, so a kernel that reads or writes one element
+/// past the buffer takes a page fault (which aborts the process) instead of reading a
+/// neighbour's memory. Built with HIP's virtual memory management; on a device without it the
+/// buffer is a plain hipMalloc and guarded() is false.
+class EndGuardedAllocation
+{
+public:
+    explicit EndGuardedAllocation(size_t bytes)
+    {
+        int device = 0;
+        int supported = 0;
+        EXPECT_EQ(hipSuccess, hipGetDevice(&device));
+        static_cast<void>(hipDeviceGetAttribute(
+            &supported, hipDeviceAttributeVirtualMemoryManagementSupported, device));
+        if(supported == 0 || bytes == 0)
+        {
+            EXPECT_EQ(hipSuccess, hipMalloc(&_ptr, std::max<size_t>(bytes, 1)));
+            return;
+        }
+        hipMemAllocationProp prop{};
+        prop.type = hipMemAllocationTypePinned;
+        prop.location.type = hipMemLocationTypeDevice;
+        prop.location.id = device;
+        size_t granularity = 0;
+        EXPECT_EQ(hipSuccess,
+                  hipMemGetAllocationGranularity(
+                      &granularity, &prop, hipMemAllocationGranularityMinimum));
+        granularity = std::max<size_t>(granularity, 1);
+        _mapped = (bytes + granularity - 1) / granularity * granularity;
+        _reserved = _mapped + granularity;
+        EXPECT_EQ(hipSuccess, hipMemAddressReserve(&_base, _reserved, 0, nullptr, 0));
+        EXPECT_EQ(hipSuccess, hipMemCreate(&_handle, _mapped, &prop, 0));
+        EXPECT_EQ(hipSuccess, hipMemMap(_base, _mapped, 0, _handle, 0));
+        hipMemAccessDesc access{};
+        access.location = prop.location;
+        access.flags = hipMemAccessFlagsProtReadWrite;
+        EXPECT_EQ(hipSuccess, hipMemSetAccess(_base, _mapped, &access, 1));
+        _ptr = static_cast<char*>(_base) + (_mapped - bytes);
+    }
+    ~EndGuardedAllocation()
+    {
+        if(_base == nullptr)
+        {
+            static_cast<void>(hipFree(_ptr));
+            return;
+        }
+        static_cast<void>(hipDeviceSynchronize());
+        static_cast<void>(hipMemUnmap(_base, _mapped));
+        static_cast<void>(hipMemRelease(_handle));
+        static_cast<void>(hipMemAddressFree(_base, _reserved));
+    }
+    EndGuardedAllocation(const EndGuardedAllocation&) = delete;
+    EndGuardedAllocation& operator=(const EndGuardedAllocation&) = delete;
+    EndGuardedAllocation(EndGuardedAllocation&&) = delete;
+    EndGuardedAllocation& operator=(EndGuardedAllocation&&) = delete;
+
+    void* get() const
+    {
+        return _ptr;
+    }
+
+    /// Whether the page past the buffer is unmapped (the device supports VMM).
+    bool guarded() const
+    {
+        return _base != nullptr;
+    }
+
+private:
+    void* _ptr = nullptr;
+    void* _base = nullptr;
+    size_t _mapped = 0;
+    size_t _reserved = 0;
+    hipMemGenericAllocationHandle_t _handle{};
+};
+
+/// Whether an EndGuardedAllocation on the current device is guarded(): false with no device or
+/// without virtual memory management, where a test of what a kernel reads past a buffer has no
+/// unmapped page to fault on and skips (as TestGpuFpReferenceSdpa.cpp's guard tests do).
+inline bool endGuardedAllocationsAreGuarded()
+{
+    int count = 0;
+    if(hipGetDeviceCount(&count) != hipSuccess || count == 0)
+    {
+        return false;
+    }
+    const EndGuardedAllocation probe(1);
+    return probe.guarded();
+}
 
 /// The output and workspace fill of a repeated launch (a determinism check): NaN, zero and a
 /// large finite value in every element width, so a launch that reads an element it did not

@@ -337,11 +337,11 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
     {
         return false;
     }
-    // Packed sequences with per-batch lengths (each table entry a slot, its rows past the length
-    // padded rows): the kernel could read them (LENGTH INDIVIDUAL, POSITION ARRAY), but its fill
-    // kernel addresses a padded row by batch, which is the next sequence's under packing, and
-    // the main kernel clamps a length to Max_seqlen_q, not to its slot. The RDNA prefill objects
-    // serve them, on gfx12 too. seq_len_kv alone (PyTorch's seqused_k, SEM-028) is served: its
+    // Packed sequences with both per-batch lengths (each sequence its length's tokens from its
+    // table entry): the kernel could read them (LENGTH INDIVIDUAL, POSITION ARRAY, a length
+    // clamped to Max_seqlen_q, and no fill launch for a packed graph), but this engine does not
+    // take the form yet: serving it needs its query lengths bound and device cases. The RDNA
+    // prefill objects serve it, on gfx12 too. seq_len_kv alone (PyTorch's seqused_k, SEM-028) is served: its
     // query rows are the packed sequences' own, so no row is padded, and the key lengths are
     // AOTriton's seqused_k (aiwVarlenArgs).
     if(binding.padded() && binding.packed()

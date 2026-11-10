@@ -251,7 +251,7 @@ sink) and O is 0.
   seed and offset1 pointers (or offset2 by value), `idropout_p` computed in f32 on the host as
   AOTriton's kernel computes it (`philox.dropout_threshold` uses double and differs in about
   3e-8 of the elements; it is not used), and `1/(1 - p)`; the seed and offset outputs stay
-  null. Its words fill each group of 4 keys in order, as AOTriton 0.15's `fast_philox`
+  null. Its words fill each group of 4 keys in order, as AOTriton's `fast_philox` from 0.14.1 on
   (0.11.1, which PyTorch 2.10 bundles, swaps words 1 and 2).
 
 The repository's `black` hook reformats these files on commit; that changes

@@ -95,6 +95,29 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/moe_fused_mega_spec_guards.cpp"
                rocke_moe_fused_mega_spec_guards)
 endif()
 
+# Universal GEMM gfx1250 rules (fp8/bf8 storage, the Tensor Data Mover, the TDM
+# K-loop traits, the cshuffle LDS budget) with their reason strings. The pybind
+# test that compares them with Python skips in CI, where the binding is not built.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/gemm_universal_spec_guards.cpp")
+  add_executable(rocke_gemm_universal_spec_guards
+                 instances/gemm_universal_spec_guards.cpp)
+  target_link_libraries(rocke_gemm_universal_spec_guards PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_gemm_universal_spec_guards PRIVATE m)
+  endif()
+  add_test(NAME rocke_gemm_universal_spec_guards
+           COMMAND rocke_gemm_universal_spec_guards)
+  set_tests_properties(rocke_gemm_universal_spec_guards
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_gemm_universal_spec_guards)
+  set_target_properties(rocke_gemm_universal_spec_guards
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_gemm_universal_spec_guards
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_gemm_universal_spec_guards)
+endif()
+
 # Depthwise dgrad entries the byte-identity gate cannot see: the lowering's
 # failure path when the kernel name overflows, the pad_w < -1 refusals and
 # the per-axis padding in the tiled dgrad kernel name.
@@ -113,6 +136,36 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/conv_direct_dw_dgrad_host.cpp")
           RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                rocke_conv_direct_dw_dgrad_host)
+endif()
+
+# Every refusal of the gfx1250 direct wgrad specs (dense wave32,
+# image-per-block, small_c, depthwise) in the C++ validators, by reason. The
+# byte-identity gate never sees a refused spec; this mirrors the Python cases
+# in library/tests/test_direct_wgrad_refusals.py. Both read the refusal texts
+# from library/tests/direct_wgrad_refusal_reasons.inc. Guarded on the sibling
+# library tree, as the platform's library installs are, not on the table: a
+# moved table must fail the build rather than drop this test.
+set(_ROCKE_WGRAD_REFUSAL_REASONS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../library/tests")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/conv_direct_wgrad_refusals_host.cpp"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../library/kernels")
+  add_executable(rocke_conv_direct_wgrad_refusals_host
+                 instances/conv_direct_wgrad_refusals_host.cpp)
+  target_include_directories(rocke_conv_direct_wgrad_refusals_host
+                             PRIVATE "${_ROCKE_WGRAD_REFUSAL_REASONS_DIR}")
+  target_link_libraries(rocke_conv_direct_wgrad_refusals_host PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_conv_direct_wgrad_refusals_host PRIVATE m)
+  endif()
+  add_test(NAME rocke_conv_direct_wgrad_refusals_host
+           COMMAND rocke_conv_direct_wgrad_refusals_host)
+  set_tests_properties(rocke_conv_direct_wgrad_refusals_host PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_conv_direct_wgrad_refusals_host)
+  set_target_properties(rocke_conv_direct_wgrad_refusals_host
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_conv_direct_wgrad_refusals_host
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_conv_direct_wgrad_refusals_host)
 endif()
 
 # Host-side stream-K partition math: the launch grid it sizes is invisible to

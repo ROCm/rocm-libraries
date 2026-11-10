@@ -16,6 +16,7 @@
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -2653,7 +2654,7 @@ INSTANTIATE_TEST_SUITE_P(PackedAndDropping,
                          [](const auto& info) { return info.param.name; });
 INSTANTIATE_TEST_SUITE_P(PackedRngDump,
                          TestFlydslSdpaCdnaFieldDeclines,
-                         ::testing::ValuesIn(sdpaDeclinesOver(sdpaRngDumpDeclines(),
+                         ::testing::ValuesIn(sdpaDeclinesOver(sdpaPackedRngDumpDeclines(),
                                                               cdnaPackedSpec)),
                          [](const auto& info) { return info.param.name; });
 
@@ -3311,6 +3312,8 @@ struct CdnaPackedOutputs
     size_t statsCount = 0;
     void* oDevice = nullptr;
     void* statsDevice = nullptr;
+    /// exactPackedBuffers: the operands' end-guarded allocations, freed with the outputs.
+    std::vector<std::shared_ptr<EndGuardedAllocation>> guarded;
 };
 
 /// Sequence bi's token si, head hi, element e of the dense @p dense (laid out by @p strides),
@@ -3367,14 +3370,28 @@ void stageCdnaPacked(const SdpaGraphSpec& spec,
     const int64_t dv = spec.valueHeadDim.value_or(d);
     packed.offsetsQ = sdpaPackedTable(spec.packedOriginsQ, spec.packedSeqLensQ);
     const auto offsetsKv = sdpaPackedTable(spec.packedOriginsKv, spec.packedSeqLensKv);
-    packed.tokensQ = sdpaPackedTokens(packed.offsetsQ, spec.packedSeqLensQ) + spec.seqLenQ;
-    const int64_t tokensKv = sdpaPackedTokens(offsetsKv, spec.packedSeqLensKv) + spec.seqLenKv;
+    // A guard of S rows past the last region, or none in exact end-guarded buffers
+    // (exactPackedBuffers), where a load or store past the tensor faults.
+    const bool exact = spec.exactPackedBuffers;
+    packed.tokensQ
+        = sdpaPackedTokens(packed.offsetsQ, spec.packedSeqLensQ) + (exact ? 0 : spec.seqLenQ);
+    const int64_t tokensKv
+        = sdpaPackedTokens(offsetsKv, spec.packedSeqLensKv) + (exact ? 0 : spec.seqLenKv);
     packed.oCount = static_cast<size_t>(packed.tokensQ * h * dv);
     packed.statsCount = static_cast<size_t>(packed.tokensQ * h);
-    const auto upload = [&allocations](void*& device, const auto& host) {
-        using Element = typename std::decay_t<decltype(host)>::value_type;
-        ASSERT_EQ(hipSuccess, hipMalloc(&device, host.size() * sizeof(Element)));
+    const auto allocate = [&](void*& device, size_t bytes) {
+        if(exact)
+        {
+            packed.guarded.push_back(std::make_shared<EndGuardedAllocation>(bytes));
+            device = packed.guarded.back()->get();
+            return;
+        }
+        ASSERT_EQ(hipSuccess, hipMalloc(&device, bytes));
         allocations.push_back(device);
+    };
+    const auto upload = [&allocate](void*& device, const auto& host) {
+        using Element = typename std::decay_t<decltype(host)>::value_type;
+        allocate(device, host.size() * sizeof(Element));
         ASSERT_EQ(
             hipSuccess,
             hipMemcpy(device, host.data(), host.size() * sizeof(Element), hipMemcpyHostToDevice));
@@ -3389,10 +3406,8 @@ void stageCdnaPacked(const SdpaGraphSpec& spec,
            packCdnaOperand(v, strides[2], offsetsKv, spec.packedSeqLensKv, tokensKv, hv, dv));
     upload(devices[FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID], packed.offsetsQ);
     upload(devices[FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID], offsetsKv);
-    ASSERT_EQ(hipSuccess, hipMalloc(&packed.oDevice, packed.oCount * sizeof(T)));
-    allocations.push_back(packed.oDevice);
-    ASSERT_EQ(hipSuccess, hipMalloc(&packed.statsDevice, packed.statsCount * sizeof(float)));
-    allocations.push_back(packed.statsDevice);
+    allocate(packed.oDevice, packed.oCount * sizeof(T));
+    allocate(packed.statsDevice, packed.statsCount * sizeof(float));
     devices[FLYDSL_SDPA_RDNA_O_UID] = packed.oDevice;
     devices[FLYDSL_SDPA_RDNA_STATS_UID] = packed.statsDevice;
     for(auto& buffer : buffers)
@@ -7161,7 +7176,7 @@ TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, KeepsANanRowNanBesidePaddedRows)
     expectCdnaMatchesReference(decode, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DECODE);
 }
 
-// Dropout (vendored-kernel modification 33): the mask AOTriton (>= 0.15) and the aiw objects
+// Dropout (vendored-kernel modification 33): the mask AOTriton (0.14.1 on) and the aiw objects
 // draw, bit for bit, checked against the test-local oracle (FlydslSdpaPhiloxOracle.hpp).
 
 TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, DropsTheOraclesMaskBitForBit)
@@ -8377,6 +8392,69 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrder)
     {
         SCOPED_TRACE(static_cast<int>(mask));
         spec.mask = mask;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+}
+
+// The two forms above at head dim 53, over the head-dim padding copies (FlydslSdpaHeadPad.hpp):
+// each copy reads and writes a sequence's own length from its table entry, so with the origins
+// out of order every sequence is copied in and its O copied back, and no token between them is
+// written.
+TEST(TestGpuFlydslSdpaCdnaDispatch, PacksSequencesAtOriginsInAnyOrderAtAHeadDimOffEight)
+{
+    auto spec = packedGpuSpec();
+    spec.batch = 4;
+    spec.headDim = 53;
+    spec.seqLenQ = 160;
+    spec.seqLenKv = 160;
+    setPacked(spec, {150, 64, 8, 90}, {160, 100, 40, 33});
+    setPadding(spec, {150, 50, 0, 77}, {100, 3, 40, 33});
+    spec.packedOriginsQ = {400, 10, 600, 100};
+    spec.packedOriginsKv = {300, 0, 520, 120};
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrderAtAHeadDimOffEight)
+{
+    auto spec = packedGpuSpec();
+    spec.batch = 4;
+    spec.headDim = 53;
+    spec.seqLenQ = 64;
+    spec.seqLenKv = 128;
+    setPacked(spec, {48, 1, 64, 17}, {128, 96, 64, 80});
+    setPadding(spec, {48, 1, 64, 17}, {100, 33, 20, 0});
+    spec.omitSeqLenQ = true;
+    spec.slotTailNan = true;
+    spec.packedOriginsKv = {200, 0, 400, 100};
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+// A trailing empty packed sequence (cu_seqlens [0, 5, 9, 9], vLLM's padded batch), whose table
+// entry is the tensor's end, with every operand exactly as long as its regions in a buffer
+// whose next page is unmapped (exactPackedBuffers): the kernel's buffer descriptors span no
+// record for an empty sequence, so nothing is read or written past the tensors.
+TEST(TestGpuFlydslSdpaCdnaDispatch, ReadsNothingPastExactBuffersForATrailingEmptySequence)
+{
+    if(!endGuardedAllocationsAreGuarded())
+    {
+        GTEST_SKIP() << "no unmapped page past the buffers (no device virtual memory management)";
+    }
+    // The last sequence empty on the query side, the key side or both.
+    for(const auto& [lensQ, lensKv] :
+        {std::pair<std::vector<int32_t>, std::vector<int32_t>>{{5, 4, 0}, {7, 3, 0}},
+         {{5, 4, 3}, {7, 3, 0}},
+         {{5, 4, 0}, {7, 3, 2}}})
+    {
+        auto spec = packedGpuSpec();
+        spec.heads = 4;
+        spec.seqLenQ = 8;
+        spec.seqLenKv = 8;
+        setPacked(spec, lensQ, lensKv);
+        spec.exactPackedBuffers = true;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        spec.dataType = DataType::HALF;
+        spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
         expectCdnaMatchesReference(spec, BF16_TOLERANCE);
     }
 }

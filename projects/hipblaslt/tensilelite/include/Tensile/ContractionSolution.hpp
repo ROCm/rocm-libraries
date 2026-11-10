@@ -1115,9 +1115,9 @@ namespace TensileLite
         // Workgroup grid that generateSingleCall hands to the cluster launch of a
         // non-persistent kernel with clusterDim > 1. Not meaningful otherwise.
         dim3                 clusterLaunchGrid(Problem const& problem, Hardware const& hardware) const;
-        // False when a non-persistent cluster launch of this problem would exceed
-        // KernelInvocation::MaxClusterGridDimZ in grid z. Always true for other
-        // kernels.
+        // False when a non-persistent cluster launch of this problem would hold
+        // more than KernelInvocation::MaxClusterGridDimYZ clusters in y or z.
+        // Always true for other kernels.
         bool                 clusterLaunchGridFits(Problem const&  problem,
                                                    Hardware const& hardware) const;
         origami::reduction_t getSKReduction(Problem const& problem, Hardware const& hardware) const;

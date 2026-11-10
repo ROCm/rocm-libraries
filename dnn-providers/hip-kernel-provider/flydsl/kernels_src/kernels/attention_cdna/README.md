@@ -488,7 +488,7 @@ diff against upstream plus the modifications below.
     - Not yet upstream.
 33. **Dropout** (`flash_attn_utils.py`, `flash_attn_generic.py`; generic prefill builds).
     A `has_dropout` build (builder argument, cache key) drops attention probabilities
-    with AOTriton's mask (>= 0.15), bit for bit, through modification 32's appended
+    with AOTriton's mask (0.14.1 on), bit for bit, through modification 32's appended
     arguments; every other build takes them unread and compiles as before.
     - **Philox4x32-10** (`_philox4x32`): the aiw kernel's `attention_rdna4/philox.py`
       round (Triton's), first restated here, now imported (modification 38); the

@@ -28,7 +28,7 @@ instance list is untouched.
 | aiter_kernels_commit | `8253efc4059516f492df597b80ce5311e9fda8bd` |
 | rocm_version | `7.13.0` |
 | generic_target_shim | `chipset=gfx1100` |
-| inputs_sha256 | `3242df8c7d1874a49f6c07c73c2663b49ffa6a3e3b0eacda181cc45df588a57f` |
+| inputs_sha256 | `31d8fd02ac74575a85b25c6f1fa380a9351b8658e28c5bfa1ebb51bd696b023b` |
 
 ## Instances
 
@@ -37,4 +37,4 @@ changes when the object does. The full record is `gfx11-generic/manifest.json`.
 
 | Instance | Priority | VGPRs | LDS | SHA256 |
 | --- | ---: | ---: | ---: | --- |
-| `sdpa_head_pad_f16_bt256` | 100 | 28 | 0 | `2bbb54205153d1fd` |
+| `sdpa_head_pad_f16_bt256` | 100 | 28 | 0 | `7251961bf7250d50` |

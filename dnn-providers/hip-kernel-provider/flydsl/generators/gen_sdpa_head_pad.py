@@ -11,7 +11,8 @@ Writes ``<content>/sdpa_head_pad/<arch>/<instance>.hsaco`` for the one row of
 gfx12-generic (the RDNA prefill and aiw engines), gfx90a, gfx942 and gfx950 (CDNA).
 
 The kernel (``kernels_src/kernels/head_pad/sdpa_head_pad.py``) copies an operand's rows into a
-workspace padded to a multiple of 8 elements, the tail zeroed, and back. It is not an attention
+workspace padded to a multiple of 8 elements, the tail zeroed, and back; a packed operand's
+sequences at their table entries, each for its per-batch length when the graph gives one. It is not an attention
 axis: the SDPA natives launch it around an attention launch only for a graph whose head dim is
 not a multiple of 8 (FlydslSdpaHeadPad.hpp), so no attention object changes. Its engine
 (``hipkernel:flydsl_sdpa_head_pad``) serves no graph; the descriptors exist so the packer packs
@@ -48,6 +49,7 @@ _SEMANTIC_ARG_NAMES = (
     "SRC",
     "DST",
     "ROW_OFF",
+    "LEN",
     "batch",
     "heads",
     "seq_len",
@@ -60,22 +62,23 @@ _SEMANTIC_ARG_NAMES = (
     "dst_stride_h",
     "dst_stride_s",
 )
-_KERNARG_SEGMENT_SIZE = 96
+_KERNARG_SEGMENT_SIZE = 104
 _EXPECTED_SIGNATURE = (
     ("global_buffer", 8, 0),
     ("global_buffer", 8, 8),
     ("global_buffer", 8, 16),
-    ("by_value", 4, 24),
-    ("by_value", 4, 28),
+    ("global_buffer", 8, 24),
     ("by_value", 4, 32),
     ("by_value", 4, 36),
     ("by_value", 4, 40),
-    ("by_value", 8, 48),
+    ("by_value", 4, 44),
+    ("by_value", 4, 48),
     ("by_value", 8, 56),
     ("by_value", 8, 64),
     ("by_value", 8, 72),
     ("by_value", 8, 80),
     ("by_value", 8, 88),
+    ("by_value", 8, 96),
 )
 
 # One thread per destination 16-bit unit, `block_threads` to a workgroup: a grid of
@@ -100,7 +103,7 @@ def _build_one(kernel_module, instance: Instance, dump_dir: Path) -> bytes:
     # dispatches through the null pointers.
     null = flyc.from_c_void_p(fx.Uint8, 0)
     flyc.compile(
-        launch, null, null, null, 1, 1, 1, 1, 8, 0, 0, 0, 0, 0, 0, fx.Stream(None)
+        launch, null, null, null, null, 1, 1, 1, 1, 8, 0, 0, 0, 0, 0, 0, fx.Stream(None)
     )
     blob, _ = hsaco_from_dump(dump_dir)
     return blob
