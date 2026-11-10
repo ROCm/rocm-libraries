@@ -272,11 +272,22 @@ struct FmhaBatchPrefillPageTileTuning : BaseTuning
     using Options = Options_;
 };
 
+// Schedule of a page-tile problem: with the WMMA operand guard (the vectorized KV layout) the
+// WMMA-first rows run with grouped drains; otherwise the shared default schedule.
+template <typename Problem, typename Geometry = FmhaBatchPrefillPageTileGeometryFor<Problem>>
+using FmhaBatchPrefillPageTileScheduleFor = std::conditional_t<
+    FmhaBatchPrefillPageTileOptionsFor<Problem>::kWmmaOperandGuard &&
+        std::is_same_v<typename FmhaTdmSchedDefaultScheduleFor<Geometry>::LocalPlacement,
+                       FmhaTdmSchedWmmaFirstPlacement<FmhaTdmSchedScheduleFor<Geometry>>>,
+    FmhaTdmSchedSequentialTileSchedule<FmhaTdmSchedGroupedDrainPlacement<Geometry>>,
+    FmhaTdmSchedDefaultScheduleFor<Geometry>>;
+
 template <typename Problem>
 using FmhaBatchPrefillPageTilePolicyFor = BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy<
     FmhaBatchPrefillPageTileGeometryFor<Problem>,
     FmhaBatchPrefillPageTileTuning<
         FmhaTdmSchedDefaultTuning<FmhaBatchPrefillPageTileGeometryFor<Problem>>,
-        FmhaBatchPrefillPageTileOptionsFor<Problem>>>;
+        FmhaBatchPrefillPageTileOptionsFor<Problem>>,
+    FmhaBatchPrefillPageTileScheduleFor<Problem>>;
 
 } // namespace ck_tile

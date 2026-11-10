@@ -324,6 +324,179 @@ struct FmhaTdmSchedReadFirstPlacement : FmhaTdmSchedWmmaFirstPlacement<ReadPlace
     }
 };
 
+// The first PV row of a stage's last M iteration: rows [kFmhaTdmSchedPvLastMRow, kPvWmmasPerStage)
+// read the last M iteration's P and V operands.
+template <typename Geometry>
+inline constexpr index_t kFmhaTdmSchedPvLastMRow =
+    (Geometry::kPvMIter - 1) * Geometry::kPvWmmasPerStage / Geometry::kPvMIter;
+
+// Half-open range [begin, end) of rows, or of QK m0/m1 pairs.
+struct FmhaTdmSchedRowRange
+{
+    index_t begin;
+    index_t end;
+};
+
+// WMMA-first rows with the grouped drains of the WMMA operand guard (see the hazard note of the
+// scheduled-TDM policy). The rows of a stage's last M iteration issue their reads one row late,
+// behind the next row's WMMA. A Drain point, a full drain, comes before those reads every QkGroup
+// QK m0/m1 pairs, and on every PvGroup-th last-M PV row and the stage's last one. The stage's last
+// row also issues its own reads and, in QK, has a KeepPending point after its RAW fence. The policy
+// implements both points: the operand registers of the WMMAs that a drain covers stay allocated
+// until it (QkKeptPairs; PvKeptRows for the PV WMMA emitter). No streaming output rescale.
+template <typename Geometry_, index_t QkGroup_ = 4, index_t PvGroup_ = 4>
+struct FmhaTdmSchedGroupedDrainPlacement
+{
+    using Geometry      = Geometry_;
+    using ReadPlacement = FmhaTdmSchedScheduleFor<Geometry>;
+    using Kind          = FmhaTdmSchedLoadKind;
+    using Point         = FmhaTdmSchedSchedulePoint;
+    template <Point P>
+    using At = std::integral_constant<Point, P>;
+
+    static constexpr index_t kNumQkStages     = ReadPlacement::kNumQkStages;
+    static constexpr index_t kNumPvStages     = ReadPlacement::kNumPvStages;
+    static constexpr index_t kQkWmmasPerStage = ReadPlacement::kQkWmmasPerStage;
+    static constexpr index_t kPvWmmasPerStage = ReadPlacement::kPvWmmasPerStage;
+    static constexpr index_t kQkGroup         = QkGroup_;
+    static constexpr index_t kPvGroup         = PvGroup_;
+    static constexpr index_t kQkMIter         = Geometry::kQkMIter;
+    static constexpr index_t kPvLastMRow      = kFmhaTdmSchedPvLastMRow<Geometry>;
+    static_assert(kQkMIter == 1 || kQkMIter == 2);
+    static_assert(kQkGroup >= 1 && kPvGroup >= 1);
+
+    // QK row r is M iteration r % kQkMIter of m0/m1 pair r / kQkMIter; a pair's last-M row is the
+    // last reader of its K slice.
+    CK_TILE_HOST_DEVICE static constexpr bool QkDrainRow(index_t r)
+    {
+        return r % kQkMIter == 0 && r > 0 && (r / kQkMIter) % kQkGroup == 0;
+    }
+    // Pairs whose last-M K slices stay allocated at the Drain (drain) or KeepPending point of row
+    // r: the pairs since the previous drain.
+    CK_TILE_HOST_DEVICE static constexpr FmhaTdmSchedRowRange QkKeptPairs(index_t r, bool drain)
+    {
+        const index_t p = r / kQkMIter;
+        if(kQkGroup == 1)
+            return {p, p};
+        return drain ? FmhaTdmSchedRowRange{p - kQkGroup, p}
+                     : FmhaTdmSchedRowRange{(p / kQkGroup) * kQkGroup, p};
+    }
+
+    // PV: a last-M row waits when it is the stage's last row or every kPvGroup rows after the
+    // first.
+    CK_TILE_HOST_DEVICE static constexpr bool PvWaitRow(index_t r)
+    {
+        return r == kPvWmmasPerStage - 1 || (r > kPvLastMRow && (r - kPvLastMRow) % kPvGroup == 0);
+    }
+    // First last-M row kept allocated at the wait of row w: the previous wait row (conservative,
+    // that row's own drain already covered its WMMA) or kPvLastMRow.
+    CK_TILE_HOST_DEVICE static constexpr index_t PvPendingFrom(index_t w)
+    {
+        for(index_t q = w - 1; q > kPvLastMRow; --q)
+            if(PvWaitRow(q))
+                return q;
+        return kPvLastMRow;
+    }
+    // Rows whose operands the PV WMMA emitter keeps allocated at row r: before its WMMA, the rows
+    // pending at the wait of row r - 1; after the RAW fence of the stage's last row, the rows
+    // pending at it.
+    CK_TILE_HOST_DEVICE static constexpr FmhaTdmSchedRowRange PvKeptRows(index_t r,
+                                                                         bool after_fence)
+    {
+        if(!after_fence && r >= kPvLastMRow + 2 && PvWaitRow(r - 1))
+            return {PvPendingFrom(r - 1), r - 1};
+        if(after_fence && r == kPvWmmasPerStage - 1 && r > kPvLastMRow)
+            return {PvPendingFrom(r), r};
+        return {r, r};
+    }
+
+    template <typename Mode,
+              index_t Stage,
+              index_t Wmma,
+              typename WmmaEmitter,
+              typename ReadEmitter,
+              typename FenceEmitter>
+    CK_TILE_HOST_DEVICE static constexpr void
+    RunQkRow(WmmaEmitter& emit_wmma, ReadEmitter& emit_read, FenceEmitter& emit_fence)
+    {
+        emit_wmma(number<Stage>{}, number<Wmma>{});
+        emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::AfterWmma>{});
+        if constexpr(QkDrainRow(Wmma))
+            emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::Drain>{});
+        if constexpr(kQkGroup > 1 && Wmma == kQkWmmasPerStage - 1)
+            emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::KeepPending>{});
+        // The previous row's reads when it is a last-M row, then this row's own unless it is one.
+        if constexpr(Wmma % kQkMIter == 0 && Wmma > 0)
+            QkReads<Stage, Wmma - 1>(emit_read, emit_fence);
+        if constexpr(Wmma % kQkMIter != kQkMIter - 1 || Wmma == kQkWmmasPerStage - 1)
+            QkReads<Stage, Wmma>(emit_read, emit_fence);
+        emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::AfterTokens>{});
+    }
+
+    template <typename Mode,
+              index_t Stage,
+              index_t Wmma,
+              typename WmmaEmitter,
+              typename ReadEmitter,
+              typename FenceEmitter,
+              typename RescaleEmitter>
+    CK_TILE_HOST_DEVICE static constexpr void RunPvRow(WmmaEmitter& emit_wmma,
+                                                       ReadEmitter& emit_read,
+                                                       FenceEmitter& emit_fence,
+                                                       RescaleEmitter&)
+    {
+        static_assert(!Mode::kStreamOutputRescale,
+                      "the grouped drains do not place the streaming output rescale");
+        emit_wmma(number<Stage>{}, number<Wmma>{});
+        emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::AfterWmma>{});
+        if constexpr(Wmma > kPvLastMRow)
+        {
+            if constexpr(PvWaitRow(Wmma))
+                emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::Drain>{});
+            PvReads<Stage, Wmma - 1>(emit_read, emit_fence);
+        }
+        if constexpr(Wmma < kPvLastMRow || Wmma == kPvWmmasPerStage - 1)
+            PvReads<Stage, Wmma>(emit_read, emit_fence);
+        emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::AfterTokens>{});
+    }
+
+    private:
+    // One row's reads in the read placement's order (the emitters skip a lead-first access).
+    template <index_t Stage, index_t Row, typename ReadEmitter, typename FenceEmitter>
+    CK_TILE_HOST_DEVICE static constexpr void QkReads(ReadEmitter& emit_read,
+                                                      FenceEmitter& emit_fence)
+    {
+        auto read = [&](auto kind, auto access) {
+            if constexpr(decltype(kind)::value != Kind::IgnoredLegacy)
+                emit_read(kind, access);
+        };
+        ReadPlacement::template VisitQkRowHalf<Stage, Row, false>(read);
+        emit_fence(number<Stage>{}, number<Row>{}, At<Point::BetweenTokenHalves>{});
+        ReadPlacement::template VisitQkRowHalf<Stage, Row, true>(read);
+    }
+
+    template <index_t Stage, index_t Row, typename ReadEmitter, typename FenceEmitter>
+    CK_TILE_HOST_DEVICE static constexpr void PvReads(ReadEmitter& emit_read,
+                                                      FenceEmitter& emit_fence)
+    {
+        auto read = [&](auto kind, auto access) {
+            if constexpr(decltype(kind)::value != Kind::IgnoredLegacy)
+                emit_read(kind, access);
+        };
+        ReadPlacement::template VisitPvRowHalf<Stage, Row, false>(read);
+        emit_fence(number<Stage>{}, number<Row>{}, At<Point::BetweenTokenHalves>{});
+        ReadPlacement::template VisitPvRowHalf<Stage, Row, true>(read);
+    }
+};
+
+// Whether a placement is the grouped-drain placement, whose points the policy implements.
+template <typename Placement>
+inline constexpr bool kIsFmhaTdmSchedGroupedDrain = false;
+template <typename Geometry, index_t QkGroup, index_t PvGroup>
+inline constexpr bool
+    kIsFmhaTdmSchedGroupedDrain<FmhaTdmSchedGroupedDrainPlacement<Geometry, QkGroup, PvGroup>> =
+        true;
+
 // The tile schedule owns phase order. The context exposes only the concrete
 // work of one sequence-K tile; its large tensors stay in the pipeline scope.
 template <typename BeginOp,
