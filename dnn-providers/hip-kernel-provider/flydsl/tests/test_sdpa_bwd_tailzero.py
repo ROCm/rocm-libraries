@@ -304,9 +304,25 @@ def _helper_uses(path: Path) -> set[str]:
     }
 
 
+# The helper functions `written_elements` evaluates to model a kernel: each kernel must call every one.
+MODELLED_FUNCTIONS = frozenset(
+    {
+        "vec_of",
+        "heads_total",
+        "batch_of",
+        "units_per_row",
+        "units_of",
+        "row_of_unit",
+        "element_offset",
+        "grid_blocks",
+    }
+)
+
+
 def test_both_arches_kernels_take_their_addressing_from_the_one_helper() -> None:
     """Every `addr.<name>` a kernel evaluates is a function or constant the helper defines (the one
-    `written_elements` models), the two kernels evaluate the same helper functions, and neither defines a
+    `written_elements` models), each kernel calls every function the model evaluates (so inline arithmetic
+    in place of one is caught), the two kernels evaluate the same helper functions, and neither defines a
     function of the helper's names itself."""
     helper = {n for n in vars(addr) if not n.startswith("_")}
     functions = {n for n in helper if callable(getattr(addr, n))}
@@ -314,6 +330,7 @@ def test_both_arches_kernels_take_their_addressing_from_the_one_helper() -> None
     for arch, names in used.items():
         assert names, arch
         assert names <= helper, (arch, sorted(names - helper))
+        assert MODELLED_FUNCTIONS <= names, (arch, sorted(MODELLED_FUNCTIONS - names))
     assert {a: n & functions for a, n in used.items()}["gfx950"] == {
         a: n & functions for a, n in used.items()
     }["gfx11-generic"]
