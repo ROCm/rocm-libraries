@@ -82,6 +82,40 @@ target_compile_options(rpp_tests PRIVATE -Wall -Wextra -Werror)
 # src/main.cpp provides main() (it installs the suite's own reporter), so gtest_main is not used.
 target_link_libraries(rpp_tests PRIVATE ${RPP_TEST_LINK_LIB} GTest::gtest)
 
+
+# Link OpenMP by imported target and embed its directory in BUILD_RPATH so the
+# POST_BUILD --gtest_list_tests discovery (and in-tree ctest) can load it when
+# libomp lives under lib/llvm/lib/<triple> (TheRock) rather than a system path.
+# Prefer ROCm/LLVM OpenMP CONFIG (…/lib/llvm/lib/cmake/openmp); else MODULE.
+if(NOT TARGET OpenMP::OpenMP_CXX)
+  find_package(OpenMP CONFIG QUIET COMPONENTS CXX
+    HINTS
+      "${ROCM_PATH}/lib/llvm"
+      "${ROCM_PATH}/llvm"
+    PATHS
+      "${ROCM_PATH}/lib/llvm/lib/cmake/openmp"
+  )
+endif()
+if(NOT TARGET OpenMP::OpenMP_CXX)
+  find_package(OpenMP MODULE REQUIRED COMPONENTS CXX)
+endif()
+target_link_libraries(rpp_tests PRIVATE OpenMP::OpenMP_CXX)
+# POST_BUILD --gtest_list_tests needs libomp on the loader path in the build tree.
+set(_rpp_tests_build_rpath)
+if(DEFINED openmp_LIB_INSTALL_DIR AND EXISTS "${openmp_LIB_INSTALL_DIR}")
+  list(APPEND _rpp_tests_build_rpath "${openmp_LIB_INSTALL_DIR}")
+endif()
+foreach(_omp_lib IN LISTS OpenMP_CXX_LIBRARIES)
+  if(IS_ABSOLUTE "${_omp_lib}" AND EXISTS "${_omp_lib}")
+    get_filename_component(_omp_dir "${_omp_lib}" DIRECTORY)
+    list(APPEND _rpp_tests_build_rpath "${_omp_dir}")
+  endif()
+endforeach()
+list(REMOVE_DUPLICATES _rpp_tests_build_rpath)
+if(_rpp_tests_build_rpath)
+  set_property(TARGET rpp_tests APPEND PROPERTY BUILD_RPATH ${_rpp_tests_build_rpath})
+endif()
+
 # One CTest test per GTest suite (per operator) by default; see cmake/grouped_tests.cmake.
 # Per-case registration isolates each case in its own process, at the cost of one start per case.
 option(RPP_TEST_CTEST_PER_CASE "Register one CTest test per GTest case (slow: one process each)" OFF)
