@@ -23,6 +23,7 @@
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ===================================================================== *
  *  HELPERS — tap validity (stride-aware boundary check)
@@ -128,14 +129,12 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
 
     if(rocke_direct_conv_dgrad_validate(spec, reason, sizeof reason) != ROCKE_OK)
     {
-        if(b->status == ROCKE_OK)
-            b->status = ROCKE_ERR_VALUE;
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
         return NULL;
     }
     if(!rocke_direct_conv_dgrad_is_valid_spec(spec, arch, reason, sizeof reason))
     {
-        if(b->status == ROCKE_OK)
-            b->status = ROCKE_ERR_VALUE;
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "invalid DirectConvDgradSpec for %s: %s", arch, reason);
         return NULL;
     }
 
@@ -145,7 +144,8 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
     const int WAVE = spec->wave_size;
     const int THREADS = BLOCK_WAVES * WAVE;
     const int BLOCK_CH = BLOCK_WAVES * WAVE;
-    const int total_k = p->groups * p->kpg;
+    /* rocke_direct_conv_dgrad_is_valid_spec bounds the total to i32. */
+    const int total_k = (int)rocke_direct_conv_problem_total_k(p);
     const int c_stride = p->stride;
     /* AOT: Ho/Wo and the channel counts are kernargs -- see
      * conv_abi.conv_direct_arg_names(). Only the filter extents,
@@ -155,8 +155,8 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
 
     /* Params: the AOT kernarg block, in conv_abi dgrad order.
      * io_type = _io_type(p.dtype): f16 or bf16 IR type. */
-    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
-    const int is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0);
+    const char* dtype = rocke_direct_conv_problem_dtype(p);
+    const rocke_type_t* io_type = rocke_dconv_io_type(b, dtype);
     rocke_dconv_params_t params;
     rocke_dconv_emit_params(b, &params, "dgrad", io_type);
     rocke_value_t* A = params.A;
@@ -173,7 +173,8 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
     /* AOT: the channel counts are kernargs. */
     rocke_value_t* c_total_c = params.p_total_c;
     rocke_value_t* c_total_k = params.p_total_k; /* declared, unused in body */
-    rocke_value_t* c_half_bytes = rocke_b_const_i32(b, 2);
+    /* Element bytes (the name predates fp32 storage). */
+    rocke_value_t* c_half_bytes = rocke_b_const_i32(b, rocke_dconv_elem_bytes(dtype));
     rocke_value_t* c_wave = rocke_b_const_i32(b, WAVE);
     rocke_value_t* oob_sentinel = rocke_b_const_i32(b, (int32_t)(((int64_t)1 << 31) - 1));
     rocke_value_t* zero_f32 = rocke_b_const_f32(b, 0.0f);
@@ -249,7 +250,8 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
 
     /* Stride between consecutive k_out values in W:
      * W[k+1, r, s, c] - W[k, r, s, c] = KH*KW*cpg * 2 bytes */
-    rocke_value_t* k_stride_bytes = rocke_b_const_i32(b, p->KH * p->KW * p->cpg * 2);
+    rocke_value_t* k_stride_bytes
+        = rocke_b_const_i32(b, p->KH * p->KW * p->cpg * rocke_dconv_elem_bytes(dtype));
     rocke_value_t* c_Wi = params.p_Wi;
     rocke_value_t* c_kpg = rocke_b_const_i32(b, p->kpg);
 
@@ -361,8 +363,7 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
                 rocke_value_t* k_byte_off = rocke_b_mul(b, k_iv, k_stride_bytes);
                 rocke_value_t* w_byte = rocke_b_add(b, w_off0_bytes, k_byte_off);
                 rocke_value_t* safe_w = rocke_b_select(b, tap_valid, w_byte, oob_sentinel);
-                rocke_value_t* w_h = is_bf16 ? rocke_b_buffer_load_bf16(b, b_rsrc, safe_w, c0)
-                                             : rocke_b_buffer_load_f16(b, b_rsrc, safe_w, c0);
+                rocke_value_t* w_h = rocke_dconv_scalar_load(b, dtype, b_rsrc, safe_w, c0);
                 rocke_value_t* w_cast = rocke_b_cast_to_f32(b, w_h);
                 rocke_value_t* w_f32 = rocke_b_select(b, tap_valid, w_cast, zero_f32);
 
@@ -370,8 +371,7 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
                 rocke_value_t* dy_byte
                     = rocke_b_add(b, dy_off0_bytes, rocke_b_mul(b, k_iv, c_half_bytes));
                 rocke_value_t* safe_dy = rocke_b_select(b, tap_valid, dy_byte, oob_sentinel);
-                rocke_value_t* dy_h = is_bf16 ? rocke_b_buffer_load_bf16(b, a_rsrc, safe_dy, c0)
-                                              : rocke_b_buffer_load_f16(b, a_rsrc, safe_dy, c0);
+                rocke_value_t* dy_h = rocke_dconv_scalar_load(b, dtype, a_rsrc, safe_dy, c0);
                 rocke_value_t* dy_cast = rocke_b_cast_to_f32(b, dy_h);
                 rocke_value_t* dy_f32 = rocke_b_select(b, tap_valid, dy_cast, zero_f32);
 
@@ -398,12 +398,7 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
         rocke_value_t* store_guard = rocke_b_land(b, c_in_ok, wi_ok);
         rocke_value_t* d_bytes = rocke_b_mul(b, d_off, c_half_bytes);
         rocke_value_t* safe_d = rocke_b_select(b, store_guard, d_bytes, oob_sentinel);
-        rocke_value_t* acc_h
-            = is_bf16 ? rocke_b_trunc_f32_to_bf16(b, acc) : rocke_b_trunc_f32_to_f16(b, acc);
-        if(is_bf16)
-            rocke_b_buffer_store_bf16(b, d_rsrc, safe_d, c0, acc_h);
-        else
-            rocke_b_buffer_store_f16(b, d_rsrc, safe_d, c0, acc_h);
+        rocke_dconv_scalar_store(b, dtype, d_rsrc, safe_d, c0, acc);
     }
 
     rocke_value_t* hi_yield[1];
@@ -428,14 +423,13 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
 
     if(rocke_direct_depthwise_dgrad_validate(spec, reason, sizeof reason) != ROCKE_OK)
     {
-        if(b->status == ROCKE_OK)
-            b->status = ROCKE_ERR_VALUE;
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
         return NULL;
     }
     if(!rocke_direct_depthwise_dgrad_is_valid_spec(spec, arch, reason, sizeof reason))
     {
-        if(b->status == ROCKE_OK)
-            b->status = ROCKE_ERR_VALUE;
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "invalid DirectDepthwiseDgradSpec for %s: %s", arch, reason);
         return NULL;
     }
 
@@ -451,8 +445,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
 
     /* Params: the AOT kernarg block, in conv_abi dgrad order.
      * io_type = _io_type(p.dtype): f16 or bf16 IR type. */
-    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
-    const int is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0);
+    const char* dtype = rocke_direct_conv_problem_dtype(p);
+    const rocke_type_t* io_type = rocke_dconv_io_type(b, dtype);
     rocke_dconv_params_t params;
     rocke_dconv_emit_params(b, &params, "dgrad", io_type);
     rocke_value_t* A = params.A;
@@ -468,7 +462,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
     rocke_value_t* c1 = rocke_b_const_i32(b, 1);
     /* AOT: the group count is a kernarg. */
     rocke_value_t* c_groups = params.p_groups;
-    rocke_value_t* c_half_bytes = rocke_b_const_i32(b, 2);
+    /* Element bytes (the name predates fp32 storage). */
+    rocke_value_t* c_half_bytes = rocke_b_const_i32(b, rocke_dconv_elem_bytes(dtype));
     rocke_value_t* c_wave = rocke_b_const_i32(b, WAVE);
     rocke_value_t* oob_sentinel = rocke_b_const_i32(b, (int32_t)(((int64_t)1 << 31) - 1));
     rocke_value_t* zero_f32 = rocke_b_const_f32(b, 0.0f);
@@ -566,8 +561,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
             /* Python: select(ch_in_range, mul(w_off, c_half_bytes), oob_sentinel) */
             rocke_value_t* w_bytes = rocke_b_mul(b, w_off, c_half_bytes);
             rocke_value_t* safe_w = rocke_b_select(b, ch_in_range, w_bytes, oob_sentinel);
-            rocke_value_t* w_h = is_bf16 ? rocke_b_buffer_load_bf16(b, b_rsrc, safe_w, c0)
-                                         : rocke_b_buffer_load_f16(b, b_rsrc, safe_w, c0);
+            rocke_value_t* w_h = rocke_dconv_scalar_load(b, dtype, b_rsrc, safe_w, c0);
             rocke_value_t* w_cast = rocke_b_cast_to_f32(b, w_h);
             weights_f32[r_const * p->KW + s_const]
                 = rocke_b_select(b, ch_in_range, w_cast, zero_f32);
@@ -637,8 +631,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
                 /* Python: select(valid, mul(dy_off, c_half_bytes), oob_sentinel) */
                 rocke_value_t* dy_bytes = rocke_b_mul(b, dy_off, c_half_bytes);
                 rocke_value_t* safe_dy = rocke_b_select(b, valid, dy_bytes, oob_sentinel);
-                rocke_value_t* dy_h = is_bf16 ? rocke_b_buffer_load_bf16(b, a_rsrc, safe_dy, c0)
-                                              : rocke_b_buffer_load_f16(b, a_rsrc, safe_dy, c0);
+                rocke_value_t* dy_h = rocke_dconv_scalar_load(b, dtype, a_rsrc, safe_dy, c0);
                 rocke_value_t* dy_cast = rocke_b_cast_to_f32(b, dy_h);
                 rocke_value_t* dy_f32 = rocke_b_select(b, valid, dy_cast, zero_f32);
                 acc = rocke_b_fma(b, weights_f32[r_const * p->KW + s_const], dy_f32, acc);
@@ -658,12 +651,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
         rocke_value_t* store_guard = rocke_b_land(b, ch_in_range, wi_ok);
         rocke_value_t* d_bytes = rocke_b_mul(b, d_off, c_half_bytes);
         rocke_value_t* safe_d = rocke_b_select(b, store_guard, d_bytes, oob_sentinel);
-        rocke_value_t* acc_h
-            = is_bf16 ? rocke_b_trunc_f32_to_bf16(b, acc) : rocke_b_trunc_f32_to_f16(b, acc);
-        if(is_bf16)
-            rocke_b_buffer_store_bf16(b, d_rsrc, safe_d, c0, acc_h);
-        else
-            rocke_b_buffer_store_f16(b, d_rsrc, safe_d, c0, acc_h);
+        rocke_dconv_scalar_store(b, dtype, d_rsrc, safe_d, c0, acc);
     }
 
     rocke_value_t* hi_yield[1];

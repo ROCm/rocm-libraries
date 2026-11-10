@@ -101,7 +101,7 @@ void rocke_gfx942_attention_tiled_3d_emit_loop_init(
         rocke_value_t* qh_mul = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, cfg->NQK));
         rocke_value_t* qh_mod = rocke_b_mod(b, ctx->lane_col, rocke_b_const_i32(b, cfg->NQK));
         rocke_value_t* qh = rocke_b_add(b, qh_mul, qh_mod);
-        rocke_value_t* qh_in = rocke_b_cmp_lt(b, qh, rocke_b_const_i32(b, cfg->NUM_QH));
+        rocke_value_t* qh_in = rocke_b_cmp_lt(b, qh, ctx->num_qh_p);
         rocke_value_t* sink_h = rocke_b_global_load(b, ctx->sinks, qh, dtype, 2);
         rocke_value_t* sink_f = rocke_b_fmul(b, rocke_b_cast_to_f32(b, sink_h), ctx->rcp_ln2);
         rocke_value_t* sink_with_mask = rocke_b_select(b, qh_in, sink_f, ctx->neg_inf);
@@ -223,14 +223,20 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         qh_mod = rocke_b_mod(b, ctx->lane_col, rocke_b_const_i32(b, cfg->NQK));
         ctx->row_qh = rocke_b_add(b, qh_mul, qh_mod);
         ok_a = rocke_b_cmp_lt(b, ctx->row_qp, ctx->cur_batch_q_len);
-        ok_b = rocke_b_cmp_lt(b, ctx->row_qh, rocke_b_const_i32(b, cfg->NUM_QH));
+        ok_b = rocke_b_cmp_lt(b, ctx->row_qh, ctx->num_qh_p);
         ctx->row_ok = rocke_b_land(b, ok_a, ok_b);
+        /* Padding rows past BLOCK_Q*NQK alias the next q-block: no store. */
+        if(cfg->BLOCK_Q * cfg->NQK < cfg->BLOCK_M)
+        {
+            rocke_value_t* vr = rocke_b_const_i32(b, cfg->BLOCK_Q * cfg->NQK);
+            rocke_value_t* row_vr = rocke_b_cmp_lt(b, ctx->lane_col, vr);
+            ctx->row_ok = rocke_b_land(b, ctx->row_ok, row_vr);
+        }
         ctx->row_causal_lim = rocke_b_add(b, ctx->context_len, ctx->row_qp);
         ctx->row_alibi = NULL;
         if(cfg->USE_ALIBI)
         {
-            rocke_value_t* qh_ok
-                = rocke_b_cmp_lt(b, ctx->row_qh, rocke_b_const_i32(b, cfg->NUM_QH));
+            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, ctx->row_qh, ctx->num_qh_p);
             ctx->row_alibi = rocke_b_masked_global_load(
                 b, ctx->alibi_slopes_ptr, ctx->row_qh, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
         }
@@ -249,10 +255,21 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         rocke_value_t* q_col_c = rocke_b_const_i32(b, k * 16);
         rocke_value_t* q_col_m = rocke_b_mul(b, ctx->lane_rg, rocke_b_const_i32(b, 4));
         rocke_value_t* q_col_off = rocke_b_add(b, q_col_c, q_col_m);
-        rocke_value_t* idx[2];
-        idx[0] = ctx->lane_col;
-        idx[1] = q_col_off;
-        Q_kits[k] = rocke_b_smem_load_vN(b, ctx->Q_lds, idx, 2, dtype, 4);
+        if(cfg->Q_IN_V_SLOT)
+        {
+            rocke_value_t* idx3[3];
+            idx3[0] = rocke_b_const_i32(b, 0);
+            idx3[1] = ctx->lane_col;
+            idx3[2] = q_col_off;
+            Q_kits[k] = rocke_b_smem_load_vN(b, ctx->V_lds, idx3, 3, dtype, 4);
+        }
+        else
+        {
+            rocke_value_t* idx[2];
+            idx[0] = ctx->lane_col;
+            idx[1] = q_col_off;
+            Q_kits[k] = rocke_b_smem_load_vN(b, ctx->Q_lds, idx, 2, dtype, 4);
+        }
     }
 
     rocke_for_t kvloop = rocke_b_scf_for_iter(b,

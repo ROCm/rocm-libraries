@@ -35,6 +35,7 @@
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ===================================================================== *
  *  Prologue  (Python lines 2572-2611)
@@ -47,18 +48,13 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
 
     if(rocke_direct_depthwise_validate(spec, reason, sizeof reason) != ROCKE_OK)
     {
-        if(b->status == ROCKE_OK)
-        {
-            b->status = ROCKE_ERR_VALUE;
-        }
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
         return false;
     }
     if(!rocke_direct_depthwise_is_valid_spec(spec, ctx->arch, reason, sizeof reason))
     {
-        if(b->status == ROCKE_OK)
-        {
-            b->status = ROCKE_ERR_VALUE;
-        }
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "invalid DirectDepthwiseSpec for %s: %s", ctx->arch, reason);
         return false;
     }
 
@@ -80,15 +76,17 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
     ctx->BLOCK_CH = rocke_direct_depthwise_block_ch(spec);
     ctx->c_stride_dw = ctx->p.stride > 0 ? ctx->p.stride : 1;
     ctx->Ho = (ctx->p.H + 2 * ctx->p.PAD - ctx->p.KH) / ctx->c_stride_dw + 1;
-    ctx->Wo = (ctx->p.W + 2 * ctx->p.PAD - ctx->p.KW) / ctx->c_stride_dw + 1;
+    ctx->Wo
+        = (ctx->p.W + 2 * rocke_direct_conv_problem_pad_w(&ctx->p) - ctx->p.KW) / ctx->c_stride_dw
+          + 1;
     ctx->n_iters = ctx->p.H + ctx->p.KH - 1;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->THREADS);
 
     ctx->is_bf16 = (ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0) ? 1 : 0;
+    ctx->dtype = rocke_direct_conv_problem_dtype(&ctx->p);
     /* params: the AOT kernarg block, in conv_abi order. */
-    rocke_dconv_emit_params(
-        b, &ctx->params, "fwd", rocke_b_io_ir_type(b, ctx->p.dtype ? ctx->p.dtype : "fp16"));
+    rocke_dconv_emit_params(b, &ctx->params, "fwd", rocke_dconv_io_type(b, ctx->dtype));
     ctx->A = ctx->params.A;
     ctx->Bp = ctx->params.Bp;
     ctx->D = ctx->params.D;
@@ -103,7 +101,8 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
     /* AOT: the store guard and the channel guard bound against kernargs. */
     ctx->c_W = ctx->params.p_Wo;
     ctx->c_groups = ctx->params.p_groups;
-    ctx->c_half_bytes = rocke_b_const_i32(b, 2);
+    /* Element bytes (the name predates fp32 storage). */
+    ctx->c_half_bytes = rocke_b_const_i32(b, rocke_dconv_elem_bytes(ctx->dtype));
     ctx->oob_sentinel = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
     ctx->zero_f32 = rocke_b_const_f32(b, 0.0);
 
@@ -154,7 +153,7 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
 void rocke_dconv_dw_build_descriptors(rocke_dconv_dw_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    int total_k = rocke_direct_conv_problem_total_k(&ctx->p);
+    int total_k = (int)rocke_direct_conv_problem_total_k(&ctx->p);
 
     /* b_desc = naive("B", [total_k, KH, KW, 1], coord_names=(k,r,s,c)) */
     {
@@ -209,8 +208,7 @@ void rocke_dconv_dw_load_weights(rocke_dconv_dw_ctx_t* ctx)
                                                        ctx->ch_in_range,
                                                        rocke_b_mul(b, w_off, ctx->c_half_bytes),
                                                        ctx->oob_sentinel);
-                w_h = ctx->is_bf16 ? rocke_b_buffer_load_bf16(b, ctx->b_rsrc, safe_w, ctx->c0)
-                                   : rocke_b_buffer_load_f16(b, ctx->b_rsrc, safe_w, ctx->c0);
+                w_h = rocke_dconv_scalar_load(b, ctx->dtype, ctx->b_rsrc, safe_w, ctx->c0);
                 ctx->weights_f32[r_const][s_const] = rocke_b_select(
                     b, ctx->ch_in_range, rocke_b_cast_to_f32(b, w_h), ctx->zero_f32);
             }
@@ -272,8 +270,7 @@ static void dw_load_row(rocke_dconv_dw_ctx_t* ctx,
         rocke_value_t* rc = rocke_b_add(b, row_off, st->col_terms[c]);
         rocke_value_t* s_term = rocke_b_select(b, row_ok, rc, ctx->oob_sentinel);
         rocke_value_t* v_off = rocke_b_add(b, st->ch_off, s_term);
-        out[c] = ctx->is_bf16 ? rocke_b_buffer_load_bf16(b, ctx->a_rsrc, v_off, ctx->c0)
-                              : rocke_b_buffer_load_f16(b, ctx->a_rsrc, v_off, ctx->c0);
+        out[c] = rocke_dconv_scalar_load(b, ctx->dtype, ctx->a_rsrc, v_off, ctx->c0);
     }
 }
 
@@ -356,12 +353,7 @@ static void dw_flush(rocke_dconv_dw_ctx_t* ctx,
 
         safe_d = rocke_b_select(
             b, store_ok, rocke_b_mul(b, d_off, ctx->c_half_bytes), ctx->oob_sentinel);
-        if(ctx->is_bf16)
-            rocke_b_buffer_store_bf16(
-                b, ctx->d_rsrc, safe_d, ctx->c0, rocke_b_trunc_f32_to_bf16(b, acc_val));
-        else
-            rocke_b_buffer_store_f16(
-                b, ctx->d_rsrc, safe_d, ctx->c0, rocke_b_trunc_f32_to_f16(b, acc_val));
+        rocke_dconv_scalar_store(b, ctx->dtype, ctx->d_rsrc, safe_d, ctx->c0, acc_val);
     }
 
     for(w_out = 0; w_out < BLOCK_W; ++w_out)

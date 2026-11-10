@@ -140,6 +140,17 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             b, ROCKE_ERR_VALUE, "invalid conv_igemm spec for %s: %s", ctx->arch, reason);
         return false;
     }
+    /* The override hands the MFMA its A operand directly, bypassing the LDS
+     * fragment read where the fp32 -> tf32 reinterpretation happens. */
+    if(rocke_conv_data_is_tf32(spec->mma_dtype) && overrides != NULL
+       && overrides->a_operand_override != NULL)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "mma_dtype='tf32' does not support a_operand_override: the override "
+                        "supplies the A operand in its own type, not as a TF32 fragment");
+        return false;
+    }
     /* The merged A/B addressing lives in the split address form; the
      * descriptor-DAG path a caller-supplied (n, ho, wo) decode forces has no
      * slot for the merged channel decode or the diagonal mask. (3-D, the other
@@ -208,7 +219,16 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         rocke_param_opts_t a_opts;
         rocke_param_opts_t bp_opts;
         rocke_param_opts_t d_opts;
-        const rocke_type_t* f16_global = rocke_ptr_type(b, rocke_f16(), "global");
+        /* ir_dtype_a/b/d = _ir_dtype(spec.data.dtype_a/b/d) */
+        const rocke_type_t* ir_a = rocke_conv_ir_dtype(b, spec->dtype_a);
+        const rocke_type_t* ir_b = rocke_conv_ir_dtype(b, spec->dtype_b);
+        const rocke_type_t* ir_d = rocke_conv_ir_dtype(b, spec->dtype_d);
+        if(ir_a == NULL || ir_b == NULL || ir_d == NULL)
+        {
+            return false; /* rocke_conv_ir_dtype set the builder error */
+        }
+        ctx->ir_dtype_a = ir_a;
+        ctx->ir_dtype_b = ir_b;
 
         memset(&a_opts, 0, sizeof(a_opts));
         a_opts.noalias = true;
@@ -217,7 +237,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         a_opts.readonly_set = true;
         a_opts.align = 16;
         a_opts.align_set = true;
-        ctx->A = rocke_b_param(b, "A", f16_global, &a_opts);
+        ctx->A = rocke_b_param(b, "A", rocke_ptr_type(b, ir_a, "global"), &a_opts);
 
         memset(&bp_opts, 0, sizeof(bp_opts));
         bp_opts.noalias = true;
@@ -226,7 +246,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         bp_opts.readonly_set = true;
         bp_opts.align = 16;
         bp_opts.align_set = true;
-        ctx->Bp = rocke_b_param(b, "B", f16_global, &bp_opts);
+        ctx->Bp = rocke_b_param(b, "B", rocke_ptr_type(b, ir_b, "global"), &bp_opts);
 
         memset(&d_opts, 0, sizeof(d_opts));
         d_opts.noalias = true;
@@ -235,7 +255,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         d_opts.writeonly_set = true;
         d_opts.align = 16;
         d_opts.align_set = true;
-        ctx->D = rocke_b_param(b, "D", f16_global, &d_opts);
+        ctx->D = rocke_b_param(b, "D", rocke_ptr_type(b, ir_d, "global"), &d_opts);
 
         /* extra_context = extra_params(b) if extra_params is not None else None */
         if(overrides != NULL && overrides->extra_params != NULL)
@@ -326,6 +346,31 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->p_pW_neg = NULL;
     }
 
+    /* ---- split-K kernargs (spec.split_k > 1) ----
+     * Python: the fp32 workspace, then the slice width and degree -- the same
+     * trailing pair wgrad takes -- emitted right after the problem block. The
+     * cluster form also declares its (1, 1, S) launch shape. */
+    ctx->fwd_split = spec->split_k > 1;
+    if(ctx->fwd_split)
+    {
+        rocke_param_opts_t ws_opts;
+        memset(&ws_opts, 0, sizeof(ws_opts));
+        ws_opts.noalias = true;
+        ws_opts.noalias_set = true;
+        ws_opts.align = 16;
+        ws_opts.align_set = true;
+        ctx->fwd_p_ws
+            = rocke_b_param(b, "ws_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &ws_opts);
+        ctx->fwd_p_ws_bytes = rocke_b_param(b, "ws_bytes", rocke_i32(), NULL);
+        ctx->fwd_p_ks = rocke_b_param(b, "ks", rocke_i32(), NULL);
+        ctx->fwd_p_ks_count = rocke_b_param(b, "ks_count", rocke_i32(), NULL);
+        if(spec->split_k_cluster && b->kernel != NULL)
+        {
+            const int64_t dims[3] = {1, 1, spec->split_k_cluster};
+            rocke_attr_set_int_list(b, &b->kernel->attrs, "cluster_dims", dims, 3);
+        }
+    }
+
     /* ---- resolve op + atom + frag widths ---- (811-815) */
     ctx->op = rocke_conv_resolve_op(b, spec, ctx->arch);
     if(ctx->op == NULL)
@@ -336,20 +381,45 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* atom = spec.atom if op.family == "mma" else None.
      *
      * Python: ``ImplicitGemmConvSpec.atom`` is
-     *     mfma_atom("f16", warp_tile_m, warp_tile_n, warp_tile_k)
+     *     mfma_atom(spec.data.mma_a, warp_tile_m, warp_tile_n, warp_tile_k)
+     * keyed on the MMA dtype: a TF32 spec stores fp32 but issues an XF32 atom,
+     * whose fragment lengths differ from the fp32 atom's
      * and ``build_implicit_gemm_conv`` keeps it only on the MFMA path
      * (``atom = spec.atom if op.family == "mma" else None``). ``rocke_mfma_atom``
      * returns a pointer into the same immutable static catalog the epilogues
      * use, so the lookup is byte-identical to ``spec.atom``. NULL stays correct
      * on the WMMA family. */
-    ctx->atom
-        = ctx->is_wmma
-              ? NULL
-              : rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+    ctx->atom = ctx->is_wmma
+                    ? NULL
+                    : rocke_mfma_atom(rocke_conv_data_mma_operand(spec->dtype_a, spec->mma_dtype),
+                                      spec->warp_tile_m,
+                                      spec->warp_tile_n,
+                                      spec->warp_tile_k);
 
-    ctx->a_per_lane = ctx->op->a_frag_len;
-    ctx->b_per_lane = ctx->op->b_frag_len;
-    ctx->c_per_lane = ctx->op->c_frag_len;
+    ctx->a_per_lane = ctx->op->srcs[0].frag_len;
+    ctx->b_per_lane = ctx->op->srcs[1].frag_len;
+    /* LDS operand element type follows the *storage* dtype the tiles were
+     * written in: bf16 -> BF16, fp32 -> F32; fp16 goes through the default f16
+     * path. Equal to the MMA operand type except under TF32 compute, where the
+     * fp32 fragment is reinterpreted after the read (_load_mma_operand). */
+    ctx->smem_dtype = rocke_conv_smem_dtype_for(spec->dtype_a);
+    ctx->is_tf32 = rocke_conv_data_is_tf32(spec->mma_dtype);
+    /* Instruction-stream shape of one logical MMA step, for the compv3/compv4
+     * scheduling hints. 1/1 for every non-TF32 atom so their hints are
+     * unchanged; under TF32 an 8-wide fp32 fragment is two ds_read_b128 and a
+     * BF16x3-emulated atom issues three physical MFMAs. */
+    if(ctx->is_tf32)
+    {
+        ctx->ds_reads_per_frag
+            = (ctx->a_per_lane + ROCKE_CONV_TF32_LDS_LOAD_MAX - 1) / ROCKE_CONV_TF32_LDS_LOAD_MAX;
+        ctx->mfmas_per_mma = rocke_conv_mfma_issues_per_mma(ctx->op);
+    }
+    else
+    {
+        ctx->ds_reads_per_frag = 1;
+        ctx->mfmas_per_mma = 1;
+    }
+    ctx->c_per_lane = ctx->op->dst.frag_len;
 
     /* ---- block tile dims ---- (817) */
     ctx->block_m = spec->tile_m;
@@ -502,11 +572,35 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
      *
      * Merged: "group" is the merged group (gridDim.z runs 0..groups/Gm) and
      * the path stays engaged even at Gm == groups -- see ctx->grouped. */
+    rocke_value_t* split_group_z = NULL;
+    if(ctx->fwd_split)
+    {
+        /* Split-K: the group and the K slice share z: z = group * ks_count +
+         * slice, as in wgrad. Slice s reduces [s*ks, (s+1)*ks); the host rounds
+         * ks to whole K tiles, and the tail past K_gemm reads zero through the
+         * descriptor bounds, so every slice runs the same bound computation. */
+        rocke_value_t* z_id = rocke_b_block_id_z(b);
+        if(ctx->grouped)
+        {
+            split_group_z = rocke_b_to_sgpr_u32(b, rocke_b_div(b, z_id, ctx->fwd_p_ks_count));
+            rocke_value_t* g_ks = rocke_b_mul(b, split_group_z, ctx->fwd_p_ks_count);
+            ctx->fwd_slice_id = rocke_b_sub(b, z_id, g_ks);
+        }
+        else
+        {
+            ctx->fwd_slice_id = z_id;
+        }
+        rocke_value_t* lo_mul = rocke_b_mul(b, ctx->fwd_slice_id, ctx->fwd_p_ks);
+        ctx->kloop_k_lo = rocke_b_to_sgpr_u32(b, lo_mul);
+        rocke_value_t* hi_add = rocke_b_add(b, ctx->kloop_k_lo, ctx->fwd_p_ks);
+        ctx->kloop_k_hi = rocke_b_to_sgpr_u32(b, hi_add);
+    }
     if(ctx->grouped)
     {
         /* Python: group_idx = b.block_id_z(); k_out_group_base = b.mul(group_idx, b.const_i32(kpg))
-         * Bind subexpressions in Python's left-to-right order to pin SSA ids. */
-        ctx->group_idx = rocke_b_block_id_z(b);
+         * Bind subexpressions in Python's left-to-right order to pin SSA ids.
+         * Split-K: the group is the z quotient decoded above. */
+        ctx->group_idx = ctx->fwd_split ? split_group_z : rocke_b_block_id_z(b);
         /* AOT: the runtime p_kpg param (was const_i32(p.kpg)). Merged: the
          * merged kpg, which is Gm exactly (depthwise only), so c_gm. */
         ctx->k_out_group_base
@@ -553,8 +647,8 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         a_shape[1] = ctx->lds_layout.row_stride;
         b_shape[0] = ctx->block_n;
         b_shape[1] = ctx->lds_layout.row_stride;
-        ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem");
-        ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_shape, 2, "B_smem");
+        ctx->A_smem = rocke_b_smem_alloc(b, ctx->ir_dtype_a, a_shape, 2, "A_smem");
+        ctx->B_smem = rocke_b_smem_alloc(b, ctx->ir_dtype_b, b_shape, 2, "B_smem");
 
         /* Only async_dma and unroll_k reach a K-loop that alternates buffers:
          * async_dma takes the SoftwarePipeline branch and unroll_k hand-rolls a
@@ -565,8 +659,8 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->double_buffer = spec->async_dma || spec->unroll_k;
         if(ctx->double_buffer)
         {
-            ctx->A_smem2 = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem2");
-            ctx->B_smem2 = rocke_b_smem_alloc(b, rocke_f16(), b_shape, 2, "B_smem2");
+            ctx->A_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_a, a_shape, 2, "A_smem2");
+            ctx->B_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_b, b_shape, 2, "B_smem2");
         }
         else
         {
@@ -581,9 +675,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->k_atoms = rocke_implicit_gemm_conv_spec_k_atoms_per_tile_k(spec);
 
     /* ---- accumulators ---- (919-922).
-     * acc_init = zero_vec_f32(c_per_lane); accs = [(acc_m{mi}_n{ni}, acc_init)
+     * acc_init = zero_vec_f32(op.srcs[2].frag_len); accs = [(acc_m{mi}_n{ni}, acc_init)
      * for mi in range(mfmas_m) for ni in range(mfmas_n)]. */
-    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->c_per_lane);
+    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->op->srcs[2].frag_len);
     ctx->num_accs = ctx->mfmas_m * ctx->mfmas_n;
     if(ctx->num_accs < 0 || ctx->num_accs > ROCKE_CONV_MAX_ACCS)
     {
@@ -710,20 +804,22 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         const int cpg = rocke_conv_problem_cpg(&spec->problem);
         const int max_dwords
             = rocke_archtarget_async_lds_max_dwords(rocke_archtarget_from_gfx(ctx->arch));
-        rocke_status_t sa = rocke_async_tile_loader_from_tile(ctx->block_m,
-                                                              ctx->block_k,
-                                                              ctx->threads,
-                                                              spec->wave_size,
-                                                              max_dwords,
-                                                              cpg,
-                                                              &ctx->a_loader);
-        rocke_status_t sb = rocke_async_tile_loader_from_tile(ctx->block_n,
-                                                              ctx->block_k,
-                                                              ctx->threads,
-                                                              spec->wave_size,
-                                                              max_dwords,
-                                                              cpg,
-                                                              &ctx->b_loader);
+        rocke_status_t sa = rocke_async_tile_loader_from_tile_typed(ctx->block_m,
+                                                                    ctx->block_k,
+                                                                    ctx->threads,
+                                                                    spec->wave_size,
+                                                                    ctx->ir_dtype_a,
+                                                                    max_dwords,
+                                                                    cpg,
+                                                                    &ctx->a_loader);
+        rocke_status_t sb = rocke_async_tile_loader_from_tile_typed(ctx->block_n,
+                                                                    ctx->block_k,
+                                                                    ctx->threads,
+                                                                    spec->wave_size,
+                                                                    ctx->ir_dtype_b,
+                                                                    max_dwords,
+                                                                    cpg,
+                                                                    &ctx->b_loader);
         if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: async tile loader from_tile failed");
@@ -747,6 +843,8 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: wavelet tile loader from_tile failed");
             return false;
         }
+        ctx->a_wavelet_loader.elem_dtype = ctx->ir_dtype_a;
+        ctx->b_wavelet_loader.elem_dtype = ctx->ir_dtype_b;
         ctx->have_wavelet_loaders = true;
 
         /* Wavelet local state: load_tid, is_math, K_iters, epi_barriers. */
@@ -789,6 +887,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: coalesced tile loader from_tile failed");
             return false;
         }
+        /* CoalescedTileLoader(..., elem_dtype=ir_dtype_a / ir_dtype_b) */
+        ctx->a_sync_loader.elem_dtype = ctx->ir_dtype_a;
+        ctx->b_sync_loader.elem_dtype = ctx->ir_dtype_b;
         ctx->have_sync_loaders = true;
     }
 
@@ -895,8 +996,9 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
         if(ctx.grouped)
         {
             /* Merged: g is the merged group and the merged kpg is Gm, so the
-             * same expression yields k_out = merged_group*Gm + g_n. */
-            rocke_value_t* bid_z = rocke_b_block_id_z(b);
+             * same expression yields k_out = merged_group*Gm + g_n. Split-K
+             * reuses the decoded group (z also carries the slice). */
+            rocke_value_t* bid_z = ctx.fwd_split ? ctx.group_idx : rocke_b_block_id_z(b);
             ctx.d_k_out_group_base = rocke_b_mul(b, bid_z, ctx.merged ? ctx.c_gm : ctx.p_kpg);
         }
         else
@@ -905,6 +1007,19 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
         }
         ctx.ir_always_valid_d = NULL;
         ctx.ir_d_pitch_pw = NULL;
+    }
+
+    if(ctx.fwd_split)
+    {
+        /* Stage 1 stores into slab `slice` of the [ks_count][M][K] fp32
+         * workspace. The slab is a packed N[D]HWK tensor like D, so D's
+         * descriptor addresses it; the epilogue adds only the slab base, and
+         * every store goes through the workspace resource. */
+        rocke_value_t* slab = rocke_b_mul(b, ctx.p_M, ctx.p_K);
+        ctx.fwd_slab_base = rocke_b_mul(b, ctx.fwd_slice_id, slab);
+        rocke_conv_buffer_resource_t ws_rsrc;
+        rocke_conv_make_buffer_resource(b, ctx.fwd_p_ws, ctx.fwd_p_ws_bytes, &ws_rsrc);
+        ctx.d_rsrc = ws_rsrc.rsrc;
     }
 
     /* ---- K-loop driver selection (1276-1347) ----

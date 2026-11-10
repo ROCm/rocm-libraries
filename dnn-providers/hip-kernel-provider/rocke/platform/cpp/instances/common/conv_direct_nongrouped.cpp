@@ -36,13 +36,18 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, has_shape */
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
-#include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
+#include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type, rocke_b_smem_load_fragment */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/lower_llvm.h"
 
-/* Global load width for the activation staging path, in halves (dwordx4). */
+/* Global load width for the 16-bit activation staging path, in halves
+ * (dwordx4). Sizes and checks that hold for every dtype go through
+ * nongrouped_x_load_vec (8 halves, or 4 floats with fp32 storage). */
 #define ROCKE_DCONV_NONGROUPED_X_LOAD_VEC 8
+/* Bytes of one dwordx4 global access / ds_read_b128 (Python _VEC_BYTES): the
+ * staging vector and the LDS alignment unit, whatever the element width. */
+#define ROCKE_DCONV_NONGROUPED_VEC_BYTES 16
 
 /* Canonical i32 byte offset for every masked-out buffer access (staging loads
  * and epilogue stores); see the Python `_OOB_BASE` comment. Loop-invariant
@@ -67,7 +72,8 @@ typedef struct rocke_dconv_nongrouped_atom
     const char* name;
     int tile; /* MFMA M == N                         */
     int k; /* MFMA K                              */
-    int frag; /* halves per lane in an A/B fragment  */
+    int frag; /* elements per lane in an A/B fragment (halves, or floats
+               * with fp32 storage)                                      */
     rocke_dconv_nongrouped_mfma_fn f16;
     rocke_dconv_nongrouped_mfma_fn bf16;
 } rocke_dconv_nongrouped_atom_t;
@@ -106,6 +112,41 @@ static bool nongrouped_is_bf16(const rocke_direct_conv_nongrouped_spec_t* spec)
     return strcmp(nongrouped_dtype(spec), "bf16") == 0;
 }
 
+/* Python _NONGROUPED_DTYPES. */
+static bool nongrouped_dtype_supported(const char* dtype)
+{
+    return strcmp(dtype, "fp16") == 0 || strcmp(dtype, "bf16") == 0 || strcmp(dtype, "fp32") == 0
+           || strcmp(dtype, "tf32") == 0;
+}
+
+/* spec.elem_bytes: 2 for fp16 / bf16, 4 for fp32 / tf32. */
+static int nongrouped_elem_bytes(const rocke_direct_conv_nongrouped_spec_t* spec)
+{
+    return rocke_dconv_elem_bytes(nongrouped_dtype(spec));
+}
+
+/* spec.x_load_vec (_x_load_vec): elements per activation staging load (one
+ * dwordx4): 8 halves, 4 floats. */
+static int nongrouped_x_load_vec(const rocke_direct_conv_nongrouped_spec_t* spec)
+{
+    return ROCKE_DCONV_NONGROUPED_VEC_BYTES / nongrouped_elem_bytes(spec);
+}
+
+/* default_lds_pad(dtype): the bank-conflict-free activation pad, in elements
+ * (16 bytes): 8 halves for fp16 / bf16, 4 floats for fp32 / tf32. */
+static int nongrouped_default_lds_pad(const char* dtype)
+{
+    return ROCKE_DCONV_NONGROUPED_VEC_BYTES / rocke_dconv_elem_bytes(dtype);
+}
+
+/* spec.w_planes: LDS planes of the weight array, one per 16 bytes of a
+ * fragment (one for 16-bit fragments, which are at most 16 bytes). */
+static int nongrouped_w_planes(const rocke_direct_conv_nongrouped_spec_t* spec, int frag)
+{
+    int planes = frag * nongrouped_elem_bytes(spec) / ROCKE_DCONV_NONGROUPED_VEC_BYTES;
+    return planes > 1 ? planes : 1;
+}
+
 static int nongrouped_ho(const rocke_direct_conv_problem_t* p)
 {
     return (p->H + 2 * p->PAD - (p->KH - 1) * p->dil_h - 1) / p->stride + 1;
@@ -113,15 +154,8 @@ static int nongrouped_ho(const rocke_direct_conv_problem_t* p)
 
 static int nongrouped_wo(const rocke_direct_conv_problem_t* p)
 {
-    return (p->W + 2 * p->PAD - (p->KW - 1) * p->dil_w - 1) / p->stride + 1;
-}
-
-static void nongrouped_set_reason(char* reason, size_t reason_cap, const char* msg)
-{
-    if(reason && reason_cap > 0)
-    {
-        snprintf(reason, reason_cap, "%s", msg);
-    }
+    return (p->W + 2 * rocke_direct_conv_problem_pad_w(p) - (p->KW - 1) * p->dil_w - 1) / p->stride
+           + 1;
 }
 
 /* ===================================================================== *
@@ -175,9 +209,10 @@ long rocke_direct_conv_nongrouped_lds_bytes(const rocke_direct_conv_nongrouped_s
     lds_in_w = (long)(spec->tile_w - 1) * p->stride + (long)(p->KW - 1) * p->dil_w + 1;
     x_halves = lds_in_h * lds_in_w * (spec->ck + spec->lds_pad);
     w_halves = (long)spec->tile_k * p->KH * p->KW * spec->ck;
-    /* + one scratch fragment per array (see the builder). */
-    one = x_halves + ROCKE_DCONV_NONGROUPED_X_LOAD_VEC + w_halves + at->frag;
-    return 2 * one * (spec->double_buffer ? 2 : 1);
+    /* + one scratch fragment per array (see the builder). Elements, sized by
+     * the stored element width. */
+    one = x_halves + nongrouped_x_load_vec(spec) + w_halves + at->frag;
+    return nongrouped_elem_bytes(spec) * one * (spec->double_buffer ? 2 : 1);
 }
 
 int rocke_direct_conv_nongrouped_acc_vgprs(const rocke_direct_conv_nongrouped_spec_t* spec)
@@ -258,7 +293,7 @@ long long
         return 0;
     }
     return 4LL * spec->split_c * p->N * nongrouped_ho(p) * nongrouped_wo(p)
-           * ((long long)p->groups * p->kpg);
+           * rocke_direct_conv_problem_total_k(p);
 }
 
 /* ===================================================================== *
@@ -278,7 +313,10 @@ rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
     char sc_buf[24];
     char grp_buf[24];
     char d_buf[32];
-    const char* parts[13];
+    char pad_buf[24];
+    const char* parts[14];
+    const char* dtype;
+    const char* dtype_flag;
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -338,8 +376,21 @@ rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
     parts[9] = we_buf;
     parts[10] = sc_buf;
     parts[11] = grp_buf;
-    parts[12] = nongrouped_is_bf16(spec) ? "bf16" : "";
-    return rocke_kernel_name_join(spec->name, parts, 13, NULL, NULL, 0, out, out_cap, NULL);
+    /* fp32 storage only: a pad other than the conflict-free default. (16-bit
+     * names never carried the pad; they keep their names.) */
+    dtype = nongrouped_dtype(spec);
+    pad_buf[0] = '\0';
+    if((strcmp(dtype, "fp32") == 0 || strcmp(dtype, "tf32") == 0)
+       && spec->lds_pad != nongrouped_default_lds_pad(dtype))
+    {
+        snprintf(pad_buf, sizeof(pad_buf), "p%d", spec->lds_pad);
+    }
+    parts[12] = pad_buf;
+    /* _DTYPE_FLAG.get(dtype, dtype): fp16 has none (the historical names);
+     * fp32 storage needs one or its binaries would collide with the fp16 names. */
+    dtype_flag = strcmp(dtype, "fp16") == 0 ? "" : dtype;
+    parts[13] = dtype_flag;
+    return rocke_kernel_name_join(spec->name, parts, 14, NULL, NULL, 0, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -350,28 +401,37 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
 {
     const rocke_direct_conv_problem_t* p;
     const rocke_dconv_nongrouped_atom_t* at;
-    char msg[ROCKE_ERR_MSG_CAP];
-    int t, merged_c, merged_k;
+    int t, merged_c, merged_k, xv, eb;
 
     if(spec == NULL)
     {
-        nongrouped_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
 
-#define NONGROUPED_REJECT(...)                          \
-    do                                                  \
-    {                                                   \
-        snprintf(msg, sizeof(msg), __VA_ARGS__);        \
-        nongrouped_set_reason(reason, reason_cap, msg); \
-        return ROCKE_ERR_VALUE;                         \
+#define NONGROUPED_REJECT(...)                                   \
+    do                                                           \
+    {                                                            \
+        rocke_spec_set_reasonf(reason, reason_cap, __VA_ARGS__); \
+        return ROCKE_ERR_VALUE;                                  \
     } while(0)
 
-    if(strcmp(nongrouped_dtype(spec), "fp16") != 0 && strcmp(nongrouped_dtype(spec), "bf16") != 0)
+    if(!nongrouped_dtype_supported(nongrouped_dtype(spec)))
     {
-        NONGROUPED_REJECT("DirectNongroupedConvSpec: unsupported dtype '%s'",
+        NONGROUPED_REJECT("DirectNongroupedConvSpec: unsupported dtype '%s' "
+                          "(expected one of ['fp16', 'bf16', 'fp32', 'tf32'])",
                           nongrouped_dtype(spec));
+    }
+    if(rocke_dconv_is_f32_storage(nongrouped_dtype(spec)) && (spec->grouped || spec->split_c != 1))
+    {
+        /* The grouped-halo and split-C variants stage and reduce 16-bit data
+         * only; fp32 storage is wired through the plain kernel. */
+        NONGROUPED_REJECT("DirectNongroupedConvSpec: %s storage supports the plain kernel only "
+                          "(grouped=False, split_c=1); got grouped=%s, split_c=%d",
+                          nongrouped_dtype(spec),
+                          spec->grouped ? "True" : "False",
+                          spec->split_c);
     }
     if(!spec->grouped && p->groups != 1)
     {
@@ -436,9 +496,11 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
     {
         NONGROUPED_REJECT("ck %d not divisible by atom K %d", spec->ck, at->k);
     }
-    if(spec->ck % ROCKE_DCONV_NONGROUPED_X_LOAD_VEC != 0)
+    /* Elements per dwordx4: 8 halves, 4 floats. */
+    xv = nongrouped_x_load_vec(spec);
+    if(spec->ck % xv != 0)
     {
-        NONGROUPED_REJECT("ck %d not divisible by %d", spec->ck, ROCKE_DCONV_NONGROUPED_X_LOAD_VEC);
+        NONGROUPED_REJECT("ck %d not divisible by %d", spec->ck, xv);
     }
     merged_c = nongrouped_merged_c(spec);
     merged_k = nongrouped_merged_k(spec);
@@ -450,10 +512,9 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
     {
         NONGROUPED_REJECT("K %d must be a multiple of %d (got %d)", merged_k, t, merged_k);
     }
-    if(merged_c % ROCKE_DCONV_NONGROUPED_X_LOAD_VEC != 0)
+    if(merged_c % xv != 0)
     {
-        NONGROUPED_REJECT(
-            "C %d must be a multiple of %d", merged_c, ROCKE_DCONV_NONGROUPED_X_LOAD_VEC);
+        NONGROUPED_REJECT("C %d must be a multiple of %d", merged_c, xv);
     }
     if(spec->grouped && p->cpg % nongrouped_w_vec(spec) != 0)
     {
@@ -466,14 +527,16 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
         NONGROUPED_REJECT("threads_per_block %d > 1024",
                           rocke_direct_conv_nongrouped_threads_per_block(spec));
     }
-    if(spec->lds_pad < 0 || spec->lds_pad % 8 != 0)
+    if(spec->lds_pad < 0 || spec->lds_pad % xv != 0)
     {
-        /* A negative pad shrinks the pixel stride below the ck halves each
-         * pixel stages, so neighbouring pixels overlap in LDS. The vec8 LDS
+        /* A negative pad shrinks the pixel stride below the ck elements each
+         * pixel stages, so neighbouring pixels overlap in LDS. The 16-byte LDS
          * store/load is emitted with align 16, so the pixel stride
-         * (ck + lds_pad halves) must be a multiple of 8 halves. */
+         * (ck + lds_pad elements) must be a multiple of 16 bytes: 8 halves,
+         * 4 floats. */
         NONGROUPED_REJECT(
-            "lds_pad must be a non-negative multiple of 8 to keep ds_read_b128 aligned (got %d)",
+            "lds_pad must be a non-negative multiple of %d to keep ds_read_b128 aligned (got %d)",
+            xv,
             spec->lds_pad);
     }
     if(spec->swizzle_wgm < 1)
@@ -512,11 +575,13 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
         /* Masked staging loads and epilogue stores go to OOB_BASE and rely on
          * it being past num_records; a larger tensor would hand the loads real
          * data and take the stores. */
-        long long total_c = (long long)p->groups * p->cpg;
-        long long total_k = (long long)p->groups * p->kpg;
-        long long a_bytes = 2LL * p->N * p->H * p->W * total_c;
-        long long b_bytes = 2LL * total_k * p->KH * p->KW * p->cpg;
-        long long d_bytes = 2LL * p->N * nongrouped_ho(p) * nongrouped_wo(p) * total_k;
+        long long total_c = rocke_direct_conv_problem_total_c(p);
+        long long total_k = rocke_direct_conv_problem_total_k(p);
+        long long a_bytes, b_bytes, d_bytes, tail;
+        eb = nongrouped_elem_bytes(spec);
+        a_bytes = (long long)eb * p->N * p->H * p->W * total_c;
+        b_bytes = (long long)eb * total_k * p->KH * p->KW * p->cpg;
+        d_bytes = (long long)eb * p->N * nongrouped_ho(p) * nongrouped_wo(p) * total_k;
         long long biggest = a_bytes > b_bytes ? a_bytes : b_bytes;
         biggest = d_bytes > biggest ? d_bytes : biggest;
         if(biggest > ROCKE_DCONV_NONGROUPED_OOB_BASE)
@@ -528,8 +593,12 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
                               b_bytes,
                               d_bytes);
         }
+        /* fp32 storage also reads a fragment as dwordx4 pieces up to 16 bytes
+         * past the chunk offset (_load_elems); 16-bit loads are one access. */
+        tail = eb == 4 ? ROCKE_DCONV_NONGROUPED_VEC_BYTES : 0;
         /* The last prefetch runs one chunk (two when double-buffered) past C. */
-        if((long long)ROCKE_DCONV_NONGROUPED_OOB_BASE + 2LL * (total_c + spec->ck) > INT32_MAX)
+        if((long long)ROCKE_DCONV_NONGROUPED_OOB_BASE + (long long)eb * (total_c + spec->ck) + tail
+           > INT32_MAX)
         {
             NONGROUPED_REJECT("C %d too large: the masked-load offset plus the channel offset "
                               "would overflow i32",
@@ -568,7 +637,7 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
     }
 #undef NONGROUPED_REJECT
 
-    nongrouped_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return ROCKE_OK;
 }
 
@@ -588,7 +657,7 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
 
     if(spec == NULL)
     {
-        nongrouped_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -610,17 +679,39 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
     if(p->stride != 1 && p->stride != 2)
     {
         snprintf(msg, sizeof(msg), "stride %d is not supported (expected 1 or 2)", p->stride);
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     at = nongrouped_atom(spec->atom);
-    ab = nongrouped_is_bf16(spec) ? "bf16" : "f16";
-    if(!rocke_mma_catalog_has_shape(
-           rocke_archtarget_mma(target), "mma", ab, ab, "fp32", at->tile, at->tile, at->k))
+    if(rocke_dconv_is_f32_storage(nongrouped_dtype(spec)))
     {
-        snprintf(msg, sizeof(msg), "missing mfma_f32_%s_%s on %s", at->name, ab, arch);
-        nongrouped_set_reason(reason, reason_cap, msg);
-        return false;
+        /* The logical atom is issued on the arch's fp32 / TF32 catalog atoms
+         * (split, or zero-padded) -- see rocke_dconv_mma_f32_logical. */
+        rocke_dconv_f32_mma_plan_t plan;
+        if(!rocke_dconv_f32_mma_plan(arch, nongrouped_dtype(spec), at->tile, at->frag, &plan))
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "no %dx%d %s MMA atom on %s for the %s fragment",
+                     at->tile,
+                     at->tile,
+                     nongrouped_dtype(spec),
+                     arch,
+                     at->name);
+            rocke_spec_set_reason(reason, reason_cap, msg);
+            return false;
+        }
+    }
+    else
+    {
+        ab = nongrouped_is_bf16(spec) ? "bf16" : "f16";
+        if(!rocke_mma_catalog_has_shape(
+               rocke_archtarget_mma(target), "mma", ab, ab, "fp32", at->tile, at->tile, at->k))
+        {
+            snprintf(msg, sizeof(msg), "missing mfma_f32_%s_%s on %s", at->name, ab, arch);
+            rocke_spec_set_reason(reason, reason_cap, msg);
+            return false;
+        }
     }
     if(spec->wave_size != target->wave_size)
     {
@@ -630,7 +721,7 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
                  spec->wave_size,
                  arch,
                  target->wave_size);
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(rocke_direct_conv_nongrouped_threads_per_block(spec)
@@ -640,7 +731,7 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
                  sizeof(msg),
                  "threads_per_block %d exceeds arch limit",
                  rocke_direct_conv_nongrouped_threads_per_block(spec));
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(!rocke_archtarget_fits_lds(target, rocke_direct_conv_nongrouped_lds_bytes(spec)))
@@ -650,10 +741,10 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
                  "LDS %ld B exceeds %d B",
                  rocke_direct_conv_nongrouped_lds_bytes(spec),
                  target->lds_capacity_bytes);
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    nongrouped_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -673,7 +764,10 @@ struct nongrouped_w_piece
 struct nongrouped_stage_meta
 {
     rocke_value_t* base; /* global byte offset base (chunk offset added per iter) */
-    rocke_value_t* lds_idx; /* LDS half index of this thread's slot                 */
+    rocke_value_t* lds_idx; /* LDS element index of this thread's slot              */
+    /* fp32-storage weights split into planes (WPL > 1): one LDS index per
+     * plane, lds_idx unused. */
+    std::vector<rocke_value_t*> lds_idxs;
     /* Merged-group weights only (base unused): the slot's k_out < K_M mask and
      * the per-piece offsets, masked per chunk in issue_stage_loads. */
     rocke_value_t* valid;
@@ -688,6 +782,17 @@ struct nongrouped_ctx
     const rocke_type_t* io_type;
     bool bf16;
     rocke_dconv_nongrouped_mfma_fn mfma;
+    const char* arch;
+    const char* dtype; /* problem dtype, NULL read as fp16 */
+    /* fp32 storage ("fp32" / "tf32"): 4-byte elements, dwordx4-sized LDS and
+     * global pieces, and the logical atom issued by rocke_dconv_mma_f32_logical.
+     * The 16-bit path is emitted exactly as before. */
+    bool F32S;
+    int EB; /* bytes per element */
+    int XV; /* elements per staging load: 8 halves / 4 floats */
+    int WPL; /* weight LDS planes (16 bytes of a fragment each) */
+    int WV; /* elements per plane per slot */
+    int W_PLANE; /* weight plane stride, in elements */
 
     /* Build-time geometry (Python all-caps locals). */
     int KH, KW, S, PAD;
@@ -761,7 +866,11 @@ bool nongrouped_prologue(nongrouped_ctx& c, const char* arch)
     }
 
     c.p = spec->problem;
-    c.io_type = rocke_b_io_ir_type(b, nongrouped_dtype(spec));
+    c.arch = arch;
+    c.dtype = nongrouped_dtype(spec);
+    c.F32S = rocke_dconv_is_f32_storage(c.dtype);
+    /* _io_type: the storage type (F32 for fp32 / tf32). */
+    c.io_type = c.F32S ? rocke_f32() : rocke_b_io_ir_type(b, c.dtype);
     if(c.io_type == NULL)
     {
         return false;
@@ -769,6 +878,10 @@ bool nongrouped_prologue(nongrouped_ctx& c, const char* arch)
     c.bf16 = nongrouped_is_bf16(spec);
     at = nongrouped_atom(spec->atom);
     c.mfma = c.bf16 ? at->bf16 : at->f16;
+    c.EB = nongrouped_elem_bytes(spec);
+    c.XV = nongrouped_x_load_vec(spec);
+    c.WPL = nongrouped_w_planes(spec, at->frag);
+    c.WV = at->frag / c.WPL;
 
     c.KH = c.p.KH;
     c.KW = c.p.KW;
@@ -798,7 +911,7 @@ bool nongrouped_prologue(nongrouped_ctx& c, const char* arch)
     c.LDS_IN_H = (c.TH - 1) * c.S + (c.KH - 1) * c.DH + 1;
     c.LDS_IN_W = (c.TW - 1) * c.S + (c.KW - 1) * c.DW + 1;
 
-    c.X_CV = c.CK / ROCKE_DCONV_NONGROUPED_X_LOAD_VEC;
+    c.X_CV = c.CK / c.XV; /* channel vectors per staged pixel */
     c.X_VECS = c.LDS_IN_H * c.LDS_IN_W * c.X_CV;
     c.X_PASSES = (c.X_VECS + c.THREADS - 1) / c.THREADS;
     c.W_SLOTS = c.KH * c.KW * c.M_TILES * c.KATOMS * c.WAVE;
@@ -807,6 +920,9 @@ bool nongrouped_prologue(nongrouped_ctx& c, const char* arch)
     c.GROUPED = spec->grouped;
     c.GM = spec->group_merge;
     c.W_VEC = (c.GROUPED && c.GM > 1) ? 4 : c.FRAG;
+    /* Plane h holds elements h*WV..h*WV+WV-1 of every slot's fragment. One
+     * plane (the whole fragment) for 16-bit. */
+    c.W_PLANE = c.W_SLOTS * c.WV;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", c.THREADS);
     if(spec->waves_per_eu != ROCKE_DCONV_NONGROUPED_WAVES_PER_EU_NONE)
@@ -853,7 +969,7 @@ bool nongrouped_prologue(nongrouped_ctx& c, const char* arch)
 
     c.c0 = nongrouped_c(c, 0);
     c.c1 = nongrouped_c(c, 1);
-    c.c_half = nongrouped_c(c, 2);
+    c.c_half = nongrouped_c(c, c.EB); /* bytes per element */
     /* Shared by the masked staging loads and the masked epilogue stores. */
     c.oob_base = nongrouped_c(c, ROCKE_DCONV_NONGROUPED_OOB_BASE);
 
@@ -869,7 +985,7 @@ bool nongrouped_prologue(nongrouped_ctx& c, const char* arch)
         int nbuf;
         int shape[2];
         c.DB = spec->double_buffer;
-        c.x_stage = (int)(x_halves + ROCKE_DCONV_NONGROUPED_X_LOAD_VEC);
+        c.x_stage = (int)(x_halves + c.XV);
         c.w_stage = (int)(w_halves + c.FRAG);
         c.x_dump = (int)x_halves;
         c.w_dump = (int)w_halves;
@@ -1053,13 +1169,13 @@ void nongrouped_x_pass_meta(nongrouped_ctx& c)
         t1 = rocke_b_mul(b, iw, c.params.p_A_stride_wi);
         t0 = rocke_b_add(b, t0, t1);
         t1 = rocke_b_add(b, img_base, t0);
-        k = nongrouped_c(c, ROCKE_DCONV_NONGROUPED_X_LOAD_VEC);
+        k = nongrouped_c(c, c.XV);
         t2 = rocke_b_mul(b, cv, k);
         elems = rocke_b_add(b, t1, t2);
 
         k = nongrouped_c(c, c.CSTRIDE);
         t0 = rocke_b_mul(b, pos, k);
-        k = nongrouped_c(c, ROCKE_DCONV_NONGROUPED_X_LOAD_VEC);
+        k = nongrouped_c(c, c.XV);
         t1 = rocke_b_mul(b, cv, k);
         lds_idx = rocke_b_add(b, t0, t1);
         if(in_tile != NULL)
@@ -1069,7 +1185,7 @@ void nongrouped_x_pass_meta(nongrouped_ctx& c)
         }
         t0 = rocke_b_mul(b, elems, c.c_half);
         base = rocke_b_select(b, valid, t0, c.oob_base);
-        c.x_meta.push_back({base, lds_idx, NULL, {}});
+        c.x_meta.push_back({base, lds_idx, {}, NULL, {}});
     }
 }
 
@@ -1181,16 +1297,49 @@ void nongrouped_w_pass_meta(nongrouped_ctx& c)
         krs = rocke_b_add(b, krs_w, s);
         t0 = rocke_b_mul(b, krs, c.C_W);
         elems = rocke_b_add(b, t0, c_in_chunk);
-        k = nongrouped_c(c, c.FRAG);
-        lds_idx = rocke_b_mul(b, g, k);
-        if(in_tile != NULL)
+        if(c.WPL == 1)
         {
-            k = nongrouped_c(c, c.w_dump);
-            lds_idx = rocke_b_select(b, in_tile, lds_idx, k);
+            k = nongrouped_c(c, c.FRAG);
+            lds_idx = rocke_b_mul(b, g, k);
+            if(in_tile != NULL)
+            {
+                k = nongrouped_c(c, c.w_dump);
+                lds_idx = rocke_b_select(b, in_tile, lds_idx, k);
+            }
+            t0 = rocke_b_mul(b, elems, c.c_half);
+            base = rocke_b_select(b, valid, t0, c.oob_base);
+            c.w_meta.push_back({base, lds_idx, {}, NULL, {}});
+            continue;
         }
-        t0 = rocke_b_mul(b, elems, c.c_half);
-        base = rocke_b_select(b, valid, t0, c.oob_base);
-        c.w_meta.push_back({base, lds_idx, NULL, {}});
+        {
+            /* fp32 storage, 8-element fragment: one LDS index per plane. An
+             * out-of-tile slot dumps plane h into the scratch tail at h * WV. */
+            nongrouped_stage_meta m;
+            rocke_value_t* slot;
+            int h;
+            k = nongrouped_c(c, c.WV);
+            slot = rocke_b_mul(b, g, k);
+            for(h = 0; h < c.WPL; ++h)
+            {
+                rocke_value_t* idx = slot;
+                if(h != 0)
+                {
+                    k = nongrouped_c(c, (int64_t)h * c.W_PLANE);
+                    idx = rocke_b_add(b, slot, k);
+                }
+                if(in_tile != NULL)
+                {
+                    k = nongrouped_c(c, (int64_t)c.w_dump + (int64_t)h * c.WV);
+                    idx = rocke_b_select(b, in_tile, idx, k);
+                }
+                m.lds_idxs.push_back(idx);
+            }
+            t0 = rocke_b_mul(b, elems, c.c_half);
+            m.base = rocke_b_select(b, valid, t0, c.oob_base);
+            m.lds_idx = NULL;
+            m.valid = NULL;
+            c.w_meta.push_back(m);
+        }
     }
 }
 
@@ -1202,6 +1351,33 @@ void nongrouped_issue_stage_loads(nongrouped_ctx& c,
 {
     xs.clear();
     ws.clear();
+    if(c.F32S)
+    {
+        /* fp32 storage: one dwordx4 per activation vector, and one per weight
+         * plane (WPL per pass, flattened pass-major). */
+        rocke_ir_builder_t* b = c.b;
+        for(const nongrouped_stage_meta& m : c.x_meta)
+        {
+            rocke_value_t* voff = rocke_b_add(b, m.base, c_off);
+            xs.push_back(rocke_dconv_load_elems(b, c.dtype, c.a_rsrc, voff, c.c0, c.XV));
+        }
+        for(const nongrouped_stage_meta& m : c.w_meta)
+        {
+            rocke_value_t* voff = rocke_b_add(b, m.base, c_off);
+            int h;
+            for(h = 0; h < c.WPL; ++h)
+            {
+                rocke_value_t* v = voff;
+                if(h != 0)
+                {
+                    rocke_value_t* k = nongrouped_c(c, (int64_t)h * c.WV * c.EB);
+                    v = rocke_b_add(b, voff, k);
+                }
+                ws.push_back(rocke_dconv_load_elems(b, c.dtype, c.b_rsrc, v, c.c0, c.WV));
+            }
+        }
+        return;
+    }
     for(const nongrouped_stage_meta& m : c.x_meta)
     {
         rocke_value_t* voff = rocke_b_add(c.b, m.base, c_off);
@@ -1259,7 +1435,27 @@ void nongrouped_commit_stage(nongrouped_ctx& c,
         }
         ind[0] = c.c0;
         ind[1] = idx;
-        rocke_b_smem_store_vN(c.b, c.X_smem, ind, 2, xs[i], ROCKE_DCONV_NONGROUPED_X_LOAD_VEC);
+        rocke_b_smem_store_vN(c.b, c.X_smem, ind, 2, xs[i], c.XV);
+    }
+    if(c.WPL > 1)
+    {
+        for(i = 0; i < c.w_meta.size(); ++i)
+        {
+            size_t h;
+            for(h = 0; h < c.w_meta[i].lds_idxs.size(); ++h)
+            {
+                rocke_value_t* idx = c.w_meta[i].lds_idxs[h];
+                rocke_value_t* ind[2];
+                if(w_buf != NULL)
+                {
+                    idx = rocke_b_add(c.b, idx, w_buf);
+                }
+                ind[0] = c.c0;
+                ind[1] = idx;
+                rocke_b_smem_store_vN(c.b, c.W_smem, ind, 2, ws[i * (size_t)c.WPL + h], c.WV);
+            }
+        }
+        return;
     }
     for(i = 0; i < c.w_meta.size(); ++i)
     {
@@ -1293,22 +1489,39 @@ void nongrouped_read_bases(nongrouped_ctx& c)
     x_lane_term = rocke_b_add(b, t0, t1);
     c.x_read_base = rocke_b_add(b, x_wave_term, x_lane_term);
 
-    /* W: idx = wave_m block + lane*FRAG + compile-time term. */
-    k = nongrouped_c(c, (int64_t)c.MT_W * c.KATOMS * c.WAVE * c.FRAG);
+    /* W: idx = wave_m block + lane*WV + compile-time term (WV == FRAG unless
+     * the fragment is split into planes). */
+    k = nongrouped_c(c, (int64_t)c.MT_W * c.KATOMS * c.WAVE * c.WV);
     t0 = rocke_b_mul(b, c.wave_m, k);
-    k = nongrouped_c(c, c.FRAG);
+    k = nongrouped_c(c, c.WV);
     t1 = rocke_b_mul(b, c.lane, k);
     c.w_read_base = rocke_b_add(b, t0, t1);
+}
+
+/* _lds_frag: an fp32 fragment from 16-byte pieces `plane_stride` elements
+ * apart. Each piece is one ds_read_b128 (align 16, which is all the pixel
+ * stride guarantees); the pieces are concatenated in K order. */
+rocke_value_t* nongrouped_lds_frag(nongrouped_ctx& c,
+                                   rocke_value_t* smem,
+                                   rocke_value_t* idx,
+                                   int plane_stride)
+{
+    const int n = c.FRAG < c.XV ? c.FRAG : c.XV;
+    return rocke_b_smem_load_fragment(c.b, smem, c.c0, idx, c.io_type, c.FRAG, n, plane_stride);
 }
 
 rocke_value_t*
     nongrouped_read_a_frag(nongrouped_ctx& c, rocke_value_t* base, int tap, int mt, int katom)
 {
-    int64_t off = ((int64_t)(tap * c.M_TILES + mt) * c.KATOMS + katom) * c.WAVE * c.FRAG;
+    int64_t off = ((int64_t)(tap * c.M_TILES + mt) * c.KATOMS + katom) * c.WAVE * c.WV;
     rocke_value_t* k = nongrouped_c(c, off);
     rocke_value_t* ind[2];
     ind[0] = c.c0;
     ind[1] = rocke_b_add(c.b, base, k);
+    if(c.F32S)
+    {
+        return nongrouped_lds_frag(c, c.W_smem, ind[1], c.W_PLANE);
+    }
     return rocke_b_smem_load_vN(c.b, c.W_smem, ind, 2, c.io_type, c.FRAG);
 }
 
@@ -1324,6 +1537,10 @@ rocke_value_t* nongrouped_read_b_frag(
     rocke_value_t* ind[2];
     ind[0] = c.c0;
     ind[1] = rocke_b_add(c.b, base, k);
+    if(c.F32S)
+    {
+        return nongrouped_lds_frag(c, c.X_smem, ind[1], c.XV);
+    }
     return rocke_b_smem_load_vN(c.b, c.X_smem, ind, 2, c.io_type, c.FRAG);
 }
 
@@ -1368,6 +1585,18 @@ void nongrouped_emit_mfmas(nongrouped_ctx& c,
                         for(mt = 0; mt < c.MT_W; ++mt)
                         {
                             size_t idx = (size_t)mt * c.NT_W + nt;
+                            if(c.F32S)
+                            {
+                                accs[idx] = rocke_dconv_mma_f32_logical(
+                                    c.b,
+                                    c.arch,
+                                    c.dtype,
+                                    c.AT,
+                                    a_frags[(size_t)mt],
+                                    b_frags[(size_t)bf_row * c.NCB + cb],
+                                    accs[idx]);
+                                continue;
+                            }
                             accs[idx] = c.mfma(c.b,
                                                a_frags[(size_t)mt],
                                                b_frags[(size_t)bf_row * c.NCB + cb],
@@ -1398,7 +1627,7 @@ std::vector<rocke_value_t*> nongrouped_channel_loop(nongrouped_ctx& c)
 
     zero_acc = rocke_b_zero_vec_f32(b, c.ACC);
 
-    c_ck_bytes = nongrouped_c(c, (int64_t)c.CK * 2);
+    c_ck_bytes = nongrouped_c(c, (int64_t)c.CK * c.EB);
     if(c.SPLIT > 1)
     {
         /* Split `split` owns chunks [split*T/S, (split+1)*T/S) of the T chunks
@@ -1552,7 +1781,8 @@ std::vector<rocke_value_t*> nongrouped_channel_loop(nongrouped_ctx& c)
     return out;
 }
 
-/* ---- epilogue: square-atom accumulator -> packed dwordx2 quad stores ---- */
+/* ---- epilogue: square-atom accumulator -> one store per quad (16-bit: a
+ * packed dwordx2; fp32 storage: a dwordx4) ---- */
 void nongrouped_epilogue(nongrouped_ctx& c, const std::vector<rocke_value_t*>& accs_out)
 {
     rocke_ir_builder_t* b = c.b;
@@ -1667,6 +1897,11 @@ void nongrouped_epilogue(nongrouped_ctx& c, const std::vector<rocke_value_t*>& a
                         comps[jj] = rocke_b_vec_extract(b, acc, 4 * q + jj);
                     }
                     quad = rocke_b_vec_pack(b, comps, 4, rocke_f32());
+                    if(c.F32S)
+                    {
+                        rocke_dconv_store_from_f32(b, c.dtype, c.d_rsrc, safe, c.c0, quad, 4);
+                        continue;
+                    }
                     if(c.bf16)
                     {
                         narrow = rocke_b_vec_trunc_f32_to_bf16(b, quad);
@@ -1856,7 +2091,7 @@ rocke_status_t rocke_direct_conv_split_reduce_validate(
 
     if(spec == NULL)
     {
-        nongrouped_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return ROCKE_ERR_VALUE;
     }
     if(strcmp(split_reduce_dtype(spec), "fp16") != 0
@@ -1866,13 +2101,13 @@ rocke_status_t rocke_direct_conv_split_reduce_validate(
                  sizeof(msg),
                  "DirectSplitReduceSpec: unsupported dtype '%s'",
                  split_reduce_dtype(spec));
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return ROCKE_ERR_VALUE;
     }
     if(spec->split_c < 2)
     {
         snprintf(msg, sizeof(msg), "split_c must be >= 2 (got %d)", spec->split_c);
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return ROCKE_ERR_VALUE;
     }
     if(spec->threads <= 0 || spec->threads % 64 != 0 || spec->threads > 1024)
@@ -1881,10 +2116,10 @@ rocke_status_t rocke_direct_conv_split_reduce_validate(
                  sizeof(msg),
                  "threads must be a positive multiple of 64 up to 1024 (got %d)",
                  spec->threads);
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return ROCKE_ERR_VALUE;
     }
-    nongrouped_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return ROCKE_OK;
 }
 
@@ -1894,7 +2129,7 @@ void rocke_direct_conv_split_reduce_grid(const rocke_direct_conv_split_reduce_sp
 {
     long long per_block = (long long)spec->threads * ROCKE_DCONV_SPLIT_REDUCE_VEC;
     long long total = (long long)problem->N * nongrouped_ho(problem) * nongrouped_wo(problem)
-                      * ((long long)problem->groups * problem->kpg);
+                      * rocke_direct_conv_problem_total_k(problem);
     grid[0] = (int)((total + per_block - 1) / per_block);
     grid[1] = 1;
     grid[2] = 1;

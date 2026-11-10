@@ -18,6 +18,9 @@ top-level skeleton that names what's special about the kernel (the
 shape, the atom, the descriptor for non-bijective addressing) and
 leaves the boilerplate to the helpers.
 
+That only holds if kernels add and fix helpers as they go, with
+tests: [platform/AGENTS.md](../../../AGENTS.md#helpers-placement).
+
 ## What's here
 
 ```text
@@ -52,6 +55,8 @@ rocke/helpers/
 │ # the (Y, P) decomposition is non-trivial.
 ├── io.py # io_ir_type, load_vec, load_vec_as_f32, pack_f32_to,
 │ # store_vec_from_f32; dtype-string-tolerant I/O dispatch.
+│ # smem_load_fragment: an LDS fragment read in <= 16-byte
+│ # pieces joined in K order by concat_tree (fp32 / TF32 conv).
 ├── reduction.py # block_lds_reduce (sum/max/min/prod) -- canonical
 │ # LDS tree reduction shared by norm/reduce/pool
 │ # kernels. Min and prod are also supported.

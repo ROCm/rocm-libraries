@@ -3180,19 +3180,47 @@ namespace
                                                max_data_size_per_batch, rank, is_real(dft_kind)));
         const auto      lengths = get_random_vector<valid_value, ptrdiff_t>(rank, max_len, 1);
         auto            shuffling_indices = get_random_shuffling_indices(rank, is_real_ip);
-        const auto      istrides
-            = default_strides(dft_kind, placement, fft_io::fft_io_in, lengths, shuffling_indices);
-        const auto idist = default_distances(
-            dft_kind, placement, fft_io::fft_io_in, lengths, batches, shuffling_indices);
+
+        // Packed data extents along each dimension. For real transforms, the last dimension of
+        // lengths is the Hermitian-reduced one (regardless of its stride), and it is padded on
+        // the real side of in-place transforms (in which case it must be contiguous).
+        auto in_extents  = lengths;
+        auto out_extents = lengths;
+        if(is_real(dft_kind))
+        {
+            auto& herm_extents  = is_fwd(dft_kind) ? out_extents : in_extents;
+            auto& real_extents  = is_fwd(dft_kind) ? in_extents : out_extents;
+            herm_extents.back() = lengths.back() / 2 + 1;
+            if(is_real_ip)
+                real_extents.back() = 2 * (lengths.back() / 2 + 1);
+        }
+        // strides and distances of packed data with the given extents, stride_order listing all
+        // dimensions from largest to unit stride (distances exceeding all strides)
+        auto packed_layout = [&batches](const std::vector<ptrdiff_t>& extents,
+                                        const std::vector<size_t>&    stride_order) {
+            std::vector<ptrdiff_t> strides(extents.size()), distances(batches.size());
+            ptrdiff_t              next = 1;
+            for(auto idx = stride_order.size(); idx-- > 0;)
+            {
+                const auto dim = stride_order[idx];
+                strides[dim]   = next;
+                next *= extents[dim];
+            }
+            for(auto idx = batches.size(); idx-- > 0;)
+            {
+                distances[idx] = next;
+                next *= batches[idx];
+            }
+            return std::make_pair(strides, distances);
+        };
+
+        const auto [istrides, idist] = packed_layout(in_extents, shuffling_indices);
         if(placement == fft_placement_notinplace)
         {
             // can use different shuffling on output
             shuffling_indices = get_random_shuffling_indices(rank, is_real_ip);
         }
-        const auto ostrides
-            = default_strides(dft_kind, placement, fft_io::fft_io_out, lengths, shuffling_indices);
-        const auto odist = default_distances(
-            dft_kind, placement, fft_io::fft_io_out, lengths, batches, shuffling_indices);
+        const auto [ostrides, odist] = packed_layout(out_extents, shuffling_indices);
 
         helper.set_creation_args(dft_kind,
                                  rank,

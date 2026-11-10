@@ -26,6 +26,8 @@ GlobalParameters:
   KernelTime: false
   CpuThreads: 4
   PrintSolutionRejectionReason: true
+  UniformSummationOrder: 0
+
 BenchmarkProblems:
 - - OperationType: GEMM
     DataType: F8
