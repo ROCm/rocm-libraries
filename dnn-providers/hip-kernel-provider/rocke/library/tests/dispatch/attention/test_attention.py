@@ -81,6 +81,8 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx942_dense_qbminor": {
+        "alibi",
+        "alibi_external_slopes",
         "causal",
         "causal_bottom_right",
         "layout_dense",
@@ -89,6 +91,8 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx942_dense_persist_aot": {
+        "alibi",
+        "alibi_external_slopes",
         "causal",
         "causal_bottom_right",
         "layout_dense",
@@ -97,6 +101,8 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx942_dense_btminor_aot": {
+        "alibi",
+        "alibi_external_slopes",
         "causal",
         "causal_bottom_right",
         "layout_dense",
@@ -105,6 +111,8 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx942_dense_hqswz_aot": {
+        "alibi",
+        "alibi_external_slopes",
         "causal",
         "causal_bottom_right",
         "layout_dense",

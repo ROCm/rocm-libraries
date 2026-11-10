@@ -183,8 +183,12 @@ def test_external_hipdnn_slopes_match_builtin():
     assert np.abs(builtin[1] - caller[1]).max() < 1e-4
 
 
-def test_top_left_cross_length():
-    _check(_run_case(sq=512, skv=1024, heads=(8, 2)), "bf16")
+@pytest.mark.parametrize(
+    "sq,skv", [(512, 1024), (1024, 512)], ids=["sq_lt_skv", "sq_gt_skv"]
+)
+def test_top_left_cross_length(sq, skv):
+    # sq > skv: the rows past the last key see every key; the anchor is the last one.
+    _check(_run_case(sq=sq, skv=skv, heads=(8, 2)), "bf16")
 
 
 def test_bottom_right():

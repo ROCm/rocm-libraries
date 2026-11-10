@@ -39,7 +39,7 @@ spec's value. See `cell_spaces`.
 
 One pack may draw kernels from more than one registry candidate: ``enumerate.also`` lists
 further sections, each with its own ``pin``, ``fixed``, ``cells``, ``free_fields``,
-``spec_fields`` and ``max_kernels`` (the candidate list, request class, sweep level and
+``spec_fields``, ``feature_fields`` and ``max_kernels`` (the candidate list, request class, sweep level and
 space are inherited from ``enumerate``, and a section may set its own ``space``). Kernels
 are emitted primary section first, then each ``also`` section in order; a cell listed by
 more than one section keeps the first section's default as its one ``default: true``
@@ -225,87 +225,95 @@ def _validate_manifest(path: str, manifest: dict) -> None:
             f"{where}.sweep_level",
             "a string",
         )
-    features = decl.get("feature_fields")
-    _require(
-        features is None
-        or (
-            isinstance(features, dict)
-            and all(isinstance(entry, dict) for entry in features.values())
-        ),
-        path,
-        "enumerate.feature_fields",
-        "a mapping of spec field name to {name_token, free_fields, select}",
-    )
-    for name, entry in (features or {}).items():
-        where = f"enumerate.feature_fields.{name}"
+    # Every section's feature_fields: an `also` section's own are honoured by
+    # `Registry` (its space inherited from enumerate), so they get the same checks.
+    for label, sec in [("enumerate", decl)] + [
+        (f"enumerate.also[{i}]", {"space": decl.get("space", "slice"), **a})
+        for i, a in enumerate(also or [])
+    ]:
+        features = sec.get("feature_fields")
         _require(
-            set(entry) <= {"name_token", "free_fields", "select"},
-            path,
-            where,
-            "a mapping with only 'name_token', 'free_fields' and 'select'",
-        )
-        token = entry.get("name_token")
-        _require(
-            isinstance(token, str) and bool(token),
-            path,
-            f"{where}.name_token",
-            "a non-empty string",
-        )
-        _require(
-            entry.get("free_fields") is None or _is_names(entry["free_fields"]),
-            path,
-            f"{where}.free_fields",
-            "a list of field names",
-        )
-        # The spec the KDP builds from (spec_fields) and the catalog key the matcher
-        # compares (metadata_fields) must both carry the field.
-        _require(
-            decl.get("spec_fields") is None or name in decl["spec_fields"],
-            path,
-            where,
-            "listed in enumerate.spec_fields",
-        )
-        _require(
-            name in specialization["metadata_fields"],
-            path,
-            where,
-            "listed in specialization.metadata_fields",
-        )
-        narrowed = entry.get("free_fields")
-        _require(
-            narrowed is None
+            features is None
             or (
-                decl.get("space", "slice") == "slice"
-                and set(narrowed) <= set(decl.get("free_fields") or [])
+                isinstance(features, dict)
+                and all(isinstance(entry, dict) for entry in features.values())
             ),
             path,
-            f"{where}.free_fields",
-            "slice only, and a subset of enumerate.free_fields (it narrows the "
-            "cell's sweep; it cannot widen it)",
+            f"{label}.feature_fields",
+            "a mapping of spec field name to {name_token, free_fields, select}",
         )
-        _require(
-            name not in (decl.get("free_fields") or []),
-            path,
-            where,
-            "not in enumerate.free_fields (a feature is a cell field, not a "
-            "swept one)",
-        )
-        select = entry.get("select")
-        swept = narrowed if narrowed is not None else (decl.get("free_fields") or [])
-        _require(
-            select is None
-            or (
-                isinstance(select, dict)
-                and bool(select)
-                and decl.get("space", "slice") == "slice"
-                and set(select) <= set(swept)
-                and all(isinstance(v, (bool, int, float, str)) for v in select.values())
-            ),
-            path,
-            f"{where}.select",
-            "slice only, a non-empty mapping of the fields the feature's cells "
-            "sweep (its free_fields, else enumerate.free_fields) to scalar values",
-        )
+        for name, entry in (features or {}).items():
+            where = f"{label}.feature_fields.{name}"
+            _require(
+                set(entry) <= {"name_token", "free_fields", "select"},
+                path,
+                where,
+                "a mapping with only 'name_token', 'free_fields' and 'select'",
+            )
+            token = entry.get("name_token")
+            _require(
+                isinstance(token, str) and bool(token),
+                path,
+                f"{where}.name_token",
+                "a non-empty string",
+            )
+            _require(
+                entry.get("free_fields") is None or _is_names(entry["free_fields"]),
+                path,
+                f"{where}.free_fields",
+                "a list of field names",
+            )
+            # The spec the KDP builds from (spec_fields) and the catalog key the matcher
+            # compares (metadata_fields) must both carry the field.
+            _require(
+                sec.get("spec_fields") is None or name in sec["spec_fields"],
+                path,
+                where,
+                f"listed in {label}.spec_fields",
+            )
+            _require(
+                name in specialization["metadata_fields"],
+                path,
+                where,
+                "listed in specialization.metadata_fields",
+            )
+            narrowed = entry.get("free_fields")
+            _require(
+                narrowed is None
+                or (
+                    sec.get("space", "slice") == "slice"
+                    and set(narrowed) <= set(sec.get("free_fields") or [])
+                ),
+                path,
+                f"{where}.free_fields",
+                f"slice only, and a subset of {label}.free_fields (it narrows the "
+                "cell's sweep; it cannot widen it)",
+            )
+            _require(
+                name not in (sec.get("free_fields") or []),
+                path,
+                where,
+                f"not in {label}.free_fields (a feature is a cell field, not a "
+                "swept one)",
+            )
+            select = entry.get("select")
+            swept = narrowed if narrowed is not None else (sec.get("free_fields") or [])
+            _require(
+                select is None
+                or (
+                    isinstance(select, dict)
+                    and bool(select)
+                    and sec.get("space", "slice") == "slice"
+                    and set(select) <= set(swept)
+                    and all(
+                        isinstance(v, (bool, int, float, str)) for v in select.values()
+                    )
+                ),
+                path,
+                f"{where}.select",
+                "slice only, a non-empty mapping of the fields the feature's cells "
+                f"sweep (its free_fields, else {label}.free_fields) to scalar values",
+            )
     _require(
         manifest.get("ground_truth") is None
         or isinstance(manifest["ground_truth"], dict),

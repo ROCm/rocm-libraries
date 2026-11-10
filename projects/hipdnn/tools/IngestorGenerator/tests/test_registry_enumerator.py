@@ -1323,6 +1323,13 @@ def test_an_also_section_must_cross_the_same_cell_fields(probe):
     assert _run_probe(probe, manifest) == 2
 
 
+def test_an_also_section_feature_fields_are_validated(probe):
+    """A section's own ``feature_fields`` reach its name tokens, so they get the
+    primary section's checks."""
+    manifest = _with_also(probe, feature_fields={"order": {"bogus": 1}})
+    assert _run_probe(probe, manifest) == 2
+
+
 def _split_also(split, **overrides) -> dict:
     """``split`` merged on its selector fields, plus a section over hdim 256."""
     manifest = _dedup(split)

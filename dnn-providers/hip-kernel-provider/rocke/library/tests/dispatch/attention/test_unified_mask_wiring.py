@@ -828,6 +828,16 @@ class TestMaskGates(unittest.TestCase):
         )
         self.assertIsNone(au._reject_mask_semantics(top_left))
 
+    def test_gfx942_top_left_alibi_lse_names_the_missing_kernel(self):
+        # Folded to bottom-right it would be refused as undefined; it is top-left.
+        kw = dict(arch="gfx942", seqlen_q=1024, seqlen_k=1024, use_alibi=True)
+        problem = _problem(_req(mask_type=TOP_LEFT, emit_lse=True, **kw))
+        self.assertTrue(problem.causal_top_left)
+        ok, why = au._reject_mask_on_arch(problem, "gfx942")
+        self.assertFalse(ok)
+        self.assertIn("top-left", why)
+        self.assertFalse(_problem(_req(mask_type=TOP_LEFT, **kw)).causal_top_left)
+
     def test_alibi_with_sinks_is_rejected_under_every_mask(self):
         for over in (
             dict(right_bound=0),

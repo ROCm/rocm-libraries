@@ -165,7 +165,10 @@ def test_bottom_right(backend, q_lens, kv_lens, external):
 
 
 @pytest.mark.parametrize("backend", ["tiled", "3d"])
-@pytest.mark.parametrize("q_lens,kv_lens", [([128], [128]), ([96, 64], [300, 64])])
+@pytest.mark.parametrize(
+    "q_lens,kv_lens",
+    [([128], [128]), ([96, 64], [300, 64]), ([160, 64], [96, 64])],  # last: q > kv
+)
 def test_top_left_with_lse(backend, q_lens, kv_lens):
     if _ARCH != "gfx950":
         pytest.skip("top-left alignment is gfx950-only in the unified kernels")

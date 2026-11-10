@@ -761,7 +761,11 @@ def normalize_band(
         return AttentionBand(
             None, 0 if sq == 1 and not uniform_lengths else None, Alignment.BOTTOM_RIGHT
         )
-    if sq == sk and (uniform_lengths or not _has_no_mask_kernel(req.arch)):
+    # The arch fold would turn top-left ALiBi with LSE into the bottom-right case its
+    # gate refuses as undefined; unfolded, the arch gate names the missing kernel.
+    alibi_lse = bool(req.use_alibi) and bool(req.emit_lse)
+    folds = not _has_no_mask_kernel(req.arch) and not alibi_lse
+    if sq == sk and (uniform_lengths or folds):
         align = Alignment.BOTTOM_RIGHT
     return AttentionBand(left_bound, right_bound, align)
 
