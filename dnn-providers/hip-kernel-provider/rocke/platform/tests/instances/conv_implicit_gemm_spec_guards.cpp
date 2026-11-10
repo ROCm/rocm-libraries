@@ -4,13 +4,14 @@
  * Host-only spec-validation test for the C++ forward implicit-GEMM gates
  * around the gfx950 MFMA split-K forward: the split-K admission gate, the
  * NULL pipeline / epilogue refusals, the LDS budget that charges compv4 one
- * A/B tile, and the refusal of a split TF32 (fp32-output) forward.
+ * A/B tile, and the refusal of a two-stage split with fp32 output (TF32 on
+ * MFMA, plain fp32 on gfx1250 WMMA).
  *
  * CI checks the parity configs of conv_implicit_gemm_emit with the Python
  * engine only (the canonical golden), and the pybind tests that compare the
  * two engines skip where rocke_engine is not built, so without this test the
  * C++ verdicts on these specs run in no CI lane. It takes the specs from the
- * C parity emitter itself (configs 66..83), so the two cannot drift, and
+ * C parity emitter itself (configs 66..84), so the two cannot drift, and
  * checks that rocke_implicit_gemm_conv_is_valid_spec gives the verdict and
  * the reason text Python's is_valid_spec gives, that an accepted spec builds
  * and lowers, and that the builder refuses a rejected one.
@@ -109,7 +110,7 @@ int main()
     static const char* const k_no_pipeline = "pipeline must be set (got None)";
     static const char* const k_no_epilogue = "epilogue must be set (got None)";
     static const char* const k_fp32_split
-        = "split-K forward on MFMA reduces into fp16 / bf16 output only (got fp32)";
+        = "split-K forward reduces through Stage 2: dtype_d must be fp16 or bf16 (got fp32)";
     const Case cases[] = {
         /* 66..73: the MFMA split-K forward (split_k=2) */
         {66, nullptr},
@@ -129,9 +130,11 @@ int main()
         {79, nullptr},
         {80, "LDS budget 196608 bytes (A/B=x2 98304, C=16384) > 163840 cap on gfx950"},
         {81, "LDS budget 196608 bytes (A/B=196608, C=131072) > 163840 cap on gfx950"},
-        /* 82..83: a split TF32 forward (fp32 output) on gfx950 and gfx942 */
+        /* 82..84: a two-stage split with fp32 output: TF32 on gfx950 and
+         * gfx942, plain fp32 on gfx1250 WMMA */
         {82, k_fp32_split},
         {83, k_fp32_split},
+        {84, k_fp32_split},
     };
     for(const Case& c : cases)
         run(c);

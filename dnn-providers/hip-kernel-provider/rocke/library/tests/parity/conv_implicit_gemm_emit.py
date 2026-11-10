@@ -608,7 +608,7 @@ def _spec_raw(idx: int):
         return _mfma_split_k_spec(idx)
     if 74 <= idx <= 81:
         return _mfma_gate_spec(idx)
-    if 82 <= idx <= 83:
+    if 82 <= idx <= 84:
         return _tf32_split_k_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
@@ -899,14 +899,29 @@ def _mfma_gate_spec(idx: int):
     return replace(spec, **kw), arch
 
 
-# TF32 compute under the MFMA split: the output is fp32 and Stage 2 casts to
-# fp16 / bf16 only, so both engines reject it. Keep in lockstep with
+# fp32 output under the two-stage split: Stage 2 casts to fp16 / bf16 only,
+# on every family, so both engines reject it. Keep in lockstep with
 # make_cfg_tf32_split_k() in conv_implicit_gemm_emit.c.
-#   82: config 54 (gfx950 16x16x32, mem/cshuffle) with split_k=2
-#   83: config 56 (gfx942 16x16x8, compv3/cshuffle) with split_k=2
+#   82: config 54 (gfx950 TF32 16x16x32, mem/cshuffle) with split_k=2
+#   83: config 56 (gfx942 TF32 16x16x8, compv3/cshuffle) with split_k=2
+#   84: config 41 (gfx1250 WMMA, mem/cshuffle, split_k=2) in fp32 storage on
+#       the 16x16x4 fp32 atom, 4-wide vectors
 
 
 def _tf32_split_k_spec(idx: int):
+    if idx == 84:
+        spec, arch = _split_k_spec(41)
+        return (
+            replace(
+                spec,
+                data=ConvDataSpec("fp32", "fp32", "fp32"),
+                warp_tile_k=4,
+                vector_size_a=4,
+                vector_size_b=4,
+                vector_size_c=4,
+            ),
+            arch,
+        )
     spec, arch = _tf32_spec({82: 54, 83: 56}[idx])
     return replace(spec, split_k=2), arch
 

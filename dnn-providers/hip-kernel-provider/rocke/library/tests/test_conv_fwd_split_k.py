@@ -82,6 +82,20 @@ def _tf32_spec(**kw):
     return _mfma_spec(**cfg)
 
 
+def _fp32_wmma_spec(**kw):
+    """A gfx1250 WMMA spec with fp32 storage (16x16x4 fp32 atom)."""
+    cfg = dict(
+        data=ConvDataSpec("fp32", "fp32", "fp32"),
+        warp_tile_k=4,
+        vector_size_a=4,
+        vector_size_b=4,
+        vector_size_c=4,
+        pipeline="mem",
+    )
+    cfg.update(kw)
+    return _spec(**cfg)
+
+
 def _spec(problem=_PROBE, data=_BF16, **kw):
     cfg = dict(
         _WMMA,
@@ -118,14 +132,21 @@ class TestSplitKGate(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("async_dma", why)
 
-    def test_mfma_fp32_output_is_rejected(self):
-        # Stage 2 casts to fp16 / bf16 only, so TF32 compute (fp32 output)
-        # stays unsplit; the unsplit kernel is unaffected.
-        ok, why = is_valid_spec(_tf32_spec(), "gfx950")
-        self.assertTrue(ok, why)
-        ok, why = is_valid_spec(_tf32_spec(split_k=2), "gfx950")
-        self.assertFalse(ok)
-        self.assertIn("fp16 / bf16 output only", why)
+    def test_fp32_output_two_stage_is_rejected(self):
+        # Stage 2 casts to fp16 / bf16 only, on every family, so fp32 storage
+        # (TF32 compute on MFMA, plain fp32 on gfx1250 WMMA) stays unsplit;
+        # the unsplit kernel is unaffected.
+        why_fp32 = (
+            "split-K forward reduces through Stage 2: "
+            "dtype_d must be fp16 or bf16 (got fp32)"
+        )
+        for arch, make in (("gfx950", _tf32_spec), ("gfx1250", _fp32_wmma_spec)):
+            with self.subTest(arch=arch):
+                ok, why = is_valid_spec(make(), arch)
+                self.assertTrue(ok, why)
+                self.assertEqual(
+                    is_valid_spec(make(split_k=2), arch), (False, why_fp32)
+                )
 
     def test_no_pipeline_or_epilogue_is_rejected_split_or_not(self):
         for field in ("pipeline", "epilogue"):
@@ -572,6 +593,16 @@ class TestSplitKResolver(unittest.TestCase):
         spec = _tf32_spec(problem=TestSplitKDegrees._SMALL, split_k=-1)
         self.assertEqual(resolve_fwd_split_k_spec(spec, "gfx950").split_k, 1)
 
+    def test_auto_does_not_split_fp32_on_wmma(self):
+        from kernels.common.conv_implicit_gemm import resolve_fwd_split_k_spec
+
+        p = TestSplitKDegrees._SMALL
+        # The bf16 spec of the same shape does split, so the 1 is the fp32 gate.
+        bf16 = _fp32_wmma_spec(problem=p, split_k=-1, data=_BF16)
+        self.assertGreater(resolve_fwd_split_k_spec(bf16, "gfx1250").split_k, 1)
+        spec = _fp32_wmma_spec(problem=p, split_k=-1)
+        self.assertEqual(resolve_fwd_split_k_spec(spec, "gfx1250").split_k, 1)
+
     def test_no_split_where_the_kernel_is_not_built(self):
         p = TestSplitKDegrees._SMALL
         for arch in ("gfx942", "gfx1201"):
@@ -931,18 +962,19 @@ class TestEngineAgreement(unittest.TestCase):
                 with self.assertRaisesRegex(Exception, "plain K loop only"):
                     lower_conv_implicit_gemm(spec, arch="gfx950", backend=backend)
 
-    def test_tf32_split_is_rejected_by_both(self):
+    def test_fp32_two_stage_split_is_rejected_by_both(self):
         _engine_or_skip(self)
         from rocke.core.backend import lower_conv_implicit_gemm
 
-        for arch, kw in (
-            ("gfx950", {}),
-            ("gfx942", dict(warp_tile_k=8, pipeline="compv3")),
+        why = r"reduces through Stage 2: dtype_d must be fp16 or bf16 \(got fp32\)"
+        for arch, spec in (
+            ("gfx950", _tf32_spec(split_k=2)),
+            ("gfx942", _tf32_spec(split_k=2, warp_tile_k=8, pipeline="compv3")),
+            ("gfx1250", _fp32_wmma_spec(split_k=2)),
         ):
-            spec = _tf32_spec(split_k=2, **kw)
             for backend in ("python", "cpp"):
                 with self.subTest(arch=arch, backend=backend):
-                    with self.assertRaisesRegex(Exception, "fp16 / bf16 output only"):
+                    with self.assertRaisesRegex(Exception, why):
                         lower_conv_implicit_gemm(spec, arch=arch, backend=backend)
 
     def test_no_pipeline_or_epilogue_is_rejected_by_both(self):

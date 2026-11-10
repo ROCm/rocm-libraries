@@ -84,6 +84,7 @@ from rocke.helpers.transforms import (
     unmerge_magic,
 )
 from kernels.common.conv_abi import conv_fwd_problem_block
+from kernels.common.conv_fwd_split_k_reduce import FwdSplitKReduceSpec
 from kernels.common._conv_implicit_gemm_common import (  # noqa: F401 — re-exported for callers
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -669,6 +670,20 @@ def fwd_split_k_cluster_problem_reason(problem: ConvProblem) -> Optional[str]:
 _FWD_SPLIT_K_MFMA_PIPELINES = ("mem", "compv3", "compv4")
 
 
+def fwd_split_k_reduce_reason(dtype_d: Optional[str]) -> Optional[str]:
+    """Why Stage 2 cannot fold the split-K slabs into ``dtype_d``, or ``None``.
+
+    The two-stage split-K forward hands its fp32 slabs to
+    ``conv_fwd_split_k_reduce`` on every family, so its admission asks Stage
+    2's own validator rather than repeating its dtype list.
+    """
+    try:
+        FwdSplitKReduceSpec(dtype_d=dtype_d).validate()
+    except ValueError as exc:
+        return f"split-K forward reduces through Stage 2: {exc}"
+    return None
+
+
 def fwd_split_k_reason(
     spec: ImplicitGemmConvSpec, family: str, target=None
 ) -> Optional[str]:
@@ -681,10 +696,11 @@ def fwd_split_k_reason(
     (``chiplet_swizzle``), merge groups, or take the pointwise fast path are
     not wired for it. Stage 1 stores raw partial sums and the reduction (Stage 2
     or the cluster fold) only adds and casts them, so the accumulator
-    epilogue (bias / scale / ReLU / clamp) must be the identity. On MFMA the
-    output is fp16 / bf16: Stage 2 has no fp32 form, so fp32 storage (and TF32
-    compute over it) stays unsplit. ``target`` (an ``ArchTarget``) gates the
-    cluster form on workgroup-cluster launch.
+    epilogue (bias / scale / ReLU / clamp) must be the identity. The two-stage
+    form (no ``split_k_cluster``) takes only an output Stage 2 can fold into,
+    on every family (:func:`fwd_split_k_reduce_reason`): fp16 / bf16, so fp32
+    storage (and TF32 compute over it) stays unsplit. ``target`` (an
+    ``ArchTarget``) gates the cluster form on workgroup-cluster launch.
     """
     if spec.split_k < 1:
         return f"split_k must be >= 1 (got {spec.split_k})"
@@ -693,8 +709,10 @@ def fwd_split_k_reason(
             f"split-K forward on MFMA runs the plain K loop only "
             f"({', '.join(_FWD_SPLIT_K_MFMA_PIPELINES)}; got {spec.pipeline})"
         )
-    if family != "wmma" and spec.data.dtype_d == "fp32":
-        return "split-K forward on MFMA reduces into fp16 / bf16 output only (got fp32)"
+    if spec.split_k > 1 and not spec.split_k_cluster:
+        _why = fwd_split_k_reduce_reason(spec.data.dtype_d)
+        if _why is not None:
+            return _why
     if not spec.acc_epilogue.is_identity():
         return (
             "split-K forward supports only the identity acc_epilogue: the "
