@@ -506,8 +506,9 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         case Variant::COOP:
         {
             // 4 waves per K group (one per transform row), each 16 x mt out channels by bt tiles:
-            // bk = 16 x mt x waves / 4 with mt 1 or 2, at most 4 accumulator tiles per bin (mt x
-            // bt / 16), and the double-buffered transformed input (bt KiB) within 64 KiB of LDS.
+            // bk = 16 x mt x waves / 4 with mt 1, 2 or 4, and the double-buffered transformed
+            // input (bt KiB) within 64 KiB of LDS. Accumulator tiles per bin (mt x bt / 16): at
+            // most 4 on RDNA (8 registers each), 16 on CDNA (4 each; mt and nt cap it).
             const int kw = config.waves / 4;
             const int mt = kw > 0 && config.bk % (16 * kw) == 0 ? config.bk / (16 * kw) : 0;
             // CDNA ("gfx9") runs wave64 MFMA: at most 16 waves in a 1024-thread block.
@@ -516,8 +517,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
                || (config.arch != "gfx11" && config.arch != "gfx12" && !cdna)
                || (config.waves != 4 && config.waves != 8 && config.waves != 16
                    && (config.waves != 32 || cdna))
-               || (config.bt != 16 && config.bt != 32 && config.bt != 64) || (mt != 1 && mt != 2)
-               || mt * (config.bt / 16) > 4)
+               || (config.bt != 16 && config.bt != 32 && config.bt != 64)
+               || (mt != 1 && mt != 2 && mt != 4) || (!cdna && mt * (config.bt / 16) > 4))
             {
                 return std::nullopt;
             }

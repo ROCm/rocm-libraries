@@ -795,10 +795,16 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
              f.bk = 48;
              return f;
          }},
-        {"CoopKBlockFourTilesPerKGroup",
+        {"CoopKBlockThreeTilesPerKGroup",
          [] {
              auto f = coop("gfx11", 1);
-             f.bk = 256;
+             f.bk = 192;
+             return f;
+         }},
+        {"CoopKBlockEightTilesPerKGroup",
+         [] {
+             auto f = coop("gfx9", 1);
+             f.bk = 512;
              return f;
          }},
         {"CoopCdnaWaves32",
@@ -904,6 +910,11 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
     rdna32.waves = 32;
     rdna32.bk = 128;
     EXPECT_TRUE(conv_winograd::configOf(kernelOf(rdna32, "HALF")).has_value());
+    // CDNA takes up to 4 x 4 accumulator tiles per bin.
+    auto cdnaWide = coop("gfx9", 1);
+    cdnaWide.bk = 256; // mt 4 with 4 K groups
+    cdnaWide.bt = 64;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(cdnaWide, "HALF")).has_value());
     // The largest legal tile counts parse: mt 1 x nt 4 and mt 2 x nt 2.
     auto wide = coop("gfx11", 1);
     wide.bt = 64;
