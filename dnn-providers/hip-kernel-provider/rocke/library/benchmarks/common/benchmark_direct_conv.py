@@ -319,26 +319,25 @@ def parse_miopen_cmd_direct(cmd: str):
             f"direct conv takes one stride for both axes "
             f"(got -u {miopen_args.sH} -v {miopen_args.sW})"
         )
-    # A stride-1 depthwise dgrad (the rotated-filter tiled kernel), an
-    # ungrouped stride-1 forward (the small-K WMMA kernel), an ungrouped 1-D
-    # strided forward (poly_view) and an ungrouped stride-1 1 x R forward,
-    # dilated or not (direct_fwd_wmma), are the problems a direct kernel
-    # computes with per-axis padding: the shapes of PER_AXIS_PAD_VARIANTS
-    # (kernels.conv.direct_variants), which the cache selection checks per
-    # variant. A stride-1 depthwise wgrad (the Toeplitz WMMA kernel) is one
-    # too. Every other problem keeps one padding for both axes.
-    pad_w_ok = (
-        (miopen_args.forw in (2, 4) and cpg == 1 and kpg == 1 and sH == 1)
-        or (
-            miopen_args.forw == 1 and groups == 1 and (sH == 1 or one_d) and not dilated
-        )
-        or (
-            miopen_args.forw == 1
-            and groups == 1
-            and sH == 1
-            and miopen_args.Y == 1
-            and miopen_args.pH == 0
-            and miopen_args.dH == 1
+    # Only the PER_AXIS_PAD_VARIANTS (kernels.conv.direct_variants) compute a
+    # column padding of their own, on the shapes per_axis_pad_variants names;
+    # the cache selection checks each variant. Every other problem keeps one
+    # padding for both axes.
+    from kernels.conv.direct_variants import per_axis_pad_variants
+
+    direction = {1: "fwd", 2: "dgrad", 4: "wgrad"}.get(miopen_args.forw)
+    pad_w_ok = direction is not None and bool(
+        per_axis_pad_variants(
+            direction,
+            groups=groups,
+            cpg=cpg,
+            kpg=kpg,
+            stride=sH,
+            KH=miopen_args.Y,
+            PAD=miopen_args.pH,
+            dil_h=miopen_args.dH,
+            dil_w=miopen_args.dW,
+            one_d=one_d,
         )
     )
     if miopen_args.pH != miopen_args.pW and not pad_w_ok:
