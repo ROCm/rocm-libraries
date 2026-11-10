@@ -171,6 +171,16 @@ inline bool queueFillConsumerSlackAllows(int consumerCycle, int criticalDsReadyC
     return consumerCycle - criticalDsReadyCycle >= std::max(0, safetyMarginCycles);
 }
 
+// Experimental result: when ds_loads remain, a reset burst is useful only if at least one hardware
+// queue's worth of WMMAs remains after that burst. This reuses the queue timeline's predicted burst
+// and the instruction metadata depth; it does not introduce a second queue model or a tunable
+// threshold.
+inline bool experimentalQueueFillTailSizeAllows(int remainingWmmas, int burstWmmas,
+                                                int remainingDsLoads, int hardwareQueueDepth) {
+    if (remainingDsLoads == 0) return true;
+    return remainingWmmas - burstWmmas >= hardwareQueueDepth;
+}
+
 // WMMAs that must issue between a WMMA reading a vgpr and a ds_load overwriting it.
 // va_vdst tracks completion, not the read, so the gap spans the whole WMMA latency;
 // dividing by issue spacing restates it as a WMMA count, which varies per format.
@@ -1929,13 +1939,24 @@ bool CDNA5ReadyQueue::promoteDueLastDs() {
 // Permit the burst only when every required ds_load returns before the first in-region matrix
 // consumer with the scheduling policy's additional cycle margin.
 bool CDNA5ReadyQueue::resetQueueFillPolicyAllowsBurst() {
-    if (!dsSpread_.active() || !regionDag_) return true;
-
     const int firstRemainingWmma =
         std::clamp(wmmaIssuedCountThisRegion_, 0, static_cast<int>(regionWmmaWindows_.size()));
     const auto remainingWmmas =
         std::span<const WmmaQueueWindow>(regionWmmaWindows_).subspan(firstRemainingWmma);
     const int burst = predictWmmaQueueFillBurst(remainingWmmas, hardwareWmmaQueueDepth_);
+    const int remainingDsLoads = std::count(remainingDs_.begin(), remainingDs_.end(), true);
+    const auto experimentalTailAllows = [&]() {
+        const bool enable =
+            experimentalQueueFillTailSizeAllows(static_cast<int>(remainingWmmas.size()), burst,
+                                                remainingDsLoads, hardwareWmmaQueueDepth_);
+        PASS_DEBUG(
+            std::cerr << "[CDNA5 queueFillTailExperiment] remainingWMMA=" << remainingWmmas.size()
+                      << " burst=" << burst << " remainingDS=" << remainingDsLoads
+                      << " queueDepth=" << hardwareWmmaQueueDepth_ << " enable=" << enable << "\n");
+        return enable;
+    };
+    if (!dsSpread_.active() || !regionDag_) return experimentalTailAllows();
+
     const int heldUntil = wmmaIssuedCountThisRegion_ + burst;
 
     unsigned firstConsumer = UINT_MAX;
@@ -1956,7 +1977,7 @@ bool CDNA5ReadyQueue::resetQueueFillPolicyAllowsBurst() {
             firstConsumer = consumer;
         }
     }
-    if (firstConsumer == UINT_MAX) return true;
+    if (firstConsumer == UINT_MAX) return experimentalTailAllows();
 
     int criticalDsWindow = -1;
     int criticalDsReadyCycle = -1;
@@ -1974,21 +1995,22 @@ bool CDNA5ReadyQueue::resetQueueFillPolicyAllowsBurst() {
         }
         ++requiredDs;
     }
-    if (criticalDsReadyCycle < 0) return true;
+    if (criticalDsReadyCycle < 0) return experimentalTailAllows();
 
     const int consumerCycle = wmmaWindowStartCycle(regionWmmaWindows_, firstConsumerWindow);
     const int safetyMargin =
         getPassContext().getPassFeatureConfig().dagFeatures.queueFillSafetyMarginCycles;
     const int consumerSlack = consumerCycle - criticalDsReadyCycle;
-    const bool enable =
+    const bool slackAllows =
         queueFillConsumerSlackAllows(consumerCycle, criticalDsReadyCycle, safetyMargin);
     PASS_DEBUG(std::cerr << "[CDNA5 queueFillGate] wmmaIssued=" << wmmaIssuedCountThisRegion_
                          << " burst=" << burst << " firstConsumer=" << firstConsumerWindow
                          << " consumerCycle=" << consumerCycle << " requiredDS=" << requiredDs
                          << " criticalDS=" << criticalDsWindow << " criticalReadyCycle="
                          << criticalDsReadyCycle << " consumerSlack=" << consumerSlack
-                         << " safetyMargin=" << safetyMargin << " enable=" << enable << "\n");
-    return enable;
+                         << " safetyMargin=" << safetyMargin << " enable=" << slackAllows << "\n");
+    if (!slackAllows) return false;
+    return experimentalTailAllows();
 }
 
 // After a queue reset (wmmaQueueFillPending_) the most-ready WMMA goes ahead of ds_loads and
