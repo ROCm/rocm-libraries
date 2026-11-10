@@ -65,10 +65,11 @@ struct MxAlphaBetaEpilogue
 #if defined(__gfx125__)
         if constexpr(kFp8Width == 8)
         {
-            const fp32x8_t x  = {v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]};
-            const auto packed = __builtin_amdgcn_cvt_scalef32_pk8_fp8_f32(x, 1.0f);
-            words[0]          = static_cast<uint32_t>(packed[0]);
-            words[1]          = static_cast<uint32_t>(packed[1]);
+            const fp32x8_t x = {v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]};
+            const auto packed =
+                bit_cast<uint32x2_t>(fp32x8_to_fp8x8<fp8_rounding_mode::standard>(x, 1.0f));
+            words[0] = static_cast<uint32_t>(packed[0]);
+            words[1] = static_cast<uint32_t>(packed[1]);
         }
         else
         {
@@ -115,13 +116,7 @@ struct MxAlphaBetaEpilogue
     CK_TILE_DEVICE static float ToFloat(Storage bits)
     {
         if constexpr(kFp8)
-        {
-#if defined(__gfx125__)
-            return __builtin_amdgcn_cvt_f32_fp8(static_cast<unsigned int>(bits), 0);
-#else
-            return static_cast<float>(bits);
-#endif
-        }
+            return type_convert<float>(bit_cast<fp8_t>(bits));
         else if constexpr(kFp16)
             return static_cast<float>(__builtin_bit_cast(_Float16, bits));
         else
