@@ -162,12 +162,12 @@ DENSE_PROBLEM_FIELDS = frozenset(
         # A fact of the target GPU, not a tuning choice: the base spec keeps
         # its default (8 XCDs).
         "chiplet_num_xcds",
-        "kv_storage_dtype",
     }
 )
-# Problem fields only some arches' dense specs declare (the band's right bound).
+# Problem fields only some arches' dense specs declare (the band's right bound,
+# and the KV storage format, whose loader only gfx950 has).
 DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
-    "gfx950": frozenset({"right_bound"}),
+    "gfx950": frozenset({"right_bound", "kv_storage_dtype"}),
     "gfx942": frozenset(),
 }
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {

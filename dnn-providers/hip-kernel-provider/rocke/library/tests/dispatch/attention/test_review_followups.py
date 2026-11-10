@@ -279,6 +279,8 @@ class TestRouteAlgorithmCoverage(unittest.TestCase):
             "a not-served algorithm named here no longer exists on any "
             "registered candidate; trim it",
         )
+
+
 class TestFp8DenseGuards(unittest.TestCase):
     """CPU guards for the fp8 dense review fixes (scale forwarding + rejections)."""
 
@@ -325,6 +327,54 @@ class TestFp8DenseGuards(unittest.TestCase):
         self.assertEqual(captured.get("k_scale"), 0.5)
         self.assertEqual(captured.get("v_scale"), 0.25)
 
+    def test_fp8_scales_are_read_once_at_bind_not_per_launch(self):
+        """A device-tensor scale costs a host sync to read.
+
+        Both fp8 bindings resolve the scales to floats at bind time so a
+        bind-once/launch-many caller (and graph capture) pays that sync once. A
+        counting scale makes that measurable: resolving per launch would show
+        one read per launch instead of one in total.
+        """
+
+        class _CountingScale:
+            def __init__(self, value):
+                self.value = value
+                self.reads = 0
+
+            def __float__(self):
+                self.reads += 1
+                return self.value
+
+        # Dense binding.
+        req, spec = self._fp8_grid_spec()
+        k_scale, v_scale = _CountingScale(0.5), _CountingScale(0.25)
+        fp8 = SimpleNamespace(dtype="torch.float8_e4m3fn")
+        with mock.patch(
+            "dispatch.attention.bindings._dense_runner",
+            return_value=lambda **_call: None,
+        ):
+            binding = bind_dense_attention_torch(
+                req,
+                spec,
+                {"q": None, "k": fp8, "v": fp8, "out": None},
+                k_scale=k_scale,
+                v_scale=v_scale,
+            )
+            binding.launch()
+            binding.launch()
+        self.assertEqual((k_scale.reads, v_scale.reads), (1, 1), "dense binding")
+
+        # Unified binding.
+        k2, v2 = _CountingScale(0.5), _CountingScale(0.25)
+        with mock.patch(
+            "kernels.common.attention_unified.run_unified_attention_torch",
+            side_effect=lambda **_call: None,
+        ):
+            unified = self._bind_unified_fp8(k_scale=k2, v_scale=v2)
+            unified.launch()
+            unified.launch()
+        self.assertEqual((k2.reads, v2.reads), (1, 1), "unified binding")
+
     def test_binding_rejects_fp8_spec_with_no_scale(self):
         # Regression: the dense binding dropped k_scale/v_scale, so every fp8
         # launch dequantized at unit scale (silently wrong). An fp8 spec with no
@@ -343,15 +393,22 @@ class TestFp8DenseGuards(unittest.TestCase):
         self.assertEqual(captured.get("v_scale"), 0.25)
 
     def test_binding_rejects_bf16_kv_for_an_fp8_spec(self):
+        # Scales are supplied and the match names the OCP dtype: without both,
+        # deleting the dtype check still raises the missing-scale error, which
+        # also says "fp8", and this test passes with the guard gone.
         req, spec = self._fp8_grid_spec()
         bf16 = SimpleNamespace(dtype="torch.bfloat16")
         with mock.patch(
             "dispatch.attention.bindings._dense_runner",
             return_value=lambda **_call: None,
         ):
-            with self.assertRaisesRegex(ValueError, "fp8"):
+            with self.assertRaisesRegex(ValueError, r"expects OCP fp8"):
                 bind_dense_attention_torch(
-                    req, spec, {"q": None, "k": bf16, "v": bf16, "out": None}
+                    req,
+                    spec,
+                    {"q": None, "k": bf16, "v": bf16, "out": None},
+                    k_scale=1.0,
+                    v_scale=1.0,
                 )
 
     def test_supports_accepts_fp8_bf16_and_fp16_but_rejects_sinks(self):
@@ -379,6 +436,24 @@ class TestFp8DenseGuards(unittest.TestCase):
     def test_fnuz_fp8_request_is_rejected_on_gfx950(self):
         with self.assertRaisesRegex(ValueError, "OCP|FNUZ"):
             attention_tuning_spec(self._fp8_req(fp8_fnuz=True), "gfx950_dense_grid")
+
+    def test_fp8_request_flags_must_be_bools(self):
+        """``bool("false")`` is True and ``bool(None)`` is False, so coercing
+        these flags before checking them would let a string select an fp8 kernel
+        and a missing encoding pass as OCP. ``_request_errors`` checks the types,
+        so the refusal names the flag."""
+        from dispatch.attention.common import _request_errors
+
+        for flag, bad in (("use_fp8", "false"), ("fp8_fnuz", None)):
+            with self.subTest(flag=flag):
+                req = self._fp8_req(**{flag: bad})
+                self.assertIn(
+                    f"{flag} must be a bool",
+                    " ".join(_request_errors(req)),
+                )
+                # And it is fatal through dispatch, not merely reported.
+                with self.assertRaises(ValueError):
+                    attention_tuning_spec(req, "gfx950_dense_grid")
 
     def test_runner_rejects_non_ocp_kv_for_an_fp8_spec(self):
         # The binding guard only covers dispatch callers; a direct call to the
@@ -411,11 +486,11 @@ class TestFp8DenseGuards(unittest.TestCase):
 
         spec = self._fp8_grid_spec()[1].kernel_spec
         fp8 = SimpleNamespace(dtype="torch.float8_e4m3fn")
-        with self.assertRaisesRegex(ValueError, r"requires k_scale"):
+        with self.assertRaisesRegex(ValueError, r"requires 'k_scale'"):
             run_attention_dense_torch(
                 spec=spec, q=fp8, k=fp8, v=fp8, out=fp8, scale=0.125
             )
-        with self.assertRaisesRegex(ValueError, r"requires v_scale"):
+        with self.assertRaisesRegex(ValueError, r"requires 'v_scale'"):
             run_attention_dense_torch(
                 spec=spec, q=fp8, k=fp8, v=fp8, out=fp8, scale=0.125, k_scale=0.5
             )
@@ -451,6 +526,60 @@ class TestFp8DenseGuards(unittest.TestCase):
         ):
             replace(ks, **paged)
 
+    def test_fp8_runtime_shape_specs_sharing_a_key_lower_identically(self):
+        """One cache key must mean one binary.
+
+        On the runtime-shape path the head counts are kernargs, so two specs
+        differing only in heads share a cache key AND a symbol. The fp8 loader
+        baked ``Hkv*D`` at one address site while every other site read the
+        kernarg, so those two specs lowered to different IR under that single
+        key and the launcher served whichever compiled first to both. bf16 is
+        the control: it was always correct here.
+        """
+        import hashlib
+
+        from kernels.gfx950.attention_dense import (
+            Gfx950AttentionDenseSpec,
+            attention_dense_cache_key,
+            build_attention_dense,
+        )
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        def key_and_ir(nhead_k, kv_storage_dtype):
+            spec = Gfx950AttentionDenseSpec(
+                batch=1,
+                seqlen_q=2048,
+                seqlen_kv=2048,
+                num_query_heads=32,
+                num_kv_heads=nhead_k,
+                head_size=64,
+                causal=True,
+                dtype="bf16",
+                block_n=64,
+                kv_storage_dtype=kv_storage_dtype,
+            )
+            self.assertTrue(spec.runtime_shape, "heads must be kernargs here")
+            kernel = build_attention_dense(spec, arch="gfx950")
+            ir = _lower_kernel_to_llvm_python(
+                kernel, arch="gfx950", llvm_flavor="llvm20"
+            )
+            return (
+                attention_dense_cache_key(spec, arch="gfx950"),
+                hashlib.sha256(ir.encode("utf-8")).hexdigest(),
+            )
+
+        for kv in ("fp8e4m3", None):
+            with self.subTest(kv_storage_dtype=kv):
+                (key_8, ir_8), (key_4, ir_4) = key_and_ir(8, kv), key_and_ir(4, kv)
+                self.assertEqual(key_8, key_4, "the two specs must share a key")
+                self.assertEqual(
+                    ir_8,
+                    ir_4,
+                    "two head counts share this cache key, so they must lower to "
+                    "the same IR; a baked head stride makes the cache serve one "
+                    "binary for both",
+                )
+
     def test_supports_rejects_fp8_tile_not_divisible_by_loader_width(self):
         # The fp8 loaders move 8 elements per thread, so block_n * head_size must
         # divide by num_waves * 64 * 8. bm256/bn32/D64 does not (2048 vs 4096).
@@ -469,7 +598,7 @@ class TestFp8DenseGuards(unittest.TestCase):
         from dispatch.attention.bindings import bind_tuning_attention_torch
 
         req = self._fp8_req(use_fp8=use_fp8)
-        problem = _problem(req)
+        problem = attention_problem(req)
         self.assertEqual(problem.use_fp8, use_fp8)
         spec = SimpleNamespace(
             path="2d", launch_grid=lambda _p: (1, 1, 1), launch_block=lambda: (64, 1, 1)

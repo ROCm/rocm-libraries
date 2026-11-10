@@ -307,17 +307,13 @@ def _resolve_fp8_scale(name: str, kwargs: Mapping[str, Any], label: str) -> floa
     happens to carry the name.
 
     Resolving at bind time host-syncs a device-tensor scale once, not on every
-    launch, which keeps graph capture intact. A missing scale raises rather than
-    silently dequantizing at unit scale; pass ``1.0`` explicitly for unit-scale KV.
+    launch, which keeps graph capture intact. The missing-scale rule itself lives
+    in ``require_fp8_kv_scale`` beside ``require_ocp_fp8_kv``, so this binding
+    and the runner refuse with one wording.
     """
-    value = kwargs.get(name)
-    if value is None:
-        raise ValueError(
-            f"{label} requires {name!r} (per-tensor dequant scale); none was "
-            f"supplied as a bind kwarg. Pass {name}=1.0 explicitly for "
-            "unit-scale KV."
-        )
-    return float(value)
+    from kernels.common.attention_dense_spec import require_fp8_kv_scale
+
+    return require_fp8_kv_scale(name, kwargs.get(name), label)
 
 
 def bind_dense_attention_torch(

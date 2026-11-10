@@ -55,6 +55,16 @@ def test_use_fp8_request_carries_the_feature():
     assert "fp8" not in bf16.features()
 
 
+def test_shape_fields_record_use_fp8():
+    """`kv_storage_dtype` is derived from this flag rather than being a recorded
+    knob, so a row that omits it replays as bf16 KV and cannot reproduce the spec
+    it describes."""
+    (fp8_req,) = list(cs._requests(_args(use_fp8=True)))
+    (bf16_req,) = list(cs._requests(_args(use_fp8=False)))
+    assert cs._shape_fields(fp8_req)["use_fp8"] is True
+    assert cs._shape_fields(bf16_req)["use_fp8"] is False
+
+
 def _grid_candidate():
     (grid,) = [
         c for c in attention_candidates() if c.name == "attention_gfx950_dense_grid"
