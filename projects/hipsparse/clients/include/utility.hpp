@@ -41,6 +41,10 @@
 
 #include <iostream>
 
+#ifdef GOOGLE_TEST
+#include "gtest/gtest.h"
+#endif
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
