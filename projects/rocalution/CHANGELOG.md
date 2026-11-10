@@ -6,8 +6,14 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 
 ### Added
 * Added the generic `amdgcnspirv` SPIR-V target to the default list of GPU architectures.
+* Added `LocalMatrix::ApplyAnalyse()`, `GlobalMatrix::ApplyAnalyse()` and `LocalStencil::ApplyAnalyse()` to run the analysis of `Apply()` and `ApplyAdd()` on the accelerator ahead of the first product. Without it, the first product of an accelerator matrix runs the analysis and prints a warning, so concurrent products of the same matrix are not safe until then. The analysis is kept by the operations that change the values in place, such as `Scale()`, and discarded by copies into the matrix, `UpdateValuesCSR()`, changes of the structure, conversions to another format and moves to another backend. `LocalStencil::ApplyAnalyse()` does nothing. The iterative and multigrid solvers call it on their operators in `Build()`, `ReBuildNumeric()` and `MoveToAccelerator()`, and the preconditioners that apply matrices call it on them when they are built or moved to the accelerator.
 
 ### Changed
+* rocSPARSE 5.2.0 or later is now required (previously 1.12.10).
+* The HIP backend now uses the generic rocSPARSE API: `rocsparse_v2_spmv` for `Apply()` and `ApplyAdd()`, spgemm and spgeam for `MatMatMult()` and `MatrixAdd()`, sptrsv, spitsv, spilu0 and spic0 for the triangular solves and the ILU0 and IC0 factorizations, and spsort for `Sort()`. The SpMV algorithm is chosen by rocSPARSE instead of being fixed per format.
+* `LocalMatrix::SetDataPtrMCSR()`, `LocalMatrix::LeaveDataPtrMCSR()`, `LocalMatrix::SetDataPtrBCSR()` and `LocalMatrix::LeaveDataPtrBCSR()` now take the row offsets as `PtrType**` instead of `int**`, as the CSR functions do. This only changes the signatures of builds with `BUILD_PTRTYPE_64`. The `MatrixMCSR` and `MatrixBCSR` structures in `matrix_formats.hpp` take a new last template parameter `PointerType` for the type of their row offsets, which defaults to `IndexType` as before.
+* In builds with `BUILD_PTRTYPE_64`, the triangular solves of BCSR matrices and `LocalMatrix::ItILU0Factorize()` now run on the host, as rocSPARSE has no 64-bit row offset versions of them.
+* The multigrid solvers no longer allocate a temporary vector for the finest level, which no cycle uses. This saves one fine-level vector of accelerator memory.
 * `LocalMatrix::DiagonalMatrixMultL()` now requires a vector with one entry per row of the matrix, and `LocalMatrix::DiagonalMatrixMultR()` one with one entry per column. Before, both accepted either size.
 * The `cg-rsamg_mpi`, `cg-saamg_mpi` and `cg-uaamg_mpi` samples now print the total runtime, as the non-MPI samples do.
 * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
@@ -41,6 +47,12 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed `LocalMatrix::ApplyAdd()` of HYB and ELL matrices on the accelerator overwriting the output instead of adding to it, and `LocalMatrix::Apply()` of HYB matrices without an ELL part adding to the previous contents of the output.
+* Fixed `LocalMatrix::ILU0Factorize()` on the accelerator hanging or accessing illegal memory after `LocalMatrix::LUAnalyse()` or `LocalMatrix::ItLUAnalyse()` on CSR and BCSR matrices.
+* Fixed the host `LocalMatrix::LLSolve()` dividing by the last entry of each row instead of the diagonal entry, which gave wrong results for BCSR matrices, whose blocks store zeros above the diagonal. A row without a diagonal entry now ends the program with an error.
+* Fixed the HIP-to-HIP `CopyToAsync()` of CSR, COO, MCSR, DIA and DENSE matrices and the HIP-to-HIP `CopyFrom()` of BCSR matrices passing a host copy kind to the HIP runtime.
+* Fixed builds with `BUILD_PTRTYPE_64`: the MCSR SpMV kernels did not compile; the distributed AMG setup failed at run time in the boundary, ghost and Ruge-Stueben ext+i functions; and the Ruge-Stueben direct interpolation and smoothed aggregation kernels held row offsets in `int`, which overflows above 2^31 non-zeros. The host CSR to MCSR and BCSR conversions no longer narrow the row offsets to `int`.
+* Fixed the debug log of the host and HIP buffer frees printing the contents of `char` buffers instead of their address.
 
 ## (Unreleased) rocALUTION 4.1.1
 
