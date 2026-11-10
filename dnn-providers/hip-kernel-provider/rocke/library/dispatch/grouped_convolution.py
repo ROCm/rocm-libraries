@@ -7,10 +7,10 @@ WHAT IS REGISTERED
 ------------------
 Exactly the instances in the per-arch, per-direction lists under
 ``grouped_convolution_instances/`` (``<arch>_<direction>.json``) -- currently
-forward and backward-data (dgrad) convolutions on gfx950. Weight-gradient
-(wgrad), gfx942 forward and gfx1250 forward have no list registered at all:
-this rewrite moved fwd/dgrad onto the instance-list machinery but has not yet
-ported those onto it, so those
+forward and backward-data (dgrad) convolutions on gfx950 and backward-data
+convolutions on gfx1250. Weight-gradient (wgrad), gfx942 forward and gfx1250
+forward have no list registered at all: this rewrite moved fwd/dgrad onto the
+instance-list machinery but has not yet ported those onto it, so those
 directions/arches are an explicit, declared gap rather than a silent
 regression -- a request for either is rejected with a reason, not routed to a
 default.
@@ -55,8 +55,9 @@ WHAT DISPATCH DECIDES
   The instances are shape-generic binaries built against a probe problem, so
   admission never builds a kernel. The LLVM flavor is part of an instance's
   name, and admission checks it against ``ConvGroupedRequest.llvm_flavor``
-  (default :data:`DEFAULT_LLVM_FLAVOR`, the flavor the registered lists are
-  built for): a request for another flavor admits none of them. Selection is
+  (default: the arch's :data:`DEFAULT_LLVM_FLAVORS` entry, the flavor its
+  registered lists are built for): a request for another flavor admits none
+  of them. Selection is
   a pure function of the request -- it never probes the process
   (``ROCKE_LLVM_FLAVOR``, COMGR) for a flavor.
 * **Selection** among admitted instances, with no ``ranker``, is the first one
@@ -93,7 +94,12 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from rocke.core.arch import ArchTarget
-from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
+from kernels.conv.aot_jobs import (
+    job_for_identity,
+    kernel_for_job,
+    spec_for_job,
+    spec_launch_block_size,
+)
 from kernels.conv.direct_aot_jobs import (
     direct_job_for_identity,
     direct_kernel_for_job,
@@ -152,6 +158,7 @@ __all__ = [
     "CONV_GROUPED_ABI_VERSION",
     "CONV_WINOGRAD_ABI_VERSION",
     "DEFAULT_LLVM_FLAVOR",
+    "DEFAULT_LLVM_FLAVORS",
     "ConvGroupedRequest",
     "ConvInstanceSpec",
     "ConvLaunchPlan",
@@ -190,12 +197,15 @@ _INSTANCE_DIR = Path(__file__).resolve().with_name("grouped_convolution_instance
 _INSTANCE_LISTS: dict[tuple[str, str], str] = {
     ("gfx950", "fwd"): "gfx950_fwd.json",
     ("gfx950", "dgrad"): "gfx950_dgrad.json",
+    ("gfx1250", "dgrad"): "gfx1250_dgrad.json",
 }
 
-# The LLVM flavor a request is admitted against unless it names its own: the
-# one every registered list is built for (pinned by
-# test_default_llvm_flavor_is_the_registered_one).
+# The LLVM flavor a request is admitted against unless it names its own: per
+# arch, the one its registered lists are built for (pinned by
+# test_default_llvm_flavor_is_the_registered_one); DEFAULT_LLVM_FLAVOR for an
+# arch with no list.
 DEFAULT_LLVM_FLAVOR = "llvm22"
+DEFAULT_LLVM_FLAVORS: dict[str, str] = {"gfx950": "llvm22", "gfx1250": "llvm24"}
 
 # The buffers bound to an instance's A, B and D operands, by direction.
 _OPERANDS = {"fwd": ("x", "w", "y"), "dgrad": ("dy", "w", "dx")}
@@ -238,8 +248,16 @@ class ConvGroupedRequest(OperatorRequest):
     algorithm: str = "auto"
     spec_id: str = "auto"
     # LLVM flavor the caller lowers to; instances built for another flavor are
-    # not admitted. Part of the request, never read from the process.
-    llvm_flavor: str = DEFAULT_LLVM_FLAVOR
+    # not admitted. Part of the request, never read from the process: None
+    # resolves to the arch's DEFAULT_LLVM_FLAVORS entry, once, at construction.
+    # dataclasses.replace(req, arch=...) therefore keeps the old arch's flavor;
+    # pass llvm_flavor=None with the new arch to resolve the new arch's default.
+    llvm_flavor: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.llvm_flavor is None:
+            flavor = DEFAULT_LLVM_FLAVORS.get(self.arch, DEFAULT_LLVM_FLAVOR)
+            object.__setattr__(self, "llvm_flavor", flavor)
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -520,7 +538,11 @@ def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, st
 def _instance_block(identity: KernelIdentity) -> tuple[int, int, int]:
     """Workgroup size of an instance, from its tuning alone."""
     if not identity.is_direct:
-        return (identity.warp_m * identity.warp_n * identity.wave_size, 1, 1)
+        if identity.pipeline != "wavelet":
+            return (identity.warp_m * identity.warp_n * identity.wave_size, 1, 1)
+        # Wavelet appends load waves to the workgroup; the spec knows how many.
+        spec = spec_for_job(job_for_identity(identity), identity.dtype_a)
+        return (spec_launch_block_size(spec), 1, 1)
     # threads_per_block reads only the knobs, so any shape the spec accepts
     # at construction answers it.
     probe = DirectConvProblem(
@@ -1136,10 +1158,6 @@ def load_instance_list(path: Path) -> InstanceList:
     for i, record in enumerate(records):
         where = f"{path.name}: instances[{i}]"
         identity = lst.identity(record, where)
-        if identity.pipeline == "wavelet":
-            # Wavelet appends load waves to the workgroup, which _instance_block
-            # does not model; no registered arch builds it.
-            raise InstanceListError(f"{where}: wavelet instances are not supported")
         if identity in seen:
             raise InstanceListError(
                 f"{where}: {identity.label()} is already instances[{seen[identity]}]"
