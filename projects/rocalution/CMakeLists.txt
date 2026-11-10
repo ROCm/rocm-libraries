@@ -135,6 +135,11 @@ else()
   # that fails as not found, which would silently build without HIP, so it
   # only runs when no ROCm compiler is found here. CMake rejects hipcc as HIP
   # compiler, so a hipcc HIPCXX is replaced with the amdclang++ next to it.
+  # check_language() caches a HIP compiler it doesn't find as NOTFOUND and
+  # then skips its search, so search again until a compiler is found.
+  if(DEFINED CMAKE_HIP_COMPILER AND NOT CMAKE_HIP_COMPILER)
+    unset(CMAKE_HIP_COMPILER CACHE)
+  endif()
   if(NOT DEFINED CMAKE_HIP_COMPILER)
     set(_rocalution_hip_bin_dirs)
     if(ROCM_PATH)

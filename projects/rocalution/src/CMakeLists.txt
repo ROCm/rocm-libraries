@@ -193,7 +193,6 @@ endif()
 
 # Create rocALUTION hip library
 if(SUPPORT_HIP)
-  # Create rocALUTION HIP library
   if(WIN32)
     add_library(rocalution_hip OBJECT ${HIP_SOURCES})
   else()
