@@ -50,6 +50,7 @@ add_library(
     descriptors/MoeGroupedMatmulBwdOperationDescriptor.cpp
     descriptors/SoftmaxOperationDescriptor.cpp
     descriptors/PagedCacheStoreOperationDescriptor.cpp
+    descriptors/MoeRoutingOperationDescriptor.cpp
     descriptors/PointwiseOperationDescriptor.cpp
     descriptors/ProfilingControlDescriptor.cpp
     descriptors/ResampleBwdOperationDescriptor.cpp

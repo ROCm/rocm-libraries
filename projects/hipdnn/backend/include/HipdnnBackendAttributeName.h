@@ -1564,6 +1564,29 @@ typedef enum
     /** @} */
 
     /**
+     * @name MoE Routing Operation Attributes (4500-4599)
+     * Attributes for HIPDNN_BACKEND_OPERATION_MOE_ROUTING_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input expert ids [S, top_k] (INT32) */
+    HIPDNN_ATTR_OPERATION_MOE_ROUTING_TOPK_IDS_DESC_EXT = 4500,
+
+    /** @brief Output group boundaries [num_experts + 1, 1, 1] (INT32 or INT64) */
+    HIPDNN_ATTR_OPERATION_MOE_ROUTING_FIRST_TOKEN_OFFSET_DESC_EXT = 4501,
+
+    /** @brief Output source token of each routed row [1, S * top_k, 1] (INT32) */
+    HIPDNN_ATTR_OPERATION_MOE_ROUTING_TOKEN_INDEX_DESC_EXT = 4502,
+
+    /** @brief Output top-k slot of each routed row [1, S * top_k, 1] (INT32) */
+    HIPDNN_ATTR_OPERATION_MOE_ROUTING_TOKEN_KS_DESC_EXT = 4503,
+
+    /** @brief Number of experts on this rank (HIPDNN_TYPE_INT64, >= 1) */
+    HIPDNN_ATTR_OPERATION_MOE_ROUTING_NUM_EXPERTS_EXT = 4504,
+
+    /** @} */
+
+    /**
      * @name Causal Conv1d Operation Attributes (4400-4499)
      * Attributes for HIPDNN_BACKEND_OPERATION_CAUSAL_CONV1D_DESCRIPTOR_EXT
      * @{

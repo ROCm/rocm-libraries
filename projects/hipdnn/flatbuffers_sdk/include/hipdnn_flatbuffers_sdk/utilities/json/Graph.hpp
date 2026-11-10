@@ -26,6 +26,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/MatmulAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/MoeGroupedMatmulAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/MoeGroupedMatmulBwdAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/MoeRoutingAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/PagedCacheStoreAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/PointwiseAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/RMSNormAttributes.hpp>
@@ -71,6 +72,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::MoeGroupedMatmulAttributes, "MoeGroupedMatmulAttributes"},
      {NodeAttributes::MoeGroupedMatmulBwdAttributes, "MoeGroupedMatmulBwdAttributes"},
      {NodeAttributes::SoftmaxAttributes, "SoftmaxAttributes"},
+     {NodeAttributes::MoeRoutingAttributes, "MoeRoutingAttributes"},
      {NodeAttributes::PagedCacheStoreAttributes, "PagedCacheStoreAttributes"},
      {NodeAttributes::CausalConv1dAttributes, "CausalConv1dAttributes"},
      {NodeAttributes::GatherAttributes, "GatherAttributes"},
@@ -165,6 +167,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::SoftmaxAttributes:
         nodeJson = *node.attributes_as_SoftmaxAttributes();
+        break;
+    case data_objects::NodeAttributes::MoeRoutingAttributes:
+        nodeJson = *node.attributes_as_MoeRoutingAttributes();
         break;
     case data_objects::NodeAttributes::PagedCacheStoreAttributes:
         nodeJson = *node.attributes_as_PagedCacheStoreAttributes();
@@ -284,6 +289,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::MoeGroupedMatmulBwdAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::SoftmaxAttributes:
             return to<data_objects::SoftmaxAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::MoeRoutingAttributes:
+            return to<data_objects::MoeRoutingAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::PagedCacheStoreAttributes:
             return to<data_objects::PagedCacheStoreAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::CausalConv1dAttributes:

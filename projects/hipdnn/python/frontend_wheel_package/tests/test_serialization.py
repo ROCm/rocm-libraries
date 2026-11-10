@@ -33,6 +33,7 @@ from .graph_builders import (
     build_layernorm_graph,
     build_matmul_graph,
     build_moe_grouped_matmul_graph,
+    build_moe_routing_graph,
     build_paged_cache_store_graph,
     build_pointwise_add_graph,
     build_reduction_graph,
@@ -105,6 +106,7 @@ _OPERATION_CASES = (
         "MoeGroupedMatmulAttributes",
     ),
     ("gather", lambda: build_gather_graph()[0], "GatherAttributes"),
+    ("moe_routing", lambda: build_moe_routing_graph()[0], "MoeRoutingAttributes"),
     ("rope", lambda: build_rope_graph()[0], "RopeAttributes"),
     ("topk", lambda: build_topk_graph()[0], "TopkAttributes"),
     (

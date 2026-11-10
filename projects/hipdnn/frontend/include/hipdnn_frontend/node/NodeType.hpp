@@ -39,6 +39,7 @@ enum class NodeType
     PAGED_CACHE_STORE = 28,
     TOPK = 26,
     GATHER = 27,
+    MOE_ROUTING = 30,
     ROPE = 24,
     CAUSAL_CONV1D = 29,
 };

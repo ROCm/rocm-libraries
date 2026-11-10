@@ -21,6 +21,7 @@
 #include "MatmulOperationDescriptor.hpp"
 #include "MoeGroupedMatmulBwdOperationDescriptor.hpp"
 #include "MoeGroupedMatmulOperationDescriptor.hpp"
+#include "MoeRoutingOperationDescriptor.hpp"
 #include "PagedCacheStoreOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"

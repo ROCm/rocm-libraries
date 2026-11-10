@@ -3886,6 +3886,73 @@ inline flatbuffers::FlatBufferBuilder createValidSoftmaxGraph(bool withStats = t
     return builder;
 }
 
+/// One MoeRouting node: topk_ids [S=3, top_k=2] INT32 routed over num_experts=4, producing
+/// first_token_offset [5, 1, 1] and token_index / token_ks [1, 6, 1], all INT32.
+inline flatbuffers::FlatBufferBuilder createValidMoeRoutingGraph()
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> topkIdsDims = {3, 2};
+    const std::vector<int64_t> topkIdsStrides = {2, 1};
+    const std::vector<int64_t> offsetDims = {5, 1, 1};
+    const std::vector<int64_t> offsetStrides = {1, 1, 1};
+    const std::vector<int64_t> rowDims = {1, 6, 1};
+    const std::vector<int64_t> rowStrides = {6, 1, 1};
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        1,
+        "topk_ids",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+        &topkIdsStrides,
+        &topkIdsDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        2,
+        "first_token_offset",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+        &offsetStrides,
+        &offsetDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        3,
+        "token_index",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+        &rowStrides,
+        &rowDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        4,
+        "token_ks",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+        &rowStrides,
+        &rowDims));
+
+    auto routingAttributes
+        = hipdnn_flatbuffers_sdk::data_objects::CreateMoeRoutingAttributes(builder, 1, 2, 3, 4, 4);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "moe_routing",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeRoutingAttributes,
+        routingAttributes.Union()));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 /// One PagedCacheStore node: x [T=4, H=2, D=8] FLOAT, slot_mapping [4] INT32, FLOAT scalar
 /// scale, written into a FLOAT container [num_blocks=3, H=2, block_size=4, D=8].
 inline flatbuffers::FlatBufferBuilder createValidPagedCacheStoreGraph()

@@ -20,6 +20,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MoeGroupedMatmulBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MoeGroupedMatmulPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MoeRoutingPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PagedCacheStorePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanRegistrySignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>

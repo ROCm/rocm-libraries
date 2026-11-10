@@ -19,6 +19,7 @@
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/MoeRoutingAttributes.hpp>
 #include <hipdnn_frontend/attributes/PagedCacheStoreAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
@@ -779,6 +780,40 @@ void attributesBindings(nb::module_& m)
         .def("get_indices", &graph::GatherAttributes::get_indices)
         .def("get_y", &graph::GatherAttributes::get_y)
         .def("get_axis", &graph::GatherAttributes::get_axis);
+
+    // MoeRoutingAttributes
+    nb::class_<graph::MoeRoutingAttributes>(m, "MoeRoutingAttributes")
+        .def(nb::init<>())
+        .def("set_name", &graph::MoeRoutingAttributes::set_name, nb::rv_policy::reference_internal)
+        .def("get_name", &graph::MoeRoutingAttributes::get_name)
+        .def("set_compute_data_type",
+             &graph::MoeRoutingAttributes::set_compute_data_type,
+             nb::rv_policy::reference_internal)
+        .def("get_compute_data_type", &graph::MoeRoutingAttributes::get_compute_data_type)
+        .def("set_topk_ids",
+             static_cast<TensorSetter<graph::MoeRoutingAttributes>>(
+                 &graph::MoeRoutingAttributes::set_topk_ids),
+             nb::rv_policy::reference_internal)
+        .def("set_first_token_offset",
+             static_cast<TensorSetter<graph::MoeRoutingAttributes>>(
+                 &graph::MoeRoutingAttributes::set_first_token_offset),
+             nb::rv_policy::reference_internal)
+        .def("set_token_index",
+             static_cast<TensorSetter<graph::MoeRoutingAttributes>>(
+                 &graph::MoeRoutingAttributes::set_token_index),
+             nb::rv_policy::reference_internal)
+        .def("set_token_ks",
+             static_cast<TensorSetter<graph::MoeRoutingAttributes>>(
+                 &graph::MoeRoutingAttributes::set_token_ks),
+             nb::rv_policy::reference_internal)
+        .def("set_num_experts",
+             &graph::MoeRoutingAttributes::set_num_experts,
+             nb::rv_policy::reference_internal)
+        .def("get_topk_ids", &graph::MoeRoutingAttributes::get_topk_ids)
+        .def("get_first_token_offset", &graph::MoeRoutingAttributes::get_first_token_offset)
+        .def("get_token_index", &graph::MoeRoutingAttributes::get_token_index)
+        .def("get_token_ks", &graph::MoeRoutingAttributes::get_token_ks)
+        .def("get_num_experts", &graph::MoeRoutingAttributes::get_num_experts);
 
     // RopeAttributes
     nb::class_<graph::RopeAttributes>(m, "RopeAttributes")

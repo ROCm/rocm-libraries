@@ -34,6 +34,7 @@ include "topk_attributes.fbs";
 include "gather_attributes.fbs";
 include "paged_cache_store_attributes.fbs";
 include "causal_conv1d_attributes.fbs";
+include "moe_routing_attributes.fbs";
 
 // Excludes a field from the generated cache-key hash/equality (cachekey_generated.h).
 // Opt-out: an unannotated field always participates; apply only when a benchmark
@@ -96,7 +97,8 @@ union NodeAttributes {
 	TopkAttributes,
 	GatherAttributes,
 	PagedCacheStoreAttributes,
-	CausalConv1dAttributes
+	CausalConv1dAttributes,
+	MoeRoutingAttributes
 }
 
 table Node {

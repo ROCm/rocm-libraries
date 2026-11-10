@@ -28,6 +28,7 @@
 #include "MatmulOperationDescriptor.hpp"
 #include "MoeGroupedMatmulBwdOperationDescriptor.hpp"
 #include "MoeGroupedMatmulOperationDescriptor.hpp"
+#include "MoeRoutingOperationDescriptor.hpp"
 #include "PagedCacheStoreOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
 #include "ProfilingControlDescriptor.hpp"
@@ -129,6 +130,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_PAGED_CACHE_STORE_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<PagedCacheStoreOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_MOE_ROUTING_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<MoeRoutingOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_CAUSAL_CONV1D_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<CausalConv1dOperationDescriptor>();

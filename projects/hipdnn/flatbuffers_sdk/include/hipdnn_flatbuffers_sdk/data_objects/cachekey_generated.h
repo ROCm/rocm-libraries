@@ -175,6 +175,8 @@ inline void hashAppend(Hasher& hasher, const MoeGroupedMatmulAttributes* value, 
 inline bool logicallyEqual(const MoeGroupedMatmulAttributes* a, const MoeGroupedMatmulAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const MoeGroupedMatmulBwdAttributes* value, const UidCanon& canon);
 inline bool logicallyEqual(const MoeGroupedMatmulBwdAttributes* a, const MoeGroupedMatmulBwdAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
+inline void hashAppend(Hasher& hasher, const MoeRoutingAttributes* value, const UidCanon& canon);
+inline bool logicallyEqual(const MoeRoutingAttributes* a, const MoeRoutingAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const Node* value, const UidCanon& canon);
 inline bool logicallyEqual(const Node* a, const Node* b, const UidCanon& aCanon, const UidCanon& bCanon);
 inline void hashAppend(Hasher& hasher, const PagedCacheStoreAttributes* value, const UidCanon& canon);
@@ -306,6 +308,9 @@ inline void hashAppend(Hasher& hasher, NodeAttributes type, const void* value, c
     case NodeAttributes::CausalConv1dAttributes:
         hashAppend(hasher, static_cast<const CausalConv1dAttributes*>(value), canon);
         break;
+    case NodeAttributes::MoeRoutingAttributes:
+        hashAppend(hasher, static_cast<const MoeRoutingAttributes*>(value), canon);
+        break;
     default:
         break;
     }
@@ -381,6 +386,8 @@ inline bool logicallyEqual(NodeAttributes aType, const void* a, NodeAttributes b
         return logicallyEqual(static_cast<const PagedCacheStoreAttributes*>(a), static_cast<const PagedCacheStoreAttributes*>(b), aCanon, bCanon);
     case NodeAttributes::CausalConv1dAttributes:
         return logicallyEqual(static_cast<const CausalConv1dAttributes*>(a), static_cast<const CausalConv1dAttributes*>(b), aCanon, bCanon);
+    case NodeAttributes::MoeRoutingAttributes:
+        return logicallyEqual(static_cast<const MoeRoutingAttributes*>(a), static_cast<const MoeRoutingAttributes*>(b), aCanon, bCanon);
     default:
         return true;
     }
@@ -2983,6 +2990,54 @@ inline bool logicallyEqual(const MoeGroupedMatmulBwdAttributes* a, const MoeGrou
         return false;
     }
     if(aCanon(a->dweight_tensor_uid()) != bCanon(b->dweight_tensor_uid()))
+    {
+        return false;
+    }
+    return true;
+}
+
+inline void hashAppend(Hasher& hasher, const MoeRoutingAttributes* value, const UidCanon& canon)
+{
+    if(value == nullptr)
+    {
+        hasher.tag(0);
+        return;
+    }
+    hasher.tag(1);
+    hashAppend(hasher, canon(value->topk_ids_tensor_uid()));
+    hashAppend(hasher, canon(value->first_token_offset_tensor_uid()));
+    hashAppend(hasher, canon(value->token_index_tensor_uid()));
+    hashAppend(hasher, canon(value->token_ks_tensor_uid()));
+    hasher.raw(value->num_experts());
+}
+
+inline bool logicallyEqual(const MoeRoutingAttributes* a, const MoeRoutingAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
+{
+    if(a == b)
+    {
+        return true;
+    }
+    if(a == nullptr || b == nullptr)
+    {
+        return false;
+    }
+    if(aCanon(a->topk_ids_tensor_uid()) != bCanon(b->topk_ids_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->first_token_offset_tensor_uid()) != bCanon(b->first_token_offset_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->token_index_tensor_uid()) != bCanon(b->token_index_tensor_uid()))
+    {
+        return false;
+    }
+    if(aCanon(a->token_ks_tensor_uid()) != bCanon(b->token_ks_tensor_uid()))
+    {
+        return false;
+    }
+    if(a->num_experts() != b->num_experts())
     {
         return false;
     }

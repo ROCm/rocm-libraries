@@ -70,6 +70,8 @@ add_executable(
     IntegrationCausalConv1dDescriptorLowering.cpp
     IntegrationTopkDescriptorLifting.cpp
     IntegrationTopkDescriptorLowering.cpp
+    IntegrationMoeRoutingDescriptorLifting.cpp
+    IntegrationMoeRoutingDescriptorLowering.cpp
     IntegrationRopeDescriptorLifting.cpp
     IntegrationRopeDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp

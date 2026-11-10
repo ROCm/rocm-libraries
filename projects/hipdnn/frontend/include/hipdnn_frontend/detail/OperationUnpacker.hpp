@@ -26,6 +26,7 @@
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
+#include <hipdnn_frontend/node/MoeRoutingNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PagedCacheStoreNode.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -142,6 +143,9 @@ namespace hipdnn_frontend::detail
     case HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_EXT:
         return {std::make_shared<graph::MoeGroupedMatmulNode>(graph::MoeGroupedMatmulAttributes{},
                                                               graphAttrs),
+                {}};
+    case HIPDNN_OPERATION_TYPE_MOE_ROUTING_EXT:
+        return {std::make_shared<graph::MoeRoutingNode>(graph::MoeRoutingAttributes{}, graphAttrs),
                 {}};
     case HIPDNN_OPERATION_TYPE_PAGED_CACHE_STORE_EXT:
         return {std::make_shared<graph::PagedCacheStoreNode>(graph::PagedCacheStoreAttributes{},

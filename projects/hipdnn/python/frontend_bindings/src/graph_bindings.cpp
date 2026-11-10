@@ -20,6 +20,7 @@
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/MoeRoutingAttributes.hpp>
 #include <hipdnn_frontend/attributes/PagedCacheStoreAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
@@ -720,6 +721,13 @@ void graphBindings(nb::module_& m)
                                std::shared_ptr<graph::TensorAttributes>,
                                graph::ReductionAttributes>(&graph::Graph::reduction))
         .def("moe_grouped_matmul", &graph::Graph::moe_grouped_matmul)
+        .def("moe_routing",
+             [](graph::Graph& graph,
+                std::shared_ptr<graph::TensorAttributes> topkIds,
+                graph::MoeRoutingAttributes attributes) {
+                 const auto outputs = graph.moe_routing(std::move(topkIds), std::move(attributes));
+                 return nb::make_tuple(outputs[0], outputs[1], outputs[2]);
+             })
         .def("gather", &graph::Graph::gather)
         .def("rope", &graph::Graph::rope)
         .def("softmax",

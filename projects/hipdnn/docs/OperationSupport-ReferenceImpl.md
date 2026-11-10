@@ -38,6 +38,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Matmul | FP16, BFP16, FP32 | Any rank >= 2 | CPU Reference | Batch dims broadcast; ragged tensors rejected |
 | MoE Grouped Matmul Forward | FP16, BFP16, FP32 | Op-defined | CPU Reference | Ragged tensors rejected; `first_token_offset` holds `E·batch` group starts or (E > 1) `G + 1` explicit boundaries, rows past the final boundary untouched |
 | MoE Grouped Matmul Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | `first_token_offset` holds `E` group starts or (E > 1) `E + 1` explicit boundaries |
+| MoE Routing | INT32 expert ids; INT32 or INT64 `first_token_offset`; INT32 `token_index`/`token_ks` | Op-defined | CPU Reference | Stable counting sort by expert; out-of-range ids not routed and trailing rows left untouched; outputs feed MoE Grouped Matmul GATHER/SCATTER directly |
 | Gather | FP16, BFP16, FP32 data; INT32, INT64 indices | All | CPU Reference | Any axis; out-of-range index throws; ragged tensors rejected |
 | Top-k | FP16, BFP16, FP32 x/values; INT32, INT64 indices | Any rank >= 1 | CPU Reference | Along the last dim; sorted best-first, ties keep the lower index; NaN compares greater than every number; values output optional; compares in FP32; ragged tensors rejected |
 | RoPE Forward | FP16, BFP16, FP32 x/y; FP32 freqs | Any rank >= 2 | CPU Reference | Rotate-half on `[o, o + rope_dim)` of the last dim (`o` = `rope_offset`, default `D - rope_dim`); freqs broadcast over non-last dims; computes in FP32; ragged tensors rejected |
@@ -93,6 +94,8 @@ The following table lists all operations currently supported in the CPU Referenc
 |-----------|-------------|---------------|-------------|
 | Gather | `GatherPlanBuilder` | `GatherSignatureKey` | Gathers slices along one axis (index_select / embedding lookup) |
 | Paged Cache Store | `PagedCacheStorePlanBuilder` | `PagedCacheStoreSignatureKey` | Writes token rows into the SDPA paged K/V container at their slots, in place |
+| MoE Routing | `MoeRoutingPlanBuilder` | `MoeRoutingSignatureKey` | Groups `topk_ids` by expert into the boundaries and row indices MoE grouped matmul consumes |
+
 ### Normalization Operations
 
 | Operation | Plan Builder | Signature Key | Description |

@@ -976,6 +976,16 @@ void visit(const CausalConv1dAttributes& op, V& visitor)
     visitor.scalar(std::string_view("activation"), static_cast<int64_t>(op.activation()));
 }
 
+template <typename V>
+void visit(const MoeRoutingAttributes& op, V& visitor)
+{
+    visitor.tensor(std::string_view("topk_ids"), static_cast<int64_t>(op.topk_ids_tensor_uid()), false);
+    visitor.tensor(std::string_view("first_token_offset"), static_cast<int64_t>(op.first_token_offset_tensor_uid()), false);
+    visitor.tensor(std::string_view("token_index"), static_cast<int64_t>(op.token_index_tensor_uid()), false);
+    visitor.tensor(std::string_view("token_ks"), static_cast<int64_t>(op.token_ks_tensor_uid()), false);
+    visitor.scalar(std::string_view("num_experts"), static_cast<int64_t>(op.num_experts()));
+}
+
 /// Visits @p node's operands. Returns false, visiting nothing, when the node has
 /// no attributes or a type this header predates.
 template <typename V>
@@ -983,7 +993,7 @@ bool visit(const Node& node, V&& visitor)
 {
     // Fails when NodeAttributes gains a member this header has no case for: rerun
     // scripts/gen_node_operands.py.
-    static_assert(NodeAttributes::MAX == NodeAttributes::CausalConv1dAttributes,
+    static_assert(NodeAttributes::MAX == NodeAttributes::MoeRoutingAttributes,
                   "node_operands_generated.h is stale: rerun scripts/gen_node_operands.py");
     switch(node.attributes_type())
     {
@@ -1199,6 +1209,13 @@ bool visit(const Node& node, V&& visitor)
         return false;
     case NodeAttributes::CausalConv1dAttributes:
         if(const auto* op = node.attributes_as_CausalConv1dAttributes(); op != nullptr)
+        {
+            visit(*op, visitor);
+            return true;
+        }
+        return false;
+    case NodeAttributes::MoeRoutingAttributes:
+        if(const auto* op = node.attributes_as_MoeRoutingAttributes(); op != nullptr)
         {
             visit(*op, visitor);
             return true;

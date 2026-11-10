@@ -25,6 +25,7 @@
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
+#include <hipdnn_frontend/node/MoeRoutingNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PagedCacheStoreNode.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -575,6 +576,15 @@ TEST(TestOperationUnpacker, CreateNodeForTypeCreatesTopkNode)
     EXPECT_TRUE(error.is_good()) << error.get_message();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->getNodeType(), NodeType::TOPK);
+}
+
+TEST(TestOperationUnpacker, CreateNodeForTypeCreatesMoeRoutingNode)
+{
+    const GraphAttributes graphAttrs;
+    const auto [node, error] = createNodeForType(HIPDNN_OPERATION_TYPE_MOE_ROUTING_EXT, graphAttrs);
+    EXPECT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getNodeType(), NodeType::MOE_ROUTING);
 }
 
 TEST(TestOperationUnpacker, CreateNodeForTypeCreatesGatherNode)
