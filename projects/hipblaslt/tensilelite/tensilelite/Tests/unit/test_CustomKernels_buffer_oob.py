@@ -141,6 +141,8 @@ NO_BUFFER_OOB_KERNELS = {
     "4096x4096x65536_c0c1_k4b371438f4": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
     "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
     "4096x4096x131584_c0c1": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "4096x4096x65536_c0c1_Acanonical_k21f5fa872a": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
     "rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
     "4096x4096x65536_c0c1_k4b371438f4": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
     "rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"

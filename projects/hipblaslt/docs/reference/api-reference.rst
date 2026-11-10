@@ -199,9 +199,10 @@ When ``HIPBLASLT_MATMUL_DESC_A_SCALE_MODE`` and ``HIPBLASLT_MATMUL_DESC_B_SCALE_
 to ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``, the following restrictions apply:
 
 *  Atype and Btype must each be ``HIP_R_6F_E2M3`` or ``HIP_R_6F_E3M2``.
-*  The order of ``A`` and ``B`` must be ``HIPBLASLT_ORDER_COL256_R128_EXT``. The caller stores ``A`` and ``B``
-   tiled in that order and the scales shuffled in tiles of 128 rows by 4 K blocks. The descriptions of
-   both enum values in ``hipblaslt.h`` give the byte offset of every element and scale.
+*  The order of ``A`` must be ``HIPBLASLT_ORDER_COL256_R128_EXT``, and the order of ``B`` must be
+   ``HIPBLASLT_ORDER_COL256_R128_EXT`` or ``HIPBLASLT_ORDER_COL``. The caller stores ``A``, and ``B`` when it
+   uses that order, tiled in that order, and both scales shuffled in tiles of 128 rows by 4 K blocks. The
+   descriptions of both enum values in ``hipblaslt.h`` give the byte offset of every element and scale.
 *  ``opA`` must be equal to ``T``, and ``opB`` must be equal to ``N``.
 
 The solutions for this scale mode are rocKE GEMM kernels, which add these restrictions:
@@ -213,7 +214,8 @@ The solutions for this scale mode are rocKE GEMM kernels, which add these restri
 *  Epilogues are not supported.
 *  ``alpha`` must be equal to ``1``, and ``beta`` must be equal to ``0``.
 *  Solutions exist only for gfx950 devices with PCI chip ID ``0x75a3``, at ``m = n = 4096`` with
-   ``K = 65536`` or ``K = 131584``.
+   ``K = 65536`` or ``K = 131584``. With ``B`` in ``HIPBLASLT_ORDER_COL``, they exist only for
+   ``HIP_R_6F_E2M3`` at ``K = 65536``.
 *  ``hipblasLtMatmulAlgoGetHeuristic`` does not return these solutions, because it does not assume
    ``beta = 0``. Query them through the extension API (``hipblaslt_ext::Gemm::setProblem`` with ``beta = 0``,
    then ``algoGetHeuristic``), and run the returned algorithm with ``hipblaslt_ext::Gemm::run`` or

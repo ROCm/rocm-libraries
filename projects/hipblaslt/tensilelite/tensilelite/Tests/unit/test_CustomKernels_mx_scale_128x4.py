@@ -31,6 +31,14 @@ _LOGIC_FILES = [
 # Each kernel runs 12 * L + 8 K tiles of 128: L iterations of a 12-tile main loop and a
 # fixed 8-tile tail. Only these K have a kernel (L = 42 and L = 85).
 _KS = (65536, 131584)
+# B in HIPBLASLT_ORDER_COL: one E2M3 kernel that runs 24 * L + 8 K tiles, L = 21.
+_CANONICAL_B_LOGIC = (
+    "gfx950/gfx950_id75a3/Equality/gfx950_Cijk_Alik_Bljk_F6BS_MXAE8B32_MXBE8B32_STA_H_UserArgs.yaml"
+)
+_CANONICAL_B_KERNEL = (
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3"
+    "_4096x4096x65536_c0c1_Acanonical_k21f5fa872a"
+)
 # A generated MX GEMM and a non-MX GEMM from the shipped corpus.
 _GENERATED_MX_LOGIC = (
     "gfx950/gfx950/GridBased/gfx950_Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_GG_HAS_SAB_SAV"
@@ -176,3 +184,33 @@ def test_logic_file_predicates(rel, fmt, assembler, gfx950_iim):
         assert values("StrideDEqual") == {(1, 4096)}
         assert solution.problemType.mxScaleFormat == 3
         assert not solution.problemType.useBeta
+
+
+@needs_logic_corpus
+def test_canonical_b_logic_file_predicates(assembler, gfx950_iim):
+    logic = require_logic_file(_CANONICAL_B_LOGIC)
+    library = L.parseLibraryLogicFile(str(logic), assembler, False, False, False, gfx950_iim, False)
+    assert len(library.solutions) == 1
+    rows = {tuple(key): index for key, (index, _) in library.exactLogic}
+    assert rows == {(4096, 4096, 1, 65536): 0}
+    struct = library.solutions[0]
+    assert struct["CustomKernelName"] == _CANONICAL_B_KERNEL
+    solution = C.Solution.FromSolutionStruct(struct, False, False, False, assembler, gfx950_iim)
+    preds = {}
+    for p in _flatten(solution.problemPredicate):
+        preds.setdefault(p.tag, []).append((p.index, p.value))
+
+    def values(tag):
+        return set(preds[tag])
+
+    assert values("MXScaleFormat") == {(None, 3)}
+    assert values("AlphaValue") == {(None, "1")}
+    assert values("SwizzleTensorA") == {(None, True)}
+    assert values("SwizzleTensorB") == {(None, False)}
+    assert not solution.problemType.swizzleTensorB
+    assert values("SizeEqual") == {(0, 4096), (1, 4096), (2, 1), (3, 65536)}
+    assert values("StrideAEqual") == {(1, 65536)}
+    assert values("StrideBEqual") == {(1, 65536)}
+    assert values("StrideDEqual") == {(1, 4096)}
+    assert solution.problemType.mxScaleFormat == 3
+    assert not solution.problemType.useBeta

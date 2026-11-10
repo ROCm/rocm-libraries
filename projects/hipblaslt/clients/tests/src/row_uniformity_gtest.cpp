@@ -1174,6 +1174,7 @@ namespace
         hipDataType type;
         int64_t     k;
         const char* gfx950Pick;
+        bool        tiledB;
     };
 
     class RowUniformityMXFp6_pre_checkin : public ::testing::TestWithParam<MXFp6Case>
@@ -1196,9 +1197,10 @@ namespace
         return static_cast<uint16_t>(bits >> 16);
     }
 
-    // The gfx950 MXFP6 custom kernels on the 128x4 scale and COL256_R128 data layouts
-    // declare uniformSummationOrder. They need beta == 0, which the C heuristic never
-    // assumes, so the case goes through the extension API. Every row of the transposed A
+    // The gfx950 MXFP6 custom kernels on the 128x4 scale layout, with A, and B when
+    // tiledB is set, in the COL256_R128 data layout, declare uniformSummationOrder. They
+    // need beta == 0, which the C heuristic never assumes, so the case goes through the
+    // extension API. Every row of the transposed A
     // holds the same values, but each (row, K block) picks one of two encodings, v at
     // scale s or v / 2 at scale s + 1, so D is row-invariant only if each row's data and
     // scales are read from where the host layouts put them. Blocks 0 and K / 64 carry
@@ -1218,10 +1220,11 @@ namespace
         constexpr int64_t large0  = 0;
         const int64_t     large1  = kBlocks / 2;
         constexpr int     one     = 127;
-        // One kernel per registered K: the pick must be the one built for this K.
+        // One kernel per registered K and B order: the pick must be the one built for them.
         const std::string kTag           = "_4096x4096x" + std::to_string(k) + "_";
         auto              isExpectedPick = [&](const std::string& pick) {
-            return pick.rfind(c.gfx950Pick, 0) == 0 && pick.find(kTag) != std::string::npos;
+            return pick.rfind(c.gfx950Pick, 0) == 0 && pick.find(kTag) != std::string::npos
+                   && (pick.find("_Acanonical_") == std::string::npos) == c.tiledB;
         };
 
         if(!gpuAvailable())
@@ -1253,8 +1256,8 @@ namespace
             codeOfHalves[halves + 8] = fp6Code(halves, e3m2);
         ASSERT_FALSE(HasFailure());
 
-        // B is packed and tiled one 256-row block at a time, which is contiguous in the
-        // tiled layout; only the columns read below keep their values.
+        // B is packed, and tiled one 256-row block at a time when tiledB is set, which is
+        // contiguous in the tiled layout; only the columns read below keep their values.
         constexpr int64_t    kProbeCols   = 64;
         const int64_t        sampleRows[] = {0, 1, 15, 16, 255, 256, 2047, m - 1};
         const int64_t        sampleCols[] = {0, 1, 63, 64, 255, 256, 2049, n - 1};
@@ -1263,7 +1266,7 @@ namespace
         std::vector<uint8_t> codes(k);
         std::vector<uint8_t> packedBlock(blockBytes);
         std::vector<int8_t>  colValues(k);
-        std::vector<uint8_t> tiledB(static_cast<size_t>(n) * rowBytes);
+        std::vector<uint8_t> dataB(static_cast<size_t>(n) * rowBytes);
         std::vector<uint8_t> bScale(static_cast<size_t>(n * kBlocks));
 
         std::map<int64_t, std::vector<int8_t>> bValue;
@@ -1284,9 +1287,14 @@ namespace
             const int64_t blockRow = col % mx_tile128x4::kTileRows;
             for(int64_t idx = 0; idx < k; ++idx)
                 codes[idx] = codeOfHalves[2 * colValues[idx] + 8];
+            if(!c.tiledB)
+            {
+                packFp6Row(dataB.data() + col * rowBytes, codes.data(), k);
+                continue;
+            }
             packFp6Row(packedBlock.data() + blockRow * rowBytes, codes.data(), k);
             if(blockRow == mx_tile128x4::kTileRows - 1)
-                mx_tile128x4::tileFp6Data(tiledB.data() + (col - blockRow) * rowBytes,
+                mx_tile128x4::tileFp6Data(dataB.data() + (col - blockRow) * rowBytes,
                                           packedBlock.data(),
                                           mx_tile128x4::kTileRows,
                                           k);
@@ -1402,7 +1410,7 @@ namespace
                 static_cast<void>(hipFree(ptr));
         };
         if(hipMalloc(&dA, tiledA.size()) != hipSuccess
-           || hipMalloc(&dB, tiledB.size()) != hipSuccess
+           || hipMalloc(&dB, dataB.size()) != hipSuccess
            || hipMalloc(&dScaleA, shuffledA.size()) != hipSuccess
            || hipMalloc(&dScaleB, shuffledB.size()) != hipSuccess
            || hipMalloc(&dD, static_cast<size_t>(m * n) * sizeof(uint16_t)) != hipSuccess
@@ -1413,7 +1421,7 @@ namespace
         }
         const bool uploaded
             = hipMemcpy(dA, tiledA.data(), tiledA.size(), hipMemcpyHostToDevice) == hipSuccess
-              && hipMemcpy(dB, tiledB.data(), tiledB.size(), hipMemcpyHostToDevice) == hipSuccess
+              && hipMemcpy(dB, dataB.data(), dataB.size(), hipMemcpyHostToDevice) == hipSuccess
               && hipMemcpy(dScaleA, shuffledA.data(), shuffledA.size(), hipMemcpyHostToDevice)
                      == hipSuccess
               && hipMemcpy(dScaleB, shuffledB.data(), shuffledB.size(), hipMemcpyHostToDevice)
@@ -1444,7 +1452,8 @@ namespace
                                                        HIP_R_16BF,
                                                        HIPBLAS_COMPUTE_32F);
             problemType.setOrderA(HIPBLASLT_ORDER_COL256_R128_EXT);
-            problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
+            if(c.tiledB)
+                problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
             hipblaslt_ext::GemmEpilogue epilogue;
             epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
             epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
@@ -1577,10 +1586,12 @@ namespace
         RowUniformity,
         RowUniformityMXFp6_pre_checkin,
         ::testing::Values(
-            MXFp6Case{"E2M3_K65536", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_"},
-            MXFp6Case{"E3M2_K65536", HIP_R_6F_E3M2, 65536, "rocke_gemm_mx_e3m2_e3m2_"},
-            MXFp6Case{"E2M3_K131584", HIP_R_6F_E2M3, 131584, "rocke_gemm_mx_e2m3_e2m3_"},
-            MXFp6Case{"E3M2_K131584", HIP_R_6F_E3M2, 131584, "rocke_gemm_mx_e3m2_e3m2_"}),
+            MXFp6Case{"E2M3_K65536", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", true},
+            MXFp6Case{"E3M2_K65536", HIP_R_6F_E3M2, 65536, "rocke_gemm_mx_e3m2_e3m2_", true},
+            MXFp6Case{"E2M3_K131584", HIP_R_6F_E2M3, 131584, "rocke_gemm_mx_e2m3_e2m3_", true},
+            MXFp6Case{"E3M2_K131584", HIP_R_6F_E3M2, 131584, "rocke_gemm_mx_e3m2_e3m2_", true},
+            MXFp6Case{
+                "E2M3_K65536_CanonicalB", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", false}),
         [](const ::testing::TestParamInfo<MXFp6Case>& info) {
             return std::string(info.param.name);
         });

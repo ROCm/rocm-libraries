@@ -3124,18 +3124,40 @@ Tests:
   # Not on gfx1250: uses FP6 and fp16-output MX types; gfx1250 MX coverage is matmul_fast_check_mx_*.
   gpu_arch: '950'
 
-# The gfx950 MXFP6 custom kernels, through the client's tiling of both operands to
-# HIPBLASLT_ORDER_COL256_R128_EXT and its 128x4 scale shuffle, at their registered
-# sizes (one kernel per K). They need beta == 0, which the C heuristic never assumes, so
-# the ext API only. Their logic is registered for chip 0x75a3 only; other gfx950 parts
-# decline. The K = 131584 entries are nightly: their CPU reference is about 2.2e12
-# multiply-adds. RowUniformityMXFp6_pre_checkin covers both K before check-in.
+# The gfx950 MXFP6 custom kernels, through the client's tiling of A, and of B when
+# swizzle_b is set, to HIPBLASLT_ORDER_COL256_R128_EXT and its 128x4 scale shuffle, at
+# their registered sizes (one kernel per K and B order). They need beta == 0, which the C
+# heuristic never assumes, so the ext API only. Their logic is registered for chip 0x75a3
+# only; other gfx950 parts decline. The K = 131584 entries are nightly: their CPU
+# reference is about 2.2e12 multiply-adds. RowUniformityMXFp6_pre_checkin covers both K
+# before check-in.
 - name: matmul_mx_fp6_tile128x4
   category: pre_checkin
   function:
     matmul:
     - { a_type: f6_r, b_type: f6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: true }
     - { a_type: bf6_r, b_type: bf6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: true }
+  M: [4096]
+  N: [4096]
+  K: [65536]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  use_ext: 1
+  use_ext_setproblem: 1
+  initialization: rand_int
+  unit_check: 1
+  norm_check: 1
+  allow_no_solution: 1
+  gpu_arch: '950'
+
+# B in HIPBLASLT_ORDER_COL with ldb = K: one E2M3 kernel, at K = 65536 only.
+- name: matmul_mx_fp6_tile128x4_canonical_b
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f6_r, b_type: f6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: false }
   M: [4096]
   N: [4096]
   K: [65536]
