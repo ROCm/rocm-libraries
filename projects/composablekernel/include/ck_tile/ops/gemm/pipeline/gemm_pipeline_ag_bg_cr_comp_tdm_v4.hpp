@@ -122,12 +122,52 @@ struct GemmPipelineAgBgCrCompTDMV4
     using BDataType = typename Problem::BDataType;
     using ODataType = typename Problem::ODataType;
 
+    using AsDataType     = remove_cvref_t<typename Problem::AsDataTypeTuple>;
+    using BsDataType     = remove_cvref_t<typename Problem::BsDataTypeTuple>;
+    using CDataType      = remove_cvref_t<typename Problem::CDataType>;
+    using BlockGemmShape = remove_cvref_t<typename Problem::BlockGemmShape>;
+    using AsLayout       = remove_cvref_t<typename Problem::AsLayoutTuple>;
+    using BsLayout       = remove_cvref_t<typename Problem::BsLayoutTuple>;
+    using ALayout        = remove_cvref_t<typename Problem::ALayout>;
+    using BLayout        = remove_cvref_t<typename Problem::BLayout>;
+    using CLayout        = remove_cvref_t<typename Problem::CLayout>;
+    using AElementWise   = remove_cvref_t<typename Problem::AElementWise>;
+    using BElementWise   = remove_cvref_t<typename Problem::BElementWise>;
+
     static constexpr MxTdmV4Spec kSpec = Policy::template GetSpec<Problem>();
     static_assert(mx_tdm_v4::InvalidTuning<Policy::template GetReason<Problem>()>::value,
                   "comp_tdm_v4: the Problem and tuning break a rule of rocKE's validate()");
     static constexpr MxTdmV4LdsLayout kLayout = Policy::template GetLdsLayout<Problem>();
 
-    static constexpr index_t kBlockSize = Problem::kBlockSize;
+    static constexpr index_t kBlockSize     = Problem::kBlockSize;
+    static constexpr index_t BlockSize      = Problem::kBlockSize;
+    static constexpr bool kPadM             = Problem::kPadM;
+    static constexpr bool kPadN             = Problem::kPadN;
+    static constexpr bool kPadK             = Problem::kPadK;
+    static constexpr bool Preshuffle        = false;
+    static constexpr bool LargeTensors      = Problem::LargeTensors;
+    static constexpr index_t ScaleBlockSize = Problem::ScaleBlockSize;
+    static constexpr index_t MXdlPackEff    = 1;
+    static constexpr index_t NXdlPackEff    = 1;
+    static constexpr index_t KXdlPackEff    = 4;
+    /// One MX GEMM of single A, B and C tensors with K-major scales: the multi-D, grouped and
+    /// batched kernels reject this pipeline.
+    static constexpr bool kPlainGemmOnly = true;
+
+    // TDM reads A and B, so the vector sizes are 1 and the launch check of the vector lengths is
+    // skipped, as for the other TDM pipelines.
+    template <bool IsWave32Host = false>
+    static constexpr index_t GetVectorSizeA()
+    {
+        return 1;
+    }
+    template <bool IsWave32Host = false>
+    static constexpr index_t GetVectorSizeB()
+    {
+        return 1;
+    }
+    static constexpr bool skipCheckValidLaunchParams = true;
+
     /// The workgroup's threads: kBlockSize of the device pass (4 waves of 32).
     static constexpr index_t kThreads     = kSpec.block_size();
     static constexpr index_t kTileM       = kSpec.tile_m;
