@@ -39,7 +39,7 @@
  * @file TestGpuConvWrw.cpp
  * @brief The matrix-core backward-weights kernels (CONV_WRW) on the device, through the engine's
  *        own graph match, kernel match, workspace sizing, prepare and launch (ConvWrw, then
- *        ConvWrwReduce), against hipDNN's CPU reference in fp64; and host checks of the shipped
+ *        ConvWrwReduce; ConvWrw alone where it writes dw at one split), against hipDNN's CPU reference in fp64; and host checks of the shipped
  *        catalog.
  *
  * Every config of the installed catalog that the kernel match admits on this device runs on
@@ -194,6 +194,7 @@ conv_wrw::WrwConfig configOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition
     c.align = kernel.getIntMetadata("align");
     c.ns = kernel.getIntMetadata("ns");
     c.wq = kernel.getIntMetadata("wq");
+    c.dws = kernel.getIntMetadata("dws");
     return c;
 }
 
@@ -288,6 +289,9 @@ struct DeviceCase
     ConvShape shape;
     /// dw stored in the other layout than x and dy.
     bool otherFilterLayout = false;
+    /// Fewer than 8 reduction steps (one split) into dw of contiguous channels: every config
+    /// but loop 5 writes dw itself, without workspace or reduce.
+    bool writesDw = false;
 };
 
 ConvShape conv(int64_t c,
@@ -387,6 +391,32 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"FilterKcrsUnderNhwc",
                      conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
                      true});
+    // One image of 3 rows of 9: at most 5 steps (3 rows, or 3 + 2 on a 3-row ring, one width
+    // chunk), one split.
+    cases.push_back({"OneSplitNhwc3x3",
+                     conv(24, 40, {3, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true, 1, 1),
+                     false,
+                     true});
+    cases.push_back({"OneSplitGroupedNhwc3x3",
+                     conv(48, 64, {3, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true, 2, 1),
+                     false,
+                     true});
+    cases.push_back({"OneSplitFilterKrscUnderNchw",
+                     conv(24, 40, {3, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 1, 1),
+                     true,
+                     true});
+    cases.push_back({"OneSplitPointwise1x1OddChannels",
+                     conv(70, 33, {3, 7}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, false, 1, 1),
+                     false,
+                     true});
+    cases.push_back({"OneSplitPointwise1x1Nhwc",
+                     conv(64, 136, {3, 9}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, true, 1, 1),
+                     false,
+                     true});
+    auto oneSplitConvolution
+        = conv(16, 32, {3, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true, 1, 1);
+    oneSplitConvolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"OneSplitTrueConvolutionNhwc", oneSplitConvolution, false, true});
     return cases;
 }
 
@@ -487,6 +517,7 @@ void runCase(const DeviceCase& deviceCase)
     static std::set<std::string> s_ldsChecked;
     const auto& handler = dispatchHandler(PACK);
     int ran = 0;
+    int wroteDw = 0;
     for(const auto& kernel : catalog())
     {
         if(!matchesKernel(PACK, fixture.context(), kernel, *bound))
@@ -498,9 +529,13 @@ void runCase(const DeviceCase& deviceCase)
         const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
         ASSERT_NE(prepared, nullptr);
         const size_t workspaceBytes = handler.workspaceBytes(fixture.context(), *bound, kernel);
-        ASSERT_GT(workspaceBytes, 0u);
-
         const auto config = configOf(kernel);
+        // No workspace: the kernel writes dw itself (never loop 5).
+        if(workspaceBytes == 0)
+        {
+            EXPECT_NE(config.loop, conv_wrw::LOOP_DIRECT);
+            ++wroteDw;
+        }
         if(s_ldsChecked.insert(kernel.name).second)
         {
             const int compiled = ldsOfCompiled(kernel, config, shape.dataType, device.gcnArchName);
@@ -523,9 +558,12 @@ void runCase(const DeviceCase& deviceCase)
         }
 
         void* workspace = nullptr;
-        ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
-        // Stale partials must not leak into the result.
-        ASSERT_EQ(hipMemset(workspace, 0x7f, workspaceBytes), hipSuccess);
+        if(workspaceBytes > 0)
+        {
+            ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
+            // Stale partials must not leak into the result.
+            ASSERT_EQ(hipMemset(workspace, 0x7f, workspaceBytes), hipSuccess);
+        }
         w.fillWithSentinelValue();
         const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
             hipdnnPluginDeviceBuffer_t{X_UID, x.rawDeviceData()},
@@ -535,7 +573,10 @@ void runCase(const DeviceCase& deviceCase)
         handler.launch(
             handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
         ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
-        ASSERT_EQ(hipFree(workspace), hipSuccess);
+        if(workspace != nullptr)
+        {
+            ASSERT_EQ(hipFree(workspace), hipSuccess);
+        }
         w.markDeviceModified();
 
         const auto* actual = static_cast<const T*>(w.rawHostData());
@@ -559,6 +600,10 @@ void runCase(const DeviceCase& deviceCase)
         GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
     }
     EXPECT_GE(ran, 1) << "no catalog config serves this case";
+    if(deviceCase.writesDw)
+    {
+        EXPECT_GE(wroteDw, 1) << "no config wrote dw itself";
+    }
 }
 
 class TestGpuConvWrw : public ::testing::TestWithParam<DeviceCase>
@@ -600,9 +645,9 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 20> KNOBS{
-        "atom_id", "loop", "layout", "bk", "bc",  "bq",  "fr",    "s",  "sw",  "dw",
-        "wk",      "wc",   "tk",     "tc", "vec", "xcd", "align", "ns", "bpu", "wq"};
+    static constexpr std::array<const char*, 21> KNOBS{
+        "atom_id", "loop", "layout", "bk",  "bc",  "bq",    "fr", "s",   "sw", "dw", "wk",
+        "wc",      "tk",   "tc",     "vec", "xcd", "align", "ns", "bpu", "wq", "dws"};
     std::set<std::vector<int64_t>> seen[3];
     for(const auto& kernel : catalog())
     {

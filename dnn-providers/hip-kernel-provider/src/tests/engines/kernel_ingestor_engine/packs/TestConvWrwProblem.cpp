@@ -414,7 +414,7 @@ struct ConfigFields
     int64_t atomId = 4;
     int64_t loop = 1, layout = 0;
     int64_t bk = 64, bc = 64, bq = 32, fr = 3, s = 3, sw = 1, dw = 1, wk = 2, wc = 2, vec = 8;
-    int64_t tk = 0, tc = 0, xcd = 0, align = 0, ns = 0, bpu = 2, wq = 0;
+    int64_t tk = 0, tc = 0, xcd = 0, align = 0, ns = 0, bpu = 2, wq = 0, dws = 1;
 };
 
 /// The base config as the output-rows loop.
@@ -476,6 +476,7 @@ ConfigFields directFields()
     f.wq = 2;
     f.xcd = 1;
     f.bpu = 1;
+    f.dws = 0;
     return f;
 }
 
@@ -505,7 +506,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"align", f.align},
                        {"ns", f.ns},
                        {"bpu", f.bpu},
-                       {"wq", f.wq}};
+                       {"wq", f.wq},
+                       {"dws", f.dws}};
     return kernel;
 }
 
@@ -533,6 +535,7 @@ WrwConfig configOf(const ConfigFields& f)
     c.tc = f.tc;
     c.bpu = f.bpu;
     c.wq = f.wq;
+    c.dws = f.dws;
     return c;
 }
 
@@ -775,6 +778,8 @@ std::vector<ConfigRefusal> configRefusals()
         {"SmallCWcTwo", [](ConfigFields& f) { f.wc = 2; }, smallcFields, "gfx942", stemShape},
         {"SmallCBc32", [](ConfigFields& f) { f.bc = 32; }, smallcFields, "gfx942", stemShape},
         {"WqOffTheDirectLoop", [](ConfigFields& f) { f.wq = 1; }},
+        {"DwsTwo", [](ConfigFields& f) { f.dws = 2; }},
+        {"DwsNegative", [](ConfigFields& f) { f.dws = -1; }},
         {"LoopNegative", [](ConfigFields& f) { f.loop = -1; }},
         {"LayoutNotTheGraphs", [](ConfigFields& f) { f.layout = 1; }},
         {"LayoutUnknown", [](ConfigFields& f) { f.layout = 3; }},
@@ -912,6 +917,7 @@ std::vector<ConfigRefusal> configRefusals()
     };
     direct("DirectWqThree", [](ConfigFields& f) { f.wq = 3; });
     direct("DirectWqZero", [](ConfigFields& f) { f.wq = 0; });
+    direct("DirectWithTheDwStore", [](ConfigFields& f) { f.dws = 1; });
     direct("DirectWavesNotEight", [](ConfigFields& f) { f.wq = 1; });
     direct("DirectOnChannelsLastTransposedIntoLds", [](ConfigFields& f) { f.layout = 1; });
     direct("DirectOn32x16Atom", [](ConfigFields& f) {
@@ -1820,6 +1826,98 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     EXPECT_EQ(flipped->reduce.flip, 1);
 }
 
+TEST(TestConvWrwLaunch, OneSplitIntoContiguousChannelsWritesDwWithoutAReduce)
+{
+    // The launch of @p fields on @p shape with dw packed K T R S C.
+    const auto krscLaunch = [](const ConfigFields& fields,
+                               const ConvShape& shape,
+                               const std::string& arch,
+                               int units) -> std::optional<conv_wrw::WrwLaunch> {
+        auto spec = specOf(shape);
+        spec.w.strides = filterChannelsLast(spec.w.dims);
+        const auto problem = parse(spec);
+        if(!problem.has_value())
+        {
+            return std::nullopt;
+        }
+        return conv_wrw::wrwLaunchFor(*problem, configOf(fields), deviceOf(arch, units));
+    };
+    // bpu 1 on one unit: one split.
+    auto one = ConfigFields{};
+    one.bpu = 1;
+
+    // K T R S C at one split: the kernel writes dw (channels contiguous, a tap cg apart).
+    const auto krsc = krscLaunch(one, baseShape(), "gfx942", 1);
+    ASSERT_TRUE(krsc.has_value());
+    EXPECT_EQ(krsc->args.splits, 1);
+    EXPECT_TRUE(krsc->dwStore);
+    EXPECT_EQ(krsc->args.dwStore, 1);
+    EXPECT_EQ(krsc->workspaceBytes, 0u);
+    EXPECT_EQ(krsc->args.dwk, 24 * 9);
+    EXPECT_EQ(krsc->args.dwtap, 24);
+    EXPECT_EQ(krsc->args.flip, 0);
+
+    // A config compiled without the direct store (dws 0): partials and the reduce.
+    auto noDws = one;
+    noDws.dws = 0;
+    const auto krscNoDws = krscLaunch(noDws, baseShape(), "gfx942", 1);
+    ASSERT_TRUE(krscNoDws.has_value());
+    EXPECT_EQ(krscNoDws->args.splits, 1);
+    EXPECT_FALSE(krscNoDws->dwStore);
+    EXPECT_EQ(krscNoDws->args.dwStore, 0);
+    EXPECT_EQ(krscNoDws->workspaceBytes, size_t{9} * 40 * 24 * 4);
+
+    // K C T R S of several taps at one split: partials and the reduce.
+    const auto kcrs = launchOf(one, baseShape(), "gfx942", 1);
+    ASSERT_TRUE(kcrs.has_value());
+    EXPECT_EQ(kcrs->args.splits, 1);
+    EXPECT_FALSE(kcrs->dwStore);
+    EXPECT_EQ(kcrs->args.dwStore, 0);
+    EXPECT_EQ(kcrs->workspaceBytes, size_t{9} * 40 * 24 * 4);
+
+    // One tap, K C T R S: its channels are contiguous too.
+    auto pointwise = baseShape();
+    pointwise.filter = {1, 1};
+    pointwise.prePadding = pointwise.postPadding = {0, 0};
+    auto f1 = rowsFields();
+    f1.s = 1;
+    f1.fr = 1;
+    f1.bpu = 1;
+    const auto oneTap = launchOf(f1, pointwise, "gfx942", 1);
+    ASSERT_TRUE(oneTap.has_value());
+    EXPECT_EQ(oneTap->args.splits, 1);
+    EXPECT_TRUE(oneTap->dwStore);
+    EXPECT_EQ(oneTap->workspaceBytes, 0u);
+    EXPECT_EQ(oneTap->args.dwk, 24);
+    EXPECT_EQ(oneTap->args.dwtap, 1);
+
+    // Two splits: partials, whatever the layout.
+    auto two = ConfigFields{};
+    two.bpu = 2;
+    const auto krscTwo = krscLaunch(two, baseShape(), "gfx942", 1);
+    ASSERT_TRUE(krscTwo.has_value());
+    EXPECT_EQ(krscTwo->args.splits, 2);
+    EXPECT_FALSE(krscTwo->dwStore);
+    EXPECT_EQ(krscTwo->args.dwStore, 0);
+    EXPECT_EQ(krscTwo->workspaceBytes, size_t{2} * 9 * 40 * 24 * 4);
+
+    // Loop 5 writes partials at one split too.
+    const auto direct = krscLaunch(directFields(), channelsLastShape(), "gfx950", 1);
+    ASSERT_TRUE(direct.has_value());
+    EXPECT_EQ(direct->args.splits, 1);
+    EXPECT_FALSE(direct->dwStore);
+    EXPECT_EQ(direct->args.dwStore, 0);
+    EXPECT_GT(direct->workspaceBytes, 0u);
+
+    // A convolution reflects the taps the kernel writes.
+    auto convolution = baseShape();
+    convolution.mode = ConvMode::CONVOLUTION;
+    const auto flipped = krscLaunch(one, convolution, "gfx942", 1);
+    ASSERT_TRUE(flipped.has_value());
+    EXPECT_TRUE(flipped->dwStore);
+    EXPECT_EQ(flipped->args.flip, 1);
+}
+
 TEST(TestConvWrwLaunch, OneAndTwoDimensionalGraphsPadTheLeadingAxes)
 {
     auto shape = baseShape();
@@ -1970,7 +2068,7 @@ TEST(TestConvWrwDefines, EveryFieldIsADefine)
     auto f = dmaFields();
     const auto defines
         = conv_wrw::compileDefinesFor(DataType::BFLOAT16, configOf(f), "K1AtomMfma32Bf16X16");
-    ASSERT_EQ(defines.size(), 20u);
+    ASSERT_EQ(defines.size(), 21u);
     EXPECT_EQ(defines[0], (std::pair<std::string, std::string>{"CONV_K3_T", "unsigned short"}));
     EXPECT_EQ(defines[1],
               (std::pair<std::string, std::string>{"CONV_K3_ATOM", "K1AtomMfma32Bf16X16"}));
@@ -1978,14 +2076,16 @@ TEST(TestConvWrwDefines, EveryFieldIsADefine)
     EXPECT_EQ(defines[13], (std::pair<std::string, std::string>{"CONV_K3_TK", "0"}));
     EXPECT_EQ(defines[18], (std::pair<std::string, std::string>{"CONV_K3_NS", "2"}));
     EXPECT_EQ(defines[19], (std::pair<std::string, std::string>{"CONV_K3_WQ", "0"}));
+    EXPECT_EQ(defines[20], (std::pair<std::string, std::string>{"CONV_K3_DWS", "1"}));
     const auto direct
         = conv_wrw::compileDefinesFor(DataType::HALF, configOf(directFields()), "K1AtomMfmaF16X32");
-    ASSERT_EQ(direct.size(), 20u);
+    ASSERT_EQ(direct.size(), 21u);
     EXPECT_EQ(direct[2], (std::pair<std::string, std::string>{"CONV_K3_LOOP", "5"}));
     EXPECT_EQ(direct[19], (std::pair<std::string, std::string>{"CONV_K3_WQ", "2"}));
+    EXPECT_EQ(direct[20], (std::pair<std::string, std::string>{"CONV_K3_DWS", "0"}));
     // The FMA ring names no atom.
     const auto fma = conv_wrw::compileDefinesFor(DataType::FLOAT, configOf(fmaFields()), "");
-    ASSERT_EQ(fma.size(), 19u);
+    ASSERT_EQ(fma.size(), 20u);
     EXPECT_EQ(fma[0], (std::pair<std::string, std::string>{"CONV_K3_T", "float"}));
     EXPECT_EQ(fma[1], (std::pair<std::string, std::string>{"CONV_K3_LOOP", "3"}));
     EXPECT_EQ(fma[12], (std::pair<std::string, std::string>{"CONV_K3_TK", "4"}));

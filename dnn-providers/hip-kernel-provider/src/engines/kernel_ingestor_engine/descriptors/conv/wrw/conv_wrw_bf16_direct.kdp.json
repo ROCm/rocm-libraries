@@ -41,7 +41,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 1000
     },
@@ -77,7 +78,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 999
     },
@@ -113,7 +115,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 998
     },
@@ -149,7 +152,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 997
     },
@@ -185,7 +189,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 996
     },
@@ -221,7 +226,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 995
     },
@@ -257,7 +263,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 994
     },
@@ -293,7 +300,8 @@
         "align": 0,
         "ns": 4,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 993
     },
@@ -329,7 +337,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 992
     },
@@ -365,7 +374,8 @@
         "align": 0,
         "ns": 4,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 991
     },
@@ -401,7 +411,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 990
     },
@@ -437,7 +448,8 @@
         "align": 0,
         "ns": 4,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 989
     },
@@ -473,7 +485,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 988
     },
@@ -509,7 +522,8 @@
         "align": 0,
         "ns": 4,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 987
     },
@@ -545,7 +559,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 986
     },
@@ -581,7 +596,8 @@
         "align": 0,
         "ns": 4,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 985
     },
@@ -617,7 +633,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 984
     },
@@ -653,7 +670,8 @@
         "align": 0,
         "ns": 4,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 983
     },
@@ -689,7 +707,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 982
     },
@@ -725,7 +744,8 @@
         "align": 0,
         "ns": 4,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 981
     },
@@ -761,7 +781,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 980
     },
@@ -797,7 +818,8 @@
         "align": 0,
         "ns": 4,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 979
     },
@@ -833,7 +855,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 978
     },
@@ -869,7 +892,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 977
     },
@@ -905,7 +929,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 976
     },
@@ -941,7 +966,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 975
     },
@@ -977,7 +1003,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 974
     },
@@ -1013,7 +1040,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 973
     },
@@ -1049,7 +1077,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 972
     },
@@ -1085,7 +1114,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 971
     },
@@ -1121,7 +1151,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 970
     },
@@ -1157,7 +1188,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 969
     },
@@ -1193,7 +1225,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 968
     },
@@ -1229,7 +1262,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 967
     },
@@ -1265,7 +1299,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 966
     },
@@ -1301,7 +1336,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 965
     },
@@ -1337,7 +1373,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 964
     },
@@ -1373,7 +1410,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 963
     },
@@ -1409,7 +1447,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 2
+        "wq": 2,
+        "dws": 0
       },
       "priority": 962
     },
@@ -1445,7 +1484,8 @@
         "align": 0,
         "ns": 3,
         "bpu": 1,
-        "wq": 1
+        "wq": 1,
+        "dws": 0
       },
       "priority": 961
     }

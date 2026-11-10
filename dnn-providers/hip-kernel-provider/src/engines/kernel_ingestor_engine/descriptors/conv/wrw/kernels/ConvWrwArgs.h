@@ -45,6 +45,14 @@ struct K3Args
     long long yImage;
     /// dw elements per split of the partials: groups * taps * (k / groups) * (c / groups).
     long long partialElems;
+    /// Nonzero (one split, dw K T R S C or of one tap): the kernel writes dw itself in its
+    /// element type, channels contiguous, and no reduce runs; `partial` is unused.
+    int dwStore;
+    int flip; ///< nonzero: true convolution, dw written with its taps reflected
+    void* dwOut; ///< dw (`dw` is the width dilation)
+    /// dw element strides: k (over all groups) and tap (t r s flattened); c is 1.
+    long long dwk;
+    long long dwtap;
 };
 
 /// Adds the splits' fp32 partials in split order and writes dw in its element type and layout.

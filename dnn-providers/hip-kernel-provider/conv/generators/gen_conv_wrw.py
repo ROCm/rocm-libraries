@@ -105,6 +105,7 @@ INTS = [
     "ns",
     "bpu",
     "wq",
+    "dws",
 ]
 STRINGS = ["direction", "dtype", "atom"]
 FIELDS = STRINGS + INTS
@@ -561,7 +562,7 @@ def C(atom, loop, layout, tile, s, sw, dw, fr, vec, xcd, align, ns):
     else:
         bk, bc, wk, wc, bq = tile
         tk = tc = 0
-    return dict(
+    c = dict(
         atom=atom,
         atom_id=ATOMS.index(atom),
         loop=loop,
@@ -584,6 +585,7 @@ def C(atom, loop, layout, tile, s, sw, dw, fr, vec, xcd, align, ns):
         bpu=0,
         wq=0,
     )
+    return dict(c, dws=dws_of(c))
 
 
 def D(atom, tile, s, dw, fr, ns):
@@ -611,6 +613,7 @@ def D(atom, tile, s, dw, fr, ns):
         ns=ns,
         bpu=1,
         wq=wq,
+        dws=0,
     )
 
 
@@ -941,6 +944,21 @@ def build():
                 kept.append(c)
         CATALOG[dtype] = kept
     return dropped
+
+
+def dws_of(c):
+    """CONV_K3_DWS: 1 compiles the direct dw store (one split into K T R S C or one tap) into
+    the epilogue, 0 keeps the partials-only epilogue. 0 for loop 5 (partials only) and for
+    gfx12's WMMA tiles of 512 or more accumulators per wave (16 x 32 and up), where the second
+    epilogue cost 7-17% on gfx1201 at any split."""
+    if c["loop"] == 5:
+        return 0
+    if (
+        c["atom"].startswith("wmma12")
+        and (c["bk"] // c["wk"]) * (c["bc"] // c["wc"]) >= 512
+    ):
+        return 0
+    return 1
 
 
 def family_of(c):

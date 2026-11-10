@@ -25,6 +25,8 @@
 //   CONV_K3_ALIGN    1: row-aligned units, unaligned LDS store (loop 1, channels-first)
 //   CONV_K3_NS       LDS stages (loop 2); ring slots (loop 5)
 //   CONV_K3_WQ       loop 5: items side by side (waves_q; wk x wc x wq = 8 waves)
+//   CONV_K3_DWS      1: the epilogue can write dw itself at one split (K3Args::dwStore); 0:
+//                    fp32 partials only (default)
 // Loop 5 (gfx950, 16-bit, channels-last kept, ConvWrwDirect.h) also takes CONV_K3_PP and
 // CONV_K3_SWZ (default 1: the ping-pong and the swizzled rows; 0 only for ablation).
 // ConvWrwReduce, the partials' fixed-order sum, shares the source, as does ConvWrwReduceRows, the

@@ -94,6 +94,10 @@
     {
       "name": "wq",
       "type": "int"
+    },
+    {
+      "name": "dws",
+      "type": "int"
     }
   ]
 }

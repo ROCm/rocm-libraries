@@ -30,7 +30,9 @@
  * The kernel reads x and dy in place, both packed channels-first (N C D H W) or both
  * channels-last (N D H W C), and writes fp32 partials [split][g][tap][k][c] into the workspace;
  * a second kernel adds the splits in a fixed order and writes dw, packed K C T R S or K T R S C,
- * in its element type (deterministic, no atomics). The LDS a config takes is the kernels' own
+ * in its element type (deterministic, no atomics). At one split with dw's channels contiguous
+ * (K T R S C, or one tap) a config compiled with the direct store (dws 1) writes dw itself: no
+ * workspace, no reduce. The LDS a config takes is the kernels' own
  * arithmetic (ConvWrwGeom.h, which the kernels assert their tiles against).
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_wrw
@@ -125,6 +127,9 @@ struct WrwConfig
     int64_t ns = 0;
     /// Loop 5: items a workgroup runs side by side (waves_q: 1, 2 or 4; wk wc wq = 8); else 0.
     int64_t wq = 0;
+    /// 1: the epilogue also writes dw itself, used at one split into K T R S C or one tap
+    /// (CONV_K3_DWS); 0: fp32 partials only, as compiled before the direct store. 0 for loop 5.
+    int64_t dws = 0;
     /// The split planner's target blocks per dispatch unit (1, 2, 4 or 8; 1 for loop 5, whose
     /// persistent grid has one workgroup per unit; 8 for small FMA blocks): host-side only.
     int64_t bpu = 0;
@@ -188,6 +193,8 @@ struct WrwLaunch
     K3Args args{};
     K3ReduceArgs reduce{};
     size_t workspaceBytes = 0;
+    /// The kernel writes dw itself (args.dwStore): no workspace, no reduce launch.
+    bool dwStore = false;
 };
 
 /// The workspace the splits' fp32 partials may take at most; splits are reduced to fit.
@@ -261,8 +268,8 @@ DirectPlan directPlanFor(int64_t tiles,
  * 0 to 2); align 0, or 1 for loop 1, channels-first, sw 1 and widths of x and dy whole vectors,
  * or 2 for loop 1, layout 1 and output channels per group not whole vectors (which the other
  * configs require);
- * ns 2 to 4 for loop 2, else 0; the block within 1024 threads and its load passes within 32;
- * the LDS within the device's; images of at least one vector (channels-first); the grids within
+ * ns 2 to 4 for loop 2, else 0; dws 0 or 1 (0 for loop 5); the block within 1024 threads and
+ * its load passes within 32; the LDS within the device's; images of at least one vector (channels-first); the grids within
  * the launch limits (x, and the reduce, 2^31 - 1; y and z 65535); bpu 1, 2, 4 or 8. The splits follow
  * splitsWanted at bpu blocks per unit, so a device that reports no dispatch units is declined.
  *

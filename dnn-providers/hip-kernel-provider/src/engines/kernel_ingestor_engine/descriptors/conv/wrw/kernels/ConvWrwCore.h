@@ -37,6 +37,20 @@
 // fragments read with the LDS transpose read (gfx950, 16-bit): a tap's shift is a row offset.
 #define K3_NHWC_TR 2
 
+// CONV_K3_DWS 1: the epilogues can also write dw itself (K3Args::dwStore, one split); 0: they
+// write fp32 partials only, compiled exactly as before the direct store (the config knob keeps
+// it out of tiles it would cost).
+#ifndef CONV_K3_DWS
+#define CONV_K3_DWS 0
+#endif
+// The loops are inlined into the kernel entry; with the direct store's second epilogue the
+// compiler may otherwise outline the larger ones into a called function.
+#if CONV_K3_DWS
+#define K3_LOOP_INLINE __attribute__((always_inline))
+#else
+#define K3_LOOP_INLINE
+#endif
+
 /// Compile-time loop: f(K3Int<0>{}) .. f(K3Int<N - 1>{}).
 template <int V>
 struct K3Int
@@ -900,9 +914,56 @@ __device__ inline unsigned k3RowsOf(int m, int u, int r)
     return rows;
 }
 
-/// fp32 partials [split][g][tap][k][c], lanes along c: acc[f S + s] holds tap (tapRow0 + f) S
-/// + s; filter rows at or past `frows` are skipped.
-template <class Atom, int FR, int S, int FK, int FC, int WTK, int WTC>
+/// Where a kernel's sums of group g go: element (tap, k, c) (tap of `taps`, k and c within the
+/// group) at base + tap ts + k ks + c. The fp32 partials of `split` ([split][g][tap][k][c]), or
+/// under a.dwStore dw itself in T (taps reflected under flip: a negative tap stride from the
+/// last tap). Channels are contiguous in both, so the epilogues share their addressing.
+struct K3Out
+{
+    void* base;
+    long long ks;
+    long long ts;
+};
+
+template <class T>
+__device__ inline K3Out k3OutOf(const K3Args& a, int g, int taps, unsigned split)
+{
+    const int kg = a.k / a.groups, cg = a.c / a.groups;
+    if(a.dwStore != 0)
+    {
+        T* dw = static_cast<T*>(a.dwOut) + static_cast<long long>(g) * kg * a.dwk
+                + (a.flip ? static_cast<long long>(taps - 1) * a.dwtap : 0);
+        return {dw, a.dwk, a.flip ? -a.dwtap : a.dwtap};
+    }
+    const long long kc = static_cast<long long>(kg) * cg;
+    return {a.partial + split * a.partialElems + static_cast<long long>(g) * taps * kc, cg, kc};
+}
+
+template <class P>
+struct K3PointeeOf;
+template <class E>
+struct K3PointeeOf<E*>
+{
+    typedef E type;
+};
+
+/// Runs store(p), p o's base typed for its elements: float* for the partials (and an fp32 dw),
+/// T* for a 16-bit dw. The branch is taken once, outside the store's unrolled loops (a branch
+/// per element made the 16-bit epilogues twice as long).
+template <class T, class Store>
+__device__ inline void k3WithOut(const K3Args& a, const K3Out& o, Store&& store)
+{
+    if constexpr(sizeof(T) == sizeof(float))
+        store(static_cast<float*>(o.base));
+    else if(a.dwStore != 0)
+        store(static_cast<T*>(o.base));
+    else
+        store(static_cast<float*>(o.base));
+}
+
+/// The sums, lanes along c: acc[f S + s] holds tap (tapRow0 + f) S + s; filter rows at or past
+/// `frows` are skipped. Into fp32 partials [split][g][tap][k][c], or dw (k3OutOf).
+template <class T, class Atom, int FR, int S, int FK, int FC, int WTK, int WTC>
 __device__ inline void k3StorePartials(const K3Args& a,
                                        const typename Atom::acc (&acc)[FR * S][FK][FC],
                                        int g,
@@ -919,36 +980,71 @@ __device__ inline void k3StorePartials(const K3Args& a,
 {
     constexpr int DIM = Atom::DIM;
     const int kg = a.k / a.groups, cg = a.c / a.groups;
-    const long long kc = static_cast<long long>(kg) * cg;
-    const int taps = frows * S;
-    float* out = a.partial + split * a.partialElems + static_cast<long long>(g) * taps * kc;
-#pragma unroll
-    for(int f = 0; f < FR; ++f)
+    if constexpr(!CONV_K3_DWS)
     {
-        // Filter row tapRow0 + f rowStep (the ring's height phases step by the stride).
-        const int row = tapRow0 + f * rowStep;
-        if(row >= frows || row >= rowEnd)
-            continue;
+        const long long kc = static_cast<long long>(kg) * cg;
+        const int taps = frows * S;
+        float* out = a.partial + split * a.partialElems + static_cast<long long>(g) * taps * kc;
 #pragma unroll
-        for(int s = 0; s < S; ++s)
+        for(int f = 0; f < FR; ++f)
         {
-            float* o = out + static_cast<long long>(row * S + s) * kc;
+            // Filter row tapRow0 + f rowStep (the ring's height phases step by the stride).
+            const int row = tapRow0 + f * rowStep;
+            if(row >= frows || row >= rowEnd)
+                continue;
 #pragma unroll
-            for(int x = 0; x < FK; ++x)
+            for(int s = 0; s < S; ++s)
+            {
+                float* o = out + static_cast<long long>(row * S + s) * kc;
 #pragma unroll
-                for(int y = 0; y < FC; ++y)
-                {
-                    const int c = c0 + wc * WTC + y * DIM + lane % DIM;
+                for(int x = 0; x < FK; ++x)
 #pragma unroll
-                    for(int e = 0; e < Atom::ACC; ++e)
+                    for(int y = 0; y < FC; ++y)
                     {
-                        const int k = k0 + wk * WTK + x * DIM + Atom::dRow(lane, e);
-                        if(k < kg && c < cg)
-                            o[static_cast<long long>(k) * cg + c] = acc[f * S + s][x][y][e];
+                        const int c = c0 + wc * WTC + y * DIM + lane % DIM;
+#pragma unroll
+                        for(int e = 0; e < Atom::ACC; ++e)
+                        {
+                            const int k = k0 + wk * WTK + x * DIM + Atom::dRow(lane, e);
+                            if(k < kg && c < cg)
+                                o[static_cast<long long>(k) * cg + c] = acc[f * S + s][x][y][e];
+                        }
                     }
-                }
+            }
         }
+        return;
     }
+    const K3Out out = k3OutOf<T>(a, g, frows * S, split);
+    k3WithOut<T>(a, out, [&](auto* base) {
+        typedef typename K3PointeeOf<decltype(base)>::type E;
+#pragma unroll
+        for(int f = 0; f < FR; ++f)
+        {
+            // Filter row tapRow0 + f rowStep (the ring's height phases step by the stride).
+            const int row = tapRow0 + f * rowStep;
+            if(row >= frows || row >= rowEnd)
+                continue;
+#pragma unroll
+            for(int s = 0; s < S; ++s)
+            {
+                E* o = base + static_cast<long long>(row * S + s) * out.ts;
+#pragma unroll
+                for(int x = 0; x < FK; ++x)
+#pragma unroll
+                    for(int y = 0; y < FC; ++y)
+                    {
+                        const int c = c0 + wc * WTC + y * DIM + lane % DIM;
+#pragma unroll
+                        for(int e = 0; e < Atom::ACC; ++e)
+                        {
+                            const int k = k0 + wk * WTK + x * DIM + Atom::dRow(lane, e);
+                            if(k < kg && c < cg)
+                                o[k * out.ks + c] = K1Elem<E>::store(acc[f * S + s][x][y][e]);
+                        }
+                    }
+            }
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -970,7 +1066,7 @@ template <class T,
           int WC,
           int VEC,
           int XCD = 0>
-__device__ void k3WrwRows(const K3Args& a)
+__device__ K3_LOOP_INLINE void k3WrwRows(const K3Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = WK * WC * WAVE;
@@ -1114,7 +1210,8 @@ __device__ void k3WrwRows(const K3Args& a)
         __syncthreads();
         buf ^= 1;
     }
-    k3StorePartials<Atom, FR, S, FK, FC, WTK, WTC>(a, acc, g, fr0, frows, k0, c0, wk, wc, lane, bz);
+    k3StorePartials<T, Atom, FR, S, FK, FC, WTK, WTC>(
+        a, acc, g, fr0, frows, k0, c0, wk, wc, lane, bz);
 }
 
 /// KPL consecutive elements of an LDS row starting OFF elements past p, OFF a per-lane runtime
@@ -1168,7 +1265,7 @@ template <class T,
           int WK,
           int VEC,
           int XCD = 0>
-__device__ void k3WrwRowsSmallC(const K3Args& a)
+__device__ K3_LOOP_INLINE void k3WrwRowsSmallC(const K3Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = WK * WAVE;
@@ -1322,34 +1419,67 @@ __device__ void k3WrwRowsSmallC(const K3Args& a)
         buf ^= 1;
     }
 
-    // Partials [split][g][tap][k][c]: column n is channel c0 + n / S, tap row fr0 + f, tap s.
-    const long long kc = static_cast<long long>(kg) * cg;
-    float* out = a.partial + bz * a.partialElems + static_cast<long long>(g) * frows * S * kc;
-#pragma unroll
-    for(int f = 0; f < FR; ++f)
+    // Partials [split][g][tap][k][c] (or dw, k3OutOf): column n is channel c0 + n / S, tap row
+    // fr0 + f, tap s.
+    if constexpr(!CONV_K3_DWS)
     {
-        if(fr0 + f >= frows)
-            continue;
+        const long long kc = static_cast<long long>(kg) * cg;
+        float* out = a.partial + bz * a.partialElems + static_cast<long long>(g) * frows * S * kc;
 #pragma unroll
-        for(int y = 0; y < FN; ++y)
+        for(int f = 0; f < FR; ++f)
         {
-            const int nn = y * DIM + lane % DIM;
-            const int c = c0 + nn / S, s = nn % S;
-            if(nn / S >= BC || c >= cg)
+            if(fr0 + f >= frows)
                 continue;
 #pragma unroll
-            for(int x = 0; x < FK; ++x)
+            for(int y = 0; y < FN; ++y)
+            {
+                const int nn = y * DIM + lane % DIM;
+                const int c = c0 + nn / S, s = nn % S;
+                if(nn / S >= BC || c >= cg)
+                    continue;
 #pragma unroll
-                for(int e = 0; e < Atom::ACC; ++e)
-                {
-                    const int k = k0 + wk * WTK + x * DIM + Atom::dRow(lane, e);
-                    if(k < kg)
-                        out[static_cast<long long>((fr0 + f) * S + s) * kc
-                            + static_cast<long long>(k) * cg + c]
-                            = acc[f][x][y][e];
-                }
+                for(int x = 0; x < FK; ++x)
+#pragma unroll
+                    for(int e = 0; e < Atom::ACC; ++e)
+                    {
+                        const int k = k0 + wk * WTK + x * DIM + Atom::dRow(lane, e);
+                        if(k < kg)
+                            out[static_cast<long long>((fr0 + f) * S + s) * kc
+                                + static_cast<long long>(k) * cg + c]
+                                = acc[f][x][y][e];
+                    }
+            }
         }
+        return;
     }
+    const K3Out out = k3OutOf<T>(a, g, frows * S, bz);
+    k3WithOut<T>(a, out, [&](auto* base) {
+        typedef typename K3PointeeOf<decltype(base)>::type E;
+#pragma unroll
+        for(int f = 0; f < FR; ++f)
+        {
+            if(fr0 + f >= frows)
+                continue;
+#pragma unroll
+            for(int y = 0; y < FN; ++y)
+            {
+                const int nn = y * DIM + lane % DIM;
+                const int c = c0 + nn / S, s = nn % S;
+                if(nn / S >= BC || c >= cg)
+                    continue;
+                E* o = base + static_cast<long long>((fr0 + f) * S + s) * out.ts + c;
+#pragma unroll
+                for(int x = 0; x < FK; ++x)
+#pragma unroll
+                    for(int e = 0; e < Atom::ACC; ++e)
+                    {
+                        const int k = k0 + wk * WTK + x * DIM + Atom::dRow(lane, e);
+                        if(k < kg)
+                            o[k * out.ks] = K1Elem<E>::store(acc[f][x][y][e]);
+                    }
+            }
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1376,7 +1506,7 @@ template <class T,
           int VEC,
           int XCD = 0,
           int ALIGN = 0>
-__device__ void k3WrwRing(const K3Args& a)
+__device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = WK * WC * WAVE;
@@ -1579,7 +1709,7 @@ __device__ void k3WrwRing(const K3Args& a)
     }
     k3WaitLoads<0>();
     // Filter rows of this phase: t fr + r0 + phases i (the ring's rows of filter depth t).
-    k3StorePartials<Atom, R, S, FK, FC, WTK, WTC>(
+    k3StorePartials<T, Atom, R, S, FK, FC, WTK, WTC>(
         a, acc, g, t * a.fr + r0, a.ft * a.fr, k0, c0, wk, wc, lane, bz, phases, (t + 1) * a.fr);
 }
 
@@ -1604,6 +1734,29 @@ __device__ inline void k3StoreFmaRun(float* o, int c, int cg, const float (&v)[T
     for(int y = 0; y < TC; ++y)
         if(c + y < cg)
             o[c + y] = v[y];
+}
+
+/// k3StoreFmaRun's run under CONV_K3_DWS, in E (fp32 partials or dw): the four-element stores
+/// also need the run's start aligned to them (dw is the caller's buffer).
+template <class E, int TC>
+__device__ inline void k3StoreRun(E* o, int c, int cg, const float (&v)[TC])
+{
+    typedef E e4 __attribute__((ext_vector_type(4)));
+    static_assert(TC % 4 == 0, "K3 FMA runs are whole quads");
+    if(cg % 4 == 0 && c + TC <= cg && reinterpret_cast<unsigned long long>(o + c) % sizeof(e4) == 0)
+    {
+#pragma unroll
+        for(int y = 0; y < TC; y += 4)
+            *reinterpret_cast<e4*>(o + c + y) = e4{K1Elem<E>::store(v[y]),
+                                                   K1Elem<E>::store(v[y + 1]),
+                                                   K1Elem<E>::store(v[y + 2]),
+                                                   K1Elem<E>::store(v[y + 3])};
+        return;
+    }
+#pragma unroll
+    for(int y = 0; y < TC; ++y)
+        if(c + y < cg)
+            o[c + y] = K1Elem<E>::store(v[y]);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1832,7 +1985,7 @@ template <class T,
           int TK,
           int TC,
           int VEC>
-__device__ void k3WrwRingFma(const K3Args& a)
+__device__ K3_LOOP_INLINE void k3WrwRingFma(const K3Args& a)
 {
     typedef K3FmaTiles<T, LAYOUT, BK, BC, BQ, R, S, DW, TK, TC, VEC> Tiles;
     static_assert(k3LdsBytes(3, LAYOUT, sizeof(T), BK, BC, BQ, R, S, 1, DW, 0, 0, TK, TC, VEC, 0, 0)
@@ -1996,23 +2149,46 @@ __device__ void k3WrwRingFma(const K3Args& a)
         ++it;
     }
     k3WaitLoads<0>();
-    // Partials [split][g][tap][k][c].
-    const long long kc = static_cast<long long>(kg) * cg;
-    const int taps = a.ft * R * S;
-    float* out = a.partial + blockIdx.z * a.partialElems + static_cast<long long>(g) * taps * kc;
+    // Partials [split][g][tap][k][c], or dw (k3OutOf).
+    if constexpr(!CONV_K3_DWS)
+    {
+        const long long kc = static_cast<long long>(kg) * cg;
+        const int taps = a.ft * R * S;
+        float* out
+            = a.partial + blockIdx.z * a.partialElems + static_cast<long long>(g) * taps * kc;
 #pragma unroll
-    for(int r = 0; r < R; ++r)
+        for(int r = 0; r < R; ++r)
 #pragma unroll
-        for(int s = 0; s < S; ++s)
+            for(int s = 0; s < S; ++s)
 #pragma unroll
-            for(int x = 0; x < TK; ++x)
-            {
-                const int k = k0 + tk * TK + x;
-                float* o = out + static_cast<long long>((t * R + r) * S + s) * kc
-                           + static_cast<long long>(k) * cg;
-                if(k < kg)
-                    k3StoreFmaRun<TC>(o, c0 + tc * TC, cg, acc[r * S + s][x]);
-            }
+                for(int x = 0; x < TK; ++x)
+                {
+                    const int k = k0 + tk * TK + x;
+                    float* o = out + static_cast<long long>((t * R + r) * S + s) * kc
+                               + static_cast<long long>(k) * cg;
+                    if(k < kg)
+                        k3StoreFmaRun<TC>(o, c0 + tc * TC, cg, acc[r * S + s][x]);
+                }
+        return;
+    }
+    const K3Out out = k3OutOf<T>(a, g, a.ft * R * S, blockIdx.z);
+    k3WithOut<T>(a, out, [&](auto* base) {
+        typedef typename K3PointeeOf<decltype(base)>::type E;
+#pragma unroll
+        for(int r = 0; r < R; ++r)
+#pragma unroll
+            for(int s = 0; s < S; ++s)
+#pragma unroll
+                for(int x = 0; x < TK; ++x)
+                {
+                    const int k = k0 + tk * TK + x;
+                    if(k < kg)
+                        k3StoreRun<E, TC>(base + ((t * R + r) * S + s) * out.ts + k * out.ks,
+                                          c0 + tc * TC,
+                                          cg,
+                                          acc[r * S + s][x]);
+                }
+    });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2242,7 +2418,7 @@ template <class T,
           int TK,
           int TC,
           int VEC>
-__device__ void k3WrwRowsFma(const K3Args& a)
+__device__ K3_LOOP_INLINE void k3WrwRowsFma(const K3Args& a)
 {
     typedef K3FmaRowTiles<T, LAYOUT, BK, BC, BQ, FR, S, SW, DW, TK, TC, VEC> Tiles;
     static_assert(
@@ -2370,26 +2546,53 @@ __device__ void k3WrwRowsFma(const K3Args& a)
         buf ^= 1;
     }
     k3WaitLoads<0>();
-    const long long kc = static_cast<long long>(kg) * cg;
-    const int taps = frows * S;
-    float* out = a.partial + blockIdx.z * a.partialElems + static_cast<long long>(g) * taps * kc;
-#pragma unroll
-    for(int f = 0; f < FR; ++f)
+    if constexpr(!CONV_K3_DWS)
     {
-        if(fr0 + f >= frows)
-            continue;
+        const long long kc = static_cast<long long>(kg) * cg;
+        const int taps = frows * S;
+        float* out
+            = a.partial + blockIdx.z * a.partialElems + static_cast<long long>(g) * taps * kc;
 #pragma unroll
-        for(int s = 0; s < S; ++s)
+        for(int f = 0; f < FR; ++f)
+        {
+            if(fr0 + f >= frows)
+                continue;
 #pragma unroll
-            for(int x = 0; x < TK; ++x)
-            {
-                const int k = k0 + tk * TK + x;
-                float* o = out + static_cast<long long>((fr0 + f) * S + s) * kc
-                           + static_cast<long long>(k) * cg;
-                if(k < kg)
-                    k3StoreFmaRun<TC>(o, c0 + tc * TC, cg, acc[f * S + s][x]);
-            }
+            for(int s = 0; s < S; ++s)
+#pragma unroll
+                for(int x = 0; x < TK; ++x)
+                {
+                    const int k = k0 + tk * TK + x;
+                    float* o = out + static_cast<long long>((fr0 + f) * S + s) * kc
+                               + static_cast<long long>(k) * cg;
+                    if(k < kg)
+                        k3StoreFmaRun<TC>(o, c0 + tc * TC, cg, acc[f * S + s][x]);
+                }
+        }
+        return;
     }
+    const K3Out out = k3OutOf<T>(a, g, frows * S, blockIdx.z);
+    k3WithOut<T>(a, out, [&](auto* base) {
+        typedef typename K3PointeeOf<decltype(base)>::type E;
+#pragma unroll
+        for(int f = 0; f < FR; ++f)
+        {
+            if(fr0 + f >= frows)
+                continue;
+#pragma unroll
+            for(int s = 0; s < S; ++s)
+#pragma unroll
+                for(int x = 0; x < TK; ++x)
+                {
+                    const int k = k0 + tk * TK + x;
+                    if(k < kg)
+                        k3StoreRun<E, TC>(base + ((fr0 + f) * S + s) * out.ts + k * out.ks,
+                                          c0 + tc * TC,
+                                          cg,
+                                          acc[f * S + s][x]);
+                }
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2447,7 +2650,7 @@ template <class T,
           int WC,
           int NS,
           int XCD = 0>
-__device__ void k3WrwRingDma(const K3Args& a)
+__device__ K3_LOOP_INLINE void k3WrwRingDma(const K3Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int WAVES = WK * WC;
@@ -2771,7 +2974,7 @@ __device__ void k3WrwRingDma(const K3Args& a)
         });
     }
     k3WaitLoads<0>();
-    k3StorePartials<Atom, R, S, FK, FC, WTK, WTC>(
+    k3StorePartials<T, Atom, R, S, FK, FC, WTK, WTC>(
         a, acc, g, t * R, a.ft * R, k0, c0, wk, wc, lane, bz);
 }
 
@@ -2811,7 +3014,7 @@ template <class T,
           int WC,
           int NS,
           int XCD = 0>
-__device__ void k3WrwRingDmaTr(const K3Args& a)
+__device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int WAVES = WK * WC;
@@ -3041,7 +3244,7 @@ __device__ void k3WrwRingDmaTr(const K3Args& a)
         });
     }
     k3WaitLoads<0>();
-    k3StorePartials<Atom, R, S, FK, FC, WTK, WTC>(
+    k3StorePartials<T, Atom, R, S, FK, FC, WTK, WTC>(
         a, acc, g, t * R, a.ft * R, k0, c0, wk, wc, lane, bz);
 }
 
