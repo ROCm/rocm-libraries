@@ -65,7 +65,7 @@ namespace
 
     void PrintTo(SolutionCase const& c, std::ostream* os)
     {
-        *os << "solution index " << c.index;
+        *os << "solution index " << c.index << ", kernel " << c.kernel;
         if(auto const* skip = std::get_if<Skip>(&c.plan))
             *os << " (" << skip->reason << ")";
     }

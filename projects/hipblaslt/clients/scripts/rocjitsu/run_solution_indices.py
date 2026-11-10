@@ -152,13 +152,17 @@ def run_once(args, config_path, out, indices):
         for suite in json.loads(report.read_text())["testsuites"]:
             for test in suite["testsuite"]:
                 index = int(re.search(r"idx(\d+)", test["name"])[1])
+                param = test.get("value_param", "")
                 if test["result"] == "SKIPPED":
-                    outcomes[index] = {"outcome": "SKIPPED", "detail": test.get("value_param", "")}
+                    outcomes[index] = {"outcome": "SKIPPED", "detail": param}
                 elif test.get("failures"):
                     detail = "\n".join(f["failure"] for f in test["failures"])
                     outcomes[index] = {"outcome": "FAILED", "detail": detail}
                 else:
                     outcomes[index] = {"outcome": "PASSED", "detail": ""}
+                kernel = re.search(r"kernel (\S+?)(?: \(|$)", param)
+                if kernel:
+                    outcomes[index]["kernel"] = kernel[1]
         return outcomes, None
     # No report: keep the verdicts gtest printed and blame the case left running.
     outcomes = {
@@ -253,6 +257,10 @@ def main():
     group.add_argument("--indices", help="File with one index per line")
     parser.add_argument("--shard", help="I/N: run every N-th index starting at the I-th (0-based)")
     parser.add_argument("--workers", type=int, default=1, help="Concurrent emulator processes")
+    parser.add_argument(
+        "--known-failures",
+        help="File of kernel names, one per line, whose failures do not fail the run",
+    )
     parser.add_argument("--timeout", type=float, default=120, help="Seconds allowed per index")
     parser.add_argument(
         "--no-race",
@@ -277,15 +285,26 @@ def main():
         }
         results.update(outcomes)
         pending = [i for i in pending if i in rejected]
-    counts, reasons = {}, {}
+    known = set()
+    if args.known_failures:
+        for line in Path(args.known_failures).read_text().splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line:
+                known.add(line)
+    counts, reasons, new = {}, {}, 0
     for result in results.values():
         counts[result["outcome"]] = counts.get(result["outcome"], 0) + 1
         if result["outcome"] not in ("PASSED", "SKIPPED"):
             result["reason"] = reason(result)
             reasons[result["reason"]] = reasons.get(result["reason"], 0) + 1
+            result["known"] = result.get("kernel") in known
+            new += not result["known"]
     Path(args.out, "results.json").write_text(json.dumps(results, indent=1, sort_keys=True))
-    print(f"{len(results)} cases: {counts}" + (f"; not passed: {reasons}" if reasons else ""))
-    return 0 if all(r["outcome"] in ("PASSED", "SKIPPED") for r in results.values()) else 1
+    summary = f"{len(results)} cases: {counts}"
+    if reasons:
+        summary += f"; not passed: {reasons}; not in the known failures: {new}"
+    print(summary)
+    return 1 if new else 0
 
 
 if __name__ == "__main__":
