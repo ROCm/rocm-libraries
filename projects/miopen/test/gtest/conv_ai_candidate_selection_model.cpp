@@ -97,33 +97,6 @@ std::string FormatMissingFiles(const std::vector<miopen::fs::path>& missing_file
     return os.str();
 }
 
-std::vector<std::vector<std::string>> GenerateValidKernelParams(
-    const CandidateSelectionMetadata& meta, const std::string& kernel_name, int num_candidates = 3)
-{
-    const auto& kernel_str_mapping = meta.GetKernelStrMapping(kernel_name);
-    std::vector<std::vector<std::string>> valid_kernel_params;
-    for(int i = 0; i < num_candidates; ++i)
-    {
-        std::vector<std::string> candidate(meta.output_params().size(), "nan");
-        candidate[0] = kernel_name;
-        for(const auto& kv : kernel_str_mapping)
-        {
-            const std::string& param_name = kv.second;
-            const std::string& index      = kv.first;
-            const int index_int           = std::stoi(index);
-            if(param_name.find("kernel_name") != std::string::npos)
-                continue;
-            auto it = meta.sequence_encodings().find(param_name);
-            if(it == meta.sequence_encodings().end())
-                candidate[index_int] = "0";
-            else
-                candidate[index_int] = it->second.begin()->first;
-        }
-        valid_kernel_params.push_back(candidate);
-    }
-    return valid_kernel_params;
-}
-
 class GPU_CandidateSelection_FP32 : public ::testing::TestWithParam<CandidateSelectionParams>
 {
 protected:
@@ -319,44 +292,10 @@ bool MetadataHasKernel(const CandidateSelectionMetadata& meta, const std::string
     }
 }
 
-// Return the metadata constant for an output param matched by suffix (e.g. the value a retrain
-// pinned a feature to when it was constant in the training set), or std::nullopt when no output
-// param with that suffix is a declared constant.
-std::optional<std::string> OutputConstantForSuffix(const CandidateSelectionMetadata& meta,
-                                                   const std::string& suffix)
-{
-    for(const auto& param_name : meta.output_params())
-    {
-        if(param_name.size() >= suffix.size() &&
-           param_name.compare(param_name.size() - suffix.size(), suffix.size(), suffix) == 0)
-            return meta.GetOutputConstant(param_name);
-    }
-    return std::nullopt;
-}
-
 // The CShuffleV3 large-tensor kernel emits BlkGemmPipelineScheduler / -Version
 // ("inline_after_optionals") right after the optional NumGroupsToMerge, then the appended SplitK.
 // base_param_count is 15, so the candidate is kernel_name + 15 base params, then (optional NGM),
 // scheduler, version, then the appended SplitK. CK keeps the "BlkGemmPipelineScheduler:" label on
-// these tokens at inference, so that is what the candidate carries here.
-constexpr const char* kV3LargeTensorKernel =
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_Large_Tensor";
-
-std::vector<std::string> MakeV3LargeTensorCandidate(bool include_num_groups,
-                                                    const std::string& scheduler,
-                                                    const std::string& version,
-                                                    const std::string& ngm = "2")
-{
-    std::vector<std::string> c;
-    c.push_back(kV3LargeTensorKernel); // [0]
-    for(int i = 0; i < 15; ++i)        // [1..15] 15 base params
-        c.push_back("1");
-    if(include_num_groups)
-        c.push_back(ngm);   // NumGroupsToMerge (present only when > 1)
-    c.push_back(scheduler); // inline-after-optionals "BlkGemmPipelineScheduler:..."
-    c.push_back(version);   // inline-after-optionals "BlkGemmPipelineVersion:..."
-    return c;
-}
 
 // A complete input-feature map for EngineerCandidateSelectionInputFeatures (every FeatureAt key),
 // so a throw can only come from the precision-class check, not a missing feature.
