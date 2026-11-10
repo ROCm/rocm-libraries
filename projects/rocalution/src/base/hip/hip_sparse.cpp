@@ -34,8 +34,10 @@
 namespace rocalution
 {
     template <typename ValueType>
-    HIPSpMV<ValueType>::HIPSpMV(void)
-        : descr_(NULL)
+    HIPSpMV<ValueType>::HIPSpMV(const char* name)
+        : name_(name)
+        , alg_(rocsparse_spmv_alg_default)
+        , descr_(NULL)
         , buffer_size_(0)
         , buffer_(NULL)
     {
@@ -48,19 +50,12 @@ namespace rocalution
     }
 
     template <typename ValueType>
-    bool HIPSpMV<ValueType>::IsAnalysed(void) const
-    {
-        return this->descr_ != NULL;
-    }
-
-    template <typename ValueType>
-    void HIPSpMV<ValueType>::Analyse(rocsparse_handle            handle,
-                                     rocsparse_spmv_alg          alg,
-                                     rocsparse_const_spmat_descr mat,
-                                     ValueType                   alpha,
-                                     rocsparse_const_dnvec_descr x,
-                                     ValueType                   beta,
-                                     rocsparse_dnvec_descr       y)
+    void HIPSpMV<ValueType>::Analyse_(rocsparse_handle            handle,
+                                      rocsparse_const_spmat_descr mat,
+                                      ValueType                   alpha,
+                                      rocsparse_const_dnvec_descr x,
+                                      ValueType                   beta,
+                                      rocsparse_dnvec_descr       y)
     {
         assert(this->descr_ == NULL);
         assert(mat != NULL);
@@ -72,7 +67,7 @@ namespace rocalution
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         status = rocsparse_spmv_set_input(
-            handle, this->descr_, rocsparse_spmv_input_alg, &alg, sizeof(alg), NULL);
+            handle, this->descr_, rocsparse_spmv_input_alg, &this->alg_, sizeof(this->alg_), NULL);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         status = rocsparse_spmv_set_input(handle,
@@ -142,10 +137,13 @@ namespace rocalution
     }
 
     template <typename ValueType>
-    void HIPSpMV<ValueType>::Analyse(rocsparse_handle            handle,
-                                     rocsparse_spmv_alg          alg,
-                                     rocsparse_const_spmat_descr mat)
+    void HIPSpMV<ValueType>::Analyse(rocsparse_handle handle, rocsparse_const_spmat_descr mat)
     {
+        if(this->descr_ != NULL)
+        {
+            return;
+        }
+
         // The analysis only depends on the matrix, empty vectors are sufficient
         rocsparse_dnvec_descr x;
         rocsparse_dnvec_descr y;
@@ -158,7 +156,7 @@ namespace rocalution
             &y, 0, NULL, rocalution_datatype_traits<ValueType>::value);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
-        this->Analyse(handle, alg, mat, static_cast<ValueType>(1), x, static_cast<ValueType>(0), y);
+        this->Analyse_(handle, mat, static_cast<ValueType>(1), x, static_cast<ValueType>(0), y);
 
         status = rocsparse_destroy_dnvec_descr(x);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
@@ -173,9 +171,17 @@ namespace rocalution
                                      rocsparse_const_spmat_descr mat,
                                      rocsparse_const_dnvec_descr x,
                                      ValueType                   beta,
-                                     rocsparse_dnvec_descr       y) const
+                                     rocsparse_dnvec_descr       y)
     {
-        assert(this->descr_ != NULL);
+        if(this->descr_ == NULL)
+        {
+            LOG_VERBOSE_INFO(2,
+                             "*** warning: " << this->name_
+                                             << " performs the SpMV analysis lazily, call "
+                                                "ApplyAnalyse() beforehand to avoid this");
+
+            this->Analyse_(handle, mat, alpha, x, beta, y);
+        }
 
         rocsparse_status status = rocsparse_v2_spmv(handle,
                                                     this->descr_,

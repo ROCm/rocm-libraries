@@ -49,6 +49,8 @@ namespace rocalution
 
     template <typename ValueType>
     HIPAcceleratorMatrixHYB<ValueType>::HIPAcceleratorMatrixHYB()
+        : ell_spmv_("HIPAcceleratorMatrixHYB, ELL part")
+        , coo_spmv_("HIPAcceleratorMatrixHYB, COO part")
     {
         // no default constructors
         LOG_INFO("no default constructor");
@@ -58,6 +60,8 @@ namespace rocalution
     template <typename ValueType>
     HIPAcceleratorMatrixHYB<ValueType>::HIPAcceleratorMatrixHYB(
         const Rocalution_Backend_Descriptor& local_backend)
+        : ell_spmv_("HIPAcceleratorMatrixHYB, ELL part")
+        , coo_spmv_("HIPAcceleratorMatrixHYB, COO part")
     {
         log_debug(this,
                   "HIPAcceleratorMatrixHYB::HIPAcceleratorMatrixHYB()",
@@ -748,45 +752,14 @@ namespace rocalution
     {
         rocsparse_handle handle = ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle);
 
-        if(this->ell_nnz_ > 0 && this->ell_spmv_.IsAnalysed() == false)
+        if(this->ell_nnz_ > 0)
         {
-            this->ell_spmv_.Analyse(handle, rocsparse_spmv_alg_default, this->ell_spmat_descr_);
+            this->ell_spmv_.Analyse(handle, this->ell_spmat_descr_);
         }
 
-        if(this->coo_nnz_ > 0 && this->coo_spmv_.IsAnalysed() == false)
+        if(this->coo_nnz_ > 0)
         {
-            this->coo_spmv_.Analyse(handle, rocsparse_spmv_alg_default, this->coo_spmat_descr_);
-        }
-    }
-
-    template <typename ValueType>
-    void HIPAcceleratorMatrixHYB<ValueType>::ApplyAnalyse_(ValueType                   alpha,
-                                                           rocsparse_const_dnvec_descr x,
-                                                           ValueType                   beta,
-                                                           rocsparse_dnvec_descr       y) const
-    {
-        rocsparse_handle handle = ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle);
-
-        bool ell_lazy = this->ell_nnz_ > 0 && this->ell_spmv_.IsAnalysed() == false;
-        bool coo_lazy = this->coo_nnz_ > 0 && this->coo_spmv_.IsAnalysed() == false;
-
-        if(ell_lazy || coo_lazy)
-        {
-            LOG_VERBOSE_INFO(2,
-                             "*** warning: HIPAcceleratorMatrixHYB performs the SpMV analysis "
-                             "lazily, call ApplyAnalyse() beforehand to avoid this");
-        }
-
-        if(ell_lazy)
-        {
-            this->ell_spmv_.Analyse(
-                handle, rocsparse_spmv_alg_default, this->ell_spmat_descr_, alpha, x, beta, y);
-        }
-
-        if(coo_lazy)
-        {
-            this->coo_spmv_.Analyse(
-                handle, rocsparse_spmv_alg_default, this->coo_spmat_descr_, alpha, x, beta, y);
+            this->coo_spmv_.Analyse(handle, this->coo_spmat_descr_);
         }
     }
 
@@ -820,9 +793,6 @@ namespace rocalution
 
             ValueType alpha = static_cast<ValueType>(1);
             ValueType beta  = static_cast<ValueType>(0);
-
-            // Lazy matrix analyse
-            this->ApplyAnalyse_(alpha, cast_in->dnvec_descr_, beta, cast_out->dnvec_descr_);
 
             // ELL
             if(this->ell_nnz_ > 0)
@@ -874,9 +844,6 @@ namespace rocalution
             rocsparse_handle handle = ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle);
 
             ValueType beta = static_cast<ValueType>(1);
-
-            // Lazy matrix analyse
-            this->ApplyAnalyse_(scalar, cast_in->dnvec_descr_, beta, cast_out->dnvec_descr_);
 
             // ELL
             if(this->ell_nnz_ > 0)

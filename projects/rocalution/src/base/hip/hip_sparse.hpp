@@ -96,36 +96,37 @@ namespace rocalution
     class HIPSpMV
     {
     public:
-        HIPSpMV(void);
+        // name is the matrix in the warning of a lazy analysis
+        explicit HIPSpMV(const char* name);
         ~HIPSpMV(void);
 
         HIPSpMV(const HIPSpMV&)            = delete;
         HIPSpMV& operator=(const HIPSpMV&) = delete;
 
-        bool IsAnalysed(void) const;
+        // Analyse ahead of the first multiplication, without vectors. Nothing to do if
+        // the analysis is in place.
+        void Analyse(rocsparse_handle handle, rocsparse_const_spmat_descr mat);
 
-        void Analyse(rocsparse_handle            handle,
-                     rocsparse_spmv_alg          alg,
-                     rocsparse_const_spmat_descr mat,
-                     ValueType                   alpha,
-                     rocsparse_const_dnvec_descr x,
-                     ValueType                   beta,
-                     rocsparse_dnvec_descr       y);
-        // Analyse without vectors, e.g. ahead of the first multiplication
-        void Analyse(rocsparse_handle            handle,
-                     rocsparse_spmv_alg          alg,
-                     rocsparse_const_spmat_descr mat);
-
+        // y = alpha * mat * x + beta * y, analyses mat first if Analyse() was not called
         void Compute(rocsparse_handle            handle,
                      ValueType                   alpha,
                      rocsparse_const_spmat_descr mat,
                      rocsparse_const_dnvec_descr x,
                      ValueType                   beta,
-                     rocsparse_dnvec_descr       y) const;
+                     rocsparse_dnvec_descr       y);
 
         void Clear(void);
 
     private:
+        void Analyse_(rocsparse_handle            handle,
+                      rocsparse_const_spmat_descr mat,
+                      ValueType                   alpha,
+                      rocsparse_const_dnvec_descr x,
+                      ValueType                   beta,
+                      rocsparse_dnvec_descr       y);
+
+        const char*          name_;
+        rocsparse_spmv_alg   alg_;
         rocsparse_spmv_descr descr_;
         size_t               buffer_size_;
         char*                buffer_;

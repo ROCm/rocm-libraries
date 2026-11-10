@@ -80,10 +80,6 @@ namespace rocalution
     private:
         void CreateSpMatDescr_(void);
         void DestroySpMatDescr_(void);
-        void ApplyAnalyse_(ValueType                   alpha,
-                           rocsparse_const_dnvec_descr x,
-                           ValueType                   beta,
-                           rocsparse_dnvec_descr       y) const;
         void ApplyAnalyseClear_(void);
 
         MatrixELL<ValueType, int> mat_;

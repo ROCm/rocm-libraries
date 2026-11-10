@@ -85,10 +85,6 @@ namespace rocalution
         // write to the arrays needs a new descriptor
         void CreateSpMatDescr_(void);
         void DestroySpMatDescr_(void);
-        void ApplyAnalyse_(ValueType                   alpha,
-                           rocsparse_const_dnvec_descr x,
-                           ValueType                   beta,
-                           rocsparse_dnvec_descr       y) const;
         void ApplyAnalyseClear_(void);
 
         MatrixCOO<ValueType, int> mat_;

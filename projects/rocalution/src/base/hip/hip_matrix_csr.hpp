@@ -483,10 +483,6 @@ namespace rocalution
         void CreateSpMatDescr_(void);
         void UpdateSpMatDescrValues_(void);
         void DestroySpMatDescr_(void);
-        void ApplyAnalyse_(ValueType                   alpha,
-                           rocsparse_const_dnvec_descr x,
-                           ValueType                   beta,
-                           rocsparse_dnvec_descr       y) const;
         void ApplyAnalyseClear_(void);
 
         MatrixCSR<ValueType, int, PtrType> mat_;
