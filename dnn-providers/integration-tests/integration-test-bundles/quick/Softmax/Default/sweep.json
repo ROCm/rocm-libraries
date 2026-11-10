@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "16_512_bf16_stats",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              512
+            ],
+            "strides": [
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              512
+            ],
+            "strides": [
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              16,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "stats_use_log2": false
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL softmax",
+        "seed": 1,
+        "notes": "MoE router softmax: [T, E=512] bf16 logits, natural-log LSE stats",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceSoftmax); shapes from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "16_512_fp32_stats",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              512
+            ],
+            "strides": [
+              512,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              512
+            ],
+            "strides": [
+              512,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              16,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "stats_use_log2": false
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL softmax",
+        "seed": 1,
+        "notes": "MoE router softmax: [T, E=512] f32, natural-log LSE stats",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceSoftmax); shapes from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "16_512_bf16_fp32_stats_log2",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              512
+            ],
+            "strides": [
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              16,
+              512
+            ],
+            "strides": [
+              512,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              16,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "stats_use_log2": true
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL softmax",
+        "seed": 1,
+        "notes": "MoE router softmax: bf16 logits to f32 probabilities, LSE stats in log2 units",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceSoftmax); shapes from the Qwen3.8 layer graph"
+      }
+    }
+  ]
+}

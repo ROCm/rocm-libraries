@@ -1,0 +1,25 @@
+{
+  "claims": {
+    "hipkernel:flydsl_softmax": [
+      {
+        "cases": [
+          "4_4096_bf16",
+          "4_4096_bf16_fp32",
+          "4_4096_fp32"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

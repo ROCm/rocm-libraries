@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "4_4096_bf16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL softmax",
+        "seed": 1,
+        "notes": "Wide row: [4, 4096] bf16, no stats",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceSoftmax); shapes from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "4_4096_fp32",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL softmax",
+        "seed": 1,
+        "notes": "Wide row: [4, 4096] f32, no stats",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceSoftmax); shapes from the Qwen3.8 layer graph"
+      }
+    },
+    {
+      "id": "4_4096_bf16_fp32",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-written",
+        "generator_version": "1.0.0",
+        "operation": "Qwen3.8 FlyDSL softmax",
+        "seed": 1,
+        "notes": "Wide row: bf16 logits to f32 probabilities, no stats",
+        "reference_source": "hipDNN CPU reference (CpuFpReferenceSoftmax); shapes from the Qwen3.8 layer graph"
+      }
+    }
+  ]
+}

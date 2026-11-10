@@ -79,6 +79,8 @@ inline float toleranceForNodeAttributes(data::NodeAttributes attrType)
         return tol::resample::getTolerance<T>();
     case NA::RopeAttributes:
         return tol::rope::getTolerance<T>();
+    case NA::SoftmaxAttributes:
+        return tol::softmax::getTolerance<T>();
     default:
         return 1e-3f;
     }

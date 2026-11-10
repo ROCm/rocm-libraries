@@ -494,4 +494,37 @@ constexpr float getTolerance()
 
 } // namespace rope
 
+namespace softmax
+{
+
+// Tolerance for s (in [0, 1]) and the f32 log-sum-exp stats, both computed in f32.
+// Engine and reference differ only in the f32 summation order over the row and in exp()
+// rounding: about n * eps relative in the worst case, far below 2e-5 for a few thousand
+// columns, and the comparison's rtol term scales with the LSE's magnitude (|stats| < 20 at
+// logits in [-8, 8] and a 4096-wide row). A half or bfloat16 s is that f32 value rounded
+// once on each side, so the two may land one output ulp apart: 2^-10 relative for half,
+// 2^-7 for bfloat16, under the bounds below.
+template <typename T>
+constexpr float getTolerance()
+{
+    if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>)
+    {
+        return 2e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 2e-3f;
+    }
+    else if constexpr(std::is_same_v<T, bfloat16>)
+    {
+        return 1e-2f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace softmax
+
 } // namespace hipdnn_test_sdk::utilities

@@ -252,6 +252,23 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
     recipes.setDefault(a->stats_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
 }
 
+// ── Softmax ──────────────────────────────────────────────────────────────────
+
+void setSoftmaxInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                            InputFillRecipes& recipes)
+{
+    const auto* a = node.attributes_as_SoftmaxAttributes();
+    if(a == nullptr)
+    {
+        return;
+    }
+
+    // Logits spread over [-8, 8] instead of [-1, 1]: probabilities then span about
+    // seven decades, so a kernel that skips the max subtraction or drops small terms
+    // from the sum diverges visibly, while exp() stays far from overflow in every dtype.
+    recipes.setDefault(a->p_tensor_uid(), FillRecipe::free(-8.0f, 8.0f));
+}
+
 // ── RoPE ─────────────────────────────────────────────────────────────────────
 
 void setRopeInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -310,6 +327,9 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
         return true;
     case NA::SdpaBackwardAttributes:
         setSdpaBackwardInitDefaults(node, recipes);
+        return true;
+    case NA::SoftmaxAttributes:
+        setSoftmaxInitDefaults(node, recipes);
         return true;
     case NA::RopeAttributes:
         setRopeInitDefaults(node, recipes);

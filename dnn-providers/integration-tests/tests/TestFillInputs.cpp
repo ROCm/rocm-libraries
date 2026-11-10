@@ -1378,4 +1378,46 @@ TEST(TestFillInputs, RopeFreqsSpanThousandsOfRadians)
     EXPECT_GT(*hi, 1024.0f);
 }
 
+// Softmax logits are drawn from [-8, 8] instead of the [-1, 1] float default, so the
+// probabilities span several decades and the row max matters.
+TEST(TestFillInputs, SoftmaxLogitsSpanSeveralDecadesOfProbability)
+{
+    GraphResult gr;
+    auto& b = gr.builder;
+    const std::vector<int64_t> pDims = {16, 512};
+    const std::vector<int64_t> pStrides = {512, 1};
+    const std::vector<int64_t> statsDims = {16, 1};
+    const std::vector<int64_t> statsStrides = {1, 1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "p", DataType::FLOAT, &pStrides, &pDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 2, "s", DataType::FLOAT, &pStrides, &pDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 3, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+
+    auto softmax = CreateSoftmaxAttributes(b, 1, 2, 3);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(
+        b, "softmax", DataType::FLOAT, NodeAttributes::SoftmaxAttributes, softmax.Union()));
+    b.Finish(CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes));
+
+    gr.graph = GetGraph(b.GetBufferPointer());
+    const auto leafUids = gr.leafInputUids({2, 3});
+    auto inputs = makeTensorsFromGraph(gr, leafUids);
+    InputFillRecipes recipes;
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(recipes.fill(1), FillRecipe::free(-8.0f, 8.0f));
+
+    auto& p = *inputs.at(1);
+    const auto* values = static_cast<const float*>(p.rawHostData());
+    const auto [lo, hi] = std::minmax_element(values, values + p.elementCount());
+    EXPECT_GE(*lo, -8.0f);
+    EXPECT_LE(*hi, 8.0f);
+    EXPECT_LT(*lo, -4.0f);
+    EXPECT_GT(*hi, 4.0f);
+}
+
 // NOLINTEND(readability-identifier-naming)
