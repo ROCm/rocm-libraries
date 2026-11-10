@@ -43,6 +43,7 @@
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/DsRefillSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
@@ -111,6 +112,9 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     if (runScheduler) {
         pm.addPass(createStinkyDAGSchedulerPass());
         pm.addPass(createStinkyMergeBarrierPass());
+        // Only expert scheduling mode 2 has the va_vdst waits this pass works on.
+        const auto& options = module.getModuleOptions();
+        if (options.EnableESM2 && options.DsRefillSink > 0) pm.addPass(createDsRefillSinkPass());
     }
 }
 

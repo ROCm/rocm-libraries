@@ -61,6 +61,7 @@
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
+#include "stinkytofu/transforms/asm/DsRefillSinkPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCFGPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250XnackHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
@@ -296,4 +297,5 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createTDMLoadWaveSyncPass(), nullptr);
     EXPECT_NE(createRemoveWaitAluPass(), nullptr);
     EXPECT_NE(createInsertWaitAluPass(), nullptr);
+    EXPECT_NE(createDsRefillSinkPass(), nullptr);
 }

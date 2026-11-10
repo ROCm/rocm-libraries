@@ -43,6 +43,7 @@
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
+#include "stinkytofu/transforms/asm/DsRefillSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCFGPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250XnackHazardPass.hpp"
@@ -274,6 +275,7 @@ const std::vector<PassInfo> availablePasses = {
          if (hasPassArg(args, "noGuard")) options.avoidMsbXcntDrain = false;
          return createEpilogueStoreSinkPass(options);
      }},
+    {"DsRefillSinkPass", [](const auto&) { return createDsRefillSinkPass(); }},
     {"PeepholeOptimizationPass", [](const auto&) { return createPeepholeOptimizationPass(); }},
     {"DeadCodeEliminationPass", [](const auto&) { return createDeadCodeEliminationPass(); }},
     {"RedundantMovEliminationPass",

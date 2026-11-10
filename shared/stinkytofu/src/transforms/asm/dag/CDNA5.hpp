@@ -60,6 +60,7 @@
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
+#include "stinkytofu/transforms/asm/dag/WmmaBudget.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -2177,7 +2178,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
     }
     // Same conversion Step 4 uses. latency is in cycles; the result is a WMMA count.
     auto latencyBudget = [&](int latency) {
-        return std::max(0, latency) / wmmaIssueConfig.latency + 1;
+        return latencyBudgetWmmas(latency, wmmaIssueConfig.latency);
     };
     // WMMAs that must issue between a WMMA read and a ds_load that overwrites it.
     // onInit already resolved this into pipeOpDistance_ (table, WarGateWmmas, or
