@@ -148,7 +148,7 @@ struct FormatDef {
     // -1 = not specified (inherit from parent); end-anchored mask of window cycles no
     // pipe can issue into (bit 0 = last cycle)
     int blockedScale = -1;
-    int matrixQueueDepth = -1;  // -1 = not specified (inherit from parent)
+    int wmmaQueueDepth = -1;  // -1 = not specified (inherit from parent)
     std::vector<std::string> flags;
 
     // Default operand field descriptions for instructions using this format
@@ -190,7 +190,7 @@ struct InstructionDef {
     // -1 = not specified (inherit from format); end-anchored mask of window cycles no
     // pipe can issue into (bit 0 = last cycle)
     int blockedScale = -1;
-    int matrixQueueDepth = -1;  // -1 = not specified (inherit from format)
+    int wmmaQueueDepth = -1;  // -1 = not specified (inherit from format)
     // 0 = not specified. Per-opcode LDS-burst drain model params (see HwInstDesc).
     int dsMaxDrain = 0;
     int dsThroughput = 0;
@@ -299,7 +299,7 @@ class DefTParser {
         if (fmt.latency == 0) fmt.latency = p.latency;
         if (fmt.coIssueWindow < 0) fmt.coIssueWindow = p.coIssueWindow;
         if (fmt.blockedScale < 0) fmt.blockedScale = p.blockedScale;
-        if (fmt.matrixQueueDepth < 0) fmt.matrixQueueDepth = p.matrixQueueDepth;
+        if (fmt.wmmaQueueDepth < 0) fmt.wmmaQueueDepth = p.wmmaQueueDepth;
         // Flags: parent first, then child (child adds MFMA etc.)
         fmt.flags = p.flags;
         fmt.flags.insert(fmt.flags.end(), it->second.flags.begin(), it->second.flags.end());
@@ -323,7 +323,7 @@ class DefTParser {
                 if (inst.latency == 0) inst.latency = arch_.defaultLatency;
                 if (inst.coIssueWindow < 0) inst.coIssueWindow = 0;
                 if (inst.blockedScale < 0) inst.blockedScale = 0;
-                if (inst.matrixQueueDepth < 0) inst.matrixQueueDepth = 0;
+                if (inst.wmmaQueueDepth < 0) inst.wmmaQueueDepth = 0;
                 continue;
             }
 
@@ -365,9 +365,9 @@ class DefTParser {
             if (inst.blockedScale < 0 && fmt.blockedScale >= 0)
                 inst.blockedScale = fmt.blockedScale;
             if (inst.blockedScale < 0) inst.blockedScale = 0;
-            if (inst.matrixQueueDepth < 0 && fmt.matrixQueueDepth >= 0)
-                inst.matrixQueueDepth = fmt.matrixQueueDepth;
-            if (inst.matrixQueueDepth < 0) inst.matrixQueueDepth = 0;
+            if (inst.wmmaQueueDepth < 0 && fmt.wmmaQueueDepth >= 0)
+                inst.wmmaQueueDepth = fmt.wmmaQueueDepth;
+            if (inst.wmmaQueueDepth < 0) inst.wmmaQueueDepth = 0;
             // The mask is anchored at the window end, so every set bit must fall inside
             // the SHORTEST window this instruction can have -- .costOverride can shorten
             // it per matrix format (e.g. 8 -> 4 for FP4xFP4).
@@ -629,7 +629,7 @@ class DefTParser {
             parseFieldCost(block, ".cost", fmt.cycle, fmt.latency);
             parseFieldIntAuto(block, ".coissue", fmt.coIssueWindow);
             parseFieldIntAuto(block, ".blockedScale", fmt.blockedScale);
-            parseFieldInt(block, ".matrixQueueDepth", fmt.matrixQueueDepth);
+            parseFieldInt(block, ".wmmaQueueDepth", fmt.wmmaQueueDepth);
             parseFieldEncoding(block, ".encoding", fmt.encoding);
             parseFieldFlags(block, ".flags", fmt.flags);
             parseFieldOperandFields(block, ".fields", fmt.fields);
@@ -802,7 +802,7 @@ class DefTParser {
                 parseFieldCost(entryFields, ".cost", inst.cycle, inst.latency);
                 parseFieldIntAuto(entryFields, ".coissue", inst.coIssueWindow);
                 parseFieldIntAuto(entryFields, ".blockedScale", inst.blockedScale);
-                parseFieldInt(entryFields, ".matrixQueueDepth", inst.matrixQueueDepth);
+                parseFieldInt(entryFields, ".wmmaQueueDepth", inst.wmmaQueueDepth);
                 parseFieldInt(entryFields, ".dsMaxDrain", inst.dsMaxDrain);
                 parseFieldInt(entryFields, ".dsThroughput", inst.dsThroughput);
                 parseFieldCostOverrides(entryFields, inst.costOverrides);
@@ -944,7 +944,7 @@ class DefTParser {
             parseFieldCost(block, ".cost", inst.cycle, inst.latency);
             parseFieldIntAuto(block, ".coissue", inst.coIssueWindow);
             parseFieldIntAuto(block, ".blockedScale", inst.blockedScale);
-            parseFieldInt(block, ".matrixQueueDepth", inst.matrixQueueDepth);
+            parseFieldInt(block, ".wmmaQueueDepth", inst.wmmaQueueDepth);
             parseFieldInt(block, ".dsMaxDrain", inst.dsMaxDrain);
             parseFieldInt(block, ".dsThroughput", inst.dsThroughput);
             parseFieldCostOverrides(block, inst.costOverrides);
@@ -1857,7 +1857,7 @@ static bool emitArchIsaFile(const std::string& arch,
 
     // MCIDTable (HwInstDesc: isaOpcode, unifiedOpcode, issue, latency, coissue,
     // blockedScale, mnemonic, flags, microcode, encoding, unit, dsMaxDrain,
-    // dsThroughput, matrixQueueDepth, operandFields placeholder)
+    // dsThroughput, wmmaQueueDepth, operandFields placeholder)
     EMIT_GUARD("GET_ISAINFO_HWINSTDESC_TABLE");
     out << "// MCIDTable: operandFields set by ArchInfo getMCIDTable()\n"
         << "static HwInstDesc MCIDTable[] = {\n";
@@ -1876,7 +1876,7 @@ static bool emitArchIsaFile(const std::string& arch,
             << ", " << "\"" << inst.mnemonic << "\", " << "makeFlagSet({"
             << (flagStr.empty() ? "" : flagStr) << "}), " << microcodeToCpp(inst.finalMicrocode)
             << ", " << inst.finalEncoding << ", " << unitToCpp(inst.finalUnit) << ", "
-            << inst.dsMaxDrain << ", " << inst.dsThroughput << ", " << inst.matrixQueueDepth << ", "
+            << inst.dsMaxDrain << ", " << inst.dsThroughput << ", " << inst.wmmaQueueDepth << ", "
             << "{} },\n";
     }
     out << "};\n\n";
