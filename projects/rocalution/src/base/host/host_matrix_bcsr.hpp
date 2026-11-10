@@ -76,7 +76,7 @@ namespace rocalution
                               BaseVector<ValueType>*       out) const;
 
     private:
-        MatrixBCSR<ValueType, int, PtrType> mat_;
+        MatrixBCSR<ValueType, int, int, PtrType> mat_;
 
         friend class BaseVector<ValueType>;
         friend class HostVector<ValueType>;

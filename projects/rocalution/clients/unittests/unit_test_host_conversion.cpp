@@ -321,8 +321,8 @@ TEST(host_conversion, bcsr_requires_dimensions_divisible_by_the_block_dimension)
         try_make_matrix(Backend::Host, Format{rocalution::BCSR, 5}, *square.host_csr(), &out));
 
     // 4 rows are divisible by 4, 6 columns are not
-    Csr<double>                                  A = wide();
-    rocalution::MatrixBCSR<double, int, PtrType> dst{};
+    Csr<double>                                       A = wide();
+    rocalution::MatrixBCSR<double, int, int, PtrType> dst{};
     dst.blockdim = 4;
 
     EXPECT_FALSE(

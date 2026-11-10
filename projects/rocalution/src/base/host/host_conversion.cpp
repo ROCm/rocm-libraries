@@ -321,12 +321,12 @@ namespace rocalution
     }
 
     template <typename ValueType, typename IndexType, typename PointerType>
-    bool csr_to_bcsr(int                                                 omp_threads,
-                     int64_t                                             nnz,
-                     IndexType                                           nrow,
-                     IndexType                                           ncol,
-                     const MatrixCSR<ValueType, IndexType, PointerType>& src,
-                     MatrixBCSR<ValueType, IndexType, PointerType>*      dst)
+    bool csr_to_bcsr(int                                                       omp_threads,
+                     int64_t                                                   nnz,
+                     IndexType                                                 nrow,
+                     IndexType                                                 ncol,
+                     const MatrixCSR<ValueType, IndexType, PointerType>&       src,
+                     MatrixBCSR<ValueType, IndexType, IndexType, PointerType>* dst)
     {
         assert(nnz > 0);
         assert(nrow > 0);
@@ -531,12 +531,12 @@ namespace rocalution
     }
 
     template <typename ValueType, typename IndexType, typename PointerType>
-    bool bcsr_to_csr(int                                                  omp_threads,
-                     int64_t                                              nnz,
-                     IndexType                                            nrow,
-                     IndexType                                            ncol,
-                     const MatrixBCSR<ValueType, IndexType, PointerType>& src,
-                     MatrixCSR<ValueType, IndexType, PointerType>*        dst)
+    bool bcsr_to_csr(int                                                             omp_threads,
+                     int64_t                                                         nnz,
+                     IndexType                                                       nrow,
+                     IndexType                                                       ncol,
+                     const MatrixBCSR<ValueType, IndexType, IndexType, PointerType>& src,
+                     MatrixCSR<ValueType, IndexType, PointerType>*                   dst)
     {
         assert(nnz > 0);
         assert(nrow > 0);
@@ -1356,14 +1356,14 @@ namespace rocalution
                               int                                    nrow,
                               int                                    ncol,
                               const MatrixCSR<double, int, PtrType>& src,
-                              MatrixBCSR<double, int, PtrType>*      dst);
+                              MatrixBCSR<double, int, int, PtrType>* dst);
 
     template bool csr_to_bcsr(int                                   omp_threads,
                               int64_t                               nnz,
                               int                                   nrow,
                               int                                   ncol,
                               const MatrixCSR<float, int, PtrType>& src,
-                              MatrixBCSR<float, int, PtrType>*      dst);
+                              MatrixBCSR<float, int, int, PtrType>* dst);
 
 #ifdef SUPPORT_COMPLEX
     template bool csr_to_bcsr(int                                                  omp_threads,
@@ -1371,14 +1371,14 @@ namespace rocalution
                               int                                                  nrow,
                               int                                                  ncol,
                               const MatrixCSR<std::complex<double>, int, PtrType>& src,
-                              MatrixBCSR<std::complex<double>, int, PtrType>*      dst);
+                              MatrixBCSR<std::complex<double>, int, int, PtrType>* dst);
 
     template bool csr_to_bcsr(int                                                 omp_threads,
                               int64_t                                             nnz,
                               int                                                 nrow,
                               int                                                 ncol,
                               const MatrixCSR<std::complex<float>, int, PtrType>& src,
-                              MatrixBCSR<std::complex<float>, int, PtrType>*      dst);
+                              MatrixBCSR<std::complex<float>, int, int, PtrType>* dst);
 #endif
 
     template bool csr_to_bcsr(int                                 omp_threads,
@@ -1386,44 +1386,44 @@ namespace rocalution
                               int                                 nrow,
                               int                                 ncol,
                               const MatrixCSR<int, int, PtrType>& src,
-                              MatrixBCSR<int, int, PtrType>*      dst);
+                              MatrixBCSR<int, int, int, PtrType>* dst);
 
-    template bool bcsr_to_csr(int                                     omp_threads,
-                              int64_t                                 nnz,
-                              int                                     nrow,
-                              int                                     ncol,
-                              const MatrixBCSR<double, int, PtrType>& src,
-                              MatrixCSR<double, int, PtrType>*        dst);
+    template bool bcsr_to_csr(int                                          omp_threads,
+                              int64_t                                      nnz,
+                              int                                          nrow,
+                              int                                          ncol,
+                              const MatrixBCSR<double, int, int, PtrType>& src,
+                              MatrixCSR<double, int, PtrType>*             dst);
 
-    template bool bcsr_to_csr(int                                    omp_threads,
-                              int64_t                                nnz,
-                              int                                    nrow,
-                              int                                    ncol,
-                              const MatrixBCSR<float, int, PtrType>& src,
-                              MatrixCSR<float, int, PtrType>*        dst);
+    template bool bcsr_to_csr(int                                         omp_threads,
+                              int64_t                                     nnz,
+                              int                                         nrow,
+                              int                                         ncol,
+                              const MatrixBCSR<float, int, int, PtrType>& src,
+                              MatrixCSR<float, int, PtrType>*             dst);
 
 #ifdef SUPPORT_COMPLEX
-    template bool bcsr_to_csr(int                                                   omp_threads,
-                              int64_t                                               nnz,
-                              int                                                   nrow,
-                              int                                                   ncol,
-                              const MatrixBCSR<std::complex<double>, int, PtrType>& src,
-                              MatrixCSR<std::complex<double>, int, PtrType>*        dst);
+    template bool bcsr_to_csr(int     omp_threads,
+                              int64_t nnz,
+                              int     nrow,
+                              int     ncol,
+                              const MatrixBCSR<std::complex<double>, int, int, PtrType>& src,
+                              MatrixCSR<std::complex<double>, int, PtrType>*             dst);
 
-    template bool bcsr_to_csr(int                                                  omp_threads,
-                              int64_t                                              nnz,
-                              int                                                  nrow,
-                              int                                                  ncol,
-                              const MatrixBCSR<std::complex<float>, int, PtrType>& src,
-                              MatrixCSR<std::complex<float>, int, PtrType>*        dst);
+    template bool bcsr_to_csr(int                                                       omp_threads,
+                              int64_t                                                   nnz,
+                              int                                                       nrow,
+                              int                                                       ncol,
+                              const MatrixBCSR<std::complex<float>, int, int, PtrType>& src,
+                              MatrixCSR<std::complex<float>, int, PtrType>*             dst);
 #endif
 
-    template bool bcsr_to_csr(int                                  omp_threads,
-                              int64_t                              nnz,
-                              int                                  nrow,
-                              int                                  ncol,
-                              const MatrixBCSR<int, int, PtrType>& src,
-                              MatrixCSR<int, int, PtrType>*        dst);
+    template bool bcsr_to_csr(int                                       omp_threads,
+                              int64_t                                   nnz,
+                              int                                       nrow,
+                              int                                       ncol,
+                              const MatrixBCSR<int, int, int, PtrType>& src,
+                              MatrixCSR<int, int, PtrType>*             dst);
 
     template bool csr_to_dia(int                                    omp_threads,
                              int64_t                                nnz,

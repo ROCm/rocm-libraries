@@ -112,7 +112,7 @@ namespace rocalution
         void DestroySpMatDescr_(void);
         void ApplyAnalyseClear_(void);
 
-        MatrixBCSR<ValueType, int, PtrType> mat_;
+        MatrixBCSR<ValueType, int, int, PtrType> mat_;
 
         rocsparse_mat_descr L_mat_descr_;
         rocsparse_mat_descr U_mat_descr_;
