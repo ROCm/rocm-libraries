@@ -196,7 +196,7 @@ TEST_F(CheckMatrixCsr, empty_dimensions)
     }
 
     // nnz != 0 does not match the single row-pointer entry.
-    device_vector<double>         val{std::vector<double>{1.0}};
+    device_vector<double>        val{std::vector<double>{1.0}};
     device_vector<rocsparse_int> col{std::vector<rocsparse_int>{0}};
     ASSERT_TRUE(val.ptr && col.ptr);
     size_t buffer_size = 0;
