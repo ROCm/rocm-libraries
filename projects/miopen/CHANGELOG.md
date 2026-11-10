@@ -9,6 +9,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
   kernels to the `ConvHipConv` solver (hipconv v0.3.1).
 
+### Changed
+* [Conv][Numerics] Migrated the remaining legacy HIP BF16 kernel types to `__hip_bfloat16` with header-independent HIPRTC compilation and support for older HIP BF16 disk headers.
+
+### Resolved Issues
+* [Numerics] Fixed statistics-mode argument handling, global launch dimensions, and minimum/maximum reductions for positive-only, negative-only, zero, infinity, and BF16 subnormal inputs.
+
 ### Removed
 * [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.
 * [Conv] Removed the gfx803 code paths and kernel sources from `ConvBinWinograd3x3U` and `ConvBinWinogradRxS`.

@@ -39,7 +39,6 @@
 
 #include <half/half.hpp>
 using half         = half_float::half;
-using hip_bfloat16 = bfloat16;
 #include "../../src/kernels/hip_float8.hpp"
 using float8_fnuz  = miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8>;
 using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;

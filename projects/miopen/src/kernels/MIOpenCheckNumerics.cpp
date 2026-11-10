@@ -26,7 +26,6 @@
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
-#include <hip/hip_bfloat16.h>
 #include <hip/hip_bf16.h>
 #endif
 
@@ -64,6 +63,15 @@ __device__ void thread_redux(Numerics* stats, size_t wid)
     }
 }
 
+template <typename T>
+__device__ float to_float(T value)
+{
+    return static_cast<float>(value);
+}
+
+// HIP 6.1 exposes the raw BF16 struct without C++ conversion operators.
+__device__ float to_float(__hip_bfloat16 value) { return __bfloat162float(value); }
+
 template <typename T, typename U>
 __device__ void
 check_numerics(const T* C_d, size_t sz, CheckNumericsResult* abnormal, bool computeStats)
@@ -71,25 +79,25 @@ check_numerics(const T* C_d, size_t sz, CheckNumericsResult* abnormal, bool comp
     __shared__ Numerics stats[256];
     U sum    = 0;
     U absSum = 0;
-    T minV   = std::numeric_limits<T>::max();
-    T maxV   = std::numeric_limits<T>::min();
+    U minV   = std::numeric_limits<U>::infinity();
+    U maxV   = -std::numeric_limits<U>::infinity();
 
     size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
     size_t stride = blockDim.x * gridDim.x;
 
     for(size_t i = offset; i < sz; i += stride)
     {
-        T val = C_d[i];
-        sum += static_cast<U>(val);
-        const auto abs_val = fabs(static_cast<U>(val));
+        const U val = static_cast<U>(to_float(C_d[i]));
+        sum += val;
+        const auto abs_val = fabs(val);
         absSum += abs_val;
-        minV = min(minV, val);
-        maxV = max(maxV, val);
+        minV = fmin(minV, val);
+        maxV = fmax(maxV, val);
         if(abs_val <= static_cast<U>(0.0f))
             abnormal->hasZero = 1;
-        if(isnan(static_cast<U>(val)))
+        if(isnan(val))
             abnormal->hasNan = 1;
-        if(isinf(static_cast<U>(val)))
+        if(isinf(val))
             abnormal->hasInf = 1;
     }
     if(computeStats)
@@ -136,13 +144,8 @@ extern "C" __global__ void check_numerics_bf16(const void* __restrict__ C_d,
                                                CheckNumericsResult* __restrict__ abnormal,
                                                bool computeStats)
 {
-#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BF16_H_)
-    check_numerics<hip_bfloat16, float>(
-        reinterpret_cast<const hip_bfloat16*>(C_d), sz, abnormal, computeStats);
-#else
     check_numerics<__hip_bfloat16, float>(
         reinterpret_cast<const __hip_bfloat16*>(C_d), sz, abnormal, computeStats);
-#endif
 }
 
 extern "C" __global__ void check_numerics_fp8(const void* __restrict__ C_d,

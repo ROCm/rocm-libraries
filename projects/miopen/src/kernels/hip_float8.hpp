@@ -234,12 +234,6 @@ struct hip_f8
         this->data = v.data;
     }
 
-    // constructor from hip_bfloat16
-    explicit MIOPEN_HIP_HOST_DEVICE
-    hip_f8(hip_bfloat16 v,
-           hip_f8_rounding_mode r = miopen_f8::hip_f8_rounding_mode::standard,
-           uint32_t rng           = 0);
-
     MIOPEN_HIP_HOST_DEVICE
     hip_f8& operator*=(const hip_f8& rhs)
     {
@@ -372,9 +366,6 @@ struct hip_f8
             }
         }
     }
-
-    // convert to hip_bfloat16
-    /*explicit*/ inline MIOPEN_HIP_HOST_DEVICE operator hip_bfloat16() const;
 
     // check for zero
     inline MIOPEN_HIP_HOST_DEVICE bool is_zero() const
@@ -646,9 +637,6 @@ struct hip_f8x4
 
     using halfx2 = _Float16 __attribute__((ext_vector_type(2)));
     using halfx4 = _Float16 __attribute__((ext_vector_type(4)));
-
-    using hip_bfloat16x2 = uint16_t __attribute__((ext_vector_type(2)));
-    using hip_bfloat16x4 = uint16_t __attribute__((ext_vector_type(4)));
 
     uint32_t data;
 

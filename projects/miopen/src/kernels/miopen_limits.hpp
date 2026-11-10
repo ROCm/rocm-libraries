@@ -43,6 +43,7 @@ public:
     static constexpr __device__ float max() noexcept { return 0x1.FFFFFEp+127f; }
 
     static constexpr __device__ float min() noexcept { return 0x1p-126f; }
+    static constexpr __device__ float infinity() noexcept { return __builtin_huge_valf(); }
 
 #if HIP_PACKAGE_VERSION_FLAT >= 6001024024ULL
     static constexpr __device__ float lowest() noexcept { return -0x1.fffffep+127; }
@@ -60,43 +61,6 @@ public:
 
     static constexpr __device__ _Float16 min() noexcept { return static_cast<_Float16>(0x1p-14f); }
 };
-
-template <>
-class numeric_limits<hip_bfloat16>
-{
-public:
-    static __device__ hip_bfloat16 max() noexcept
-    {
-        // data = 0x7F7F
-        return static_cast<hip_bfloat16>(0x1.FEp+127f);
-    }
-
-    static __device__ hip_bfloat16 min() noexcept
-    {
-        // data = 0x0080
-        return static_cast<hip_bfloat16>(0x1p-126f);
-    }
-};
-
-// Recent HIPRTC preambles provide this type without a disk-header include.
-#if defined(HIP_INCLUDE_HIP_HIP_BF16_H) || defined(_HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BF16_H_)
-template <>
-class numeric_limits<__hip_bfloat16>
-{
-public:
-    static __device__ __hip_bfloat16 max() noexcept
-    {
-        // data = 0x7F7F
-        return static_cast<__hip_bfloat16>(0x1.FEp+127f);
-    }
-
-    static __device__ __hip_bfloat16 min() noexcept
-    {
-        // data = 0x0080
-        return static_cast<__hip_bfloat16>(0x1p-126f);
-    }
-};
-#endif
 
 #if HIP_PACKAGE_VERSION_FLAT >= 6001024024ULL
 

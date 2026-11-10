@@ -50,11 +50,27 @@ compile time constant:
 
 #if MIOPEN_USE_FP16
 using IO_DTYPE = __half;
-#elif defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BF16_H_)
-using IO_DTYPE = hip_bfloat16;
 #else
 using IO_DTYPE = __hip_bfloat16;
 #endif
+
+__device__ inline float to_float(IO_DTYPE value)
+{
+#if MIOPEN_USE_FP16
+    return static_cast<float>(value);
+#else
+    return __bfloat162float(value);
+#endif
+}
+
+__device__ inline IO_DTYPE from_float(float value)
+{
+#if MIOPEN_USE_FP16
+    return static_cast<IO_DTYPE>(value);
+#else
+    return __float2bfloat16(value);
+#endif
+}
 
 using u32 = unsigned int;
 using u16 = unsigned short;
@@ -183,7 +199,7 @@ extern "C" __global__ void __launch_bounds__(256, 1)
     constexpr int32x4_t vzero = {0};
     for(int i = threadIdx.x; i < KD * padded_H * padded_W; i += blockDim.x)
     {
-        s_input[i] = 0.0f;
+        s_input[i] = from_float(0.0f);
     }
     __syncthreads();
 
@@ -218,13 +234,13 @@ extern "C" __global__ void __launch_bounds__(256, 1)
 #pragma unroll
             for(int w = 0; w < KW; w++)
             {
-                weight_reg[d][h][w] = kernel[ki++];
+                weight_reg[d][h][w] = to_float(kernel[ki++]);
             }
         }
     }
     float bias_value = 0.0f;
     if(bias != nullptr)
-        bias_value = bias[out_channel];
+        bias_value = to_float(bias[out_channel]);
 
     s_waitcnt_vmcnt<0>();
     __syncthreads();
@@ -284,28 +300,28 @@ extern "C" __global__ void __launch_bounds__(256, 1)
 
                             v_fmac_f32(sum,
                                        weight_reg[d][h][w + 0],
-                                       (float)(input_reg[d][h][w / KW_PACK][0]));
+                                       to_float(input_reg[d][h][w / KW_PACK][0]));
                             if(w + 1 < KW)
 
                                 v_fmac_f32(sum,
                                            weight_reg[d][h][w + 1],
-                                           (float)(input_reg[d][h][w / KW_PACK][1]));
+                                           to_float(input_reg[d][h][w / KW_PACK][1]));
                         }
                         else
                         {
                             v_fmac_f32(sum,
                                        weight_reg[d][h][w + 0],
-                                       (float)(input_reg[d][h][w / KW_PACK][1]));
+                                       to_float(input_reg[d][h][w / KW_PACK][1]));
                             if(w + 1 < KW)
 
                                 v_fmac_f32(sum,
                                            weight_reg[d][h][w + 1],
-                                           (float)(input_reg[d][h][w / KW_PACK + 1][0]));
+                                           to_float(input_reg[d][h][w / KW_PACK + 1][0]));
                         }
                     }
                 }
             }
-            output[oh * oW + ow + p] = (IO_DTYPE)(sum);
+            output[oh * oW + ow + p] = from_float(sum);
         }
     }
 }
