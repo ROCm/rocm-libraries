@@ -32,7 +32,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 1000
     },
@@ -59,7 +60,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 999
     },
@@ -86,7 +88,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 998
     },
@@ -113,7 +116,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 997
     },
@@ -140,7 +144,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 996
     },
@@ -167,7 +172,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 995
     },
@@ -194,7 +200,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 994
     },
@@ -221,7 +228,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 993
     },
@@ -248,7 +256,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 992
     },
@@ -275,7 +284,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 991
     },
@@ -302,7 +312,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 990
     },
@@ -329,7 +340,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 989
     },
@@ -356,7 +368,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 988
     },
@@ -383,7 +396,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 987
     },
@@ -410,7 +424,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 986
     },
@@ -437,7 +452,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 985
     },
@@ -464,7 +480,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 984
     },
@@ -491,7 +508,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 983
     },
@@ -518,7 +536,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 982
     },
@@ -545,7 +564,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 981
     },
@@ -572,7 +592,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 980
     },
@@ -599,9 +620,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 979
+    },
+    {
+      "version": "1.0",
+      "id": "6c5f532b-10b2-5958-bca4-0a1c551010af",
+      "name": "conv_group.bwd.f16.mfma16_f16.3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 978
+    },
+    {
+      "version": "1.0",
+      "id": "d45c2154-a685-5ff9-acf2-f28f3ddabe9c",
+      "name": "conv_group.bwd.f16.mfma16_f16.3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 977
+    },
+    {
+      "version": "1.0",
+      "id": "4f41345d-f46a-5be6-8301-f9c68a9067ec",
+      "name": "conv_group.bwd.f16.mfma16_f16.3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 976
+    },
+    {
+      "version": "1.0",
+      "id": "ade6ca77-8e6d-50f2-8f75-e8ba5a60bbe1",
+      "name": "conv_group.bwd.f16.mfma16_f16.3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 975
+    },
+    {
+      "version": "1.0",
+      "id": "7931ec21-766f-5b15-a4cb-25c8509a5d6a",
+      "name": "conv_group.bwd.f16.mfma16_f16.3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 974
     },
     {
       "version": "1.0",
@@ -626,9 +788,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 978
+      "priority": 973
     },
     {
       "version": "1.0",
@@ -653,9 +816,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 977
+      "priority": 972
     },
     {
       "version": "1.0",
@@ -680,9 +844,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 976
+      "priority": 971
     },
     {
       "version": "1.0",
@@ -707,9 +872,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 975
+      "priority": 970
     },
     {
       "version": "1.0",
@@ -734,9 +900,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 974
+      "priority": 969
     },
     {
       "version": "1.0",
@@ -761,9 +928,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 973
+      "priority": 968
     },
     {
       "version": "1.0",
@@ -788,9 +956,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 972
+      "priority": 967
     },
     {
       "version": "1.0",
@@ -815,9 +984,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 971
+      "priority": 966
     },
     {
       "version": "1.0",
@@ -842,9 +1012,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 970
+      "priority": 965
     },
     {
       "version": "1.0",
@@ -869,9 +1040,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 969
+      "priority": 964
     },
     {
       "version": "1.0",
@@ -896,9 +1068,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 968
+      "priority": 963
     },
     {
       "version": "1.0",
@@ -923,9 +1096,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 967
+      "priority": 962
     },
     {
       "version": "1.0",
@@ -950,9 +1124,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 966
+      "priority": 961
     },
     {
       "version": "1.0",
@@ -977,9 +1152,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 965
+      "priority": 960
     },
     {
       "version": "1.0",
@@ -1004,9 +1180,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 964
+      "priority": 959
     },
     {
       "version": "1.0",
@@ -1031,9 +1208,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 963
+      "priority": 958
     },
     {
       "version": "1.0",
@@ -1058,9 +1236,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 962
+      "priority": 957
     },
     {
       "version": "1.0",
@@ -1085,9 +1264,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 961
+      "priority": 956
     },
     {
       "version": "1.0",
@@ -1112,9 +1292,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 960
+      "priority": 955
     },
     {
       "version": "1.0",
@@ -1139,9 +1320,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 959
+      "priority": 954
     },
     {
       "version": "1.0",
@@ -1166,9 +1348,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 958
+      "priority": 953
     },
     {
       "version": "1.0",
@@ -1193,9 +1376,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 957
+      "priority": 952
+    },
+    {
+      "version": "1.0",
+      "id": "6a31c31a-d991-595c-861c-15f59a06f39f",
+      "name": "conv_group.bwd.f16.mfma16_f16.3x3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 951
+    },
+    {
+      "version": "1.0",
+      "id": "b5d57201-a35c-5847-a5f3-ed314642d217",
+      "name": "conv_group.bwd.f16.mfma16_f16.3x3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 950
+    },
+    {
+      "version": "1.0",
+      "id": "4c7c246e-134b-50bd-b38e-5563f2cafc55",
+      "name": "conv_group.bwd.f16.mfma16_f16.3x3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 949
+    },
+    {
+      "version": "1.0",
+      "id": "92211baa-2bc8-5144-a481-8c21f270685a",
+      "name": "conv_group.bwd.f16.mfma16_f16.3x3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 948
+    },
+    {
+      "version": "1.0",
+      "id": "1e980697-931c-58b2-a411-4452a87310f0",
+      "name": "conv_group.bwd.f16.mfma16_f16.3x3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "mfma16_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 947
     },
     {
       "version": "1.0",
@@ -1220,9 +1544,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 956
+      "priority": 946
     },
     {
       "version": "1.0",
@@ -1247,9 +1572,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 955
+      "priority": 945
     },
     {
       "version": "1.0",
@@ -1274,9 +1600,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 954
+      "priority": 944
     },
     {
       "version": "1.0",
@@ -1301,9 +1628,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 953
+      "priority": 943
     },
     {
       "version": "1.0",
@@ -1328,9 +1656,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 952
+      "priority": 942
     },
     {
       "version": "1.0",
@@ -1355,9 +1684,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 951
+      "priority": 941
     },
     {
       "version": "1.0",
@@ -1382,9 +1712,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 950
+      "priority": 940
     },
     {
       "version": "1.0",
@@ -1409,9 +1740,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 949
+      "priority": 939
     },
     {
       "version": "1.0",
@@ -1436,9 +1768,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 948
+      "priority": 938
     },
     {
       "version": "1.0",
@@ -1463,9 +1796,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 947
+      "priority": 937
     },
     {
       "version": "1.0",
@@ -1490,9 +1824,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 946
+      "priority": 936
     },
     {
       "version": "1.0",
@@ -1517,9 +1852,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 945
+      "priority": 935
     },
     {
       "version": "1.0",
@@ -1544,9 +1880,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 944
+      "priority": 934
     },
     {
       "version": "1.0",
@@ -1571,9 +1908,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 943
+      "priority": 933
     },
     {
       "version": "1.0",
@@ -1598,9 +1936,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 942
+      "priority": 932
     },
     {
       "version": "1.0",
@@ -1625,9 +1964,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 941
+      "priority": 931
     },
     {
       "version": "1.0",
@@ -1652,9 +1992,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 940
+      "priority": 930
     },
     {
       "version": "1.0",
@@ -1679,9 +2020,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 939
+      "priority": 929
     },
     {
       "version": "1.0",
@@ -1706,9 +2048,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 938
+      "priority": 928
     },
     {
       "version": "1.0",
@@ -1733,9 +2076,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 937
+      "priority": 927
     },
     {
       "version": "1.0",
@@ -1760,9 +2104,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 936
+      "priority": 926
     },
     {
       "version": "1.0",
@@ -1787,9 +2132,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 935
+      "priority": 925
+    },
+    {
+      "version": "1.0",
+      "id": "b79d7ad5-f8fd-5452-bab1-e93172908247",
+      "name": "conv_group.bwd.f16.wmma11_f16.3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 924
+    },
+    {
+      "version": "1.0",
+      "id": "484da189-7347-5066-9d85-6513f191e14a",
+      "name": "conv_group.bwd.f16.wmma11_f16.3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 923
+    },
+    {
+      "version": "1.0",
+      "id": "7864cab1-6fbd-576d-b69f-5dc4f12d68d2",
+      "name": "conv_group.bwd.f16.wmma11_f16.3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 922
+    },
+    {
+      "version": "1.0",
+      "id": "1e8a52f1-68b3-5320-893c-9a9ed94a467b",
+      "name": "conv_group.bwd.f16.wmma11_f16.3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 921
+    },
+    {
+      "version": "1.0",
+      "id": "e2f8d22f-e71a-5b0a-aaf7-35ba34c3bcd0",
+      "name": "conv_group.bwd.f16.wmma11_f16.3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 920
     },
     {
       "version": "1.0",
@@ -1814,9 +2300,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 934
+      "priority": 919
     },
     {
       "version": "1.0",
@@ -1841,9 +2328,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 933
+      "priority": 918
     },
     {
       "version": "1.0",
@@ -1868,9 +2356,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 932
+      "priority": 917
     },
     {
       "version": "1.0",
@@ -1895,9 +2384,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 931
+      "priority": 916
     },
     {
       "version": "1.0",
@@ -1922,9 +2412,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 930
+      "priority": 915
     },
     {
       "version": "1.0",
@@ -1949,9 +2440,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 929
+      "priority": 914
     },
     {
       "version": "1.0",
@@ -1976,9 +2468,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 928
+      "priority": 913
     },
     {
       "version": "1.0",
@@ -2003,9 +2496,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 927
+      "priority": 912
     },
     {
       "version": "1.0",
@@ -2030,9 +2524,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 926
+      "priority": 911
     },
     {
       "version": "1.0",
@@ -2057,9 +2552,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 925
+      "priority": 910
     },
     {
       "version": "1.0",
@@ -2084,9 +2580,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 924
+      "priority": 909
     },
     {
       "version": "1.0",
@@ -2111,9 +2608,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 923
+      "priority": 908
     },
     {
       "version": "1.0",
@@ -2138,9 +2636,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 922
+      "priority": 907
     },
     {
       "version": "1.0",
@@ -2165,9 +2664,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 921
+      "priority": 906
     },
     {
       "version": "1.0",
@@ -2192,9 +2692,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 920
+      "priority": 905
     },
     {
       "version": "1.0",
@@ -2219,9 +2720,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 919
+      "priority": 904
     },
     {
       "version": "1.0",
@@ -2246,9 +2748,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 918
+      "priority": 903
     },
     {
       "version": "1.0",
@@ -2273,9 +2776,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 917
+      "priority": 902
     },
     {
       "version": "1.0",
@@ -2300,9 +2804,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 916
+      "priority": 901
     },
     {
       "version": "1.0",
@@ -2327,9 +2832,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 915
+      "priority": 900
     },
     {
       "version": "1.0",
@@ -2354,9 +2860,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 914
+      "priority": 899
     },
     {
       "version": "1.0",
@@ -2381,9 +2888,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 913
+      "priority": 898
+    },
+    {
+      "version": "1.0",
+      "id": "fe6d1c82-c902-503a-a6c8-65caf9d26ebc",
+      "name": "conv_group.bwd.f16.wmma11_f16.3x3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 897
+    },
+    {
+      "version": "1.0",
+      "id": "c31c3dcb-922c-54ed-8be9-ebf5ae065d20",
+      "name": "conv_group.bwd.f16.wmma11_f16.3x3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 896
+    },
+    {
+      "version": "1.0",
+      "id": "1064db0c-7cc2-5392-87d7-96f48cfb752f",
+      "name": "conv_group.bwd.f16.wmma11_f16.3x3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 895
+    },
+    {
+      "version": "1.0",
+      "id": "ae9000d4-f889-54f2-8a76-f1b40d8edc5e",
+      "name": "conv_group.bwd.f16.wmma11_f16.3x3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 894
+    },
+    {
+      "version": "1.0",
+      "id": "d28a13bf-0316-5bc6-9f58-fbea0cfc5f5d",
+      "name": "conv_group.bwd.f16.wmma11_f16.3x3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 893
     },
     {
       "version": "1.0",
@@ -2408,9 +3056,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 912
+      "priority": 892
     },
     {
       "version": "1.0",
@@ -2435,9 +3084,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 911
+      "priority": 891
     },
     {
       "version": "1.0",
@@ -2462,9 +3112,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 910
+      "priority": 890
     },
     {
       "version": "1.0",
@@ -2489,9 +3140,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 909
+      "priority": 889
     },
     {
       "version": "1.0",
@@ -2516,9 +3168,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 908
+      "priority": 888
     },
     {
       "version": "1.0",
@@ -2543,9 +3196,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 907
+      "priority": 887
     },
     {
       "version": "1.0",
@@ -2570,9 +3224,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 906
+      "priority": 886
     },
     {
       "version": "1.0",
@@ -2597,9 +3252,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 905
+      "priority": 885
     },
     {
       "version": "1.0",
@@ -2624,9 +3280,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 904
+      "priority": 884
     },
     {
       "version": "1.0",
@@ -2651,9 +3308,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 903
+      "priority": 883
     },
     {
       "version": "1.0",
@@ -2678,9 +3336,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 902
+      "priority": 882
     },
     {
       "version": "1.0",
@@ -2705,9 +3364,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 901
+      "priority": 881
     },
     {
       "version": "1.0",
@@ -2732,9 +3392,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 900
+      "priority": 880
     },
     {
       "version": "1.0",
@@ -2759,9 +3420,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 899
+      "priority": 879
     },
     {
       "version": "1.0",
@@ -2786,9 +3448,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 898
+      "priority": 878
     },
     {
       "version": "1.0",
@@ -2813,9 +3476,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 897
+      "priority": 877
     },
     {
       "version": "1.0",
@@ -2840,9 +3504,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 896
+      "priority": 876
     },
     {
       "version": "1.0",
@@ -2867,9 +3532,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 895
+      "priority": 875
     },
     {
       "version": "1.0",
@@ -2894,9 +3560,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 894
+      "priority": 874
     },
     {
       "version": "1.0",
@@ -2921,9 +3588,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 893
+      "priority": 873
     },
     {
       "version": "1.0",
@@ -2948,9 +3616,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 892
+      "priority": 872
     },
     {
       "version": "1.0",
@@ -2975,9 +3644,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 891
+      "priority": 871
+    },
+    {
+      "version": "1.0",
+      "id": "a51a27e9-8a72-5694-a9de-139ec933a5e2",
+      "name": "conv_group.bwd.f16.wmma12_f16.3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 870
+    },
+    {
+      "version": "1.0",
+      "id": "f9c874df-c8d2-5cbe-a8c1-03ead39de839",
+      "name": "conv_group.bwd.f16.wmma12_f16.3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 869
+    },
+    {
+      "version": "1.0",
+      "id": "1a4a9777-be03-59c4-b0ed-2ebc1e5d4b82",
+      "name": "conv_group.bwd.f16.wmma12_f16.3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 868
+    },
+    {
+      "version": "1.0",
+      "id": "34b6b25f-ed76-51bd-a03b-be0cd50c4801",
+      "name": "conv_group.bwd.f16.wmma12_f16.3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 867
+    },
+    {
+      "version": "1.0",
+      "id": "71e21ad8-1d54-504c-88a8-eb3dcbacfa5c",
+      "name": "conv_group.bwd.f16.wmma12_f16.3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 866
     },
     {
       "version": "1.0",
@@ -3002,9 +3812,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 890
+      "priority": 865
     },
     {
       "version": "1.0",
@@ -3029,9 +3840,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 889
+      "priority": 864
     },
     {
       "version": "1.0",
@@ -3056,9 +3868,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 888
+      "priority": 863
     },
     {
       "version": "1.0",
@@ -3083,9 +3896,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 887
+      "priority": 862
     },
     {
       "version": "1.0",
@@ -3110,9 +3924,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 886
+      "priority": 861
     },
     {
       "version": "1.0",
@@ -3137,9 +3952,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 885
+      "priority": 860
     },
     {
       "version": "1.0",
@@ -3164,9 +3980,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 884
+      "priority": 859
     },
     {
       "version": "1.0",
@@ -3191,9 +4008,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 883
+      "priority": 858
     },
     {
       "version": "1.0",
@@ -3218,9 +4036,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 882
+      "priority": 857
     },
     {
       "version": "1.0",
@@ -3245,9 +4064,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 881
+      "priority": 856
     },
     {
       "version": "1.0",
@@ -3272,9 +4092,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 880
+      "priority": 855
     },
     {
       "version": "1.0",
@@ -3299,9 +4120,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 879
+      "priority": 854
     },
     {
       "version": "1.0",
@@ -3326,9 +4148,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 878
+      "priority": 853
     },
     {
       "version": "1.0",
@@ -3353,9 +4176,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 877
+      "priority": 852
     },
     {
       "version": "1.0",
@@ -3380,9 +4204,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 876
+      "priority": 851
     },
     {
       "version": "1.0",
@@ -3407,9 +4232,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 875
+      "priority": 850
     },
     {
       "version": "1.0",
@@ -3434,9 +4260,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 874
+      "priority": 849
     },
     {
       "version": "1.0",
@@ -3461,9 +4288,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 873
+      "priority": 848
     },
     {
       "version": "1.0",
@@ -3488,9 +4316,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 872
+      "priority": 847
     },
     {
       "version": "1.0",
@@ -3515,9 +4344,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 871
+      "priority": 846
     },
     {
       "version": "1.0",
@@ -3542,9 +4372,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 870
+      "priority": 845
     },
     {
       "version": "1.0",
@@ -3569,9 +4400,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 869
+      "priority": 844
+    },
+    {
+      "version": "1.0",
+      "id": "7b4fa71a-324f-598a-b37c-2dd174a28959",
+      "name": "conv_group.bwd.f16.wmma12_f16.3x3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 843
+    },
+    {
+      "version": "1.0",
+      "id": "29dbb3bd-2c97-5f4b-9d78-f91e2c807e5e",
+      "name": "conv_group.bwd.f16.wmma12_f16.3x3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 842
+    },
+    {
+      "version": "1.0",
+      "id": "1a1e6462-762e-5691-86bf-7133871ed155",
+      "name": "conv_group.bwd.f16.wmma12_f16.3x3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 841
+    },
+    {
+      "version": "1.0",
+      "id": "8cb8db50-707e-5768-afd4-6e6e12c0cc97",
+      "name": "conv_group.bwd.f16.wmma12_f16.3x3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 840
+    },
+    {
+      "version": "1.0",
+      "id": "bedc7c76-35ad-5c70-a0ba-8323d26ae415",
+      "name": "conv_group.bwd.f16.wmma12_f16.3x3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 839
     },
     {
       "version": "1.0",
@@ -3596,7 +4568,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 1000
     },
@@ -3623,7 +4596,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 999
     },
@@ -3650,7 +4624,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 998
     },
@@ -3677,7 +4652,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 997
     },
@@ -3704,7 +4680,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 996
     },
@@ -3731,7 +4708,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 995
     },
@@ -3758,7 +4736,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 994
     },
@@ -3785,7 +4764,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 993
     },
@@ -3812,7 +4792,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 992
     },
@@ -3839,7 +4820,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 991
     },
@@ -3866,7 +4848,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 990
     },
@@ -3893,7 +4876,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 989
     },
@@ -3920,7 +4904,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 988
     },
@@ -3947,7 +4932,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 987
     },
@@ -3974,7 +4960,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 986
     },
@@ -4001,7 +4988,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 985
     },
@@ -4028,7 +5016,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 984
     },
@@ -4055,7 +5044,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 983
     },
@@ -4082,7 +5072,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 982
     },
@@ -4109,7 +5100,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 981
     },
@@ -4136,7 +5128,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 980
     },
@@ -4163,9 +5156,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 979
+    },
+    {
+      "version": "1.0",
+      "id": "6eb60efa-2815-5793-b5d1-7b5aab36cbff",
+      "name": "conv_group.bwd.bf16.mfma16_bf16.3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 978
+    },
+    {
+      "version": "1.0",
+      "id": "3d324d23-f3c0-55a2-af82-d4a3e5196215",
+      "name": "conv_group.bwd.bf16.mfma16_bf16.3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 977
+    },
+    {
+      "version": "1.0",
+      "id": "55d8c96f-eb98-5b94-9387-530445775e9b",
+      "name": "conv_group.bwd.bf16.mfma16_bf16.3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 976
+    },
+    {
+      "version": "1.0",
+      "id": "4940bdce-2d0a-514c-9640-6042bdca8c5e",
+      "name": "conv_group.bwd.bf16.mfma16_bf16.3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 975
+    },
+    {
+      "version": "1.0",
+      "id": "cceab41d-25e7-50c6-9f29-4a946c357ca4",
+      "name": "conv_group.bwd.bf16.mfma16_bf16.3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 974
     },
     {
       "version": "1.0",
@@ -4190,9 +5324,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 978
+      "priority": 973
     },
     {
       "version": "1.0",
@@ -4217,9 +5352,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 977
+      "priority": 972
     },
     {
       "version": "1.0",
@@ -4244,9 +5380,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 976
+      "priority": 971
     },
     {
       "version": "1.0",
@@ -4271,9 +5408,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 975
+      "priority": 970
     },
     {
       "version": "1.0",
@@ -4298,9 +5436,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 974
+      "priority": 969
     },
     {
       "version": "1.0",
@@ -4325,9 +5464,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 973
+      "priority": 968
     },
     {
       "version": "1.0",
@@ -4352,9 +5492,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 972
+      "priority": 967
     },
     {
       "version": "1.0",
@@ -4379,9 +5520,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 971
+      "priority": 966
     },
     {
       "version": "1.0",
@@ -4406,9 +5548,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 970
+      "priority": 965
     },
     {
       "version": "1.0",
@@ -4433,9 +5576,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 969
+      "priority": 964
     },
     {
       "version": "1.0",
@@ -4460,9 +5604,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 968
+      "priority": 963
     },
     {
       "version": "1.0",
@@ -4487,9 +5632,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 967
+      "priority": 962
     },
     {
       "version": "1.0",
@@ -4514,9 +5660,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 966
+      "priority": 961
     },
     {
       "version": "1.0",
@@ -4541,9 +5688,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 965
+      "priority": 960
     },
     {
       "version": "1.0",
@@ -4568,9 +5716,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 964
+      "priority": 959
     },
     {
       "version": "1.0",
@@ -4595,9 +5744,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 963
+      "priority": 958
     },
     {
       "version": "1.0",
@@ -4622,9 +5772,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 962
+      "priority": 957
     },
     {
       "version": "1.0",
@@ -4649,9 +5800,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 961
+      "priority": 956
     },
     {
       "version": "1.0",
@@ -4676,9 +5828,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 960
+      "priority": 955
     },
     {
       "version": "1.0",
@@ -4703,9 +5856,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 959
+      "priority": 954
     },
     {
       "version": "1.0",
@@ -4730,9 +5884,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 958
+      "priority": 953
     },
     {
       "version": "1.0",
@@ -4757,9 +5912,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 957
+      "priority": 952
+    },
+    {
+      "version": "1.0",
+      "id": "e11814f5-c4ce-5642-8ff7-ff4169179f75",
+      "name": "conv_group.bwd.bf16.mfma16_bf16.3x3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 951
+    },
+    {
+      "version": "1.0",
+      "id": "22c3cfd9-7ce4-5e3e-80df-4292b218709e",
+      "name": "conv_group.bwd.bf16.mfma16_bf16.3x3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 950
+    },
+    {
+      "version": "1.0",
+      "id": "e655189d-1a67-501c-9e1b-fd10e1b35d02",
+      "name": "conv_group.bwd.bf16.mfma16_bf16.3x3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 949
+    },
+    {
+      "version": "1.0",
+      "id": "a6e86c79-7869-58a1-9040-295c5561e697",
+      "name": "conv_group.bwd.bf16.mfma16_bf16.3x3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 948
+    },
+    {
+      "version": "1.0",
+      "id": "aebd1e3b-0c20-50b7-b71e-1f6e3fdbf109",
+      "name": "conv_group.bwd.bf16.mfma16_bf16.3x3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 947
     },
     {
       "version": "1.0",
@@ -4784,9 +6080,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 956
+      "priority": 946
     },
     {
       "version": "1.0",
@@ -4811,9 +6108,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 955
+      "priority": 945
     },
     {
       "version": "1.0",
@@ -4838,9 +6136,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 954
+      "priority": 944
     },
     {
       "version": "1.0",
@@ -4865,9 +6164,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 953
+      "priority": 943
     },
     {
       "version": "1.0",
@@ -4892,9 +6192,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 952
+      "priority": 942
     },
     {
       "version": "1.0",
@@ -4919,9 +6220,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 951
+      "priority": 941
     },
     {
       "version": "1.0",
@@ -4946,9 +6248,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 950
+      "priority": 940
     },
     {
       "version": "1.0",
@@ -4973,9 +6276,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 949
+      "priority": 939
     },
     {
       "version": "1.0",
@@ -5000,9 +6304,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 948
+      "priority": 938
     },
     {
       "version": "1.0",
@@ -5027,9 +6332,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 947
+      "priority": 937
     },
     {
       "version": "1.0",
@@ -5054,9 +6360,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 946
+      "priority": 936
     },
     {
       "version": "1.0",
@@ -5081,9 +6388,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 945
+      "priority": 935
     },
     {
       "version": "1.0",
@@ -5108,9 +6416,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 944
+      "priority": 934
     },
     {
       "version": "1.0",
@@ -5135,9 +6444,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 943
+      "priority": 933
     },
     {
       "version": "1.0",
@@ -5162,9 +6472,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 942
+      "priority": 932
     },
     {
       "version": "1.0",
@@ -5189,9 +6500,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 941
+      "priority": 931
     },
     {
       "version": "1.0",
@@ -5216,9 +6528,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 940
+      "priority": 930
     },
     {
       "version": "1.0",
@@ -5243,9 +6556,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 939
+      "priority": 929
     },
     {
       "version": "1.0",
@@ -5270,9 +6584,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 938
+      "priority": 928
     },
     {
       "version": "1.0",
@@ -5297,9 +6612,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 937
+      "priority": 927
     },
     {
       "version": "1.0",
@@ -5324,9 +6640,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 936
+      "priority": 926
     },
     {
       "version": "1.0",
@@ -5351,9 +6668,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 935
+      "priority": 925
+    },
+    {
+      "version": "1.0",
+      "id": "cd2cf4e4-5c30-5fb4-bf43-f160d6765e72",
+      "name": "conv_group.bwd.bf16.mfma16_bf16_908.3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16_908",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 924
+    },
+    {
+      "version": "1.0",
+      "id": "c1155c3b-aa24-55f0-9645-59f8ce6d9701",
+      "name": "conv_group.bwd.bf16.mfma16_bf16_908.3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16_908",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 923
+    },
+    {
+      "version": "1.0",
+      "id": "35c9b3e5-aa94-5ebc-b83c-2eb77c860f6c",
+      "name": "conv_group.bwd.bf16.mfma16_bf16_908.3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16_908",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 922
+    },
+    {
+      "version": "1.0",
+      "id": "2d610fcb-143b-5138-930d-c75c527f8081",
+      "name": "conv_group.bwd.bf16.mfma16_bf16_908.3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16_908",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 921
+    },
+    {
+      "version": "1.0",
+      "id": "6e869923-fc64-595c-9a11-b4744a9ac721",
+      "name": "conv_group.bwd.bf16.mfma16_bf16_908.3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16_908",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 920
     },
     {
       "version": "1.0",
@@ -5378,9 +6836,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 934
+      "priority": 919
     },
     {
       "version": "1.0",
@@ -5405,9 +6864,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 933
+      "priority": 918
     },
     {
       "version": "1.0",
@@ -5432,9 +6892,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 932
+      "priority": 917
     },
     {
       "version": "1.0",
@@ -5459,9 +6920,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 931
+      "priority": 916
     },
     {
       "version": "1.0",
@@ -5486,9 +6948,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 930
+      "priority": 915
     },
     {
       "version": "1.0",
@@ -5513,9 +6976,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 929
+      "priority": 914
     },
     {
       "version": "1.0",
@@ -5540,9 +7004,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 928
+      "priority": 913
     },
     {
       "version": "1.0",
@@ -5567,9 +7032,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 927
+      "priority": 912
     },
     {
       "version": "1.0",
@@ -5594,9 +7060,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 926
+      "priority": 911
     },
     {
       "version": "1.0",
@@ -5621,9 +7088,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 925
+      "priority": 910
     },
     {
       "version": "1.0",
@@ -5648,9 +7116,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 924
+      "priority": 909
     },
     {
       "version": "1.0",
@@ -5675,9 +7144,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 923
+      "priority": 908
     },
     {
       "version": "1.0",
@@ -5702,9 +7172,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 922
+      "priority": 907
     },
     {
       "version": "1.0",
@@ -5729,9 +7200,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 921
+      "priority": 906
     },
     {
       "version": "1.0",
@@ -5756,9 +7228,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 920
+      "priority": 905
     },
     {
       "version": "1.0",
@@ -5783,9 +7256,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 919
+      "priority": 904
     },
     {
       "version": "1.0",
@@ -5810,9 +7284,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 918
+      "priority": 903
     },
     {
       "version": "1.0",
@@ -5837,9 +7312,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 917
+      "priority": 902
     },
     {
       "version": "1.0",
@@ -5864,9 +7340,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 916
+      "priority": 901
     },
     {
       "version": "1.0",
@@ -5891,9 +7368,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 915
+      "priority": 900
     },
     {
       "version": "1.0",
@@ -5918,9 +7396,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 914
+      "priority": 899
     },
     {
       "version": "1.0",
@@ -5945,9 +7424,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 913
+      "priority": 898
+    },
+    {
+      "version": "1.0",
+      "id": "646c4078-376a-55f3-9088-0f37998dcf4f",
+      "name": "conv_group.bwd.bf16.mfma16_bf16_908.3x3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16_908",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 897
+    },
+    {
+      "version": "1.0",
+      "id": "86c071c0-f221-505d-9c4a-3f04c561f886",
+      "name": "conv_group.bwd.bf16.mfma16_bf16_908.3x3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16_908",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 896
+    },
+    {
+      "version": "1.0",
+      "id": "4d09d5f1-cd94-53ed-a9f9-94145c213f86",
+      "name": "conv_group.bwd.bf16.mfma16_bf16_908.3x3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16_908",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 895
+    },
+    {
+      "version": "1.0",
+      "id": "4412f0fa-b53d-57e4-9164-d485ec76fd49",
+      "name": "conv_group.bwd.bf16.mfma16_bf16_908.3x3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16_908",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 894
+    },
+    {
+      "version": "1.0",
+      "id": "c0d0c1cd-da2e-50f5-8469-2a8ced3787c8",
+      "name": "conv_group.bwd.bf16.mfma16_bf16_908.3x3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "mfma16_bf16_908",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 893
     },
     {
       "version": "1.0",
@@ -5972,9 +7592,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 912
+      "priority": 892
     },
     {
       "version": "1.0",
@@ -5999,9 +7620,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 911
+      "priority": 891
     },
     {
       "version": "1.0",
@@ -6026,9 +7648,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 910
+      "priority": 890
     },
     {
       "version": "1.0",
@@ -6053,9 +7676,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 909
+      "priority": 889
     },
     {
       "version": "1.0",
@@ -6080,9 +7704,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 908
+      "priority": 888
     },
     {
       "version": "1.0",
@@ -6107,9 +7732,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 907
+      "priority": 887
     },
     {
       "version": "1.0",
@@ -6134,9 +7760,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 906
+      "priority": 886
     },
     {
       "version": "1.0",
@@ -6161,9 +7788,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 905
+      "priority": 885
     },
     {
       "version": "1.0",
@@ -6188,9 +7816,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 904
+      "priority": 884
     },
     {
       "version": "1.0",
@@ -6215,9 +7844,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 903
+      "priority": 883
     },
     {
       "version": "1.0",
@@ -6242,9 +7872,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 902
+      "priority": 882
     },
     {
       "version": "1.0",
@@ -6269,9 +7900,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 901
+      "priority": 881
     },
     {
       "version": "1.0",
@@ -6296,9 +7928,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 900
+      "priority": 880
     },
     {
       "version": "1.0",
@@ -6323,9 +7956,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 899
+      "priority": 879
     },
     {
       "version": "1.0",
@@ -6350,9 +7984,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 898
+      "priority": 878
     },
     {
       "version": "1.0",
@@ -6377,9 +8012,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 897
+      "priority": 877
     },
     {
       "version": "1.0",
@@ -6404,9 +8040,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 896
+      "priority": 876
     },
     {
       "version": "1.0",
@@ -6431,9 +8068,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 895
+      "priority": 875
     },
     {
       "version": "1.0",
@@ -6458,9 +8096,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 894
+      "priority": 874
     },
     {
       "version": "1.0",
@@ -6485,9 +8124,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 893
+      "priority": 873
     },
     {
       "version": "1.0",
@@ -6512,9 +8152,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 892
+      "priority": 872
     },
     {
       "version": "1.0",
@@ -6539,9 +8180,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 891
+      "priority": 871
+    },
+    {
+      "version": "1.0",
+      "id": "92b219fd-dc3d-5882-bb91-91202ff3d24d",
+      "name": "conv_group.bwd.bf16.wmma11_bf16.3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 870
+    },
+    {
+      "version": "1.0",
+      "id": "65ce2958-6662-5e94-83c9-b90d6ba2527d",
+      "name": "conv_group.bwd.bf16.wmma11_bf16.3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 869
+    },
+    {
+      "version": "1.0",
+      "id": "272d13ed-a478-5a31-8972-bb551849aaa6",
+      "name": "conv_group.bwd.bf16.wmma11_bf16.3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 868
+    },
+    {
+      "version": "1.0",
+      "id": "70edb896-756c-5c55-955a-73f99a0a26a2",
+      "name": "conv_group.bwd.bf16.wmma11_bf16.3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 867
+    },
+    {
+      "version": "1.0",
+      "id": "abf3f6f0-7e22-542f-82d8-1a068d7b0d6b",
+      "name": "conv_group.bwd.bf16.wmma11_bf16.3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 866
     },
     {
       "version": "1.0",
@@ -6566,9 +8348,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 890
+      "priority": 865
     },
     {
       "version": "1.0",
@@ -6593,9 +8376,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 889
+      "priority": 864
     },
     {
       "version": "1.0",
@@ -6620,9 +8404,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 888
+      "priority": 863
     },
     {
       "version": "1.0",
@@ -6647,9 +8432,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 887
+      "priority": 862
     },
     {
       "version": "1.0",
@@ -6674,9 +8460,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 886
+      "priority": 861
     },
     {
       "version": "1.0",
@@ -6701,9 +8488,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 885
+      "priority": 860
     },
     {
       "version": "1.0",
@@ -6728,9 +8516,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 884
+      "priority": 859
     },
     {
       "version": "1.0",
@@ -6755,9 +8544,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 883
+      "priority": 858
     },
     {
       "version": "1.0",
@@ -6782,9 +8572,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 882
+      "priority": 857
     },
     {
       "version": "1.0",
@@ -6809,9 +8600,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 881
+      "priority": 856
     },
     {
       "version": "1.0",
@@ -6836,9 +8628,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 880
+      "priority": 855
     },
     {
       "version": "1.0",
@@ -6863,9 +8656,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 879
+      "priority": 854
     },
     {
       "version": "1.0",
@@ -6890,9 +8684,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 878
+      "priority": 853
     },
     {
       "version": "1.0",
@@ -6917,9 +8712,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 877
+      "priority": 852
     },
     {
       "version": "1.0",
@@ -6944,9 +8740,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 876
+      "priority": 851
     },
     {
       "version": "1.0",
@@ -6971,9 +8768,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 875
+      "priority": 850
     },
     {
       "version": "1.0",
@@ -6998,9 +8796,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 874
+      "priority": 849
     },
     {
       "version": "1.0",
@@ -7025,9 +8824,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 873
+      "priority": 848
     },
     {
       "version": "1.0",
@@ -7052,9 +8852,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 872
+      "priority": 847
     },
     {
       "version": "1.0",
@@ -7079,9 +8880,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 871
+      "priority": 846
     },
     {
       "version": "1.0",
@@ -7106,9 +8908,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 870
+      "priority": 845
     },
     {
       "version": "1.0",
@@ -7133,9 +8936,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 869
+      "priority": 844
+    },
+    {
+      "version": "1.0",
+      "id": "81f60a3b-1050-549e-a3f2-d6b388eb537e",
+      "name": "conv_group.bwd.bf16.wmma11_bf16.3x3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 843
+    },
+    {
+      "version": "1.0",
+      "id": "e3e07a4b-6248-5753-b8bd-ed6ebd630547",
+      "name": "conv_group.bwd.bf16.wmma11_bf16.3x3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 842
+    },
+    {
+      "version": "1.0",
+      "id": "b84cb8cc-a3a1-5dad-a8a6-5a88bc414bb9",
+      "name": "conv_group.bwd.bf16.wmma11_bf16.3x3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 841
+    },
+    {
+      "version": "1.0",
+      "id": "c79a2cdf-1691-5f7d-a38a-791319e195f1",
+      "name": "conv_group.bwd.bf16.wmma11_bf16.3x3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 840
+    },
+    {
+      "version": "1.0",
+      "id": "631925ff-6da4-5657-b139-ed8d043c2a45",
+      "name": "conv_group.bwd.bf16.wmma11_bf16.3x3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 839
     },
     {
       "version": "1.0",
@@ -7160,9 +9104,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 868
+      "priority": 838
     },
     {
       "version": "1.0",
@@ -7187,9 +9132,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 867
+      "priority": 837
     },
     {
       "version": "1.0",
@@ -7214,9 +9160,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 866
+      "priority": 836
     },
     {
       "version": "1.0",
@@ -7241,9 +9188,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 865
+      "priority": 835
     },
     {
       "version": "1.0",
@@ -7268,9 +9216,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 864
+      "priority": 834
     },
     {
       "version": "1.0",
@@ -7295,9 +9244,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 863
+      "priority": 833
     },
     {
       "version": "1.0",
@@ -7322,9 +9272,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 862
+      "priority": 832
     },
     {
       "version": "1.0",
@@ -7349,9 +9300,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 861
+      "priority": 831
     },
     {
       "version": "1.0",
@@ -7376,9 +9328,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 860
+      "priority": 830
     },
     {
       "version": "1.0",
@@ -7403,9 +9356,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 859
+      "priority": 829
     },
     {
       "version": "1.0",
@@ -7430,9 +9384,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 858
+      "priority": 828
     },
     {
       "version": "1.0",
@@ -7457,9 +9412,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 857
+      "priority": 827
     },
     {
       "version": "1.0",
@@ -7484,9 +9440,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 856
+      "priority": 826
     },
     {
       "version": "1.0",
@@ -7511,9 +9468,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 855
+      "priority": 825
     },
     {
       "version": "1.0",
@@ -7538,9 +9496,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 854
+      "priority": 824
     },
     {
       "version": "1.0",
@@ -7565,9 +9524,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 853
+      "priority": 823
     },
     {
       "version": "1.0",
@@ -7592,9 +9552,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 852
+      "priority": 822
     },
     {
       "version": "1.0",
@@ -7619,9 +9580,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 851
+      "priority": 821
     },
     {
       "version": "1.0",
@@ -7646,9 +9608,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 850
+      "priority": 820
     },
     {
       "version": "1.0",
@@ -7673,9 +9636,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 849
+      "priority": 819
     },
     {
       "version": "1.0",
@@ -7700,9 +9664,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 848
+      "priority": 818
     },
     {
       "version": "1.0",
@@ -7727,9 +9692,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 847
+      "priority": 817
+    },
+    {
+      "version": "1.0",
+      "id": "5c3449c0-7ed9-5e44-a182-f617a8d05005",
+      "name": "conv_group.bwd.bf16.wmma12_bf16.3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 816
+    },
+    {
+      "version": "1.0",
+      "id": "49db2783-393b-5d1e-b744-fb1db184a9b4",
+      "name": "conv_group.bwd.bf16.wmma12_bf16.3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 815
+    },
+    {
+      "version": "1.0",
+      "id": "abd04c05-1e88-576a-9765-5bc2e570e3a3",
+      "name": "conv_group.bwd.bf16.wmma12_bf16.3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 814
+    },
+    {
+      "version": "1.0",
+      "id": "9644e3da-a595-58e2-861e-df7ab0a6d125",
+      "name": "conv_group.bwd.bf16.wmma12_bf16.3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 813
+    },
+    {
+      "version": "1.0",
+      "id": "05c8ff7d-0bb2-5d7c-b29b-8777a99a87a9",
+      "name": "conv_group.bwd.bf16.wmma12_bf16.3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 812
     },
     {
       "version": "1.0",
@@ -7754,9 +9860,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 846
+      "priority": 811
     },
     {
       "version": "1.0",
@@ -7781,9 +9888,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 845
+      "priority": 810
     },
     {
       "version": "1.0",
@@ -7808,9 +9916,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 844
+      "priority": 809
     },
     {
       "version": "1.0",
@@ -7835,9 +9944,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 843
+      "priority": 808
     },
     {
       "version": "1.0",
@@ -7862,9 +9972,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 842
+      "priority": 807
     },
     {
       "version": "1.0",
@@ -7889,9 +10000,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 841
+      "priority": 806
     },
     {
       "version": "1.0",
@@ -7916,9 +10028,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 840
+      "priority": 805
     },
     {
       "version": "1.0",
@@ -7943,9 +10056,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 839
+      "priority": 804
     },
     {
       "version": "1.0",
@@ -7970,9 +10084,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 838
+      "priority": 803
     },
     {
       "version": "1.0",
@@ -7997,9 +10112,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 837
+      "priority": 802
     },
     {
       "version": "1.0",
@@ -8024,9 +10140,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 836
+      "priority": 801
     },
     {
       "version": "1.0",
@@ -8051,9 +10168,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 835
+      "priority": 800
     },
     {
       "version": "1.0",
@@ -8078,9 +10196,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 834
+      "priority": 799
     },
     {
       "version": "1.0",
@@ -8105,9 +10224,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 833
+      "priority": 798
     },
     {
       "version": "1.0",
@@ -8132,9 +10252,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 832
+      "priority": 797
     },
     {
       "version": "1.0",
@@ -8159,9 +10280,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 831
+      "priority": 796
     },
     {
       "version": "1.0",
@@ -8186,9 +10308,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 830
+      "priority": 795
     },
     {
       "version": "1.0",
@@ -8213,9 +10336,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 829
+      "priority": 794
     },
     {
       "version": "1.0",
@@ -8240,9 +10364,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 828
+      "priority": 793
     },
     {
       "version": "1.0",
@@ -8267,9 +10392,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 827
+      "priority": 792
     },
     {
       "version": "1.0",
@@ -8294,9 +10420,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 826
+      "priority": 791
     },
     {
       "version": "1.0",
@@ -8321,9 +10448,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 825
+      "priority": 790
+    },
+    {
+      "version": "1.0",
+      "id": "e8494e22-d71c-5f5e-8d8f-86dd3214158d",
+      "name": "conv_group.bwd.bf16.wmma12_bf16.3x3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 789
+    },
+    {
+      "version": "1.0",
+      "id": "990a0d09-985e-5ccc-830d-46835a2e13f2",
+      "name": "conv_group.bwd.bf16.wmma12_bf16.3x3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 788
+    },
+    {
+      "version": "1.0",
+      "id": "47e44386-2eff-53ac-8443-68c3e299b4b8",
+      "name": "conv_group.bwd.bf16.wmma12_bf16.3x3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 787
+    },
+    {
+      "version": "1.0",
+      "id": "8a51dcee-57fb-5438-9906-3568b3d18b20",
+      "name": "conv_group.bwd.bf16.wmma12_bf16.3x3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 786
+    },
+    {
+      "version": "1.0",
+      "id": "60bb2071-7802-5e95-8739-e9ea4abdcf4c",
+      "name": "conv_group.bwd.bf16.wmma12_bf16.3x3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 785
     },
     {
       "version": "1.0",
@@ -8348,7 +10616,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 1000
     },
@@ -8375,7 +10644,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 999
     },
@@ -8402,7 +10672,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 998
     },
@@ -8429,7 +10700,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 997
     },
@@ -8456,7 +10728,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 996
     },
@@ -8483,7 +10756,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 995
     },
@@ -8510,7 +10784,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 994
     },
@@ -8537,7 +10812,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 993
     },
@@ -8564,7 +10840,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 992
     },
@@ -8591,7 +10868,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 991
     },
@@ -8618,7 +10896,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 990
     },
@@ -8645,7 +10924,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 989
     },
@@ -8672,7 +10952,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 988
     },
@@ -8699,7 +10980,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 987
     },
@@ -8726,7 +11008,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 986
     },
@@ -8753,7 +11036,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 985
     },
@@ -8780,7 +11064,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 984
     },
@@ -8807,7 +11092,8 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 983
     },
@@ -8834,7 +11120,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 982
     },
@@ -8861,7 +11148,8 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 981
     },
@@ -8888,9 +11176,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
       "priority": 980
+    },
+    {
+      "version": "1.0",
+      "id": "6a100edf-cc29-597e-926b-a27257e946b9",
+      "name": "conv_group.bwd.f32.mfma16_f32.3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 979
+    },
+    {
+      "version": "1.0",
+      "id": "075fd5da-d4bc-524f-a44d-20265114bdf9",
+      "name": "conv_group.bwd.f32.mfma16_f32.3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 978
+    },
+    {
+      "version": "1.0",
+      "id": "92bab4f4-cf0c-5873-b0cb-31e84be3aa7b",
+      "name": "conv_group.bwd.f32.mfma16_f32.3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 977
+    },
+    {
+      "version": "1.0",
+      "id": "c126fb55-78d5-5cf8-8a1a-af6f242d3b3c",
+      "name": "conv_group.bwd.f32.mfma16_f32.3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 976
+    },
+    {
+      "version": "1.0",
+      "id": "25d24e7a-6ade-5b43-b216-85ba585d23cc",
+      "name": "conv_group.bwd.f32.mfma16_f32.3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "t": 1,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 975
     },
     {
       "version": "1.0",
@@ -8915,9 +11344,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 979
+      "priority": 974
     },
     {
       "version": "1.0",
@@ -8942,9 +11372,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 978
+      "priority": 973
     },
     {
       "version": "1.0",
@@ -8969,9 +11400,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 977
+      "priority": 972
     },
     {
       "version": "1.0",
@@ -8996,9 +11428,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 976
+      "priority": 971
     },
     {
       "version": "1.0",
@@ -9023,9 +11456,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 975
+      "priority": 970
     },
     {
       "version": "1.0",
@@ -9050,9 +11484,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 974
+      "priority": 969
     },
     {
       "version": "1.0",
@@ -9077,9 +11512,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 973
+      "priority": 968
     },
     {
       "version": "1.0",
@@ -9104,9 +11540,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 972
+      "priority": 967
     },
     {
       "version": "1.0",
@@ -9131,9 +11568,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 971
+      "priority": 966
     },
     {
       "version": "1.0",
@@ -9158,9 +11596,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 970
+      "priority": 965
     },
     {
       "version": "1.0",
@@ -9185,9 +11624,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 969
+      "priority": 964
     },
     {
       "version": "1.0",
@@ -9212,9 +11652,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 968
+      "priority": 963
     },
     {
       "version": "1.0",
@@ -9239,9 +11680,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 967
+      "priority": 962
     },
     {
       "version": "1.0",
@@ -9266,9 +11708,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 966
+      "priority": 961
     },
     {
       "version": "1.0",
@@ -9293,9 +11736,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 965
+      "priority": 960
     },
     {
       "version": "1.0",
@@ -9320,9 +11764,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 964
+      "priority": 959
     },
     {
       "version": "1.0",
@@ -9347,9 +11792,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 963
+      "priority": 958
     },
     {
       "version": "1.0",
@@ -9374,9 +11820,10 @@
         "cf": 0,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 962
+      "priority": 957
     },
     {
       "version": "1.0",
@@ -9401,9 +11848,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 961
+      "priority": 956
     },
     {
       "version": "1.0",
@@ -9428,9 +11876,10 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 960
+      "priority": 955
     },
     {
       "version": "1.0",
@@ -9455,9 +11904,150 @@
         "cf": 1,
         "cg": 0,
         "oc": 0,
-        "px": 0
+        "px": 0,
+        "pf": 0
       },
-      "priority": 959
+      "priority": 954
+    },
+    {
+      "version": "1.0",
+      "id": "ef3ff4a5-a92a-58ae-8185-a73ed4aae03b",
+      "name": "conv_group.bwd.f32.mfma16_f32.3x3x3.s2.t2x1x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 953
+    },
+    {
+      "version": "1.0",
+      "id": "0b1b08f8-ffa6-5f9b-b562-31f79b6dba59",
+      "name": "conv_group.bwd.f32.mfma16_f32.3x3x3.s2.t4x1x1.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 952
+    },
+    {
+      "version": "1.0",
+      "id": "481f3a36-026c-53a9-beae-7f01b78e05ed",
+      "name": "conv_group.bwd.f32.mfma16_f32.3x3x3.s2.t2x2x2.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 2,
+        "cb": 2,
+        "cf": 0,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 951
+    },
+    {
+      "version": "1.0",
+      "id": "2140c30e-aa42-5fc0-ac69-5f25351b18c3",
+      "name": "conv_group.bwd.f32.mfma16_f32.3x3x3.s2.t2x1x2.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 2,
+        "wp": 1,
+        "cb": 2,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 950
+    },
+    {
+      "version": "1.0",
+      "id": "7781cbaf-b474-5bf0-af4f-5b6c1d686763",
+      "name": "conv_group.bwd.f32.mfma16_f32.3x3x3.s2.t4x1x1.cf.pf",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvGroup.cpp",
+        "entry_point": "ConvGroup"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16_f32",
+        "t": 3,
+        "r": 3,
+        "s": 3,
+        "stride": 2,
+        "th": 4,
+        "wp": 1,
+        "cb": 1,
+        "cf": 1,
+        "cg": 0,
+        "oc": 0,
+        "px": 0,
+        "pf": 1
+      },
+      "priority": 949
     },
     {
       "version": "1.0",
@@ -9482,7 +12072,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 500
     },
@@ -9509,7 +12100,8 @@
         "cf": 1,
         "cg": 2,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 499
     },
@@ -9536,7 +12128,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 498
     },
@@ -9563,7 +12156,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 497
     },
@@ -9590,7 +12184,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 496
     },
@@ -9617,7 +12212,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 495
     },
@@ -9644,7 +12240,8 @@
         "cf": 1,
         "cg": 4,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 494
     },
@@ -9671,7 +12268,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 493
     },
@@ -9698,7 +12296,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 492
     },
@@ -9725,7 +12324,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 491
     },
@@ -9752,7 +12352,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 490
     },
@@ -9779,7 +12380,8 @@
         "cf": 1,
         "cg": 8,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 489
     },
@@ -9806,7 +12408,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 488
     },
@@ -9833,7 +12436,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 487
     },
@@ -9860,7 +12464,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 486
     },
@@ -9887,7 +12492,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 485
     },
@@ -9914,7 +12520,8 @@
         "cf": 1,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 484
     },
@@ -9941,7 +12548,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 483
     },
@@ -9968,7 +12576,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 482
     },
@@ -9995,7 +12604,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 481
     },
@@ -10022,7 +12632,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 480
     },
@@ -10049,7 +12660,8 @@
         "cf": 1,
         "cg": 16,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 479
     },
@@ -10076,7 +12688,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 478
     },
@@ -10103,7 +12716,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 477
     },
@@ -10130,7 +12744,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 476
     },
@@ -10157,7 +12772,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 475
     },
@@ -10184,7 +12800,8 @@
         "cf": 1,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 474
     },
@@ -10211,7 +12828,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 473
     },
@@ -10238,7 +12856,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 472
     },
@@ -10265,7 +12884,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 471
     },
@@ -10292,7 +12912,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 16,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 470
     },
@@ -10319,7 +12940,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 16,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 469
     },
@@ -10346,7 +12968,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 468
     },
@@ -10373,7 +12996,8 @@
         "cf": 1,
         "cg": 2,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 467
     },
@@ -10400,7 +13024,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 466
     },
@@ -10427,7 +13052,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 465
     },
@@ -10454,7 +13080,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 464
     },
@@ -10481,7 +13108,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 463
     },
@@ -10508,7 +13136,8 @@
         "cf": 1,
         "cg": 4,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 462
     },
@@ -10535,7 +13164,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 461
     },
@@ -10562,7 +13192,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 460
     },
@@ -10589,7 +13220,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 459
     },
@@ -10616,7 +13248,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 458
     },
@@ -10643,7 +13276,8 @@
         "cf": 1,
         "cg": 8,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 457
     },
@@ -10670,7 +13304,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 456
     },
@@ -10697,7 +13332,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 455
     },
@@ -10724,7 +13360,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 454
     },
@@ -10751,7 +13388,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 453
     },
@@ -10778,7 +13416,8 @@
         "cf": 1,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 452
     },
@@ -10805,7 +13444,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 451
     },
@@ -10832,7 +13472,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 450
     },
@@ -10859,7 +13500,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 449
     },
@@ -10886,7 +13528,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 448
     },
@@ -10913,7 +13556,8 @@
         "cf": 1,
         "cg": 16,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 447
     },
@@ -10940,7 +13584,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 446
     },
@@ -10967,7 +13612,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 445
     },
@@ -10994,7 +13640,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 444
     },
@@ -11021,7 +13668,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 443
     },
@@ -11048,7 +13696,8 @@
         "cf": 1,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 442
     },
@@ -11075,7 +13724,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 441
     },
@@ -11102,7 +13752,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 440
     },
@@ -11129,7 +13780,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 439
     },
@@ -11156,7 +13808,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 16,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 438
     },
@@ -11183,7 +13836,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 16,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 437
     },
@@ -11210,7 +13864,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 436
     },
@@ -11237,7 +13892,8 @@
         "cf": 1,
         "cg": 2,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 435
     },
@@ -11264,7 +13920,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 434
     },
@@ -11291,7 +13948,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 433
     },
@@ -11318,7 +13976,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 432
     },
@@ -11345,7 +14004,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 431
     },
@@ -11372,7 +14032,8 @@
         "cf": 1,
         "cg": 4,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 430
     },
@@ -11399,7 +14060,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 429
     },
@@ -11426,7 +14088,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 428
     },
@@ -11453,7 +14116,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 427
     },
@@ -11480,7 +14144,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 426
     },
@@ -11507,7 +14172,8 @@
         "cf": 1,
         "cg": 8,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 425
     },
@@ -11534,7 +14200,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 424
     },
@@ -11561,7 +14228,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 423
     },
@@ -11588,7 +14256,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 422
     },
@@ -11615,7 +14284,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 421
     },
@@ -11642,7 +14312,8 @@
         "cf": 1,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 420
     },
@@ -11669,7 +14340,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 419
     },
@@ -11696,7 +14368,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 418
     },
@@ -11723,7 +14396,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 417
     },
@@ -11750,7 +14424,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 416
     },
@@ -11777,7 +14452,8 @@
         "cf": 1,
         "cg": 16,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 415
     },
@@ -11804,7 +14480,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 414
     },
@@ -11831,7 +14508,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 413
     },
@@ -11858,7 +14536,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 412
     },
@@ -11885,7 +14564,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 411
     },
@@ -11912,7 +14592,8 @@
         "cf": 1,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 410
     },
@@ -11939,7 +14620,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 409
     },
@@ -11966,7 +14648,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 408
     },
@@ -11993,7 +14676,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 407
     },
@@ -12020,7 +14704,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 16,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 406
     },
@@ -12047,7 +14732,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 16,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 405
     },
@@ -12074,7 +14760,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 404
     },
@@ -12101,7 +14788,8 @@
         "cf": 1,
         "cg": 2,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 403
     },
@@ -12128,7 +14816,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 402
     },
@@ -12155,7 +14844,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 401
     },
@@ -12182,7 +14872,8 @@
         "cf": 0,
         "cg": 2,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 400
     },
@@ -12209,7 +14900,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 399
     },
@@ -12236,7 +14928,8 @@
         "cf": 1,
         "cg": 4,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 398
     },
@@ -12263,7 +14956,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 397
     },
@@ -12290,7 +14984,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 396
     },
@@ -12317,7 +15012,8 @@
         "cf": 0,
         "cg": 4,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 395
     },
@@ -12344,7 +15040,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 394
     },
@@ -12371,7 +15068,8 @@
         "cf": 1,
         "cg": 8,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 393
     },
@@ -12398,7 +15096,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 392
     },
@@ -12425,7 +15124,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 391
     },
@@ -12452,7 +15152,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 390
     },
@@ -12479,7 +15180,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 389
     },
@@ -12506,7 +15208,8 @@
         "cf": 1,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 388
     },
@@ -12533,7 +15236,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 387
     },
@@ -12560,7 +15264,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 386
     },
@@ -12587,7 +15292,8 @@
         "cf": 0,
         "cg": 8,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 385
     },
@@ -12614,7 +15320,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 384
     },
@@ -12641,7 +15348,8 @@
         "cf": 1,
         "cg": 16,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 383
     },
@@ -12668,7 +15376,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 382
     },
@@ -12695,7 +15404,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 4
+        "px": 4,
+        "pf": 0
       },
       "priority": 381
     },
@@ -12722,7 +15432,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 4,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 380
     },
@@ -12749,7 +15460,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 379
     },
@@ -12776,7 +15488,8 @@
         "cf": 1,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 378
     },
@@ -12803,7 +15516,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 377
     },
@@ -12830,7 +15544,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 376
     },
@@ -12857,7 +15572,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 8,
-        "px": 2
+        "px": 2,
+        "pf": 0
       },
       "priority": 375
     },
@@ -12884,7 +15600,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 16,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 374
     },
@@ -12911,7 +15628,8 @@
         "cf": 0,
         "cg": 16,
         "oc": 16,
-        "px": 1
+        "px": 1,
+        "pf": 0
       },
       "priority": 373
     }

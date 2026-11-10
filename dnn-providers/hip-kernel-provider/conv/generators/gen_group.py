@@ -29,6 +29,7 @@ FIELDS = [
     "cg",
     "oc",
     "px",
+    "pf",
 ]
 KNOBS = [f for f in FIELDS if f not in ("direction", "dtype")]
 STRINGS = {"direction", "dtype", "atom"}
@@ -56,6 +57,21 @@ TILES = [
 # Tiles that also ship channels-first in place (cf 1: the graph's packed N C D H W activations
 # read and written without staging): the bench winners of that form on every target.
 CF_TILES = [(4, 2, 2), (4, 4, 2), (8, 2, 2)]
+# Phase-fused backward data at stride 2 (pf 1: one launch writes all four row and column
+# phases through an LDS output tile, whole dx lines at once): (th, wp, cb) per phase, the
+# workgroup's dx tile 2 th x 32 wp; cf twins for the first two.
+PF_TILES = [(2, 1, 2), (4, 1, 1), (2, 2, 2)]
+PF_CF_TILES = [(2, 1, 2), (4, 1, 1)]
+
+
+def lds_pf(eb, r, s, th, tw, cb, cf):
+    vec = 16 // eb
+    pitch = 16 * cb + vec
+    halo = (th + r) * (tw + s) * pitch
+    tile = 2 * th * 16 * cb * (2 * tw + 1) if cf else 4 * th * tw * pitch
+    return (halo + tile) * eb
+
+
 # (t, r, s): filter depth, rows and columns (depth 1 serves 2-D graphs too).
 FILTERS = [(1, 3, 3), (3, 3, 3)]
 
@@ -144,19 +160,31 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
         for atom in atoms:
             for t, r, s in FILTERS:
                 for st in strides:
-                    for th, wp, cb, cf in [
-                        tile + (cf,)
+                    pfs = [
+                        tile + (cf, 1)
+                        for cf in (0, 1)
+                        for tile in PF_TILES
+                        if cf == 0 or tile in PF_CF_TILES
+                    ]
+                    for th, wp, cb, cf, pf in [
+                        tile + (cf, 0)
                         for cf in (0, 1)
                         for tile in TILES
                         if cf == 0 or tile in CF_TILES
-                    ]:
+                    ] + (pfs if tag == "bwd" and st == 2 else []):
                         # Backward data runs stride phases: ceil(R / st) taps at unit stride.
                         kr, ks, kst = (
                             (r, s, st)
                             if tag == "fwd"
                             else (-(-r // st), -(-s // st), 1)
                         )
-                        if lds(EB[dtype], kr, ks, kst, th, 16 * wp, cb) > 64 * 1024:
+                        if pf:
+                            if (
+                                lds_pf(EB[dtype], kr, ks, th, 16 * wp, cb, cf)
+                                > 64 * 1024
+                            ):
+                                continue
+                        elif lds(EB[dtype], kr, ks, kst, th, 16 * wp, cb) > 64 * 1024:
                             continue
                         c = dict(
                             atom=atom,
@@ -171,10 +199,11 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             cg=0,
                             oc=0,
                             px=0,
+                            pf=pf,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.t{th}x{wp}x{cb}"
-                        name += ".cf" if cf else ""
+                        name += (".cf" if cf else "") + (".pf" if pf else "")
                         kernels.append(
                             {
                                 "version": "1.0",
@@ -224,6 +253,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             cg=cg,
                             oc=oc,
                             px=px,
+                            pf=0,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = (
