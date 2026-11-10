@@ -208,6 +208,18 @@ CK_TILE_DECLARE_ENV_VAR_BOOL(CK_TILE_FMHA_LONG_TESTS)
         ASSERT_EQ(result, fwd_result::success);                   \
     } while(0)
 
+// For the qr_tdm split-kv suites: gfx1250 fp16/bf16 has an instance for every
+// case they run, so no_instance there means codegen dropped one and must fail.
+#define CHECK_SPLITKV_RESULT(result)                                              \
+    do                                                                            \
+    {                                                                             \
+        if(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value && \
+           ck_tile::is_gfx125_supported())                                        \
+            ASSERT_EQ(result, fwd_result::success);                               \
+        else                                                                      \
+            CHECK_RESULT(result);                                                 \
+    } while(0)
+
 const ck_tile::stream_config stream_config{
     nullptr, // stream_id_
     false,   // time_kernel_
@@ -1345,7 +1357,7 @@ TEST_P(SplitKvSoftCapTraits, DataTypeConfig)
         init_sink,
         0, // pack_gqa
         stream_config);
-    CHECK_RESULT(result);
+    CHECK_SPLITKV_RESULT(result);
 }
 
 // Two paths want to contribute the sink logit to the merged denominator: split
@@ -2040,7 +2052,7 @@ TEST_P(PagedSplitKV, DataTypeConfig)
                                                true,       // is_rotary_interleaved
                                                num_splits, // num_splits
                                                COMMON_ARGS);
-    CHECK_RESULT(result);
+    CHECK_SPLITKV_RESULT(result);
 }
 
 #endif // CK_TILE_FMHA_FWD_SPLITKV_API

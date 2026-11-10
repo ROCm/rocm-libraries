@@ -163,11 +163,11 @@ int override_num_splits_if_necessary(int batch,
                                      int nhead,
                                      int max_seqlen_q,
                                      int max_seqlen_k,
+                                     int hdim_q,
                                      int hdim_v,
                                      float p_drop,
                                      int num_splits)
 {
-    (void)hdim_v;
     int device;
     auto status = hipGetDevice(&device);
     if(status != hipSuccess)
@@ -192,14 +192,19 @@ int override_num_splits_if_necessary(int batch,
         // props.multiProcessorCount for >=gfx10 is the number of WGPs (each has 2 CUs)
         const int num_blocks_per_SM = props.warpSize == 32 ? 4 : 2;
 
-        // Both tweaks below are tuned for gfx125 only; the split cap also assumes
-        // its bn0 64 split-kv tile (gfx9/gfx12 also emit bn0 128).
+        // The split cap and fill threshold below are tuned for gfx125 only; the
+        // cap also assumes its bn0 64 split-kv tile (gfx9/gfx12 also emit bn0 128).
         const bool is_gfx125 = std::string{props.gcnArchName}.compare(0, 6, "gfx125") == 0;
 
         int max_splits       = 128;
         float fill_threshold = 0.8f;
         if(is_gfx125)
         {
+            // Every gfx125 split-kv instance needs hdim % 8 == 0, so other head
+            // dims must not be split or no instance would match.
+            if(hdim_q % 8 != 0 || hdim_v % 8 != 0)
+                return 1;
+
             // Cap the split count so every split keeps enough KV tiles to
             // amortise its prologue and the combine pass.
             constexpr int kN0               = 64;
@@ -726,8 +731,14 @@ fwd_result fmha_fwd_run(mode_enum mode,
             nhead_merged        = nhead_k;
             max_seqlen_q_merged = max_seqlen_q * (nhead / nhead_k);
         }
-        num_splits = override_num_splits_if_necessary(
-            batch, nhead_merged, max_seqlen_q_merged, max_seqlen_k, hdim_v, p_drop, num_splits);
+        num_splits = override_num_splits_if_necessary(batch,
+                                                      nhead_merged,
+                                                      max_seqlen_q_merged,
+                                                      max_seqlen_k,
+                                                      hdim_q,
+                                                      hdim_v,
+                                                      p_drop,
+                                                      num_splits);
     }
     if(128 < num_splits)
     {
