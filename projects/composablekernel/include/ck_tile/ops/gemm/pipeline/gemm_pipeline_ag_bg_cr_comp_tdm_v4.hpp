@@ -56,46 +56,14 @@ struct Coords
     index_t cluster_wy;
 };
 
-// sched_barrier mask: VALU (0x2), SALU (0x4) and TRANS (0x400) may cross; WMMAs and memory
-// operations may not.
-inline constexpr int kSchedAluOnly = 0x2 | 0x4 | 0x400;
 // th:TH_LOAD_NT | scope:SCOPE_SE.
 inline constexpr int kGl2PrefetchCpol = 1 | (1 << 3);
-
-template <index_t N>
-CK_TILE_DEVICE void wait_dscnt()
-{
-#if defined(__gfx125__)
-    asm volatile("s_wait_dscnt %0" ::"n"(N) : "memory");
-#endif
-}
-
-template <index_t N>
-CK_TILE_DEVICE void wait_tensorcnt()
-{
-#if defined(__gfx125__)
-    __builtin_amdgcn_s_wait_tensorcnt(N);
-#endif
-}
-
-/// s_barrier alone: the caller issues the waits it needs.
-CK_TILE_DEVICE void barrier_bare()
-{
-#if defined(__gfx125__)
-    __builtin_amdgcn_s_barrier();
-#endif
-}
 
 /// Keeps LLVM from moving LDS reads or WMMAs across this point; ALU work may cross.
 CK_TILE_DEVICE void fence()
 {
-#if defined(__gfx125__)
-    asm volatile("" ::: "memory");
-    __builtin_amdgcn_sched_barrier(kSchedAluOnly);
-#endif
+    sched_fence<LLVMSchedGroupMask::VALU | LLVMSchedGroupMask::SALU | LLVMSchedGroupMask::TRANS>();
 }
-
-CK_TILE_DEVICE void memory_clobber() { asm volatile("" ::: "memory"); }
 
 /// llvm.amdgcn.s.cluster.barrier as inline asm: the workgroup barrier, then its first wave joins
 /// the cluster barrier. A plain workgroup barrier without a cluster.
@@ -911,8 +879,8 @@ struct GemmPipelineAgBgCrCompTDMV4
             {
                 // Tile k+1 is read next, from this point: it is the only TDM load in flight, and
                 // the barrier below publishes it.
-                mx_tdm_v4::wait_tensorcnt<0>();
-                mx_tdm_v4::barrier_bare();
+                s_wait_tensorcnt<0>();
+                s_barrier();
                 mx_tdm_v4::fence();
             }
         }
@@ -924,17 +892,17 @@ struct GemmPipelineAgBgCrCompTDMV4
                 mx_tdm_v4::cluster_wait();
             // No wave drained its reads of this buffer before the signal; the workgroup barrier
             // publishes them here.
-            mx_tdm_v4::wait_dscnt<kLatePending>();
-            mx_tdm_v4::barrier_bare();
+            s_wait_dscnt_pinned<kLatePending>();
+            s_barrier();
             Issue(ClampK(k0 + 2 * kTileK), parity);
             mx_tdm_v4::fence();
         }
 
         CK_TILE_DEVICE static void WaitNextTile()
         {
-            mx_tdm_v4::wait_tensorcnt<2>();
-            mx_tdm_v4::barrier_bare();
-            mx_tdm_v4::memory_clobber();
+            s_wait_tensorcnt<2>();
+            s_barrier();
+            compiler_memory_fence();
         }
 
         // ---------------------------------------------------------------- TileCompute
@@ -993,7 +961,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                     ReadB<0, kHalf>(carry.b, next_buffer, 0);
                 }
                 constexpr bool signal = kHasCluster && step + 2 == Steps;
-                mx_tdm_v4::wait_dscnt<kReadsPerStep>();
+                s_wait_dscnt_pinned<kReadsPerStep>();
                 Wmmas<true, 0, kHalf, false>(acc, cur, cur_b);
                 if constexpr(!last)
                     ReadB<kHalf, kHalf>(carry.b, buffer, step + 1);
@@ -1003,7 +971,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                     SignalBeforeLate<Steps>();
                     Late(k0, parity);
                 }
-                mx_tdm_v4::wait_dscnt<kReadsPerStep>();
+                s_wait_dscnt_pinned<kReadsPerStep>();
                 Wmmas<true, kHalf, kHalf, signal>(acc, cur, cur_b);
             });
         }
@@ -1026,7 +994,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                 const index_t src_buf      = last ? next_buffer : buffer;
                 constexpr index_t src_step = last ? 0 : step + 1;
                 constexpr bool signal      = kHasCluster && step + 2 == Steps;
-                mx_tdm_v4::wait_dscnt<kWait0>();
+                s_wait_dscnt_pinned<kWait0>();
                 if constexpr(last)
                     Refill<StaticParity>(k0);
                 carry.head = ReadHead(src_buf, src_step);
@@ -1036,7 +1004,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                     SignalBeforeLate<Steps>();
                     Late(k0, parity);
                 }
-                mx_tdm_v4::wait_dscnt<kWait1>();
+                s_wait_dscnt_pinned<kWait1>();
                 ReadB<0, kHalf>(carry.b, src_buf, src_step);
                 Wmmas<true, kHalf, kHalf, signal>(acc, cur, cur_b);
                 ReadB<kHalf, kHalf>(carry.b, src_buf, src_step);
@@ -1071,7 +1039,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                     Late(k0, parity);
                 }
                 constexpr bool signal = kHasCluster && step + 2 == Steps;
-                mx_tdm_v4::wait_dscnt<kReadsPerStep>();
+                s_wait_dscnt_pinned<kReadsPerStep>();
                 Wmmas<false, 0, kRn, signal>(acc, cur, cur_b);
             });
         }
@@ -1090,7 +1058,7 @@ struct GemmPipelineAgBgCrCompTDMV4
                 const Head h           = ReadHead(buffer, step);
                 BRegs b;
                 ReadB<0, kRn>(b, buffer, step);
-                mx_tdm_v4::wait_dscnt<0>();
+                s_wait_dscnt_pinned<0>();
                 if constexpr(last)
                 {
                     Refill<StaticParity>(k0);
@@ -1188,7 +1156,7 @@ struct GemmPipelineAgBgCrCompTDMV4
             }
             // No workgroup may exit while a TDM load into its LDS is in flight: with multicast,
             // peers' loads write here too.
-            mx_tdm_v4::wait_tensorcnt<0>();
+            s_wait_tensorcnt<0>();
             if constexpr(kHasCluster)
                 mx_tdm_v4::cluster_sync<true>();
         }

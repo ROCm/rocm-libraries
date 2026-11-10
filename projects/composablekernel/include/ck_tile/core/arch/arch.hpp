@@ -1518,6 +1518,20 @@ CK_TILE_DEVICE void s_wait_dscnt()
 #endif
 }
 
+/// s_wait_dscnt N exactly where it is written. LLVM's waitcnt pass may drop or relax the
+/// intrinsic in s_wait_dscnt when its own analysis needs no wait there, so a pipeline that paces
+/// its LDS reads ahead of their use loses the waits it placed.
+template <index_t N = 0>
+CK_TILE_DEVICE void s_wait_dscnt_pinned()
+{
+#if defined(__gfx12__)
+    static_assert(N >= 0 && N <= waitcnt_arg::kMaxLgkmCnt, "dscnt out of range");
+    asm volatile("s_wait_dscnt %0" ::"n"(N) : "memory");
+#else
+    s_wait_dscnt<N>();
+#endif
+}
+
 template <index_t N = 0>
 CK_TILE_DEVICE void s_wait_asynccnt()
 {
@@ -1574,6 +1588,13 @@ CK_TILE_DEVICE void s_wait_tensorcnt_barrier()
     s_wait_tensorcnt<tensorcnt>();
     block_sync_lds<lgkmcnt>();
 }
+
+/// The workgroup barrier alone. Unlike block_sync_lds it waits for nothing: the caller issues
+/// the waits it needs first.
+CK_TILE_DEVICE void s_barrier() { __builtin_amdgcn_s_barrier(); }
+
+/// A compiler-only memory fence: no memory operation is moved across it. Emits no instruction.
+CK_TILE_DEVICE void compiler_memory_fence() { asm volatile("" ::: "memory"); }
 
 template <index_t vmcnt = 0>
 CK_TILE_DEVICE void block_sync_lds_direct_load()
@@ -1784,6 +1805,15 @@ enum LLVMSchedGroupMask : int32_t
     TRANS      = 1 << 10,
     ALL        = (TRANS << 1) - 1,
 };
+
+/// compiler_memory_fence plus a sched_barrier: only the instruction groups in Mask (an
+/// LLVMSchedGroupMask) may be scheduled across this point.
+template <int32_t Mask = LLVMSchedGroupMask::NONE>
+CK_TILE_DEVICE void sched_fence()
+{
+    compiler_memory_fence();
+    __builtin_amdgcn_sched_barrier(Mask);
+}
 
 CK_TILE_DEVICE static constexpr auto get_max_vgpr_count()
 {
