@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "3a9f4893-ce21-5c5d-9470-cdee9ed65676",
+  "name": "flydsl gather selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_gather.score"
+  }
+}

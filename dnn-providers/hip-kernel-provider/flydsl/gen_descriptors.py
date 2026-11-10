@@ -146,8 +146,10 @@ GRAPH_DETERMINED_FIELDS = {
     "has_sink",
     "merge_symbol",
     "kernel",
-    # Top-k: the indices' dtype (a load width).
+    # Gather: the indices' dtype (a load width), and the access width an object
+    # moves per lane, which the row's bytes and the bases' alignment must admit.
     "index_dtype",
+    "vec_bytes",
     "out_dtype",
     # Softmax (`out_dtype` above is s's dtype): the width an object's copies need N
     # to be a multiple of.

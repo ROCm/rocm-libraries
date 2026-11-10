@@ -86,6 +86,10 @@ void resetFlydslSdpaCdnaDualwaveModuleCache();
 void registerFlydslSdpaCdnaDecodeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslSdpaCdnaDecodeModuleCache();
 
+/// @see packs/FlydslGatherNative.cpp
+void registerFlydslGatherSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslGatherModuleCache();
+
 /// @see packs/FlydslRopeNative.cpp
 void registerFlydslRopeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslRopeModuleCache();

@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "08636aaf-3b17-5bf0-b80f-7779e8b5980c",
+  "name": "flydsl gather dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_gather.dispatch"
+}

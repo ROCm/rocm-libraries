@@ -1034,6 +1034,62 @@ Approved for this integration.
 
 ---
 
+## Gather (embedding lookup) — `hipkernel:flydsl_gather`
+
+12 objects per arch, built for **gfx90a, gfx942 and gfx950** (the kernel uses only buffer
+loads and stores and scalar loads, which all three have; RDNA is not built). Kernel:
+[`kernels_src/kernels/gather/gather_kernel.py`](kernels_src/kernels/gather/gather_kernel.py),
+written for this provider after AITER's `moe_gather_reduce.py` (commit `8253efc40595`, the
+pinned AITER commit); native half:
+[`FlydslGatherNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslGatherNative.cpp).
+
+It computes `y[a, i, b] = x[a, indices[i], b]` with the packed operands viewed as x
+`[outer, axis_extent, inner]`, indices `[num_indices]` (any rank, read flat) and y
+`[outer, num_indices, inner]`: the op's gather along any one axis. The embedding lookup
+(axis 0, x the `[V, H]` table) is `outer = 1`, `inner = H`. One workgroup per (index,
+chunk of `256 x vec_elems` row elements, outer position).
+
+**Baked:** the element size (dtype `bf16`, `f16`, `f32`; values are copied as raw bits),
+the index dtype (`i32`, `i64`), and the access width `vec_bytes`: 16 (one 16-byte vector
+per lane, priority 100) or the element size (one element per lane, priority 10).
+**Runtime:** `num_indices`, `axis_extent`, `inner` (kernel arguments) and `outer` (the
+grid), so no object is per-H. Row addresses are formed in 64 bits and each row gets its own
+buffer descriptor, so a table past 4 GiB is served (Qwen3.8's 248320 x 5120 is 2.4 GiB in
+bf16, 4.7 GiB in f32); only one row of x or y, and all of the indices, must fit 32-bit
+offsets.
+
+**Out-of-range indices.** An index outside `[0, axis_extent)` is outside the op's contract
+(hipDNN's CPU reference throws before writing). The kernel cannot report it, and nothing is
+declined for it (the values are only known at execute, as in cuDNN, where it is undefined):
+such an index reads nothing -- its row's descriptor has zero records -- and its output row
+is written as **zeros**. No memory outside x is read. INT64 indices are compared in 64 bits,
+so a value past 2^32 is never truncated onto a real row.
+
+| Graph-scoped (`flydslGatherGraphMatches`) | Accepted | Declined |
+|---|---|---|
+| Nodes | exactly one `GatherAttributes` node | anything else; override-shape graphs |
+| Operands | x, indices, y real device tensors | virtual, pass-by-value or ragged |
+| Dtypes | x in bf16 / f16 / f32, y in x's dtype; indices INT32 / INT64 | other dtypes; y converting |
+| Axis | `0 <= axis < rank(x)`, any rank of x and of the indices (>= 1) | outside x's rank |
+| Shape | y = `x.dims[:axis] ++ indices.dims ++ x.dims[axis+1:]` | any other y |
+| Layout | x, indices, y packed row-major (unit axes' strides free) | padded or permuted strides; a zero extent |
+| Alignment | x and y on their element size, indices on theirs | less |
+| Extents | `axis_extent`, `num_indices` <= 2^31 - 1; one row <= 2^31 - 1 bytes; all indices <= 2^31 - 1 bytes; `outer` <= 65535 (grid z) | larger |
+
+| Kernel-scoped (`flydslGatherKernelMatches`) | |
+|---|---|
+| `dtype`, `index_dtype` | equal the graph's |
+| `vec_bytes` 16 | a row of a multiple of 16 bytes, and x and y declared 16-byte aligned |
+| `vec_bytes` = element size | any row |
+| either | the row's chunks, `ceil(inner / (256 x vec_elems))`, <= 65535 (grid y) |
+
+**Checked by:** `TestFlydslGatherEngine` (every row of both tables, host-only),
+`TestGpuFlydslGatherObjects` (every staged object against `CpuFpReferenceGather`, bit for
+bit: embedding lookups, a middle and the last axis, partial chunks, out-of-range rows as
+zeros, and rows past 4 GiB of a 248320 x 5120 table), and the census `TestFlydslGatherPacks`.
+
+---
+
 ## RoPE (rotate-half) — `hipkernel:flydsl_rope`
 
 3 objects per arch (bf16, f16, f32), built for **gfx90a, gfx942 and gfx950**: the kernel is

@@ -25,6 +25,7 @@ OP_KERNEL_DIRS = {
     "sdpa_cdna_dualwave": ("attention_cdna",),
     "sdpa_cdna_decode": ("attention_cdna",),
     "sdpa_aiw": ("attention_rdna4",),
+    "gather": ("gather",),
     "rope": ("rope",),
     "softmax": ("softmax",),
     "topk": ("topk",),

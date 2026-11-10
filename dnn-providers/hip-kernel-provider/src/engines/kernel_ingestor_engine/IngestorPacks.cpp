@@ -40,6 +40,7 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:FlydslSdpaCdnaDecode",
          &registerFlydslSdpaCdnaDecodeSymbols,
          &resetFlydslSdpaCdnaDecodeModuleCache},
+        {"hipkernel:flydsl_gather", &registerFlydslGatherSymbols, &resetFlydslGatherModuleCache},
         {"hipkernel:flydsl_rope", &registerFlydslRopeSymbols, &resetFlydslRopeModuleCache},
         {"hipkernel:flydsl_softmax", &registerFlydslSoftmaxSymbols, &resetFlydslSoftmaxModuleCache},
         {"hipkernel:flydsl_topk", &registerFlydslTopkSymbols, &resetFlydslTopkModuleCache},

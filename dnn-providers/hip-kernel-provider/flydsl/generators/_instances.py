@@ -114,6 +114,7 @@ _ABBREV = {
     "n_max": "nmax",
     "reduce_symbol": "",
     "index_dtype": "idx",
+    "vec_bytes": "vec",
     "out_dtype": "out",
     "n_align": "align",
     "threads_per_row": "tpr",
@@ -1470,6 +1471,47 @@ def sdpa_aiw_instances(arch: str) -> list[Instance]:
     return instances
 
 
+# --- Gather (embedding lookup) -------------------------------------------------
+
+# kernels_src/kernels/gather/gather_kernel.py: one workgroup per gathered row, the row
+# width, the gathered axis's extent, the index count and the outer extent all runtime
+# arguments, so an object serves every shape of its class. Baked: the element size
+# (by dtype), the index dtype (its load width) and the access width. `vec_bytes` 16
+# objects move a 16-byte vector per lane and serve rows whose bytes are a multiple of
+# 16 with 16-byte aligned bases (every model's hidden size); the per-element objects
+# (`vec_bytes` = the element size) serve every other row, ranked below them.
+GATHER_DTYPES = ("bf16", "f16", "f32")
+GATHER_INDEX_DTYPES = ("i32", "i64")
+GATHER_ELEM_BYTES = {"bf16": 2, "f16": 2, "f32": 4}
+GATHER_VECTOR_BYTES = 16
+GATHER_BLOCK_THREADS = 256
+
+
+def gather_instances() -> list[Instance]:
+    """The gather table: every dtype x index dtype, vector and per-element."""
+    instances = [
+        Instance(
+            op="gather",
+            dtype=dtype,
+            priority=(
+                PRIORITY_SPECIALIZED
+                if vec_bytes == GATHER_VECTOR_BYTES
+                else PRIORITY_GENERIC
+            ),
+            knobs={
+                "index_dtype": index_dtype,
+                "vec_bytes": vec_bytes,
+                "block_threads": GATHER_BLOCK_THREADS,
+            },
+        )
+        for dtype in GATHER_DTYPES
+        for index_dtype in GATHER_INDEX_DTYPES
+        for vec_bytes in (GATHER_VECTOR_BYTES, GATHER_ELEM_BYTES[dtype])
+    ]
+    _assert_unique(instances)
+    return instances
+
+
 # --- RoPE (rotate-half) ---------------------------------------------------------
 
 # kernels_src/kernels/rope/rope_kernel.py: one wave per row, and head_dim, rope_dim,
@@ -1646,6 +1688,7 @@ OPS = {
     "sdpa_cdna_dualwave": sdpa_cdna_dualwave_instances,
     "sdpa_cdna_decode": sdpa_cdna_decode_instances,
     "sdpa_aiw": sdpa_aiw_instances,
+    "gather": gather_instances,
     "rope": rope_instances,
     "softmax": softmax_instances,
     "topk": topk_instances,

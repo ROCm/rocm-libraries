@@ -1,0 +1,24 @@
+{
+  "version": "1.0",
+  "id": "24ec5515-f453-55a9-9be8-86439c49c8bd",
+  "name": "flydsl gather variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "index_dtype",
+      "type": "string"
+    },
+    {
+      "name": "vec_bytes",
+      "type": "int"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    }
+  ]
+}
