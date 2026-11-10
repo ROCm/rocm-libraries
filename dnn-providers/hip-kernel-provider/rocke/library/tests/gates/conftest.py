@@ -13,12 +13,12 @@ import pytest
 from rocke.core.llvm_profile import _flavor_for_llvm
 from rocke.runtime.comgr import loaded_compiler_info
 
-from tests._attention_bwd_counted_cases import (
-    COUNTED_COMPILER_FLAVORS,
-    MFMA_ARCHS,
-    selected_isa_arch,
+from tests._attention_bwd_counted_cases import MFMA_ARCHS, selected_isa_arch
+from tests._attention_bwd_resources import (
+    GATE_COMGR_ROCM,
+    GATE_FLAVOR,
+    comgr_is_production,
 )
-from tests._attention_bwd_resources import is_identified_comgr_provenance
 from tests._explicit_gate_policy import (
     configured_selection_is_partial,
     selection_is_partial,
@@ -45,8 +45,11 @@ def _qualification_gap(
     arches: tuple[str, ...],
 ) -> str | None:
     """Why a compiler cannot run the counted gate, or ``None`` when qualified."""
-    if requested_flavor not in COUNTED_COMPILER_FLAVORS:
-        return f"unsupported LLVM flavor {requested_flavor!r}"
+    if requested_flavor != GATE_FLAVOR:
+        return (
+            f"resource gate requires LLVM flavor {GATE_FLAVOR}, "
+            f"got {requested_flavor!r}"
+        )
     if active_flavor is None:
         return "could not query the active comgr compiler flavor"
     if requested_flavor != active_flavor:
@@ -54,8 +57,8 @@ def _qualification_gap(
             f"requested flavor {requested_flavor} does not match active comgr "
             f"flavor {active_flavor}"
         )
-    if not is_identified_comgr_provenance(comgr):
-        return "could not identify comgr provenance"
+    if not comgr_is_production(comgr):
+        return f"resource gate requires ROCm {GATE_COMGR_ROCM} comgr, got {comgr}"
     if targets is None:
         return "could not query comgr ISA targets"
     missing = [arch for arch in arches if arch not in targets]

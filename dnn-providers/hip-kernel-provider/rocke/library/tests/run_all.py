@@ -140,9 +140,10 @@ def _gate_environment(
         if not partial:
             environment.pop("ROCKE_TEST_SHARD", None)
     if name == "counted-compiler":
-        # This gate validates the caller-selected ROCm/comgr toolchain rather
-        # than replacing it with torch's bundled compiler.
-        environment["ROCKE_BWD_NO_COMGR_PIN"] = "1"
+        # Preserve the resource gate's reference-toolchain contract. The
+        # library conftest pins that compiler when it is available; preflight
+        # reports one gate-level outcome when it is not.
+        environment.pop("ROCKE_BWD_NO_COMGR_PIN", None)
         environment.pop("ROCKE_BWD_ISA_ARCH", None)
         if gate_arch is not None:
             environment["ROCKE_BWD_ISA_ARCH"] = gate_arch

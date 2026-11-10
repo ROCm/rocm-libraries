@@ -354,6 +354,7 @@ def test_gate_warning_options_are_not_selection_filters(warning_arg, tmp_path):
 def test_required_compiler_gate_cannot_inherit_optional_policy(monkeypatch):
     monkeypatch.setenv("ROCKE_COUNTED_ISA_OPTIONAL", "1")
     monkeypatch.setenv("ROCKE_BWD_ISA_ARCH", "gfx942")
+    monkeypatch.setenv("ROCKE_BWD_NO_COMGR_PIN", "1")
     monkeypatch.setenv("PYTEST_ADDOPTS", "-k manifest")
     monkeypatch.setenv("ROCKE_EXPLICIT_GATE_PREFLIGHT", "1")
     monkeypatch.setenv("ROCKE_TEST_SHARD", "0/2")
@@ -364,8 +365,8 @@ def test_required_compiler_gate_cannot_inherit_optional_policy(monkeypatch):
     )
     assert "ROCKE_COUNTED_ISA_OPTIONAL" not in required
     assert optional["ROCKE_COUNTED_ISA_OPTIONAL"] == "1"
-    assert required["ROCKE_BWD_NO_COMGR_PIN"] == "1"
-    assert optional["ROCKE_BWD_NO_COMGR_PIN"] == "1"
+    assert "ROCKE_BWD_NO_COMGR_PIN" not in required
+    assert "ROCKE_BWD_NO_COMGR_PIN" not in optional
     assert "ROCKE_BWD_ISA_ARCH" not in required
     assert "ROCKE_BWD_ISA_ARCH" not in optional
     assert "PYTEST_ADDOPTS" not in required
@@ -382,13 +383,12 @@ def test_required_compiler_gate_cannot_inherit_optional_policy(monkeypatch):
     assert partial["ROCKE_BWD_ISA_ARCH"] == "gfx950"
 
 
-@pytest.mark.parametrize("flavor", ("llvm22", "llvm23", "llvm24"))
-def test_compiler_preflight_accepts_qualified_active_flavor(flavor):
+def test_compiler_preflight_accepts_reference_toolchain():
     assert (
         gate_config._qualification_gap(
-            flavor,
-            flavor,
-            "comgr3.5/rocm10.3",
+            "llvm22",
+            "llvm22",
+            "comgr3.0/rocm7.2",
             frozenset(("gfx942", "gfx950")),
             ("gfx942", "gfx950"),
         )
@@ -399,32 +399,43 @@ def test_compiler_preflight_accepts_qualified_active_flavor(flavor):
 @pytest.mark.parametrize(
     "requested,active,comgr,targets,match",
     [
-        ("llvm20", "llvm20", "comgr3.0/rocm7.1", frozenset(("gfx942",)), "unsupported"),
         (
             "llvm24",
-            "llvm23",
+            "llvm24",
             "comgr3.5/rocm10.3",
+            frozenset(("gfx942",)),
+            "requires LLVM flavor llvm22",
+        ),
+        (
+            "llvm22",
+            "llvm23",
+            "comgr3.0/rocm7.2",
             frozenset(("gfx942",)),
             "does not match",
         ),
         (
-            "llvm24",
+            "llvm22",
             None,
-            "comgr3.5/rocm10.3",
+            "comgr3.0/rocm7.2",
             frozenset(("gfx942",)),
             "could not query",
         ),
         (
-            "llvm24",
-            "llvm24",
-            "comgr3.5/rocmunknown",
+            "llvm22",
+            "llvm22",
+            "comgr3.5/rocm10.3",
             frozenset(("gfx942",)),
-            "provenance",
+            "requires ROCm 7.2 comgr",
         ),
-        ("llvm24", "llvm24", "", frozenset(("gfx942",)), "provenance"),
-        ("llvm24", "llvm24", "rocm10.3", frozenset(("gfx942",)), "provenance"),
-        ("llvm24", "llvm24", "comgr3.5/rocm10.3", None, "ISA targets"),
-        ("llvm24", "llvm24", "comgr3.5/rocm10.3", frozenset(("gfx950",)), "gfx942"),
+        ("llvm22", "llvm22", None, frozenset(("gfx942",)), "requires ROCm 7.2"),
+        ("llvm22", "llvm22", "comgr3.0/rocm7.2", None, "ISA targets"),
+        (
+            "llvm22",
+            "llvm22",
+            "comgr3.0/rocm7.2",
+            frozenset(("gfx950",)),
+            "gfx942",
+        ),
     ],
 )
 def test_compiler_preflight_rejects_unqualified_toolchain(
@@ -1473,7 +1484,7 @@ def test_source_runner_keep_going_runs_named_stages_in_order(monkeypatch):
     assert structural[1]["ROCKE_EXPLICIT_GATE_PARTIAL"] == "0"
     assert compiler[0][-1] == str(EXPLICIT_GATES["counted-compiler"])
     assert compiler[1]["ROCKE_COUNTED_ISA_OPTIONAL"] == "1"
-    assert compiler[1]["ROCKE_BWD_NO_COMGR_PIN"] == "1"
+    assert "ROCKE_BWD_NO_COMGR_PIN" not in compiler[1]
 
 
 def test_source_runner_reports_optional_gate_skip_once(monkeypatch):

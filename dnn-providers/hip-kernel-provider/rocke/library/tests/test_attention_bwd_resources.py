@@ -294,37 +294,6 @@ def test_gate_is_invalid_off_the_production_flavor():
     )
 
 
-@pytest.mark.parametrize("flavor", ("llvm22", "llvm23", "llvm24"))
-def test_gate_provenance_can_qualify_explicit_compiler_lanes(flavor):
-    blob = _elf(META, _kd(128), "k0")
-    gate = res.evaluate_resource_gate(
-        blob,
-        arch="gfx942",
-        lds_capacity_bytes=65536,
-        flavor=flavor,
-        comgr="comgr3.5/rocm10.3",
-    )
-    assert gate.has_supported_flavor_and_identified_comgr(
-        ("llvm22", "llvm23", "llvm24")
-    )
-    assert gate.record()["provenance_known"]
-
-
-@pytest.mark.parametrize("provenance", ("", "rocm10.3", "comgr3.5/rocmunknown"))
-def test_gate_unknown_provenance_does_not_qualify_explicit_lane(provenance):
-    assert not res.is_identified_comgr_provenance(None)
-    blob = _elf(META, _kd(128), "k0")
-    gate = res.evaluate_resource_gate(
-        blob,
-        arch="gfx942",
-        lds_capacity_bytes=65536,
-        flavor="llvm24",
-        comgr=provenance,
-    )
-    assert not gate.has_supported_flavor_and_identified_comgr(("llvm24",))
-    assert not gate.record()["provenance_known"]
-
-
 @pytest.mark.parametrize(
     "field,value,token",
     [

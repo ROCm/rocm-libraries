@@ -289,8 +289,8 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 
 # Exhaustive counted-sync gates are intentionally outside normal pytest
 # discovery. The structural gate is host-only; the compiler gate additionally
-# requires a supported COMGR/LLVM flavor and llvm-objdump. They share a lock to
-# cap aggregate host memory and compiler pressure in parallel runs.
+# requires the reference COMGR/LLVM toolchain and llvm-objdump. They share a
+# lock to cap aggregate host memory and compiler pressure in parallel runs.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_counted_structural_gate python -m pytest -p pytest_timeout \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_structural_gate.py\" -v -rs --timeout=60)\n"
        "set_tests_properties(rocke_library_counted_structural_gate PROPERTIES\n"
@@ -308,7 +308,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "    \"ROCKE_EXPLICIT_GATE_RUN=1\"\n"
        "    \"ROCKE_EXPLICIT_GATE_PARTIAL=0\"\n"
        "    \"ROCKE_EXPLICIT_GATE_PREFLIGHT=\"\n"
-       "    \"ROCKE_BWD_NO_COMGR_PIN=1\"\n"
+       "    \"ROCKE_BWD_NO_COMGR_PIN=\"\n"
        "    \"ROCKE_BWD_ISA_ARCH=\"\n"
        "    \"ROCKE_ISA_INSPECT_PROBE=${ROCKE_TEST_CTEST_REL}tests/support/probe_isa_inspect.py\")\n"
        "list(APPEND _rocke_counted_isa_environment\n"

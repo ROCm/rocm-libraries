@@ -82,7 +82,8 @@ def test_counted_gates_have_installed_and_tier_owners():
     assert "add_test(rocke_library_counted_structural_gate" in cmake
     assert "add_test(rocke_library_counted_compiler_gate" in cmake
     assert "ROCKE_ISA_INSPECT_PROBE=" in cmake
-    assert "ROCKE_BWD_NO_COMGR_PIN=1" in cmake
+    assert "ROCKE_BWD_NO_COMGR_PIN=" in cmake
+    assert "ROCKE_BWD_NO_COMGR_PIN=1" not in cmake
     assert "probe_isa_inspect.py" in cmake
     assert "structural\\\\;comprehensive\\\\;full" in cmake
     assert "compiler\\\\;comprehensive\\\\;full" in cmake

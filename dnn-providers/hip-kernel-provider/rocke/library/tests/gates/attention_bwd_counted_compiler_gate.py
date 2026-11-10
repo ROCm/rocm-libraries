@@ -3,8 +3,8 @@
 """Compiler, ISA, and resource gate for counted backward synchronization.
 
 The gate compiles each row of the pinned representative counted ISA subset once
-on the active supported LLVM/comgr toolchain. The subset spans every final-ISA
-control-flow class while the structural gate owns the complete legal matrix.
+on the resource gate's reference LLVM/comgr toolchain. The subset spans every
+final-ISA control-flow class while the structural gate owns the complete legal matrix.
 Early and late counted issue modes share one canonical
 full-barrier twin, so that twin is compiled only on the early row. CTest and
 ``library/tests/run_all.py`` invoke this module explicitly after a toolchain
@@ -26,7 +26,6 @@ from kernels.common.attention_bwd import (
 )
 
 from tests._attention_bwd_counted_cases import (
-    COUNTED_COMPILER_FLAVORS,
     MFMA_ARCHS,
     isa_rows,
     require_explicit_gate_entrypoint,
@@ -94,9 +93,7 @@ def _assert_resource_gate(
         spec=resolved,
         isa_text=isa_text,
     )
-    assert result.has_supported_flavor_and_identified_comgr(
-        COUNTED_COMPILER_FLAVORS
-    ), result.record()
+    assert result.matches_reference_toolchain, result.record()
     assert not result.failures and not result.warnings, result.record()
     return result
 

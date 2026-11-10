@@ -325,7 +325,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             "ROCKE_EXPLICIT_GATE_RUN": "1",
             "ROCKE_EXPLICIT_GATE_PARTIAL": "0",
             "ROCKE_EXPLICIT_GATE_PREFLIGHT": "",
-            "ROCKE_BWD_NO_COMGR_PIN": "1",
+            "ROCKE_BWD_NO_COMGR_PIN": "",
             "ROCKE_BWD_ISA_ARCH": "",
             "ROCKE_ISA_INSPECT_PROBE": (
                 f"{test_ctest_rel}tests/support/probe_isa_inspect.py"

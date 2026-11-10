@@ -273,18 +273,16 @@ CTests. Legacy violations remain tracked as TESTING.md gap G9.
 | `rocke_library_runner_contract_pytest` | Affordable-lane selection, resource defaults, and gate verdict policy | quick and higher; pure policy contracts |
 | `rocke_library_worker_integration_pytest` | Real file-worker subprocess, timeout, signal, package-identity, and process-ownership lifecycle | standard and higher; host process integration |
 | `rocke_library_counted_structural_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | comprehensive and full; host-only structural gate, pending standard-shard capacity (#15334) |
-| `rocke_library_counted_compiler_gate` | Pinned representative compile/final-ISA/resource subset and canonical full-barrier twins on the active supported toolchain | comprehensive and full; compiler preflight required |
+| `rocke_library_counted_compiler_gate` | Pinned representative compile/final-ISA/resource subset and canonical full-barrier twins on the LLVM 22/reference-comgr toolchain | comprehensive and full; compiler preflight required |
 
-Each compiler-gate invocation accepts one eligible code-object lane (`llvm22`,
-`llvm23`, or `llvm24`) when the requested profile matches the active comgr
-compiler, and records comgr provenance in every resource result. A green result
-proves that active lane only; aggregate coverage of every eligible lane requires
-separate compiler-specific CI jobs. The older `llvm20` profile remains covered by
-offline emission/parity.
+The compiler gate preserves the resource table's existing qualification contract:
+LLVM 22 with the reference ROCm 7.2 comgr. LLVM 23 and LLVM 24 are emission/parity
+profiles, not qualified code-object resource lanes; their scheduling and register
+allocation cannot be judged against thresholds calibrated on the reference compiler.
 The two counted gates share the `rocke_counted_sync_gate` CTest resource
-lock. The installed compiler gate forces required mode; an unsupported flavor,
-missing target support, unknown comgr provenance, or missing `llvm-objdump` fails
-once at preflight. The source runner treats that gate as optional unless passed
+lock. The installed compiler gate forces required mode; a mismatched compiler,
+missing target support, or missing `llvm-objdump` fails once at preflight. The
+source runner treats that gate as optional unless passed
 `--require-compiler-gate`; an accepted optional skip reports `INCOMPLETE`, never
 plain `GREEN`.
 See [TESTING.md §5.0.1](../../TESTING.md#501-unit-discovery-versus-explicit-resource-gates)

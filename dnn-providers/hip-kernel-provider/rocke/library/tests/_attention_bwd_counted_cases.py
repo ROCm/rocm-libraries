@@ -20,7 +20,6 @@ from ._attention_bwd_test_utils import distinct_configs
 from .sdpa.bwd_kernel_cases import config_knobs
 
 __all__ = [
-    "COUNTED_COMPILER_FLAVORS",
     "COUNTED_VARIANTS",
     "DTYPES",
     "HEADS",
@@ -37,7 +36,6 @@ __all__ = [
     "spec_of",
 ]
 
-COUNTED_COMPILER_FLAVORS = ("llvm22", "llvm23", "llvm24")
 MFMA_ARCHS = ("gfx942", "gfx950")
 RDNA_ARCHS = ("gfx1151", "gfx1201")
 HEADS = (32, 64, 128)

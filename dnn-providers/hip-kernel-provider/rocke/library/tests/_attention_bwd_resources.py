@@ -51,12 +51,6 @@ GATE_FLAVOR = "llvm22"
 # not say it: a preset ``ROCKE_LLVM_FLAVOR=llvm22`` also reports llvm22 when a
 # process loaded a newer system comgr, whose register allocation differs.
 GATE_COMGR_ROCM = "7.2"
-_COMGR_PROVENANCE = re.compile(r"^comgr[^/]+/rocm(?!unknown$)[^/]+$")
-
-
-def is_identified_comgr_provenance(value: str | None) -> bool:
-    """Whether ``value`` positively identifies comgr and its ROCm release."""
-    return value is not None and _COMGR_PROVENANCE.fullmatch(value) is not None
 
 
 # Per-arch register and LDS budgets used by the gate. The CDNA register file is
@@ -876,15 +870,6 @@ class ResourceGateResult:
         """Compatibility name for historical resource-table qualification."""
         return self.matches_reference_toolchain
 
-    def has_supported_flavor_and_identified_comgr(self, flavors: Sequence[str]) -> bool:
-        """Whether the flavor is supported and comgr provenance is identified.
-
-        Active/requested compiler-flavor agreement and target support are
-        separate preflight contracts. ``matches_reference_toolchain`` retains
-        the historical production-resource-table meaning.
-        """
-        return self.flavor in flavors and is_identified_comgr_provenance(self.comgr)
-
     @property
     def passes_reference_policy(self) -> bool:
         """Whether resource checks pass on the historical reference toolchain."""
@@ -909,9 +894,6 @@ class ResourceGateResult:
             "flavor": self.flavor,
             "comgr": self.comgr,
             "matches_reference_toolchain": self.matches_reference_toolchain,
-            "provenance_known": self.has_supported_flavor_and_identified_comgr(
-                (self.flavor,)
-            ),
         }
 
 

@@ -569,14 +569,12 @@ fast validator/model/mutation contracts remain in unit discovery; the exhaustive
 IR/LDS matrix and pinned representative compile/final-ISA/resource subset are
 comprehensive-tier gates. Structural enrollment can return to standard after the
 hipkernelprovider standard shards regain clear outer-timeout margin (public issue
-#15334). One gate invocation validates
-the matching active comgr toolchain when it is an eligible compiler lane
-(`llvm22`, `llvm23`, or `llvm24`) and records provenance rather than treating one
-historical compiler as canonical. One green invocation proves only its active
-lane; continuous evidence for every eligible lane requires separate
-compiler-specific CI jobs and is not implied by this single CTest registration.
-The `llvm20` profile remains an offline emission/parity lane for
-these current targets, not a counted-kernel code-object lane. Exact installed
+#15334). The compiler gate preserves the existing resource-table qualification:
+LLVM 22 with the reference ROCm 7.2 comgr. Its register thresholds and final-ISA
+expectations are calibrated to that toolchain; LLVM 23 and LLVM 24 remain valid
+emission/parity profiles but are not qualified by this code-object resource gate.
+An unavailable or mismatched reference compiler produces one gate-level outcome
+before any rows compile. Exact installed
 CTest names and scopes live in the
 [rocKE test inventory](platform/tests/README.md#library-unit-and-explicit-host-gates).
 
