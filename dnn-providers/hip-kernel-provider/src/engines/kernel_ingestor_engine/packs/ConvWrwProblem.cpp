@@ -543,6 +543,11 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
+    // The direct dw store: compiled in or not; loop 5 writes partials only.
+    if((config.dws != 0 && config.dws != 1) || (direct && config.dws != 0))
+    {
+        return std::nullopt;
+    }
     if(direct)
     {
         threads = 8 * info->wave;
@@ -767,7 +772,12 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     launch.block = static_cast<unsigned int>(threads);
     launch.reduceGrid = static_cast<unsigned int>(reduceGrid);
     launch.kernelType = info->kernelType;
-    launch.workspaceBytes = static_cast<size_t>(*workspace);
+    // One split into dw of contiguous channels (K T R S C, or one tap), on a config compiled
+    // with the direct store: the kernel writes dw in its element type and no reduce runs.
+    const bool dwStore
+        = config.dws == 1 && splits == 1 && (problem.filterChannelsLast || problem.taps == 1);
+    launch.dwStore = dwStore;
+    launch.workspaceBytes = dwStore ? 0 : static_cast<size_t>(*workspace);
     auto& k3 = launch.args;
     k3.n = static_cast<int>(a.n);
     k3.c = static_cast<int>(a.c);
@@ -806,6 +816,10 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     k3.xImage = xImage;
     k3.yImage = yImage;
     k3.partialElems = *partialElems;
+    k3.dwStore = dwStore ? 1 : 0;
+    k3.flip = a.flipFilter != 0 ? 1 : 0;
+    k3.dwk = cg * problem.taps;
+    k3.dwtap = problem.filterChannelsLast ? cg : 1;
 
     auto& r = launch.reduce;
     r.elems = a.k * cg * problem.taps;
@@ -848,7 +862,7 @@ std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects:
     {
         defines.emplace_back("CONV_K3_ATOM", std::string(kernelType));
     }
-    const std::array<std::pair<const char*, int64_t>, 18> fields{{{"LOOP", config.loop},
+    const std::array<std::pair<const char*, int64_t>, 19> fields{{{"LOOP", config.loop},
                                                                   {"LAYOUT", config.layout},
                                                                   {"BK", config.bk},
                                                                   {"BC", config.bc},
@@ -865,7 +879,8 @@ std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects:
                                                                   {"XCD", config.xcd},
                                                                   {"ALIGN", config.align},
                                                                   {"NS", config.ns},
-                                                                  {"WQ", config.wq}}};
+                                                                  {"WQ", config.wq},
+                                                                  {"DWS", config.dws}}};
     for(const auto& [name, value] : fields)
     {
         defines.emplace_back(std::string("CONV_K3_") + name, std::to_string(value));

@@ -140,6 +140,97 @@ __device__ inline void accumulateTaps(float (&sum)[TAPS],
         }
     }
 }
+
+/// Output columns per register strip of the unit-stride, undilated width path.
+#ifndef CONV_DW_STRIP
+#define CONV_DW_STRIP 8
+#endif
+constexpr int STRIP = CONV_DW_STRIP;
+
+/// Output row `row` (n, oz, oy) of channel c at width stride 1 and dilation 1, columns from
+/// oxBegin to the row's end in strips of STRIP columns, oxStep apart: the strip's dy values
+/// and, per filter row, the STRIP + KW - 1 x values under it sit in registers, so each x
+/// element is read once per filter row (not once per tap) and offsets are formed per row, not
+/// per tap.
+__device__ inline void accumulateStrips(float (&sum)[TAPS],
+                                        const ElementType* x,
+                                        const ElementType* dy,
+                                        int row,
+                                        int c,
+                                        int oxBegin,
+                                        int oxStep,
+                                        const ConvDepthwiseValuWrwArgs& a)
+{
+    constexpr int SPAN = STRIP + CONV_DW_KW - 1;
+    const int oy = row % a.ho;
+    const int oz = (row / a.ho) % a.dOut;
+    const int n = row / (a.ho * a.dOut);
+    const long cs = CONV_DW_LAYOUT == 0 ? a.c : 1; // element stride of a column
+    const ElementType* dyRow = dy + offsetOf(n, c, oz, oy, 0, a.c, a.dOut, a.ho, a.wo);
+    // Filter rows (kz, ky) outside x read a clamped row and count zero: no branches, so every
+    // load of a strip issues before its first FMA.
+    constexpr int FROWS = CONV_DW_KD * CONV_DW_KH;
+    const ElementType* xRows[FROWS];
+    bool rowInside[FROWS];
+#pragma unroll
+    for(int kz = 0; kz < CONV_DW_KD; ++kz)
+    {
+#pragma unroll
+        for(int ky = 0; ky < CONV_DW_KH; ++ky)
+        {
+            const int iz = oz * a.sd - a.pd + kz * a.dd;
+            const int iy = oy * a.sh - a.ph + ky * a.dh;
+            rowInside[kz * CONV_DW_KH + ky] = iz >= 0 && iz < a.di && iy >= 0 && iy < a.hi;
+            xRows[kz * CONV_DW_KH + ky] = x
+                                          + offsetOf(n,
+                                                     c,
+                                                     min(max(iz, 0), a.di - 1),
+                                                     min(max(iy, 0), a.hi - 1),
+                                                     0,
+                                                     a.c,
+                                                     a.di,
+                                                     a.hi,
+                                                     a.wi);
+        }
+    }
+    for(int ox0 = oxBegin; ox0 < a.wo; ox0 += oxStep)
+    {
+        float g[STRIP];
+#pragma unroll
+        for(int t = 0; t < STRIP; ++t)
+        {
+            const int ox = min(ox0 + t, a.wo - 1);
+            const float value = toFloat(dyRow[ox * cs]);
+            g[t] = ox0 + t < a.wo ? value : 0.0f;
+        }
+        const int ix0 = ox0 - a.pw;
+        float v[FROWS][SPAN];
+#pragma unroll
+        for(int r = 0; r < FROWS; ++r)
+        {
+#pragma unroll
+            for(int j = 0; j < SPAN; ++j)
+            {
+                const int ix = ix0 + j;
+                const float value = toFloat(xRows[r][min(max(ix, 0), a.wi - 1) * cs]);
+                v[r][j] = rowInside[r] && ix >= 0 && ix < a.wi ? value : 0.0f;
+            }
+        }
+#pragma unroll
+        for(int r = 0; r < FROWS; ++r)
+        {
+#pragma unroll
+            for(int kx = 0; kx < CONV_DW_KW; ++kx)
+            {
+#pragma unroll
+                for(int t = 0; t < STRIP; ++t)
+                {
+                    sum[r * CONV_DW_KW + kx] += g[t] * v[r][t + kx];
+                }
+            }
+        }
+    }
+}
 #endif
 
 } // namespace
@@ -203,7 +294,14 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
     {
         sum[t] = 0.0f;
     }
-    if(c < a.c)
+    if(c < a.c && a.sw == 1 && a.dw_ == 1)
+    {
+        for(int row = first + lane; row < last; row += LANES)
+        {
+            accumulateStrips(sum, x, dy, row, c, 0, STRIP, a);
+        }
+    }
+    else if(c < a.c)
     {
         for(int row = first + lane; row < last; row += LANES)
         {
@@ -281,15 +379,28 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
     {
         sum[t] = 0.0f;
     }
-    for(int p = tid; p < positions; p += BLOCK)
+    if(a.sw == 1 && a.dw_ == 1)
     {
-        const int row = first + p / a.wo;
-        const int ox = p % a.wo;
-        const int oy = row % a.ho;
-        const int oz = (row / a.ho) % a.dOut;
-        const int n = row / (a.ho * a.dOut);
-        const float g = toFloat(dy[offsetOf(n, c, oz, oy, ox, a.c, a.dOut, a.ho, a.wo)]);
-        accumulateTaps(sum, x, g, n, c, oz, oy, ox, a);
+        // A thread takes strips of STRIP columns (accumulateStrips), consecutive threads
+        // consecutive strips.
+        const int strips = (a.wo + STRIP - 1) / STRIP;
+        for(int p = tid; p < (last - first) * strips; p += BLOCK)
+        {
+            accumulateStrips(sum, x, dy, first + p / strips, c, (p % strips) * STRIP, a.wo, a);
+        }
+    }
+    else
+    {
+        for(int p = tid; p < positions; p += BLOCK)
+        {
+            const int row = first + p / a.wo;
+            const int ox = p % a.wo;
+            const int oy = row % a.ho;
+            const int oz = (row / a.ho) % a.dOut;
+            const int n = row / (a.ho * a.dOut);
+            const float g = toFloat(dy[offsetOf(n, c, oz, oy, ox, a.c, a.dOut, a.ho, a.wo)]);
+            accumulateTaps(sum, x, g, n, c, oz, oy, ox, a);
+        }
     }
 #pragma unroll
     for(int t = 0; t < TAPS; ++t)

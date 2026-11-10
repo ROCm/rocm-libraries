@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -45,7 +46,9 @@
  * (packed channels-first or channels-last), every filter-width tap of a block's filter rows
  * accumulates in registers, and the reduction over images and output positions is split over
  * blocks into fp32 partials in the workspace, which ConvWrwReduce (the same source under a
- * second entry point) adds in split order into dw: deterministic, no atomics. fp32, fp16 and
+ * second entry point) adds in split order into dw: deterministic, no atomics. At one split
+ * with dw's channels contiguous the kernel writes dw itself and neither the workspace nor the
+ * reduce is used (WrwLaunch::dwStore). fp32, fp16 and
  * bf16; shapes are runtime, a config fixes the tile, the loop and the filter width, its stride
  * and dilation. Every config is admitted on correctness alone (wrwLaunchFor); autotune, and UHD
  * once trained, ranks them.
@@ -103,6 +106,7 @@ WrwConfig configOf(const KernelDefinition& kernel)
     config.align = kernel.getIntMetadata("align");
     config.ns = kernel.getIntMetadata("ns");
     config.wq = kernel.getIntMetadata("wq");
+    config.dws = kernel.getIntMetadata("dws");
     config.bpu = kernel.getIntMetadata("bpu");
     return config;
 }
@@ -185,8 +189,9 @@ const std::vector<KernelArgument>& reduceSignature()
 class PreparedConvWrw : public IngestorPreparedDispatch
 {
 public:
+    /// @p reduce is empty when the kernel writes dw itself (WrwLaunch::dwStore).
     PreparedConvWrw(IngestorKernelCode wrw,
-                    IngestorKernelCode reduce,
+                    std::optional<IngestorKernelCode> reduce,
                     const WrwLaunch& launch,
                     const WrwProblem& problem)
         : _wrw(std::move(wrw))
@@ -209,9 +214,14 @@ public:
         return _wrw.kernelForStream(stream);
     }
 
+    bool hasReduce() const
+    {
+        return _reduce.has_value();
+    }
+
     compilation::IRunnableKernel& reduceForStream(hipStream_t stream) const
     {
-        return _reduce.kernelForStream(stream);
+        return _reduce->kernelForStream(stream);
     }
 
     void argsFor(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
@@ -228,11 +238,12 @@ public:
         reduce.partial = static_cast<const float*>(workspace);
         reduce.dw
             = hipdnn_plugin_sdk::findDeviceBuffer(_dwUid, deviceBuffers, numDeviceBuffers).ptr;
+        args.dwOut = reduce.dw;
     }
 
 private:
     IngestorKernelCode _wrw;
-    IngestorKernelCode _reduce;
+    std::optional<IngestorKernelCode> _reduce;
     K3Args _args;
     K3ReduceArgs _reduceArgs;
     int64_t _xUid;
@@ -287,16 +298,20 @@ public:
 
         auto wrw = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, wrwSignature());
-        KernelDefinition reduceKernel = kernel;
-        // The reduce is the same source under another entry point.
-        reduceKernel.source.entryPoint
-            = std::string(launch->reduce.rows != 0 ? REDUCE_ROWS_ENTRY_POINT : REDUCE_ENTRY_POINT);
-        auto reduce = buildIngestorKernelCode(
-            _kernelCompiler, _kpackLoader, context, reduceKernel, options, reduceSignature());
+        std::optional<IngestorKernelCode> reduce;
+        if(!launch->dwStore)
+        {
+            KernelDefinition reduceKernel = kernel;
+            // The reduce is the same source under another entry point.
+            reduceKernel.source.entryPoint = std::string(
+                launch->reduce.rows != 0 ? REDUCE_ROWS_ENTRY_POINT : REDUCE_ENTRY_POINT);
+            reduce = buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, reduceKernel, options, reduceSignature());
+            reduce->setBlockSize(launch->reduceBlock, 1, 1);
+            reduce->setGridSize(launch->reduceGrid, 1, 1);
+        }
         wrw.setBlockSize(launch->block, 1, 1);
         wrw.setGridSize(launch->gridX, launch->gridY, launch->gridZ);
-        reduce.setBlockSize(launch->reduceBlock, 1, 1);
-        reduce.setGridSize(launch->reduceGrid, 1, 1);
         return std::make_unique<PreparedConvWrw>(
             std::move(wrw), std::move(reduce), *launch, *problem);
     }
@@ -307,18 +322,21 @@ public:
                 uint32_t numDeviceBuffers,
                 void* workspace) const override
     {
-        if(workspace == nullptr)
+        const auto& dispatch = dynamic_cast<const PreparedConvWrw&>(prepared);
+        if(dispatch.hasReduce() && workspace == nullptr)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM, "conv_wrw needs its partial-sum workspace");
         }
-        const auto& dispatch = dynamic_cast<const PreparedConvWrw&>(prepared);
         K3Args args{};
         K3ReduceArgs reduce{};
         dispatch.argsFor(deviceBuffers, numDeviceBuffers, workspace, args, reduce);
         const auto stream = handle.getStream();
         dispatch.wrwForStream(stream).launch(stream, args);
-        dispatch.reduceForStream(stream).launch(stream, reduce);
+        if(dispatch.hasReduce())
+        {
+            dispatch.reduceForStream(stream).launch(stream, reduce);
+        }
     }
 
 private:
