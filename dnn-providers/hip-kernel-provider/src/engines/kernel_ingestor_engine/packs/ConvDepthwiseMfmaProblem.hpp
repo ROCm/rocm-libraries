@@ -63,9 +63,10 @@ int64_t mfmaLdsBytes(const MfmaConfig& config);
 
 /**
  * @brief Whether a device @p gcnArchName (features intact) runs @p atom's MFMA in the element
- *        type (@p bf16 or fp16): 32 on gfx950; 16 on gfx908 (fp16 only), gfx90a, gfx94x, gfx950.
+ *        type (@p bf16 or fp16) for @p layout's core: 32 on gfx950, and on gfx94x as the 2:4-sparse
+ *        MFMA for NHWC; 16 on gfx908 (fp16 only), gfx90a, gfx94x, gfx950.
  */
-bool mfmaRunsOn(int64_t atom, std::string_view gcnArchName, bool bf16);
+bool mfmaRunsOn(int64_t atom, std::string_view gcnArchName, bool bf16, std::string_view layout);
 
 /**
  * @brief The launch of @p config on @p problem, or nullopt when the config does not compute it

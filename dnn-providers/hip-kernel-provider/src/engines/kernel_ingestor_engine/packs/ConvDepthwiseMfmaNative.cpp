@@ -194,7 +194,8 @@ std::optional<MfmaLaunch> launchOf(const MatchContext& context, const KernelDefi
         if(!conv_depthwise_mfma::mfmaRunsOn(config.atom,
                                             context.deviceProperties.gcnArchName,
                                             problem->base.dataType
-                                                == data_objects::DataType::BFLOAT16))
+                                                == data_objects::DataType::BFLOAT16,
+                                            config.layout))
         {
             return std::nullopt;
         }

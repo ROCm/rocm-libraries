@@ -287,7 +287,17 @@ TEST(TestConvDepthwiseMfmaKernelMatch, AtomGatesTheDevice)
     Fields x16;
     x16.config.atom = 16;
     EXPECT_TRUE(admits(x32, baseShape(), "gfx950"));
-    EXPECT_FALSE(admits(x32, baseShape(), "gfx942:sramecc+:xnack-"));
+    // gfx94x runs K = 32 as the sparse MFMA: the NHWC core's taps compress, the NCHW core's
+    // dense input does not.
+    for(const std::string arch : {"gfx942:sramecc+:xnack-", "gfx941", "gfx940"})
+    {
+        EXPECT_TRUE(admits(x32, baseShape(), arch)) << arch;
+    }
+    Fields x32First = x32;
+    x32First.config.layout = "NCHW";
+    EXPECT_TRUE(admits(x32First, channelsFirst(), "gfx950"));
+    EXPECT_FALSE(admits(x32First, channelsFirst(), "gfx942"));
+    EXPECT_FALSE(admits(x32, baseShape(), "gfx90a"));
     for(const std::string arch : {"gfx950", "gfx942", "gfx941", "gfx940", "gfx90a", "gfx908"})
     {
         EXPECT_TRUE(admits(x16, baseShape(), arch)) << arch;

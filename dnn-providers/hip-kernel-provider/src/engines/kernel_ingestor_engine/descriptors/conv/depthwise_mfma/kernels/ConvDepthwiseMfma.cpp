@@ -130,6 +130,36 @@ struct Atom
     }
 };
 
+// gfx94x has no dense 16x16x32 MFMA but a 2:4-sparse one (v_smfmac_f32_16x16x32): the
+// channel-diagonal taps hold at most one nonzero per 4 channels, so they compress exactly.
+#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#define CONV_DWM_SPARSE32 1
+#else
+#define CONV_DWM_SPARSE32 0
+#endif
+
+/// D += A B with A 2:4-compressed (4 values a lane, 2-bit positions in idx), B 16 x ... dense.
+template <class T>
+__device__ inline f4 smfmac32(T __attribute__((ext_vector_type(4))) a,
+                              T __attribute__((ext_vector_type(8))) b,
+                              f4 c,
+                              int idx)
+{
+#if CONV_DWM_SPARSE32
+    if constexpr(__is_same(T, _Float16))
+        return __builtin_amdgcn_smfmac_f32_16x16x32_f16(a, b, c, idx, 0, 0);
+    else
+    {
+        typedef short s4 __attribute__((ext_vector_type(4)));
+        typedef short s8 __attribute__((ext_vector_type(8)));
+        return __builtin_amdgcn_smfmac_f32_16x16x32_bf16(
+            __builtin_bit_cast(s4, a), __builtin_bit_cast(s8, b), c, idx, 0, 0);
+    }
+#endif
+    __builtin_trap();
+    return c;
+}
+
 /// Waits for this block's LDS traffic only (no vmcnt drain), then barriers.
 __device__ inline void ldsBarrier()
 {
@@ -181,7 +211,18 @@ __device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
     const int pos = (g * KPL) >> 3, chOff = (g * KPL) & 7;
 
     // Taps: one one-hot diagonal fragment per filter row and pass.
-    frag A[KH][KWP];
+    // Sparse (gfx94x, 16x16x32): the lane's 8 channels are two groups of 4 with the tap in
+    // group kc / 4 at t = kc % 4; each group compresses to 2 values at ascending 2-bit
+    // positions: (t, t + 1) with the tap first, or (2, 3) with it second for t = 3; the other
+    // group holds zeros at (0, 1).
+    constexpr bool SPARSE = KA == 32 && CONV_DWM_SPARSE32;
+    typedef T c4 __attribute__((ext_vector_type(4)));
+    frag A[SPARSE ? 1 : KH][SPARSE ? 1 : KWP];
+    c4 As[SPARSE ? KH : 1][SPARSE ? KWP : 1];
+    const int tg = kc & 3, lo = tg == 3 ? 2 : tg;
+    const int tapPair = lo | (lo + 1) << 2, zeroPair = 0 | 1 << 2;
+    const int Ai = kc < 4 ? (tapPair | zeroPair << 4) : (zeroPair | tapPair << 4);
+    const int slotInGroup = tg == 3 ? 1 : 0;
 #pragma unroll
     for(int r = 0; r < KH; ++r)
 #pragma unroll
@@ -192,9 +233,19 @@ __device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
             if(s >= 0 && s < KW && kc >= chOff && kc < chOff + KPL)
                 v = w[((long)(c0 + kc) * KH + (FLIP ? KH - 1 - r : r)) * KW
                       + (FLIP ? KW - 1 - s : s)];
+            if constexpr(SPARSE)
+            {
+                const T z = (T)0.0f;
+                c4 a4 = c4{z, z, z, z};
+                a4[(kc < 4 ? 0 : 2) + slotInGroup] = v;
+                As[r][ph] = a4;
+            }
+            else
+            {
 #pragma unroll
-            for(int e = 0; e < KPL; ++e)
-                A[r][ph][e] = chOff + e == kc ? v : (T)0.0f;
+                for(int e = 0; e < KPL; ++e)
+                    A[r][ph][e] = chOff + e == kc ? v : (T)0.0f;
+            }
         }
 
     // One buffer resource over the block's FOLD images (the host bounds their bytes by 2^31 - 1,
@@ -320,7 +371,12 @@ __device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
                 const int slot = (t - r + BIAS) / S % RING;
 #pragma unroll
                 for(int ph = 0; ph < KWP; ++ph)
-                    acc[slot] = Am::mma(A[r][ph], bf[ph], acc[slot]);
+                {
+                    if constexpr(SPARSE)
+                        acc[slot] = smfmac32<T>(As[r][ph], bf[ph], acc[slot], Ai);
+                    else
+                        acc[slot] = Am::mma(A[r][ph], bf[ph], acc[slot]);
+                }
             }
             // A completed output row goes to the LDS row of its parity.
             if((t - (KH - 1) + BIAS) % S == 0)

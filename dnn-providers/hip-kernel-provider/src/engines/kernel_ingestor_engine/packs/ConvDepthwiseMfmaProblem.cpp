@@ -50,12 +50,15 @@ int64_t mfmaLdsBytes(const MfmaConfig& config)
     return 2 * (columns + 32) * config.waves * 16;
 }
 
-bool mfmaRunsOn(int64_t atom, std::string_view gcnArchName, bool bf16)
+bool mfmaRunsOn(int64_t atom, std::string_view gcnArchName, bool bf16, std::string_view layout)
 {
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
     if(atom == 32)
     {
-        return arch == "gfx950";
+        // gfx94x runs K = 32 as the 2:4-sparse MFMA: the channel-diagonal taps (NHWC) compress,
+        // the channel-pair core's dense input operand (NCHW) does not.
+        return arch == "gfx950"
+               || (layout == "NHWC" && (arch == "gfx940" || arch == "gfx941" || arch == "gfx942"));
     }
     if(atom == 16)
     {
