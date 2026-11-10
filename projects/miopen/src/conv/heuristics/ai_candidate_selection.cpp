@@ -1664,11 +1664,12 @@ ModelSelectBestCandidate(const std::string& arch,
     }
 }
 
-MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>>
-SelectBestVocabCandidate(const std::string& arch,
-                         const std::string& solver,
-                         const std::map<std::string, float>& features,
-                         const std::function<bool(const std::string&, int)>& is_args_supported)
+MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>> SelectBestVocabCandidate(
+    const std::string& arch,
+    const std::string& solver,
+    const std::map<std::string, float>& features,
+    bool use_tf32,
+    const std::function<bool(const std::string&, int, bool)>& is_args_supported)
 {
     // MIOPEN_DEBUG_LGBM_ONLY turns the two-tower model off; the lazy path is that model, so bypass
     // it here (mirrors ModelSelectBestCandidate) -> caller falls to the solver's non-AI default.
@@ -1726,35 +1727,51 @@ SelectBestVocabCandidate(const std::string& arch,
         // of the old ~200 ms enumeration we replaced (ideally one check instead of ~thousands).
         const miopen::ScopedTimeLogger check_timer(solver +
                                                    " lazy_applicability.is_args_supported");
-        int checks = 0;
-        for(const auto& [idx, score] : scored)
+        // One top-down pass over the ranked vocabulary. fp32_pass selects the TF32 instance set
+        // (false) or the FP32 fallback set (true); the ranking is computed once and reused.
+        const auto walk = [&](bool fp32_pass) -> std::optional<std::pair<std::string, int>> {
+            int checks = 0;
+            for(const auto& [idx, score] : scored)
+            {
+                if(idx < 0 || static_cast<std::size_t>(idx) >= vocab.size())
+                    continue;
+                const std::string& kernel_id = vocab[idx].first;
+                const int split_k            = split_k_of(kernel_id);
+                // Hand the check the bare GetTypeString; the caller's ck_validator re-appends
+                // "+<split_k>" for split-k solvers only. Return the same bare string.
+                std::string base = kernel_id;
+                {
+                    const auto gt   = kernel_id.rfind('>');
+                    const auto plus = kernel_id.find('+', gt == std::string::npos ? 0 : gt);
+                    if(plus != std::string::npos)
+                        base = kernel_id.substr(0, plus);
+                }
+                ++checks;
+                if(is_args_supported(base, split_k, fp32_pass))
+                {
+                    MIOPEN_LOG_I2("Lazy-applicability selected: "
+                                  << base << " (split_k=" << split_k << ", score=" << score
+                                  << ", fp32_pass=" << fp32_pass << ") after " << checks
+                                  << " applicability check(s) of " << vocab.size() << " vocab");
+                    return std::make_pair(base, split_k);
+                }
+            }
+            return std::nullopt;
+        };
+
+        // First walk against the TF32 instance set (or, for non-TF32 problems, the only set); a
+        // TF32 request falls back to the FP32 set only if no TF32 kernel applies, mirroring the
+        // enumeration path (FillValidKernels TF32-first, FP32 on empty).
+        if(auto hit = walk(/*fp32_pass=*/false))
+            return hit;
+        if(use_tf32)
         {
-            if(idx < 0 || static_cast<std::size_t>(idx) >= vocab.size())
-                continue;
-            const std::string& kernel_id = vocab[idx].first;
-            const int split_k            = split_k_of(kernel_id);
-            // Hand the check the bare GetTypeString; the caller's ck_validator re-appends
-            // "+<split_k>" for split-k solvers only. Return the same bare string.
-            std::string base = kernel_id;
-            {
-                const auto gt   = kernel_id.rfind('>');
-                const auto plus = kernel_id.find('+', gt == std::string::npos ? 0 : gt);
-                if(plus != std::string::npos)
-                    base = kernel_id.substr(0, plus);
-            }
-            ++checks;
-            if(is_args_supported(base, split_k))
-            {
-                MIOPEN_LOG_I2("Lazy-applicability selected: "
-                              << base << " (split_k=" << split_k << ", score=" << score
-                              << ") after " << checks << " applicability check(s) of "
-                              << vocab.size() << " vocab");
-                return std::make_pair(base, split_k);
-            }
+            if(auto hit = walk(/*fp32_pass=*/true))
+                return hit;
         }
         MIOPEN_LOG_I2("Lazy-applicability: none of " << vocab.size() << " vocab applicable for "
-                                                     << solver << " on " << arch << " (" << checks
-                                                     << " checks); -> solver non-AI default");
+                                                     << solver << " on " << arch
+                                                     << "; -> solver non-AI default");
         return std::nullopt;
     }
     catch(const std::exception& ex)

@@ -108,7 +108,9 @@ MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>> SelectBestVoc
     const std::string& arch,
     const std::string& solver,
     const std::map<std::string, float>& features,
-    const std::function<bool(const std::string& kernel_id, int split_k)>& is_args_supported);
+    bool use_tf32,
+    const std::function<bool(const std::string& base, int split_k, bool fp32_pass)>&
+        is_args_supported);
 
 /// Expands problem features into the vector consumed by the input_encoder submodel.
 /// Produces the engineered features consumed by the input_encoder submodel for 2D and 3D models.

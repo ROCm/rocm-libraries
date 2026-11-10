@@ -442,15 +442,15 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
             // own is_args_supported lambda. SelectBestVocabCandidate returns the bare
             // GetTypeString.
             auto ck_validator = ck_val_creator(problem);
-            auto lazy_check   = [&](const std::string& base, int split_k) -> bool {
+            auto lazy_check   = [&](const std::string& base, int split_k, bool fp32_pass) -> bool {
                 if(is_deterministic && solver_cfg.uses_split_k && split_k != 1)
                     return false;
                 if(!solver_cfg.IsValidSplitK(split_k))
                     return false;
-                return ck_validator(base, split_k);
+                return ck_validator(base, split_k, fp32_pass);
             };
             auto lazy = ai::tuning::candidate_selection::SelectBestVocabCandidate(
-                arch, solver_name, fp_features, lazy_check);
+                arch, solver_name, fp_features, use_tf32, lazy_check);
             if(lazy)
             {
                 const std::string& base = lazy->first;

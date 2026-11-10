@@ -258,12 +258,15 @@ inline auto MakeCKValidatorCreator(const CkImplLibLoader& loader,
 {
     return [&loader, solver_type, data_type, use_tf32, uses_split_k](
                const miopen::conv::ProblemDescription& p) {
-        return [&loader, solver_type, data_type, use_tf32, uses_split_k, &p](const std::string& kid,
-                                                                             int sk) {
+        return [&loader, solver_type, data_type, use_tf32, uses_split_k, &p](
+                   const std::string& kid, int sk, bool fp32_pass) {
             // Split-k solvers key their instances on "<base>+<split_k>"; non-split solvers key on
             // the bare type string, so appending a suffix there would miss every instance.
             const std::string combined_id = uses_split_k ? (kid + "+" + std::to_string(sk)) : kid;
-            return loader.IsArgsSupported(solver_type, p, combined_id, data_type, use_tf32);
+            // Two-pass TF32: the first pass checks the TF32 instance set (use_tf32); the FP32
+            // fallback pass re-checks the same candidates against the FP32 set.
+            const bool tf32 = use_tf32 && !fp32_pass;
+            return loader.IsArgsSupported(solver_type, p, combined_id, data_type, tf32);
         };
     };
 }
