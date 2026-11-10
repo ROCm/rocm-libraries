@@ -642,8 +642,9 @@ namespace rocalution
 
         *nnz_ell = dst->max_row * nrow;
 
-        // Limit ELL size to 5 times CSR nnz
-        if(dst->max_row > 5 * (nnz / nrow))
+        // Limit ELL size to 5 times CSR nnz. Rows with duplicate entries can be wider
+        // than the matrix, the HIP backend cannot hold such an ELL matrix.
+        if(dst->max_row > 5 * (nnz / nrow) || dst->max_row > ncol)
         {
             return false;
         }

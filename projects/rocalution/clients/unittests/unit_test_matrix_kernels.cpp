@@ -887,6 +887,43 @@ TYPED_TEST(matrix_kernels_hip_conversion, ell_and_dia_reject_oversized_matrices)
     expect_matrix(*hyb, Format{rocalution::HYB, 1}, ref);
 }
 
+// A row with duplicate entries can be longer than the matrix is wide, which no ELL
+// matrix of rocSPARSE can hold. ELL rejects it on both backends, so that the
+// LocalMatrix fallback to CSR does not end the program when it moves the matrix
+// back to the accelerator.
+TYPED_TEST(matrix_kernels_hip_conversion, ell_rejects_rows_longer_than_the_matrix_is_wide)
+{
+    using T = typename TypeParam::value_type;
+
+    // Column 0 twice in the first row, which stays within 5 times the CSR storage
+    const int n = 4;
+    Csr<T>    ref(n);
+    ref.add(0, static_cast<T>(1));
+    for(int j = 0; j < n; ++j)
+    {
+        ref.add(j, static_cast<T>(j + 2));
+    }
+    ref.end_row();
+    for(int i = 1; i < n; ++i)
+    {
+        ref.add(i, static_cast<T>(i + 1));
+        ref.end_row();
+    }
+    EXPECT_GT(longest_row(ref), n);
+    EXPECT_LE(longest_row(ref), 5 * (ref.nnz() / n));
+
+    auto csr = make_matrix(Backend::Accelerator, Format{rocalution::CSR, 1}, *ref.host_csr());
+    ASSERT_NE(csr, nullptr);
+
+    auto X = empty_matrix<T>(Backend::Accelerator, Format{rocalution::ELL, 1});
+    EXPECT_FALSE(X->ConvertFrom(*csr));
+    EXPECT_EQ(X->GetNnz(), 0);
+
+    auto H = empty_matrix<T>(Backend::Host, Format{rocalution::ELL, 1});
+    EXPECT_FALSE(H->ConvertFrom(*ref.host_csr()));
+    EXPECT_EQ(H->GetNnz(), 0);
+}
+
 TEST(matrix_kernels_hip_conversion, bcsr_requires_dimensions_divisible_by_the_block_dimension)
 {
     REQUIRE_BACKEND(Backend::Accelerator);

@@ -568,8 +568,9 @@ namespace rocalution
                                        &data_type);
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
-            // Limit ELL size to 5 times CSR nnz
-            if(ell_width > 5 * (nnz / nrow))
+            // Limit ELL size to 5 times CSR nnz. Rows with duplicate entries can be wider
+            // than the matrix, rocsparse rejects ELL descriptors with such a width.
+            if(ell_width > 5 * (nnz / nrow) || ell_width > ncol)
             {
                 return false;
             }
