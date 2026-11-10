@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -317,7 +317,10 @@ void testing_csrcolor(const Arguments& argus)
                 if(row != col)
                 {
                     int col_color = hcoloring[col];
-                    unit_check_condition(row_color != col_color);
+                    EXPECT_HIPSPARSE_STATUS((row_color != col_color)
+                                                ? HIPSPARSE_STATUS_SUCCESS
+                                                : HIPSPARSE_STATUS_INTERNAL_ERROR,
+                                            HIPSPARSE_STATUS_SUCCESS);
                 }
             }
         }
@@ -327,7 +330,10 @@ void testing_csrcolor(const Arguments& argus)
         for(size_t i = 0; i < hcoloring.size(); ++i)
         {
             // Check value is well defined.
-            unit_check_condition(hcoloring[i] >= 0 && hcoloring[i] < m);
+            EXPECT_HIPSPARSE_STATUS((hcoloring[i] >= 0 && hcoloring[i] < m)
+                                        ? HIPSPARSE_STATUS_SUCCESS
+                                        : HIPSPARSE_STATUS_INTERNAL_ERROR,
+                                    HIPSPARSE_STATUS_SUCCESS);
 
             // Calculate maximum value.
             if(hcoloring[i] > max_value)
@@ -346,7 +352,9 @@ void testing_csrcolor(const Arguments& argus)
 
         for(int i = 0; i < max_value; ++i)
         {
-            unit_check_condition(marker[i]);
+            EXPECT_HIPSPARSE_STATUS(marker[i] ? HIPSPARSE_STATUS_SUCCESS
+                                              : HIPSPARSE_STATUS_INTERNAL_ERROR,
+                                    HIPSPARSE_STATUS_SUCCESS);
         }
 #endif
     }

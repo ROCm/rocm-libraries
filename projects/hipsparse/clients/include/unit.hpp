@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,13 +46,6 @@
 // a wrapper will cause the loop keep going
 template <typename T>
 void unit_check_general(int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU);
-
-// Throws, including the expression and source location, so a failed check
-// unwinds the test instead of returning from this helper.
-void throw_if_condition_failed(bool condition, const char* expression, const char* file, int line);
-
-#define unit_check_condition(condition) \
-    throw_if_condition_failed(static_cast<bool>(condition), #condition, __FILE__, __LINE__)
 
 // Element-wise "approximately equal" check:
 // |hCPU - hGPU| <= max(atol, rtol * |hCPU|)

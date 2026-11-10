@@ -317,6 +317,31 @@ inline void log_if_hipsparse_error(const char* call, hipsparseStatus_t status)
 #define CHECK_HIP_ERROR(ERROR) throw_if_hip_error(#ERROR, (ERROR), __FILE__, __LINE__)
 #define CHECK_HIPSPARSE_ERROR(ERROR) throw_if_hipsparse_error(#ERROR, (ERROR), __FILE__, __LINE__)
 
+// EXPECT_HIPSPARSE_STATUS
+#ifdef GOOGLE_TEST
+#define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)                                                 \
+    do                                                                                           \
+    {                                                                                            \
+        hipsparseStatus_t expect_hipsparse_status_status_ = (STATUS);                            \
+        hipsparseStatus_t expect_hipsparse_status_expect_ = (EXPECT);                            \
+        ASSERT_EQ(expect_hipsparse_status_status_, expect_hipsparse_status_expect_)              \
+            << "received " << hipsparseStatusToString(expect_hipsparse_status_status_)           \
+            << ", expected " << hipsparseStatusToString(expect_hipsparse_status_expect_) << "."; \
+    } while(0)
+#else
+#define EXPECT_HIPSPARSE_STATUS2(status, expect)                                            \
+    if(status != expect)                                                                    \
+    {                                                                                       \
+        std::cerr << "hipSPARSE status error: Expected " << hipsparseStatusToString(expect) \
+                  << ", received " << hipsparseStatusToString(status) << std::endl;         \
+        if(expect == HIPSPARSE_STATUS_SUCCESS)                                              \
+        {                                                                                   \
+            exit(EXIT_FAILURE);                                                             \
+        }                                                                                   \
+    }
+#endif
+#define EXPECT_HIPSPARSE_STATUS(STATUS, EXPECT) EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)
+
 inline void
     throw_on_generate_matrix_error(const char* call, bool generated, const char* file, int line)
 {
