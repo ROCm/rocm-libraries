@@ -167,6 +167,8 @@ using TestGpuFlydslSdpaBwdMergedNanBiasBfp16 = TestGpuFlydslSdpaBwdMergedLowestF
 using TestGpuFlydslSdpaBwdMergedNanBiasFp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitNanBiasBfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitNanBiasFp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasF32Bfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasF32Fp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasBfp16
     = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
 using TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasFp16
@@ -310,7 +312,7 @@ BwdCase lowestFiniteBiasCase(DataType dtype)
 /// dK/dV exponent clamp that turns a NaN exponent into 0 gives P = 1 there and finite dK and dV
 /// at key 7, where the reference is NaN. The graph is biasCase's (a dense bias with its gradient);
 /// it selects the 32-row dK/dV object, and TestFlydslSdpaBwdObjectsPerObject.cpp runs the NaN on the
-/// biased 16-row dkdv and merged objects, which carry their own copy of the clamp.
+/// biased dkdv and merged objects that pin `mfma_rows = 16`, which carry their own copy of the clamp.
 BwdCase nanBiasCase(DataType dtype)
 {
     BwdCase c = biasCase(dtype);
@@ -357,6 +359,15 @@ BwdCase f32BiasCase(DataType dtype, bool dbias, BwdBiasFill fill = BwdBiasFill::
         c.seqQ = 200;
         c.seqKv = 300;
     }
+    return c;
+}
+
+/// `nanBiasCase` with a FLOAT bias beside the 16-bit Q: the f32-bias dK/dV object carries the same
+/// exponent clamp, so a NaN at query row 5, key 7 must reach dK and dV there.
+BwdCase f32NanBiasCase(DataType dtype)
+{
+    BwdCase c = f32BiasCase(dtype, true);
+    c.nanBiasAt = std::pair<int64_t, int64_t>{5, 7};
     return c;
 }
 
@@ -692,6 +703,16 @@ TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasBfp16, PropagatesToDkAndDv)
 TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasFp16, PropagatesToDkAndDv)
 {
     expectCase(SPLIT_ENGINE, nanBiasCase(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasF32Bfp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, f32NanBiasCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasF32Fp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, f32NanBiasCase(DataType::HALF));
 }
 
 TEST_F(TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasFp16, GradientsAreFiniteAndMatchTheReference)
