@@ -134,9 +134,10 @@ def configMarks(filepath, rootDir, availableArchs, deviceTags=()):
 
     # A TensileLite config is a mapping (GlobalParameters/BenchmarkProblems/...).
     # Top-level sequences are library logic YAMLs (e.g. characterization data
-    # files), which are not standalone run.py configs. Signal the caller to
-    # skip them rather than crashing on doc["BenchmarkProblems"].
-    if not isinstance(doc, dict):
+    # files), and mappings without BenchmarkProblems are unit-test data files;
+    # neither is a standalone run.py config. Signal the caller to skip them
+    # rather than crashing on doc["BenchmarkProblems"].
+    if not isinstance(doc, dict) or "BenchmarkProblems" not in doc:
         return None
 
     if "TestParameters" in doc:
