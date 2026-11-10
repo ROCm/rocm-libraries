@@ -29,6 +29,9 @@ enum PointwiseOps
     POINTWISE_BINARY_OP_RELU_BWD = 14,
 };
 
+// Maximum number of dimensions the kernels support
+constexpr int POINTWISE_MAX_DIMS = 5;
+
 struct PointwiseUnaryArgs
 {
     // IO tensors
@@ -38,12 +41,12 @@ struct PointwiseUnaryArgs
     // Number of elements in output buffer
     long long size;
 
-    // Broadcasting metadata, max 5 dimensions supported
+    // Broadcasting metadata
     int nDim;
     // NOLINTBEGIN(modernize-avoid-c-arrays)
-    long long outputDims[5];
-    long long inputStrides[5];
-    long long outputStrides[5];
+    long long outputDims[POINTWISE_MAX_DIMS];
+    long long inputStrides[POINTWISE_MAX_DIMS];
+    long long outputStrides[POINTWISE_MAX_DIMS];
     // NOLINTEND(modernize-avoid-c-arrays)
 
     // Activation operation parameters
@@ -63,13 +66,13 @@ struct PointwiseBinaryArgs
     // Number of elements in output buffer
     long long size;
 
-    // Broadcasting metadata, max 5 dimensions supported
+    // Broadcasting metadata
     int nDim;
     // NOLINTBEGIN(modernize-avoid-c-arrays)
-    long long outputDims[5];
-    long long input0Strides[5];
-    long long input1Strides[5];
-    long long outputStrides[5];
+    long long outputDims[POINTWISE_MAX_DIMS];
+    long long input0Strides[POINTWISE_MAX_DIMS];
+    long long input1Strides[POINTWISE_MAX_DIMS];
+    long long outputStrides[POINTWISE_MAX_DIMS];
     // NOLINTEND(modernize-avoid-c-arrays)
 
     // Activation operation parameters

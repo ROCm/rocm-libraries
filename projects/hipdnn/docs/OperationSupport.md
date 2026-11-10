@@ -20,7 +20,7 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - Batchnorm operations (Training, Backward, Inference)
   - Fused operation graphs
   - Standalone pointwise activation
-  - Standalone pointwise binary elementwise (ADD, SUB, MUL, MAX, MIN)
+  - Standalone pointwise binary elementwise (ADD, SUB, MUL, MAX_OP, MIN_OP; the frontend spells the last two MAX and MIN)
 
 - **[hipBLASLt Provider Plugin](../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)** - Integration with AMD's hipBLASLt library that provides optimized GEMM operations.
   - Stand-alone Matmul (FP32/FP16/BF16 inputs and outputs, with optional fused bias and activation)
@@ -42,6 +42,29 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - Used as the oracle for graph-only integration test bundles
   - Supports a subset of the CPU operations (e.g. Convolution forward, Batchnorm forward, Layernorm, RMSNorm, Reduction, SDPA forward, Matmul, Pointwise)
   - Not intended for performance or production use
+
+> [!NOTE]
+> The CPU and GPU references do not accept the same pointwise graphs:
+>
+> - **Modes.** Only the CPU reference takes `MAX_OP`, `MIN_OP`, `CMP_GT` and `BINARY_SELECT`. Only the GPU
+>   reference takes `IDENTITY`.
+> - **Mixed datatypes.** Only the CPU reference takes an FP32 operand beside a 16-bit one, and FP16 or BFP16
+>   compute types. Only the GPU reference takes unary conversions that widen a 16-bit type or go between FP16 and
+>   BFP16, and binary ops that mix FP16 with BFP16.
+> - **Compute type.** The CPU reference evaluates in `double` and rounds once to the output type, whatever the
+>   node's compute type says. The GPU reference computes in the node's compute type, which must be FP32.
+> - **Parameters.** `RELU_FWD` and `RELU_BWD` use `relu_lower_clip`, `relu_upper_clip` and
+>   `relu_lower_clip_slope`, and `SWISH_FWD` uses `swish_beta`. On any other mode a parameter makes the CPU
+>   reference throw and the GPU reference ignore it. `elu_alpha` and `softplus_beta` have no mode on either
+>   reference: the CPU reference throws when it builds the plan, the GPU reference ignores them.
+> - **Rank.** The GPU reference addresses at most 5 dimensions and declines a deeper pointwise node. The CPU
+>   reference has no rank limit and runs it.
+>
+> The full datatype tuples, parameter behavior and shape rules are in the
+> [CPU](./OperationSupport-ReferenceImpl.md#pointwise-restrictions) and
+> [GPU](../../../dnn-providers/integration-tests/docs/OperationSupport-GpuReferenceImpl.md#pointwise-modes)
+> documents. `TestPointwiseReferenceParity` (integration test project) fails when either reference gains or
+> loses a mode or datatype tuple without the difference being recorded there.
 
 ## Roadmap
 

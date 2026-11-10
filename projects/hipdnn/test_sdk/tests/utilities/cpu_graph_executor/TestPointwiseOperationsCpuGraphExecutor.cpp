@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <unordered_map>
+#include <vector>
 
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
@@ -15,6 +16,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
@@ -610,4 +612,147 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
         }
         EXPECT_FLOAT_EQ(dalpha.getHostValue(0, channel, 0, 0), expectedDalpha[channelIndex]);
     }
+}
+
+namespace
+{
+
+// Calls `visit` with every logical index of a tensor of shape `dims` and its row-major position.
+template <typename Visit>
+void forEachIndex(const std::vector<int64_t>& dims, Visit visit)
+{
+    size_t total = 1;
+    for(const int64_t dim : dims)
+    {
+        total *= static_cast<size_t>(dim);
+    }
+
+    std::vector<int64_t> index(dims.size());
+    for(size_t position = 0; position < total; ++position)
+    {
+        size_t remaining = position;
+        for(size_t axis = dims.size(); axis-- > 0;)
+        {
+            index[axis] = static_cast<int64_t>(remaining % static_cast<size_t>(dims[axis]));
+            remaining /= static_cast<size_t>(dims[axis]);
+        }
+        visit(index, position);
+    }
+}
+
+// Runs ADD or MUL over the tensors, whatever their strides, and checks every output element by
+// logical index. The inputs differ at every position, so a stride applied to the wrong tensor, or
+// ignored, gives a wrong value. The values are small integers and halves, so the results are exact
+// in FP32 whatever the executor computes in. `in1` may broadcast (dimensions of 1).
+void expectBinaryMatchesLogicalIndexing(PointwiseMode mode,
+                                        Tensor<float>& in0,
+                                        Tensor<float>& in1,
+                                        Tensor<float>& out)
+{
+    // The uids createPointwiseGraph gives the first input, the output and the second input.
+    constexpr int64_t IN0_UID = 1;
+    constexpr int64_t OUT_UID = 2;
+    constexpr int64_t IN1_UID = 3;
+
+    const auto graph = createPointwiseGraph(PointwiseGraphSpec::binary(
+        mode, in0.dims(), in0.strides(), out.dims(), out.strides(), in1.dims(), in1.strides()));
+
+    forEachIndex(in0.dims(), [&in0](const std::vector<int64_t>& index, size_t position) {
+        in0.setHostValue(static_cast<float>(position), index);
+    });
+    forEachIndex(in1.dims(), [&in1](const std::vector<int64_t>& index, size_t position) {
+        in1.setHostValue(static_cast<float>(position) * 0.5f - 1.0f, index);
+    });
+
+    const std::unordered_map<int64_t, void*> variantPack = {{IN0_UID, in0.memory().hostData()},
+                                                            {OUT_UID, out.memory().hostData()},
+                                                            {IN1_UID, in1.memory().hostData()}};
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+    executor.execute(graph.GetBufferPointer(), graph.GetSize(), variantPack);
+
+    forEachIndex(out.dims(), [&](const std::vector<int64_t>& index, size_t position) {
+        std::vector<int64_t> operandIndex(index.size());
+        for(size_t axis = 0; axis < index.size(); ++axis)
+        {
+            operandIndex[axis] = in1.dims()[axis] == 1 ? 0 : index[axis];
+        }
+        const float a = in0.getHostValue(index);
+        const float b = in1.getHostValue(operandIndex);
+        EXPECT_FLOAT_EQ(out.getHostValue(index), mode == PointwiseMode::ADD ? a + b : a * b)
+            << "at position " << position;
+    });
+}
+
+} // namespace
+
+// The layout conv and batchnorm activations use: channels last, with a per-channel operand.
+TEST(TestPointwiseOperationsCpuGraphExecutor, BinaryAddNhwcWithPerChannelOperand)
+{
+    Tensor<float> in0({2, 3, 4, 5}, TensorLayout::NHWC);
+    Tensor<float> in1({1, 3, 1, 1}, TensorLayout::NHWC);
+    Tensor<float> out({2, 3, 4, 5}, TensorLayout::NHWC);
+
+    expectBinaryMatchesLogicalIndexing(PointwiseMode::ADD, in0, in1, out);
+}
+
+// Each tensor keeps its own strides: the first input channels first, the other two channels last.
+TEST(TestPointwiseOperationsCpuGraphExecutor, BinaryAddMixedLayouts)
+{
+    Tensor<float> in0({2, 3, 4, 5}, TensorLayout::NCHW);
+    Tensor<float> in1({2, 3, 4, 5}, TensorLayout::NHWC);
+    Tensor<float> out({2, 3, 4, 5}, TensorLayout::NHWC);
+
+    expectBinaryMatchesLogicalIndexing(PointwiseMode::ADD, in0, in1, out);
+}
+
+// Rows of 5 padded to a pitch of 8 (first input) and 9 (output), as in a view into a larger buffer.
+TEST(TestPointwiseOperationsCpuGraphExecutor, BinaryMulPaddedStrides)
+{
+    const std::vector<int64_t> dims = {2, 3, 4, 5};
+    const std::vector<int64_t> paddedIn0 = {96, 32, 8, 1};
+    const std::vector<int64_t> paddedOut = {108, 36, 9, 1};
+    Tensor<float> in0(dims, paddedIn0);
+    Tensor<float> in1(dims);
+    Tensor<float> out(dims, paddedOut);
+
+    expectBinaryMatchesLogicalIndexing(PointwiseMode::MUL, in0, in1, out);
+}
+
+// A unary op that also changes layout: channels last in, channels first out.
+TEST(TestPointwiseOperationsCpuGraphExecutor, UnaryReluNhwcInputToNchwOutput)
+{
+    constexpr int64_t IN_UID = 1;
+    constexpr int64_t OUT_UID = 2;
+    Tensor<float> in({2, 3, 4, 5}, TensorLayout::NHWC);
+    Tensor<float> out({2, 3, 4, 5}, TensorLayout::NCHW);
+    const auto graph = createPointwiseGraph(PointwiseGraphSpec::unary(
+        PointwiseMode::RELU_FWD, in.dims(), in.strides(), out.dims(), out.strides()));
+
+    // 0 to 119 less 60, so ReLU sees both signs.
+    forEachIndex(in.dims(), [&in](const std::vector<int64_t>& index, size_t position) {
+        in.setHostValue(static_cast<float>(position) - 60.0f, index);
+    });
+
+    const std::unordered_map<int64_t, void*> variantPack
+        = {{IN_UID, in.memory().hostData()}, {OUT_UID, out.memory().hostData()}};
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+    executor.execute(graph.GetBufferPointer(), graph.GetSize(), variantPack);
+
+    forEachIndex(out.dims(), [&](const std::vector<int64_t>& index, size_t position) {
+        const float a = in.getHostValue(index);
+        EXPECT_FLOAT_EQ(out.getHostValue(index), a > 0.0f ? a : 0.0f) << "at position " << position;
+    });
+}
+
+// Above the GPU reference's 5-D cap (GpuReferencePointwise::MAX_DIMS), so only the CPU runs it.
+TEST(TestPointwiseOperationsCpuGraphExecutor, BinaryAddBroadcastAboveFiveDimensions)
+{
+    const std::vector<int64_t> dims = {2, 3, 2, 2, 2, 2};
+    Tensor<float> in0(dims);
+    Tensor<float> in1({1, 3, 1, 1, 1, 1});
+    Tensor<float> out(dims);
+
+    expectBinaryMatchesLogicalIndexing(PointwiseMode::ADD, in0, in1, out);
 }
