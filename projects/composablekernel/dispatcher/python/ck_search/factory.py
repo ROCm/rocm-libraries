@@ -149,6 +149,13 @@ def make_strategy(
             de = DifferentialEvolution(space, seed, init=init, **de_opts)
         return de
     if name == "tpe":
+        pool = opts.pop("candidate_pool", "sampled")
+        if pool not in ("sampled", "listed"):
+            raise ValueError("TPE candidate_pool must be sampled or listed")
+        if pool == "listed":
+            from .listed_tpe import ListedTPE
+
+            return ListedTPE(space, seed, prior=prior, init=init, **opts)
         return TPE(space, seed, prior=prior, init=init, **opts)
     if name == "gp":
         return GPEI(space, seed, prior=prior, init=init, **opts)

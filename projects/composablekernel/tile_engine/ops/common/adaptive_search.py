@@ -310,6 +310,7 @@ class SearchSettings:
     host_cache: HostCacheSettings = field(default_factory=HostCacheSettings)
     portfolio_members: Optional[tuple] = None
     build_aware: Optional[BuildAwareSettings] = None
+    tpe_candidate_pool: str = "sampled"
 
     @classmethod
     def from_json(cls, source) -> "SearchSettings":
@@ -333,6 +334,10 @@ class SearchSettings:
         names = tuple(_ck_search().STRATEGY_NAMES)
         strategy = _get(data, w, "strategy", str, ok=lambda v: v in names,
                         want=f"one of {names}")
+        tpe_pool = _get(data, w, "tpe_candidate_pool", str, "sampled",
+                        lambda v: v in ("sampled", "listed"), "sampled or listed")
+        if "tpe_candidate_pool" in data and strategy != "tpe":
+            raise SettingsError(f"{w}.tpe_candidate_pool requires strategy=tpe")
         trials = _get(data, w, "trials_per_problem", int, ok=_positive, want=">= 1")
         warm = None
         if "warm_start" in data:
@@ -418,6 +423,7 @@ class SearchSettings:
             confirm=confirm,
             portfolio_members=members,
             build_aware=build_aware,
+            tpe_candidate_pool=tpe_pool,
             measurement_policy=_get(
                 data, w, "measurement_policy", str, "full",
                 lambda v: v in MEASUREMENT_POLICIES, f"one of {MEASUREMENT_POLICIES}",
@@ -445,6 +451,8 @@ class SearchSettings:
             del d["build_aware"]
         else:
             d["build_aware"] = vars(self.build_aware).copy()
+        if self.tpe_candidate_pool == "sampled":
+            del d["tpe_candidate_pool"]
         d["host_cache"] = {k: v for k, v in vars(self.host_cache).items()
                            if v is not None}
         for name in ("deadline_s", "build_timeout_s"):
@@ -791,6 +799,8 @@ class SearchCoordinator:
         self.log = log
         if strategy_factory is not None and settings.portfolio_members is not None:
             raise SettingsError("portfolio_members requires the default strategy factory")
+        if strategy_factory is not None and settings.tpe_candidate_pool != "sampled":
+            raise SettingsError("tpe_candidate_pool requires the default strategy factory")
         self.strategy_factory = strategy_factory
         self.writer = RunWriter(out_dir)
         self.writer.check_fresh()
@@ -941,6 +951,8 @@ class SearchCoordinator:
                 options = ({"members": s.portfolio_members}
                            if p.strategy_name == "portfolio" and s.portfolio_members
                            else None)
+                if p.strategy_name == "tpe" and s.tpe_candidate_pool != "sampled":
+                    options = {"candidate_pool": s.tpe_candidate_pool}
                 p.strategy = _default_factory(
                     p.strategy_name, p.space, p.seed, warm, prior, options=options)
             if s.build_aware is not None and p.strategy_name != "exhaustive":

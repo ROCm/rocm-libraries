@@ -620,8 +620,8 @@ or keep the default `shared` seed policy.
 
 #### Experimental tuning comparison (opt-in)
 
-The following controls leave the PR14938 defaults unchanged. They are
-experiments, not demonstrated GPU speedups.
+The following controls leave the PR14938 defaults unchanged. Evaluate each
+experimental policy on the target workload and device before enabling it.
 
 | Technique | Enable | Baseline |
 |---|---|---|
@@ -630,6 +630,32 @@ experiments, not demonstrated GPU speedups.
 | Bounded statistical confirmation | `confirm.mode: "race"` | Fixed `fresh_calls`, minimum passing median |
 | Build-aware TPE/GP proposals | `build_aware: {"rank_fraction": 0.1, "explore_probability": 0.2}` | Highest acquisition score |
 | TPE-containing portfolio | `strategy: "portfolio"`, `portfolio_members: ["hill", "gp", "de", "tpe"]` | Portfolio members `hill,gp,de` |
+| TPE over the full candidate list | `strategy: "tpe"`, `tpe_candidate_pool: "listed"` | Sampled acquisition pool |
+
+`tpe_candidate_pool: "listed"` scores every catalog member before selecting
+the next trial. It keeps TPE's density model, prior, startup, pending-trial
+handling and optional build preference. Only the selected kernels are built
+and measured. Ties use a reproducible random permutation rather than catalog
+order. The extra model-scoring work grows with the catalog size; compare
+total tuning time as well as trial count. This setting is for standalone TPE
+and the default strategy factory. It has an independent `listed_tpe` comparison
+arm; it is not included in the existing portfolio-based `combined` arm.
+
+The option applies the TPE density-ratio acquisition to a finite catalog;
+see [Bergstra et al. (2011)](https://papers.nips.cc/paper/4443-algorithms-for-hyper-parameter-optimization)
+and [Watanabe (2026), sections 3.3.3 and 4.1.2](https://arxiv.org/html/2304.11127v5)
+for the model and candidate-selection tradeoffs. Scoring more candidates
+can also exploit an inaccurate model more aggressively.
+
+A bounded MI355X/gfx950 study used 144 kernels, six new fp16/rcr shapes,
+20 search seeds, and separate discovery/scoring calls (2,592 verified GPU
+calls). At 32 trials with five warm configurations from a different shape,
+mean excess latency above the catalog's best measured kernel was 4.060%
+for sampled TPE and 2.996% for listed TPE (22 wins, 96 ties, 2 losses).
+Without warm starts it was 3.193% versus 3.481%; 16-trial results also did
+not improve. These fixed-catalog results support an opt-in warm-start
+experiment, not a default change or a universal speedup claim. Compare
+against GP as well: its mean quality was better at the 64-trial budget.
 
 `--top_k` controls warm picks independently of `--ranked_top_k` (omitted:
 same top-K CSV as before; zero: every ranked candidate). `--family_cap`
@@ -702,8 +728,8 @@ python compare_search.py prepare --baseline search.json \
 
 This only writes configs and a manifest; it **does not start GPU jobs**.
 The baseline must be TPE with warm pairs, no prior, fixed confirmation and no
-experimental controls. Each seed has nine arms, deterministically shuffled:
-`baseline`, `broad_prior`, `diverse_warm`, `confirmation_control`, `race`,
+experimental controls. Each seed has ten arms, deterministically shuffled:
+`baseline`, `listed_tpe`, `broad_prior`, `diverse_warm`, `confirmation_control`, `race`,
 `build_aware`, `portfolio_control`, `portfolio_tpe`, and `combined`.
 The fixed-confirmation control and race share a maximum of
 `max(9, baseline.fresh_calls)` calls per finalist. Portfolio membership has its

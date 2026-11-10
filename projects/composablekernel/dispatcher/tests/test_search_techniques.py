@@ -42,6 +42,9 @@ from gemm_search import read_ranked_csv  # noqa: E402
     ({"confirm": {"mode": "race", "fresh_calls": 2}}, ">= min_calls"),
     ({"confirm": {"mode": "race", "alpha": 0}}, "in \\(0, 1\\)"),
     ({"confirm": {"mode": "race", "margin": -1}}, ">= 0"),
+    ({"strategy": "gp", "tpe_candidate_pool": "listed"}, "requires strategy=tpe"),
+    ({"strategy": "tpe", "tpe_candidate_pool": "invalid"}, "sampled or listed"),
+    ({"strategy": "tpe", "tpe_candidate_pool": True}, "expected type str"),
 ])
 def test_experimental_settings_fail_explicitly(extra, message):
     with pytest.raises(AS.SettingsError, match=message):
@@ -52,6 +55,7 @@ def test_opt_in_settings_round_trip_and_defaults_stay_disabled():
     plain = settings().to_json()
     assert "build_aware" not in plain and "portfolio_members" not in plain
     assert plain["confirm"] == {"finalists": 2, "fresh_calls": 3}
+    assert "tpe_candidate_pool" not in plain
     new = settings(
         strategy="portfolio", portfolio_members=["hill", "gp", "de", "tpe"],
         build_aware={"rank_fraction": 0.25, "explore_probability": 0.4},
@@ -280,14 +284,15 @@ def test_comparison_runs_all_independent_and_combined_arms(comparison):
     assert "mode" not in baseline["confirm"]
     for arm, field in (("broad_prior", "warm_start"), ("diverse_warm", "warm_start"),
                        ("confirmation_control", "confirm"), ("race", "confirm"),
-                       ("build_aware", "build_aware"), ("portfolio_control", "strategy")):
+                       ("build_aware", "build_aware"), ("portfolio_control", "strategy"),
+                       ("listed_tpe", "tpe_candidate_pool")):
         changed = {k for k in set(baseline) | set(by_arm[arm]["settings"])
                    if baseline.get(k) != by_arm[arm]["settings"].get(k)}
         assert changed == {field}
     output = io.StringIO()
     assert compare.summarize(comparison, output) == 0
     rows = list(csv.DictReader(io.StringIO(output.getvalue())))
-    assert len(rows) == 9
+    assert len(rows) == 10
     assert all(r["status"] == "complete" and r["paired_winners"] == "2" for r in rows)
     assert all(float(r["control_relative_quality"]) == 1 for r in rows)
     assert next(r for r in rows if r["arm"] == "race")["control_arm"] == "confirmation_control"
@@ -299,6 +304,24 @@ def test_comparison_runs_all_independent_and_combined_arms(comparison):
         by_arm["combined"]["settings"]["warm_start"]["pairs_file"],
         by_arm["combined"]["settings"]["warm_start"]["ranked_csv"],
     }
+
+
+def test_listed_tpe_is_wired_through_coordinator_and_settings(tmp_path):
+    config = settings(strategy="tpe", trials_per_problem=12, tpe_candidate_pool="listed")
+    assert AS.SearchSettings.from_json(config.to_json()).to_json() == config.to_json()
+    co = AS.SearchCoordinator(FakeAdapter({"P1": list("ABCDEFGHIJKL")}), config, tmp_path / "run")
+    summary = co.run()
+    assert summary.exit_code == 0
+    assert co.problems[0].strategy.name == "tpe_listed"
+    assert len(co.problems[0].strategy.history) == 12
+    assert strict(tmp_path / "run" / "run.json")["settings"]["tpe_candidate_pool"] == "listed"
+
+
+def test_listed_tpe_cannot_be_silently_ignored_by_custom_factory(tmp_path):
+    with pytest.raises(AS.SettingsError, match="tpe_candidate_pool requires the default"):
+        AS.SearchCoordinator(FakeAdapter({"P1": list("ABCDEFGHIJKL")}),
+                             settings(strategy="tpe", tpe_candidate_pool="listed"),
+                             tmp_path / "run", strategy_factory=lambda *args: None)
 
 
 def test_comparison_reports_missing_and_failed_runs_without_quality_bias(comparison):
@@ -319,7 +342,7 @@ def test_comparison_reports_missing_and_failed_runs_without_quality_bias(compari
     assert rows["diverse_warm"]["control_relative_quality"] == ""
 
 
-@pytest.mark.parametrize("change", ["settings", "domain", "prior", "input"])
+@pytest.mark.parametrize("change", ["settings", "domain", "prior", "input", "source"])
 def test_comparison_rejects_mismatched_experiments(comparison, change):
     case = next(c for c in json.loads(comparison.read_text())["runs"] if c["arm"] == "broad_prior")
     path = Path(case["output_dir"]) / "run.json"
@@ -330,6 +353,8 @@ def test_comparison_rejects_mismatched_experiments(comparison, change):
         meta["context"]["domain_sha256"] = "different"
     elif change == "input":
         meta["warm_start_sha256"][next(iter(meta["warm_start_sha256"]))] = "changed"
+    elif change == "source":
+        meta["context"]["sources"] = {"ck_commit": "different"}
     else:
         meta["problems"]["128x128x128"]["prior_entries"] -= 1
     path.write_text(json.dumps(meta))

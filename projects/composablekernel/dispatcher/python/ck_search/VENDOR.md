@@ -54,6 +54,10 @@ above), `db.py`, `driver.py`, `measure.py`, `halving.py`, `knobspace.py`,
 ## CK files
 
 - `__init__.py`: lean exports and `ORIGIN_SHA`.
+- `listed_tpe.py`: optional TPE acquisition over every listed candidate,
+  with randomized ties and the unchanged upstream density/prior/protocol.
+  Select with `options={"candidate_pool": "listed"}` for `tpe`; the default
+  sampled pool and upstream trial parity remain unchanged.
 - `build_aware.py`: optional, evaluator-owned reuse context for TPE/GP scored
   pools, also attachable to portfolio model members. Prefer a successfully
   built or planned key within a top acquisition-rank band, with cost-blind

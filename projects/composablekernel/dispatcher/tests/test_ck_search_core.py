@@ -52,7 +52,7 @@ VENDORED = (
     "surrogate.py",
     "trial.py",
 )
-CK_AUTHORED = ("__init__.py", "_compat.py", "factory.py", "build_aware.py")
+CK_AUTHORED = ("__init__.py", "_compat.py", "factory.py", "build_aware.py", "listed_tpe.py")
 PATCH_MARK = re.compile(r"# ck_search patch (\d+)")
 UPSTREAM_SUBDIR = Path("rocke", "dispatch", "tuning", "search")
 FORBIDDEN_MODULES = {"rocke", "lightgbm", "pandas", "torch", "hip", "ctypes_utils"}

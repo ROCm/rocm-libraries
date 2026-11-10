@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
 from adaptive_search import SearchSettings, SettingsError, sha256_file, valid_latency  # noqa: E402
 
 ARMS = (
-    "baseline", "broad_prior", "diverse_warm", "confirmation_control", "race", "build_aware",
+    "baseline", "listed_tpe", "broad_prior", "diverse_warm", "confirmation_control", "race", "build_aware",
     "portfolio_control", "portfolio_tpe", "combined",
 )
 
@@ -32,7 +32,7 @@ def prepare(baseline, ranked_csv, diverse_pairs, output, seeds):
     if (baseline.strategy != "tpe" or baseline.build_aware is not None
             or baseline.portfolio_members is not None or baseline.confirm.mode != "fixed"
             or baseline.warm_start is None or baseline.warm_start.pairs_file is None
-            or baseline.warm_start.use_prior):
+            or baseline.warm_start.use_prior or baseline.tpe_candidate_pool != "sampled"):
         raise SettingsError("baseline must be fixed-confirmation TPE with warm pairs, "
                             "no prior, and no experimental controls")
     if not seeds or len(set(seeds)) != len(seeds):
@@ -47,6 +47,8 @@ def prepare(baseline, ranked_csv, diverse_pairs, output, seeds):
         for arm in ARMS:
             data = copy.deepcopy(baseline.to_json())
             data["seed"] = seed
+            if arm == "listed_tpe":
+                data["tpe_candidate_pool"] = "listed"
             if arm in ("broad_prior", "combined"):
                 data["warm_start"].update(ranked_csv=str(ranked_csv), use_prior=True)
             if arm in ("diverse_warm", "combined"):
@@ -109,7 +111,7 @@ def _read_run(case):
 def _same_domain(a, b):
     ca, cb = a["context"], b["context"]
     fields = ("arch", "dtype", "layout", "variant", "domain_sha256", "devices",
-              "timing_environment", "build")
+              "timing_environment", "build", "sources")
     return (set(a["problems"]) == set(b["problems"])
             and all(ca.get(k) == cb.get(k) for k in fields)
             and ca.get("domain_sha256") is not None
@@ -173,7 +175,7 @@ def summarize(manifest, stream):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    prep = commands.add_parser("prepare", help="Write nine paired ablations per seed")
+    prep = commands.add_parser("prepare", help="Write ten paired ablations per seed")
     prep.add_argument("--baseline", required=True)
     prep.add_argument("--ranked-csv", required=True, help="Full eligible-domain predictor CSV")
     prep.add_argument("--diverse-pairs", required=True)
