@@ -47,13 +47,15 @@ class FakeRuntime:
 def _write_reference_output(rt, binding, ptrs, req, dtype):
     """Fill the C buffer with the exact expected result, as a perfect kernel would."""
     import numpy as np
-    from rocke.dispatch.gemm.binding import _SEED, _bf16_from_f32
+
+    from rocke.dispatch.gemm.binding import _SEED
+    from rocke.numeric.bf16 import f32_to_bf16
 
     rng = np.random.default_rng(_SEED)
     a = rng.integers(-5, 6, size=(req.M, req.K), dtype=np.int16)
     b = rng.integers(-5, 6, size=(req.N, req.K), dtype=np.int16)
     ref = a.astype(np.float32) @ b.astype(np.float32).T
-    encoded = ref.astype(np.float16) if dtype == "fp16" else _bf16_from_f32(np, ref)
+    encoded = ref.astype(np.float16) if dtype == "fp16" else f32_to_bf16(ref)
     rt.mem[ptrs[2]][: encoded.nbytes] = encoded.tobytes()
 
 
@@ -289,23 +291,29 @@ class TestBindingRatchet(unittest.TestCase):
 
 
 class TestBf16Encoding(unittest.TestCase):
-    def test_round_trip_is_exact_for_bf16_representable_values(self):
+    """The binding encodes bf16 with rocke.numeric.bf16, not a codec of its own.
+
+    A second codec beside the shared one is how a harness ends up agreeing with
+    itself rather than with the device: the binding's old copy turned a NaN
+    into an infinity.
+    """
+
+    def test_binding_uses_the_shared_codec(self):
+        from rocke.dispatch.gemm import binding
+        from rocke.numeric import bf16
+
+        self.assertIs(binding.f32_to_bf16, bf16.f32_to_bf16)
+        self.assertIs(binding.bf16_to_f32, bf16.bf16_to_f32)
+        self.assertFalse(hasattr(binding, "bf16_from_f32"))
+        self.assertFalse(hasattr(binding, "f32_from_bf16"))
+
+    def test_nan_stays_nan(self):
         import numpy as np
-        from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
 
-        values = np.array([0.0, 1.0, -1.0, 5.0, -256.0, 1024.0], dtype=np.float32)
-        back = _f32_from_bf16(np, _bf16_from_f32(np, values))
-        np.testing.assert_array_equal(back, values)
+        from rocke.dispatch.gemm.binding import bf16_to_f32, f32_to_bf16
 
-    def test_rounding_is_nearest_even_not_truncation(self):
-        import numpy as np
-        from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
-
-        # A value just above a bf16 tick must round up, not truncate down.
-        one_ulp = np.float32(1.0 + 2.0**-8)
-        nudged = np.array([one_ulp * (1.0 + 2.0**-12)], dtype=np.float32)
-        back = _f32_from_bf16(np, _bf16_from_f32(np, nudged))
-        self.assertGreaterEqual(float(back[0]), float(one_ulp))
+        nan_low_payload = np.array([0x7F800001], dtype=np.uint32).view(np.float32)
+        self.assertTrue(np.isnan(bf16_to_f32(f32_to_bf16(nan_low_payload))[0]))
 
 
 if __name__ == "__main__":

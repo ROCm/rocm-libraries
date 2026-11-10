@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <string.h> /* strcmp -- operand dtype string -> transpose-read elem type */
 
+#include "rocke/helper_rocke.helpers.layouts.h" /* rocke_conv_tr_lane_offsets32 */
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h" /* rocke_lane_decode_t, rocke_decode_mfma_lanes */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 
@@ -50,10 +51,11 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
  *   lds_row = b.add(atom_mn_base, mn_in_atom)
  *   lds_col = b.add(k_tile_base, k_in_atom)
  *   if frag_len <= 8:
- *       return _emit_smem_load(b, src, lds_row, lds_col, frag_len)
+ *       return _emit_smem_load(b, src, lds_row, lds_col, frag_len, smem_dtype=smem_dtype)
  *   frag = None
  *   for off in range(0, frag_len, 8):
- *       chunk = _emit_smem_load(b, src, lds_row, b.add(lds_col, b.const_i32(off)), 8)
+ *       chunk = _emit_smem_load(b, src, lds_row, b.add(lds_col, b.const_i32(off)), 8,
+ *                               smem_dtype=smem_dtype)
  *       frag = chunk if frag is None else b.vec_concat(frag, chunk)
  *   return frag
  * ====================================================================== */
@@ -111,24 +113,14 @@ rocke_value_t* rocke_conv_tr_frag(rocke_ir_builder_t* b,
      * containing l % 16, and lane l supplies the (l % 8)-th K row of the run:
      *     col  = mn_base + ((l % 16) / 8) * 8
      *     row0 = k_base  + (l / 16) * n + (l % 8)
-     * Verified on silicon. Mirrors the wave32 branch of _tr_frag() in Python. */
+     * Verified on silicon. Mirrors the wave32 branch of
+     * _BoundConvKOuterFragmentReader.fragment() in Python; the lane map itself
+     * is the shared rocke_conv_tr_lane_offsets32. */
     if(wave_size == 32)
     {
-        /* Python binds ONE const_i32(16) and ONE const_i32(8) and reuses each;
-         * emitting a duplicate here consumes an extra SSA id and drifts every
-         * later number. Keep the op order identical to the Python branch. */
-        rocke_value_t* c16w = rocke_b_const_i32(b, 16);
-        rocke_value_t* c8w = rocke_b_const_i32(b, 8);
-        rocke_value_t* lane_mod16 = rocke_b_mod(b, lane, c16w);
-        rocke_value_t* col_grp = rocke_b_div(b, lane_mod16, c8w);
-        rocke_value_t* col_off = rocke_b_mul(b, col_grp, c8w);
-        rocke_value_t* col32 = rocke_b_add(b, mn_base, col_off);
-        rocke_value_t* lane_div16 = rocke_b_div(b, lane, c16w);
-        rocke_value_t* c_n32 = rocke_b_const_i32(b, n);
-        rocke_value_t* row_mul32 = rocke_b_mul(b, lane_div16, c_n32);
-        rocke_value_t* lane_mod8 = rocke_b_mod(b, lane, c8w);
-        rocke_value_t* row_sum32 = rocke_b_add(b, row_mul32, lane_mod8);
-        rocke_value_t* row032 = rocke_b_add(b, k_base, row_sum32);
+        rocke_value_t* col32;
+        rocke_value_t* row032;
+        rocke_conv_tr_lane_offsets32(b, lane, n, mn_base, k_base, &col32, &row032);
         rocke_value_t* out32 = NULL;
         for(int r = 0; r < n / 8; ++r)
         {
@@ -181,18 +173,19 @@ rocke_value_t* rocke_conv_emit_frag_smem_load(rocke_ir_builder_t* b,
                                               rocke_value_t* k_in_atom,
                                               rocke_value_t* atom_mn_base,
                                               rocke_value_t* k_tile_base,
-                                              int frag_len)
+                                              int frag_len,
+                                              const rocke_type_t* smem_dtype)
 {
     rocke_value_t* lds_row = rocke_b_add(b, atom_mn_base, mn_in_atom);
     rocke_value_t* lds_col = rocke_b_add(b, k_tile_base, k_in_atom);
     if(frag_len <= 8)
-        return rocke_conv_emit_smem_load(b, src, lds_row, lds_col, frag_len);
+        return rocke_conv_emit_smem_load(b, src, lds_row, lds_col, frag_len, smem_dtype);
 
     rocke_value_t* frag = NULL;
     for(int off = 0; off < frag_len; off += 8)
     {
         rocke_value_t* col = rocke_b_add(b, lds_col, rocke_b_const_i32(b, off));
-        rocke_value_t* chunk = rocke_conv_emit_smem_load(b, src, lds_row, col, 8);
+        rocke_value_t* chunk = rocke_conv_emit_smem_load(b, src, lds_row, col, 8, smem_dtype);
         frag = (frag == NULL) ? chunk : rocke_b_vec_concat(b, frag, chunk);
     }
     return frag;
@@ -265,8 +258,14 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
                                                 ctx->tr_dtype);
                 continue;
             }
-            a_rows[mi] = rocke_conv_emit_frag_smem_load(
-                b, A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, ctx->a_per_lane);
+            a_rows[mi] = rocke_conv_emit_frag_smem_load(b,
+                                                        A_src,
+                                                        a_row_in_atom,
+                                                        a_k_in_atom,
+                                                        atom_row,
+                                                        k_tile_base,
+                                                        ctx->a_per_lane,
+                                                        ctx->smem_dtype);
         }
 
         for(int ni = 0; ni < ctx->mfmas_n; ++ni)
@@ -288,8 +287,14 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
                                                 ctx->tr_dtype);
                 continue;
             }
-            b_cols[ni] = rocke_conv_emit_frag_smem_load(
-                b, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, ctx->b_per_lane);
+            b_cols[ni] = rocke_conv_emit_frag_smem_load(b,
+                                                        B_src,
+                                                        b_col_in_atom,
+                                                        b_k_in_atom,
+                                                        atom_row,
+                                                        k_tile_base,
+                                                        ctx->b_per_lane,
+                                                        ctx->smem_dtype);
         }
 
         int flat = 0;
@@ -407,7 +412,8 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
             }
             else
             {
-                a_rows[mi] = rocke_conv_emit_smem_load(b, A_src, a_row, col_base, ctx->a_per_lane);
+                a_rows[mi] = rocke_conv_load_mma_operand(
+                    b, A_src, a_row, col_base, ctx->a_per_lane, ctx->smem_dtype, ctx->is_tf32);
             }
         }
 
@@ -436,7 +442,8 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
                 b,
                 warp_n_off,
                 rocke_b_add(b, rocke_b_const_i32(b, ni * spec->warp_tile_n), n_in_atom));
-            b_cols[ni] = rocke_conv_emit_smem_load(b, B_src, b_row, col_base, ctx->b_per_lane);
+            b_cols[ni] = rocke_conv_load_mma_operand(
+                b, B_src, b_row, col_base, ctx->b_per_lane, ctx->smem_dtype, ctx->is_tf32);
         }
 
         int flat = 0;
@@ -450,9 +457,13 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
             }
         }
 
-        /* schedule.emit_after_mfma_step(b, ds_read_count=mfmas_m + mfmas_n,
-         *                               mfma_count=mfmas_m * mfmas_n) */
+        /* schedule.emit_after_mfma_step(
+         *     b, ds_read_count=(mfmas_m + mfmas_n) * _ds_reads_per_frag,
+         *     mfma_count=mfmas_m * mfmas_n * _mfmas_per_mma) */
         rocke_schedule_policy_emit_after_mfma_step(
-            &ctx->schedule, b, ctx->mfmas_m + ctx->mfmas_n, ctx->mfmas_m * ctx->mfmas_n);
+            &ctx->schedule,
+            b,
+            (ctx->mfmas_m + ctx->mfmas_n) * ctx->ds_reads_per_frag,
+            ctx->mfmas_m * ctx->mfmas_n * ctx->mfmas_per_mma);
     }
 }
