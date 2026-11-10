@@ -2870,6 +2870,69 @@ TYPED_TEST(solvers, a_solver_built_on_one_backend_solves_after_moving_to_the_oth
     }
 }
 
+// Build, ReBuildNumeric and MoveToAccelerator analyse the operator, so that no product
+// of the solve performs the analysis lazily
+TYPED_TEST(solvers, set_up_analyses_the_operator_before_the_solve)
+{
+    using T = typename TypeParam::value_type;
+    if(this->backend() != Backend::Accelerator)
+    {
+        GTEST_SKIP() << "the host keeps no analysis";
+    }
+    const int    n      = 16;
+    const Vec<T> b      = rhs<T>(n);
+    const Vec<T> x0     = Vec<T>(n, 0);
+    auto         lazily = [](const std::string& log) {
+        return log.find("the SpMV analysis is performed lazily") != std::string::npos;
+    };
+
+    // A product of an operator that no solver analysed warns
+    {
+        auto A = this->make(spd<T>(n));
+        auto y = make_local_vector(*A, x0);
+        EXPECT_TRUE(lazily(logged([&] { A->Apply(*make_local_vector(*A, b), y.get()); })));
+    }
+
+    for(const Problem<T>& p : problems<T>(n))
+    {
+        for(bool precond : {false, true})
+        {
+            if(p.method.needs_preconditioner && !precond)
+            {
+                continue;
+            }
+            SCOPED_TRACE(trace(p.method, precond));
+            const Csr<T> changed = transformed(
+                p.A, [](int i, int j, T v) { return i == j ? v + static_cast<T>(1) : v; });
+
+            auto      A = this->make(p.A);
+            Jacobi<T> jacobi;
+            auto      solver = p.method.make();
+            solver->Init(0.0, 0.0, 1e8, 3);
+            set_up(*solver, p.method, *A, precond ? &jacobi : nullptr);
+            EXPECT_FALSE(lazily(logged([&] { solve(*solver, *A, b, x0); })));
+
+            if(!rebuild_breaks(p.method))
+            {
+                SCOPED_TRACE("after ReBuildNumeric");
+                A->CopyFromCSR(changed.row_offset.data(), changed.col.data(), changed.val.data());
+                solver->ReBuildNumeric();
+                EXPECT_FALSE(lazily(logged([&] { solve(*solver, *A, b, x0); })));
+            }
+
+            SCOPED_TRACE("built on the host");
+            auto      H = make_local_matrix(Backend::Host, p.A);
+            Jacobi<T> host_jacobi;
+            auto      moved = p.method.make();
+            moved->Init(0.0, 0.0, 1e8, 3);
+            set_up(*moved, p.method, *H, precond ? &host_jacobi : nullptr);
+            H->MoveToAccelerator();
+            moved->MoveToAccelerator();
+            EXPECT_FALSE(lazily(logged([&] { solve(*moved, *H, b, x0); })));
+        }
+    }
+}
+
 TYPED_TEST(solvers, asynchronous_build_solves_on_the_accelerator_after_sync)
 {
     using T = typename TypeParam::value_type;

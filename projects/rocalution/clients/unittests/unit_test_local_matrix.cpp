@@ -186,6 +186,14 @@ namespace
         return has_analysis(b, format, "L") || (b == Backend::Accelerator && format == BCSR);
     }
 
+    // The formats whose Apply and ApplyAdd keep an analysis
+    bool has_spmv_analysis(Backend b, unsigned int format)
+    {
+        return b == Backend::Accelerator
+               && (format == CSR || format == COO || format == ELL || format == HYB
+                   || format == BCSR);
+    }
+
     // Nonsymmetric and diagonally dominant, with lower bandwidth 1, so that ILU(0)
     // is the exact LU factorization. DIA stores zeros and ELL pads every other row.
     template <typename T = double>
@@ -1882,6 +1890,46 @@ TEST_P(local_matrix_formats, apply_follows_a_new_sparsity_pattern)
             A->ApplyAnalyse();
             expect_applies(c);
         }
+    });
+}
+
+// A product without the analysis performs it and warns, the analysis then serves every
+// Apply and ApplyAdd until the entries change or the matrix moves
+TEST_P(local_matrix_formats, apply_analyse_keeps_the_analysis_until_the_entries_change)
+{
+    if(!has_spmv_analysis(backend(), format().id))
+    {
+        GTEST_SKIP() << "the products keep no analysis";
+    }
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T>         a = banded<T>();
+        const std::vector<T> x = rhs<T>(a.n);
+
+        auto A        = make(a);
+        auto analyses = [&] {
+            auto              y   = vector_of(std::vector<T>(a.n, 0.0));
+            const std::string log = logged([&] {
+                A->Apply(*vector_of(x), y.get());
+                A->ApplyAdd(*vector_of(x), static_cast<T>(2), y.get());
+            });
+            return log.find("the SpMV analysis is performed lazily") != std::string::npos;
+        };
+
+        EXPECT_TRUE(analyses());
+        EXPECT_FALSE(analyses());
+
+        A->CopyFrom(*make(a));
+        EXPECT_TRUE(analyses());
+
+        A->CopyFrom(*make(a));
+        A->ApplyAnalyse();
+        EXPECT_FALSE(analyses());
+
+        A->MoveToHost();
+        A->MoveToAccelerator();
+        EXPECT_TRUE(analyses());
     });
 }
 

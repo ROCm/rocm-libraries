@@ -2223,6 +2223,35 @@ TYPED_TEST(multigrid_backends, amg_levels_follow_the_moves_of_the_solver)
     }
 }
 
+// Build and ReBuildNumeric analyse the operators of every level in the format they are
+// applied in, so that no product of a cycle performs the analysis lazily
+TYPED_TEST(multigrid_backends, set_up_analyses_the_operators_of_every_level)
+{
+    using T             = typename TypeParam::value_type;
+    const Csr<T> ref    = grid<T>(8, 8, 1.0, 1.0, true);
+    const Vec<T> b      = rhs<T>(ref.n);
+    const Vec<T> x0     = initial_guess<T>(ref.n);
+    auto         lazily = [](const std::string& log) {
+        return log.find("the SpMV analysis is performed lazily") != std::string::npos;
+    };
+    for(const AmgCase<T>& c : amg_classes<T>())
+    {
+        for(unsigned int format : {rocalution::CSR, rocalution::ELL})
+        {
+            SCOPED_TRACE(c.name + ", " + rocalution::_matrix_format_names[format]);
+            ManualAmg<T> m(TypeParam::backend, ref, c, 4);
+            m.amg->SetOperatorFormat(format, 1);
+            m.amg->Build();
+            EXPECT_FALSE(lazily(logged([&] { solve(*m.amg, *m.A, b, x0, 2); })));
+
+            Vec<T> val = csr_values(ref);
+            m.A->UpdateValuesCSR(val.data());
+            m.amg->ReBuildNumeric();
+            EXPECT_FALSE(lazily(logged([&] { solve(*m.amg, *m.A, b, x0, 2); })));
+        }
+    }
+}
+
 TYPED_TEST(multigrid_backends, rebuild_numeric_keeps_the_host_levels)
 {
     using T          = typename TypeParam::value_type;
