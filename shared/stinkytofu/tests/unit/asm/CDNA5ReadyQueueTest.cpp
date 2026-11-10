@@ -208,10 +208,27 @@ TEST_F(CDNA5ReadyQueueTest, QueueFillBurstIncludesEntriesRetiredWhileFilling) {
     EXPECT_EQ(predictWmmaQueueFillBurst(scaled, /*queueDepth=*/5), 7);
 }
 
-TEST_F(CDNA5ReadyQueueTest, QueueFillConsumerDistanceMustBeStrictlyGreaterThanTen) {
-    EXPECT_FALSE(queueFillConsumerDistanceAllows(0));
-    EXPECT_FALSE(queueFillConsumerDistanceAllows(10));
-    EXPECT_TRUE(queueFillConsumerDistanceAllows(11));
+TEST_F(CDNA5ReadyQueueTest, QueueFillConsumerSlackUsesResolvedWmmaLatencies) {
+    const std::vector<WmmaQueueWindow> f8(
+        24, {/*latency=*/8, /*issue=*/1, /*coIssueMask=*/0, /*blockedMask=*/0});
+    const std::vector<WmmaQueueWindow> f4(
+        24, {/*latency=*/4, /*issue=*/1, /*coIssueMask=*/0, /*blockedMask=*/0});
+    constexpr int kDsReadyCycle = 56;
+    constexpr int kSafetyMargin = 32;
+
+    // Preserve the old gfx1250 boundary for an 8-cycle WMMA: ten windows leave only 24 cycles
+    // after the load returns, while eleven leave the required 32.
+    EXPECT_FALSE(
+        queueFillConsumerSlackAllows(wmmaWindowStartCycle(f8, 10), kDsReadyCycle, kSafetyMargin));
+    EXPECT_TRUE(
+        queueFillConsumerSlackAllows(wmmaWindowStartCycle(f8, 11), kDsReadyCycle, kSafetyMargin));
+
+    // The same number of 4-cycle FP4 windows is not enough time. Twenty-two windows provide the
+    // same 88 cycles as eleven FP8 windows.
+    EXPECT_FALSE(
+        queueFillConsumerSlackAllows(wmmaWindowStartCycle(f4, 11), kDsReadyCycle, kSafetyMargin));
+    EXPECT_TRUE(
+        queueFillConsumerSlackAllows(wmmaWindowStartCycle(f4, 22), kDsReadyCycle, kSafetyMargin));
 }
 
 TEST_F(CDNA5ReadyQueueTest, DsLoadDescCarriesDrainParams) {
