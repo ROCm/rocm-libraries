@@ -133,9 +133,9 @@ def test_cpp_evaluator_prints_the_same_lines():
     """The C++ evaluator gives every case the same value or the same error text.
 
     ``ROCKE_INTEXPR_CLI`` names the built ``rocke_intexpr``: ``tests/run_all.py``
-    resolves it from a configured build and the installed ``rocke_pytest`` ctest
-    sets it. A value that names no file is a broken setup, so it fails instead
-    of skipping.
+    resolves it from a configured build and the installed ``rocke_pytest_*``
+    ctest entries set it. A value that names no file is a broken setup, so it
+    fails instead of skipping.
     """
     path = built_program("ROCKE_INTEXPR_CLI", "rocke_intexpr")
     printed = subprocess.run(

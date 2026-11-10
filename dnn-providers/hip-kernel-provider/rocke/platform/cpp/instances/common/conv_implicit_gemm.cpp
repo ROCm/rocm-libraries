@@ -16,7 +16,13 @@
 #include "rocke/helper_rocke.instances.common.conv_implicit_gemm.h"
 
 #include <stdio.h> /* snprintf */
+#include <stdlib.h> /* qsort -- the sorted TF32 atom list */
 #include <string.h> /* strcmp */
+
+#include "rocke/dtypes.h" /* rocke_normalize_dtype -- _is_tf32_spelling */
+#include "rocke/helper_rocke.core.arch.h" /* ArchTarget -- the TF32 atom gate */
+#include "rocke/helper_rocke.helpers.atoms.h" /* mfma_atom -- the arch-free TF32 gate */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_spec_set_reasonf */
 
 rocke_conv_problem_t rocke_conv_problem_make(int N,
                                              int Hi,
@@ -271,4 +277,321 @@ bool rocke_conv_vector_width_ok(
                  nbytes,
                  max_vector_bytes);
     return false;
+}
+
+/* ===================================================================== *
+ *  ConvDataSpec.mma_dtype -- TF32 compute
+ *
+ *  Python twin: the ConvDataSpec properties and the "TF32 compute helpers"
+ *  block of _conv_implicit_gemm_common.py. Each *_reason returns true and
+ *  writes the Python reason text when the spec cannot build.
+ * ===================================================================== */
+
+/* Write the printf-style reason (rocke_spec_set_reasonf) and evaluate to true,
+ * "cannot build". */
+#define ROCKE_CONV_TF32_FAIL(reason, reason_cap, ...) \
+    (rocke_spec_set_reasonf((reason), (reason_cap), __VA_ARGS__), true)
+
+bool rocke_conv_is_tf32_spelling(const char* dtype)
+{
+    /* isinstance(dtype, str) and normalize_dtype(dtype) == "tf32" */
+    if(dtype == NULL)
+        return false;
+    char scratch[64];
+    const char* canon = rocke_normalize_dtype(dtype, scratch, sizeof(scratch));
+    return canon != NULL && strcmp(canon, "tf32") == 0;
+}
+
+bool rocke_conv_data_is_tf32(const char* mma_dtype)
+{
+    return mma_dtype != NULL && strcmp(mma_dtype, "tf32") == 0;
+}
+
+const char* rocke_conv_data_mma_operand(const char* storage, const char* mma_dtype)
+{
+    /* self.mma_dtype or self.dtype_a ("" is falsy, as in Python) */
+    return (mma_dtype != NULL && mma_dtype[0] != '\0') ? mma_dtype : storage;
+}
+
+bool rocke_conv_mma_dtype_reason(const char* dtype_a,
+                                 const char* dtype_b,
+                                 const char* dtype_d,
+                                 const char* mma_dtype,
+                                 char* reason,
+                                 size_t reason_cap)
+{
+    if(rocke_conv_is_tf32_spelling(dtype_a) || rocke_conv_is_tf32_spelling(dtype_b))
+        return ROCKE_CONV_TF32_FAIL(reason,
+                                    reason_cap,
+                                    "tf32 is a compute mode, not a storage dtype: use "
+                                    "dtype_a='fp32', dtype_b='fp32' with mma_dtype='tf32'");
+    if(mma_dtype == NULL)
+        return false;
+    if(strcmp(mma_dtype, "tf32") != 0)
+        return ROCKE_CONV_TF32_FAIL(
+            reason, reason_cap, "mma_dtype must be None or 'tf32', got '%s'", mma_dtype);
+    const char* da = dtype_a ? dtype_a : "fp16";
+    const char* db = dtype_b ? dtype_b : "fp16";
+    if(strcmp(da, "fp32") != 0 || strcmp(db, "fp32") != 0)
+        return ROCKE_CONV_TF32_FAIL(reason,
+                                    reason_cap,
+                                    "mma_dtype='tf32' needs fp32 A and B storage, got "
+                                    "dtype_a='%s', dtype_b='%s'",
+                                    da,
+                                    db);
+    /* TF32 is a compute mode for fp32 convolutions (as in cuDNN and MIOpen):
+     * one rule for fwd, dgrad and wgrad, so they cannot drift. */
+    const char* dd = dtype_d ? dtype_d : "fp16";
+    if(strcmp(dd, "fp32") != 0)
+        return ROCKE_CONV_TF32_FAIL(reason,
+                                    reason_cap,
+                                    "mma_dtype='tf32' is an fp32-convolution compute mode and "
+                                    "needs an fp32 output (dtype_d='fp32'), got dtype_d='%s'",
+                                    dd);
+    return false;
+}
+
+/* _TF32_EMULATED_MAX_ACC_PER_LANE: emulated (BF16x3) TF32 warp tiles at or
+ * above this many fp32 accumulators per lane sit at the 512-VGPR ceiling once
+ * the hi/lo split temporaries are live, where comgr's VGPR->AGPR spill path
+ * miscompiles (see the Python comment). */
+static const int kTf32EmulatedMaxAccPerLane = 384;
+
+/* _tf32_any_arch_frag_len(spec): the per-lane fragment of the TF32 atom the
+ * warp tile names on any arch, from the arch-agnostic MfmaAtom table; -1 for
+ * Python None (no such atom). */
+static int rocke_conv_tf32_any_arch_frag_len(const rocke_conv_tf32_spec_view_t* spec)
+{
+    const rocke_mfma_atom_t* atom
+        = rocke_mfma_atom("tf32", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+    return atom != NULL ? atom->a_per_lane : -1;
+}
+
+/* _tf32_register_reason(spec, op): reject an emulated-TF32 warp tile that
+ * reaches the VGPR ceiling. A NULL or native op is not checked. */
+static bool rocke_conv_tf32_register_reason(const rocke_conv_tf32_spec_view_t* spec,
+                                            const rocke_mma_op_t* op,
+                                            char* reason,
+                                            size_t reason_cap)
+{
+    if(op == NULL || rocke_arch_mma_op_is_native(op))
+        return false;
+    const int acc = (spec->tile_m / spec->warp_m) * (spec->tile_n / spec->warp_n) / 64;
+    if(acc >= kTf32EmulatedMaxAccPerLane)
+        return ROCKE_CONV_TF32_FAIL(reason,
+                                    reason_cap,
+                                    "mma_dtype='tf32': %d fp32 accumulators per lane with the "
+                                    "BF16x3-emulated atom reach the 512-VGPR ceiling, where the "
+                                    "VGPR->AGPR spill path miscompiles; use a smaller warp tile "
+                                    "(< %d accumulators per lane)",
+                                    acc,
+                                    kTf32EmulatedMaxAccPerLane);
+    return false;
+}
+
+/* _tf32_lds_stride_reason(row_stride, frag): the LDS row stride must keep a
+ * TF32 fragment read aligned -- a multiple of min(frag, 4) fp32 elements. */
+static bool
+    rocke_conv_tf32_lds_stride_reason(int row_stride, int frag, char* reason, size_t reason_cap)
+{
+    const int need = frag < ROCKE_CONV_TF32_LDS_LOAD_MAX ? frag : ROCKE_CONV_TF32_LDS_LOAD_MAX;
+    if(need != 0 && row_stride % need != 0)
+        return ROCKE_CONV_TF32_FAIL(reason,
+                                    reason_cap,
+                                    "mma_dtype='tf32': LDS row stride %d fp32 elements is not "
+                                    "a multiple of %d, so the %d-wide fragment read would be "
+                                    "misaligned; use an lds_k_pad that keeps tile_k + pad a "
+                                    "multiple of %d",
+                                    row_stride,
+                                    need,
+                                    frag,
+                                    need);
+    return false;
+}
+
+/* A TF32 atom's (m, n, k) as it sorts in Python's sorted() list of tuples. */
+typedef struct
+{
+    int m, n, k;
+} rocke_conv_tf32_shape_t;
+
+static int rocke_conv_tf32_shape_cmp(const void* lhs, const void* rhs)
+{
+    const rocke_conv_tf32_shape_t* a = (const rocke_conv_tf32_shape_t*)lhs;
+    const rocke_conv_tf32_shape_t* b = (const rocke_conv_tf32_shape_t*)rhs;
+    if(a->m != b->m)
+        return a->m < b->m ? -1 : 1;
+    if(a->n != b->n)
+        return a->n < b->n ? -1 : 1;
+    if(a->k != b->k)
+        return a->k < b->k ? -1 : 1;
+    return 0;
+}
+
+static bool rocke_conv_tf32_is_atom_row(const rocke_mma_op_t* op)
+{
+    return op->family != NULL && strcmp(op->family, "mma") == 0 && op->srcs[0].dtype != NULL
+           && strcmp(op->srcs[0].dtype, "tf32") == 0 && op->srcs[1].dtype != NULL
+           && strcmp(op->srcs[1].dtype, "tf32") == 0 && op->srcs[2].dtype != NULL
+           && strcmp(op->srcs[2].dtype, "fp32") == 0;
+}
+
+/* _tf32_reason(spec, target, family, arch): why a TF32 spec cannot build on
+ * `arch` -- a WMMA target, an MFMA arch with no TF32 row, a warp tile that is
+ * not one of its TF32 atoms, or the emulated atom's register ceiling. */
+static bool rocke_conv_tf32_reason(const rocke_conv_tf32_spec_view_t* spec,
+                                   const rocke_archtarget_t* target,
+                                   const char* family,
+                                   const char* arch,
+                                   char* reason,
+                                   size_t reason_cap)
+{
+    if(strcmp(family, "mma") != 0)
+        return ROCKE_CONV_TF32_FAIL(
+            reason, reason_cap, "mma_dtype='tf32' is MFMA-only; %s is a WMMA target", arch);
+
+    int num_ops = 0;
+    const rocke_mma_op_t* ops = rocke_mma_catalog_ops(rocke_archtarget_mma(target), &num_ops);
+    rocke_conv_tf32_shape_t shapes[64];
+    int num_shapes = 0;
+    for(int i = 0; i < num_ops && num_shapes < (int)(sizeof(shapes) / sizeof(shapes[0])); ++i)
+    {
+        if(!rocke_conv_tf32_is_atom_row(&ops[i]))
+            continue;
+        shapes[num_shapes].m = ops[i].m;
+        shapes[num_shapes].n = ops[i].n;
+        shapes[num_shapes].k = ops[i].k;
+        ++num_shapes;
+    }
+    if(num_shapes == 0)
+        return ROCKE_CONV_TF32_FAIL(
+            reason, reason_cap, "mma_dtype='tf32': %s has no TF32 MFMA atom", arch);
+    qsort(shapes, (size_t)num_shapes, sizeof(shapes[0]), rocke_conv_tf32_shape_cmp);
+
+    bool listed = false;
+    for(int i = 0; i < num_shapes; ++i)
+        listed = listed
+                 || (shapes[i].m == spec->warp_tile_m && shapes[i].n == spec->warp_tile_n
+                     && shapes[i].k == spec->warp_tile_k);
+    if(!listed)
+    {
+        /* f"(have {_shapes})": Python's repr of a sorted list of tuples. */
+        char have[512];
+        size_t pos = 0;
+        have[0] = '\0';
+        for(int i = 0; i < num_shapes && pos < sizeof(have); ++i)
+        {
+            int w = snprintf(have + pos,
+                             sizeof(have) - pos,
+                             "%s(%d, %d, %d)",
+                             i == 0 ? "" : ", ",
+                             shapes[i].m,
+                             shapes[i].n,
+                             shapes[i].k);
+            if(w < 0)
+                break;
+            pos += (size_t)w;
+        }
+        return ROCKE_CONV_TF32_FAIL(reason,
+                                    reason_cap,
+                                    "mma_dtype='tf32': warp_tile (%d, %d, %d) is not a TF32 atom "
+                                    "on %s (have [%s])",
+                                    spec->warp_tile_m,
+                                    spec->warp_tile_n,
+                                    spec->warp_tile_k,
+                                    arch,
+                                    have);
+    }
+    const rocke_mma_op_t* op = rocke_archtarget_op_for_shape(target,
+                                                             "mma",
+                                                             "tf32",
+                                                             "tf32",
+                                                             "fp32",
+                                                             spec->warp_tile_m,
+                                                             spec->warp_tile_n,
+                                                             spec->warp_tile_k,
+                                                             nullptr);
+    return rocke_conv_tf32_register_reason(spec, op, reason, reason_cap);
+}
+
+bool rocke_conv_tf32_conv_spec_reason(const rocke_conv_tf32_spec_view_t* spec,
+                                      const char* arch,
+                                      bool async_needs_k_outer,
+                                      char* reason,
+                                      size_t reason_cap)
+{
+    if(rocke_conv_mma_dtype_reason(
+           spec->dtype_a, spec->dtype_b, spec->dtype_d, spec->mma_dtype, reason, reason_cap))
+        return true;
+    if(!rocke_conv_data_is_tf32(spec->mma_dtype))
+        return false;
+    if(spec->lds_k_outer)
+        return ROCKE_CONV_TF32_FAIL(
+            reason,
+            reason_cap,
+            "mma_dtype='tf32': lds_k_outer is not supported -- the K-outer operand fetch is a "
+            "16-bit transpose read (ds_read_b64_tr_b16) with no 32-bit form, and TF32 keeps "
+            "fp32 tiles in LDS");
+    if(async_needs_k_outer && spec->async_dma)
+        return ROCKE_CONV_TF32_FAIL(
+            reason,
+            reason_cap,
+            "mma_dtype='tf32': async_dma is not supported -- this kernel's direct "
+            "global->LDS load needs the K-outer tile, which TF32 cannot use");
+    if(spec->lds_layout_swizzled)
+        return ROCKE_CONV_TF32_FAIL(reason,
+                                    reason_cap,
+                                    "mma_dtype='tf32': a swizzled lds_layout is not supported -- "
+                                    "the fragment is read as contiguous fp32 vectors");
+    return rocke_conv_tf32_mfma_reason(spec, arch, reason, reason_cap);
+}
+
+bool rocke_conv_tf32_mfma_reason(const rocke_conv_tf32_spec_view_t* spec,
+                                 const char* arch,
+                                 char* reason,
+                                 size_t reason_cap)
+{
+    if(spec->wave_size != 64)
+        return ROCKE_CONV_TF32_FAIL(reason,
+                                    reason_cap,
+                                    "mma_dtype='tf32' is MFMA-only; wave_size=%d is a WMMA target",
+                                    spec->wave_size);
+    int frag;
+    if(arch == NULL)
+    {
+        frag = rocke_conv_tf32_any_arch_frag_len(spec);
+        if(frag < 0)
+            return ROCKE_CONV_TF32_FAIL(reason,
+                                        reason_cap,
+                                        "mma_dtype='tf32': warp_tile (%d, %d, %d) is not a TF32 "
+                                        "atom on any arch",
+                                        spec->warp_tile_m,
+                                        spec->warp_tile_n,
+                                        spec->warp_tile_k);
+    }
+    else
+    {
+        const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
+        if(target == NULL)
+            /* ArchTarget.from_gfx raises KeyError; every caller resolves the
+             * arch first, so this is the defensive form of that error. */
+            return ROCKE_CONV_TF32_FAIL(reason, reason_cap, "unknown gfx target '%s'", arch);
+        const char* family = target->wave_size == 32 ? "wmma" : "mma";
+        if(rocke_conv_tf32_reason(spec, target, family, arch, reason, reason_cap))
+            return true;
+        const rocke_mma_op_t* op = rocke_archtarget_op_for_shape(target,
+                                                                 "mma",
+                                                                 "tf32",
+                                                                 "tf32",
+                                                                 "fp32",
+                                                                 spec->warp_tile_m,
+                                                                 spec->warp_tile_n,
+                                                                 spec->warp_tile_k,
+                                                                 nullptr);
+        frag = op->srcs[0].frag_len;
+    }
+    if(spec->lds_layout_error != NULL)
+        return ROCKE_CONV_TF32_FAIL(reason, reason_cap, "%s", spec->lds_layout_error);
+    /* A and B share the layout, so one stride covers both tiles. */
+    return rocke_conv_tf32_lds_stride_reason(spec->lds_row_stride, frag, reason, reason_cap);
 }

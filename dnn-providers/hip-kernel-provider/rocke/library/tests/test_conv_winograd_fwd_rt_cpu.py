@@ -98,6 +98,103 @@ def test_aot_grid_builds():
         assert k.name == spec.kernel_name()
 
 
+@pytest.mark.parametrize("arch", ["gfx1250", "gfx942", "gfx1201"])
+def test_aot_k3_grid_is_k3_configs_short_on_non_gfx950(arch):
+    """Arches outside K3_MFMA_ARCHS use the gfx1250 list (K3_CONFIGS_SHORT)."""
+    from benchmarks.common.benchmark_winograd_conv import K3_CONFIGS_SHORT, k3_configs
+
+    assert k3_configs(arch) == K3_CONFIGS_SHORT
+
+
+def test_aot_k3_grid_on_gfx950_adds_the_mfma_configs():
+    """gfx950's K3 grid is the gfx1250 list plus the 32x32 warp tile and the
+    compv3 / compv4 pipelines, each config once, and every added config has a
+    valid implicit-GEMM spec for both I/O dtypes.
+
+    The wiring check asserts that the K3 configs drawn from ``_job_list``
+    match ``k3_configs("gfx950")``; this fails if ``_job_list`` reverts to the
+    gfx1250 list or any tile row is dropped.
+    """
+    from benchmarks.common import benchmark_winograd_aot as A
+    from benchmarks.common.benchmark_winograd_conv import (
+        K3_CONFIGS_SHORT,
+        k3_configs,
+    )
+    from kernels.common.conv_implicit_gemm import is_valid_spec
+
+    # -- pinned list of the 30 configs added on gfx950 (not in K3_CONFIGS_SHORT)
+    _MFMA_ADDED_CONFIGS: tuple = (
+        (256, 256, 64, 2, 4, 16, "compv3", "cshuffle"),
+        (256, 256, 64, 2, 4, 16, "compv4", "cshuffle"),
+        (256, 256, 64, 2, 4, 32, "mem", "cshuffle"),
+        (256, 256, 64, 2, 4, 32, "compv3", "cshuffle"),
+        (256, 256, 64, 2, 4, 32, "compv4", "cshuffle"),
+        (256, 256, 64, 4, 4, 16, "compv3", "cshuffle"),
+        (256, 256, 64, 4, 4, 16, "compv4", "cshuffle"),
+        (256, 256, 64, 4, 4, 32, "mem", "cshuffle"),
+        (256, 256, 64, 4, 4, 32, "compv3", "cshuffle"),
+        (256, 256, 64, 4, 4, 32, "compv4", "cshuffle"),
+        (256, 128, 64, 4, 2, 16, "compv3", "cshuffle"),
+        (256, 128, 64, 4, 2, 16, "compv4", "cshuffle"),
+        (256, 128, 64, 4, 2, 32, "mem", "cshuffle"),
+        (256, 128, 64, 4, 2, 32, "compv3", "cshuffle"),
+        (256, 128, 64, 4, 2, 32, "compv4", "cshuffle"),
+        (128, 256, 64, 2, 4, 16, "compv3", "cshuffle"),
+        (128, 256, 64, 2, 4, 16, "compv4", "cshuffle"),
+        (128, 256, 64, 2, 4, 32, "mem", "cshuffle"),
+        (128, 256, 64, 2, 4, 32, "compv3", "cshuffle"),
+        (128, 256, 64, 2, 4, 32, "compv4", "cshuffle"),
+        (128, 128, 64, 2, 2, 16, "compv3", "cshuffle"),
+        (128, 128, 64, 2, 2, 16, "compv4", "cshuffle"),
+        (128, 128, 64, 2, 2, 32, "mem", "cshuffle"),
+        (128, 128, 64, 2, 2, 32, "compv3", "cshuffle"),
+        (128, 128, 64, 2, 2, 32, "compv4", "cshuffle"),
+        (64, 128, 64, 2, 2, 16, "compv3", "cshuffle"),
+        (64, 128, 64, 2, 2, 16, "compv4", "cshuffle"),
+        (64, 128, 64, 2, 2, 32, "mem", "cshuffle"),
+        (64, 128, 64, 2, 2, 32, "compv3", "cshuffle"),
+        (64, 128, 64, 2, 2, 32, "compv4", "cshuffle"),
+    )
+
+    grid = k3_configs("gfx950")
+
+    # wiring: configs scheduled by _job_list match k3_configs("gfx950")
+    job_k3_cfgs = tuple(
+        dict.fromkeys(  # preserve order, deduplicate
+            payload[0] for kind, payload in A._job_list("gfx950") if kind == "I"
+        )
+    )
+    assert job_k3_cfgs == grid, (
+        "K3 configs in _job_list('gfx950') do not match k3_configs('gfx950'); "
+        "check that _job_list calls k3_configs, not a hard-coded gfx1250 list"
+    )
+
+    # shape: gfx1250 list as prefix, then exactly the 30 pinned configs
+    assert len(grid) == len(set(grid)), "duplicate K3 configs"
+    assert grid[: len(K3_CONFIGS_SHORT)] == K3_CONFIGS_SHORT
+    added = grid[len(K3_CONFIGS_SHORT) :]
+    assert added == _MFMA_ADDED_CONFIGS, "pinned MFMA-added configs changed"
+
+    # each added config is valid in the implicit-GEMM AOT gfx950 fwd grid
+    for cfg in _MFMA_ADDED_CONFIGS:
+        for dt in A.IOS:
+            spec = A._k3i_spec(cfg, dt, 8, 8, "gfx950")
+            assert spec is not None and is_valid_spec(spec, "gfx950")[0], cfg
+
+
+@pytest.mark.parametrize("arch", ["gfx950", "gfx1250"])
+def test_jit_sweep_short_matches_k3_configs(arch):
+    """The JIT sweep's ``"short"`` list equals ``k3_configs(arch)`` for every arch.
+
+    Catches a regression where the sweep reverts to a hard-coded gfx1250 list
+    instead of calling ``k3_sweep_configs`` (which delegates to ``k3_configs``).
+    """
+    from benchmarks.common.benchmark_winograd_conv import k3_configs, k3_sweep_configs
+
+    assert k3_sweep_configs("short", arch) == k3_configs(arch)
+    assert k3_sweep_configs("first", arch) == k3_configs(arch)[:1]
+
+
 _PROBLEMS = [
     ConvProblem(N=2, Hi=20, Wi=24, C=64, K=96, Y=3, X=3, pH=1, pW=1),
     ConvProblem(N=1, Hi=13, Wi=11, C=36, K=20, Y=3, X=3, pH=0, pW=2),

@@ -123,6 +123,14 @@ def build_gemm(name, arch, *args, **kwargs):
     return _build
 
 
+def _tf32_conv_data():
+    """fp32 storage with TF32 MFMA operands (gfx942 native XF32, gfx950
+    BF16x3) for the implicit-GEMM conv builders' ``tf32=True``."""
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    return ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
+
+
 def build_conv(
     name,
     arch,
@@ -142,6 +150,7 @@ def build_conv(
     group_merge=1,
     split_k=1,
     split_k_cluster=0,
+    tf32=False,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm import (
@@ -170,6 +179,7 @@ def build_conv(
             group_merge=group_merge,
             split_k=split_k,
             split_k_cluster=split_k_cluster,
+            **({"data": _tf32_conv_data()} if tf32 else {}),
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -196,6 +206,7 @@ def build_conv_wgrad(
     streamk="off",
     streamk_reduction="linear",
     streamk_ctas=-1,
+    tf32=False,
     **spec_extra,
 ):
     def _build():
@@ -212,7 +223,11 @@ def build_conv_wgrad(
         spec = WgradConvSpec(
             problem=p,
             name=name,
-            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
+            data=(
+                _tf32_conv_data()
+                if tf32
+                else ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d)
+            ),
             tile_m=tile_m,
             tile_n=tile_n,
             tile_k=tile_k,
@@ -251,6 +266,7 @@ def build_dgrad(
     split_k=1,
     tap_outer_k=False,
     halo=None,
+    tf32=False,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm_dgrad import (
@@ -266,7 +282,11 @@ def build_dgrad(
         spec = DgradConvSpec(
             problem=p,
             name=name,
-            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp16"),
+            data=(
+                _tf32_conv_data()
+                if tf32
+                else ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp16")
+            ),
             tile_m=tile_m,
             tile_n=tile_n,
             tile_k=tile_k,
@@ -957,6 +977,7 @@ def build_direct_16c(
     block_groups=8,
     fold_k32=True,
     double_buffer=True,
+    dtype="fp16",
 ):
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -975,6 +996,7 @@ def build_direct_16c(
             KH=KH,
             KW=KW,
             PAD=PAD,
+            dtype=dtype,
         )
         spec = DirectConv16cSpec(
             problem=p,
@@ -1037,6 +1059,25 @@ def build_direct_4c(
             waves_q=block_q // 4 if stage_rows else 1,
         )
         return build_direct_conv_4c(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_generic(name, arch, problem, **spec_kw):
+    """The generic forward DirectConvSpec kernel; ``problem`` holds the
+    DirectConvProblem fields, ``spec_kw`` further DirectConvSpec fields."""
+
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectConvSpec,
+            build_direct_conv,
+        )
+
+        spec = DirectConvSpec(
+            problem=DirectConvProblem(**problem), name=name, **spec_kw
+        )
+        return build_direct_conv(spec, arch=arch)
 
     return _build
 
@@ -1435,9 +1476,11 @@ def build_direct_nongrouped(
 
 def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
     """A direct wgrad kernel: ``kind`` is tiled / dw_lds / dw_cols / gather /
-    dw_mfma / grouped_mfma / fold; ``problem`` overrides the DirectConvProblem
-    fields (unused by the fold). Configs mirror parity/conv_direct_grouped_emit.* (indices 95+),
-    where the C++ engine is gated byte-identical by check_byte_identity.py."""
+    dw_mfma / grouped_mfma / fold, or the gfx1250 wave32 image (and small-C)
+    ``w32`` and depthwise ``dw_valu`` kernels; ``problem`` overrides the
+    DirectConvProblem fields (unused by the fold). Configs mirror
+    parity/conv_direct_grouped_emit.* (indices 95+ and 201+), where the C++
+    engine is gated byte-identical by check_byte_identity.py."""
 
     def _build():
         from kernels.common import conv_direct_dw_wgrad as dw
@@ -1445,6 +1488,7 @@ def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
         from kernels.common import conv_direct_grouped_wgrad_mfma as gwm
         from kernels.common import conv_direct_wgrad_gather as wg
         from kernels.common import conv_direct_wgrad_tiled as wt
+        from kernels.common import conv_direct_grouped as dc
         from kernels.common.conv_direct_grouped import DirectConvProblem
 
         if kind == "fold":
@@ -1476,6 +1520,8 @@ def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
                 gwm.GroupedWgradMfmaSpec,
                 gwm.build_grouped_wgrad_mfma,
             ),
+            "w32": (dc.DirectConvWgradSpec, dc.build_direct_conv_wgrad),
+            "dw_valu": (dc.DirectDepthwiseWgradSpec, dc.build_direct_depthwise_wgrad),
         }[kind]
         return build(spec_cls(problem=p, name=name, **spec_kw), arch=arch)
 
@@ -3265,6 +3311,46 @@ def cases():
             tile_k=32,
         ),
     )
+
+    # TF32 compute (fp32 storage, mma_dtype="tf32") on the implicit-GEMM fwd,
+    # dgrad and wgrad: gfx942 issues the native XF32 MFMA, gfx950 the BF16x3
+    # split (three bf16 MFMAs per logical atom). Between them the cases cover
+    # all four TF32 atoms. check_byte_identity.py holds the C++ builders to
+    # the same IR (the TF32 configs of the conv_implicit_gemm* parity families);
+    # this pins it against drift in both engines.
+    for _arch, _fwd_atom, _bwd_atom in (
+        ("gfx942", (32, 4), (16, 8)),
+        ("gfx950", (16, 32), (32, 16)),
+    ):
+        _a = _arch[3:]
+        _fwd = dict(wtm=_fwd_atom[0], wtn=_fwd_atom[0], wtk=_fwd_atom[1])
+        _bwd = dict(wtm=_bwd_atom[0], wtn=_bwd_atom[0], wtk=_bwd_atom[1])
+        _tile = dict(wave_size=64, tile_m=64, tile_n=64, tile_k=32, tf32=True)
+        add(
+            "conv",
+            f"conv/{_arch}/n1h8c16k32r3_tf32",
+            _arch,
+            build_conv(
+                f"irhash_conv_{_a}_tf32",
+                _arch,
+                conv1,
+                epilogue="cshuffle",
+                **_fwd,
+                **_tile,
+            ),
+        )
+        add(
+            "conv_dgrad",
+            f"conv_dgrad/{_arch}/n1h8c16k32r3_s1_tf32",
+            _arch,
+            build_dgrad(f"irhash_dgrad_{_a}_s1_tf32", _arch, dgrad1, **_bwd, **_tile),
+        )
+        add(
+            "conv_wgrad",
+            f"conv_wgrad/{_arch}/n1h8c16k32r3_tf32",
+            _arch,
+            build_conv_wgrad(f"irhash_wgrad_{_a}_tf32", _arch, wgrad1, **_bwd, **_tile),
+        )
 
     # Two-stage wgrad Stage 1: workspace-store epilogue instead of atomic-add.
     # split_k=4, two_stage=True — exercises the _emit_wgrad_workspace_store_epilogue
@@ -5309,6 +5395,66 @@ def cases():
             ),
         )
 
+    # fp32 storage on the direct conv: dtype "fp32" runs the exact fp32 atoms,
+    # "tf32" the TF32 atoms (gfx942 native XF32, gfx950 BF16x3). Covers the
+    # fixed-cpg 16c forward, the generic DirectConvSpec forward and the
+    # non-grouped kernel. check_byte_identity.py holds the C++ twins to the same
+    # IR (the fp32-storage configs of conv_direct_grouped_emit); this pins it
+    # against drift in both engines.
+    for _arch in ("gfx942", "gfx950"):
+        _a = _arch[3:]
+        for _dt in ("fp32", "tf32"):
+            add(
+                "conv_direct",
+                f"conv_direct/{_arch}/16c_n1h8_{_dt}",
+                _arch,
+                build_direct_16c(
+                    f"irhash_direct16c_{_a}_{_dt}",
+                    _arch,
+                    N=1,
+                    H=8,
+                    W=8,
+                    groups=8,
+                    block_groups=4,
+                    fold_k32=_arch == "gfx950",
+                    dtype=_dt,
+                ),
+            )
+            add(
+                "conv_direct_nongrouped",
+                f"conv_direct_nongrouped/{_arch}/{_dt}_a32x32x16_t4x32x64",
+                _arch,
+                build_direct_nongrouped(
+                    f"irhash_direct_nongrouped_{_a}_{_dt}",
+                    _arch,
+                    N=1,
+                    H=16,
+                    W=32,
+                    C=64,
+                    K=64,
+                    dtype=_dt,
+                    tile_h=4,
+                    tile_w=32,
+                    tile_k=64,
+                    ck=16,
+                    waves_m=2,
+                    waves_n=2,
+                    atom="32x32x16",
+                    lds_pad=4,
+                ),
+            )
+        add(
+            "conv_direct",
+            f"conv_direct/{_arch}/gen_c32_n2h14_tf32",
+            _arch,
+            build_direct_generic(
+                f"irhash_direct_gen_{_a}_tf32",
+                _arch,
+                dict(N=2, H=14, W=14, groups=8, cpg=32, kpg=32, dtype="tf32"),
+                block_h=8,
+            ),
+        )
+
     # --- conv_dgrad_{patch,smallc}_wmma: wave32 WMMA stem dgrad (gfx1250) ---
     # Patch embeddings as one GEMM with a pixel-shuffle TDM store, and small-C
     # stems as a GEMM over the flattened filter plus an LDS overlap-add. Every
@@ -6246,6 +6392,75 @@ def cases():
             "gfx950",
             build_direct_wgrad(
                 f"irhash_direct_wgrad_{_case_id}", "gfx950", _kind, _prob, **_over
+            ),
+        )
+    # The gfx1250 (wave32) direct wgrad kernels: the image-per-block kernel
+    # (register blocking, row split, TDM ring, replicated two-stage scratch,
+    # LDS epilogue), the small-C stem form, and the depthwise VALU kernel.
+    # Mirrors library/tests/parity/conv_direct_grouped_emit.* (indices 318+).
+    for _case_id, _kind, _prob, _over in (
+        (
+            "image_rps3_rb2_ws8",
+            "w32",
+            dict(H=12),
+            dict(
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                row_blocks=2,
+                ws_replicas=8,
+                lds_epilogue=True,
+            ),
+        ),
+        (
+            "image_tdm3_fp16",
+            "w32",
+            dict(dtype="fp16"),
+            dict(
+                waves_k=4,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                tdm_stages=3,
+                ws_replicas=8,
+            ),
+        ),
+        (
+            "small_c3_3x3_s2",
+            "w32",
+            dict(cpg=3, kpg=32, stride=2, H=32, W=64),
+            dict(
+                waves_k=2,
+                waves_c=1,
+                wave_tiles_k=1,
+                wave_tiles_c=2,
+                small_c=True,
+                vec_x=4,
+                sub_steps=2,
+                ws_replicas=4,
+                row_blocks=8,
+            ),
+        ),
+        (
+            "dw_valu_7x7_c128",
+            "dw_valu",
+            dict(groups=128, cpg=1, kpg=1, KH=7, KW=7, PAD=3, H=14, W=14),
+            dict(chan_per_lane=4, waves=8, rows_per_wave=4, r_split=2),
+        ),
+    ):
+        add(
+            "conv_direct_wgrad",
+            f"conv_direct_wgrad/gfx1250/{_case_id}",
+            "gfx1250",
+            build_direct_wgrad(
+                f"irhash_direct_wgrad_1250_{_case_id}",
+                "gfx1250",
+                _kind,
+                _prob,
+                wave_size=32,
+                **({"mfma_k": 32} if _kind == "w32" else {}),
+                **_over,
             ),
         )
 
