@@ -592,9 +592,13 @@ namespace rocsparse
                 // To force the compiler to stick to the order of operations, we need acquire/release fences.
                 // Workgroup scope is sufficient for this purpose, to only invalidate L1 and avoid L2
                 // invalidations.
-                if (__builtin_amdgcn_processor_is("gfx1250") ||
-                    __builtin_amdgcn_processor_is("gfx1250-strict") ||
-                    __builtin_amdgcn_processor_is("gfx12-5-generic"))
+                if(__builtin_amdgcn_processor_is("gfx1200")
+                   || __builtin_amdgcn_processor_is("gfx1201")
+                   || __builtin_amdgcn_processor_is("gfx12-generic")
+                   || __builtin_amdgcn_processor_is("gfx1250")
+                   || __builtin_amdgcn_processor_is("gfx1250-strict")
+                   || __builtin_amdgcn_processor_is("gfx1251")
+                   || __builtin_amdgcn_processor_is("gfx12-5-generic"))
                 {
                     __threadfence();
                 }
@@ -1317,9 +1321,13 @@ namespace rocsparse
                 // To force the compiler to stick to the order of operations, we need acquire/release fences.
                 // Workgroup scope is sufficient for this purpose, to only invalidate L1 and avoid L2
                 // invalidations.
-                if (__builtin_amdgcn_processor_is("gfx1250") ||
-                    __builtin_amdgcn_processor_is("gfx1250-strict") ||
-                    __builtin_amdgcn_processor_is("gfx12-5-generic"))
+                if(__builtin_amdgcn_processor_is("gfx1200")
+                   || __builtin_amdgcn_processor_is("gfx1201")
+                   || __builtin_amdgcn_processor_is("gfx12-generic")
+                   || __builtin_amdgcn_processor_is("gfx1250")
+                   || __builtin_amdgcn_processor_is("gfx1250-strict")
+                   || __builtin_amdgcn_processor_is("gfx1251")
+                   || __builtin_amdgcn_processor_is("gfx12-5-generic"))
                 {
                     __threadfence();
                 }

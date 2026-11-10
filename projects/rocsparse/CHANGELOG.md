@@ -5,6 +5,9 @@ Documentation for rocSPARSE is available at
 
 ## (Unreleased) rocSPARSE 5.3.0
 
+### Added
+* Added support for the generic `amdgcnspirv` (SPIR-V) offload target, and added it to the default `GPU_TARGETS`. A default build also embeds a SPIR-V code object, which the runtime compiles for devices that have no architecture-specific code object in the build.
+
 ### Changed
 * `rocsparse_spmv` and `rocsparse_v2_spmv` with the default algorithm (`rocsparse_spmv_alg_default`) now select the nnz-split algorithm when the CSR-adaptive row-block partition is a poor fit. This applies to non-transposed CSR and to transposed and conjugate-transposed CSC, for general and symmetric matrices. The partition is a poor fit when row blocks spanning many mostly empty rows cover a substantial share of the matrix, or when many row blocks are runs of short rows between long rows that hold far fewer non-zeros than a full block. An empty prefix or suffix that the adaptive algorithm already skips does not cause the switch to the nnz-split algorithm. Half-precision (`f16` and `bf16`) matrices and the transposed CSR and non-transposed CSC defaults keep their previous algorithm, and explicit algorithm selections, including `rocsparse_spmv_alg_csr_adaptive`, still use the requested algorithm.
 * The nnz-split SpMV compute stage, selected explicitly with `rocsparse_spmv_alg_csr_nnzsplit` or by the default algorithm, now checks that the matrix descriptor, sizes, and pointers match the preprocessing stage, as the adaptive algorithm does. Changing the matrix pointers between the two stages now returns `rocsparse_status_invalid_pointer` instead of reusing the analysis of the old arrays; preprocess a new matrix descriptor for the new arrays. An adaptive compute stage after a default preprocessing stage that selected nnz-split returns `rocsparse_status_invalid_value`.
@@ -42,7 +45,6 @@ Documentation for rocSPARSE is available at
 * Added the batch support for `rocsparse_sptrsm`.
 * Added the `rocsparse_dnmat_transpose` generic routine for dense matrix transposing.
 * Added the `rocsparse_dnmat_copy_data` generic routine for dense matrix data copying.
-* Added support for the `amdgcnspirv` architecture.
 
 ### Optimized
 * Improved `rocsparse_Xgemvi` performance, especially when `n` is greater than `m`.
