@@ -55,7 +55,16 @@ UNIQ_COLS = (
     "lowest_avg_freq", 
     "lowest_median_freq", 
     "avg_MCLK", 
-    "median_MCLK"
+    "median_MCLK",
+    # Adaptive timing outputs: measured per run, so they must not be merge keys.
+    "batch",
+    "samples",
+    "hot_iters",
+    "mean_us",
+    "min_us",
+    "cv",
+    "rel_iqr",
+    "status",
 )
 
 
@@ -394,6 +403,35 @@ def standard_benchmark(
     )
 
 
+def _merge_reference_tuned(dfr: pd.DataFrame, dft: pd.DataFrame) -> pd.DataFrame:
+    """Merge reference and tuned results on every column that is not a per-run result.
+
+    Columns in UNIQ_COLS (already suffixed with _reference/_tuned) are results
+    and are kept side by side; every other column is a benchmark input and a
+    merge key. A result column missing from UNIQ_COLS makes the keys disagree
+    between both runs and silently drops rows, so that case raises instead.
+
+    Raises:
+        ValueError: If the merge loses rows, naming the key columns whose
+            values differ between both runs.
+    """
+    keys = [c for c in dfr.columns if c.split("_reference")[0] not in UNIQ_COLS]
+    df = dfr.merge(dft, on=keys)
+    if len(df) >= min(len(dfr), len(dft)):
+        return df
+
+    unstable = [
+        c for c in keys
+        if c in dft.columns
+        and sorted(dfr[c].astype(str)) != sorted(dft[c].astype(str))
+    ]
+    raise ValueError(
+        f"Merging reference and tuned results kept {len(df)} of {len(dfr)} rows. "
+        f"These columns differ between both runs and are probably results that "
+        f"should be listed in UNIQ_COLS: {unstable}"
+    )
+
+
 def compare(
     hipblaslt_path: str | Path,
     lib_dir: str | Path,
@@ -558,7 +596,7 @@ def compare(
         dft["error_tuned"] = dft.merge(dfv, on=[c for c in dfv.columns if c not in ["norm_error", "atol", "rtol"]])["norm_error"]
         dft["error_tuned"] = dft["error_tuned"] / dft["batch_count"] # normalized by batch_count
 
-    df = dfr.merge(dft, on=[c for c in dfr.columns if c.split("_reference")[0] not in UNIQ_COLS])
+    df = _merge_reference_tuned(dfr, dft)
     df["ratio"] = df["us_reference"] / df["us_tuned"]
     logger.debug(
         f"Benchmark compare result: rows={len(df)} ratio_mean={df['ratio'].mean():.6f} "
