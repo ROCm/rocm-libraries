@@ -182,12 +182,10 @@ jobs:
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
-      # gfx125X (CDNA5/gfx1250) is included build-only on every PR/push: no test
-      # hardware exists for it yet (see amdgpu_family_matrix.py in TheRock, family
-      # key "gfx125x": test-runs-on is empty everywhere), but legacy therock-ci.yml
-      # built it on every PR/push before Multi-Arch CI became the default, and this
-      # restores that parity so gfx1250 build breaks are caught same-PR instead of
-      # only nightly.
+      # gfx125X (CDNA5/gfx1250) is built on every PR/push; the MIOpen quick
+      # sidecar below tests its artifacts with CPU emulation, independently of
+      # TheRock's hardware-test scheduling. Keeping gfx125X in the default
+      # build families catches gfx1250 build breaks in the same PR.
       #
       # An empty input means "not specified" here and falls back to these
       # defaults, including on workflow_dispatch. To skip a platform entirely,
@@ -297,6 +295,52 @@ jobs:
     permissions:
       contents: read
       id-token: write
+
+  miopen_gfx1250_rocjitsu_quick:
+    name: miopen-gfx1250-rocjitsu-quick
+    # Consume this run's published Linux artifacts, not a separate CK/MIOpen build.
+    # Full quick-suite GPU emulation is substantial CPU work, not light lint;
+    # use the configured Linux compute pool without requesting GPU hardware.
+    needs: [ci-env, configure, setup, linux_build_and_test]
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.linux_build_and_test.result != 'skipped' &&
+        contains(needs.setup.outputs.linux_build_config, 'gfx125X-dcgpu') &&
+        (
+          needs.configure.outputs.run_all_tests == 'true' ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/miopen,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/composablekernel,') ||
+          contains(github.event.pull_request.labels.*.name, 'test:miopen') ||
+          contains(format(',{0},', inputs.pr_labels), ',test:miopen,') ||
+          github.event_name == 'workflow_dispatch'
+        )
+      }}
+    uses: ROCm/TheRock/.github/workflows/test_component.yml@647a8c52a206f2e7d0e9c63cbf0af0ded084f08b # 2026-11-09
+    with:
+      artifact_run_id: ${{ github.run_id }}
+      artifact_group: gfx125X-dcgpu
+      amdgpu_families: gfx125X-dcgpu
+      amdgpu_targets: gfx1250
+      test_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
+      platform: linux
+      build_variant: release
+      repository: ROCm/TheRock
+      ref: 647a8c52a206f2e7d0e9c63cbf0af0ded084f08b # 2026-11-09
+      component: >-
+        {
+          "job_name": "miopen-gfx1250-rocjitsu-quick",
+          "test_type": "quick",
+          "total_shards": 1,
+          "shard_arr": [1],
+          "platform": "linux",
+          "linux_cpu_runner": true,
+          "timeout_minutes": 100,
+          "fetch_artifact_args": "--blas --miopen --rand --tests",
+          "test_script": "python ./build/share/miopen/bin/run_gfx1250_rocjitsu_quick.py",
+          "additional_requirements_files": [],
+          "container_options": "--user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576"
+        }
 
   rocjitsu_race_check:
     name: rocjitsu race check (${{ matrix.amdgpu_families }})

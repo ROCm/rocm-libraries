@@ -82,7 +82,7 @@ def cu_correct_config(in_path: Path, cu_count: int, out_path: Path):
 
 
 def ensure_build_tools():
-    """Install cmake/build-essential/libdrm-dev/git if missing.
+    """Install cmake/Ninja/build-essential/libdrm-dev/git if missing.
 
     Uses sudo rather than assuming the container runs as root: TheRock's
     no_rocm_image_ubuntu24_04 (and its variants) run as an unprivileged
@@ -90,7 +90,7 @@ def ensure_build_tools():
     pools don't honor a container's --user 0:0 override.
     """
     if (
-        all(shutil.which(t) for t in ("cmake", "c++", "git"))
+        all(shutil.which(t) for t in ("cmake", "ninja", "c++", "git"))
         and Path("/usr/include/libdrm").exists()
     ):
         return
@@ -103,6 +103,7 @@ def ensure_build_tools():
             "-y",
             "--no-install-recommends",
             "cmake",
+            "ninja-build",
             "build-essential",
             "libdrm-dev",
             "git",
@@ -110,8 +111,8 @@ def ensure_build_tools():
     )
 
 
-def build_rocjitsu(workdir: Path):
-    """Sparse-clone rocjitsu @ the pinned ref and build the rocjitsu CLI launcher.
+def build_rocjitsu(workdir: Path, ref: str, jobs: int = None):
+    """Sparse-clone rocjitsu @ ref and build the rocjitsu CLI launcher.
 
     The launcher (not a raw LD_PRELOAD of librocjitsu.so) is the supported entry point: it stands
     up the simulated KFD and injects the interposer into the child process it execs.
@@ -122,10 +123,12 @@ def build_rocjitsu(workdir: Path):
         run(["git", "init", str(src)])
         run(["git", "-C", str(src), "remote", "add", "origin", ROCJITSU_REPO])
         run(["git", "-C", str(src), "config", "core.sparseCheckout", "true"])
-        (src / ".git" / "info" / "sparse-checkout").write_text("emulation/rocjitsu\n")
-        run(["git", "-C", str(src), "fetch", "--depth", "1", "origin", ROCJITSU_REF])
+        (src / ".git" / "info" / "sparse-checkout").write_text(
+            "emulation/rocjitsu\nruntimes/api-headers\nshared/machine-readable-isa/isa\n"
+        )
+        run(["git", "-C", str(src), "fetch", "--depth", "1", "origin", ref])
         run(["git", "-C", str(src), "checkout", "FETCH_HEAD"])
-    build = workdir / "rocjitsu-build"
+    build = workdir / "rocjitsu-build-ninja"
     run(
         [
             "cmake",
@@ -133,7 +136,10 @@ def build_rocjitsu(workdir: Path):
             str(src / "emulation" / "rocjitsu"),
             "-B",
             str(build),
+            "-G",
+            "Ninja",
             "-DCMAKE_BUILD_TYPE=Release",
+            f"-DFETCHCONTENT_BASE_DIR={build / 'third_party'}",
         ]
     )
     run(
@@ -145,7 +151,7 @@ def build_rocjitsu(workdir: Path):
             "rocjitsu_bin",
             "rocjitsu_shared",
             "-j",
-            str(os.cpu_count() or 4),
+            str(jobs if jobs is not None else (os.cpu_count() or 4)),
         ]
     )
     rocjitsu_bin = build / "tools" / "rocjitsu" / "rocjitsu"
@@ -203,7 +209,7 @@ def main():
     work = Path("rocjitsu-work").resolve()
     work.mkdir(exist_ok=True)
     ensure_build_tools()
-    rocjitsu_bin, rj_src = build_rocjitsu(work)
+    rocjitsu_bin, rj_src = build_rocjitsu(work, ROCJITSU_REF)
     configs_dir = rj_src / "emulation" / "rocjitsu" / "configs"
 
     env_base = os.environ.copy()

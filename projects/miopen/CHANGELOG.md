@@ -63,6 +63,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   replay a captured graph.
 
 ### Added
+* [CI] Added full MIOpen quick-suite coverage for gfx1250 under rocjitsu, consuming same-run TheRock Multi-Arch CI artifacts.
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.

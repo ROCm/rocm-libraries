@@ -4,6 +4,64 @@ Full test-naming rules live on the wiki: https://github.com/ROCm/MIOpen/wiki/GTe
 (`Smoke`/`Standard`/`Full`/`Perf`/`Unit` prefixes, `CPU`/`GPU` hardware token, datatype
 suffix). `check_names.py` enforces that schema against `miopen_gtest --gtest_list_tests`.
 
+## gfx1250 quick suite under rocjitsu
+
+The existing TheRock Multi-Arch CI workflow has a separate
+`miopen-gfx1250-rocjitsu-quick` job. It consumes the current run's
+`gfx125X-dcgpu` artifacts with an explicit `gfx1250` fetch target. CK and MIOpen
+are built only by the upstream build stage; the test job builds the pinned
+rocjitsu host emulator, not CK or MIOpen. It uses the configured Linux CPU
+compute pool because full GPU-suite emulation is substantial work, and needs
+no gfx1250 hardware capacity.
+
+The installed `share/miopen/bin/run_gfx1250_rocjitsu_quick.py` runner selects
+exactly `miopen_gtest_quick_suite` from the packaged CTest JSON metadata using
+`-R ^miopen_gtest_quick_suite$ -L ^quick$`, then executes that command under
+rocjitsu in one GTest shard. This is the full MIOpen quick suite, not the
+`ffm-quick` subset. It is independent of the parent lane's test tier; it runs
+no standard/full suites and does not enable rocjitsu strict mode.
+
+With the same-run artifacts already unpacked under `./build`, invoke it from
+the artifact workspace:
+
+```sh
+OUTPUT_ARTIFACTS_DIR=./build THEROCK_BIN_DIR=./build/bin \
+  python ./build/share/miopen/bin/run_gfx1250_rocjitsu_quick.py
+```
+
+The default emulator source is pinned to ROCm/rocm-systems commit
+`6f5d9658a4b13656e0c1a3719d86a320c9206dbe` with
+`gfx1250_mi455x_kmd_4gpu.json`, configured for one emulated GPU while retaining
+its CU settings. The runner sets `HSA_DISABLE_GFX12_STRICT=1`.
+A real prebuilt emulator can be supplied with the paired
+`--rocjitsu-bin PATH --rocjitsu-config PATH` options; this does not bypass
+the runtime check or tests. Before running the suite, the runner requires
+the runtime under the launcher to report gfx1250. Missing test binaries,
+gfx1250 CK plugins, a runtime mismatch, empty reports and failed tests fail
+the job rather than becoming successful skips.
+
+The runner isolates writable user databases and caches in a unique work
+directory outside the artifact prefix. It bounds suite execution to 5400
+seconds instead of the packaged suite's hardware-oriented 600-second CTest
+timeout. The reusable workflow's test step is bounded to 100 minutes.
+The runner streams output to the Actions log and appends the job step summary.
+Local reproduction files live under
+`./rocjitsu-work/gfx1250-quick/`: `miopen_gtest_quick_suite.xml`,
+`miopen_gtest_quick_suite.log`, `runtime-probe.log`, `ctest-metadata.json`
+and `rocjitsu-config.json`.
+These files remain in the test workspace; this lane does not upload them
+as downloadable report artifacts.
+
+The job runs after the Linux pipeline finishes when gfx125X was built and
+MIOpen or Composable Kernel changed, all tests were requested,
+`test:miopen` was requested, or the workflow was manually dispatched.
+Workflow changes also request all tests. Failures are visible on this
+separate job; the existing Multi-Arch CI Summary is unchanged. This does
+not configure branch protection or claim that this check is required for
+merge.
+An unrelated Linux test failure does not suppress the emulator job. Missing
+or incomplete gfx1250 artifacts fail the artifact fetch or runner checks.
+
 ## hipDNN shim surface
 
 A test belongs to the hipDNN backend-swap surface if its full gtest name contains the
