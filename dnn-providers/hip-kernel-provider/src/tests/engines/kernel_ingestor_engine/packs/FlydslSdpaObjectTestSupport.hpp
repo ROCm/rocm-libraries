@@ -229,6 +229,20 @@ private:
     hipMemGenericAllocationHandle_t _handle{};
 };
 
+/// Whether an EndGuardedAllocation on the current device is guarded(): false with no device or
+/// without virtual memory management, where a test of what a kernel reads past a buffer has no
+/// unmapped page to fault on and skips (as TestGpuFpReferenceSdpa.cpp's guard tests do).
+inline bool endGuardedAllocationsAreGuarded()
+{
+    int count = 0;
+    if(hipGetDeviceCount(&count) != hipSuccess || count == 0)
+    {
+        return false;
+    }
+    const EndGuardedAllocation probe(1);
+    return probe.guarded();
+}
+
 /// The output and workspace fill of a repeated launch (a determinism check): NaN, zero and a
 /// large finite value in every element width, so a launch that reads an element it did not
 /// write gives an answer that depends on which launch it is.

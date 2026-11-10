@@ -8436,6 +8436,10 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrderAtAHead
 // record for an empty sequence, so nothing is read or written past the tensors.
 TEST(TestGpuFlydslSdpaCdnaDispatch, ReadsNothingPastExactBuffersForATrailingEmptySequence)
 {
+    if(!endGuardedAllocationsAreGuarded())
+    {
+        GTEST_SKIP() << "no unmapped page past the buffers (no device virtual memory management)";
+    }
     // The last sequence empty on the query side, the key side or both.
     for(const auto& [lensQ, lensKv] :
         {std::pair<std::vector<int32_t>, std::vector<int32_t>>{{5, 4, 0}, {7, 3, 0}},

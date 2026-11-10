@@ -9283,6 +9283,10 @@ std::vector<SdpaGraphSpec> trailingEmptySequenceSpecs(int64_t headDim)
 TEST(TestGpuFlydslSdpaRdnaDispatch, ReadsNothingPastExactBuffersForATrailingEmptySequence)
 {
     SKIP_IF_NO_DEVICES();
+    if(!endGuardedAllocationsAreGuarded())
+    {
+        GTEST_SKIP() << "no unmapped page past the buffers (no device virtual memory management)";
+    }
     for(const int64_t headDim : {int64_t{64}, int64_t{128}})
     {
         for(auto spec : trailingEmptySequenceSpecs(headDim))
@@ -9304,6 +9308,10 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, ReadsNothingPastExactBuffersForATrailingEmpt
 TEST(TestGpuFlydslSdpaAiwDispatch, ReadsNothingPastExactBuffersForATrailingEmptySequence)
 {
     SKIP_IF_NO_DEVICES();
+    if(!endGuardedAllocationsAreGuarded())
+    {
+        GTEST_SKIP() << "no unmapped page past the buffers (no device virtual memory management)";
+    }
     for(const auto& spec : trailingEmptySequenceSpecs(64))
     {
         expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
