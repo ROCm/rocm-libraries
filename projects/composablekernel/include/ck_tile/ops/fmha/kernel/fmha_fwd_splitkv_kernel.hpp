@@ -102,6 +102,11 @@ struct FmhaFwdSplitKVKernel
     // the native (seqlen_k, hdim_v) and pages dim 0. K is always (seqlen_k, hdim_q).
     static constexpr index_t kVPagedDim = kUsesUntransposedVKernelPath ? 0 : 1;
 
+    // make_v_dram leaves untransposed V unpadded, which is only safe when the
+    // TDM box clamp bounds the reads past seqlen_k.
+    static_assert(!kUsesUntransposedVKernelPath || kUsesTdmAffineDramPath,
+                  "untransposed V requires the TDM affine DRAM path");
+
     static_assert(!kMergeNumHeadGroupsSeqLenQ ||
                   (kMergeNumHeadGroupsSeqLenQ && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
                    !kHasMask));
@@ -868,7 +873,8 @@ struct FmhaFwdSplitKVKernel
                     number<1>{});
 
                 // Pipelines with native row-major V consume (seqlen, hdim_v)
-                // windows directly, unpadded like K in make_k_dram.
+                // windows directly. They are on kUsesTdmAffineDramPath (asserted
+                // next to kVPagedDim), so V stays unpadded like K in make_k_dram.
                 if constexpr(kUsesUntransposedVKernelPath)
                 {
                     return v_dram_naive;
