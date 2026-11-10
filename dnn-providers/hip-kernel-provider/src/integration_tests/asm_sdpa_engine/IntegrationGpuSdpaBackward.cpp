@@ -129,20 +129,46 @@ struct SdpaBwdTestCase
 const std::vector<std::string> K_GFX942_ONLY = {"gfx942"};
 const std::vector<std::string> K_GFX950_ONLY = {"gfx950"};
 
-std::vector<SdpaBwdTestCase> getSdpaBwdTestCases()
+// Shapes stay small because the CPU backward reference costs O(B*H*S_q*S_kv*D).
+
+// Quick tier: one case per engine path, at the cheapest shape that reaches it.
+// getSdpaBwdComprehensiveTestCases() covers the larger shapes and the rest of
+// the mask, layout and head-dim combinations.
+std::vector<SdpaBwdTestCase> getSdpaBwdSmokeTestCases()
 {
-    // Small dims for fast CPU reference execution (backward CPU ref is O(B*H*S^2*D))
     return {
-        // NO_MASK (mask=0)
+        // hd128 A32 psskddv on gfx942 (S = 256 is not a multiple of the 192-row
+        // K/V tile) and hd128 A32 on gfx950: no mask (mask=0), top-left causal
+        // (mask=1), bottom-right causal (mask=2).
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}),
-        // TOP_LEFT_CAUSAL (mask=1): rightBound=0, topLeftAlignment=true
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, true),
-        // BOTTOM_RIGHT_CAUSAL (mask=2): rightBound=0, topLeftAlignment=false
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, false),
+        // Bottom-right sliding window: mask=3 on gfx942, mask=4 on gfx950.
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, 64, 64, false),
+        // S_q = 1: the gfx950 hd128 kernels carry a seqlen_q == 1 buffer-range fix.
+        SdpaBwdTestCase({1, 1, 1, 128}, {1, 1, 256, 128}),
+        // The a16 accumulator: the gfx942 A16 rows without sequence padding
+        // (S_q == S_kv, S_kv % 64 == 0, packed strides) and the gfx950 A16
+        // psskddv rows with the dq_shuffle post kernel.
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}).withA16(),
+        // A padded head dim: D = 72 runs the hd128 kernels on both architectures.
+        SdpaBwdTestCase({1, 1, 256, 72}, {1, 1, 256, 72}),
+        // D_qk = 192 with D_v = 128 on gfx950.
+        SdpaBwdTestCase({1, 1, 256, 192}, {1, 1, 256, 128}).onlyOn(K_GFX950_ONLY),
+        // S_q == S_kv on a multiple of the gfx942 192-row K/V tile: packed strides
+        // run the dqdkdv kernel without sequence padding (pssk = 0); dO stored
+        // [B, S, H, D] falls back to the psskddv kernel.
+        SdpaBwdTestCase({1, 1, 384, 128}, {1, 1, 384, 128}).onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 1, 384, 128}, {1, 1, 384, 128}).withBshdDo().onlyOn(K_GFX942_ONLY),
+    };
+}
+
+// Comprehensive and full tiers: every case getSdpaBwdSmokeTestCases() leaves out.
+std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
+{
+    return {
         // SLIDING_WINDOW / SWA (mask=3): top-left alignment
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, 64, 64, true),
-        // SLIDING_WINDOW / SWA (mask=3, mask=4 on gfx950): bottom-right alignment
-        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, 64, 64, false),
         // Asymmetric Sq != Skv — no mask
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}),
         // Asymmetric Sq != Skv — top-left causal
@@ -157,9 +183,7 @@ std::vector<SdpaBwdTestCase> getSdpaBwdTestCases()
         // One-sided bottom-right window: the right bound is unbounded (-1).
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, 64, -1, false),
         // Small S_q (1 and 16). AITER's Python layer sends these to CK for speed,
-        // so the ASM kernels see them less often; the gfx950 hd128 kernels carry
-        // a seqlen_q == 1 buffer-range fix.
-        SdpaBwdTestCase({1, 1, 1, 128}, {1, 1, 256, 128}),
+        // so the ASM kernels see them less often.
         SdpaBwdTestCase({1, 1, 1, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, false),
         SdpaBwdTestCase({1, 1, 16, 128}, {1, 1, 256, 128}),
         SdpaBwdTestCase({1, 1, 16, 128}, {1, 1, 16, 128}, std::nullopt, -1, 0, true),
@@ -484,7 +508,11 @@ TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuSdpaBwdBf16,
-                         testing::ValuesIn(getSdpaBwdTestCases()));
+                         testing::ValuesIn(getSdpaBwdSmokeTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         IntegrationGpuSdpaBwdBf16,
+                         testing::ValuesIn(getSdpaBwdComprehensiveTestCases()));
 
 TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
 {
@@ -499,4 +527,8 @@ TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuSdpaBwdFp16,
-                         testing::ValuesIn(getSdpaBwdTestCases()));
+                         testing::ValuesIn(getSdpaBwdSmokeTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         IntegrationGpuSdpaBwdFp16,
+                         testing::ValuesIn(getSdpaBwdComprehensiveTestCases()));
