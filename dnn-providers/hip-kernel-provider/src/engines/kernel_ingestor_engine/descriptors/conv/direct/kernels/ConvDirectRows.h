@@ -59,6 +59,33 @@ __device__ inline void k2rBarrier()
     __builtin_amdgcn_sched_barrier(0);
 }
 
+/// Four fp32 accumulators as four TO. gfx950 rounds bf16 pairs in hardware (v_cvt_pk_bf16_f32):
+/// bit-identical to k1FloatToBf for every non-NaN input (checked exhaustively), and NaNs stay
+/// quiet NaNs; one instruction per pair instead of the software round's six or so per value.
+template <class TO, class V>
+__device__ __attribute__((always_inline)) inline TO __attribute__((ext_vector_type(4)))
+k2rPack4(const V& v)
+{
+    typedef TO v4 __attribute__((ext_vector_type(4)));
+#if defined(__gfx950__)
+    if constexpr(__is_same(TO, k1_bf16))
+    {
+        typedef float f2 __attribute__((ext_vector_type(2)));
+        typedef __bf16 b2 __attribute__((ext_vector_type(2)));
+        typedef unsigned u2 __attribute__((ext_vector_type(2)));
+        const b2 lo = __builtin_convertvector((f2){v[0], v[1]}, b2);
+        const b2 hi = __builtin_convertvector((f2){v[2], v[3]}, b2);
+        return __builtin_bit_cast(
+            v4, (u2){__builtin_bit_cast(unsigned, lo), __builtin_bit_cast(unsigned, hi)});
+    }
+#endif
+    v4 o;
+#pragma unroll
+    for(int i = 0; i < 4; ++i)
+        o[i] = K1Elem<TO>::store(v[i]);
+    return o;
+}
+
 /// Weight pre-pass of the rows kernel. 16 x KA fragments are stored lane-major for the 16x16 MFMA
 /// lane map (lane l: column l % 16, slice offset (l / 16) KPL), ordered so one wave's step (FN
 /// column tiles x R filter rows of one filter column s and one KA slice kc) is one contiguous run:
@@ -492,11 +519,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
                 if(vec && n + 3 < a.k)
                 {
                     typedef TO v4 __attribute__((ext_vector_type(4)));
-                    v4 o;
-#pragma unroll
-                    for(int i = 0; i < 4; ++i)
-                        o[i] = K1Elem<TO>::store(acc[p][j][i]);
-                    *reinterpret_cast<v4*>(yp + n) = o;
+                    *reinterpret_cast<v4*>(yp + n) = k2rPack4<TO>(acc[p][j]);
                 }
                 else
                 {
@@ -531,10 +554,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
             for(int j = 0; j < FN; ++j)
             {
                 typedef TO v4 __attribute__((ext_vector_type(4)));
-                v4 o;
-#pragma unroll
-                for(int i = 0; i < 4; ++i)
-                    o[i] = K1Elem<TO>::store(acc[p][j][i]);
+                const v4 o = k2rPack4<TO>(acc[p][j]);
                 const int gi = (j * DIM + g * 4) * static_cast<int>(sizeof(TO)) / 16;
                 const int half = (g * 4 * static_cast<int>(sizeof(TO))) % 16;
                 *reinterpret_cast<v4*>(
