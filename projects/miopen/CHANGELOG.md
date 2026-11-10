@@ -69,6 +69,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   exponent bias now follows the device at run time.
 
 ### Optimized
+* [Conv] `GemmFwdRest` now splits the Im2Col of a dilated NCHW 2D convolution along the output when
+  it exceeds the 288 MiB dilated GEMM workspace cap, instead of leaving the problem to the naive
+  solver. On gfx1100 the Kokoro-82M vocoder's dilated Conv1d layers (727 MiB of Im2Col, 3 pieces)
+  run in 7 ms instead of 161 ms, and the whole forward pass drops from 1.17 s to 0.37 s.
 * [Conv] Restored gfx1200 backward-weights performance that #13697 gave up when it removed the
   Composable Kernel entries invalidated by #13373 from 838 find-db keys. 835 of those problems were
   re-tuned on gfx1200, and the 475 whose config verifies on a fresh-process replay and beats the

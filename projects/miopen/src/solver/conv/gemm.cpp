@@ -22,6 +22,50 @@ namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
 
+namespace {
+
+#if MIOPEN_USE_GEMM
+// A dilated NCHW 2d GemmFwdRest whose Im2Col exceeds MaxDilatedGemmWorkspaceSize is run in pieces
+// along the output height, or the output width when the height is 1 (Conv1d). Each piece is a
+// contiguous span of every output channel, so its GEMM writes in place with ldc = H_out * W_out.
+struct Im2ColSplit
+{
+    std::size_t pieces = 1;
+    std::size_t length = 0; // output rows (columns if along_w) per piece; the last may be shorter
+    bool along_w       = false;
+    std::size_t workspace = 0;
+};
+
+Im2ColSplit GetDilatedIm2ColSplit(const ProblemDescription& problem)
+{
+    decltype(auto) conv  = problem.GetConv();
+    decltype(auto) wDesc = problem.GetWeights();
+
+    if(conv.GetSpatialDimension() != 2 || !problem.IsLayoutDefault() || conv.group_count != 1 ||
+       wDesc.GetType() == miopenInt8 || problem.IsTensorsCasted() || problem.IsFp8() ||
+       problem.IsBfp8() || !miopen::any_of(conv.GetConvDilations(), [](auto v) { return v > 1; }))
+        return {};
+
+    const auto out_h  = problem.GetOutHeight();
+    const auto out_w  = problem.GetOutWidth();
+    const auto column = wDesc.GetLengths()[1] * wDesc.GetLengths()[2] * wDesc.GetLengths()[3] *
+                        GetTypeSize(wDesc.GetType());
+
+    const bool along_w = out_h == 1;
+    const auto total   = along_w ? out_w : out_h;
+    const auto unit    = along_w ? column : column * out_w;
+    const auto fit     = MaxDilatedGemmWorkspaceSize / unit;
+    if(unit * total <= MaxDilatedGemmWorkspaceSize || fit == 0)
+        return {};
+
+    const auto pieces = (total + fit - 1) / fit;
+    const auto length = (total + pieces - 1) / pieces;
+    return {pieces, length, along_w, unit * length};
+}
+#endif
+
+} // namespace
+
 bool GemmFwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
 
@@ -982,6 +1026,9 @@ size_t GemmFwdRest::GetWorkspaceSize(const ExecutionContext& context,
 
     const auto ws_sz = (wDesc.GetType() == miopenInt8 ? 2 * workspace_size : workspace_size);
 
+    if(const auto split = GetDilatedIm2ColSplit(problem); split.pieces > 1)
+        return split.workspace;
+
     if(ws_sz > handle.GetMaxMemoryAllocSize())
     {
         MIOPEN_LOG_I2("GemmFwdRest: " << ws_sz << " > " << handle.GetMaxMemoryAllocSize());
@@ -1198,6 +1245,11 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
         const auto wei_spatial_size = std::accumulate(
             wei_spatial.begin(), wei_spatial.end(), std::size_t(1), std::multiplies<std::size_t>());
 
+        const auto split = GetDilatedIm2ColSplit(problem);
+        if(split.pieces > 1)
+            MIOPEN_LOG_I2("GemmFwdRest: Im2Col in " << split.pieces << " pieces of " << split.length
+                                                    << (split.along_w ? " columns" : " rows"));
+
         return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
             float time_gemm          = 0;
             const auto& conv_params  = primitive_params.CastTo<miopen::conv::DataInvokeParams>();
@@ -1220,6 +1272,57 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
             {
                 std::size_t out_offset = i * wei_k * out_spatial_size;
                 std::size_t in_offset  = i * in_c * in_spatial_size;
+
+                if(split.pieces > 1)
+                {
+                    const auto dim      = split.along_w ? 1 : 0;
+                    const auto total    = out_spatial[dim];
+                    const auto per_unit = split.along_w ? 1 : out_spatial[1];
+                    for(std::size_t begin = 0; begin < total; begin += split.length)
+                    {
+                        const auto length = std::min(split.length, total - begin);
+
+                        auto piece_out = out_spatial;
+                        auto piece_pad = conv.GetConvPads();
+                        piece_out[dim] = length;
+                        piece_pad[dim] -= static_cast<int>(begin) * conv.GetConvStrides()[dim];
+
+                        time_gemm += Im2ColGPU(handle,
+                                               spatial_dim,
+                                               x,
+                                               in_offset,
+                                               in_c,
+                                               in_spatial,
+                                               wei_spatial,
+                                               piece_out,
+                                               piece_pad,
+                                               conv.GetConvStrides(),
+                                               conv.GetConvDilations(),
+                                               workSpace,
+                                               xDesc.GetType(),
+                                               false);
+
+                        auto gemm_desc            = tmp_gemm_desc;
+                        gemm_desc.gfx90a_alt_impl = conv_params.gfx90aFp16alt;
+                        gemm_desc.n               = static_cast<int>(length * per_unit);
+                        gemm_desc.ldb             = gemm_desc.n;
+
+                        if(CallGemm(handle,
+                                    gemm_desc,
+                                    w,
+                                    0,
+                                    workSpace,
+                                    0,
+                                    y,
+                                    out_offset + begin * per_unit,
+                                    GemmBackend_t::rocblas) != miopenStatusSuccess)
+                            MIOPEN_THROW("GEMM execution failure");
+
+                        if(handle.IsProfilingEnabled())
+                            time_gemm += handle.GetKernelTime();
+                    }
+                    continue;
+                }
 
                 time_gemm += Im2ColGPU(handle,
                                        spatial_dim,
