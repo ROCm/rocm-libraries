@@ -38,6 +38,11 @@ bool isPowerOfTwoUpTo(int64_t value, int64_t limit)
 
 int64_t mfmaLdsBytes(const MfmaConfig& config)
 {
+    // Channels-first loads each wave's rows straight into its fragments.
+    if(config.layout != "NHWC")
+    {
+        return 0;
+    }
     const int64_t positions = config.atom / 8;
     const int64_t passes = (config.kw + config.stride + positions - 1) / positions;
     const int64_t columns = config.fold * (config.stride * (32 / config.fold) + positions * passes);
@@ -45,12 +50,15 @@ int64_t mfmaLdsBytes(const MfmaConfig& config)
     return 2 * (columns + 32) * config.waves * 16;
 }
 
-bool mfmaRunsOn(int64_t atom, std::string_view gcnArchName, bool bf16)
+bool mfmaRunsOn(int64_t atom, std::string_view gcnArchName, bool bf16, std::string_view layout)
 {
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
     if(atom == 32)
     {
-        return arch == "gfx950";
+        // gfx94x runs K = 32 as the 2:4-sparse MFMA: the channel-diagonal taps (NHWC) compress,
+        // the channel-pair core's dense input operand (NCHW) does not.
+        return arch == "gfx950"
+               || (layout == "NHWC" && (arch == "gfx940" || arch == "gfx941" || arch == "gfx942"));
     }
     if(atom == 16)
     {
@@ -67,7 +75,10 @@ bool mfmaRunsOn(int64_t atom, std::string_view gcnArchName, bool bf16)
 std::optional<MfmaLaunch> mfmaLaunchFor(const DepthwiseValuProblem& problem,
                                         const MfmaConfig& config)
 {
-    if(config.layout != "NHWC" || problem.layout != DepthwiseLayout::CHANNELS_LAST
+    const bool channelsLast = config.layout == "NHWC";
+    if((!channelsLast && config.layout != "NCHW")
+       || problem.layout
+              != (channelsLast ? DepthwiseLayout::CHANNELS_LAST : DepthwiseLayout::CHANNELS_FIRST)
        || problem.ndims != 2 || problem.gatherOnly)
     {
         return std::nullopt;
@@ -85,12 +96,15 @@ std::optional<MfmaLaunch> mfmaLaunchFor(const DepthwiseValuProblem& problem,
     {
         return std::nullopt;
     }
-    if(!isPowerOfTwoUpTo(config.waves, 16) || a.c % (8 * config.waves) != 0)
+    // Channels-last: a wave owns 8 channels of the block's 8 x waves. Channels-first: a wave owns
+    // a channel pair, any count (a missing second channel reads and writes nothing).
+    if(!isPowerOfTwoUpTo(config.waves, 16) || (channelsLast && a.c % (8 * config.waves) != 0))
     {
         return std::nullopt;
     }
-    if(config.depth < 1 || config.depth > 4 || !isPowerOfTwoUpTo(config.fold, 4) || config.rows < 1
-       || config.rows > INT_LIMIT)
+    // Images sharing the MFMA columns: 32 (channels-last) or 128 (channels-first) of them.
+    if(config.depth < 1 || config.depth > 4 || !isPowerOfTwoUpTo(config.fold, channelsLast ? 4 : 8)
+       || config.rows < 1 || config.rows > INT_LIMIT)
     {
         return std::nullopt;
     }
@@ -110,8 +124,10 @@ std::optional<MfmaLaunch> mfmaLaunchFor(const DepthwiseValuProblem& problem,
     launch.flip = problem.flipFilter;
     launch.block = 64 * config.waves;
     const int64_t chunks = divUp(a.ho, config.rows);
-    launch.grid = divUp(a.n, config.fold) * chunks * divUp(a.wo, 32 / config.fold)
-                  * (a.c / (8 * config.waves));
+    launch.grid
+        = divUp(a.n, config.fold) * chunks
+          * (channelsLast ? divUp(a.wo, 32 / config.fold) * (a.c / (8 * config.waves))
+                          : divUp(a.wo, 128 / config.fold) * divUp(divUp(a.c, 2), config.waves));
     if(launch.grid < 1 || launch.grid > INT_LIMIT)
     {
         return std::nullopt;

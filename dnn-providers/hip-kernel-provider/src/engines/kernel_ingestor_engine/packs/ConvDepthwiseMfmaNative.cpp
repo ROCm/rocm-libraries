@@ -37,12 +37,13 @@
  * @brief The native half of the matrix-core depthwise engines (CONV_DEPTHWISE_MFMA_FWD,
  *        CONV_DEPTHWISE_MFMA_BWD): graph matching, kernel matching and dispatch.
  *
- * The kernel (descriptors/conv/depthwise_mfma/kernels) runs unit-stride 2-D depthwise
- * convolution, channels-last, fp16 and bf16, on CDNA matrix cores: the filter row as a one-hot
- * diagonal MFMA operand over 8 channels, the input row staged once per block through LDS, a ring
- * of per-filter-row accumulators streaming down the image. Backward data at unit stride is the
- * forward convolution of dy with the filter reflected. Every catalog config is admitted on
- * correctness alone (mfmaLaunchFor, mfmaRunsOn); which one runs is the ranking's: autotune, and
+ * The kernel (descriptors/conv/depthwise_mfma/kernels) runs 2-D depthwise convolution at stride
+ * 1 or 2, fp16 and bf16, on CDNA matrix cores, with a ring of per-filter-row accumulators
+ * streaming down the image. Channels-last: the filter row as a one-hot diagonal MFMA operand over
+ * 8 channels, the input row staged once per block through LDS. Channels-first: channel pairs
+ * along the MFMA's K, each wave loading its own rows. Backward data at unit stride is the forward
+ * convolution of dy with the filter reflected. Every catalog config is admitted on correctness
+ * alone (mfmaLaunchFor, mfmaRunsOn); which one runs is the ranking's: autotune, and
  * UHD once trained.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -123,13 +124,12 @@ MfmaConfig configOf(const KernelDefinition& kernel)
 std::optional<DepthwiseValuProblem> problemFor(const MatchContext& context, ConvDirection direction)
 {
     auto problem = conv_depthwise_valu::parseDepthwiseValuProblem(context, direction);
-    // 1-D (as height 1) and 2-D, channels-last, unit dilation, stride 1 on both axes or (forward)
+    // 1-D (as height 1) and 2-D, either layout, unit dilation, stride 1 on both axes or (forward)
     // 2 on both (backward data: its unit-stride forward form), 16-bit.
     const auto stridesServed = [](const ConvDepthwiseValuArgs& a) {
         return a.dh == 1 && a.dw == 1 && a.sh == a.sw && (a.sh == 1 || a.sh == 2);
     };
-    if(!problem.has_value() || problem->ndims != 2
-       || problem->layout != DepthwiseLayout::CHANNELS_LAST || problem->gatherOnly
+    if(!problem.has_value() || problem->ndims != 2 || problem->gatherOnly
        || !stridesServed(problem->args)
        || (problem->base.dataType != data_objects::DataType::HALF
            && problem->base.dataType != data_objects::DataType::BFLOAT16))
@@ -194,7 +194,8 @@ std::optional<MfmaLaunch> launchOf(const MatchContext& context, const KernelDefi
         if(!conv_depthwise_mfma::mfmaRunsOn(config.atom,
                                             context.deviceProperties.gcnArchName,
                                             problem->base.dataType
-                                                == data_objects::DataType::BFLOAT16))
+                                                == data_objects::DataType::BFLOAT16,
+                                            config.layout))
         {
             return std::nullopt;
         }
@@ -314,6 +315,7 @@ public:
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         options.add("CONV_DWM_TYPE", elementTypeFor(kernel.getStringMetadata("dtype")));
         options.add("CONV_DWM_FLIP", std::string(launch->flip ? "1" : "0"));
+        options.add("CONV_DWM_LAYOUT", std::string(config.layout == "NHWC" ? "0" : "1"));
         const std::array<std::pair<const char*, int64_t>, 7> fields{{{"ATOM", config.atom},
                                                                      {"KH", config.kh},
                                                                      {"KW", config.kw},
