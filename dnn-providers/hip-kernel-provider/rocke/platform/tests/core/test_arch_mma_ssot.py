@@ -43,6 +43,7 @@ from rocke.core.arch.target import (
     normalize_dtype,
 )
 from rocke.core.ir import IRBuilder
+from rocke.tests.arch_catalog import patched_arch_specs
 
 
 @pytest.mark.parametrize("width", [-1, 1.5, "4", None, True, False])
@@ -562,13 +563,9 @@ class TestIndexedOpIdDstDtype(unittest.TestCase):
         drifted = dict(specs)
         drifted["_synthetic_drift"] = {"mma": [clash]}
 
-        _op_id_dst_dtype.cache_clear()
-        try:
-            with mock.patch("rocke.core.arch.target._load_specs", return_value=drifted):
-                with self.assertRaises(ValueError):
-                    _op_id_dst_dtype()
-        finally:
-            _op_id_dst_dtype.cache_clear()
+        with patched_arch_specs(drifted):
+            with self.assertRaises(ValueError):
+                _op_id_dst_dtype()
 
 
 class TestIndexedMmaOperands(unittest.TestCase):
@@ -1137,13 +1134,9 @@ def test_op_id_family_matches_all_catalogs_and_rejects_conflicts():
     assert _op_id_family().get("unknown") is None
     sample = next(op for row in specs.values() for op in row["mma"])
     drifted = {**specs, "synthetic": {"mma": [{**sample, "family": "conflicting"}]}}
-    _op_id_family.cache_clear()
-    try:
-        with mock.patch("rocke.core.arch.target._load_specs", return_value=drifted):
-            with pytest.raises(ValueError, match="inconsistent family"):
-                _op_id_family()
-    finally:
-        _op_id_family.cache_clear()
+    with patched_arch_specs(drifted):
+        with pytest.raises(ValueError, match="inconsistent family"):
+            _op_id_family()
 
 
 def test_mma_naming_without_target_lookup():
@@ -1394,15 +1387,8 @@ def _duplicate_matrix_row():
 def _read_fixture_row(row, reader):
     if reader == "builder":
         return _build_mma_op(row)
-    _op_id_dst_dtype.cache_clear()
-    try:
-        with mock.patch(
-            "rocke.core.arch.target._load_specs",
-            return_value={"fixture": {"mma": [row]}},
-        ):
-            return _op_id_dst_dtype()[row["op_id"]]
-    finally:
-        _op_id_dst_dtype.cache_clear()
+    with patched_arch_specs({"fixture": {"mma": [row]}}):
+        return _op_id_dst_dtype()[row["op_id"]]
 
 
 @pytest.mark.parametrize("reader", ["builder", "raw"])
@@ -1468,20 +1454,13 @@ def test_raw_mma_rejects_present_unsupported_destination_dtype(dtype):
     )
     # Generic catalog metadata recognizes types independently of emission support.
     assert _build_mma_op(row).dst.dtype == dtype
-    _op_id_dst_dtype.cache_clear()
-    try:
-        with mock.patch(
-            "rocke.core.arch.target._load_specs",
-            return_value={"fixture": {"mma": [row]}},
-        ):
-            b = IRBuilder("raw_bad_destination")
-            value = b.const_i32(0)
-            before = len(b.kernel.body.ops)
-            with pytest.raises(ValueError, match="MMA destination dtype"):
-                b.mma(atom.op_id, value, value, value)
-            assert len(b.kernel.body.ops) == before
-    finally:
-        _op_id_dst_dtype.cache_clear()
+    with patched_arch_specs({"fixture": {"mma": [row]}}):
+        b = IRBuilder("raw_bad_destination")
+        value = b.const_i32(0)
+        before = len(b.kernel.body.ops)
+        with pytest.raises(ValueError, match="MMA destination dtype"):
+            b.mma(atom.op_id, value, value, value)
+        assert len(b.kernel.body.ops) == before
 
 
 @pytest.mark.parametrize(
