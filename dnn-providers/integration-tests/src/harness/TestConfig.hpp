@@ -355,30 +355,12 @@ public:
         return _testSettings.has_value();
     }
 
-    // Find a tolerance override matching the given test name.
-    // Returns std::nullopt if no config loaded or no filter matches.
-    std::optional<ToleranceOverride> findToleranceOverride(std::string_view testName) const
+    // The settings loaded from the engine's TOML, or nullptr when none was provided. The
+    // [[tolerance_overrides]] and [[validator_overrides]] lookups are TestSettings'.
+    const TestSettings* testSettings() const
     {
         throwIfNotInitialized();
-        if(!_testSettings.has_value())
-        {
-            return std::nullopt;
-        }
-        return _testSettings->findToleranceOverride(testName);
-    }
-
-    // Find a validator override for one output tensor of the given test.
-    // Returns std::nullopt if no config loaded or nothing matches, which means the
-    // default allclose comparison.
-    std::optional<ValidatorOverride> findValidatorOverride(std::string_view testName,
-                                                           std::string_view tensorLabel) const
-    {
-        throwIfNotInitialized();
-        if(!_testSettings.has_value())
-        {
-            return std::nullopt;
-        }
-        return _testSettings->findValidatorOverride(testName, tensorLabel);
+        return _testSettings.has_value() ? &*_testSettings : nullptr;
     }
 
     // Raw gcnArchName for device 0 detected at init time (e.g.

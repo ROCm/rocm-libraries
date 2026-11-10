@@ -296,8 +296,11 @@ protected:
 
                 // One shared decision site for both harnesses: it picks the check and
                 // logs the one it picked.
-                const auto tolerance
-                    = gradingForTensor(testName, label, absoluteTolerance, relativeTolerance);
+                const auto tolerance = gradingForTensor(testName,
+                                                        label,
+                                                        TestConfig::get().testSettings(),
+                                                        absoluteTolerance,
+                                                        relativeTolerance);
 
                 auto selection = bundle::makeValidator(sdkDataType, label, tolerance, site);
                 auto [it, inserted] = _tensorValidationMap.insert(
