@@ -111,6 +111,8 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 
 Seeded dropout (`dropout_probability`, seed, offset) in every hipDNN SDPA engine that serves it, forward and backward, draws hipDNN's Philox mask, not cuDNN's random stream. Forward and backward must use the same contract: a gradient is correct only when the forward drew its mask under it. The contract is [SEM-015](./SdpaSemanticsRegister.md#sem-015-dropout).
 
+A `dropout_probability` of 0 is the graph without dropout, forward and backward: seed and offset may be given or absent and are not read. cuDNN frontend v1.24.0's backward builds its random-number node from seed and offset whatever the probability. See [SEM-015](./SdpaSemanticsRegister.md#sem-015-dropout).
+
 ## hipDNN extensions
 
 - `Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {FALLBACK})`: returns `OK` if any engine supports the graph, `GRAPH_NOT_SUPPORTED` otherwise. Builds the operation graph if needed; does not create or invalidate plans.
