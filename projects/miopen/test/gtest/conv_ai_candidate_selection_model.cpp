@@ -41,6 +41,9 @@
 #include <sstream>
 #include <algorithm>
 #include <cmath>
+#include <array>
+#include <cstdint>
+#include <fstream>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 using namespace miopen::ai::tuning::candidate_selection;
@@ -655,6 +658,140 @@ std::vector<CandidateSelectionParams> GenerateCandidateSelectionParams()
     };
 }
 
+// ============================================================================
+// Item 5: lazy-applicability walk (SelectBestVocabCandidate)
+// ============================================================================
+namespace {
+// Bare GetTypeString from a vocab id: strip a trailing "+<split_k>" after the final '>'.
+std::string VocabBase(const std::string& kid)
+{
+    const auto gt   = kid.rfind('>');
+    const auto plus = kid.find('+', gt == std::string::npos ? 0 : gt);
+    return plus == std::string::npos ? kid : kid.substr(0, plus);
+}
+// All-ones input features for a solver (same convention as SelectBestCandidateValid_Test).
+std::map<std::string, float> AllOnesFeatures(const std::string& arch, const std::string& solver)
+{
+    CandidateSelectionMetadata meta(arch, solver);
+    std::map<std::string, float> features;
+    for(const auto& name : meta.input_params())
+        features[name] = 1.0f;
+    return features;
+}
+} // namespace
+
+// Best-first: when every candidate is applicable, the walk returns the highest-ranked vocab base.
+// The ranking is recomputed exactly as SelectBestCandidateIndices does (inner product, NaN last).
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabBestFirst_Test)
+{
+    const auto& params = GetParam();
+    const auto& vocab  = GetConfigEmbeddingVocab(params.arch, params.solver);
+    ASSERT_FALSE(vocab.empty());
+    const auto features = AllOnesFeatures(params.arch, params.solver);
+    CandidateSelectionModel model(params.arch, params.solver);
+    const auto encoded_features = model.EncodeInputFeatures(features);
+    int best                    = -1;
+    float best_score            = 0.0f;
+    for(std::size_t i = 0; i < vocab.size(); ++i)
+    {
+        if(vocab[i].second.size() != encoded_features.size())
+            continue;
+        const float s = std::inner_product(
+            vocab[i].second.begin(), vocab[i].second.end(), encoded_features.begin(), 0.0f);
+        if(std::isnan(s))
+            continue;
+        if(best < 0 || s > best_score)
+        {
+            best       = static_cast<int>(i);
+            best_score = s;
+        }
+    }
+    ASSERT_GE(best, 0);
+    auto accept_all = [](const std::string&, int, bool) { return true; };
+    auto result     = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/false, accept_all);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->first, VocabBase(vocab[best].first))
+        << "accept-all walk did not return the top-ranked candidate";
+}
+
+// First applicable wins: when only one vocab base is applicable, the walk returns exactly it,
+// regardless of its rank (i.e. it keeps walking past rejected higher-ranked candidates).
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabFirstApplicableWins_Test)
+{
+    const auto& params = GetParam();
+    const auto& vocab  = GetConfigEmbeddingVocab(params.arch, params.solver);
+    ASSERT_FALSE(vocab.empty());
+    const std::string target = VocabBase(vocab[vocab.size() / 2].first);
+    const auto features      = AllOnesFeatures(params.arch, params.solver);
+    auto only_target         = [&](const std::string& base, int, bool) { return base == target; };
+    auto result              = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/false, only_target);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->first, target);
+}
+
+// TF32 two-pass: a predicate that only accepts on the FP32 fallback pass is reached iff use_tf32,
+// mirroring the enumeration order (TF32 set first, FP32 set only if nothing applied).
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabTwoPassTf32_Test)
+{
+    const auto& params = GetParam();
+    const auto& vocab  = GetConfigEmbeddingVocab(params.arch, params.solver);
+    ASSERT_FALSE(vocab.empty());
+    const std::string target = VocabBase(vocab.front().first);
+    const auto features      = AllOnesFeatures(params.arch, params.solver);
+    auto fp32_only           = [&](const std::string& base, int, bool fp32_pass) {
+        return fp32_pass && base == target;
+    };
+    // use_tf32 -> the FP32 fallback pass runs and finds the target.
+    auto tf32_on = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/true, fp32_only);
+    ASSERT_TRUE(tf32_on.has_value());
+    EXPECT_EQ(tf32_on->first, target);
+    // no TF32 -> only the first pass runs, the target is never offered, nothing applies.
+    auto tf32_off = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/false, fp32_only);
+    EXPECT_FALSE(tf32_off.has_value());
+}
+
+// Nothing applicable in either pass -> nullopt (caller falls to the non-AI default).
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabNoneApplicable_Test)
+{
+    const auto& params  = GetParam();
+    const auto features = AllOnesFeatures(params.arch, params.solver);
+    auto reject_all     = [](const std::string&, int, bool) { return false; };
+    EXPECT_FALSE(SelectBestVocabCandidate(
+                     params.arch, params.solver, features, /*use_tf32=*/true, reject_all)
+                     .has_value());
+}
+
+// Kill switch: MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB empties the vocab -> nullopt even
+// with an accept-all predicate.
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabKillSwitch_Test)
+{
+    const auto& params  = GetParam();
+    const auto features = AllOnesFeatures(params.arch, params.solver);
+    auto accept_all     = [](const std::string&, int, bool) { return true; };
+    miopen::debug::env::UpdateEnvVariable("MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB", "1");
+    auto result = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/false, accept_all);
+    miopen::debug::env::UpdateEnvVariable("MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB", "0");
+    EXPECT_FALSE(result.has_value());
+}
+
+// LGBM-only: MIOPEN_DEBUG_LGBM_ONLY turns the two-tower (lazy) path off -> nullopt.
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabLgbmOnly_Test)
+{
+    const auto& params  = GetParam();
+    const auto features = AllOnesFeatures(params.arch, params.solver);
+    auto accept_all     = [](const std::string&, int, bool) { return true; };
+    miopen::debug::env::UpdateEnvVariable("MIOPEN_DEBUG_LGBM_ONLY", "1");
+    auto result = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/false, accept_all);
+    miopen::debug::env::UpdateEnvVariable("MIOPEN_DEBUG_LGBM_ONLY", "0");
+    EXPECT_FALSE(result.has_value());
+}
+
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_CandidateSelection_FP32,
                          ::testing::ValuesIn(GenerateCandidateSelectionParams()),
@@ -663,6 +800,82 @@ INSTANTIATE_TEST_SUITE_P(Full,
                              PrintTo(testInfo.param, &os);
                              return os.str();
                          });
+
+// ============================================================================
+// Item 5: config-embedding table loader
+// ============================================================================
+// Every shipped table loads into a non-empty vocabulary: well-formed MICE, a v3 vocab block, and an
+// md5 that matches the installed input encoder (a mismatch rejects the table -> empty vocab).
+TEST(CPU_ConfigEmbeddingTableLoader_NONE, AllShippedTablesWellFormed)
+{
+    const std::array<const char*, 2> arches  = {"gfx942", "gfx950"};
+    const std::array<const char*, 6> solvers = {"ConvHipImplicitGemmGroupFwdXdlops",
+                                                "ConvHipImplicitGemmGroupBwdXdlops",
+                                                "ConvHipImplicitGemmGroupWrwXdlops",
+                                                "ConvHipImplicitGemm3DGroupFwdXdlops",
+                                                "ConvHipImplicitGemm3DGroupBwdXdlops",
+                                                "ConvHipImplicitGemm3DGroupWrwXdlops"};
+    const auto db                            = miopen::GetSystemDbPath();
+    int present                              = 0;
+    for(const auto* arch : arches)
+        for(const auto* solver : solvers)
+        {
+            const auto path =
+                db / (std::string(arch) + "_" + solver + "_kernel_config_embeddings.bin");
+            if(!miopen::fs::exists(path))
+                continue;
+            ++present;
+            EXPECT_FALSE(GetConfigEmbeddingVocab(arch, solver).empty())
+                << arch << "_" << solver
+                << ": table present but vocab empty (rejected / md5 mismatch / no v3 block)";
+        }
+    if(present == 0)
+        GTEST_SKIP() << "No shipped config-embedding tables installed at " << db;
+}
+
+// The loader fails closed on a malformed table (bad magic, unknown version, size/row mismatch):
+// each yields an empty vocab, no throw. Written under a scratch (arch, solver) that collides with
+// nothing shipped.
+TEST(CPU_ConfigEmbeddingTableLoader_NONE, RejectsMalformedTables)
+{
+    const auto db = miopen::GetSystemDbPath();
+    auto path_for = [&](const std::string& solver) {
+        return db / ("zztest_" + solver + "_kernel_config_embeddings.bin");
+    };
+    // 28-byte v1 header: magic[4] + {version,key_dim,emb_dim,num_rows,key_dtype,emb_dtype} u32.
+    auto header = [](const char* magic,
+                     std::uint32_t ver,
+                     std::uint32_t key_dim,
+                     std::uint32_t emb_dim,
+                     std::uint32_t num_rows) {
+        std::vector<char> b;
+        auto put = [&](const void* p, size_t n) {
+            const char* c = static_cast<const char*>(p);
+            b.insert(b.end(), c, c + n);
+        };
+        put(magic, 4);
+        for(std::uint32_t v : {ver, key_dim, emb_dim, num_rows, 0u, 0u})
+            put(&v, 4);
+        return b;
+    };
+    auto write = [&](const std::string& solver, const std::vector<char>& bytes) {
+        std::ofstream os(path_for(solver), std::ios::binary);
+        if(os)
+            os.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        return static_cast<bool>(os);
+    };
+    const bool wrote = write("badmagic", header("XXXX", 1, 4, 4, 0)) &&
+                       write("badver", header("MICE", 99, 4, 4, 0)) &&
+                       // claims 10 rows but only the header is present -> size mismatch
+                       write("badsize", header("MICE", 1, 4, 4, 10));
+    if(!wrote)
+        GTEST_SKIP() << "System db path not writable for crafting test tables: " << db;
+    EXPECT_TRUE(GetConfigEmbeddingVocab("zztest", "badmagic").empty());
+    EXPECT_TRUE(GetConfigEmbeddingVocab("zztest", "badver").empty());
+    EXPECT_TRUE(GetConfigEmbeddingVocab("zztest", "badsize").empty());
+    for(const char* solver : {"badmagic", "badver", "badsize"})
+        miopen::fs::remove(path_for(solver));
+}
 
 #else
 // Add a dummy test when AI kernel tuning is disabled
