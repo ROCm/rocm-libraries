@@ -49,6 +49,10 @@ std::optional<GroupProblem>
     parseGroupProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                       conv_naive::ConvDirection direction);
 
+/// @p problem with its activations read and written in place by the channels-first (cf) kernels:
+/// nullopt unless x and y are both packed channels-first (both staged by transposes).
+std::optional<GroupProblem> channelsFirstInPlace(const GroupProblem& problem);
+
 /// Workgroups of a TH x (16 wp) output tile over cb channel blocks for one launch: images x
 /// output planes x row tiles x column tiles x channel tiles, or nullopt past the launch limit.
 std::optional<unsigned int> phaseBlocks(const K4Args& args, int th, int wp, int cb);

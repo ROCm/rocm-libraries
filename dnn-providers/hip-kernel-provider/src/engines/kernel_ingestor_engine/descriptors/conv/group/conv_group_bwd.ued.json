@@ -14,7 +14,8 @@
     "stride",
     "th",
     "wp",
-    "cb"
+    "cb",
+    "cf"
   ],
   "behavior_notes": [
     "runtime_compilation"
