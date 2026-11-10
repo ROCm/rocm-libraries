@@ -161,6 +161,10 @@ _HELPERS = (
 # accumulators (see direct_mfma_knobs_reason): three quarters of the 512-VGPR
 # file, leaving the rest for the LDS fragments and addressing.
 _MFMA_PRELOAD_VGPR_BUDGET = 384
+# The same budget with fp32 storage (fp32 / tf32): the LDS fragments are
+# twice as wide, so half the file is left for them. Calibrated on gfx942 and
+# gfx950 builds of the fp32 / tf32 grid, where binaries past it spilled.
+_MFMA_PRELOAD_F32_VGPR_BUDGET = 256
 # The same estimate's cut for a runtime-channel preloading binary whose wave
 # covers two 16-column Q subtiles (block_q 32): above it the binary computed a
 # wrong dX on gfx950 (see direct_mfma_knobs_reason).
@@ -435,18 +439,69 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
     raise ValueError(f"unknown direct conv variant {variant!r}")
 
 
-def dgrad_rtc_vgprs(knobs: dict, KH: int, KW: int) -> int:
+def dgrad_frag_vgprs(fold_k32: bool, dtype: str, arch: str | None = None) -> int:
+    """Registers per lane one preloaded weight fragment of the MFMA dgrad's
+    fprop pass holds: a K-atom's 8 (``fold_k32``) or 4 elements per lane, two
+    to a register with 16-bit storage and one with fp32 storage (``"fp32"`` /
+    ``"tf32"``).
+
+    With ``arch`` given, TF32 on an emulating arch (gfx950: BF16x3) adds the
+    fragment's split: the weights are loop-invariant, so the backend keeps
+    each one's bf16 "big" and "small" halves live next to it. The halves span
+    the emulated atom's fragment -- together as many registers as its eight
+    fp32 elements, twice the fragment's own for a K-16 fragment zero-padded to
+    the K-32 atom. That is deliberately more than ``nongrouped_live_regs``
+    charges (one fragment's worth per operand): the padded half is kept live
+    too, and the estimate stays conservative.
+    """
+    from kernels.common import conv_direct_grouped as dc
+
+    load_vec = 8 if fold_k32 else 4
+    regs = load_vec * dc._elem_bytes(dtype) // 4
+    if arch is not None and dtype == "tf32":
+        try:
+            plan = dc._f32_mma_plan(arch, dtype, 16, load_vec)
+        except KeyError:
+            plan = None
+        if plan is not None and not plan[0].is_native:
+            op, chunks, _pad = plan
+            regs += op.a_frag_len * chunks
+    return regs
+
+
+def dgrad_rtc_vgprs(
+    knobs: dict, KH: int, KW: int, dtype: str = "fp16", arch: str | None = None
+) -> int:
     """Registers per lane the compute pass of a runtime-channel dgrad binary
-    holds in its weights (preloading splits only) and accumulators."""
-    load_vec = 8 if knobs["fold_k32"] else 4
+    holds in its weights (preloading splits only) and accumulators.
+
+    ``dtype`` is the problem's (the knobs do not name it); ``arch`` adds the
+    split of emulated TF32 weights (:func:`dgrad_frag_vgprs`)."""
     acc = (knobs["block_q"] // knobs["waves_q"] // 16) * knobs["m_tiles"] * KH * 4
     if knobs["waves_k"] == 1:
         return acc
     per_wave = knobs["k_atoms"] // knobs["waves_k"]
-    return acc + KH * KW * per_wave * knobs["m_tiles"] * (load_vec // 2)
+    frag = dgrad_frag_vgprs(knobs["fold_k32"], dtype, arch)
+    return acc + KH * KW * per_wave * knobs["m_tiles"] * frag
 
 
-def direct_mfma_knobs_reason(problem, knobs: dict) -> str | None:
+def _mfma_preload_budget(dtype: str, knobs: dict) -> int:
+    """The preload budget of an MFMA dgrad binary for problem dtype ``dtype``:
+    the 16-bit or fp32-storage one, split between the block's waves that
+    share a SIMD (more than four halve it)."""
+    from kernels.common import conv_direct_grouped as dc
+
+    if dc._elem_bytes(dtype) == 4:
+        budget = _MFMA_PRELOAD_F32_VGPR_BUDGET
+    else:
+        budget = _MFMA_PRELOAD_VGPR_BUDGET
+    waves = knobs.get("block_groups", 1) * knobs.get("waves_q", 1) * knobs["waves_k"]
+    return budget // -(-waves // 4)
+
+
+def direct_mfma_knobs_reason(
+    problem, knobs: dict, arch: str | None = None
+) -> str | None:
     """Constraints of the MFMA dgrad pipeline that its spec cannot see.
 
     The fprop spec validates K-atoms as ``ceil(cpg/16)``; with ``fold_k32``
@@ -458,8 +513,13 @@ def direct_mfma_knobs_reason(problem, knobs: dict) -> str | None:
     top. Past :data:`_MFMA_PRELOAD_VGPR_BUDGET` the kernel sits at the
     512-VGPR ceiling and spills, and comgr's VGPR-to-AGPR spilling there has
     produced a kernel that silently computes the wrong dX (correct at -O1
-    and with ``-amdgpu-spill-vgpr-to-agpr=0``). No spec under the budget
-    spills, so the cut costs no kernel that runs out of registers cleanly.
+    and with ``-amdgpu-spill-vgpr-to-agpr=0``). With 16-bit storage no spec
+    under the budget spills, so the cut costs no kernel that runs out of
+    registers cleanly. The fp32-storage estimate is conservative and also
+    drops some binaries that would have compiled without spilling. Weights are counted at the problem's storage width, and with ``arch``
+    given with their emulated-TF32 split (:func:`dgrad_frag_vgprs`); fp32
+    storage gets the smaller :data:`_MFMA_PRELOAD_F32_VGPR_BUDGET`, and a
+    block of more than four waves a share of it (:func:`_mfma_preload_budget`).
 
     The runtime-channel pipeline (knobs ``k_atoms`` / ``m_tiles``) has a
     narrower cut where a wave covers two Q subtiles (block_q 32): a
@@ -483,7 +543,7 @@ def direct_mfma_knobs_reason(problem, knobs: dict) -> str | None:
         # The fprop pass runs on the transposed problem: it reduces over this
         # kpg and its M-tiles cover this cpg.
         n_m_tiles = (problem.cpg + 15) // 16
-        frag_vgprs = 4 if knobs["fold_k32"] else 2
+        frag_vgprs = dgrad_frag_vgprs(knobs["fold_k32"], problem.dtype, arch)
         weights = (
             problem.KH
             * problem.KW
@@ -493,13 +553,14 @@ def direct_mfma_knobs_reason(problem, knobs: dict) -> str | None:
         )
         q_subtiles = knobs["block_q"] // knobs.get("waves_q", 1) // 16
         accumulators = q_subtiles * n_m_tiles * problem.KH * 4
-        if weights + accumulators > _MFMA_PRELOAD_VGPR_BUDGET:
+        budget = _mfma_preload_budget(problem.dtype, knobs)
+        if weights + accumulators > budget:
             return (
                 f"preloaded weights ({weights}) + accumulators ({accumulators}) "
-                f"VGPRs > {_MFMA_PRELOAD_VGPR_BUDGET}: the kernel would spill"
+                f"VGPRs > {budget}: the kernel would spill"
             )
         if "k_atoms" in knobs and q_subtiles > 1:
-            vgprs = dgrad_rtc_vgprs(knobs, problem.KH, problem.KW)
+            vgprs = dgrad_rtc_vgprs(knobs, problem.KH, problem.KW, problem.dtype, arch)
             if vgprs > _RTC_WIDE_Q_PRELOAD_VGPR_BUDGET:
                 return (
                     f"runtime-channel preload of {vgprs} VGPRs over "
@@ -773,7 +834,7 @@ def direct_spec_for_problem(
     otherwise.
     """
     if variant in DIRECT_MFMA_DGRAD:
-        why = direct_mfma_knobs_reason(problem, knobs)
+        why = direct_mfma_knobs_reason(problem, knobs, arch)
         if why:
             return None, why
     if variant == "direct_wgrad_dw_cols" and knobs["channels"] != problem.groups:
