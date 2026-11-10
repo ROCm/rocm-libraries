@@ -239,6 +239,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseValuWrwNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseRowsNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseRowsProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseMfmaNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseMfmaProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvIgemmNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvIgemmNchwNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvIgemmNchwProblem.cpp
@@ -260,6 +262,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu_wrw/kernels/ConvDepthwiseValuWrwArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_rows/kernels/ConvDepthwiseRows.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_rows/kernels/ConvDepthwiseRowsCores.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_mfma/kernels/ConvDepthwiseMfma.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_mfma/kernels/ConvDepthwiseMfmaArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmCore.h"
@@ -297,6 +301,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvDepthwiseValuWrwArgs.h
         kernels/ConvDepthwiseRows.cpp
         ConvDepthwiseRowsCores.h
+        kernels/ConvDepthwiseMfma.cpp
+        ConvDepthwiseMfmaArgs.h
         kernels/ConvIgemm.cpp
         ConvIgemmArgs.h
         ConvIgemmCore.h

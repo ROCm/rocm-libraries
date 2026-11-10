@@ -125,6 +125,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvDepthwiseValu.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDepthwiseRowsProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvDepthwiseRows.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDepthwiseMfmaProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvDepthwiseMfma.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvIgemm.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvIgemmNchwProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvIgemmNchw.cpp
